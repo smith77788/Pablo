@@ -37,6 +37,36 @@ node tools/notify.js --from "Claude" "🚀 Запускаю агента для 
 - Не дублювати тривіальні події (читання файлів, прості правки)
 - Не надсилати великі шматки коду — це бот, не пастебін
 
+## Автономна команда агентів (ОБОВ'ЯЗКОВО)
+
+**Користувач вимагає щоб агенти працювали завжди, без явної команди.**
+
+Після КОЖНОЇ значущої зміни в коді (нова фіча, рефакторинг, фікс багу) Claude повинен **автоматично** запускати команду паралельних агентів-ревьюверів у фоні:
+
+### Стандартна команда (4 паралельних агенти)
+
+1. **Security Auditor** — `subagent_type: general-purpose`, шукає вразливості (SQL injection, XSS, відсутність авторизації, expose секретів, file upload exploits)
+2. **Backend Reliability** — `subagent_type: general-purpose`, шукає race conditions, відсутність try/catch, неоптимальні запити, відсутні індекси, memory leaks
+3. **UX/Frontend Auditor** — `subagent_type: general-purpose`, перевіряє mobile responsive, accessibility, broken links, validation gaps, відсутні loading states
+4. **Bot Integration Checker** — `subagent_type: general-purpose`, тестує сценарії бота, перевіряє error handling, deep-links, callback queries
+
+Кожен агент:
+- Запускається з `run_in_background: true`
+- Отримує інструкцію надсилати апдейти в Telegram через `tools/notify.js`
+- Повертає короткий список знайдених проблем
+
+Після їх завершення Claude **сам** виправляє знайдені критичні проблеми (без додаткового підтвердження користувача — користувач уже надав мандат на автономну роботу).
+
+### Коли НЕ запускати
+
+- Тривіальні правки (typo, переклад)
+- Зміни лише в документації
+- Коміти конфігурації (.env, package.json bumps)
+
+### Як запускати команду
+
+Завжди в одному повідомленні з кількома `Agent` tool calls — щоб виконувались паралельно, а не послідовно.
+
 ## Конфігурація проекту
 
 - `nevesty-models/` — основний код (Node.js + Express + SQLite + Telegram бот)
