@@ -5,6 +5,67 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Заявки — Nevesty Models Admin</title>
   <link rel="stylesheet" href="/css/admin.css" />
+  <style>
+    /* ─── Bulk action bar ──────────────────────────── */
+    .bulk-bar {
+      display: none; align-items: center; gap: 12px;
+      padding: 12px 24px; background: rgba(201,169,110,0.08);
+      border-bottom: 1px solid rgba(201,169,110,0.25);
+      flex-wrap: wrap;
+    }
+    .bulk-bar.visible { display: flex; }
+    .bulk-count {
+      font-size: 0.8rem; color: var(--gold); font-weight: 600;
+      letter-spacing: 0.5px; flex: 1;
+    }
+    /* Checkbox column */
+    .cb-cell { width: 44px; padding: 14px 12px 14px 20px !important; }
+    .cb-th { width: 44px; padding: 12px 12px 12px 20px !important; }
+    .row-check {
+      width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer;
+    }
+    /* Unread dot */
+    .unread-dot {
+      display: inline-block; width: 8px; height: 8px;
+      background: var(--error); border-radius: 50%;
+      margin-left: 6px; vertical-align: middle; flex-shrink: 0;
+    }
+    /* Pagination info */
+    .pagination-info {
+      font-size: 0.75rem; color: var(--text-muted);
+      padding: 0 16px; white-space: nowrap;
+    }
+    .pagination { border-top: 1px solid var(--border); justify-content: flex-end; }
+    /* Manager dropdown in sidebar */
+    .manager-select {
+      width: 100%; background: var(--bg2); border: 1px solid var(--border);
+      color: var(--text); padding: 8px 12px; font-size: 0.85rem;
+      outline: none; margin-bottom: 12px;
+    }
+    .manager-select:focus { border-color: var(--gold); }
+    /* Export btn in filters */
+    .btn-export {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: 1px solid var(--border); color: var(--text-muted);
+      padding: 7px 14px; font-size: 0.7rem; letter-spacing: 1px;
+      text-transform: uppercase; cursor: pointer; transition: all 0.2s;
+    }
+    .btn-export:hover { border-color: var(--gold); color: var(--gold); }
+    /* Auto-refresh indicator */
+    .chat-live-indicator {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 0.7rem; color: var(--success);
+    }
+    .chat-live-dot {
+      width: 6px; height: 6px; background: var(--success);
+      border-radius: 50%; animation: livePulse 1.5s infinite;
+    }
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+    /* Select-all checkbox header */
+    #checkAll { width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer; }
+  </style>
 </head>
 <body>
 <div class="admin-layout">
@@ -40,13 +101,15 @@
     <header class="topbar">
       <div class="topbar-title" id="pageTitle">Заявки</div>
       <div class="topbar-right">
-        <button class="topbar-btn" onclick="closeDetail()">☰ Все заявки</button>
+        <button class="topbar-btn" id="backToListBtn" style="display:none" onclick="closeDetail()">← Все заявки</button>
       </div>
     </header>
 
-    <!-- LIST VIEW -->
+    <!-- ══════════════════ LIST VIEW ══════════════════ -->
     <div id="listView" class="page-content">
       <div class="section-card">
+
+        <!-- Filters -->
         <div class="filters-bar">
           <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск: имя, номер, телефон..." />
           <select class="filter-select" id="statusFilter">
@@ -59,11 +122,25 @@
             <option value="cancelled">❌ Отменённые</option>
           </select>
           <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
+          <button class="btn-export" onclick="exportCSV()" title="Экспорт текущей выборки в CSV">⬇ CSV</button>
         </div>
+
+        <!-- Bulk action bar (hidden until rows are checked) -->
+        <div class="bulk-bar" id="bulkBar">
+          <span class="bulk-count" id="bulkCount">0 выбрано</span>
+          <button class="btn btn-sm btn-ghost" onclick="bulkAction('confirmed')">✅ Подтвердить</button>
+          <button class="btn btn-sm btn-ghost" onclick="bulkAction('in_progress')">▶️ В процессе</button>
+          <button class="btn btn-sm btn-ghost" onclick="bulkAction('completed')">🏁 Завершить</button>
+          <button class="btn btn-sm btn-ghost" onclick="bulkAction('cancelled')">❌ Отменить</button>
+          <button class="btn btn-sm btn-danger" onclick="bulkAction('delete')">🗑 Удалить</button>
+          <button class="btn btn-sm btn-ghost" onclick="clearSelection()" style="margin-left:auto">✕ Снять выбор</button>
+        </div>
+
         <div class="section-card-body">
           <table class="data-table">
             <thead>
               <tr>
+                <th class="cb-th"><input type="checkbox" id="checkAll" title="Выбрать все" /></th>
                 <th>№ заявки</th>
                 <th>Клиент</th>
                 <th>Мероприятие</th>
@@ -74,15 +151,24 @@
                 <th></th>
               </tr>
             </thead>
-            <tbody id="ordersBody"><tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr></tbody>
+            <tbody id="ordersBody">
+              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr>
+            </tbody>
           </table>
+        </div>
+
+        <!-- Pagination -->
+        <div style="display:flex;align-items:center;border-top:1px solid var(--border)">
+          <span class="pagination-info" id="paginationInfo"></span>
+          <div class="pagination" id="pagination" style="flex:1"></div>
         </div>
       </div>
     </div>
 
-    <!-- DETAIL VIEW -->
+    <!-- ══════════════════ DETAIL VIEW ══════════════════ -->
     <div id="detailView" class="page-content" style="display:none">
       <div class="order-detail-grid">
+
         <!-- Left: order info + chat -->
         <div>
           <div class="section-card" style="margin-bottom:24px">
@@ -94,11 +180,17 @@
             </div>
             <div class="section-card-body padded" id="detailInfo"></div>
           </div>
+
           <!-- Chat -->
           <div class="section-card">
             <div class="section-card-header">
               <div class="section-card-title">💬 Переписка с клиентом</div>
-              <span style="font-size:0.75rem;color:var(--text-dim)" id="chatTgInfo"></span>
+              <div style="display:flex;align-items:center;gap:16px">
+                <span class="chat-live-indicator" id="chatLiveIndicator" style="display:none">
+                  <span class="chat-live-dot"></span> Live
+                </span>
+                <span style="font-size:0.75rem;color:var(--text-dim)" id="chatTgInfo"></span>
+              </div>
             </div>
             <div class="chat-messages" id="chatMessages"></div>
             <div class="chat-input-row">
@@ -113,11 +205,20 @@
           <div class="section-card" style="margin-bottom:24px">
             <div class="section-card-header"><div class="section-card-title">🔧 Управление</div></div>
             <div class="section-card-body padded">
+
               <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Статус заявки</div>
               <select class="status-select" id="statusSelect"></select>
-              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:16px">Заметки менеджера</div>
+
+              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:16px">Ответственный менеджер</div>
+              <select class="manager-select" id="managerSelect">
+                <option value="">— не назначен —</option>
+              </select>
+
+              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:8px">Заметки менеджера</div>
               <textarea class="notes-area" id="adminNotes" placeholder="Внутренние заметки (клиент не видит)"></textarea>
+
               <button class="btn btn-md btn-gold" style="width:100%" onclick="saveOrder()">💾 Сохранить</button>
+
               <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
                 <button class="btn btn-sm btn-ghost" onclick="quickStatus('confirmed')">✅ Подтвердить</button>
                 <button class="btn btn-sm btn-ghost" onclick="quickStatus('in_progress')">▶️ В процессе</button>
@@ -126,6 +227,7 @@
               </div>
             </div>
           </div>
+
           <div class="section-card" id="modelCard" style="display:none">
             <div class="section-card-header"><div class="section-card-title">💃 Модель</div></div>
             <div class="section-card-body padded" id="modelInfo"></div>
@@ -135,82 +237,305 @@
     </div>
   </div>
 </div>
+
 <div class="toast-container" id="toastContainer"></div>
 <script src="/js/admin.js"></script>
 <script>
-let currentOrderId = null;
+/* ═══════════════════════════════════════════════════════
+   State
+═══════════════════════════════════════════════════════ */
+let currentOrderId   = null;
+let currentPage      = 1;
+let totalPages       = 1;
+let totalOrders      = 0;
+const PAGE_LIMIT     = 25;
 
-async function loadOrders() {
-  const search = document.getElementById('searchInput').value;
+let selectedIds      = new Set();
+let chatPollTimer    = null;
+let chatLastCount    = 0;
+let managersCache    = null;   // loaded once
+
+/* ═══════════════════════════════════════════════════════
+   LIST — load / render
+═══════════════════════════════════════════════════════ */
+async function loadOrders(page) {
+  if (page !== undefined) currentPage = page;
+  const search = document.getElementById('searchInput').value.trim();
   const status = document.getElementById('statusFilter').value;
-  let url = '/admin/orders?';
-  if (status) url += `status=${status}&`;
-  if (search) url += `search=${encodeURIComponent(search)}&`;
+
+  const params = new URLSearchParams({ page: currentPage, limit: PAGE_LIMIT });
+  if (status) params.set('status', status);
+  if (search) params.set('search', search);
+
   try {
-    const orders = await _admin.apiFetch(url);
-    const tbody = document.getElementById('ordersBody');
-    if (!orders.length) {
-      tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
-      return;
-    }
-    tbody.innerHTML = orders.map(o => `
-      <tr style="cursor:pointer" onclick="openDetail(${o.id})">
-        <td><strong>${o.order_number}</strong></td>
-        <td>${o.client_name}<br><span style="font-size:0.75rem;color:var(--text-dim)">${o.client_phone}</span></td>
-        <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
-        <td>${o.model_name || '<span style="color:var(--text-dim)">—</span>'}</td>
-        <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
-        <td>${_admin.statusBadge(o.status)}</td>
-        <td>${_admin.formatDateTime(o.created_at)}</td>
-        <td><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openDetail(${o.id})">Открыть →</button></td>
-      </tr>`).join('');
-  } catch (e) { _admin.toast('Ошибка загрузки: ' + e.message, 'error'); }
+    const data = await _admin.apiFetch('/admin/orders?' + params);
+    const orders = data.orders || [];
+    totalPages   = data.pages  || 1;
+    totalOrders  = data.total  || 0;
+
+    renderTable(orders);
+    renderPagination();
+    syncBulkBar();
+  } catch (e) {
+    _admin.toast('Ошибка загрузки: ' + e.message, 'error');
+  }
 }
 
+function renderTable(orders) {
+  const tbody = document.getElementById('ordersBody');
+  if (!orders.length) {
+    tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = orders.map(o => {
+    const checked = selectedIds.has(o.id) ? 'checked' : '';
+    const unread  = o.has_unread ? '<span class="unread-dot" title="Непрочитанные сообщения"></span>' : '';
+    return `
+    <tr data-id="${o.id}" style="cursor:pointer" onclick="openDetail(${o.id})">
+      <td class="cb-cell" onclick="event.stopPropagation()">
+        <input type="checkbox" class="row-check" data-id="${o.id}" ${checked}
+          onchange="toggleRow(${o.id}, this.checked)" />
+      </td>
+      <td><strong>${o.order_number}</strong>${unread}</td>
+      <td>${o.client_name}<br><span style="font-size:0.75rem;color:var(--text-dim)">${o.client_phone}</span></td>
+      <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
+      <td>${o.model_name || '<span style="color:var(--text-dim)">—</span>'}</td>
+      <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
+      <td>${_admin.statusBadge(o.status)}</td>
+      <td>${_admin.formatDateTime(o.created_at)}</td>
+      <td><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openDetail(${o.id})">Открыть →</button></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ═══════════════════════════════════════════════════════
+   PAGINATION
+═══════════════════════════════════════════════════════ */
+function renderPagination() {
+  const from  = totalOrders === 0 ? 0 : (currentPage - 1) * PAGE_LIMIT + 1;
+  const to    = Math.min(currentPage * PAGE_LIMIT, totalOrders);
+  document.getElementById('paginationInfo').textContent =
+    totalOrders ? `Заявки ${from}–${to} из ${totalOrders}` : '';
+
+  const nav = document.getElementById('pagination');
+  if (totalPages <= 1) { nav.innerHTML = ''; return; }
+
+  const pages = buildPageRange(currentPage, totalPages);
+  nav.innerHTML = `
+    <button class="page-btn" ${currentPage <= 1 ? 'disabled style="opacity:.4;cursor:default"' : ''}
+      onclick="loadOrders(${currentPage - 1})">‹</button>
+    ${pages.map(p => p === '…'
+      ? `<span style="padding:0 6px;color:var(--text-dim);line-height:32px">…</span>`
+      : `<button class="page-btn ${p === currentPage ? 'active' : ''}" onclick="loadOrders(${p})">${p}</button>`
+    ).join('')}
+    <button class="page-btn" ${currentPage >= totalPages ? 'disabled style="opacity:.4;cursor:default"' : ''}
+      onclick="loadOrders(${currentPage + 1})">›</button>`;
+}
+
+function buildPageRange(cur, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = [];
+  if (cur <= 4) {
+    pages.push(1, 2, 3, 4, 5, '…', total);
+  } else if (cur >= total - 3) {
+    pages.push(1, '…', total - 4, total - 3, total - 2, total - 1, total);
+  } else {
+    pages.push(1, '…', cur - 1, cur, cur + 1, '…', total);
+  }
+  return pages;
+}
+
+/* ═══════════════════════════════════════════════════════
+   BULK ACTIONS
+═══════════════════════════════════════════════════════ */
+function toggleRow(id, checked) {
+  if (checked) selectedIds.add(id); else selectedIds.delete(id);
+  syncBulkBar();
+  syncCheckAll();
+}
+
+function syncBulkBar() {
+  const n    = selectedIds.size;
+  const bar  = document.getElementById('bulkBar');
+  bar.classList.toggle('visible', n > 0);
+  document.getElementById('bulkCount').textContent = `${n} выбрано`;
+}
+
+function syncCheckAll() {
+  const boxes    = document.querySelectorAll('.row-check');
+  const allCheck = document.getElementById('checkAll');
+  if (!boxes.length) { allCheck.checked = false; allCheck.indeterminate = false; return; }
+  const visibleIds = [...boxes].map(b => +b.dataset.id);
+  const checkedCnt = visibleIds.filter(id => selectedIds.has(id)).length;
+  allCheck.indeterminate = checkedCnt > 0 && checkedCnt < visibleIds.length;
+  allCheck.checked       = checkedCnt === visibleIds.length;
+}
+
+document.getElementById('checkAll').addEventListener('change', function () {
+  const boxes = document.querySelectorAll('.row-check');
+  boxes.forEach(b => {
+    const id = +b.dataset.id;
+    if (this.checked) selectedIds.add(id); else selectedIds.delete(id);
+    b.checked = this.checked;
+  });
+  syncBulkBar();
+});
+
+function clearSelection() {
+  selectedIds.clear();
+  document.querySelectorAll('.row-check').forEach(b => b.checked = false);
+  document.getElementById('checkAll').checked = false;
+  document.getElementById('checkAll').indeterminate = false;
+  syncBulkBar();
+}
+
+async function bulkAction(action) {
+  if (!selectedIds.size) return;
+  const ids = [...selectedIds];
+
+  const labels = {
+    confirmed: 'подтвердить', in_progress: 'перевести в процесс',
+    completed: 'завершить', cancelled: 'отменить', delete: 'УДАЛИТЬ'
+  };
+  const confirmMsg = action === 'delete'
+    ? `Удалить ${ids.length} заявок(и)? Это действие необратимо.`
+    : `${labels[action]} ${ids.length} заявок(и)?`;
+
+  _admin.adminConfirm('Массовое действие', confirmMsg, async () => {
+    try {
+      await _admin.apiFetch('/admin/orders/bulk', {
+        method: 'POST',
+        body: JSON.stringify({ ids, action })
+      });
+      _admin.toast('Готово', 'success');
+      clearSelection();
+      loadOrders();
+    } catch (e) {
+      _admin.toast('Ошибка: ' + e.message, 'error');
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════════════════
+   EXPORT CSV
+═══════════════════════════════════════════════════════ */
+function exportCSV() {
+  const status = document.getElementById('statusFilter').value;
+  const search = document.getElementById('searchInput').value.trim();
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (search) params.set('search', search);
+  const token = localStorage.getItem('admin_token');
+  // trigger browser download
+  const url = `/api/admin/orders/export?${params}`;
+  const a = document.createElement('a');
+  a.href = url;
+  // Pass auth via header is impossible for plain <a>, so use fetch + blob
+  _admin.apiFetch('/admin/orders/export?' + params, { parseJSON: false })
+    .catch(() => {
+      // fallback: open URL directly (works if server accepts query-param token)
+      window.open(url + (params.toString() ? '&' : '?') + 'token=' + encodeURIComponent(token), '_blank');
+    });
+}
+
+/* ═══════════════════════════════════════════════════════
+   MANAGERS — load once for dropdown
+═══════════════════════════════════════════════════════ */
+async function loadManagers() {
+  if (managersCache) return managersCache;
+  try {
+    managersCache = await _admin.apiFetch('/admin/managers');
+  } catch { managersCache = []; }
+  return managersCache;
+}
+
+function populateManagerSelect(currentManagerId) {
+  const sel = document.getElementById('managerSelect');
+  const managers = managersCache || [];
+  sel.innerHTML = '<option value="">— не назначен —</option>' +
+    managers.map(m => `<option value="${m.id}" ${m.id === currentManagerId ? 'selected' : ''}>${m.username}${m.role === 'superadmin' ? ' ★' : ''}</option>`).join('');
+}
+
+/* ═══════════════════════════════════════════════════════
+   DETAIL VIEW — open / render
+═══════════════════════════════════════════════════════ */
 async function openDetail(id) {
   currentOrderId = id;
-  document.getElementById('listView').style.display = 'none';
-  document.getElementById('detailView').style.display = 'block';
+  stopChatPoll();
+
+  document.getElementById('listView').style.display    = 'none';
+  document.getElementById('detailView').style.display  = 'block';
+  document.getElementById('backToListBtn').style.display = 'inline-flex';
+
   try {
-    const o = await _admin.apiFetch(`/admin/orders/${id}`);
+    const [o] = await Promise.all([
+      _admin.apiFetch(`/admin/orders/${id}`),
+      loadManagers()
+    ]);
+
     document.getElementById('detailTitle').textContent = `Заявка ${o.order_number}`;
-    document.getElementById('pageTitle').textContent = `Заявка ${o.order_number}`;
+    document.getElementById('pageTitle').textContent   = `Заявка ${o.order_number}`;
+
     document.getElementById('statusSelect').innerHTML = _admin.STATUS_OPTIONS;
-    document.getElementById('statusSelect').value = o.status;
-    document.getElementById('adminNotes').value = o.admin_notes || '';
+    document.getElementById('statusSelect').value     = o.status;
+    document.getElementById('adminNotes').value       = o.admin_notes || '';
 
-    document.getElementById('detailInfo').innerHTML = `
-      <div class="detail-row"><div class="detail-label">Клиент</div><div class="detail-value"><strong>${o.client_name}</strong></div></div>
-      <div class="detail-row"><div class="detail-label">Телефон</div><div class="detail-value"><a href="tel:${o.client_phone}" style="color:var(--gold)">${o.client_phone}</a></div></div>
-      ${o.client_email ? `<div class="detail-row"><div class="detail-label">Email</div><div class="detail-value"><a href="mailto:${o.client_email}" style="color:var(--gold)">${o.client_email}</a></div></div>` : ''}
-      ${o.client_telegram ? `<div class="detail-row"><div class="detail-label">Telegram</div><div class="detail-value"><a href="https://t.me/${o.client_telegram}" target="_blank" style="color:var(--gold)">@${o.client_telegram}</a></div></div>` : ''}
-      <div class="detail-row"><div class="detail-label">Мероприятие</div><div class="detail-value">${_admin.EVENT_LABELS[o.event_type] || o.event_type}</div></div>
-      ${o.event_date ? `<div class="detail-row"><div class="detail-label">Дата</div><div class="detail-value">${_admin.formatDate(o.event_date)}</div></div>` : ''}
-      ${o.event_duration ? `<div class="detail-row"><div class="detail-label">Продолжительность</div><div class="detail-value">${o.event_duration} ч</div></div>` : ''}
-      ${o.location ? `<div class="detail-row"><div class="detail-label">Место</div><div class="detail-value">${o.location}</div></div>` : ''}
-      ${o.budget ? `<div class="detail-row"><div class="detail-label">Бюджет</div><div class="detail-value">${o.budget}</div></div>` : ''}
-      ${o.comments ? `<div class="detail-row"><div class="detail-label">Комментарий</div><div class="detail-value" style="white-space:pre-wrap">${o.comments}</div></div>` : ''}
-      <div class="detail-row"><div class="detail-label">Создана</div><div class="detail-value">${_admin.formatDateTime(o.created_at)}</div></div>`;
+    populateManagerSelect(o.manager_id || null);
 
-    // Chat
-    document.getElementById('chatTgInfo').textContent = o.client_chat_id ? '✅ Telegram подключён' : o.client_telegram ? '⚠️ Telegram не привязан' : '—';
+    document.getElementById('detailInfo').innerHTML = buildDetailHTML(o);
+
+    document.getElementById('chatTgInfo').textContent =
+      o.client_chat_id    ? '✅ Telegram подключён'
+      : o.client_telegram ? '⚠️ Telegram не привязан'
+      : '—';
+
+    chatLastCount = (o.messages || []).length;
     renderChat(o.messages || []);
 
-    // Model card
     if (o.model_name) {
       document.getElementById('modelCard').style.display = 'block';
-      document.getElementById('modelInfo').innerHTML = `
-        <div style="display:flex;gap:12px;align-items:center">
-          ${o.model_photo ? `<img src="${o.model_photo}" style="width:60px;height:80px;object-fit:cover;flex-shrink:0" />` : ''}
-          <div>
-            <strong style="color:var(--text)">${o.model_name}</strong>
-            <br><a href="/admin/models.html?id=${o.model_id}" class="btn btn-sm btn-ghost" style="margin-top:8px">Профиль →</a>
-          </div>
-        </div>`;
+      document.getElementById('modelInfo').innerHTML = buildModelHTML(o);
+    } else {
+      document.getElementById('modelCard').style.display = 'none';
     }
+
+    startChatPoll();
   } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
 }
 
+function buildDetailHTML(o) {
+  const row = (label, val) => val
+    ? `<div class="detail-row"><div class="detail-label">${label}</div><div class="detail-value">${val}</div></div>`
+    : '';
+  return [
+    row('Клиент',           `<strong>${o.client_name}</strong>`),
+    row('Телефон',          `<a href="tel:${o.client_phone}" style="color:var(--gold)">${o.client_phone}</a>`),
+    o.client_email    ? row('Email',    `<a href="mailto:${o.client_email}" style="color:var(--gold)">${o.client_email}</a>`) : '',
+    o.client_telegram ? row('Telegram', `<a href="https://t.me/${o.client_telegram}" target="_blank" style="color:var(--gold)">@${o.client_telegram}</a>`) : '',
+    row('Мероприятие',      _admin.EVENT_LABELS[o.event_type] || o.event_type),
+    o.event_date      ? row('Дата',     _admin.formatDate(o.event_date))           : '',
+    o.event_duration  ? row('Продолжительность', `${o.event_duration} ч`)          : '',
+    o.location        ? row('Место',    o.location)                                : '',
+    o.budget          ? row('Бюджет',   o.budget)                                  : '',
+    o.comments        ? row('Комментарий', `<span style="white-space:pre-wrap">${o.comments}</span>`) : '',
+    row('Создана',          _admin.formatDateTime(o.created_at)),
+  ].join('');
+}
+
+function buildModelHTML(o) {
+  return `<div style="display:flex;gap:12px;align-items:center">
+    ${o.model_photo ? `<img src="${o.model_photo}" style="width:60px;height:80px;object-fit:cover;flex-shrink:0" />` : ''}
+    <div>
+      <strong style="color:var(--text)">${o.model_name}</strong>
+      <br><a href="/admin/models.html?id=${o.model_id}" class="btn btn-sm btn-ghost" style="margin-top:8px">Профиль →</a>
+    </div>
+  </div>`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   CHAT — render + auto-poll
+═══════════════════════════════════════════════════════ */
 function renderChat(messages) {
   const box = document.getElementById('chatMessages');
   if (!messages.length) {
@@ -219,36 +544,76 @@ function renderChat(messages) {
   }
   box.innerHTML = messages.map(m => `
     <div class="chat-msg ${m.sender_type}">
-      <div class="chat-bubble">${m.content}</div>
+      <div class="chat-bubble">${escapeHtml(m.content)}</div>
       <div class="chat-meta">${m.sender_name || m.sender_type} · ${_admin.formatDateTime(m.created_at)}</div>
     </div>`).join('');
   box.scrollTop = box.scrollHeight;
 }
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function startChatPoll() {
+  document.getElementById('chatLiveIndicator').style.display = 'inline-flex';
+  chatPollTimer = setInterval(pollChat, 5000);
+}
+
+function stopChatPoll() {
+  document.getElementById('chatLiveIndicator').style.display = 'none';
+  clearInterval(chatPollTimer);
+  chatPollTimer = null;
+}
+
+async function pollChat() {
+  if (!currentOrderId) { stopChatPoll(); return; }
+  try {
+    const o = await _admin.apiFetch(`/admin/orders/${currentOrderId}`);
+    const msgs = o.messages || [];
+    if (msgs.length !== chatLastCount) {
+      chatLastCount = msgs.length;
+      renderChat(msgs);
+    }
+  } catch { /* network blip — keep polling */ }
+}
+
 async function sendMessage() {
-  const input = document.getElementById('chatInput');
+  const input   = document.getElementById('chatInput');
   const content = input.value.trim();
   if (!content) return;
   try {
-    await _admin.apiFetch(`/admin/orders/${currentOrderId}/message`, { method: 'POST', body: JSON.stringify({ content }) });
+    await _admin.apiFetch(`/admin/orders/${currentOrderId}/message`, {
+      method: 'POST',
+      body: JSON.stringify({ content })
+    });
     input.value = '';
     const o = await _admin.apiFetch(`/admin/orders/${currentOrderId}`);
+    chatLastCount = (o.messages || []).length;
     renderChat(o.messages || []);
     _admin.toast('Сообщение отправлено', 'success');
   } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
 }
 
-document.getElementById('chatInput')?.addEventListener('keydown', e => {
+document.getElementById('chatInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
+/* ═══════════════════════════════════════════════════════
+   SAVE / QUICK STATUS
+═══════════════════════════════════════════════════════ */
 async function saveOrder() {
+  const managerId = document.getElementById('managerSelect').value;
   try {
     await _admin.apiFetch(`/admin/orders/${currentOrderId}`, {
       method: 'PUT',
       body: JSON.stringify({
-        status: document.getElementById('statusSelect').value,
+        status:      document.getElementById('statusSelect').value,
         admin_notes: document.getElementById('adminNotes').value,
+        manager_id:  managerId ? +managerId : null,
       })
     });
     _admin.toast('Сохранено', 'success');
@@ -260,25 +625,40 @@ async function quickStatus(status) {
   await saveOrder();
 }
 
+/* ═══════════════════════════════════════════════════════
+   CLOSE DETAIL
+═══════════════════════════════════════════════════════ */
 function closeDetail() {
+  stopChatPoll();
   currentOrderId = null;
-  document.getElementById('detailView').style.display = 'none';
-  document.getElementById('listView').style.display = 'block';
-  document.getElementById('pageTitle').textContent = 'Заявки';
+  document.getElementById('detailView').style.display  = 'none';
+  document.getElementById('listView').style.display    = 'block';
+  document.getElementById('backToListBtn').style.display = 'none';
+  document.getElementById('pageTitle').textContent     = 'Заявки';
+  loadOrders(); // refresh list (unread dots may have changed)
 }
 
-// Search + filter
+/* ═══════════════════════════════════════════════════════
+   SEARCH / FILTER
+═══════════════════════════════════════════════════════ */
 let searchTimer;
-document.getElementById('searchInput')?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadOrders, 400); });
-document.getElementById('statusFilter')?.addEventListener('change', loadOrders);
+document.getElementById('searchInput').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadOrders(1), 400);
+});
+document.getElementById('statusFilter').addEventListener('change', () => loadOrders(1));
 
-// URL params
-const urlParams = new URLSearchParams(window.location.search);
-const urlStatus = urlParams.get('status');
-const urlId = urlParams.get('id');
-if (urlStatus) document.getElementById('statusFilter').value = urlStatus;
-loadOrders();
-if (urlId) setTimeout(() => openDetail(+urlId), 300);
+/* ═══════════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════════ */
+(function init() {
+  const params   = new URLSearchParams(window.location.search);
+  const urlStatus = params.get('status');
+  const urlId     = params.get('id');
+  if (urlStatus) document.getElementById('statusFilter').value = urlStatus;
+  loadOrders(1);
+  if (urlId) setTimeout(() => openDetail(+urlId), 400);
+})();
 </script>
 </body>
 </html>

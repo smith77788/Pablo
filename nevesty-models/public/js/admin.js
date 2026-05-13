@@ -17,9 +17,9 @@ async function apiFetch(path, opts = {}) {
     },
     ...opts
   });
-  if (res.status === 401) { localStorage.clear(); window.location.href = '/admin/login.html'; }
+  if (res.status === 401) { localStorage.clear(); window.location.href = '/admin/login.html'; return; }
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Ошибка запроса');
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
@@ -29,30 +29,46 @@ async function apiFetchForm(path, formData, method = 'POST') {
     headers: { 'Authorization': `Bearer ${token}` },
     body: formData
   });
-  if (res.status === 401) { localStorage.clear(); window.location.href = '/admin/login.html'; }
+  if (res.status === 401) { localStorage.clear(); window.location.href = '/admin/login.html'; return; }
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Ошибка запроса');
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
+// ─── Toast notifications ──────────────────────────────
 function toast(msg, type = 'info') {
   let container = document.getElementById('toastContainer');
-  if (!container) { container = document.createElement('div'); container.id = 'toastContainer'; container.className = 'toast-container'; document.body.appendChild(container); }
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
   const t = document.createElement('div');
   t.className = `toast ${type}`;
-  t.innerHTML = `<span>${type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ'}</span> <span>${msg}</span>`;
+  const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : type === 'warning' ? '⚠' : 'ℹ';
+  t.innerHTML = `<span style="font-weight:700">${icon}</span> <span>${msg}</span>`;
   container.appendChild(t);
-  setTimeout(() => t.style.opacity = '0', 3500);
+  setTimeout(() => { t.style.transition = 'opacity 0.4s'; t.style.opacity = '0'; }, 3500);
   setTimeout(() => t.remove(), 4000);
 }
 
+// ─── Confirm dialog ───────────────────────────────────
 function adminConfirm(title, msg, onOk) {
   let overlay = document.getElementById('confirmOverlay');
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'confirmOverlay';
     overlay.className = 'confirm-overlay';
-    overlay.innerHTML = `<div class="confirm-box"><h4 id="confirmTitle"></h4><p id="confirmMsg"></p><div class="confirm-btns"><button class="btn btn-md btn-ghost" id="confirmCancel">Отмена</button><button class="btn btn-md btn-danger" id="confirmOk">Подтвердить</button></div></div>`;
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <h4 id="confirmTitle"></h4>
+        <p id="confirmMsg"></p>
+        <div class="confirm-btns">
+          <button class="btn btn-md btn-ghost" id="confirmCancel">Отмена</button>
+          <button class="btn btn-md btn-danger" id="confirmOk">Подтвердить</button>
+        </div>
+      </div>`;
     document.body.appendChild(overlay);
     document.getElementById('confirmCancel').addEventListener('click', () => overlay.classList.remove('open'));
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
@@ -66,21 +82,23 @@ function adminConfirm(title, msg, onOk) {
   newBtn.addEventListener('click', () => { overlay.classList.remove('open'); onOk(); });
 }
 
-function logout() {
-  localStorage.clear();
-  window.location.href = '/admin/login.html';
-}
+function logout() { localStorage.clear(); window.location.href = '/admin/login.html'; }
 
+// ─── Formatters ───────────────────────────────────────
 const STATUS_LABELS = {
   new: 'Новая', reviewing: 'На рассмотрении', confirmed: 'Подтверждена',
   in_progress: 'В процессе', completed: 'Завершена', cancelled: 'Отменена'
 };
 const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+const CATEGORIES = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
+const EVENT_LABELS = {
+  fashion_show: 'Показ мод', photo_shoot: 'Фотосессия', event: 'Мероприятие',
+  commercial: 'Коммерческая', runway: 'Подиум', other: 'Другое'
+};
 
 function statusBadge(status) {
   return `<span class="badge badge-${status}">${STATUS_LABELS[status] || status}</span>`;
 }
-
 function formatDate(d) {
   if (!d) return '—';
   try { return new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return d; }
@@ -90,41 +108,103 @@ function formatDateTime(d) {
   try { return new Date(d).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return d; }
 }
 
-const CATEGORIES = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
-const EVENT_LABELS = {
-  fashion_show: 'Показ мод', photo_shoot: 'Фотосессия', event: 'Мероприятие',
-  commercial: 'Коммерческая съёмка', runway: 'Подиум', other: 'Другое'
-};
-
-// ─── Populate user info ────────────────────────────────
+// ─── Sidebar user info ────────────────────────────────
 document.querySelectorAll('.sidebar-user-name').forEach(el => el.textContent = adminUser.username || '—');
 document.querySelectorAll('.sidebar-user-role').forEach(el => el.textContent = adminUser.role === 'superadmin' ? 'Суперадмин' : 'Менеджер');
 document.querySelectorAll('.sidebar-user-letter').forEach(el => el.textContent = (adminUser.username || 'A')[0].toUpperCase());
 
-// ─── Active nav link ───────────────────────────────────
-const currentPath = window.location.pathname;
-document.querySelectorAll('.sidebar-nav a').forEach(a => {
-  if (a.getAttribute('href') === currentPath || a.getAttribute('href') === currentPath.replace('/admin/', '/admin/index.html')) {
-    a.classList.add('active');
+// ─── Mobile sidebar toggle ────────────────────────────
+(function () {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+
+  // Create hamburger button and overlay dynamically
+  const hamburger = document.createElement('button');
+  hamburger.id = 'sidebarToggle';
+  hamburger.innerHTML = '☰';
+  hamburger.style.cssText = 'display:none;background:none;border:none;color:var(--text);font-size:1.4rem;cursor:pointer;padding:4px 8px;';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sidebarOverlay';
+  overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99;';
+  document.body.appendChild(overlay);
+
+  const topbarLeft = document.querySelector('.topbar');
+  if (topbarLeft) topbarLeft.insertBefore(hamburger, topbarLeft.firstChild);
+
+  function showOnMobile() {
+    if (window.innerWidth <= 900) {
+      hamburger.style.display = 'inline-flex';
+    } else {
+      hamburger.style.display = 'none';
+      sidebar.classList.remove('open');
+      overlay.style.display = 'none';
+    }
   }
+
+  hamburger.addEventListener('click', () => {
+    const isOpen = sidebar.classList.toggle('open');
+    overlay.style.display = isOpen ? 'block' : 'none';
+  });
+  overlay.addEventListener('click', () => {
+    sidebar.classList.remove('open');
+    overlay.style.display = 'none';
+  });
+
+  window.addEventListener('resize', showOnMobile);
+  showOnMobile();
+})();
+
+// ─── Active nav link ──────────────────────────────────
+const currentPath = window.location.pathname.replace(/\/$/, '') || '/';
+document.querySelectorAll('.sidebar-nav a').forEach(a => {
+  const href = (a.getAttribute('href') || '').replace(/\/$/, '');
+  if (href && currentPath.endsWith(href)) a.classList.add('active');
 });
 
-// ─── Logout buttons ────────────────────────────────────
+// ─── Logout buttons ───────────────────────────────────
 document.querySelectorAll('[data-action="logout"]').forEach(el => {
   el.addEventListener('click', (e) => { e.preventDefault(); logout(); });
 });
 
-// ─── Poll new orders badge ─────────────────────────────
+// ─── New orders badge polling ─────────────────────────
 async function pollNewOrders() {
   try {
     const stats = await apiFetch('/admin/stats');
     document.querySelectorAll('#newOrdersBadge').forEach(el => {
       el.textContent = stats.new_orders;
-      el.style.display = stats.new_orders > 0 ? 'inline' : 'none';
+      el.style.display = stats.new_orders > 0 ? '' : 'none';
+    });
+    // Unread messages badge
+    document.querySelectorAll('#unreadBadge').forEach(el => {
+      el.textContent = stats.unread_messages;
+      el.style.display = stats.unread_messages > 0 ? '' : 'none';
     });
   } catch {}
 }
 pollNewOrders();
-setInterval(pollNewOrders, 30000);
+setInterval(pollNewOrders, 20000);
 
-window._admin = { apiFetch, apiFetchForm, toast, adminConfirm, logout, formatDate, formatDateTime, statusBadge, STATUS_OPTIONS, CATEGORIES, EVENT_LABELS };
+// ─── Export helper ────────────────────────────────────
+function downloadCSV(url) {
+  const a = document.createElement('a');
+  a.href = API + url + `&_auth=${encodeURIComponent(token)}`;
+  // Use fetch with auth header and create blob URL
+  fetch(API + url, { headers: { Authorization: `Bearer ${token}` } })
+    .then(r => r.blob())
+    .then(blob => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `orders_${Date.now()}.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    })
+    .catch(() => toast('Ошибка экспорта', 'error'));
+}
+
+window._admin = {
+  apiFetch, apiFetchForm, toast, adminConfirm, logout,
+  formatDate, formatDateTime, statusBadge,
+  STATUS_OPTIONS, STATUS_LABELS, CATEGORIES, EVENT_LABELS,
+  downloadCSV
+};

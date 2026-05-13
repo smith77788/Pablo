@@ -65,10 +65,62 @@
     }
   }
 
+  /* ─── Validation helpers ──────────────────────────── */
+  function clearErrors() {
+    document.querySelectorAll('.field-error-msg').forEach(el => el.remove());
+    document.querySelectorAll('.form-control[data-error]').forEach(el => {
+      el.style.borderColor = '';
+      el.removeAttribute('data-error');
+    });
+  }
+
+  function markError(id, msg) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.borderColor = 'var(--error, #e05c5c)';
+    el.setAttribute('data-error', '1');
+    // Remove any existing error message for this field
+    el.parentNode.querySelectorAll('.field-error-msg').forEach(n => n.remove());
+    const hint = document.createElement('div');
+    hint.className = 'field-error-msg';
+    hint.style.cssText = 'color:var(--error,#e05c5c);font-size:0.78rem;margin-top:4px';
+    hint.textContent = msg;
+    el.insertAdjacentElement('afterend', hint);
+    // Clear error on user input
+    el.addEventListener('input', () => {
+      el.style.borderColor = '';
+      el.removeAttribute('data-error');
+      hint.remove();
+    }, { once: true });
+  }
+
+  /* ─── Restore step fields from state ─────────────── */
+  function restoreStep(n) {
+    if (n === 2) {
+      document.getElementById('event_type').value = state.event_type || '';
+      document.getElementById('event_date').value = state.event_date || '';
+      document.getElementById('event_duration').value = state.event_duration || '4';
+      document.getElementById('location').value = state.location || '';
+      document.getElementById('budget').value = state.budget || '';
+      document.getElementById('comments').value = state.comments || '';
+    }
+    if (n === 3) {
+      document.getElementById('client_name').value = state.client_name || '';
+      document.getElementById('client_phone').value = state.client_phone || '';
+      document.getElementById('client_email').value = state.client_email || '';
+      document.getElementById('client_telegram').value = state.client_telegram ? '@' + state.client_telegram : '';
+    }
+  }
+
   function nextStep() {
     if (state.step === 2) {
+      clearErrors();
       const type = document.getElementById('event_type').value;
-      if (!type) { toast('Выберите тип мероприятия', 'error'); return; }
+      if (!type) {
+        markError('event_type', 'Выберите тип мероприятия');
+        toast('Выберите тип мероприятия', 'error');
+        return;
+      }
       state.event_type = type;
       state.event_date = document.getElementById('event_date').value;
       state.event_duration = document.getElementById('event_duration').value;
@@ -77,13 +129,30 @@
       state.comments = document.getElementById('comments').value;
     }
     if (state.step === 3) {
+      clearErrors();
       const name = document.getElementById('client_name').value.trim();
       const phone = document.getElementById('client_phone').value.trim();
-      if (!name) { toast('Введите ваше имя', 'error'); return; }
-      if (!phone) { toast('Введите номер телефона', 'error'); return; }
+      const email = document.getElementById('client_email').value.trim();
+      let hasError = false;
+      if (!name) {
+        markError('client_name', 'Введите ваше имя');
+        hasError = true;
+      }
+      if (!phone) {
+        markError('client_phone', 'Введите номер телефона');
+        hasError = true;
+      } else if (!/^[\d\s\+\-\(\)]{7,}$/.test(phone)) {
+        markError('client_phone', 'Введите корректный номер телефона');
+        hasError = true;
+      }
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        markError('client_email', 'Введите корректный email');
+        hasError = true;
+      }
+      if (hasError) { toast('Проверьте правильность заполнения полей', 'error'); return; }
       state.client_name = name;
       state.client_phone = phone;
-      state.client_email = document.getElementById('client_email').value.trim();
+      state.client_email = email;
       state.client_telegram = document.getElementById('client_telegram').value.trim().replace('@', '');
       buildSummary();
     }
@@ -106,6 +175,7 @@
     }
     state.step = n;
     document.getElementById(`step${n}`)?.classList.add('active');
+    restoreStep(n);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 

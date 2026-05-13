@@ -52,22 +52,118 @@ function modelCard(m, onClick) {
     </div>`;
 }
 
+/* ─── Lightbox ─────────────────────────────────────── */
+(function initLightbox() {
+  if (document.getElementById('lightbox')) return;
+
+  // Inject styles
+  const style = document.createElement('style');
+  style.textContent = `
+    #lightbox { position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.96);display:none;align-items:center;justify-content:center; }
+    #lightbox.lb-open { display:flex; }
+    #lb-img { max-height:90vh;max-width:90vw;object-fit:contain;user-select:none; }
+    #lb-prev,#lb-next {
+      position:absolute;top:50%;transform:translateY(-50%);
+      background:rgba(201,169,110,0.15);border:1px solid rgba(201,169,110,0.4);color:#c9a96e;
+      font-size:1.6rem;width:52px;height:52px;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      transition:background 0.2s;border-radius:2px;
+    }
+    #lb-prev:hover,#lb-next:hover { background:rgba(201,169,110,0.3); }
+    #lb-prev { left:20px; }
+    #lb-next { right:20px; }
+    #lb-close {
+      position:absolute;top:20px;right:24px;
+      background:none;border:none;color:#c9a96e;font-size:1.8rem;
+      cursor:pointer;line-height:1;padding:4px 8px;
+    }
+    #lb-counter {
+      position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
+      color:rgba(201,169,110,0.6);font-size:0.8rem;letter-spacing:2px;font-family:'Inter',sans-serif;
+    }
+    #modalMainImg { cursor:zoom-in; }
+  `;
+  document.head.appendChild(style);
+
+  // Inject DOM
+  const lb = document.createElement('div');
+  lb.id = 'lightbox';
+  lb.innerHTML = `
+    <button id="lb-prev" aria-label="Предыдущее фото">&#8592;</button>
+    <img id="lb-img" alt="" />
+    <button id="lb-next" aria-label="Следующее фото">&#8594;</button>
+    <button id="lb-close" aria-label="Закрыть">&#10005;</button>
+    <div id="lb-counter"></div>
+  `;
+  document.body.appendChild(lb);
+
+  let _photos = [];
+  let _idx = 0;
+
+  function lbShow(photos, idx) {
+    _photos = photos;
+    _idx = idx;
+    _render();
+    lb.classList.add('lb-open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function lbClose() {
+    lb.classList.remove('lb-open');
+    // restore body overflow only if model modal is also closed
+    if (!document.getElementById('modelModal')?.classList.contains('open')) {
+      document.body.style.overflow = '';
+    }
+  }
+
+  function _render() {
+    document.getElementById('lb-img').src = _photos[_idx];
+    const counter = document.getElementById('lb-counter');
+    counter.textContent = _photos.length > 1 ? `${_idx + 1} / ${_photos.length}` : '';
+    document.getElementById('lb-prev').style.display = _photos.length > 1 ? 'flex' : 'none';
+    document.getElementById('lb-next').style.display = _photos.length > 1 ? 'flex' : 'none';
+  }
+
+  function lbPrev() { _idx = (_idx - 1 + _photos.length) % _photos.length; _render(); }
+  function lbNext() { _idx = (_idx + 1) % _photos.length; _render(); }
+
+  document.getElementById('lb-close').addEventListener('click', lbClose);
+  document.getElementById('lb-prev').addEventListener('click', lbPrev);
+  document.getElementById('lb-next').addEventListener('click', lbNext);
+  lb.addEventListener('click', e => { if (e.target === lb) lbClose(); });
+
+  document.addEventListener('keydown', e => {
+    if (!lb.classList.contains('lb-open')) return;
+    if (e.key === 'Escape') lbClose();
+    if (e.key === 'ArrowLeft') lbPrev();
+    if (e.key === 'ArrowRight') lbNext();
+  });
+
+  // Expose for use in openModelModal
+  window._lightbox = { show: lbShow };
+})();
+
 function openModelModal(id) {
   apiFetch(`/models/${id}`)
     .then(m => {
       const photos = m.photos && m.photos.length ? m.photos : [];
       const allPhotos = m.photo_main ? [m.photo_main, ...photos.filter(p => p !== m.photo_main)] : photos;
       const thumbsHtml = allPhotos.slice(0, 6).map((p, i) =>
-        `<div class="modal-thumb" onclick="document.getElementById('modalMainImg').src='${p}'">
+        `<div class="modal-thumb" onclick="switchModalPhoto('${p}',${i})">
            <img src="${p}" alt="${m.name} ${i + 1}" />
          </div>`
       ).join('');
+
+      // Store photos on window for lightbox access from inline handlers
+      window._currentModalPhotos = allPhotos;
 
       document.getElementById('modalInner').innerHTML = `
         <div class="modal-gallery">
           <div class="modal-main-img">
             ${m.photo_main || allPhotos[0]
-              ? `<img id="modalMainImg" src="${m.photo_main || allPhotos[0]}" alt="${m.name}" />`
+              ? `<img id="modalMainImg" src="${m.photo_main || allPhotos[0]}" alt="${m.name}"
+                   onclick="window._lightbox && window._lightbox.show(window._currentModalPhotos, window._currentModalPhotoIdx || 0)"
+                   title="Нажмите для просмотра" />`
               : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg3);font-family:'Playfair Display',serif;font-size:6rem;color:rgba(201,169,110,0.15)">${m.name[0]}</div>`
             }
           </div>
@@ -92,6 +188,8 @@ function openModelModal(id) {
           </div>
         </div>`;
 
+      window._currentModalPhotoIdx = 0;
+
       const modal = document.getElementById('modelModal');
       modal.classList.add('open');
       document.body.style.overflow = 'hidden';
@@ -99,8 +197,15 @@ function openModelModal(id) {
     .catch(() => toast('Не удалось загрузить данные модели', 'error'));
 }
 
+function switchModalPhoto(src, idx) {
+  const img = document.getElementById('modalMainImg');
+  if (img) img.src = src;
+  window._currentModalPhotoIdx = idx;
+}
+
 // Make global
 window.openModelModal = openModelModal;
+window.switchModalPhoto = switchModalPhoto;
 
 /* ─── Navbar scroll ────────────────────────────────── */
 const navbar = document.getElementById('navbar');

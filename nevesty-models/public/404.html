@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>404 — Страница не найдена · Nevesty Models</title>
+  <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    .page-404 {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 40px 24px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .page-404::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(201,169,110,0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .err-code {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(7rem, 22vw, 16rem);
+      font-weight: 700;
+      line-height: 1;
+      color: transparent;
+      -webkit-text-stroke: 1px rgba(201,169,110,0.25);
+      background: linear-gradient(135deg, rgba(201,169,110,0.15) 0%, rgba(201,169,110,0.05) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      user-select: none;
+      letter-spacing: -0.02em;
+      margin-bottom: -16px;
+    }
+
+    .err-divider {
+      width: 60px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      margin: 0 auto 28px;
+    }
+
+    .err-label {
+      font-size: 0.7rem;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 16px;
+    }
+
+    .err-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      color: var(--text);
+      margin-bottom: 16px;
+    }
+
+    .err-desc {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      max-width: 420px;
+      line-height: 1.7;
+      margin-bottom: 40px;
+    }
+
+    .err-actions {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .err-corner {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      border-color: rgba(201,169,110,0.12);
+      border-style: solid;
+    }
+    .err-corner-tl { top: 32px; left: 32px; border-width: 1px 0 0 1px; }
+    .err-corner-tr { top: 32px; right: 32px; border-width: 1px 1px 0 0; }
+    .err-corner-bl { bottom: 32px; left: 32px; border-width: 0 0 1px 1px; }
+    .err-corner-br { bottom: 32px; right: 32px; border-width: 0 1px 1px 0; }
+
+    @media (max-width: 480px) {
+      .err-corner { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar scrolled">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links">
+        <a href="/catalog.html">Модели</a>
+        <a href="/#services">Услуги</a>
+        <a href="/#about">О нас</a>
+        <a href="/#contact">Контакты</a>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page-404">
+    <div class="err-corner err-corner-tl"></div>
+    <div class="err-corner err-corner-tr"></div>
+    <div class="err-corner err-corner-bl"></div>
+    <div class="err-corner err-corner-br"></div>
+
+    <div class="err-code">404</div>
+    <div class="err-divider"></div>
+    <div class="err-label">Ошибка</div>
+    <h1 class="err-title">Страница не найдена</h1>
+    <p class="err-desc">
+      К сожалению, запрошенная страница не существует или была перемещена.<br>
+      Воспользуйтесь навигацией или вернитесь на главную.
+    </p>
+    <div class="err-actions">
+      <a href="/" class="btn-primary" style="padding:14px 32px;font-size:0.8rem">На главную</a>
+      <a href="/catalog.html" class="btn-outline" style="padding:14px 32px;font-size:0.8rem">Каталог моделей</a>
+    </div>
+  </main>
+</body>
+</html>
