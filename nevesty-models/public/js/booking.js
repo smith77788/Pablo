@@ -1,6 +1,7 @@
 /* ─── Booking form logic ────────────────────────────── */
 (function () {
-  const BOT_USERNAME = window._BOT_USERNAME || 'nevesty_models_bot';
+  let BOT_USERNAME = '';
+  fetch('/api/config').then(r => r.json()).then(cfg => { BOT_USERNAME = cfg.bot_username || ''; }).catch(() => {});
 
   const state = {
     step: 1,

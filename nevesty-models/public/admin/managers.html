@@ -127,7 +127,7 @@ async function addManager() {
 }
 
 function deleteManager(id, name) {
-  _admin.confirm('Удалить менеджера?', `"${name}" потеряет доступ к панели управления.`, async () => {
+  _admin.adminConfirm('Удалить менеджера?', `"${name}" потеряет доступ к панели управления.`, async () => {
     try {
       await _admin.apiFetch(`/admin/managers/${id}`, { method: 'DELETE' });
       _admin.toast('Менеджер удалён', 'success');

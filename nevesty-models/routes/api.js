@@ -11,6 +11,30 @@ let botInstance = null;
 
 function setBot(bot) { botInstance = bot; }
 
+// ─── Validation helpers ──────────────────────────────────────────────────────
+const ALLOWED_EVENT_TYPES = ['fashion_show', 'photo_shoot', 'event', 'commercial', 'runway', 'other'];
+const ALLOWED_IMG_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+const ALLOWED_CATEGORIES = ['fashion', 'commercial', 'events'];
+
+function sanitizeStr(s, max = 500) {
+  if (typeof s !== 'string') return null;
+  return s.trim().slice(0, max) || null;
+}
+
+function validatePhone(phone) {
+  return typeof phone === 'string' && /^[\d\s\+\(\)\-]{7,20}$/.test(phone.trim());
+}
+
+function validateEmail(email) {
+  if (!email) return true; // optional
+  return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+}
+
+function validateDate(d) {
+  if (!d) return true; // optional
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d));
+}
+
 // ─── File upload ────────────────────────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -19,7 +43,7 @@ const storage = multer.diskStorage({
     cb(null, dir);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
+    const ext = path.extname(file.originalname).toLowerCase();
     cb(null, `model_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
   }
 });
@@ -27,9 +51,22 @@ const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Only images allowed'));
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (file.mimetype.startsWith('image/') && ALLOWED_IMG_EXTS.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Допускаются только изображения JPG, PNG, GIF, WebP'));
+    }
   }
+});
+
+// ─── Public config ────────────────────────────────────────────────────────────
+router.get('/config', (req, res) => {
+  res.json({
+    bot_username: process.env.BOT_USERNAME || '',
+    agency_phone: process.env.AGENCY_PHONE || '',
+    agency_email: process.env.AGENCY_EMAIL || '',
+  });
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────
@@ -155,32 +192,49 @@ router.delete('/admin/models/:id/photo', auth, async (req, res) => {
 router.post('/orders', async (req, res) => {
   try {
     const { client_name, client_phone, client_email, client_telegram, client_chat_id, model_id, event_type, event_date, event_duration, location, budget, comments } = req.body;
-    if (!client_name || !client_phone || !event_type) {
-      return res.status(400).json({ error: 'Заполните обязательные поля' });
-    }
-    let order_number;
-    let attempts = 0;
-    do {
-      order_number = generateOrderNumber();
-      const exists = await get('SELECT id FROM orders WHERE order_number = ?', [order_number]);
-      if (!exists) break;
-      attempts++;
-    } while (attempts < 10);
+
+    // Required fields
+    if (!sanitizeStr(client_name, 100)) return res.status(400).json({ error: 'Укажите ваше имя' });
+    if (!client_phone || !validatePhone(client_phone)) return res.status(400).json({ error: 'Укажите корректный номер телефона' });
+    if (!ALLOWED_EVENT_TYPES.includes(event_type)) return res.status(400).json({ error: 'Неверный тип мероприятия' });
+
+    // Optional field validation
+    if (!validateEmail(client_email)) return res.status(400).json({ error: 'Укажите корректный email' });
+    if (!validateDate(event_date)) return res.status(400).json({ error: 'Некорректная дата мероприятия' });
+
+    const duration = Math.min(Math.max(parseInt(event_duration, 10) || 4, 1), 48);
+
+    const order_number = generateOrderNumber();
+
+    const sanitized = {
+      client_name: sanitizeStr(client_name, 100),
+      client_phone: client_phone.trim().slice(0, 20),
+      client_email: sanitizeStr(client_email, 100),
+      client_telegram: sanitizeStr(client_telegram, 64),
+      client_chat_id: sanitizeStr(client_chat_id, 32),
+      model_id: model_id ? parseInt(model_id, 10) || null : null,
+      event_type,
+      event_date: event_date || null,
+      event_duration: duration,
+      location: sanitizeStr(location, 200),
+      budget: sanitizeStr(budget, 100),
+      comments: sanitizeStr(comments, 2000),
+    };
 
     const result = await run(
       `INSERT INTO orders (order_number,client_name,client_phone,client_email,client_telegram,client_chat_id,model_id,event_type,event_date,event_duration,location,budget,comments)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [order_number, client_name, client_phone, client_email || null, client_telegram || null, client_chat_id || null, model_id || null, event_type, event_date || null, event_duration || 4, location || null, budget || null, comments || null]
+      [order_number, sanitized.client_name, sanitized.client_phone, sanitized.client_email, sanitized.client_telegram, sanitized.client_chat_id, sanitized.model_id, sanitized.event_type, sanitized.event_date, sanitized.event_duration, sanitized.location, sanitized.budget, sanitized.comments]
     );
 
-    // Notify bot
     if (botInstance) {
-      botInstance.notifyNewOrder({ id: result.id, order_number, client_name, client_phone, client_email, client_telegram, event_type, event_date, location, budget, comments, model_id });
+      botInstance.notifyNewOrder({ id: result.id, order_number, ...sanitized });
     }
 
     res.json({ order_number, id: result.id });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('POST /orders error:', e);
+    res.status(500).json({ error: 'Ошибка при создании заявки' });
   }
 });
 
@@ -235,7 +289,8 @@ router.put('/admin/orders/:id', auth, async (req, res) => {
 
 // ─── Messages ─────────────────────────────────────────────────────────────
 router.post('/admin/orders/:id/message', auth, async (req, res) => {
-  const { content } = req.body;
+  const content = sanitizeStr(req.body.content, 2000);
+  if (!content) return res.status(400).json({ error: 'Сообщение не может быть пустым' });
   const order = await get('SELECT * FROM orders WHERE id = ?', [req.params.id]);
   if (!order) return res.status(404).json({ error: 'Not found' });
   const admin = await get('SELECT username FROM admins WHERE id = ?', [req.admin.id]);
@@ -255,8 +310,17 @@ router.get('/admin/managers', auth, async (req, res) => {
 router.post('/admin/managers', auth, async (req, res) => {
   if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
   const { username, email, password, role, telegram_id } = req.body;
+  if (!username || !/^[a-zA-Z0-9_]{3,32}$/.test(username)) return res.status(400).json({ error: 'Логин: 3–32 символа, только буквы/цифры/_' });
+  if (!password || password.length < 6) return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+  if (email && !validateEmail(email)) return res.status(400).json({ error: 'Некорректный email' });
+  const allowedRoles = ['manager', 'superadmin'];
+  const existing = await get('SELECT id FROM admins WHERE username = ?', [username]);
+  if (existing) return res.status(409).json({ error: 'Пользователь с таким логином уже существует' });
   const hash = await bcrypt.hash(password, 10);
-  const result = await run('INSERT INTO admins (username, email, password_hash, role, telegram_id) VALUES (?,?,?,?,?)', [username, email, hash, role || 'manager', telegram_id || null]);
+  const result = await run(
+    'INSERT INTO admins (username, email, password_hash, role, telegram_id) VALUES (?,?,?,?,?)',
+    [username, email || null, hash, allowedRoles.includes(role) ? role : 'manager', telegram_id || null]
+  );
   res.json({ id: result.id });
 });
 

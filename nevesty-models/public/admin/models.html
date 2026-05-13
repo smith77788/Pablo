@@ -217,30 +217,19 @@ function setAvail(v) {
   document.querySelectorAll('.toggle-option').forEach(o => o.classList.toggle('active', +o.dataset.val === v));
 }
 
-async function loadModels() {
-  const search = document.getElementById('searchInput').value;
+async function fetchModels() {
+  const params = new URLSearchParams();
   const cat = document.getElementById('categoryFilter').value;
   const av = document.getElementById('availFilter').value;
-  let url = '/models?';
-  if (cat) url += `category=${cat}&`;
-  if (av !== '') url += `available=${av}&`;
-  if (search) url += `search=${encodeURIComponent(search)}&`;
+  const search = document.getElementById('searchInput').value.trim();
+  if (cat) params.set('category', cat);
+  if (av !== '') params.set('available', av);
+  if (search) params.set('search', search);
+  const qs = params.toString();
   try {
-    allModels = await fetch(url.replace(/^\/models/, '/api/models')).then(r => r.json());
+    allModels = await _admin.apiFetch('/models' + (qs ? '?' + qs : ''));
     renderModels();
-  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
-}
-
-async function fetchModels() {
-  const url = '/api/models';
-  try {
-    allModels = await _admin.apiFetch('/models?' + new URLSearchParams({
-      category: document.getElementById('categoryFilter').value,
-      available: document.getElementById('availFilter').value,
-      search: document.getElementById('searchInput').value
-    }));
-    renderModels();
-  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  } catch (e) { _admin.toast('Ошибка загрузки: ' + e.message, 'error'); }
 }
 
 function renderModels() {
@@ -252,19 +241,26 @@ function renderModels() {
   grid.innerHTML = allModels.map(m => `
     <div class="admin-model-card">
       <div class="admin-model-img">
-        ${m.photo_main ? `<img src="${m.photo_main}" alt="${m.name}" loading="lazy" />` : `<div class="admin-model-placeholder">${m.name[0]}</div>`}
+        ${m.photo_main ? `<img src="${m.photo_main}" alt="" loading="lazy" />` : `<div class="admin-model-placeholder">${(m.name || '?')[0]}</div>`}
       </div>
       <div class="admin-model-info">
         <div class="admin-model-name">${m.name}</div>
         <div class="admin-model-meta">${m.height || '—'}см · ${m.hair_color || '—'} · ${_admin.CATEGORIES[m.category] || m.category}</div>
         <div style="margin-top:6px">${m.available ? '<span class="badge badge-available">Доступна</span>' : '<span class="badge badge-unavailable">Недоступна</span>'}</div>
         <div class="admin-model-actions">
-          <button class="btn btn-sm btn-ghost" onclick="editModel(${m.id})">✏️ Ред.</button>
+          <button class="btn btn-sm btn-ghost" data-action="edit" data-id="${m.id}">✏️ Ред.</button>
           <a href="/catalog.html" target="_blank" class="btn btn-sm btn-ghost">👁</a>
-          <button class="btn btn-sm btn-danger" onclick="deleteModel(${m.id}, '${m.name}')">🗑</button>
+          <button class="btn btn-sm btn-danger" data-action="delete" data-id="${m.id}">🗑</button>
         </div>
       </div>
     </div>`).join('');
+
+  // Attach events after render (avoids inline onclick XSS risk)
+  grid.querySelectorAll('[data-action="edit"]').forEach(btn => btn.addEventListener('click', () => editModel(+btn.dataset.id)));
+  grid.querySelectorAll('[data-action="delete"]').forEach(btn => btn.addEventListener('click', () => {
+    const m = allModels.find(x => x.id === +btn.dataset.id);
+    if (m) deleteModel(m.id, m.name);
+  }));
 }
 
 function showList() {
@@ -333,13 +329,13 @@ function fillForm(m) {
 
 async function editModel(id) {
   try {
-    const m = await fetch(`/api/models/${id}`).then(r => r.json());
+    const m = await _admin.apiFetch(`/models/${id}`);
     showForm(m);
   } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
 }
 
 async function deleteModel(id, name) {
-  _admin.confirm('Удалить модель?', `"${name}" будет удалена безвозвратно.`, async () => {
+  _admin.adminConfirm('Удалить модель?', `"${name}" будет удалена безвозвратно.`, async () => {
     try {
       await _admin.apiFetch(`/admin/models/${id}`, { method: 'DELETE' });
       _admin.toast('Модель удалена', 'success');
@@ -351,7 +347,7 @@ async function deleteModel(id, name) {
 async function deletePhoto(photo, modelId) {
   try {
     await _admin.apiFetch(`/admin/models/${modelId}/photo`, { method: 'DELETE', body: JSON.stringify({ photo }) });
-    const m = await fetch(`/api/models/${modelId}`).then(r => r.json());
+    const m = await _admin.apiFetch(`/models/${modelId}`);
     fillForm(m);
     _admin.toast('Фото удалено', 'success');
   } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }

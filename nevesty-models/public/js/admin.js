@@ -46,7 +46,7 @@ function toast(msg, type = 'info') {
   setTimeout(() => t.remove(), 4000);
 }
 
-function confirm(title, msg, onOk) {
+function adminConfirm(title, msg, onOk) {
   let overlay = document.getElementById('confirmOverlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -127,4 +127,4 @@ async function pollNewOrders() {
 pollNewOrders();
 setInterval(pollNewOrders, 30000);
 
-window._admin = { apiFetch, apiFetchForm, toast, confirm, logout, formatDate, formatDateTime, statusBadge, STATUS_OPTIONS, CATEGORIES, EVENT_LABELS };
+window._admin = { apiFetch, apiFetchForm, toast, adminConfirm, logout, formatDate, formatDateTime, statusBadge, STATUS_OPTIONS, CATEGORIES, EVENT_LABELS };

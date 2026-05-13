@@ -108,6 +108,15 @@ async function initDatabase() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  // Indexes for frequent queries
+  await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_orders_model_id ON orders(model_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_orders_client_chat ON orders(client_chat_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at DESC)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_messages_order ON messages(order_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_models_category ON models(category)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_models_available ON models(available)`);
+
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);
   if (!admin) {
