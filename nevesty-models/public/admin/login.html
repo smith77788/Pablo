@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Вход — Nevesty Models Admin</title>
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-box">
+      <div class="login-logo">Nevesty Models</div>
+      <div class="login-sub">Панель управления</div>
+      <form class="login-form" id="loginForm">
+        <input class="login-input" type="text" id="username" placeholder="Логин" autocomplete="username" required />
+        <input class="login-input" type="password" id="password" placeholder="Пароль" autocomplete="current-password" required />
+        <div class="login-error" id="loginError"></div>
+        <button class="login-btn" type="submit" id="loginBtn">Войти</button>
+      </form>
+      <p style="text-align:center;margin-top:20px;font-size:0.75rem;color:var(--text-dim)">
+        <a href="/" style="color:var(--text-dim)">← Вернуться на сайт</a>
+      </p>
+    </div>
+  </div>
+  <script>
+    if (localStorage.getItem('admin_token')) {
+      window.location.href = '/admin/';
+    }
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('loginBtn');
+      const err = document.getElementById('loginError');
+      btn.disabled = true; btn.textContent = 'Вход...'; err.textContent = '';
+      try {
+        const res = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: document.getElementById('username').value, password: document.getElementById('password').value })
+        });
+        const data = await res.json();
+        if (!res.ok) { err.textContent = data.error || 'Ошибка входа'; btn.disabled = false; btn.textContent = 'Войти'; return; }
+        localStorage.setItem('admin_token', data.token);
+        localStorage.setItem('admin_user', JSON.stringify(data.admin));
+        window.location.href = '/admin/';
+      } catch { err.textContent = 'Ошибка соединения'; btn.disabled = false; btn.textContent = 'Войти'; }
+    });
+  </script>
+</body>
+</html>

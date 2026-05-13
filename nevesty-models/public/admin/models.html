@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Модели — Nevesty Models Admin</title>
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-text">Nevesty Models</div>
+      <div class="sidebar-logo-sub">Панель управления</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Главная</div>
+      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+      <div class="nav-section-label">Бизнес</div>
+      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
+      <a href="/admin/models.html" class="active"><span class="nav-icon">💃</span> Модели</a>
+      <div class="nav-section-label">Настройки</div>
+      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user">
+        <div class="sidebar-avatar sidebar-user-letter">A</div>
+        <div class="sidebar-user-info">
+          <strong class="sidebar-user-name">—</strong>
+          <span class="sidebar-user-role">—</span>
+        </div>
+      </div>
+      <button class="btn-logout" data-action="logout">Выйти</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <div class="topbar-title" id="pageTitle">Модели</div>
+      <div class="topbar-right">
+        <button class="topbar-btn" onclick="showList()">☰ Список</button>
+        <button class="topbar-btn primary" onclick="showForm()">+ Добавить модель</button>
+      </div>
+    </header>
+
+    <!-- LIST VIEW -->
+    <div id="listView" class="page-content">
+      <div class="section-card">
+        <div class="filters-bar">
+          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск..." />
+          <select class="filter-select" id="categoryFilter">
+            <option value="">Все категории</option>
+            <option value="fashion">Fashion</option>
+            <option value="commercial">Commercial</option>
+            <option value="events">Events</option>
+          </select>
+          <select class="filter-select" id="availFilter">
+            <option value="">Все</option>
+            <option value="1">Доступные</option>
+            <option value="0">Недоступные</option>
+          </select>
+        </div>
+        <div class="section-card-body padded">
+          <div class="admin-model-grid" id="modelsGrid">
+            <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FORM VIEW -->
+    <div id="formView" class="page-content" style="display:none">
+      <div class="section-card">
+        <div class="section-card-header">
+          <div class="section-card-title" id="formTitle">Добавить модель</div>
+          <button class="btn btn-sm btn-ghost" onclick="showList()">← Назад</button>
+        </div>
+        <div class="section-card-body padded">
+          <form id="modelForm" enctype="multipart/form-data">
+            <input type="hidden" id="editId" />
+            <!-- Basic info -->
+            <div class="form-section">
+              <div class="form-section-title">Основная информация</div>
+              <div class="form-row-2">
+                <div class="admin-form-group">
+                  <label>Имя *</label>
+                  <input class="admin-input" type="text" id="f_name" required placeholder="Имя Фамилия" />
+                </div>
+                <div class="admin-form-group">
+                  <label>Категория *</label>
+                  <select class="admin-input" id="f_category">
+                    <option value="fashion">Fashion</option>
+                    <option value="commercial">Commercial</option>
+                    <option value="events">Events</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row-3">
+                <div class="admin-form-group">
+                  <label>Возраст</label>
+                  <input class="admin-input" type="number" id="f_age" placeholder="22" min="16" max="50" />
+                </div>
+                <div class="admin-form-group">
+                  <label>Рост (см)</label>
+                  <input class="admin-input" type="number" id="f_height" placeholder="175" min="155" max="195" />
+                </div>
+                <div class="admin-form-group">
+                  <label>Вес (кг)</label>
+                  <input class="admin-input" type="number" id="f_weight" placeholder="55" min="40" max="90" />
+                </div>
+              </div>
+              <div class="form-row-4">
+                <div class="admin-form-group">
+                  <label>Грудь (см)</label>
+                  <input class="admin-input" type="number" id="f_bust" placeholder="86" />
+                </div>
+                <div class="admin-form-group">
+                  <label>Талия (см)</label>
+                  <input class="admin-input" type="number" id="f_waist" placeholder="61" />
+                </div>
+                <div class="admin-form-group">
+                  <label>Бёдра (см)</label>
+                  <input class="admin-input" type="number" id="f_hips" placeholder="88" />
+                </div>
+                <div class="admin-form-group">
+                  <label>Размер обуви</label>
+                  <input class="admin-input" type="text" id="f_shoe_size" placeholder="38" />
+                </div>
+              </div>
+              <div class="form-row-2">
+                <div class="admin-form-group">
+                  <label>Цвет волос</label>
+                  <select class="admin-input" id="f_hair_color">
+                    <option value="Блонд">Блонд</option>
+                    <option value="Тёмный блонд">Тёмный блонд</option>
+                    <option value="Шатен">Шатен</option>
+                    <option value="Брюнетка">Брюнетка</option>
+                    <option value="Рыжая">Рыжая</option>
+                    <option value="Чёрные">Чёрные</option>
+                  </select>
+                </div>
+                <div class="admin-form-group">
+                  <label>Цвет глаз</label>
+                  <select class="admin-input" id="f_eye_color">
+                    <option value="Карие">Карие</option>
+                    <option value="Голубые">Голубые</option>
+                    <option value="Зелёные">Зелёные</option>
+                    <option value="Серые">Серые</option>
+                    <option value="Чёрные">Чёрные</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row-2">
+                <div class="admin-form-group">
+                  <label>Instagram</label>
+                  <input class="admin-input" type="text" id="f_instagram" placeholder="@username" />
+                </div>
+                <div class="admin-form-group">
+                  <label>Доступность</label>
+                  <div class="toggle-group">
+                    <div class="toggle-option active" data-val="1" onclick="setAvail(1)">✅ Доступна</div>
+                    <div class="toggle-option" data-val="0" onclick="setAvail(0)">❌ Занята</div>
+                  </div>
+                  <input type="hidden" id="f_available" value="1" />
+                </div>
+              </div>
+              <div class="admin-form-group">
+                <label>Биография / Описание</label>
+                <textarea class="admin-input" id="f_bio" placeholder="Опыт работы, специализация, достижения..." rows="4"></textarea>
+              </div>
+            </div>
+
+            <!-- Photos -->
+            <div class="form-section">
+              <div class="form-section-title">Фотографии</div>
+              <div class="admin-form-group">
+                <label>Главное фото (обложка)</label>
+                <div class="upload-zone" onclick="document.getElementById('mainPhotoInput').click()" id="mainPhotoZone">
+                  <div class="upload-zone-icon" id="mainPhotoPreviewWrap">📷</div>
+                  <p>Нажмите для выбора или перетащите файл</p>
+                  <span>JPG, PNG до 10 МБ</span>
+                </div>
+                <input type="file" id="mainPhotoInput" accept="image/*" style="display:none" />
+              </div>
+              <div class="admin-form-group">
+                <label>Портфолио (до 10 фото)</label>
+                <div class="upload-zone" onclick="document.getElementById('photosInput').click()">
+                  <div class="upload-zone-icon">🖼️</div>
+                  <p>Добавить фотографии портфолио</p>
+                  <span>JPG, PNG до 10 МБ каждое</span>
+                </div>
+                <input type="file" id="photosInput" accept="image/*" multiple style="display:none" />
+                <div class="photos-grid" id="photosPreview"></div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:12px;margin-top:8px">
+              <button type="submit" class="btn btn-lg btn-gold">💾 Сохранить модель</button>
+              <button type="button" class="btn btn-lg btn-ghost" onclick="showList()">Отмена</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast-container" id="toastContainer"></div>
+<script src="/js/admin.js"></script>
+<script>
+let allModels = [];
+let editingId = null;
+
+function setAvail(v) {
+  document.getElementById('f_available').value = v;
+  document.querySelectorAll('.toggle-option').forEach(o => o.classList.toggle('active', +o.dataset.val === v));
+}
+
+async function loadModels() {
+  const search = document.getElementById('searchInput').value;
+  const cat = document.getElementById('categoryFilter').value;
+  const av = document.getElementById('availFilter').value;
+  let url = '/models?';
+  if (cat) url += `category=${cat}&`;
+  if (av !== '') url += `available=${av}&`;
+  if (search) url += `search=${encodeURIComponent(search)}&`;
+  try {
+    allModels = await fetch(url.replace(/^\/models/, '/api/models')).then(r => r.json());
+    renderModels();
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function fetchModels() {
+  const url = '/api/models';
+  try {
+    allModels = await _admin.apiFetch('/models?' + new URLSearchParams({
+      category: document.getElementById('categoryFilter').value,
+      available: document.getElementById('availFilter').value,
+      search: document.getElementById('searchInput').value
+    }));
+    renderModels();
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+function renderModels() {
+  const grid = document.getElementById('modelsGrid');
+  if (!allModels.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1"><div class="empty-state"><div class="empty-state-icon">💃</div><p>Модели не найдены</p></div></div>';
+    return;
+  }
+  grid.innerHTML = allModels.map(m => `
+    <div class="admin-model-card">
+      <div class="admin-model-img">
+        ${m.photo_main ? `<img src="${m.photo_main}" alt="${m.name}" loading="lazy" />` : `<div class="admin-model-placeholder">${m.name[0]}</div>`}
+      </div>
+      <div class="admin-model-info">
+        <div class="admin-model-name">${m.name}</div>
+        <div class="admin-model-meta">${m.height || '—'}см · ${m.hair_color || '—'} · ${_admin.CATEGORIES[m.category] || m.category}</div>
+        <div style="margin-top:6px">${m.available ? '<span class="badge badge-available">Доступна</span>' : '<span class="badge badge-unavailable">Недоступна</span>'}</div>
+        <div class="admin-model-actions">
+          <button class="btn btn-sm btn-ghost" onclick="editModel(${m.id})">✏️ Ред.</button>
+          <a href="/catalog.html" target="_blank" class="btn btn-sm btn-ghost">👁</a>
+          <button class="btn btn-sm btn-danger" onclick="deleteModel(${m.id}, '${m.name}')">🗑</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function showList() {
+  document.getElementById('listView').style.display = 'block';
+  document.getElementById('formView').style.display = 'none';
+  document.getElementById('pageTitle').textContent = 'Модели';
+  editingId = null;
+  fetchModels();
+}
+
+function showForm(model) {
+  document.getElementById('listView').style.display = 'none';
+  document.getElementById('formView').style.display = 'block';
+  clearForm();
+  if (model) {
+    editingId = model.id;
+    document.getElementById('formTitle').textContent = `Редактировать: ${model.name}`;
+    document.getElementById('pageTitle').textContent = `Ред. модели`;
+    fillForm(model);
+  } else {
+    editingId = null;
+    document.getElementById('formTitle').textContent = 'Добавить модель';
+    document.getElementById('pageTitle').textContent = 'Добавить модель';
+  }
+}
+
+function clearForm() {
+  ['f_name','f_age','f_height','f_weight','f_bust','f_waist','f_hips','f_shoe_size','f_bio','f_instagram'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('f_category').value = 'fashion';
+  document.getElementById('f_hair_color').value = 'Блонд';
+  document.getElementById('f_eye_color').value = 'Карие';
+  document.getElementById('f_available').value = '1';
+  setAvail(1);
+  document.getElementById('mainPhotoPreviewWrap').innerHTML = '📷';
+  document.getElementById('photosPreview').innerHTML = '';
+  document.getElementById('mainPhotoInput').value = '';
+  document.getElementById('photosInput').value = '';
+}
+
+function fillForm(m) {
+  document.getElementById('f_name').value = m.name || '';
+  document.getElementById('f_age').value = m.age || '';
+  document.getElementById('f_height').value = m.height || '';
+  document.getElementById('f_weight').value = m.weight || '';
+  document.getElementById('f_bust').value = m.bust || '';
+  document.getElementById('f_waist').value = m.waist || '';
+  document.getElementById('f_hips').value = m.hips || '';
+  document.getElementById('f_shoe_size').value = m.shoe_size || '';
+  document.getElementById('f_bio').value = m.bio || '';
+  document.getElementById('f_instagram').value = m.instagram || '';
+  document.getElementById('f_category').value = m.category || 'fashion';
+  document.getElementById('f_hair_color').value = m.hair_color || 'Блонд';
+  document.getElementById('f_eye_color').value = m.eye_color || 'Карие';
+  document.getElementById('f_available').value = m.available ? '1' : '0';
+  setAvail(m.available ? 1 : 0);
+  if (m.photo_main) {
+    document.getElementById('mainPhotoPreviewWrap').innerHTML = `<img src="${m.photo_main}" style="max-height:120px;max-width:100%;object-fit:contain" />`;
+  }
+  const photos = typeof m.photos === 'string' ? JSON.parse(m.photos || '[]') : (m.photos || []);
+  document.getElementById('photosPreview').innerHTML = photos.map(p => `
+    <div class="photo-item">
+      <img src="${p}" />
+      <button class="photo-del" onclick="deletePhoto('${p}', ${m.id})">✕</button>
+    </div>`).join('');
+}
+
+async function editModel(id) {
+  try {
+    const m = await fetch(`/api/models/${id}`).then(r => r.json());
+    showForm(m);
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function deleteModel(id, name) {
+  _admin.confirm('Удалить модель?', `"${name}" будет удалена безвозвратно.`, async () => {
+    try {
+      await _admin.apiFetch(`/admin/models/${id}`, { method: 'DELETE' });
+      _admin.toast('Модель удалена', 'success');
+      fetchModels();
+    } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  });
+}
+
+async function deletePhoto(photo, modelId) {
+  try {
+    await _admin.apiFetch(`/admin/models/${modelId}/photo`, { method: 'DELETE', body: JSON.stringify({ photo }) });
+    const m = await fetch(`/api/models/${modelId}`).then(r => r.json());
+    fillForm(m);
+    _admin.toast('Фото удалено', 'success');
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+// Photo preview
+document.getElementById('mainPhotoInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => { document.getElementById('mainPhotoPreviewWrap').innerHTML = `<img src="${ev.target.result}" style="max-height:120px;max-width:100%;object-fit:contain" />`; };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById('photosInput').addEventListener('change', e => {
+  const preview = document.getElementById('photosPreview');
+  Array.from(e.target.files).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const div = document.createElement('div');
+      div.className = 'photo-item';
+      div.innerHTML = `<img src="${ev.target.result}" />`;
+      preview.appendChild(div);
+    };
+    reader.readAsDataURL(file);
+  });
+});
+
+// Form submit
+document.getElementById('modelForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('[type=submit]');
+  btn.disabled = true; btn.textContent = 'Сохранение...';
+  try {
+    const fd = new FormData();
+    const fields = ['name','age','height','weight','bust','waist','hips','shoe_size','hair_color','eye_color','bio','instagram','category','available'];
+    fields.forEach(f => fd.append(f, document.getElementById(`f_${f}`).value));
+    const mainPhoto = document.getElementById('mainPhotoInput').files[0];
+    if (mainPhoto) fd.append('photo_main', mainPhoto);
+    const photos = document.getElementById('photosInput').files;
+    Array.from(photos).forEach(p => fd.append('photos', p));
+
+    if (editingId) {
+      await _admin.apiFetchForm(`/admin/models/${editingId}`, fd, 'PUT');
+      _admin.toast('Модель обновлена!', 'success');
+    } else {
+      await _admin.apiFetchForm('/admin/models', fd);
+      _admin.toast('Модель добавлена!', 'success');
+    }
+    setTimeout(() => showList(), 1000);
+  } catch (err) {
+    _admin.toast('Ошибка: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 Сохранить модель';
+  }
+});
+
+// Search / filter
+let searchTimer;
+document.getElementById('searchInput').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(fetchModels, 400); });
+document.getElementById('categoryFilter').addEventListener('change', fetchModels);
+document.getElementById('availFilter').addEventListener('change', fetchModels);
+
+// URL params
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('action') === 'new') { showForm(); } else { fetchModels(); }
+</script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — Nevesty Models Admin</title>
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+<div class="admin-layout">
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-text">Nevesty Models</div>
+      <div class="sidebar-logo-sub">Панель управления</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Главная</div>
+      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+      <div class="nav-section-label">Бизнес</div>
+      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
+      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+      <div class="nav-section-label">Настройки</div>
+      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user">
+        <div class="sidebar-avatar sidebar-user-letter">A</div>
+        <div class="sidebar-user-info">
+          <strong class="sidebar-user-name">—</strong>
+          <span class="sidebar-user-role">—</span>
+        </div>
+      </div>
+      <button class="btn-logout" data-action="logout">Выйти</button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main-content">
+    <header class="topbar">
+      <div class="topbar-title">Dashboard</div>
+      <div class="topbar-right">
+        <a href="/admin/orders.html?status=new" class="topbar-btn">🆕 Новые заявки</a>
+        <a href="/booking.html" class="topbar-btn primary" target="_blank">+ Новая заявка</a>
+      </div>
+    </header>
+
+    <div class="page-content">
+      <!-- STAT CARDS -->
+      <div class="stat-cards" id="statCards">
+        <div class="stat-card"><div class="stat-card-label">Всего заявок</div><div class="stat-card-value" id="s_total">—</div><div class="stat-card-icon">📋</div></div>
+        <div class="stat-card"><div class="stat-card-label">Новых</div><div class="stat-card-value gold" id="s_new">—</div><div class="stat-card-icon">🆕</div></div>
+        <div class="stat-card"><div class="stat-card-label">Активных</div><div class="stat-card-value" id="s_active">—</div><div class="stat-card-icon">▶️</div></div>
+        <div class="stat-card"><div class="stat-card-label">Всего моделей</div><div class="stat-card-value" id="s_models">—</div><div class="stat-card-icon">💃</div></div>
+        <div class="stat-card"><div class="stat-card-label">Доступно</div><div class="stat-card-value" id="s_available">—</div><div class="stat-card-icon">🟢</div></div>
+      </div>
+
+      <!-- RECENT ORDERS -->
+      <div class="section-card">
+        <div class="section-card-header">
+          <div class="section-card-title">📋 Последние заявки</div>
+          <a href="/admin/orders.html" class="btn btn-sm btn-ghost">Все заявки →</a>
+        </div>
+        <div class="section-card-body">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>№ заявки</th>
+                <th>Клиент</th>
+                <th>Мероприятие</th>
+                <th>Дата</th>
+                <th>Статус</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="recentOrders"><tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-dim)">Загрузка...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- QUICK ACTIONS + BOT INFO -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">⚡ Быстрые действия</div></div>
+          <div class="section-card-body padded">
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <a href="/admin/orders.html?status=new" class="btn btn-md btn-ghost" style="justify-content:flex-start">🆕 Новые заявки</a>
+              <a href="/admin/orders.html?status=confirmed" class="btn btn-md btn-ghost" style="justify-content:flex-start">✅ Подтверждённые</a>
+              <a href="/admin/models.html" class="btn btn-md btn-ghost" style="justify-content:flex-start">💃 Управление моделями</a>
+              <a href="/admin/models.html?action=new" class="btn btn-md btn-gold" style="justify-content:flex-start">+ Добавить модель</a>
+            </div>
+          </div>
+        </div>
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">🤖 Telegram бот</div></div>
+          <div class="section-card-body padded">
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:16px;line-height:1.7">
+              Бот автоматически уведомляет о новых заявках и пересылает сообщения клиентов.
+            </p>
+            <div style="font-size:0.8rem;color:var(--text-dim);line-height:2">
+              <div>🆕 Новая заявка → уведомление с кнопками</div>
+              <div>✅/❌ Подтвердить / отклонить прямо в боте</div>
+              <div>💬 Переписка клиент ↔ менеджер</div>
+              <div>📊 /stats — статистика агентства</div>
+            </div>
+            <a href="https://t.me/nevesty_models_bot" target="_blank" class="btn btn-md btn-ghost" style="margin-top:16px;display:inline-flex;align-items:center;gap:8px">
+              ✈ Открыть бота
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast-container" id="toastContainer"></div>
+<script src="/js/admin.js"></script>
+<script>
+(async function () {
+  try {
+    const stats = await _admin.apiFetch('/admin/stats');
+    document.getElementById('s_total').textContent = stats.total_orders;
+    document.getElementById('s_new').textContent = stats.new_orders;
+    document.getElementById('s_active').textContent = stats.active_orders;
+    document.getElementById('s_models').textContent = stats.total_models;
+    document.getElementById('s_available').textContent = stats.available_models;
+
+    const tbody = document.getElementById('recentOrders');
+    if (!stats.recent.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-dim)">Заявок пока нет</td></tr>';
+      return;
+    }
+    tbody.innerHTML = stats.recent.map(o => `
+      <tr>
+        <td><strong>${o.order_number}</strong></td>
+        <td>${o.client_name}<br><span style="font-size:0.75rem;color:var(--text-dim)">${o.client_phone}</span></td>
+        <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
+        <td>${_admin.formatDate(o.event_date || o.created_at)}</td>
+        <td>${_admin.statusBadge(o.status)}</td>
+        <td><a href="/admin/orders.html?id=${o.id}" class="btn btn-sm btn-ghost">Открыть</a></td>
+      </tr>`).join('');
+  } catch (e) {
+    _admin.toast('Ошибка загрузки данных: ' + e.message, 'error');
+  }
+})();
+</script>
+</body>
+</html>

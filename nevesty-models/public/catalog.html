@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Каталог моделей — Nevesty Models</title>
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+  <nav class="navbar scrolled" id="navbar">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links">
+        <a href="/catalog.html" style="color:var(--gold)">Модели</a>
+        <a href="/#services">Услуги</a>
+        <a href="/#about">О нас</a>
+        <a href="/#contact">Контакты</a>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+    </div>
+  </nav>
+  <nav class="nav-mobile" id="mobileMenu">
+    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <a href="/catalog.html">Модели</a>
+    <a href="/#services">Услуги</a>
+    <a href="/#about">О нас</a>
+    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
+  </nav>
+
+  <div class="catalog-page">
+    <div class="container">
+      <div class="catalog-header">
+        <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Наши модели</div>
+        <h1>Каталог моделей</h1>
+        <p style="color:var(--text-muted);margin-top:8px">Найдите идеальную модель для вашего проекта</p>
+      </div>
+      <div class="catalog-layout">
+        <!-- FILTERS -->
+        <aside class="filters-panel">
+          <h3>Фильтры</h3>
+          <div class="filter-group">
+            <label>Поиск</label>
+            <input class="filter-search" type="text" id="searchInput" placeholder="Имя модели..." />
+          </div>
+          <div class="filter-group">
+            <label>Категория</label>
+            <div class="filter-options" id="categoryFilters">
+              <span class="filter-tag active" data-value="">Все</span>
+              <span class="filter-tag" data-value="fashion">Fashion</span>
+              <span class="filter-tag" data-value="commercial">Commercial</span>
+              <span class="filter-tag" data-value="events">Events</span>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label>Цвет волос</label>
+            <div class="filter-options" id="hairFilters">
+              <span class="filter-tag active" data-value="">Все</span>
+              <span class="filter-tag" data-value="Блонд">Блонд</span>
+              <span class="filter-tag" data-value="Шатен">Шатен</span>
+              <span class="filter-tag" data-value="Брюнетка">Брюнетка</span>
+              <span class="filter-tag" data-value="Рыжая">Рыжая</span>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label>Рост (см)</label>
+            <div class="range-row">
+              <input type="number" id="minHeight" placeholder="от" min="160" max="195" class="admin-input" style="padding:8px 10px;" />
+              <span>—</span>
+              <input type="number" id="maxHeight" placeholder="до" min="160" max="195" class="admin-input" style="padding:8px 10px;" />
+            </div>
+          </div>
+          <div class="filter-group">
+            <label>Доступность</label>
+            <div class="filter-options" id="availFilters">
+              <span class="filter-tag active" data-value="">Все</span>
+              <span class="filter-tag" data-value="1">Свободна</span>
+            </div>
+          </div>
+          <button class="btn-filter-reset" id="resetFilters">Сбросить фильтры</button>
+        </aside>
+
+        <!-- CATALOG -->
+        <div>
+          <div class="catalog-count" id="catalogCount">Загрузка...</div>
+          <div class="catalog-grid" id="catalogGrid">
+            <!-- injected -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODEL MODAL -->
+  <div class="modal-overlay" id="modelModal">
+    <div class="modal" id="modalContent">
+      <button class="modal-close" id="modalClose">✕</button>
+      <div class="modal-inner" id="modalInner"></div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="/js/main.js"></script>
+  <script src="/js/catalog.js"></script>
+</body>
+</html>

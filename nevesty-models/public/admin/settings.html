@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Настройки — Nevesty Models Admin</title>
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar">
+    <div class="sidebar-logo"><div class="sidebar-logo-text">Nevesty Models</div><div class="sidebar-logo-sub">Панель управления</div></div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Главная</div>
+      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+      <div class="nav-section-label">Бизнес</div>
+      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
+      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+      <div class="nav-section-label">Настройки</div>
+      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+      <a href="/admin/settings.html" class="active"><span class="nav-icon">⚙️</span> Настройки</a>
+      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user"><div class="sidebar-avatar sidebar-user-letter">A</div><div class="sidebar-user-info"><strong class="sidebar-user-name">—</strong><span class="sidebar-user-role">—</span></div></div>
+      <button class="btn-logout" data-action="logout">Выйти</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <div class="topbar-title">Настройки профиля</div>
+    </header>
+    <div class="page-content">
+      <!-- Profile settings -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">👤 Мой профиль</div></div>
+          <div class="section-card-body padded">
+            <div class="admin-form-group"><label>Логин</label><input class="admin-input" type="text" id="p_username" disabled /></div>
+            <div class="admin-form-group"><label>Email</label><input class="admin-input" type="email" id="p_email" /></div>
+            <div class="admin-form-group">
+              <label>Telegram ID</label>
+              <input class="admin-input" type="text" id="p_telegram_id" placeholder="Числовой Telegram ID для уведомлений" />
+              <div style="font-size:0.75rem;color:var(--text-dim);margin-top:6px">Узнайте ID через @userinfobot в Telegram</div>
+            </div>
+            <button class="btn btn-md btn-gold" onclick="saveProfile()">Сохранить</button>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">🔒 Изменить пароль</div></div>
+          <div class="section-card-body padded">
+            <div class="admin-form-group"><label>Текущий пароль</label><input class="admin-input" type="password" id="p_current" /></div>
+            <div class="admin-form-group"><label>Новый пароль</label><input class="admin-input" type="password" id="p_new" /></div>
+            <div class="admin-form-group"><label>Повторите пароль</label><input class="admin-input" type="password" id="p_confirm" /></div>
+            <button class="btn btn-md btn-ghost" onclick="changePassword()">Изменить пароль</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bot info -->
+      <div class="section-card" style="margin-top:24px">
+        <div class="section-card-header"><div class="section-card-title">🤖 Telegram бот — команды</div></div>
+        <div class="section-card-body padded">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+            <div>
+              <div style="font-size:0.75rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:16px">Для менеджеров</div>
+              <div style="font-size:0.85rem;color:var(--text-muted);line-height:2.2">
+                <div><code style="color:var(--gold)">/start</code> — приветствие и команды</div>
+                <div><code style="color:var(--gold)">/orders</code> — последние 10 заявок</div>
+                <div><code style="color:var(--gold)">/new_orders</code> — только новые заявки</div>
+                <div><code style="color:var(--gold)">/models</code> — список моделей</div>
+                <div><code style="color:var(--gold)">/stats</code> — статистика агентства</div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:0.75rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:16px">Для клиентов</div>
+              <div style="font-size:0.85rem;color:var(--text-muted);line-height:2.2">
+                <div><code style="color:var(--gold)">/start</code> — приветствие с кнопками</div>
+                <div><code style="color:var(--gold)">/status NM-XXXX</code> — статус заявки</div>
+                <div>Любое сообщение — переслать менеджеру</div>
+                <div><code style="color:var(--gold)">/start NM-XXXX</code> — привязать заявку</div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:24px;padding:16px;background:var(--bg2);border:1px solid var(--border);font-size:0.85rem;color:var(--text-muted);line-height:1.8">
+            <strong style="color:var(--text)">⚙️ Настройка бота:</strong><br>
+            1. Создайте бота через <strong style="color:var(--gold)">@BotFather</strong> в Telegram<br>
+            2. Скопируйте токен и укажите в файле <code style="color:var(--gold)">.env</code> как <code>TELEGRAM_BOT_TOKEN</code><br>
+            3. Укажите ваш Telegram ID в поле выше (получить через @userinfobot)<br>
+            4. Добавьте ID в <code>.env</code> → <code>ADMIN_TELEGRAM_IDS</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast-container" id="toastContainer"></div>
+<script src="/js/admin.js"></script>
+<script>
+(async function() {
+  try {
+    const me = await _admin.apiFetch('/admin/me');
+    document.getElementById('p_username').value = me.username;
+    document.getElementById('p_email').value = me.email || '';
+    document.getElementById('p_telegram_id').value = me.telegram_id || '';
+  } catch(e) {}
+})();
+
+async function saveProfile() {
+  try {
+    await _admin.apiFetch('/admin/me', {
+      method: 'PUT',
+      body: JSON.stringify({
+        email: document.getElementById('p_email').value,
+        telegram_id: document.getElementById('p_telegram_id').value
+      })
+    });
+    _admin.toast('Профиль обновлён', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function changePassword() {
+  const current = document.getElementById('p_current').value;
+  const newPwd = document.getElementById('p_new').value;
+  const confirm = document.getElementById('p_confirm').value;
+  if (!current || !newPwd) return _admin.toast('Заполните все поля', 'error');
+  if (newPwd !== confirm) return _admin.toast('Пароли не совпадают', 'error');
+  if (newPwd.length < 6) return _admin.toast('Пароль минимум 6 символов', 'error');
+  try {
+    await _admin.apiFetch('/admin/me', {
+      method: 'PUT',
+      body: JSON.stringify({ current_password: current, new_password: newPwd })
+    });
+    _admin.toast('Пароль изменён!', 'success');
+    document.getElementById('p_current').value = '';
+    document.getElementById('p_new').value = '';
+    document.getElementById('p_confirm').value = '';
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+</script>
+</body>
+</html>

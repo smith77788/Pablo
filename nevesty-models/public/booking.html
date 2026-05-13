@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Оформить заявку — Nevesty Models</title>
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+  <nav class="navbar scrolled">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links">
+        <a href="/catalog.html">Модели</a>
+        <a href="/#services">Услуги</a>
+        <a href="/#about">О нас</a>
+        <a href="/#contact">Контакты</a>
+        <a href="/booking.html" class="btn-nav" style="color:var(--bg);background:var(--gold);border-color:var(--gold)">Заказать</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="booking-page">
+    <div class="container">
+      <div class="booking-header">
+        <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Бронирование</div>
+        <h1>Оформить заявку</h1>
+        <p style="color:var(--text-muted)">Заполните форму — менеджер свяжется с вами в течение 1 часа</p>
+      </div>
+
+      <!-- STEPS INDICATOR -->
+      <div class="booking-steps" id="stepsBar">
+        <div class="booking-step active" data-step="1">
+          <div class="booking-step-num">1</div>
+          <div class="booking-step-label">Модель</div>
+        </div>
+        <div class="booking-step-line" id="line1"></div>
+        <div class="booking-step" data-step="2">
+          <div class="booking-step-num">2</div>
+          <div class="booking-step-label">Мероприятие</div>
+        </div>
+        <div class="booking-step-line" id="line2"></div>
+        <div class="booking-step" data-step="3">
+          <div class="booking-step-num">3</div>
+          <div class="booking-step-label">Контакты</div>
+        </div>
+        <div class="booking-step-line" id="line3"></div>
+        <div class="booking-step" data-step="4">
+          <div class="booking-step-num">4</div>
+          <div class="booking-step-label">Подтверждение</div>
+        </div>
+      </div>
+
+      <div class="booking-form-wrap">
+        <!-- STEP 1 — MODEL SELECTION -->
+        <div class="booking-section active" id="step1">
+          <h3>Выберите модель</h3>
+          <p class="hint">Необязательно — вы можете оформить заявку без выбора конкретной модели, и менеджер подберёт подходящий вариант</p>
+          <div class="model-select-none selected" id="noModelOption" onclick="window._booking.selectModel(null)">
+            ✦ Менеджер подберёт модель сам
+          </div>
+          <div style="margin-top:12px;font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px">— или выберите из каталога —</div>
+          <div class="model-select-grid" id="modelSelectGrid">
+            <!-- injected -->
+          </div>
+          <div class="booking-nav">
+            <span></span>
+            <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
+          </div>
+        </div>
+
+        <!-- STEP 2 — EVENT DETAILS -->
+        <div class="booking-section" id="step2">
+          <h3>Детали мероприятия</h3>
+          <p class="hint">Расскажите нам подробнее о вашем проекте</p>
+          <div class="form-group">
+            <label>Тип мероприятия <span class="req">*</span></label>
+            <select class="form-control" id="event_type">
+              <option value="">— Выберите тип —</option>
+              <option value="fashion_show">Показ мод</option>
+              <option value="photo_shoot">Фотосессия</option>
+              <option value="event">Корпоратив / Мероприятие</option>
+              <option value="commercial">Коммерческая съёмка</option>
+              <option value="runway">Подиум</option>
+              <option value="other">Другое</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Дата мероприятия</label>
+              <input type="date" class="form-control" id="event_date" />
+            </div>
+            <div class="form-group">
+              <label>Продолжительность (ч)</label>
+              <input type="number" class="form-control" id="event_duration" value="4" min="1" max="24" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Место проведения</label>
+            <input type="text" class="form-control" id="location" placeholder="Город, адрес или площадка" />
+          </div>
+          <div class="form-group">
+            <label>Бюджет</label>
+            <select class="form-control" id="budget">
+              <option value="">— Укажите бюджет —</option>
+              <option value="до 30 000 руб">до 30 000 руб</option>
+              <option value="30 000 – 70 000 руб">30 000 – 70 000 руб</option>
+              <option value="70 000 – 150 000 руб">70 000 – 150 000 руб</option>
+              <option value="150 000 – 300 000 руб">150 000 – 300 000 руб</option>
+              <option value="свыше 300 000 руб">свыше 300 000 руб</option>
+              <option value="по договорённости">по договорённости</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Дополнительные пожелания</label>
+            <textarea class="form-control" id="comments" placeholder="Особые требования, дресс-код, тематика проекта..."></textarea>
+          </div>
+          <div class="booking-nav">
+            <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
+            <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
+          </div>
+        </div>
+
+        <!-- STEP 3 — CONTACTS -->
+        <div class="booking-section" id="step3">
+          <h3>Контактные данные</h3>
+          <p class="hint">Ваши данные необходимы для связи. Мы не передаём их третьим лицам.</p>
+          <div class="form-group">
+            <label>Ваше имя <span class="req">*</span></label>
+            <input type="text" class="form-control" id="client_name" placeholder="Иван Иванов" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Телефон <span class="req">*</span></label>
+              <input type="tel" class="form-control" id="client_phone" placeholder="+7 (999) 000-00-00" />
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" class="form-control" id="client_email" placeholder="your@email.com" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Telegram</label>
+            <input type="text" class="form-control" id="client_telegram" placeholder="@username (без @)" />
+            <div class="form-note">💡 Укажите username для уведомлений о статусе заявки через Telegram</div>
+          </div>
+          <div class="booking-nav">
+            <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
+            <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
+          </div>
+        </div>
+
+        <!-- STEP 4 — CONFIRM -->
+        <div class="booking-section" id="step4">
+          <h3>Подтверждение заявки</h3>
+          <p class="hint">Проверьте данные перед отправкой</p>
+          <div class="order-summary" id="orderSummary">
+            <!-- injected -->
+          </div>
+          <div style="margin-bottom:20px;padding:16px;border:1px solid var(--border);font-size:0.8rem;color:var(--text-muted);line-height:1.7">
+            Отправляя заявку, вы соглашаетесь на обработку персональных данных и связь по указанным контактам.
+          </div>
+          <div class="booking-nav">
+            <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
+            <button class="btn-next" id="submitBtn" onclick="window._booking.submit()">Отправить заявку ✓</button>
+          </div>
+        </div>
+
+        <!-- STEP 5 — SUCCESS -->
+        <div class="booking-section" id="step5">
+          <div class="success-box">
+            <div class="success-icon">✦</div>
+            <h3>Заявка принята!</h3>
+            <p>Ваш номер заявки:</p>
+            <div class="order-num-display" id="orderNumDisplay">—</div>
+            <p>Менеджер свяжется с вами в течение 1 часа.</p>
+            <p style="margin-top:8px">Сохраните номер заявки для отслеживания статуса.</p>
+            <div class="tg-connect" id="tgConnectBox">
+              <p>📱 Подключите Telegram для уведомлений о статусе заявки</p>
+              <a class="btn-telegram" id="tgConnectLink" href="#" target="_blank">
+                ✈ Открыть в Telegram
+              </a>
+            </div>
+            <div style="margin-top:24px;display:flex;gap:12px;justify-content:center">
+              <a href="/" class="btn-outline">На главную</a>
+              <a href="/catalog.html" class="btn-primary">Каталог моделей</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STATUS CHECKER -->
+      <div style="max-width:640px;margin:48px auto 0;border-top:1px solid var(--border);padding-top:40px" id="status">
+        <h3 style="font-size:1.3rem;color:var(--white);margin-bottom:8px">Проверить статус заявки</h3>
+        <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:20px">Введите номер заявки (формат: NM-2024-1234)</p>
+        <div style="display:flex;gap:12px">
+          <input type="text" class="form-control" id="statusInput" placeholder="NM-2024-1234" style="flex:1" />
+          <button class="btn-primary" onclick="window._booking.checkStatus()" style="padding:12px 24px;font-size:0.8rem">Проверить</button>
+        </div>
+        <div id="statusResult" style="margin-top:16px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="/js/main.js"></script>
+  <script src="/js/booking.js"></script>
+</body>
+</html>

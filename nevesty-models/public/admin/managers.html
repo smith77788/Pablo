@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Менеджеры — Nevesty Models Admin</title>
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar">
+    <div class="sidebar-logo"><div class="sidebar-logo-text">Nevesty Models</div><div class="sidebar-logo-sub">Панель управления</div></div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Главная</div>
+      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+      <div class="nav-section-label">Бизнес</div>
+      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
+      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+      <div class="nav-section-label">Настройки</div>
+      <a href="/admin/managers.html" class="active"><span class="nav-icon">👥</span> Менеджеры</a>
+      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user"><div class="sidebar-avatar sidebar-user-letter">A</div><div class="sidebar-user-info"><strong class="sidebar-user-name">—</strong><span class="sidebar-user-role">—</span></div></div>
+      <button class="btn-logout" data-action="logout">Выйти</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <div class="topbar-title">Менеджеры</div>
+      <div class="topbar-right">
+        <button class="topbar-btn primary" onclick="showAddForm()">+ Добавить менеджера</button>
+      </div>
+    </header>
+
+    <div class="page-content">
+      <div class="section-card" style="margin-bottom:24px">
+        <div class="section-card-body">
+          <table class="data-table">
+            <thead>
+              <tr><th>Логин</th><th>Email</th><th>Роль</th><th>Telegram ID</th><th>Добавлен</th><th></th></tr>
+            </thead>
+            <tbody id="managersBody"><tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ADD FORM -->
+      <div class="section-card" id="addForm" style="display:none">
+        <div class="section-card-header">
+          <div class="section-card-title">Добавить менеджера</div>
+          <button class="btn btn-sm btn-ghost" onclick="hideAddForm()">✕ Закрыть</button>
+        </div>
+        <div class="section-card-body padded">
+          <div class="form-row-2">
+            <div class="admin-form-group"><label>Логин *</label><input class="admin-input" type="text" id="mg_username" placeholder="manager1" /></div>
+            <div class="admin-form-group"><label>Email</label><input class="admin-input" type="email" id="mg_email" placeholder="manager@agency.ru" /></div>
+          </div>
+          <div class="form-row-2">
+            <div class="admin-form-group"><label>Пароль *</label><input class="admin-input" type="password" id="mg_password" placeholder="Минимум 6 символов" /></div>
+            <div class="admin-form-group"><label>Telegram ID</label><input class="admin-input" type="text" id="mg_telegram_id" placeholder="123456789 (числовой ID)" /></div>
+          </div>
+          <div class="admin-form-group">
+            <label>Роль</label>
+            <select class="admin-input" id="mg_role">
+              <option value="manager">Менеджер</option>
+              <option value="superadmin">Суперадмин</option>
+            </select>
+          </div>
+          <button class="btn btn-md btn-gold" onclick="addManager()">Добавить менеджера</button>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-header"><div class="section-card-title">ℹ️ Как получить Telegram ID</div></div>
+        <div class="section-card-body padded" style="font-size:0.85rem;color:var(--text-muted);line-height:1.8">
+          <p>1. Напишите боту <strong style="color:var(--gold)">@userinfobot</strong> в Telegram</p>
+          <p>2. Он вышлет ваш числовой Telegram ID</p>
+          <p>3. Скопируйте и вставьте его в поле выше</p>
+          <p style="margin-top:8px">После добавления ID менеджер будет получать уведомления о новых заявках через Telegram-бот агентства.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast-container" id="toastContainer"></div>
+<script src="/js/admin.js"></script>
+<script>
+async function loadManagers() {
+  try {
+    const managers = await _admin.apiFetch('/admin/managers');
+    const tbody = document.getElementById('managersBody');
+    tbody.innerHTML = managers.map(m => `
+      <tr>
+        <td><strong>${m.username}</strong></td>
+        <td>${m.email || '—'}</td>
+        <td>${m.role === 'superadmin' ? '<span class="badge badge-confirmed">Суперадмин</span>' : '<span class="badge badge-reviewing">Менеджер</span>'}</td>
+        <td>${m.telegram_id || '<span style="color:var(--text-dim)">не указан</span>'}</td>
+        <td>${_admin.formatDate(m.created_at)}</td>
+        <td>${m.username !== (JSON.parse(localStorage.getItem('admin_user') || '{}').username) ? `<button class="btn btn-sm btn-danger" onclick="deleteManager(${m.id}, '${m.username}')">Удалить</button>` : '<span style="color:var(--text-dim);font-size:0.75rem">это вы</span>'}</td>
+      </tr>`).join('');
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function addManager() {
+  const username = document.getElementById('mg_username').value.trim();
+  const password = document.getElementById('mg_password').value;
+  if (!username || !password) return _admin.toast('Заполните логин и пароль', 'error');
+  if (password.length < 6) return _admin.toast('Пароль минимум 6 символов', 'error');
+  try {
+    await _admin.apiFetch('/admin/managers', {
+      method: 'POST',
+      body: JSON.stringify({
+        username,
+        email: document.getElementById('mg_email').value,
+        password,
+        role: document.getElementById('mg_role').value,
+        telegram_id: document.getElementById('mg_telegram_id').value
+      })
+    });
+    _admin.toast('Менеджер добавлен!', 'success');
+    hideAddForm();
+    loadManagers();
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+function deleteManager(id, name) {
+  _admin.confirm('Удалить менеджера?', `"${name}" потеряет доступ к панели управления.`, async () => {
+    try {
+      await _admin.apiFetch(`/admin/managers/${id}`, { method: 'DELETE' });
+      _admin.toast('Менеджер удалён', 'success');
+      loadManagers();
+    } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  });
+}
+
+function showAddForm() { document.getElementById('addForm').style.display = 'block'; }
+function hideAddForm() { document.getElementById('addForm').style.display = 'none'; }
+
+loadManagers();
+</script>
+</body>
+</html>

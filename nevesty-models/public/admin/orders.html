@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Заявки — Nevesty Models Admin</title>
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-text">Nevesty Models</div>
+      <div class="sidebar-logo-sub">Панель управления</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Главная</div>
+      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+      <div class="nav-section-label">Бизнес</div>
+      <a href="/admin/orders.html" class="active"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
+      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+      <div class="nav-section-label">Настройки</div>
+      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user">
+        <div class="sidebar-avatar sidebar-user-letter">A</div>
+        <div class="sidebar-user-info">
+          <strong class="sidebar-user-name">—</strong>
+          <span class="sidebar-user-role">—</span>
+        </div>
+      </div>
+      <button class="btn-logout" data-action="logout">Выйти</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <div class="topbar-title" id="pageTitle">Заявки</div>
+      <div class="topbar-right">
+        <button class="topbar-btn" onclick="closeDetail()">☰ Все заявки</button>
+      </div>
+    </header>
+
+    <!-- LIST VIEW -->
+    <div id="listView" class="page-content">
+      <div class="section-card">
+        <div class="filters-bar">
+          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск: имя, номер, телефон..." />
+          <select class="filter-select" id="statusFilter">
+            <option value="">Все статусы</option>
+            <option value="new">🆕 Новые</option>
+            <option value="reviewing">🔍 На рассмотрении</option>
+            <option value="confirmed">✅ Подтверждённые</option>
+            <option value="in_progress">▶️ В процессе</option>
+            <option value="completed">🏁 Завершённые</option>
+            <option value="cancelled">❌ Отменённые</option>
+          </select>
+          <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
+        </div>
+        <div class="section-card-body">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>№ заявки</th>
+                <th>Клиент</th>
+                <th>Мероприятие</th>
+                <th>Модель</th>
+                <th>Дата</th>
+                <th>Статус</th>
+                <th>Создана</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="ordersBody"><tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- DETAIL VIEW -->
+    <div id="detailView" class="page-content" style="display:none">
+      <div class="order-detail-grid">
+        <!-- Left: order info + chat -->
+        <div>
+          <div class="section-card" style="margin-bottom:24px">
+            <div class="section-card-header">
+              <div class="section-card-title" id="detailTitle">Заявка</div>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-sm btn-ghost" onclick="closeDetail()">← Назад</button>
+              </div>
+            </div>
+            <div class="section-card-body padded" id="detailInfo"></div>
+          </div>
+          <!-- Chat -->
+          <div class="section-card">
+            <div class="section-card-header">
+              <div class="section-card-title">💬 Переписка с клиентом</div>
+              <span style="font-size:0.75rem;color:var(--text-dim)" id="chatTgInfo"></span>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="chat-input-row">
+              <input class="chat-input" id="chatInput" placeholder="Напишите сообщение клиенту..." />
+              <button class="btn btn-md btn-gold" onclick="sendMessage()">Отправить</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: status management -->
+        <div>
+          <div class="section-card" style="margin-bottom:24px">
+            <div class="section-card-header"><div class="section-card-title">🔧 Управление</div></div>
+            <div class="section-card-body padded">
+              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Статус заявки</div>
+              <select class="status-select" id="statusSelect"></select>
+              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:16px">Заметки менеджера</div>
+              <textarea class="notes-area" id="adminNotes" placeholder="Внутренние заметки (клиент не видит)"></textarea>
+              <button class="btn btn-md btn-gold" style="width:100%" onclick="saveOrder()">💾 Сохранить</button>
+              <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-sm btn-ghost" onclick="quickStatus('confirmed')">✅ Подтвердить</button>
+                <button class="btn btn-sm btn-ghost" onclick="quickStatus('in_progress')">▶️ В процессе</button>
+                <button class="btn btn-sm btn-ghost" onclick="quickStatus('completed')">🏁 Завершить</button>
+                <button class="btn btn-sm btn-danger" onclick="quickStatus('cancelled')">❌ Отменить</button>
+              </div>
+            </div>
+          </div>
+          <div class="section-card" id="modelCard" style="display:none">
+            <div class="section-card-header"><div class="section-card-title">💃 Модель</div></div>
+            <div class="section-card-body padded" id="modelInfo"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast-container" id="toastContainer"></div>
+<script src="/js/admin.js"></script>
+<script>
+let currentOrderId = null;
+
+async function loadOrders() {
+  const search = document.getElementById('searchInput').value;
+  const status = document.getElementById('statusFilter').value;
+  let url = '/admin/orders?';
+  if (status) url += `status=${status}&`;
+  if (search) url += `search=${encodeURIComponent(search)}&`;
+  try {
+    const orders = await _admin.apiFetch(url);
+    const tbody = document.getElementById('ordersBody');
+    if (!orders.length) {
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = orders.map(o => `
+      <tr style="cursor:pointer" onclick="openDetail(${o.id})">
+        <td><strong>${o.order_number}</strong></td>
+        <td>${o.client_name}<br><span style="font-size:0.75rem;color:var(--text-dim)">${o.client_phone}</span></td>
+        <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
+        <td>${o.model_name || '<span style="color:var(--text-dim)">—</span>'}</td>
+        <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
+        <td>${_admin.statusBadge(o.status)}</td>
+        <td>${_admin.formatDateTime(o.created_at)}</td>
+        <td><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openDetail(${o.id})">Открыть →</button></td>
+      </tr>`).join('');
+  } catch (e) { _admin.toast('Ошибка загрузки: ' + e.message, 'error'); }
+}
+
+async function openDetail(id) {
+  currentOrderId = id;
+  document.getElementById('listView').style.display = 'none';
+  document.getElementById('detailView').style.display = 'block';
+  try {
+    const o = await _admin.apiFetch(`/admin/orders/${id}`);
+    document.getElementById('detailTitle').textContent = `Заявка ${o.order_number}`;
+    document.getElementById('pageTitle').textContent = `Заявка ${o.order_number}`;
+    document.getElementById('statusSelect').innerHTML = _admin.STATUS_OPTIONS;
+    document.getElementById('statusSelect').value = o.status;
+    document.getElementById('adminNotes').value = o.admin_notes || '';
+
+    document.getElementById('detailInfo').innerHTML = `
+      <div class="detail-row"><div class="detail-label">Клиент</div><div class="detail-value"><strong>${o.client_name}</strong></div></div>
+      <div class="detail-row"><div class="detail-label">Телефон</div><div class="detail-value"><a href="tel:${o.client_phone}" style="color:var(--gold)">${o.client_phone}</a></div></div>
+      ${o.client_email ? `<div class="detail-row"><div class="detail-label">Email</div><div class="detail-value"><a href="mailto:${o.client_email}" style="color:var(--gold)">${o.client_email}</a></div></div>` : ''}
+      ${o.client_telegram ? `<div class="detail-row"><div class="detail-label">Telegram</div><div class="detail-value"><a href="https://t.me/${o.client_telegram}" target="_blank" style="color:var(--gold)">@${o.client_telegram}</a></div></div>` : ''}
+      <div class="detail-row"><div class="detail-label">Мероприятие</div><div class="detail-value">${_admin.EVENT_LABELS[o.event_type] || o.event_type}</div></div>
+      ${o.event_date ? `<div class="detail-row"><div class="detail-label">Дата</div><div class="detail-value">${_admin.formatDate(o.event_date)}</div></div>` : ''}
+      ${o.event_duration ? `<div class="detail-row"><div class="detail-label">Продолжительность</div><div class="detail-value">${o.event_duration} ч</div></div>` : ''}
+      ${o.location ? `<div class="detail-row"><div class="detail-label">Место</div><div class="detail-value">${o.location}</div></div>` : ''}
+      ${o.budget ? `<div class="detail-row"><div class="detail-label">Бюджет</div><div class="detail-value">${o.budget}</div></div>` : ''}
+      ${o.comments ? `<div class="detail-row"><div class="detail-label">Комментарий</div><div class="detail-value" style="white-space:pre-wrap">${o.comments}</div></div>` : ''}
+      <div class="detail-row"><div class="detail-label">Создана</div><div class="detail-value">${_admin.formatDateTime(o.created_at)}</div></div>`;
+
+    // Chat
+    document.getElementById('chatTgInfo').textContent = o.client_chat_id ? '✅ Telegram подключён' : o.client_telegram ? '⚠️ Telegram не привязан' : '—';
+    renderChat(o.messages || []);
+
+    // Model card
+    if (o.model_name) {
+      document.getElementById('modelCard').style.display = 'block';
+      document.getElementById('modelInfo').innerHTML = `
+        <div style="display:flex;gap:12px;align-items:center">
+          ${o.model_photo ? `<img src="${o.model_photo}" style="width:60px;height:80px;object-fit:cover;flex-shrink:0" />` : ''}
+          <div>
+            <strong style="color:var(--text)">${o.model_name}</strong>
+            <br><a href="/admin/models.html?id=${o.model_id}" class="btn btn-sm btn-ghost" style="margin-top:8px">Профиль →</a>
+          </div>
+        </div>`;
+    }
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+function renderChat(messages) {
+  const box = document.getElementById('chatMessages');
+  if (!messages.length) {
+    box.innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:0.85rem;padding:32px">Сообщений пока нет</div>';
+    return;
+  }
+  box.innerHTML = messages.map(m => `
+    <div class="chat-msg ${m.sender_type}">
+      <div class="chat-bubble">${m.content}</div>
+      <div class="chat-meta">${m.sender_name || m.sender_type} · ${_admin.formatDateTime(m.created_at)}</div>
+    </div>`).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chatInput');
+  const content = input.value.trim();
+  if (!content) return;
+  try {
+    await _admin.apiFetch(`/admin/orders/${currentOrderId}/message`, { method: 'POST', body: JSON.stringify({ content }) });
+    input.value = '';
+    const o = await _admin.apiFetch(`/admin/orders/${currentOrderId}`);
+    renderChat(o.messages || []);
+    _admin.toast('Сообщение отправлено', 'success');
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+document.getElementById('chatInput')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+async function saveOrder() {
+  try {
+    await _admin.apiFetch(`/admin/orders/${currentOrderId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        status: document.getElementById('statusSelect').value,
+        admin_notes: document.getElementById('adminNotes').value,
+      })
+    });
+    _admin.toast('Сохранено', 'success');
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function quickStatus(status) {
+  document.getElementById('statusSelect').value = status;
+  await saveOrder();
+}
+
+function closeDetail() {
+  currentOrderId = null;
+  document.getElementById('detailView').style.display = 'none';
+  document.getElementById('listView').style.display = 'block';
+  document.getElementById('pageTitle').textContent = 'Заявки';
+}
+
+// Search + filter
+let searchTimer;
+document.getElementById('searchInput')?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadOrders, 400); });
+document.getElementById('statusFilter')?.addEventListener('change', loadOrders);
+
+// URL params
+const urlParams = new URLSearchParams(window.location.search);
+const urlStatus = urlParams.get('status');
+const urlId = urlParams.get('id');
+if (urlStatus) document.getElementById('statusFilter').value = urlStatus;
+loadOrders();
+if (urlId) setTimeout(() => openDetail(+urlId), 300);
+</script>
+</body>
+</html>
