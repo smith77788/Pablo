@@ -41,11 +41,17 @@ async function runOrchestrator() {
   let criticalCount = 0, highCount = 0, mediumCount = 0, okCount = 0;
   const agentSummaries = [];
 
-  // Запускаем агентов ТИХО — они не шлют индивидуальные TG-уведомления
-  for (const AgentClass of agents) {
-    const agent = new AgentClass();
-    try {
-      await agent.run({ silent: true });
+  // Запускаем агентов параллельно батчами по 5 — быстро и без перегрузки DB
+  const BATCH = 5;
+  for (let i = 0; i < agents.length; i += BATCH) {
+    const batch = agents.slice(i, i + BATCH);
+    const results = await Promise.allSettled(batch.map(AgentClass => {
+      const agent = new AgentClass();
+      return agent.run({ silent: true }).then(() => agent);
+    }));
+    for (const r of results) {
+      if (r.status !== 'fulfilled') { console.error('Agent crashed:', r.reason?.message); continue; }
+      const agent = r.value;
       const findings = agent.findings || [];
       allFindings.push(...findings.map(f => ({ ...f, agentName: agent.name, agentEmoji: agent.emoji })));
       const crit = findings.filter(f => f.sev === SEV_EMO.CRITICAL).length;
@@ -57,8 +63,6 @@ async function runOrchestrator() {
         agentSummaries.push({ name: agent.name, emoji: agent.emoji, crit, high, med,
           issues: findings.filter(f => [SEV_EMO.CRITICAL, SEV_EMO.HIGH, SEV_EMO.MEDIUM].includes(f.sev)) });
       }
-    } catch (err) {
-      console.error(`❌ ${agent.name} crashed:`, err.message);
     }
   }
 

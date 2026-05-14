@@ -13,27 +13,42 @@ const SRV_PATH = path.join(__dirname, '../../server.js');
 const API_PATH = path.join(__dirname, '../../routes/api.js');
 const DB_MOD   = path.join(__dirname, '../../database.js');
 
-// ─── Shared DB helpers (own connection — non-blocking) ────────────────────────
+// ─── Shared DB helpers — каждый запрос в отдельном соединении с таймаутом ─────
+const DB_TIMEOUT = 8000; // 8s max per query
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`DB timeout: ${label}`)), ms))
+  ]);
+}
+
 function dbRun(sql, params = []) {
-  return new Promise((res, rej) => {
-    const db = new sqlite.Database(DB_PATH);
-    db.run(sql, params, function (err) {
-      db.close();
-      err ? rej(err) : res({ id: this.lastID, changes: this.changes });
+  return withTimeout(new Promise((res, rej) => {
+    const db = new sqlite.Database(DB_PATH, sqlite.OPEN_READWRITE | sqlite.OPEN_CREATE, err => {
+      if (err) return rej(err);
+      db.configure('busyTimeout', 5000); // wait up to 5s for lock
+      db.run(sql, params, function(e) { db.close(); e ? rej(e) : res({ id: this.lastID, changes: this.changes }); });
     });
-  });
+  }), DB_TIMEOUT, sql.slice(0, 40));
 }
 function dbGet(sql, params = []) {
-  return new Promise((res, rej) => {
-    const db = new sqlite.Database(DB_PATH);
-    db.get(sql, params, (err, row) => { db.close(); err ? rej(err) : res(row); });
-  });
+  return withTimeout(new Promise((res, rej) => {
+    const db = new sqlite.Database(DB_PATH, sqlite.OPEN_READONLY, err => {
+      if (err) return rej(err);
+      db.configure('busyTimeout', 5000);
+      db.get(sql, params, (e, row) => { db.close(); e ? rej(e) : res(row); });
+    });
+  }), DB_TIMEOUT, sql.slice(0, 40));
 }
 function dbAll(sql, params = []) {
-  return new Promise((res, rej) => {
-    const db = new sqlite.Database(DB_PATH);
-    db.all(sql, params, (err, rows) => { db.close(); err ? rej(err) : res(rows); });
-  });
+  return withTimeout(new Promise((res, rej) => {
+    const db = new sqlite.Database(DB_PATH, sqlite.OPEN_READONLY, err => {
+      if (err) return rej(err);
+      db.configure('busyTimeout', 5000);
+      db.all(sql, params, (e, rows) => { db.close(); e ? rej(e) : res(rows); });
+    });
+  }), DB_TIMEOUT, sql.slice(0, 40));
 }
 
 // ─── File read helper ─────────────────────────────────────────────────────────
@@ -42,24 +57,35 @@ function readFile(p) {
   catch { return ''; }
 }
 
-// ─── Telegram notify ──────────────────────────────────────────────────────────
+// ─── Telegram notify — с таймаутом 15с на запрос ─────────────────────────────
 const https = require('https');
+const TG_TIMEOUT = 15000;
+
 function tgSend(text, opts = {}) {
   const TOKEN    = process.env.TELEGRAM_BOT_TOKEN;
   const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   if (!TOKEN || !ADMIN_IDS.length) return Promise.resolve();
   const sends = ADMIN_IDS.map(chatId => new Promise(resolve => {
-    const body = { chat_id: chatId, text, disable_web_page_preview: true, ...opts };
+    const body = { chat_id: chatId, text: text.slice(0, 4000), disable_web_page_preview: true, ...opts };
     const payload = JSON.stringify(body);
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; resolve(); } };
+
     const req = https.request({
       hostname: 'api.telegram.org',
       path: `/bot${TOKEN}/sendMessage`,
       method: 'POST',
+      timeout: TG_TIMEOUT,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-    }, res => { res.on('data', ()=>{}); res.on('end', resolve); });
-    req.on('error', resolve);
+    }, res => { res.on('data', ()=>{}); res.on('end', done); });
+
+    req.on('error', done);
+    req.on('timeout', () => { req.destroy(); done(); });
     req.write(payload);
     req.end();
+
+    // Hard fallback
+    setTimeout(done, TG_TIMEOUT + 1000);
   }));
   return Promise.allSettled(sends);
 }
