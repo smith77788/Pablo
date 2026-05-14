@@ -109,6 +109,13 @@ async function initDatabase() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  await run(`CREATE TABLE IF NOT EXISTS agent_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_name TEXT,
+    message TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   // Indexes for frequent queries
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_model_id ON orders(model_id)`);

@@ -85,6 +85,22 @@ async function send(chatId, text) {
   return res.ok;
 }
 
+// ─── Write to agent_logs DB (optional, non-fatal) ────────────────────────────
+async function logToDb(fromName, message) {
+  try {
+    const sqlite3 = require('sqlite3').verbose();
+    const dbPath = path.join(__dirname, '..', 'data.db');
+    const db = new sqlite3.Database(dbPath);
+    await new Promise((resolve) => {
+      db.run(
+        'INSERT INTO agent_logs (from_name, message) VALUES (?, ?)',
+        [fromName || 'Claude', message],
+        () => { db.close(); resolve(); }
+      );
+    });
+  } catch {} // DB might not exist yet — silent fail
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 (async () => {
   if (!body) body = await readStdin();
@@ -97,6 +113,8 @@ async function send(chatId, text) {
   const ts = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const header = from ? `🤖 *${from}* · _${ts}_` : `🤖 _${ts}_`;
   const text = `${header}\n${body}`;
+  // Save to DB for bot's agent feed menu
+  await logToDb(from, body);
   const results = await Promise.all(ADMIN_IDS.map(id => send(id, text)));
   const ok = results.filter(Boolean).length;
   console.log(`✓ sent to ${ok}/${ADMIN_IDS.length} admins`);
