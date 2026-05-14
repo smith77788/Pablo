@@ -1,5 +1,5 @@
 /** 🗄️ DB Optimizer — Skeletal System | Індекси, запити, продуктивність БД */
-const { Agent, readFile, dbAll, BOT_PATH, DB_MOD } = require('./lib/base');
+const { Agent, readFile, dbAll, dbRun, BOT_PATH, DB_MOD } = require('./lib/base');
 
 class DBOptimizer extends Agent {
   constructor() {
@@ -11,10 +11,31 @@ class DBOptimizer extends Agent {
     const dbSrc  = readFile(DB_MOD);
 
     // 1. Наявність індексів у БД
-    const indexes = ['idx_orders_status','idx_orders_model_id','idx_orders_client_chat','idx_messages_order','idx_models_available'];
-    const missing = indexes.filter(i => !dbSrc.includes(i));
-    if (missing.length) this.addFinding('HIGH',`Відсутні індекси: ${missing.join(', ')}`);
-    else this.addFinding('OK',`Всі ${indexes.length} необхідних індексів присутні`);
+    const indexDefs = {
+      idx_orders_status:      'CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)',
+      idx_orders_model_id:    'CREATE INDEX IF NOT EXISTS idx_orders_model_id ON orders(model_id)',
+      idx_orders_client_chat: 'CREATE INDEX IF NOT EXISTS idx_orders_client_chat ON orders(client_chat_id)',
+      idx_messages_order:     'CREATE INDEX IF NOT EXISTS idx_messages_order ON messages(order_id)',
+      idx_models_available:   'CREATE INDEX IF NOT EXISTS idx_models_available ON models(available)',
+    };
+    const missing = Object.keys(indexDefs).filter(i => !dbSrc.includes(i));
+    if (missing.length) {
+      this.addFinding('HIGH', `Відсутні індекси: ${missing.join(', ')}`, {
+        autoFixable: true,
+        proposedFix: `CREATE INDEX IF NOT EXISTS для: ${missing.join(', ')}`
+      });
+      // Auto-fix: create each missing index
+      for (const idxName of missing) {
+        try {
+          await dbRun(indexDefs[idxName]);
+          this.addFixed(`Created index: ${idxName}`);
+        } catch (e) {
+          this.addFinding('MEDIUM', `Не вдалось створити індекс ${idxName}: ${e.message}`);
+        }
+      }
+    } else {
+      this.addFinding('OK', `Всі ${Object.keys(indexDefs).length} необхідних індексів присутні`);
+    }
 
     // 2. SELECT * не використовується (вибираємо тільки потрібне)
     const selectStar = (botSrc.match(/SELECT \*/g)||[]).length;

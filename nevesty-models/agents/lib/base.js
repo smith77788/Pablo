@@ -154,12 +154,13 @@ class Agent {
   /** Override: apply automated fix */
   async fix(issue) { return false; }
 
-  addFinding(sev, msg, fixable = false) {
-    this.findings.push({ sev: SEV[sev] || sev, msg, fixable });
+  addFinding(sev, msg, { autoFixable = false, proposedFix = null, file = null, line = null } = {}) {
+    this.findings.push({ sev: SEV[sev] || sev, msg, autoFixable, proposedFix, file, line });
   }
 
-  addFixed(msg) {
-    this.fixed.push(msg);
+  addFixed(description) {
+    this.fixed = this.fixed || [];
+    this.fixed.push(description);
   }
 
   /** Run the full agent lifecycle.
@@ -172,6 +173,17 @@ class Agent {
       this.findings = [];
       this.fixed    = [];
       await this.analyze();
+
+      // Post findings to shared blackboard
+      for (const f of this.findings) {
+        if (!['✅', '⚪'].includes(f.sev)) {
+          await dbRun(
+            `INSERT INTO agent_findings (agent_name, severity, message, file, line, auto_fixable, proposed_fix, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
+            [this.name, f.sev, f.msg, f.file || null, f.line || null, f.autoFixable ? 1 : 0, f.proposedFix || null]
+          ).catch(() => {}); // don't fail if table doesn't exist yet
+        }
+      }
     } catch (e) {
       this.addFinding('HIGH', `Ошибка выполнения агента: ${e.message}`);
     }

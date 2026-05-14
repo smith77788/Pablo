@@ -874,7 +874,7 @@ async function showOrganismStatus(chatId) {
 
 async function showAdminModels(chatId, page) {
   try {
-    const all = await query('SELECT * FROM models ORDER BY id DESC');
+    const all = await query('SELECT * FROM models ORDER BY id DESC LIMIT 500');
     const perPage = 8;
     const slice = all.slice(page*perPage, page*perPage+perPage);
     let text = `💃 *Модели агентства* \\(всего: ${all.length}\\)\n\n`;

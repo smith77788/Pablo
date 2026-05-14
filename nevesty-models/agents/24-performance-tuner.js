@@ -1,4 +1,5 @@
 /** ⚡ Performance Tuner — Mitochondria | Параллельные запросы, кэш, await */
+const fs = require('fs');
 const { Agent, readFile, BOT_PATH, API_PATH } = require('./lib/base');
 
 class PerformanceTuner extends Agent {
@@ -54,7 +55,39 @@ class PerformanceTuner extends Agent {
     // 6. LIMIT в API запросах
     const apiLimits = (apiSrc.match(/LIMIT \d+/g)||[]).length;
     if (apiLimits < 3) {
-      this.addFinding('MEDIUM', `api.js: только ${apiLimits} запросов с LIMIT — без ограничения результаты могут быть огромными`);
+      this.addFinding('MEDIUM', `api.js: только ${apiLimits} запросов с LIMIT — без ограничения результаты могут быть огромными`, {
+        autoFixable: true,
+        file: API_PATH,
+        proposedFix: 'Add LIMIT 500 to unbounded SELECT queries on large tables in api.js'
+      });
+
+      // Auto-fix: add LIMIT 500 to the unbounded managers query and models export query
+      try {
+        let src = fs.readFileSync(API_PATH, 'utf8');
+        let changed = false;
+
+        // Fix: managers list — no LIMIT
+        const managersRe = /(SELECT id, username, email, role, telegram_id, created_at FROM admins ORDER BY created_at DESC')(\))/;
+        if (managersRe.test(src)) {
+          src = src.replace(managersRe, `$1 LIMIT 500'$2`);
+          changed = true;
+          this.addFixed('Added LIMIT 500 to admins manager list query in api.js');
+        }
+
+        // Fix: models export — no LIMIT
+        const modelsExportRe = /(SELECT id, name, age, height, city, category, available, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos FROM models ORDER BY name')(\))/;
+        if (modelsExportRe.test(src)) {
+          src = src.replace(modelsExportRe, `$1 LIMIT 1000'$2`);
+          changed = true;
+          this.addFixed('Added LIMIT 1000 to models export query in api.js');
+        }
+
+        if (changed) {
+          fs.writeFileSync(API_PATH, src, 'utf8');
+        }
+      } catch (e) {
+        this.addFinding('LOW', `Не удалось авто-исправить LIMIT в api.js: ${e.message}`);
+      }
     } else {
       this.addFinding('OK', `api.js: LIMIT используется в ${apiLimits} запросах`);
     }

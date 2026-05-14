@@ -5,9 +5,16 @@
  */
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
-const { runOrchestrator } = require('./orchestrator');
+// Try smart orchestrator first, fall back to regular orchestrator
+let runCheck;
+try {
+  runCheck = require('./smart-orchestrator').runSmartOrchestrator;
+} catch {
+  runCheck = require('./orchestrator').runOrchestrator;
+}
+
 const AutoFixer = require('./auto-fixer');
-const { tgSend, logAgent } = require('./lib/base');
+const { tgSend, logAgent, dbAll } = require('./lib/base');
 
 // Run immediately, then every 6 hours
 const INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -26,8 +33,8 @@ async function runCycle() {
     await fixer.run({ silent: true });
     const fixed = fixer.fixed || [];
 
-    // Step 2: Run full organism check
-    const result = await runOrchestrator();
+    // Step 2: Run full organism check (smart or regular)
+    const result = await runCheck();
     const { healthScore, criticalCount, highCount } = result;
 
     // Step 3: If health degraded significantly, run fixer again
@@ -48,6 +55,36 @@ async function runCycle() {
         fixed.slice(0, 5).map(f => `• ${f}`).join('\n')
       );
     }
+
+    // Step 5: Report top-3 agent discussions from this cycle
+    try {
+      const discussions = await dbAll(
+        'SELECT * FROM agent_discussions ORDER BY created_at DESC LIMIT 3'
+      );
+      if (discussions.length > 0) {
+        let dMsg = `💬 Обсуждения агентов (топ-3):\n`;
+        discussions.forEach(d => {
+          const to = d.to_agent ? ` → ${d.to_agent}` : ' → all';
+          const snippet = (d.message || '').slice(0, 120);
+          dMsg += `\n🤖 ${d.from_agent}${to}:\n"${snippet}${snippet.length < (d.message||'').length ? '…' : ''}"\n`;
+        });
+        await tgSend(dMsg).catch(() => {});
+      }
+    } catch (e) { console.warn('[Scheduler] discussions report skipped:', e.message); }
+
+    // Step 6: Report auto-fixed findings
+    try {
+      const autoFixed = await dbAll(
+        "SELECT * FROM agent_findings WHERE status='fixed' ORDER BY updated_at DESC LIMIT 5"
+      );
+      if (autoFixed.length > 0) {
+        let fMsg = `✅ Авто-исправленные находки (${autoFixed.length}):\n`;
+        autoFixed.forEach(f => {
+          fMsg += `• [${f.severity || 'info'}] ${(f.title || f.description || '').slice(0, 100)}\n`;
+        });
+        await tgSend(fMsg).catch(() => {});
+      }
+    } catch (e) { console.warn('[Scheduler] findings report skipped:', e.message); }
 
     lastHealthScore = healthScore;
     failureCount = 0;
