@@ -112,14 +112,19 @@ function buildClientKeyboard() {
 }
 
 const KB_MAIN_ADMIN = (badge, score) => {
-  const health = score != null ? ` · 💚${score}%` : '';
+  const health = score != null ? ` 💚${score}%` : '';
   return {
     inline_keyboard: [
-      [{ text: `📋 Заявки${badge}`,        callback_data: 'adm_orders__0'  }],
-      [{ text: '💃 Модели',                callback_data: 'adm_models_0'   }],
-      [{ text: '📊 Статистика',            callback_data: 'adm_stats'      }],
-      [{ text: `🤖 Организм${health}`,     callback_data: 'adm_organism'   }],
-      [{ text: '📡 Фид агентов',           callback_data: 'agent_feed_0'   }],
+      [{ text: `📋 Заявки${badge}`,          callback_data: 'adm_orders__0'  },
+       { text: '💃 Модели',                  callback_data: 'adm_models_0'   }],
+      [{ text: '📊 Статистика',              callback_data: 'adm_stats'      },
+       { text: `🤖 Организм${health}`,       callback_data: 'adm_organism'   }],
+      [{ text: '⚙️ Настройки',              callback_data: 'adm_settings'   },
+       { text: '📢 Рассылка',               callback_data: 'adm_broadcast'  }],
+      [{ text: '➕ Добавить модель',         callback_data: 'adm_addmodel'   },
+       { text: '📤 Экспорт заявок',         callback_data: 'adm_export'     }],
+      [{ text: '👑 Администраторы',          callback_data: 'adm_admins'     },
+       { text: '📡 Фид агентов',            callback_data: 'agent_feed_0'   }],
     ]
   };
 };
@@ -825,14 +830,23 @@ async function showAdminModel(chatId, modelId) {
     if (!m) return safeSend(chatId, '❌ Модель не найдена.');
     const cnt = (await get('SELECT COUNT(*) as n FROM orders WHERE model_id=?', [modelId])).n;
     let text = `💃 *${m.name}*\n\n`;
-    text += `Рост: ${m.height}см, Возраст: ${m.age||'—'} лет\n`;
-    text += `Категория: ${m.category}\nЗаявок всего: ${cnt}\n`;
+    if (m.age)    text += `🎂 Возраст: ${m.age} лет\n`;
+    if (m.height) text += `📏 Рост: ${m.height} см\n`;
+    if (m.weight) text += `⚖️ Вес: ${m.weight} кг\n`;
+    if (m.bust)   text += `📐 Параметры: ${m.bust}/${m.waist}/${m.hips}\n`;
+    if (m.shoe_size)  text += `👟 Обувь: ${m.shoe_size}\n`;
+    if (m.hair_color) text += `💇 Волосы: ${m.hair_color}\n`;
+    if (m.eye_color)  text += `👁 Глаза: ${m.eye_color}\n`;
+    if (m.instagram)  text += `📸 @${m.instagram}\n`;
+    text += `🏷 Категория: ${MODEL_CATEGORIES[m.category]||m.category}\n`;
+    text += `📋 Заявок: ${cnt}\n`;
     text += `Статус: ${m.available ? '🟢 Доступна' : '🔴 Недоступна'}\n`;
-    if (m.bio) text += `\n${m.bio}`;
+    if (m.bio) text += `\n_${m.bio}_`;
     return safeSend(chatId, text, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: [
-        [{ text: m.available ? '🔴 Отметить недоступной' : '🟢 Отметить доступной', callback_data: `adm_toggle_${m.id}` }],
+        [{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${m.id}` },
+         { text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${m.id}` }],
         [{ text: '← К моделям', callback_data: 'adm_models_0' }],
       ]}
     });
@@ -863,6 +877,271 @@ async function showAgentFeed(chatId, page) {
       ]}
     });
   } catch (e) { console.error('[Bot] showAgentFeed:', e.message); }
+}
+
+// ─── Settings helper ──────────────────────────────────────────────────────────
+
+async function getSetting(key) {
+  try { const r = await get('SELECT value FROM bot_settings WHERE key=?', [key]); return r?.value ?? null; }
+  catch { return null; }
+}
+async function setSetting(key, value) {
+  await run('INSERT OR REPLACE INTO bot_settings (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)', [key, value]);
+}
+
+// ─── Settings menu ────────────────────────────────────────────────────────────
+
+async function showAdminSettings(chatId) {
+  if (!isAdmin(chatId)) return;
+  const [greeting, phone, email, insta, notifNew, notifSt] = await Promise.all([
+    getSetting('greeting'), getSetting('contacts_phone'), getSetting('contacts_email'),
+    getSetting('contacts_insta'), getSetting('notif_new_order'), getSetting('notif_status'),
+  ]);
+  const text = `⚙️ *Настройки бота и агентства*\n\n` +
+    `📝 Приветствие: _${(greeting||'').slice(0,50)}..._\n` +
+    `📞 Телефон: \`${phone||'—'}\`\n` +
+    `📧 Email: \`${email||'—'}\`\n` +
+    `📸 Instagram: \`${insta||'—'}\`\n` +
+    `🔔 Уведомления о заявках: ${notifNew==='1'?'✅ Вкл':'❌ Выкл'}\n` +
+    `🔔 Уведомления о статусах: ${notifSt==='1'?'✅ Вкл':'❌ Выкл'}`;
+  return safeSend(chatId, text, {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: [
+      [{ text: '📝 Приветствие', callback_data: 'adm_set_greeting' },
+       { text: 'ℹ️ О нас',      callback_data: 'adm_set_about'    }],
+      [{ text: '📞 Телефон',    callback_data: 'adm_set_phone'   },
+       { text: '📧 Email',      callback_data: 'adm_set_email'   }],
+      [{ text: '📸 Instagram',  callback_data: 'adm_set_insta'   },
+       { text: '📍 Адрес',      callback_data: 'adm_set_addr'    }],
+      [{ text: '💰 Прайс-лист', callback_data: 'adm_set_pricing' }],
+      [{ text: notifNew==='1' ? '🔕 Выкл уведом. заявки' : '🔔 Вкл уведом. заявки',
+         callback_data: notifNew==='1' ? 'adm_notif_new_off' : 'adm_notif_new_on' },
+       { text: notifSt==='1'  ? '🔕 Выкл уведом. статус' : '🔔 Вкл уведом. статус',
+         callback_data: notifSt==='1'  ? 'adm_notif_st_off'  : 'adm_notif_st_on'  }],
+      [{ text: '← Меню', callback_data: 'admin_menu' }],
+    ]}
+  });
+}
+
+// ─── Add Model wizard ─────────────────────────────────────────────────────────
+
+const MODEL_HAIR_COLORS = ['Блонд','Тёмный блонд','Шатен','Брюнетка','Рыжая','Другой'];
+const MODEL_EYE_COLORS  = ['Голубые','Серые','Зелёные','Карие','Чёрные'];
+const MODEL_CATEGORIES  = { fashion:'Fashion', commercial:'Commercial', events:'Events' };
+
+async function showAddModelStep(chatId, d) {
+  const step = d._step || 'name';
+  const progress = { name:1, age:2, height:3, params:4, shoe:5, hair:6, eye:7, category:8, instagram:9, bio:10, photo:11 };
+  const pct = Math.round((progress[step]||1)/11*100);
+  const bar = '█'.repeat(Math.round(pct/10)) + '░'.repeat(10-Math.round(pct/10));
+
+  const header = `➕ *Добавление модели* [${bar}]\n\n`;
+
+  if (step === 'name') {
+    await setSession(chatId, 'adm_mdl_name', d);
+    return safeSend(chatId, header + '👤 Введите *имя модели*:', { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
+  }
+  if (step === 'age') {
+    await setSession(chatId, 'adm_mdl_age', d);
+    return safeSend(chatId, header + `Имя: *${d.name}*\n\n🎂 Введите *возраст* (лет):`, { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_age' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
+  }
+  if (step === 'height') {
+    await setSession(chatId, 'adm_mdl_height', d);
+    return safeSend(chatId, header + `Имя: *${d.name}*\n\n📏 Введите *рост* (см, например: 176):`, { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_height' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
+  }
+  if (step === 'params') {
+    await setSession(chatId, 'adm_mdl_params', d);
+    return safeSend(chatId, header + `📐 Введите *параметры* в формате *ОГ/ОТ/ОБ* (например: 86/60/88)\nили пропустите:`, { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_params' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
+  }
+  if (step === 'shoe') {
+    await setSession(chatId, 'adm_mdl_shoe', d);
+    return safeSend(chatId, header + `👟 Введите *размер обуви*:`, { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_shoe' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
+  }
+  if (step === 'hair') {
+    await setSession(chatId, 'adm_mdl_hair', d);
+    const btns = MODEL_HAIR_COLORS.map(c => [{ text: c, callback_data: `adm_mdl_hair_${c}` }]);
+    btns.push([{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_hair' }]);
+    return safeSend(chatId, header + `💇 Выберите *цвет волос*:`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: btns } });
+  }
+  if (step === 'eye') {
+    await setSession(chatId, 'adm_mdl_eye', d);
+    const btns = MODEL_EYE_COLORS.map(c => [{ text: c, callback_data: `adm_mdl_eye_${c}` }]);
+    btns.push([{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_eye' }]);
+    return safeSend(chatId, header + `👁 Выберите *цвет глаз*:`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: btns } });
+  }
+  if (step === 'category') {
+    await setSession(chatId, 'adm_mdl_category', d);
+    const btns = Object.entries(MODEL_CATEGORIES).map(([k,v]) => [{ text: v, callback_data: `adm_mdl_cat_${k}` }]);
+    return safeSend(chatId, header + `🏷 Выберите *категорию*:`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: btns } });
+  }
+  if (step === 'instagram') {
+    await setSession(chatId, 'adm_mdl_instagram', d);
+    return safeSend(chatId, header + `📸 Введите *Instagram* (без @, например: anna_model):`, { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_instagram' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
+  }
+  if (step === 'bio') {
+    await setSession(chatId, 'adm_mdl_bio', d);
+    return safeSend(chatId, header + `📝 Введите *описание/портфолио* модели:`, { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_bio' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
+  }
+  if (step === 'photo') {
+    await setSession(chatId, 'adm_mdl_photo', d);
+    return safeSend(chatId, header + `📷 Отправьте *фото модели* (главное фото карточки):`, { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_photo' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
+  }
+  if (step === 'confirm') {
+    await setSession(chatId, 'adm_mdl_confirm', d);
+    const params = d.bust ? `${d.bust}/${d.waist}/${d.hips}` : '—';
+    let summary = `✅ *Подтвердите добавление модели:*\n\n`;
+    summary += `👤 Имя: *${d.name}*\n`;
+    if (d.age)        summary += `🎂 Возраст: *${d.age}* лет\n`;
+    if (d.height)     summary += `📏 Рост: *${d.height}* см\n`;
+    if (d.bust)       summary += `📐 Параметры: *${params}*\n`;
+    if (d.shoe_size)  summary += `👟 Обувь: *${d.shoe_size}*\n`;
+    if (d.hair_color) summary += `💇 Волосы: *${d.hair_color}*\n`;
+    if (d.eye_color)  summary += `👁 Глаза: *${d.eye_color}*\n`;
+    if (d.category)   summary += `🏷 Категория: *${MODEL_CATEGORIES[d.category]||d.category}*\n`;
+    if (d.instagram)  summary += `📸 Instagram: *@${d.instagram}*\n`;
+    if (d.bio)        summary += `📝 Описание: _${d.bio.slice(0,80)}${d.bio.length>80?'...':''}_\n`;
+    if (d.photo_id)   summary += `📷 Фото: ✅ загружено\n`;
+    return safeSend(chatId, summary, { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [
+        [{ text: '✅ Добавить модель', callback_data: 'adm_mdl_save' }],
+        [{ text: '❌ Отмена',          callback_data: 'admin_menu'   }],
+      ]}
+    });
+  }
+}
+
+async function saveNewModel(chatId, d) {
+  try {
+    const res = await run(
+      `INSERT INTO models (name,age,height,weight,bust,waist,hips,shoe_size,hair_color,eye_color,bio,instagram,category,photo_main,available)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+      [d.name, d.age||null, d.height||null, d.weight||null, d.bust||null, d.waist||null, d.hips||null,
+       d.shoe_size||null, d.hair_color||null, d.eye_color||null, d.bio||null, d.instagram||null,
+       d.category||'fashion', d.photo_file_id||null]
+    );
+    await clearSession(chatId);
+    return safeSend(chatId, `✅ *Модель «${d.name}» добавлена!*\n\nID: ${res.id}`, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [
+        [{ text: '👁 Просмотреть карточку', callback_data: `adm_model_${res.id}` }],
+        [{ text: '➕ Добавить ещё',          callback_data: 'adm_addmodel'         }],
+        [{ text: '← Меню',                  callback_data: 'admin_menu'            }],
+      ]}
+    });
+  } catch (e) { return safeSend(chatId, `❌ Ошибка сохранения: ${e.message}`); }
+}
+
+// ─── Edit Model ───────────────────────────────────────────────────────────────
+
+async function showModelEditMenu(chatId, modelId) {
+  if (!isAdmin(chatId)) return;
+  const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
+  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+  return safeSend(chatId, `✏️ *Редактировать: ${m.name}*\n\nВыберите поле:`, {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: [
+      [{ text: '👤 Имя',         callback_data: `adm_ef_${modelId}_name`       },
+       { text: '🎂 Возраст',    callback_data: `adm_ef_${modelId}_age`        }],
+      [{ text: '📏 Рост',        callback_data: `adm_ef_${modelId}_height`     },
+       { text: '⚖️ Вес',        callback_data: `adm_ef_${modelId}_weight`     }],
+      [{ text: '📐 Параметры',  callback_data: `adm_ef_${modelId}_params`     },
+       { text: '👟 Обувь',       callback_data: `adm_ef_${modelId}_shoe_size`  }],
+      [{ text: '💇 Волосы',     callback_data: `adm_ef_${modelId}_hair_color`  },
+       { text: '👁 Глаза',       callback_data: `adm_ef_${modelId}_eye_color`  }],
+      [{ text: '📸 Instagram',  callback_data: `adm_ef_${modelId}_instagram`  },
+       { text: '🏷 Категория',  callback_data: `adm_ef_${modelId}_category`   }],
+      [{ text: '📝 Описание',   callback_data: `adm_ef_${modelId}_bio`        }],
+      [{ text: '📷 Фото',       callback_data: `adm_ef_${modelId}_photo`      }],
+      [{ text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${modelId}` }],
+      [{ text: '🗑 Удалить модель', callback_data: `adm_del_model_${modelId}` }],
+      [{ text: '← Карточка',   callback_data: `adm_model_${modelId}`          }],
+    ]}
+  });
+}
+
+// ─── Broadcast ────────────────────────────────────────────────────────────────
+
+async function showBroadcast(chatId) {
+  if (!isAdmin(chatId)) return;
+  const r = await get("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>({n:0}));
+  return safeSend(chatId,
+    `📢 *Рассылка клиентам*\n\nКлиентов с заявками: *${r.n}*\n\nВведите сообщение для рассылки — оно будет отправлено всем клиентам, которые оформляли заявки через бота.\n\n⚠️ _Используйте аккуратно_`,
+    { parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] } }
+  );
+}
+
+async function sendBroadcast(chatId, text) {
+  const clients = await query("SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>[]);
+  if (!clients.length) return safeSend(chatId, '❌ Нет клиентов для рассылки.');
+  let sent = 0, failed = 0;
+  for (const c of clients) {
+    try {
+      await bot.sendMessage(c.client_chat_id, `📢 *Сообщение от Nevesty Models*\n\n${text}`, { parse_mode: 'Markdown' });
+      sent++;
+    } catch { failed++; }
+    await new Promise(r => setTimeout(r, 50)); // rate limit
+  }
+  await clearSession(chatId);
+  return safeSend(chatId, `✅ *Рассылка завершена*\n\nОтправлено: ${sent}\nОшибок: ${failed}`, {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+  });
+}
+
+// ─── Admin management ─────────────────────────────────────────────────────────
+
+async function showAdminManagement(chatId) {
+  if (!isAdmin(chatId)) return;
+  const dbAdmins = await query("SELECT username, telegram_id, role FROM admins").catch(()=>[]);
+  let text = `👑 *Управление администраторами*\n\n`;
+  text += `*Из .env (ADMIN_TELEGRAM_IDS):*\n`;
+  ADMIN_IDS.forEach(id => { text += `• \`${id}\`\n`; });
+  text += `\n*В базе данных:*\n`;
+  dbAdmins.forEach(a => { text += `• ${a.username} (\`${a.telegram_id||'—'}\`) — ${a.role}\n`; });
+  text += `\n_Чтобы добавить admin — нажмите «Добавить Telegram ID»_`;
+  return safeSend(chatId, text, {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: [
+      [{ text: '➕ Добавить Telegram ID', callback_data: 'adm_add_admin_id' }],
+      [{ text: '← Меню',                 callback_data: 'admin_menu'        }],
+    ]}
+  });
+}
+
+// ─── Export orders ────────────────────────────────────────────────────────────
+
+async function exportOrders(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const orders = await query(
+      `SELECT o.order_number,o.client_name,o.client_phone,o.client_email,o.client_telegram,
+              o.event_type,o.event_date,o.event_duration,o.location,o.budget,o.comments,
+              o.status,o.created_at,m.name as model_name
+       FROM orders o LEFT JOIN models m ON o.model_id=m.id
+       ORDER BY o.created_at DESC`
+    );
+    const header = ['Номер','Клиент','Телефон','Email','Telegram','Тип события','Дата','Длит(ч)','Место','Бюджет','Комментарий','Статус','Создан','Модель'];
+    const rows = orders.map(o => [
+      o.order_number, o.client_name, o.client_phone, o.client_email||'', o.client_telegram||'',
+      o.event_type, o.event_date||'', o.event_duration||'', o.location||'', o.budget||'',
+      (o.comments||'').replace(/"/g,'""'), o.status,
+      new Date(o.created_at).toLocaleString('ru'), o.model_name||''
+    ].map(v => `"${v}"`).join(','));
+    const csv = [header.join(','), ...rows].join('\n');
+    const buf = Buffer.from('﻿' + csv, 'utf8'); // BOM для Excel
+    await bot.sendDocument(chatId, buf, {
+      caption: `📤 Экспорт заявок — ${orders.length} записей\n${new Date().toLocaleString('ru')}`,
+    }, { filename: `orders_${Date.now()}.csv`, contentType: 'text/csv' });
+  } catch (e) { return safeSend(chatId, `❌ Ошибка экспорта: ${e.message}`); }
 }
 
 // ─── Admin order actions ──────────────────────────────────────────────────────
@@ -1210,11 +1489,179 @@ function initBot(app) {
       return showAdminModel(chatId, id);
     }
 
+    // ── Settings
+    if (data === 'adm_settings')  return showAdminSettings(chatId);
+    if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; await setSession(chatId, 'adm_broadcast_msg', {}); return showBroadcast(chatId); }
+    if (data === 'adm_admins')    return showAdminManagement(chatId);
+    if (data === 'adm_export')    return exportOrders(chatId);
+    if (data === 'adm_addmodel')  { if (!isAdmin(chatId)) return; return showAddModelStep(chatId, { _step: 'name' }); }
+
+    // ── Settings inputs — set session and ask for text
+    const settingPrompts = {
+      'adm_set_greeting': '📝 Введите новый текст *приветствия*\n\n_Текущий отображается при /start_:',
+      'adm_set_about':    'ℹ️ Введите новый текст *«О нас»*:',
+      'adm_set_phone':    '📞 Введите новый *номер телефона* агентства:',
+      'adm_set_email':    '📧 Введите новый *email* агентства:',
+      'adm_set_insta':    '📸 Введите новый *Instagram* (без @):',
+      'adm_set_addr':     '📍 Введите новый *адрес* агентства:',
+      'adm_set_pricing':  '💰 Введите новый *прайс-лист*\n(Можно несколько строк):',
+    };
+    if (settingPrompts[data]) {
+      if (!isAdmin(chatId)) return;
+      await setSession(chatId, data, {});
+      return safeSend(chatId, settingPrompts[data], { parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings' }]] } });
+    }
+
+    // ── Notifications toggle
+    if (data.startsWith('adm_notif_')) {
+      if (!isAdmin(chatId)) return;
+      const [, , key, onoff] = data.split('_');
+      const settingKey = key === 'new' ? 'notif_new_order' : 'notif_status';
+      await setSetting(settingKey, onoff === 'on' ? '1' : '0');
+      return showAdminSettings(chatId);
+    }
+
+    // ── Add admin Telegram ID
+    if (data === 'adm_add_admin_id') {
+      if (!isAdmin(chatId)) return;
+      await setSession(chatId, 'adm_add_admin_id', {});
+      return safeSend(chatId, '👑 Введите *Telegram ID* нового администратора:\n\n_Получить ID можно через @userinfobot_', {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_admins' }]] }
+      });
+    }
+
+    // ── Add model wizard — skip buttons
+    if (data.startsWith('adm_mdl_skip_')) {
+      if (!isAdmin(chatId)) return;
+      const session2 = await getSession(chatId);
+      const d2 = sessionData(session2);
+      const skipField = data.replace('adm_mdl_skip_','');
+      const nextSteps = { name:'age', age:'height', height:'params', params:'shoe', shoe:'hair', hair:'eye', eye:'category', category:'instagram', instagram:'bio', bio:'photo', photo:'confirm' };
+      d2._step = nextSteps[skipField] || 'confirm';
+      return showAddModelStep(chatId, d2);
+    }
+
+    // ── Add model wizard — select buttons (hair, eye, category)
+    if (data.startsWith('adm_mdl_hair_')) {
+      if (!isAdmin(chatId)) return;
+      const session2 = await getSession(chatId);
+      const d2 = sessionData(session2);
+      d2.hair_color = data.replace('adm_mdl_hair_',''); d2._step = 'eye';
+      return showAddModelStep(chatId, d2);
+    }
+    if (data.startsWith('adm_mdl_eye_')) {
+      if (!isAdmin(chatId)) return;
+      const session2 = await getSession(chatId);
+      const d2 = sessionData(session2);
+      d2.eye_color = data.replace('adm_mdl_eye_',''); d2._step = 'category';
+      return showAddModelStep(chatId, d2);
+    }
+    if (data.startsWith('adm_mdl_cat_')) {
+      if (!isAdmin(chatId)) return;
+      const session2 = await getSession(chatId);
+      const d2 = sessionData(session2);
+      d2.category = data.replace('adm_mdl_cat_',''); d2._step = 'instagram';
+      return showAddModelStep(chatId, d2);
+    }
+    if (data === 'adm_mdl_save') {
+      if (!isAdmin(chatId)) return;
+      const session2 = await getSession(chatId);
+      return saveNewModel(chatId, sessionData(session2));
+    }
+
+    // ── Edit model
+    if (data.startsWith('adm_editmodel_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_editmodel_',''));
+      return showModelEditMenu(chatId, id);
+    }
+    if (data.startsWith('adm_ef_')) {
+      if (!isAdmin(chatId)) return;
+      const parts = data.replace('adm_ef_','').split('_');
+      const modelId = parseInt(parts[0]);
+      const field   = parts.slice(1).join('_');
+      if (field === 'category') {
+        // Show category selector
+        const btns = Object.entries(MODEL_CATEGORIES).map(([k,v]) => [{ text: v, callback_data: `adm_efc_${modelId}_${k}` }]);
+        btns.push([{ text: '← Назад', callback_data: `adm_editmodel_${modelId}` }]);
+        return safeSend(chatId, '🏷 Выберите новую категорию:', { reply_markup: { inline_keyboard: btns } });
+      }
+      if (field === 'photo') {
+        await setSession(chatId, `adm_ef_${modelId}_photo`, {});
+        return safeSend(chatId, '📷 Отправьте новое *фото модели*:', { parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: `adm_editmodel_${modelId}` }]] } });
+      }
+      const fieldLabels = { name:'имя', age:'возраст', height:'рост (см)', weight:'вес (кг)',
+                            shoe_size:'размер обуви', instagram:'Instagram', bio:'описание',
+                            hair_color:'цвет волос', eye_color:'цвет глаз', params:'параметры (ОГ/ОТ/ОБ)' };
+      await setSession(chatId, `adm_ef_${modelId}_${field}`, {});
+      return safeSend(chatId, `✏️ Введите новое *${fieldLabels[field]||field}*:`, { parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '← Отмена', callback_data: `adm_editmodel_${modelId}` }]] } });
+    }
+    if (data.startsWith('adm_efc_')) {  // edit field category
+      if (!isAdmin(chatId)) return;
+      const parts = data.replace('adm_efc_','').split('_');
+      const modelId = parseInt(parts[0]);
+      const cat = parts[1];
+      await run('UPDATE models SET category=? WHERE id=?', [cat, modelId]).catch(()=>{});
+      return safeSend(chatId, '✅ Категория обновлена!', {
+        reply_markup: { inline_keyboard: [[{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${modelId}` }, { text: '← Карточка', callback_data: `adm_model_${modelId}` }]] }
+      });
+    }
+
+    // ── Delete model
+    if (data.startsWith('adm_del_model_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_del_model_',''));
+      const m = await get('SELECT name FROM models WHERE id=?', [id]).catch(()=>null);
+      return safeSend(chatId, `🗑 *Удалить модель «${m?.name||id}»?*\n\nЭто действие необратимо!`, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [
+          [{ text: '⚠️ Да, удалить', callback_data: `adm_del_confirm_${id}` }],
+          [{ text: '← Отмена',       callback_data: `adm_model_${id}`        }],
+        ]}
+      });
+    }
+    if (data.startsWith('adm_del_confirm_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_del_confirm_',''));
+      const m = await get('SELECT name FROM models WHERE id=?', [id]).catch(()=>null);
+      await run('DELETE FROM models WHERE id=?', [id]).catch(()=>{});
+      return safeSend(chatId, `✅ Модель «${m?.name||id}» удалена.`, {
+        reply_markup: { inline_keyboard: [[{ text: '← К моделям', callback_data: 'adm_models_0' }]] }
+      });
+    }
+
     // ── Agent feed
     if (data.startsWith('agent_feed_')) {
       if (!isAdmin(chatId)) return;
       const page = parseInt(data.replace('agent_feed_','')) || 0;
       return showAgentFeed(chatId, page);
+    }
+  });
+
+  // ── Photo handler (для загрузки фото модели через бот) ──────────────────
+  bot.on('photo', async (msg) => {
+    const chatId  = msg.chat.id;
+    if (!isAdmin(chatId)) return;
+    const session = await getSession(chatId);
+    const state   = session?.state || 'idle';
+    const d       = sessionData(session);
+    const fileId  = msg.photo[msg.photo.length - 1].file_id;
+
+    if (state === 'adm_mdl_photo') {
+      d.photo_file_id = fileId; d._step = 'confirm';
+      return showAddModelStep(chatId, d);
+    }
+    if (state.startsWith('adm_ef_') && state.endsWith('_photo')) {
+      const modelId = parseInt(state.replace('adm_ef_','').split('_')[0]);
+      await run('UPDATE models SET photo_main=? WHERE id=?', [fileId, modelId]).catch(()=>{});
+      await clearSession(chatId);
+      return safeSend(chatId, '✅ Фото обновлено!', {
+        reply_markup: { inline_keyboard: [[{ text: '← Карточка', callback_data: `adm_model_${modelId}` }]] }
+      });
     }
   });
 
@@ -1226,6 +1673,105 @@ function initBot(app) {
     const session = await getSession(chatId);
     const state   = session?.state || 'idle';
     const d       = sessionData(session);
+
+    // ── Admin: settings text inputs
+    if (isAdmin(chatId)) {
+      const settingStates = {
+        'adm_set_greeting': ['greeting',       '📝 Приветствие обновлено!'],
+        'adm_set_about':    ['about',           'ℹ️ Текст «О нас» обновлён!'],
+        'adm_set_phone':    ['contacts_phone',  '📞 Телефон обновлён!'],
+        'adm_set_email':    ['contacts_email',  '📧 Email обновлён!'],
+        'adm_set_insta':    ['contacts_insta',  '📸 Instagram обновлён!'],
+        'adm_set_addr':     ['contacts_addr',   '📍 Адрес обновлён!'],
+        'adm_set_pricing':  ['pricing',         '💰 Прайс-лист обновлён!'],
+      };
+      if (settingStates[state]) {
+        const [key, okMsg] = settingStates[state];
+        await setSetting(key, text);
+        await clearSession(chatId);
+        return safeSend(chatId, `✅ ${okMsg}`, {
+          reply_markup: { inline_keyboard: [[{ text: '⚙️ К настройкам', callback_data: 'adm_settings' }]] }
+        });
+      }
+
+      // ── Add admin Telegram ID
+      if (state === 'adm_add_admin_id') {
+        const newId = text.replace(/[^0-9]/g, '');
+        if (!newId) return safeSend(chatId, '❌ Некорректный ID. Введите числовой Telegram ID:');
+        await run('UPDATE admins SET telegram_id=? WHERE id=(SELECT MIN(id) FROM admins WHERE telegram_id IS NULL OR telegram_id="")', [newId]).catch(()=>{});
+        await clearSession(chatId);
+        return safeSend(chatId, `✅ Telegram ID \`${newId}\` добавлен!\n\n⚠️ Для постоянного добавления — также добавьте его в ADMIN_TELEGRAM_IDS в .env файле.`, {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '← Администраторы', callback_data: 'adm_admins' }]] }
+        });
+      }
+
+      // ── Broadcast
+      if (state === 'adm_broadcast_msg') {
+        return sendBroadcast(chatId, text);
+      }
+    }
+
+    // ── Admin: add model text inputs
+    if (isAdmin(chatId) && state.startsWith('adm_mdl_')) {
+      const step = state.replace('adm_mdl_', '');
+      if (step === 'name') {
+        if (text.length < 2) return safeSend(chatId, '❌ Имя слишком короткое. Введите имя модели:');
+        d.name = text; d._step = 'age';
+        return showAddModelStep(chatId, d);
+      }
+      if (step === 'age') {
+        d.age = parseInt(text) || null; d._step = 'height';
+        return showAddModelStep(chatId, d);
+      }
+      if (step === 'height') {
+        d.height = parseInt(text) || null; d._step = 'params';
+        return showAddModelStep(chatId, d);
+      }
+      if (step === 'params') {
+        const parts = text.split('/').map(x => parseInt(x.trim()));
+        if (parts.length === 3 && parts.every(Boolean)) {
+          [d.bust, d.waist, d.hips] = parts;
+        }
+        d._step = 'shoe'; return showAddModelStep(chatId, d);
+      }
+      if (step === 'shoe') {
+        d.shoe_size = text; d._step = 'hair';
+        return showAddModelStep(chatId, d);
+      }
+      if (step === 'instagram') {
+        d.instagram = text.replace('@',''); d._step = 'bio';
+        return showAddModelStep(chatId, d);
+      }
+      if (step === 'bio') {
+        d.bio = text; d._step = 'photo';
+        return showAddModelStep(chatId, d);
+      }
+    }
+
+    // ── Admin: edit model field input
+    if (isAdmin(chatId) && state.startsWith('adm_ef_')) {
+      // state: adm_ef_{id}_{field}
+      const parts = state.replace('adm_ef_','').split('_');
+      const modelId = parseInt(parts[0]);
+      const field   = parts.slice(1).join('_');
+      const fieldMap = { name:'name', age:'age', height:'height', weight:'weight',
+                         shoe_size:'shoe_size', instagram:'instagram', bio:'bio', eye_color:'eye_color', hair_color:'hair_color' };
+      if (field === 'params') {
+        const ps = text.split('/').map(x => parseInt(x.trim()));
+        if (ps.length === 3 && ps.every(Boolean)) {
+          await run('UPDATE models SET bust=?,waist=?,hips=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+            [ps[0],ps[1],ps[2],modelId]).catch(()=>{});
+        }
+      } else if (fieldMap[field]) {
+        const val = ['age','height','weight'].includes(field) ? (parseInt(text)||null) : text;
+        await run(`UPDATE models SET ${fieldMap[field]}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, [val, modelId]).catch(()=>{});
+      }
+      await clearSession(chatId);
+      return safeSend(chatId, '✅ Поле обновлено!', {
+        reply_markup: { inline_keyboard: [[{ text: '✏️ Редактировать ещё', callback_data: `adm_editmodel_${modelId}` }, { text: '← Карточка', callback_data: `adm_model_${modelId}` }]] }
+      });
+    }
 
     // ── Admin reply to client
     if (isAdmin(chatId) && state === 'replying' && d.order_id) {

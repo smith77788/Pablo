@@ -116,6 +116,29 @@ async function initDatabase() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  await run(`CREATE TABLE IF NOT EXISTS bot_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Default settings
+  const defaults = [
+    ['greeting',       'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],
+    ['about',          'Мы работаем с 2018 года. Более 200 моделей в базе. Fashion, Commercial, Events.'],
+    ['contacts_phone', '+7 (900) 000-00-00'],
+    ['contacts_email', 'info@nevesty-models.ru'],
+    ['contacts_insta', '@nevesty_models'],
+    ['contacts_addr',  'Москва, ул. Пресненская, 8'],
+    ['pricing',        'Fashion/Commercial — от 5000₽/час\nEvents — от 8000₽/час\nRunway — от 10000₽/час'],
+    ['notif_new_order', '1'],
+    ['notif_status',    '1'],
+    ['notif_message',   '1'],
+  ];
+  for (const [key, value] of defaults) {
+    await run('INSERT OR IGNORE INTO bot_settings (key,value) VALUES (?,?)', [key, value]);
+  }
+
   // Indexes for frequent queries
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_model_id ON orders(model_id)`);

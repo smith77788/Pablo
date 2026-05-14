@@ -100,12 +100,11 @@ class Agent {
     this.fixed.push(msg);
   }
 
-  /** Run the full agent lifecycle */
-  async run() {
+  /** Run the full agent lifecycle.
+   *  silent=true: skip individual Telegram notification (orchestrator collects all findings itself) */
+  async run({ silent = false } = {}) {
     const t0 = Date.now();
     const label = `Agent: ${this.name}`;
-
-    await logAgent(label, `${this.emoji} [${this.organ}] активирован — ${this.focus}`);
 
     try {
       this.findings = [];
@@ -120,23 +119,23 @@ class Agent {
     const high     = this.findings.filter(f => f.sev === SEV.HIGH).length;
     const fixCount = this.fixed.length;
 
-    let summary = `${this.emoji} [${this.organ}] ${this.name} — ${elapsed}s\n`;
-    if (this.findings.length === 0 && fixCount === 0) {
-      summary += `✅ Всё в порядке`;
-    } else {
-      if (critical) summary += `🔴 Критических: ${critical}  `;
-      if (high)     summary += `🟠 Важных: ${high}  `;
-      summary += `Всего: ${this.findings.length}`;
-      if (fixCount) summary += `  🔧 Исправлено: ${fixCount}`;
-      this.findings.forEach(f => { summary += `\n${f.sev} ${f.msg}`; });
-      this.fixed.forEach(m    => { summary += `\n✅ Fixed: ${m}`; });
-    }
+    // Build summary line for DB log (compact)
+    const badges = [critical && `🔴${critical}`, high && `🟠${high}`, fixCount && `🔧${fixCount}`].filter(Boolean).join(' ');
+    const logLine = `${this.emoji} ${this.name} [${this.organ}] ${elapsed}s ${badges||'✅'}\n` +
+      [...this.findings.filter(f => f.sev !== SEV.OK && f.sev !== SEV.INFO).map(f => `${f.sev} ${f.msg}`),
+       ...this.fixed.map(m => `🔧 ${m}`)].join('\n');
 
-    await logAgent(label, summary);
+    await logAgent(label, logLine);
 
-    // Notify only if there's something interesting
-    if (critical + high + fixCount > 0) {
-      await tgSend(`🤖 ${label}\n${summary}`);
+    // In silent mode, no individual Telegram notification (orchestrator handles it)
+    if (!silent && (critical + high + fixCount > 0)) {
+      const detail = [
+        `${this.emoji} *${this.name}* [${this.organ}]`,
+        '',
+        ...this.findings.filter(f => [SEV.CRITICAL, SEV.HIGH].includes(f.sev)).map(f => `${f.sev} ${f.msg}`),
+        ...this.fixed.map(m => `🔧 ${m}`),
+      ].join('\n');
+      await tgSend(detail, { parse_mode: 'Markdown' });
     }
 
     return { findings: this.findings, fixed: this.fixed, elapsed };
