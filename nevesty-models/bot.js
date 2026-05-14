@@ -1082,26 +1082,49 @@ async function showAgentFeed(chatId, page) {
   } catch (e) { console.error('[Bot] showAgentFeed:', e.message); }
 }
 
-async function showAgentDiscussions(chatId) {
+async function showAgentDiscussions(chatId, period = '24h', page = 0) {
   try {
-    const rows = await query('SELECT * FROM agent_discussions ORDER BY created_at DESC LIMIT 10');
-    if (!rows.length) return safeSend(chatId, '💬 Обсуждений агентов пока нет.', {
-      reply_markup: { inline_keyboard: [[{ text:'← Меню', callback_data:'admin_menu' }]] }
+    const periodMap = { '1h': '-1 hours', '24h': '-24 hours', '7d': '-7 days', '30d': '-30 days' };
+    const since = periodMap[period] || '-24 hours';
+    const PAGE_SIZE = 8;
+
+    const [totalRow, rows] = await Promise.all([
+      get(`SELECT COUNT(*) as n FROM agent_discussions WHERE created_at > datetime('now', ?)`, [since]),
+      query(`SELECT * FROM agent_discussions WHERE created_at > datetime('now', ?) ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        [since, PAGE_SIZE, page * PAGE_SIZE]),
+    ]);
+    const total = totalRow?.n || 0;
+
+    if (!rows.length) return safeSend(chatId, `💬 Обсуждений за ${period} нет — агенты ещё не запускались.`, {
+      reply_markup: { inline_keyboard: [
+        [{ text:'📡 Фид агентов', callback_data:'agent_feed_0' }, { text:'← Меню', callback_data:'admin_menu' }],
+      ]}
     });
-    let text = `💬 *Обсуждения агентов*\n\n`;
+
     const now = Date.now();
-    rows.reverse().forEach(d => {
-      const ageTo = d.to_agent ? esc(d.to_agent) : 'all';
+    let text = `💬 *Обсуждения агентов* \\(${period}, ${total} записей\\)\n\n`;
+    rows.forEach(d => {
       const mins = Math.round((now - new Date(d.created_at).getTime()) / 60000);
-      const timeStr = mins < 60 ? `${mins} мин назад` : `${Math.round(mins/60)} ч назад`;
-      const snippet = esc((d.message || '').slice(0, 150));
-      text += `🤖 *${esc(d.from_agent || '?')}* → ${esc(ageTo)} \\(${esc(timeStr)}\\):\n"${snippet}${(d.message||'').length > 150 ? '…' : ''}"\n\n`;
+      const timeStr = mins < 60 ? `${mins}м` : `${Math.round(mins/60)}ч`;
+      const snippet = esc((d.message || '').slice(0, 120));
+      text += `*${esc(d.from_agent||'?')}* \\(${esc(timeStr)}\\):\n_${snippet}_\n\n`;
     });
+
+    const nav = [];
+    if (page > 0) nav.push({ text: '◀️', callback_data: `adm_disc_${period}_${page - 1}` });
+    if ((page + 1) * PAGE_SIZE < total) nav.push({ text: '▶️', callback_data: `adm_disc_${period}_${page + 1}` });
+
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
-        [{ text:'🔄 Обновить', callback_data:'adm_discussions' }],
-        [{ text:'← Меню',     callback_data:'admin_menu'       }],
+        [
+          { text: period === '1h'  ? '✓1ч' : '1ч',   callback_data: 'adm_disc_1h_0'  },
+          { text: period === '24h' ? '✓24ч': '24ч',  callback_data: 'adm_disc_24h_0' },
+          { text: period === '7d'  ? '✓7д' : '7д',   callback_data: 'adm_disc_7d_0'  },
+          { text: period === '30d' ? '✓30д': '30д',  callback_data: 'adm_disc_30d_0' },
+        ],
+        ...(nav.length ? [nav] : []),
+        [{ text:'🔄 Обновить', callback_data:`adm_disc_${period}_${page}` }, { text:'← Меню', callback_data:'admin_menu' }],
       ]}
     });
   } catch (e) { console.error('[Bot] showAgentDiscussions:', e.message); }
@@ -1960,7 +1983,14 @@ function initBot(app) {
     // ── Agent discussions feed
     if (data === 'adm_discussions') {
       if (!isAdmin(chatId)) return;
-      return showAgentDiscussions(chatId);
+      return showAgentDiscussions(chatId, '24h', 0);
+    }
+    if (data.startsWith('adm_disc_')) {
+      if (!isAdmin(chatId)) return;
+      const parts  = data.replace('adm_disc_', '').split('_');
+      const period = parts.slice(0, -1).join('_'); // '1h', '24h', '7d', '30d'
+      const page   = parseInt(parts[parts.length - 1]) || 0;
+      return showAgentDiscussions(chatId, period, page);
     }
   });
 

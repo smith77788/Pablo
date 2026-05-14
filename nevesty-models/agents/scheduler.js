@@ -1,11 +1,17 @@
 /**
- * 🧬 Living Organism Scheduler
- * Runs continuously, auto-detects issues, auto-fixes what it can,
- * reports results to Telegram admins.
+ * 🧬 Living Organism Scheduler — 24/7 autonomous operation
+ *
+ * Каждые 15 минут запускает полный цикл:
+ * 1. AutoFixer — немедленные тех. исправления (сессии, индексы, orphans)
+ * 2. SmartOrchestrator — 28 агентов анализируют и исправляют
+ * 3. Детальный audit-log каждого действия
+ *
+ * Администратор может посмотреть что делал организм за ЛЮБОЙ период через
+ * Telegram → 💬 Обсуждения или 📡 Фид агентов.
  */
+'use strict';
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
-// Try smart orchestrator first, fall back to regular orchestrator
 let runCheck;
 try {
   runCheck = require('./smart-orchestrator').runSmartOrchestrator;
@@ -14,99 +20,154 @@ try {
 }
 
 const AutoFixer = require('./auto-fixer');
-const { tgSend, logAgent, dbAll } = require('./lib/base');
+const { tgSend, logAgent, dbAll, dbRun, dbGet } = require('./lib/base');
 
-// Run immediately, then every 30 minutes
-const INTERVAL_MS = 30 * 60 * 1000;
+const INTERVAL_MS = 15 * 60 * 1000;   // 15 минут
+const CYCLE_LOG_LIMIT = 10000;         // храним до 10000 записей в agent_logs
 
-// Track consecutive failures to avoid spam
-let lastHealthScore = null;
-let failureCount = 0;
+let cycleNumber   = 0;
+let lastScore     = null;
+let totalFixed    = 0;
+let totalCycles   = 0;
+let startupTime   = Date.now();
+
+// ─── Детальная запись каждого цикла ──────────────────────────────────────────
+
+async function logCycleStart(cycleNum) {
+  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  await dbRun(
+    `INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`,
+    ['Scheduler', 'all', `Цикл #${cycleNum} старт`,
+     `🧬 Цикл #${cycleNum} начат в ${ts}. Аптайм: ${formatUptime(Date.now() - startupTime)}.`]
+  ).catch(() => {});
+}
+
+async function logCycleEnd(cycleNum, score, fixed, elapsed) {
+  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  await dbRun(
+    `INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`,
+    ['Scheduler', 'all', `Цикл #${cycleNum} завершён`,
+     `✅ Цикл #${cycleNum} завершён в ${ts}. Score=${score}%, исправлено=${fixed}, время=${elapsed}с. Итого за сессию: циклов=${totalCycles}, исправлений=${totalFixed}.`]
+  ).catch(() => {});
+}
+
+function formatUptime(ms) {
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return h > 0 ? `${h}ч ${m}м` : `${m}м`;
+}
+
+// ─── Очистка старых логов (чтобы БД не пухла) ────────────────────────────────
+
+async function pruneOldLogs() {
+  try {
+    // Оставляем только 10000 последних записей в agent_logs
+    const count = await dbGet('SELECT COUNT(*) as n FROM agent_logs');
+    if (count?.n > CYCLE_LOG_LIMIT) {
+      await dbRun(
+        `DELETE FROM agent_logs WHERE id IN (
+           SELECT id FROM agent_logs ORDER BY created_at ASC LIMIT ?
+         )`,
+        [count.n - CYCLE_LOG_LIMIT]
+      );
+    }
+    // Оставляем 30 дней обсуждений
+    await dbRun(
+      `DELETE FROM agent_discussions WHERE created_at < datetime('now', '-30 days')`
+    ).catch(() => {});
+    // Оставляем 7 дней открытых findings (закрытые — навсегда)
+    await dbRun(
+      `DELETE FROM agent_findings WHERE status='open' AND created_at < datetime('now', '-7 days')`
+    ).catch(() => {});
+  } catch {}
+}
+
+// ─── Основной цикл ───────────────────────────────────────────────────────────
 
 async function runCycle() {
+  cycleNumber++;
+  totalCycles++;
+  const t0 = Date.now();
   const ts = new Date().toLocaleString('ru', { timeZone: 'Europe/Moscow' });
-  console.log(`\n[${ts}] 🧬 Organism cycle starting...`);
+  console.log(`\n[${ts}] 🧬 Цикл #${cycleNumber} начат...`);
+
+  await logCycleStart(cycleNumber);
 
   try {
-    // Step 1: Run auto-fixer FIRST (fix what we already know about)
+    // ── Шаг 1: AutoFixer (быстрые тех. исправления) ──────────────────────────
     const fixer = new AutoFixer();
     await fixer.run({ silent: true });
-    const fixed = fixer.fixed || [];
+    const autoFixed = fixer.fixed || [];
+    if (autoFixed.length > 0) {
+      totalFixed += autoFixed.length;
+      await tgSend(
+        `🔧 AutoFixer [цикл #${cycleNumber}]:\n` +
+        autoFixed.slice(0, 5).map(f => `• ${f}`).join('\n')
+      ).catch(() => {});
+    }
 
-    // Step 2: Run full organism check (smart or regular)
+    // ── Шаг 2: Smart Orchestrator (28 агентов) ───────────────────────────────
     const result = await runCheck();
-    const { healthScore, criticalCount, highCount } = result;
+    const { healthScore = 100, criticalCount = 0, highCount = 0 } = result;
+    const orchFixed = (result.fixResults || []).filter(r => r.outcome === 'fixed').length;
+    totalFixed += orchFixed;
 
-    // Step 3: If health degraded significantly, run fixer again
-    if (lastHealthScore !== null && healthScore < lastHealthScore - 10) {
+    // ── Шаг 3: Алерт если health score деградировал ──────────────────────────
+    if (lastScore !== null && healthScore < lastScore - 15) {
       await tgSend(
-        `⚠️ Health score упал: ${lastHealthScore}% → ${healthScore}%\n` +
-        `🔴 ${criticalCount} критических, 🟠 ${highCount} высоких\n` +
-        `Запускаю авто-исправление...`
-      );
-      const fixer2 = new AutoFixer();
-      await fixer2.run({ silent: true });
+        `⚠️ Health Score деградировал: ${lastScore}% → ${healthScore}%\n` +
+        `🔴 ${criticalCount} крит, 🟠 ${highCount} высоких\n` +
+        `Цикл #${cycleNumber} — проверьте бот.`
+      ).catch(() => {});
     }
 
-    // Step 4: Notify about significant events
-    if (fixed.length > 0) {
-      await tgSend(
-        `🔧 Авто-исправлено: ${fixed.length} проблем\n` +
-        fixed.slice(0, 5).map(f => `• ${f}`).join('\n')
-      );
-    }
+    // ── Шаг 4: Очистка старых логов ──────────────────────────────────────────
+    await pruneOldLogs();
 
-    // Step 5: Report top-3 agent discussions from this cycle
-    try {
-      const discussions = await dbAll(
-        'SELECT * FROM agent_discussions ORDER BY created_at DESC LIMIT 3'
-      );
-      if (discussions.length > 0) {
-        let dMsg = `💬 Обсуждения агентов (топ-3):\n`;
-        discussions.forEach(d => {
-          const to = d.to_agent ? ` → ${d.to_agent}` : ' → all';
-          const snippet = (d.message || '').slice(0, 120);
-          dMsg += `\n🤖 ${d.from_agent}${to}:\n"${snippet}${snippet.length < (d.message||'').length ? '…' : ''}"\n`;
-        });
-        await tgSend(dMsg).catch(() => {});
-      }
-    } catch (e) { console.warn('[Scheduler] discussions report skipped:', e.message); }
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    lastScore = healthScore;
 
-    // Step 6: Report auto-fixed findings
-    try {
-      const autoFixed = await dbAll(
-        "SELECT * FROM agent_findings WHERE status='fixed' ORDER BY fixed_at DESC, created_at DESC LIMIT 5"
-      );
-      if (autoFixed.length > 0) {
-        let fMsg = `✅ Авто-исправленные находки (${autoFixed.length}):\n`;
-        autoFixed.forEach(f => {
-          fMsg += `• [${f.severity || 'info'}] ${(f.message || '').slice(0, 100)}\n`;
-        });
-        await tgSend(fMsg).catch(() => {});
-      }
-    } catch (e) { console.warn('[Scheduler] findings report skipped:', e.message); }
-
-    lastHealthScore = healthScore;
-    failureCount = 0;
-
-    await logAgent('Scheduler', `Цикл завершён: Score=${healthScore}% fixed=${fixed.length}`);
-    console.log(`[Scheduler] Cycle done. Score=${healthScore}% fixed=${fixed.length}`);
+    await logCycleEnd(cycleNumber, healthScore, autoFixed.length + orchFixed, elapsed);
+    await logAgent('Scheduler',
+      `Цикл #${cycleNumber}: Score=${healthScore}% autoFixed=${autoFixed.length} orchFixed=${orchFixed} ${elapsed}с`
+    );
+    console.log(`[Scheduler] Цикл #${cycleNumber} done. Score=${healthScore}% fixed=${autoFixed.length + orchFixed} (${elapsed}с)`);
 
   } catch (err) {
-    failureCount++;
-    console.error(`[Scheduler] Cycle error (${failureCount}):`, err.message);
-    if (failureCount <= 3) {
-      await tgSend(`🚨 Organism scheduler error: ${err.message}`).catch(() => {});
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    console.error(`[Scheduler] Цикл #${cycleNumber} ERROR (${elapsed}с):`, err.message);
+    await dbRun(
+      `INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`,
+      ['Scheduler', 'all', `❌ Цикл #${cycleNumber} ошибка`,
+       `Ошибка в цикле #${cycleNumber}: ${err.message}. Следующая попытка через ${INTERVAL_MS/60000} мин.`]
+    ).catch(() => {});
+    // Не спамим в Telegram при повторных ошибках
+    if (cycleNumber <= 3 || cycleNumber % 10 === 0) {
+      await tgSend(`🚨 Organism error [цикл #${cycleNumber}]: ${err.message}`).catch(() => {});
     }
   }
 }
 
-// Run immediately
-console.log('🧬 Living Organism Scheduler started');
-tgSend('🟢 Organism scheduler запущен. Первая проверка начинается...').catch(() => {});
+// ─── Запуск ──────────────────────────────────────────────────────────────────
 
+console.log('🧬 Living Organism Scheduler запущен (28 агентов, каждые 15 мин)');
+
+const uptimeStr = () => formatUptime(Date.now() - startupTime);
+
+tgSend(
+  `🟢 Organism запущен\n` +
+  `28 агентов | цикл каждые 15 мин\n\n` +
+  `Агенты:\n` +
+  `• 25 аналитиков (UX, Security, DB, Booking...)\n` +
+  `• 💰 Sales Analyst — конверсия и продажи\n` +
+  `• 📝 Content Manager — контент бота\n` +
+  `• 📊 Activity Logger — аудит каждого действия\n\n` +
+  `Первая проверка начинается...`
+).catch(() => {});
+
+// Первый цикл — сразу
 runCycle().then(() => {
-  // Schedule recurring runs
+  // Повторяем каждые 15 минут
   setInterval(runCycle, INTERVAL_MS);
-  console.log(`[Scheduler] Next run in ${INTERVAL_MS / 3600000}h`);
+  console.log(`[Scheduler] Следующий цикл через ${INTERVAL_MS / 60000} мин`);
 });

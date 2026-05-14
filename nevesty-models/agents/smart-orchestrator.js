@@ -42,6 +42,9 @@ const AGENT_CLASSES = [
   require('./21-admin-protection'),     require('./22-sql-safety'),
   require('./23-deeplink-handler'),     require('./24-performance-tuner'),
   require('./25-consistency-checker'),
+  require('./26-sales-analyst'),        // 💰 Воронка продаж, конверсия
+  require('./27-content-manager'),      // 📝 FAQ, About, контент бота
+  require('./28-activity-logger'),      // 📊 Полный аудит-трейл
 ];
 
 const SEV_EMO    = { CRITICAL: '🔴', HIGH: '🟠', MEDIUM: '🟡', LOW: '🟢', INFO: '⚪', OK: '✅' };
@@ -775,12 +778,32 @@ async function runSmartOrchestrator() {
   // ── PHASE 4: Fix ──────────────────────────────────────────────────────────
   const fixResults = await fixPhase(cycleId, fixPlan);
 
+  const fixedCount = fixResults.filter(r => r.outcome === 'fixed').length;
+
+  // Auto-restart bot if code was patched
+  if (fixedCount > 0) {
+    try {
+      await new Promise((res, rej) => {
+        const { exec } = require('child_process');
+        exec('pm2 restart nevesty-models --silent', (err) => err ? rej(err) : res());
+      });
+      console.log('  🔄 Bot restarted after code fixes');
+      await dbRun(
+        `INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`,
+        ['SmartOrchestrator', 'all', '🔄 Бот перезапущен',
+         `После ${fixedCount} авто-исправлений бот перезапущен для применения патчей.`]
+      ).catch(() => {});
+    } catch (e) {
+      console.warn('  ⚠️ Bot restart failed:', e.message);
+    }
+  }
+
   if (progressRef) {
-    const fixedCount = fixResults.filter(r => r.outcome === 'fixed').length;
     await tgEditMessage(progressRef.chatId, progressRef.messageId,
       `🧠 Smart Orchestrator\n\n` +
-      `✅ Исправлено: ${fixedCount} из ${fixResults.length}\n\n` +
-      `🔍 Верификация...`
+      `✅ Исправлено: ${fixedCount} из ${fixResults.length}\n` +
+      (fixedCount > 0 ? `🔄 Бот перезапущен\n` : '') +
+      `\n🔍 Верификация...`
     );
   }
 
