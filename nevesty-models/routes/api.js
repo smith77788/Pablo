@@ -855,5 +855,28 @@ router.get('/stats', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// ─── Agent discussions (admin) ────────────────────────────────────────────────
+router.get('/admin/discussions', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const discussions = await query(
+      'SELECT * FROM agent_discussions ORDER BY created_at DESC LIMIT ?',
+      [limit]
+    );
+    res.json(discussions);
+  } catch(e) { next(e); }
+});
+
+router.get('/admin/findings', auth, async (req, res, next) => {
+  try {
+    const status = req.query.status || 'open';
+    const findings = await query(
+      'SELECT * FROM agent_findings WHERE status=? ORDER BY created_at DESC LIMIT 100',
+      [status]
+    );
+    res.json(findings);
+  } catch(e) { next(e); }
+});
+
 module.exports = router;
 module.exports.setBot = setBot;
