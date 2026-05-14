@@ -1240,12 +1240,36 @@ async function showModelEditMenu(chatId, modelId) {
       [{ text: '📸 Instagram',  callback_data: `adm_ef_${modelId}_instagram`  },
        { text: '🏷 Категория',  callback_data: `adm_ef_${modelId}_category`   }],
       [{ text: '📝 Описание',   callback_data: `adm_ef_${modelId}_bio`        }],
-      [{ text: '📷 Фото',       callback_data: `adm_ef_${modelId}_photo`      }],
+      [{ text: '📷 Галерея фото', callback_data: `adm_gallery_${modelId}`      }],
       [{ text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${modelId}` }],
       [{ text: '🗑 Удалить модель', callback_data: `adm_del_model_${modelId}` }],
       [{ text: '← Карточка',   callback_data: `adm_model_${modelId}`          }],
     ]}
   });
+}
+
+// ─── Photo Gallery Manager ─────────────────────────────────────────────────────
+
+async function showPhotoGalleryManager(chatId, modelId) {
+  if (!isAdmin(chatId)) return;
+  const m = await get('SELECT id, name, photo_main, photos FROM models WHERE id=?', [modelId]);
+  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+  let gallery = [];
+  try { gallery = JSON.parse(m.photos || '[]'); } catch {}
+  const all = m.photo_main ? [m.photo_main, ...gallery] : gallery;
+  const count = all.length;
+  await setSession(chatId, `adm_gallery_${modelId}`, {});
+  return safeSend(chatId,
+    `📷 Галерея: *${m.name}*\nФото: *${count}/8* загружено\n\nОтправляйте фото одно за другим (до 8 штук).\nПервое фото станет главным.`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [
+        [{ text: '🗑 Очистить все фото', callback_data: `adm_gallery_clear_${modelId}` }],
+        [{ text: '✅ Готово',           callback_data: `adm_model_${modelId}`           }],
+        [{ text: '← Редактировать',    callback_data: `adm_editmodel_${modelId}`       }],
+      ]}
+    }
+  );
 }
 
 // ─── Broadcast ────────────────────────────────────────────────────────────────
@@ -1828,9 +1852,7 @@ function initBot(app) {
         return safeSend(chatId, '🏷 Выберите новую категорию:', { reply_markup: { inline_keyboard: btns } });
       }
       if (field === 'photo') {
-        await setSession(chatId, `adm_ef_${modelId}_photo`, {});
-        return safeSend(chatId, '📷 Отправьте новое *фото модели*:', {
-          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: `adm_editmodel_${modelId}` }]] } });
+        return showPhotoGalleryManager(chatId, modelId);
       }
       const fieldLabels = { name:'имя', age:'возраст', height:'рост (см)', weight:'вес (кг)',
                             shoe_size:'размер обуви', instagram:'Instagram', bio:'описание',
@@ -1871,6 +1893,17 @@ function initBot(app) {
         reply_markup: { inline_keyboard: [[{ text: '← К моделям', callback_data: 'adm_models_0' }]] }
       });
     }
+    if (data.startsWith('adm_gallery_clear_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_gallery_clear_',''));
+      await run("UPDATE models SET photo_main=NULL, photos='[]' WHERE id=?", [modelId]).catch(()=>{});
+      return showPhotoGalleryManager(chatId, modelId);
+    }
+    if (data.startsWith('adm_gallery_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_gallery_',''));
+      return showPhotoGalleryManager(chatId, modelId);
+    }
 
     // ── Agent feed
     if (data.startsWith('agent_feed_')) {
@@ -1899,13 +1932,35 @@ function initBot(app) {
       d.photo_file_id = fileId; d._step = 'confirm';
       return showAddModelStep(chatId, d);
     }
+    if (state.startsWith('adm_gallery_')) {
+      const modelId = parseInt(state.replace('adm_gallery_',''));
+      const m = await get('SELECT photo_main, photos FROM models WHERE id=?', [modelId]).catch(()=>null);
+      if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+      let gallery = [];
+      try { gallery = JSON.parse(m.photos || '[]'); } catch {}
+      const all = m.photo_main ? [m.photo_main, ...gallery] : gallery;
+      if (all.length >= 8) {
+        return safeSend(chatId, '⚠️ Максимум 8 фото. Сначала нажмите «Очистить».');
+      }
+      if (!m.photo_main) {
+        await run('UPDATE models SET photo_main=? WHERE id=?', [fileId, modelId]).catch(()=>{});
+      } else {
+        gallery.push(fileId);
+        await run('UPDATE models SET photos=? WHERE id=?', [JSON.stringify(gallery), modelId]).catch(()=>{});
+      }
+      const newCount = all.length + 1;
+      return safeSend(chatId, `✅ Фото ${newCount}/8 добавлено!\n\nОтправьте следующее или нажмите «Готово».`, {
+        reply_markup: { inline_keyboard: [
+          [{ text: '✅ Готово',          callback_data: `adm_model_${modelId}`           }],
+          [{ text: '🗑 Очистить всё',   callback_data: `adm_gallery_clear_${modelId}`   }],
+          [{ text: '📷 К галерее',      callback_data: `adm_gallery_${modelId}`         }],
+        ]}
+      });
+    }
     if (state.startsWith('adm_ef_') && state.endsWith('_photo')) {
       const modelId = parseInt(state.replace('adm_ef_','').split('_')[0]);
-      await run('UPDATE models SET photo_main=? WHERE id=?', [fileId, modelId]).catch(()=>{});
       await clearSession(chatId);
-      return safeSend(chatId, '✅ Фото обновлено!', {
-        reply_markup: { inline_keyboard: [[{ text: '← Карточка', callback_data: `adm_model_${modelId}` }]] }
-      });
+      return showPhotoGalleryManager(chatId, modelId);
     }
   });
 
