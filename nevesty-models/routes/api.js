@@ -27,11 +27,23 @@ function validateDate(d) { return !d || (/^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN
 
 // ─── File utilities ───────────────────────────────────────────────────────────
 function deleteFile(urlPath) {
-  if (!urlPath) return;
+  if (!urlPath || typeof urlPath !== 'string') return;
   try {
-    const abs = path.join(__dirname, '..', urlPath);
+    const uploadsDir = path.resolve(__dirname, '..', 'uploads');
+    const abs = path.resolve(__dirname, '..', urlPath.replace(/^\//, ''));
+    if (!abs.startsWith(uploadsDir + path.sep)) {
+      console.warn('deleteFile blocked path traversal:', urlPath);
+      return;
+    }
     if (fs.existsSync(abs)) fs.unlinkSync(abs);
   } catch (e) { console.warn('deleteFile error:', e.message); }
+}
+
+// ─── CSV helpers ──────────────────────────────────────────────────────────────
+function csvCell(v) {
+  let s = (v == null ? '' : String(v));
+  if (/^[=+\-@]/.test(s)) s = "'" + s;
+  return '"' + s.replace(/"/g, '""') + '"';
 }
 
 const storage = multer.diskStorage({
@@ -171,7 +183,9 @@ router.get('/models', async (req, res, next) => {
 
 router.get('/models/:id', async (req, res, next) => {
   try {
-    const m = await get('SELECT * FROM models WHERE id = ?', [req.params.id]);
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const m = await get('SELECT * FROM models WHERE id = ?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
     res.json({ ...m, photos: JSON.parse(m.photos || '[]') });
   } catch (e) { next(e); }
@@ -196,7 +210,9 @@ router.post('/admin/models', auth, upload.fields([{ name: 'photo_main', maxCount
 
 router.put('/admin/models/:id', auth, upload.fields([{ name: 'photo_main', maxCount: 1 }, { name: 'photos', maxCount: 10 }]), async (req, res, next) => {
   try {
-    const existing = await get('SELECT * FROM models WHERE id = ?', [req.params.id]);
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const existing = await get('SELECT * FROM models WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'Модель не найдена' });
     const { name, age, height, weight, bust, waist, hips, shoe_size, hair_color, eye_color, bio, instagram, category, available } = req.body;
     // Replace main photo if new one uploaded
@@ -211,7 +227,7 @@ router.put('/admin/models/:id', auth, upload.fields([{ name: 'photo_main', maxCo
     }
     await run(
       `UPDATE models SET name=?,age=?,height=?,weight=?,bust=?,waist=?,hips=?,shoe_size=?,hair_color=?,eye_color=?,bio=?,photo_main=?,photos=?,instagram=?,category=?,available=? WHERE id=?`,
-      [sanitize(name, 100), +age || null, +height || null, +weight || null, +bust || null, +waist || null, +hips || null, sanitize(shoe_size, 10), sanitize(hair_color, 50), sanitize(eye_color, 50), sanitize(bio, 2000), photo_main, JSON.stringify(photos), sanitize(instagram, 100), category || existing.category, available === '1' ? 1 : 0, req.params.id]
+      [sanitize(name, 100), +age || null, +height || null, +weight || null, +bust || null, +waist || null, +hips || null, sanitize(shoe_size, 10), sanitize(hair_color, 50), sanitize(eye_color, 50), sanitize(bio, 2000), photo_main, JSON.stringify(photos), sanitize(instagram, 100), category || existing.category, available === '1' ? 1 : 0, id]
     );
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -219,24 +235,28 @@ router.put('/admin/models/:id', auth, upload.fields([{ name: 'photo_main', maxCo
 
 router.delete('/admin/models/:id', auth, async (req, res, next) => {
   try {
-    const m = await get('SELECT * FROM models WHERE id = ?', [req.params.id]);
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const m = await get('SELECT * FROM models WHERE id = ?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
     // Delete all photos from disk
     deleteFile(m.photo_main);
     const photos = JSON.parse(m.photos || '[]');
     photos.forEach(p => deleteFile(p));
-    await run('DELETE FROM models WHERE id = ?', [req.params.id]);
+    await run('DELETE FROM models WHERE id = ?', [id]);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
 router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
   try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const { photo } = req.body;
-    const m = await get('SELECT photos FROM models WHERE id = ?', [req.params.id]);
+    const m = await get('SELECT photos FROM models WHERE id = ?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
     const photos = JSON.parse(m.photos || '[]').filter(p => p !== photo);
-    await run('UPDATE models SET photos = ? WHERE id = ?', [JSON.stringify(photos), req.params.id]);
+    await run('UPDATE models SET photos = ? WHERE id = ?', [JSON.stringify(photos), id]);
     deleteFile(photo);
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -302,8 +322,10 @@ router.get('/orders/status/:order_number', async (req, res, next) => {
 // ─── Orders (admin) ───────────────────────────────────────────────────────────
 router.get('/admin/orders', auth, async (req, res, next) => {
   try {
-    const { status, search, page = 1, limit = 25 } = req.query;
-    const offset = (Math.max(+page, 1) - 1) * Math.min(+limit, 100);
+    const { status, search } = req.query;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+    const offset = (page - 1) * limit;
     let where = '1=1';
     const params = [];
     if (status && ALLOWED_STATUSES.includes(status)) { where += ' AND o.status = ?'; params.push(status); }
@@ -319,14 +341,14 @@ router.get('/admin/orders', auth, async (req, res, next) => {
              LEFT JOIN admins a ON o.manager_id = a.id
              WHERE ${where}
              ORDER BY o.created_at DESC
-             LIMIT ? OFFSET ?`, [...params, Math.min(+limit, 100), offset])
+             LIMIT ? OFFSET ?`, [...params, limit, offset])
     ]);
     res.json({
       orders,
       total: totalRow.n,
-      page: +page,
-      pages: Math.ceil(totalRow.n / Math.min(+limit, 100)),
-      limit: Math.min(+limit, 100)
+      page,
+      pages: Math.ceil(totalRow.n / limit),
+      limit
     });
   } catch (e) { next(e); }
 });
@@ -350,7 +372,7 @@ router.get('/admin/orders/export', auth, async (req, res, next) => {
     const STATUS_RU = { new:'Новая', reviewing:'На рассмотрении', confirmed:'Подтверждена', in_progress:'В процессе', completed:'Завершена', cancelled:'Отменена' };
     const EVENT_RU = { fashion_show:'Показ мод', photo_shoot:'Фотосессия', event:'Мероприятие', commercial:'Коммерческая', runway:'Подиум', other:'Другое' };
     const headers = ['Номер','Клиент','Телефон','Email','Telegram','Мероприятие','Дата','Часов','Место','Бюджет','Комментарий','Статус','Заметки','Модель','Менеджер','Создана','Обновлена'];
-    const csvRow = (cols) => cols.map(c => `"${String(c || '').replace(/"/g, '""')}"`).join(',');
+    const csvRow = (cols) => cols.map(csvCell).join(',');
     const rows = [csvRow(headers), ...orders.map(o => csvRow([
       o.order_number, o.client_name, o.client_phone, o.client_email || '', o.client_telegram || '',
       EVENT_RU[o.event_type] || o.event_type, o.event_date || '', o.event_duration,
@@ -366,16 +388,18 @@ router.get('/admin/orders/export', auth, async (req, res, next) => {
 
 router.get('/admin/orders/:id', auth, async (req, res, next) => {
   try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const order = await get(
       `SELECT o.*, m.name as model_name, m.photo_main as model_photo, a.username as manager_name
        FROM orders o
        LEFT JOIN models m ON o.model_id = m.id
        LEFT JOIN admins a ON o.manager_id = a.id
        WHERE o.id = ?`,
-      [req.params.id]
+      [id]
     );
     if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
-    const messages = await query('SELECT * FROM messages WHERE order_id = ? ORDER BY created_at ASC', [req.params.id]);
+    const messages = await query('SELECT * FROM messages WHERE order_id = ? ORDER BY created_at ASC', [id]);
     const hasUnread = messages.some(m => m.sender_type === 'client') &&
       !messages.slice().reverse().find(m => m.sender_type === 'admin');
     res.json({ ...order, messages, has_unread: hasUnread });
@@ -384,13 +408,15 @@ router.get('/admin/orders/:id', auth, async (req, res, next) => {
 
 router.put('/admin/orders/:id', auth, async (req, res, next) => {
   try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const { status, admin_notes, manager_id } = req.body;
     if (status && !ALLOWED_STATUSES.includes(status)) return res.status(400).json({ error: 'Недопустимый статус' });
-    const order = await get('SELECT * FROM orders WHERE id = ?', [req.params.id]);
+    const order = await get('SELECT * FROM orders WHERE id = ?', [id]);
     if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
     await run(
       `UPDATE orders SET status=COALESCE(?,status), admin_notes=?, manager_id=COALESCE(?,manager_id), updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-      [status || null, admin_notes !== undefined ? sanitize(admin_notes, 2000) : order.admin_notes, manager_id || null, req.params.id]
+      [status || null, admin_notes !== undefined ? sanitize(admin_notes, 2000) : order.admin_notes, manager_id || null, id]
     );
     if (botInstance && order.client_chat_id && status && status !== order.status) {
       botInstance.notifyStatusChange(order.client_chat_id, order.order_number, status);
@@ -412,11 +438,12 @@ router.post('/admin/orders/bulk', auth, async (req, res, next) => {
     } else {
       const orders = await query(`SELECT id, client_chat_id, order_number, status FROM orders WHERE id IN (${validIds.map(() => '?').join(',')})`, validIds);
       await run(`UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id IN (${validIds.map(() => '?').join(',')})`, [action, ...validIds]);
-      // Notify clients whose status changed
+      // Notify clients whose status changed (parallel)
       if (botInstance) {
-        orders.filter(o => o.status !== action && o.client_chat_id).forEach(o => {
-          botInstance.notifyStatusChange(o.client_chat_id, o.order_number, action);
-        });
+        const toNotify = orders.filter(o => o.status !== action && o.client_chat_id);
+        await Promise.allSettled(
+          toNotify.map(o => botInstance.notifyStatusChange(o.client_chat_id, o.order_number, action))
+        );
       }
     }
     res.json({ ok: true, affected: validIds.length });
@@ -426,13 +453,15 @@ router.post('/admin/orders/bulk', auth, async (req, res, next) => {
 // ─── Messages ─────────────────────────────────────────────────────────────────
 router.post('/admin/orders/:id/message', auth, async (req, res, next) => {
   try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const content = sanitize(req.body.content, 2000);
     if (!content) return res.status(400).json({ error: 'Сообщение не может быть пустым' });
-    const order = await get('SELECT * FROM orders WHERE id = ?', [req.params.id]);
+    const order = await get('SELECT * FROM orders WHERE id = ?', [id]);
     if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
     const admin = await get('SELECT username FROM admins WHERE id = ?', [req.admin.id]);
     await run('INSERT INTO messages (order_id, sender_type, sender_name, content) VALUES (?,?,?,?)',
-      [req.params.id, 'admin', admin.username, content]);
+      [id, 'admin', admin.username, content]);
     if (botInstance) {
       if (order.client_chat_id) {
         botInstance.sendMessageToClient(order.client_chat_id, order.order_number, content, admin.username);
@@ -458,6 +487,7 @@ router.post('/admin/notify', auth, async (req, res, next) => {
 // ─── Managers ─────────────────────────────────────────────────────────────────
 router.get('/admin/managers', auth, async (req, res, next) => {
   try {
+    if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
     const managers = await query('SELECT id, username, email, role, telegram_id, created_at FROM admins ORDER BY created_at DESC');
     res.json(managers);
   } catch (e) { next(e); }
@@ -484,8 +514,10 @@ router.post('/admin/managers', auth, async (req, res, next) => {
 router.delete('/admin/managers/:id', auth, async (req, res, next) => {
   try {
     if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
-    if (+req.params.id === req.admin.id) return res.status(400).json({ error: 'Нельзя удалить себя' });
-    await run('DELETE FROM admins WHERE id = ?', [req.params.id]);
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    if (id === req.admin.id) return res.status(400).json({ error: 'Нельзя удалить себя' });
+    await run('DELETE FROM admins WHERE id = ?', [id]);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

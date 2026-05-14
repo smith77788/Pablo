@@ -2,14 +2,16 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
-const { initDatabase } = require('./database');
+const { initDatabase, get: dbGet, closeDatabase } = require('./database');
 const { initBot } = require('./bot');
 const apiRouter = require('./routes/api');
 
-if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret')) {
-  console.error('FATAL: Set a strong JWT_SECRET in .env before running in production!');
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  console.error('FATAL: JWT_SECRET must be set to a strong value (>= 32 chars).');
   process.exit(1);
 }
+
+let botInstance = null;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,8 +56,13 @@ app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
 app.use('/api', apiRouter);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime(), ts: new Date().toISOString() });
+app.get('/health', async (req, res) => {
+  try {
+    await dbGet('SELECT 1 as ok');
+    res.json({ status: 'ok', uptime: process.uptime(), ts: new Date().toISOString() });
+  } catch (e) {
+    res.status(503).json({ status: 'down', error: e.message });
+  }
 });
 
 // ─── Frontend routing ─────────────────────────────────────────────────────────
@@ -84,7 +91,7 @@ app.use((err, req, res, next) => {
 async function start() {
   await initDatabase();
 
-  const botInstance = initBot(app);
+  botInstance = initBot(app);
   if (botInstance) apiRouter.setBot(botInstance);
 
   const server = app.listen(PORT, () => {
@@ -92,19 +99,26 @@ async function start() {
     console.log(`🔐 Admin panel     →  http://localhost:${PORT}/admin/login.html`);
     console.log(`   Login: ${process.env.ADMIN_USERNAME || 'admin'} / ${process.env.ADMIN_PASSWORD || 'admin123'}`);
     console.log(`❤  Health check   →  http://localhost:${PORT}/health\n`);
-    if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret') {
-      console.warn('⚠️  JWT_SECRET is weak — set it in .env!');
-    }
   });
 
   // ─── Graceful shutdown ───────────────────────────────────────────────────
-  const shutdown = (signal) => {
+  const shutdown = async (signal) => {
     console.log(`\n${signal} received — shutting down gracefully…`);
-    server.close(() => {
+    const forceTimer = setTimeout(() => { console.error('Forced shutdown after timeout.'); process.exit(1); }, 10000);
+    try {
+      if (botInstance?.instance?.stopPolling) {
+        try { await botInstance.instance.stopPolling({ cancel: true }); console.log('Bot polling stopped.'); } catch (e) { console.warn('stopPolling:', e.message); }
+      }
+      await new Promise(resolve => server.close(resolve));
       console.log('HTTP server closed.');
+      if (closeDatabase) await closeDatabase();
+      console.log('Database closed.');
+      clearTimeout(forceTimer);
       process.exit(0);
-    });
-    setTimeout(() => { console.error('Forced shutdown after timeout.'); process.exit(1); }, 10000);
+    } catch (e) {
+      console.error('Shutdown error:', e);
+      process.exit(1);
+    }
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));

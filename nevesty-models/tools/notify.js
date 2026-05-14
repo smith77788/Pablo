@@ -46,12 +46,12 @@ async function readStdin() {
 }
 
 // ─── Send to Telegram ────────────────────────────────────────────────────────
-function send(chatId, text) {
+function sendRaw(chatId, text, useMarkdown) {
   return new Promise(resolve => {
     const payload = JSON.stringify({
       chat_id: chatId,
       text,
-      parse_mode: 'Markdown',
+      ...(useMarkdown ? { parse_mode: 'Markdown' } : {}),
       disable_web_page_preview: true
     });
     const req = https.request({
@@ -65,15 +65,24 @@ function send(chatId, text) {
       res.on('end', () => {
         try {
           const json = JSON.parse(resp);
-          if (!json.ok) console.error(`[notify] ${chatId}: ${json.description}`);
-          resolve(json.ok);
-        } catch { resolve(false); }
+          resolve(json);
+        } catch { resolve({ ok: false, description: 'parse error' }); }
       });
     });
-    req.on('error', e => { console.error(`[notify] ${chatId}: ${e.message}`); resolve(false); });
+    req.on('error', e => resolve({ ok: false, description: e.message }));
     req.write(payload);
     req.end();
   });
+}
+
+async function send(chatId, text) {
+  let res = await sendRaw(chatId, text, true);
+  if (!res.ok && /parse entities|can't parse/i.test(res.description || '')) {
+    // Markdown failed — fall back to plain text
+    res = await sendRaw(chatId, text, false);
+  }
+  if (!res.ok) console.error(`[notify] ${chatId}: ${res.description}`);
+  return res.ok;
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────

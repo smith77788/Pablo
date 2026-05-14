@@ -1,10 +1,17 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const TelegramBot = require('node-telegram-bot-api');
 const { query, run, get } = require('./database');
 
 const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const SITE_URL = process.env.SITE_URL || 'http://localhost:3000';
 const WEBHOOK_URL = process.env.WEBHOOK_URL || '';
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || crypto.randomBytes(32).toString('hex');
+
+function mdEscape(s) {
+  if (s == null) return '';
+  return String(s).replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+}
 
 const STATUS_LABELS = {
   new: '🆕 Новая',
@@ -42,10 +49,19 @@ async function getAdminChatIds() {
 }
 
 // Safe send — never throws even if user blocked the bot
-async function safeSend(chatId, text, opts) {
+async function safeSend(chatId, text, opts = {}) {
   try {
     return await bot.sendMessage(chatId, text, opts);
   } catch (e) {
+    if (opts.parse_mode && /parse entities|can't parse/i.test(e.message)) {
+      try {
+        const { parse_mode, ...rest } = opts;
+        return await bot.sendMessage(chatId, text, rest);
+      } catch (e2) {
+        console.warn(`[Bot] sendMessage retry to ${chatId} failed: ${e2.message}`);
+        return null;
+      }
+    }
     console.warn(`[Bot] sendMessage to ${chatId} failed: ${e.message}`);
     return null;
   }
@@ -75,12 +91,14 @@ function initBot(app) {
     const webhookPath = '/api/tg-webhook';
     const fullWebhookUrl = WEBHOOK_URL.replace(/\/$/, '') + webhookPath;
 
-    bot.setWebHook(fullWebhookUrl)
+    bot.setWebHook(fullWebhookUrl, { secret_token: WEBHOOK_SECRET })
       .then(() => console.log(`🤖 Telegram bot started (webhook: ${fullWebhookUrl})`))
       .catch(e => console.error('[Bot] setWebHook error:', e.message));
 
     if (app) {
       app.post(webhookPath, (req, res) => {
+        const sig = req.headers['x-telegram-bot-api-secret-token'];
+        if (sig !== WEBHOOK_SECRET) return res.sendStatus(403);
         bot.processUpdate(req.body);
         res.sendStatus(200);
       });
@@ -132,9 +150,12 @@ function initBot(app) {
       try {
         const order = await get('SELECT * FROM orders WHERE order_number = ?', [orderRef]);
         if (order) {
+          if (order.client_chat_id && order.client_chat_id !== String(chatId)) {
+            return safeSend(chatId, '❌ Эта заявка уже привязана к другому чату.');
+          }
           await run('UPDATE orders SET client_chat_id = ? WHERE order_number = ?', [String(chatId), orderRef]);
           return safeSend(chatId,
-            `✅ *Ваша заявка ${orderRef} привязана к этому чату.*\n\n` +
+            `✅ *Ваша заявка ${mdEscape(orderRef)} привязана к этому чату.*\n\n` +
             `Теперь вы будете получать уведомления о статусе заявки.\n` +
             `Вы можете писать сообщения прямо сюда — менеджер ответит вам.`,
             {
@@ -200,16 +221,16 @@ function initBot(app) {
         [orderNumber]
       );
       if (!order) {
-        return safeSend(chatId, `❌ Заявка *${orderNumber}* не найдена.`, { parse_mode: 'Markdown' });
+        return safeSend(chatId, `❌ Заявка *${mdEscape(orderNumber)}* не найдена.`, { parse_mode: 'Markdown' });
       }
       const statusLabel = STATUS_LABELS[order.status] || order.status;
       return safeSend(chatId,
-        `📋 *Заявка ${order.order_number}*\n\n` +
-        `Клиент: ${order.client_name}\n` +
+        `📋 *Заявка ${mdEscape(order.order_number)}*\n\n` +
+        `Клиент: ${mdEscape(order.client_name)}\n` +
         `Статус: ${statusLabel}\n` +
         `Мероприятие: ${EVENT_TYPES[order.event_type] || order.event_type}\n` +
-        (order.event_date ? `Дата: ${order.event_date}\n` : '') +
-        (order.model_name ? `Модель: ${order.model_name}\n` : ''),
+        (order.event_date ? `Дата: ${mdEscape(order.event_date)}\n` : '') +
+        (order.model_name ? `Модель: ${mdEscape(order.model_name)}\n` : ''),
         { parse_mode: 'Markdown' }
       );
     } catch (e) {
@@ -228,8 +249,8 @@ function initBot(app) {
       if (!orders.length) return safeSend(msg.chat.id, '📭 Нет заявок.');
       let text = `📋 *Последние заявки:*\n\n`;
       for (const o of orders) {
-        text += `${STATUS_LABELS[o.status] || o.status} *${o.order_number}*\n`;
-        text += `  ${o.client_name} · ${EVENT_TYPES[o.event_type] || o.event_type}\n\n`;
+        text += `${STATUS_LABELS[o.status] || o.status} *${mdEscape(o.order_number)}*\n`;
+        text += `  ${mdEscape(o.client_name)} · ${EVENT_TYPES[o.event_type] || o.event_type}\n\n`;
       }
       return safeSend(msg.chat.id, text, {
         parse_mode: 'Markdown',
@@ -253,8 +274,8 @@ function initBot(app) {
       if (!orders.length) return safeSend(msg.chat.id, '✅ Новых заявок нет.');
       let text = `🆕 *Новые заявки (${orders.length}):*\n\n`;
       for (const o of orders) {
-        text += `*${o.order_number}* — ${o.client_name}\n`;
-        text += `📞 ${o.client_phone} · ${EVENT_TYPES[o.event_type] || o.event_type}\n\n`;
+        text += `*${mdEscape(o.order_number)}* — ${mdEscape(o.client_name)}\n`;
+        text += `📞 ${mdEscape(o.client_phone)} · ${EVENT_TYPES[o.event_type] || o.event_type}\n\n`;
       }
       return safeSend(msg.chat.id, text, { parse_mode: 'Markdown' });
     } catch (e) {
@@ -269,7 +290,7 @@ function initBot(app) {
       const models = await query('SELECT name, height, category, available FROM models ORDER BY id DESC');
       let text = `💃 *Модели агентства (${models.length}):*\n\n`;
       for (const m of models) {
-        text += `${m.available ? '🟢' : '🔴'} *${m.name}* — ${m.height}см · ${m.category}\n`;
+        text += `${m.available ? '🟢' : '🔴'} *${mdEscape(m.name)}* — ${mdEscape(m.height)}см · ${mdEscape(m.category)}\n`;
       }
       return safeSend(msg.chat.id, text, { parse_mode: 'Markdown' });
     } catch (e) {
@@ -354,9 +375,9 @@ function initBot(app) {
       if (!messages.length) return safeSend(msg.chat.id, '📭 Сообщений пока нет.');
       let text = `📡 *Лента сообщений (последние 15):*\n\n`;
       for (const m of messages.reverse()) {
-        const who = m.sender_type === 'admin' ? `👤 ${m.sender_name}` : `🙋 ${m.client_name}`;
+        const who = m.sender_type === 'admin' ? `👤 ${mdEscape(m.sender_name)}` : `🙋 ${mdEscape(m.client_name)}`;
         const ts = new Date(m.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-        text += `[${ts}] *${m.order_number}* — ${who}\n${m.content}\n\n`;
+        text += `[${ts}] *${mdEscape(m.order_number)}* — ${who}\n${mdEscape(m.content)}\n\n`;
       }
       return safeSend(msg.chat.id, text, { parse_mode: 'Markdown' });
     } catch (e) {
@@ -371,7 +392,7 @@ function initBot(app) {
     const text = match[2].trim();
     try {
       const order = await get('SELECT * FROM orders WHERE order_number = ?', [orderNum]);
-      if (!order) return safeSend(msg.chat.id, `❌ Заявка *${orderNum}* не найдена.`, { parse_mode: 'Markdown' });
+      if (!order) return safeSend(msg.chat.id, `❌ Заявка *${mdEscape(orderNum)}* не найдена.`, { parse_mode: 'Markdown' });
       const admin = await get('SELECT username FROM admins WHERE telegram_id = ?', [String(msg.chat.id)]);
       const adminName = admin?.username || 'Менеджер';
       await run(
@@ -380,7 +401,7 @@ function initBot(app) {
       );
       if (order.client_chat_id) {
         await safeSend(order.client_chat_id,
-          `💬 *Сообщение от менеджера* (${order.order_number}):\n\n${text}`,
+          `💬 *Сообщение от менеджера* (${mdEscape(order.order_number)}):\n\n${mdEscape(text)}`,
           { parse_mode: 'Markdown' }
         );
         return safeSend(msg.chat.id, `✅ Сообщение отправлено клиенту ${order.client_name}.`);
@@ -410,15 +431,15 @@ function initBot(app) {
           [orderRef]
         );
         if (!order) {
-          return safeSend(chatId, `❌ Заявка *${orderRef}* не найдена.`, { parse_mode: 'Markdown' });
+          return safeSend(chatId, `❌ Заявка *${mdEscape(orderRef)}* не найдена.`, { parse_mode: 'Markdown' });
         }
         const statusLabel = STATUS_LABELS[order.status] || order.status;
         return safeSend(chatId,
-          `📋 *Заявка ${order.order_number}*\n\n` +
+          `📋 *Заявка ${mdEscape(order.order_number)}*\n\n` +
           `Статус: ${statusLabel}\n` +
           `Мероприятие: ${EVENT_TYPES[order.event_type] || order.event_type}\n` +
-          (order.event_date ? `Дата: ${order.event_date}\n` : '') +
-          (order.model_name ? `Модель: ${order.model_name}\n` : ''),
+          (order.event_date ? `Дата: ${mdEscape(order.event_date)}\n` : '') +
+          (order.model_name ? `Модель: ${mdEscape(order.model_name)}\n` : ''),
           { parse_mode: 'Markdown' }
         );
       } catch (e) {
@@ -455,9 +476,21 @@ function initBot(app) {
 
     if (action === 'confirm') {
       try {
-        await run("UPDATE orders SET status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?", [orderId]);
-      } catch (e) { console.error('[Bot] confirm update error:', e.message); }
-      await safeEdit(`✅ Заявка *${order.order_number}* подтверждена.`, {
+        const r = await run(
+          "UPDATE orders SET status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('confirmed','cancelled','completed')",
+          [orderId]
+        );
+        if (r.changes === 0) {
+          await safeEdit(`⚠️ Заявка ${order.order_number} уже обработана.`, {
+            chat_id: chatId, message_id: q.message.message_id
+          });
+          return;
+        }
+      } catch (e) {
+        console.error('[Bot] confirm update error:', e.message);
+        return;
+      }
+      await safeEdit(`✅ Заявка *${mdEscape(order.order_number)}* подтверждена.`, {
         chat_id: chatId, message_id: q.message.message_id, parse_mode: 'Markdown'
       });
       if (order.client_chat_id) notifyStatusChange(order.client_chat_id, order.order_number, 'confirmed');
@@ -466,9 +499,21 @@ function initBot(app) {
 
     if (action === 'reject') {
       try {
-        await run("UPDATE orders SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=?", [orderId]);
-      } catch (e) { console.error('[Bot] reject update error:', e.message); }
-      await safeEdit(`❌ Заявка *${order.order_number}* отклонена.`, {
+        const r = await run(
+          "UPDATE orders SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','cancelled')",
+          [orderId]
+        );
+        if (r.changes === 0) {
+          await safeEdit(`⚠️ Заявка ${order.order_number} уже обработана.`, {
+            chat_id: chatId, message_id: q.message.message_id
+          });
+          return;
+        }
+      } catch (e) {
+        console.error('[Bot] reject update error:', e.message);
+        return;
+      }
+      await safeEdit(`❌ Заявка *${mdEscape(order.order_number)}* отклонена.`, {
         chat_id: chatId, message_id: q.message.message_id, parse_mode: 'Markdown'
       });
       if (order.client_chat_id) notifyStatusChange(order.client_chat_id, order.order_number, 'cancelled');
@@ -477,9 +522,21 @@ function initBot(app) {
 
     if (action === 'review') {
       try {
-        await run("UPDATE orders SET status='reviewing', updated_at=CURRENT_TIMESTAMP WHERE id=?", [orderId]);
-      } catch (e) { console.error('[Bot] review update error:', e.message); }
-      await safeEdit(`🔍 Заявка *${order.order_number}* взята в работу.`, {
+        const r = await run(
+          "UPDATE orders SET status='reviewing', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('confirmed','cancelled','completed')",
+          [orderId]
+        );
+        if (r.changes === 0) {
+          await safeEdit(`⚠️ Заявка ${order.order_number} уже обработана.`, {
+            chat_id: chatId, message_id: q.message.message_id
+          });
+          return;
+        }
+      } catch (e) {
+        console.error('[Bot] review update error:', e.message);
+        return;
+      }
+      await safeEdit(`🔍 Заявка *${mdEscape(order.order_number)}* взята в работу.`, {
         chat_id: chatId, message_id: q.message.message_id, parse_mode: 'Markdown'
       });
       return;

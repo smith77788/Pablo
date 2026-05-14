@@ -84,6 +84,12 @@ function adminConfirm(title, msg, onOk) {
 
 function logout() { localStorage.clear(); window.location.href = '/admin/login.html'; }
 
+// ─── HTML escape helper (XSS protection) ──────────────
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 // ─── Formatters ───────────────────────────────────────
 const STATUS_LABELS = {
   new: 'Новая', reviewing: 'На рассмотрении', confirmed: 'Подтверждена',

@@ -1,6 +1,7 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const DB_PATH = path.join(__dirname, 'data.db');
 let db;
@@ -159,8 +160,14 @@ async function seedDemoModels() {
 
 function generateOrderNumber() {
   const year = new Date().getFullYear();
-  const rand = Math.floor(1000 + Math.random() * 9000);
-  return `NM-${year}-${rand}`;
+  return `NM-${year}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 }
 
-module.exports = { initDatabase, query, run, get, generateOrderNumber };
+function closeDatabase() {
+  return new Promise(resolve => {
+    if (db) db.close(err => { if (err) console.error('DB close error:', err.message); resolve(); });
+    else resolve();
+  });
+}
+
+module.exports = { initDatabase, query, run, get, generateOrderNumber, closeDatabase };
