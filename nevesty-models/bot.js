@@ -1197,6 +1197,9 @@ function initBot(app) {
       return bookingSubmit(chatId, d);
     }
 
+    // ── Guard all admin_ and agent_feed_ callbacks
+    if ((data.startsWith('admin_') || data.startsWith('toggle_model_') || data.startsWith('agent_feed_')) && !isAdmin(chatId)) return;
+
     // ── Admin orders
     if (data.startsWith('admin_orders_')) {
       const parts = data.replace('admin_orders_', '').split('_');
@@ -1432,8 +1435,8 @@ async function notifyNewOrder(order) {
   const text =
     `🆕 *Новая заявка!*\n\n` +
     `📋 Номер: *${order.order_number}*\n` +
-    `👤 Клиент: ${order.client_name}\n` +
-    `📞 Телефон: ${order.client_phone}\n` +
+    `👤 Клиент: ${esc(order.client_name)}\n` +
+    `📞 Телефон: ${esc(order.client_phone)}\n` +
     (order.client_email ? `📧 Email: ${order.client_email}\n` : '') +
     (order.client_telegram ? `💬 Telegram: @${String(order.client_telegram).replace('@', '')}\n` : '') +
     `\n🎭 Мероприятие: ${EVENT_TYPES[order.event_type] || order.event_type}\n` +
