@@ -44,6 +44,8 @@ function toast(msg, type = 'info') {
     container.className = 'toast-container';
     document.body.appendChild(container);
   }
+  container.setAttribute('aria-live', 'polite');
+  container.setAttribute('aria-atomic', 'true');
   const t = document.createElement('div');
   t.className = `toast ${type}`;
   const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : type === 'warning' ? '⚠' : 'ℹ';

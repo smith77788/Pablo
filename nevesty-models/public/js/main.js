@@ -14,6 +14,10 @@ async function apiFetch(path, opts = {}) {
 function toast(msg, type = 'info') {
   const container = document.getElementById('toastContainer');
   if (!container) return;
+  if (!container.getAttribute('aria-live')) {
+    container.setAttribute('aria-live', 'polite');
+    container.setAttribute('aria-atomic', 'true');
+  }
   const t = document.createElement('div');
   t.className = `toast ${type}`;
   t.innerHTML = `<span>${type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ'}</span> ${msg}`;
@@ -193,6 +197,7 @@ function openModelModal(id) {
       const modal = document.getElementById('modelModal');
       modal.classList.add('open');
       document.body.style.overflow = 'hidden';
+      modal.focus();
     })
     .catch(() => toast('Не удалось загрузить данные модели', 'error'));
 }
