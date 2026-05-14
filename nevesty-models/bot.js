@@ -56,6 +56,9 @@ async function getAdminChatIds() {
 }
 
 async function safeSend(chatId, text, opts = {}) {
+  // Telegram hard limit is 4096 chars — truncate gracefully
+  const MAX = 4096;
+  if (text && text.length > MAX) text = text.slice(0, MAX - 3) + '…';
   try {
     return await bot.sendMessage(chatId, text, opts);
   } catch (e) {
@@ -292,7 +295,10 @@ async function showCatalog(chatId, cat, page) {
 async function showModel(chatId, modelId) {
   try {
     const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
-    if (!m) return safeSend(chatId, '❌ Модель не найдена\\.', { parse_mode: 'MarkdownV2' });
+    if (!m) return safeSend(chatId, '❌ Модель не найдена\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] }
+    });
 
     const lines = [];
     if (m.age)                             lines.push(`Возраст: *${m.age}* лет`);
@@ -403,7 +409,10 @@ async function showClientOrder(chatId, orderId) {
       [orderId]
     );
     if (!o || o.client_chat_id !== String(chatId)) {
-      return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
+      return safeSend(chatId, '❌ Заявка не найдена\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] }
+      });
     }
     const msgs = await query(
       'SELECT * FROM messages WHERE order_id=? ORDER BY created_at DESC LIMIT 3',
@@ -1285,9 +1294,9 @@ async function showPhotoGalleryManager(chatId, modelId) {
   const count = all.length;
   await setSession(chatId, `adm_gallery_${modelId}`, {});
   return safeSend(chatId,
-    `📷 Галерея: *${m.name}*\nФото: *${count}/8* загружено\n\nОтправляйте фото одно за другим (до 8 штук).\nПервое фото станет главным.`,
+    `📷 Галерея: *${esc(m.name)}*\nФото: *${count}/8* загружено\n\nОтправляйте фото одно за другим \\(до 8 штук\\)\\.\nПервое фото станет главным\\.`,
     {
-      parse_mode: 'Markdown',
+      parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         [{ text: '🗑 Очистить все фото', callback_data: `adm_gallery_clear_${modelId}` }],
         [{ text: '✅ Готово',           callback_data: `adm_model_${modelId}`           }],
@@ -1311,7 +1320,9 @@ async function showBroadcast(chatId) {
 
 async function sendBroadcast(chatId, text) {
   const clients = await query("SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>[]);
-  if (!clients.length) return safeSend(chatId, '❌ Нет клиентов для рассылки.');
+  if (!clients.length) return safeSend(chatId, '❌ Нет клиентов для рассылки.', {
+    reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+  });
   let sent = 0, failed = 0;
   for (const c of clients) {
     try {
@@ -1448,16 +1459,23 @@ function initBot(app) {
     const firstName = msg.from.first_name;
     await setSession(chatId, 'idle', {});
 
-    // Deep-link: /start ORDER_NUMBER
+    // Deep-link: /start model_NNN  — прямая ссылка на карточку модели
     const ref = match[1]?.trim();
     if (ref) {
+      const modelMatch = ref.match(/^model_(\d+)$/);
+      if (modelMatch) {
+        const modelId = parseInt(modelMatch[1]);
+        const m = await get('SELECT id FROM models WHERE id=? AND available=1', [modelId]).catch(()=>null);
+        if (m) return showModel(chatId, modelId);
+      }
+      // Deep-link: /start ORDER_NUMBER
       const order = await get('SELECT * FROM orders WHERE order_number=?', [ref]).catch(()=>null);
       if (order) {
         if (order.client_chat_id && order.client_chat_id !== String(chatId))
           return safeSend(chatId, '❌ Эта заявка уже привязана к другому чату.');
         await run('UPDATE orders SET client_chat_id=? WHERE order_number=?', [String(chatId), ref]);
         return safeSend(chatId,
-          `✅ Заявка *${ref}* привязана к вашему чату\\!\n\nВы будете получать уведомления о статусе\\.`,
+          `✅ Заявка *${esc(ref)}* привязана к вашему чату\\!\n\nВы будете получать уведомления о статусе\\.`,
           {
             parse_mode: 'MarkdownV2',
             reply_markup: { inline_keyboard: [
@@ -1479,7 +1497,9 @@ function initBot(app) {
     const s = await getSession(chatId);
     if (!s || s.state === 'idle') return safeSend(chatId, 'ℹ️ Нет активного действия.');
     await clearSession(chatId);
-    return safeSend(chatId, '❌ Действие отменено. Нажмите /start для возврата в меню.');
+    return safeSend(chatId, '❌ Действие отменено.', {
+      reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+    });
   });
 
   // ── /status ────────────────────────────────────────────────────────────────
@@ -2119,9 +2139,10 @@ function initBot(app) {
           await run('UPDATE models SET bust=?,waist=?,hips=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
             [ps[0],ps[1],ps[2],modelId]).catch(()=>{});
         }
-      } else if (fieldMap[field]) {
+      } else if (fieldMap[field] && /^[a-z_]+$/.test(fieldMap[field])) {
+        const col = fieldMap[field];
         const val = ['age','height','weight'].includes(field) ? (parseInt(text)||null) : text;
-        await run(`UPDATE models SET ${fieldMap[field]}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, [val, modelId]).catch(()=>{});
+        await run(`UPDATE models SET ${col}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, [val, modelId]).catch(()=>{});
       }
       await clearSession(chatId);
       return safeSend(chatId, '✅ Поле обновлено!', {
@@ -2315,7 +2336,7 @@ async function showUserProfile(chatId, firstName) {
     const orders = await query(
       `SELECT o.status, o.created_at FROM orders o
        WHERE o.client_chat_id = ?
-       ORDER BY o.created_at ASC`,
+       ORDER BY o.created_at ASC LIMIT 50`,
       [String(chatId)]
     );
 

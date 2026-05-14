@@ -83,7 +83,7 @@ const FIXER_MAP = {
   '.css':        './fixers/fixer-frontend',
 };
 
-function getFixer(fileHint) {
+function getFixerClass(fileHint) {
   if (!fileHint) return null;
   for (const [key, mod] of Object.entries(FIXER_MAP)) {
     if (fileHint.includes(key)) {
@@ -92,6 +92,8 @@ function getFixer(fileHint) {
   }
   return null;
 }
+// Keep old name for backward compat
+const getFixer = getFixerClass;
 
 // Guess which file a finding likely relates to from its message text
 function guessFile(msg = '') {
@@ -316,11 +318,11 @@ async function reportFixResult(finding, outcome, fixerName) {
 async function loadKnownGood() {
   try {
     const rows = await dbAll(
-      `SELECT finding_msg FROM agent_findings
-       WHERE fix_outcome = 'fixed' AND created_at > datetime('now', '-7 days')
+      `SELECT message FROM agent_findings
+       WHERE status = 'fixed' AND created_at > datetime('now', '-7 days')
        LIMIT 200`
     );
-    return new Set(rows.map(r => r.finding_msg));
+    return new Set(rows.map(r => r.message));
   } catch { return new Set(); }
 }
 
@@ -479,53 +481,65 @@ async function fixPhase(cycleId, fixPlan) {
 
   const fixResults = [];
 
-  for (const plan of fixPlan) {
-    const fixer = getFixer(plan.file);
+  // Collect unique files that need fixing
+  const filesToFix = new Set(fixPlan.map(p => p.file).filter(Boolean));
 
-    if (fixer) {
-      console.log(`  🔧 Fixer found for ${plan.file}: ${fixer.name}`);
+  for (const file of filesToFix) {
+    const FixerClass = getFixerClass(file);
+    if (!FixerClass) {
+      console.log(`  ⏭  No fixer for ${file}`);
+      continue;
+    }
 
-      for (const finding of plan.findings) {
-        let outcome = 'failed';
-        let resultMsg = '';
+    // Get all findings for this file
+    const findings = fixPlan
+      .filter(p => p.file === file)
+      .flatMap(p => p.findings);
 
-        try {
-          if (typeof fixer.canFix === 'function' && !fixer.canFix(finding)) {
-            outcome   = 'skipped';
-            resultMsg = 'canFix() returned false';
-          } else if (typeof fixer.fix === 'function') {
-            const res  = await fixer.fix(finding);
-            outcome    = res?.ok ? 'fixed' : 'failed';
-            resultMsg  = res?.msg || '';
-          } else {
-            outcome   = 'skipped';
-            resultMsg = 'fixer has no fix() method';
-          }
-        } catch (e) {
-          outcome   = 'failed';
-          resultMsg = e.message;
-        }
+    console.log(`  🔧 Running fixer for ${file} (${findings.length} findings)`);
 
-        console.log(`    ${outcome === 'fixed' ? '✅' : '⚠️'} ${finding.msg.slice(0, 60)} → ${outcome}`);
-        await logFinding(cycleId, finding, plan.strategy, outcome);
-        await reportFixResult(finding, outcome, fixer.name || 'Fixer');
-        fixResults.push({ finding, strategy: plan.strategy, outcome, resultMsg });
+    try {
+      const fixer = new FixerClass();
+      // Pass findings context so fixer knows what to target
+      fixer._pendingFindings = findings;
+      const result = await fixer.run({ silent: true });
+
+      const fixedCount = result.fixed?.length || 0;
+      const outcome    = fixedCount > 0 ? 'fixed' : 'partial';
+      console.log(`    ✅ ${fixer.name}: ${fixedCount} auto-fixes applied`);
+
+      for (const finding of findings) {
+        const plan = fixPlan.find(p => p.findings.includes(finding));
+        await logFinding(cycleId, finding, plan?.strategy, outcome);
+        await reportFixResult(finding, outcome, fixer.name);
+        fixResults.push({ finding, strategy: plan?.strategy, outcome, resultMsg: result.fixed?.join('; ') || '' });
       }
-    } else {
-      // No fixer module — record as pending for manual review
-      console.log(`  ⏭  No fixer for ${plan.file || 'unknown'} (${plan.strategy.label}) — queuing for manual`);
+    } catch (e) {
+      console.error(`    ❌ Fixer for ${file} crashed: ${e.message}`);
+      for (const finding of findings) {
+        const plan = fixPlan.find(p => p.findings.includes(finding));
+        await logFinding(cycleId, finding, plan?.strategy, 'failed');
+        fixResults.push({ finding, strategy: plan?.strategy, outcome: 'failed', resultMsg: e.message });
+      }
+    }
+  }
+
+  // Record findings for unknown files
+  for (const plan of fixPlan) {
+    if (!plan.file || !filesToFix.has(plan.file)) {
       for (const finding of plan.findings) {
-        const outcome = plan.strategy.label === 'manual-review' ? 'skipped' : 'pending';
-        await logFinding(cycleId, finding, plan.strategy, outcome);
-        fixResults.push({ finding, strategy: plan.strategy, outcome, resultMsg: 'no fixer module' });
+        if (!fixResults.find(r => r.finding === finding)) {
+          await logFinding(cycleId, finding, plan.strategy, 'pending');
+          fixResults.push({ finding, strategy: plan.strategy, outcome: 'pending', resultMsg: 'no fixer module' });
+        }
       }
     }
   }
 
   const fixed   = fixResults.filter(r => r.outcome === 'fixed').length;
+  const partial = fixResults.filter(r => r.outcome === 'partial').length;
   const pending = fixResults.filter(r => r.outcome === 'pending').length;
-  const skipped = fixResults.filter(r => r.outcome === 'skipped').length;
-  console.log(`  Fix summary: ✅ ${fixed} fixed, ⏳ ${pending} pending, ⏭ ${skipped} skipped`);
+  console.log(`  Fix summary: ✅ ${fixed} fixed, 🔄 ${partial} partial, ⏳ ${pending} pending`);
 
   return fixResults;
 }

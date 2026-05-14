@@ -204,6 +204,11 @@ async function initDatabase() {
   await run(`CREATE INDEX IF NOT EXISTS idx_messages_order ON messages(order_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_models_category ON models(category)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_models_available ON models(available)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_sessions_updated ON telegram_sessions(updated_at)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_agent_findings_status ON agent_findings(status)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_agent_findings_created ON agent_findings(created_at DESC)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_agent_discussions_created ON agent_discussions(created_at DESC)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_agent_logs_created ON agent_logs(created_at DESC)`);
 
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);

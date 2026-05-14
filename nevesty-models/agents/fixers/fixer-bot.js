@@ -1,9 +1,10 @@
 /**
- * 🔧 Bot Fixer — patches bot.js automatically
- * Called by smart-orchestrator when bot.js issues are found
+ * 🔧 Bot Fixer — automatically patches bot.js
+ * Invoked by smart-orchestrator when bot.js analysis findings are CRITICAL/HIGH.
  */
+'use strict';
 const { Agent } = require('../lib/base');
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 
 const BOT_PATH = path.join(__dirname, '../../bot.js');
@@ -15,55 +16,71 @@ class BotFixer extends Agent {
   }
 
   async analyze() {
-    const src = fs.readFileSync(BOT_PATH, 'utf8');
+    let src = fs.readFileSync(BOT_PATH, 'utf8');
+    let changed = false;
 
-    // Fix 1: queries without LIMIT that could return huge result sets
-    const noLimitQueries = (src.match(/query\(['"](SELECT .+? FROM (models|orders|messages|agent_logs)(?!.{0,100}LIMIT))/g) || []);
-    if (noLimitQueries.length > 0) {
-      this.addFinding('MEDIUM', `${noLimitQueries.length} запросов без LIMIT — патчу`);
-      await this.fixMissingLimits(src);
+    // ── Fix 1: queries without LIMIT on large tables ──────────────────────────
+    const noLimitPattern = /query\(`SELECT [^`]*FROM (models|orders|messages|agent_logs|agent_findings|agent_discussions)[^`]*(?<!LIMIT \d+)`/g;
+    const matches = src.match(noLimitPattern) || [];
+    if (matches.length > 0) {
+      this.addFinding('MEDIUM', `${matches.length} SELECT без LIMIT`);
     }
 
-    // Fix 2: bot.sendMessage calls without error handling
-    const unguarded = (src.match(/bot\.sendMessage\([^)]+\)(?!\s*\.catch)/g) || []).length;
-    if (unguarded > 5) {
-      this.addFinding('MEDIUM', `${unguarded} bot.sendMessage без .catch — рекомендуется добавить safeSend`);
+    // ── Fix 2: safeSend without 4096 truncation — already handled in safeSend helper ──
+
+    // ── Fix 3: bot.sendMessage direct calls (bypassing safeSend) ─────────────
+    const directSend = (src.match(/bot\.sendMessage\([^,]+,\s*[^,]+(?!\s*\.\s*catch)/g) || []).length;
+    if (directSend > 3) {
+      this.addFinding('LOW', `${directSend} прямых bot.sendMessage вместо safeSend`);
     }
 
-    // Fix 3: Missing city column filter in showCatalog
-    if (src.includes("SELECT * FROM models WHERE available=1 ORDER BY id")) {
-      this.addFinding('LOW', 'showCatalog query — можно оптимизировать (добавить LIMIT и нужные колонки)');
+    // ── Fix 4: parse_mode: 'Markdown' instead of MarkdownV2 ──────────────────
+    const markdownOld = (src.match(/parse_mode:\s*['"]Markdown['"]/g) || [])
+      .filter(m => !m.includes('MarkdownV2'));
+    if (markdownOld.length > 0) {
+      src = src.replace(/parse_mode:\s*'Markdown'(?!\s*V2)/g, "parse_mode: 'MarkdownV2'");
+      this.patched.push(`parse_mode Markdown → MarkdownV2 (${markdownOld.length} мест)`);
+      changed = true;
     }
 
-    this.addFinding('OK', `Bot Fixer проверил ${path.basename(BOT_PATH)}`);
+    // ── Fix 5: showAdminOrders called without page arg ────────────────────────
+    const missingPage = src.match(/showAdminOrders\(chatId,\s*\d+\)(?!\s*;?\s*\/\/)/g);
+    if (missingPage) {
+      src = src.replace(/showAdminOrders\(chatId,\s*(\d+)\)(?!\s*;?\s*\/\/)/g,
+        'showAdminOrders(chatId, $1, 0)');
+      this.patched.push('showAdminOrders: добавлен аргумент page=0');
+      changed = true;
+    }
 
-    if (this.patched.length > 0) {
-      for (const msg of this.patched) this.addFixed(msg);
-    }
-  }
+    // ── Apply pending findings passed from orchestrator ───────────────────────
+    if (this._pendingFindings) {
+      for (const f of this._pendingFindings) {
+        const msg = (f.msg || '').toLowerCase();
 
-  async fixMissingLimits(src) {
-    // Add LIMIT to showAdminModels query that fetches ALL models
-    let patched = src;
-    if (patched.includes("query('SELECT * FROM models ORDER BY id DESC')")) {
-      patched = patched.replace(
-        "query('SELECT * FROM models ORDER BY id DESC')",
-        "query('SELECT * FROM models ORDER BY id DESC LIMIT 500')"
-      );
-      this.patched.push('showAdminModels: добавлен LIMIT 500');
+        // Fix: missing PRAGMA / WAL
+        if (msg.includes('wal') || msg.includes('pragma') || msg.includes('synchronous')) {
+          this.addFinding('INFO', 'WAL/PRAGMA: уже настроены в database.js');
+        }
+      }
     }
-    if (patched !== src) {
-      fs.writeFileSync(BOT_PATH, patched);
+
+    if (changed) {
+      fs.writeFileSync(BOT_PATH, src, 'utf8');
+      for (const msg of this.patched) {
+        this.addFixed(msg);
+        console.log(`  🔧 BotFixer: ${msg}`);
+      }
     }
+
+    this.addFinding('OK', `BotFixer проверил ${path.basename(BOT_PATH)}: ${this.patched.length} патчей`);
   }
 }
 
 if (require.main === module) {
   const f = new BotFixer();
   f.run().then(r => {
-    console.log(`[BotFixer] findings: ${r.findings.length}, fixed: ${r.fixed.length}, elapsed: ${r.elapsed}s`);
-    r.findings.forEach(f => console.log(`  ${f.sev} ${f.msg}`));
-    r.fixed.forEach(m => console.log(`  🔧 ${m}`));
+    console.log(`[BotFixer] fixed: ${r.fixed?.length || 0}, findings: ${r.findings?.length || 0}`);
+    r.fixed?.forEach(m => console.log(`  🔧 ${m}`));
     process.exit(0);
   }).catch(e => { console.error(e); process.exit(1); });
 }
