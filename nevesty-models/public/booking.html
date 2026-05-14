@@ -97,7 +97,7 @@
           <h3>Детали мероприятия</h3>
           <p class="hint">Расскажите нам подробнее о вашем проекте</p>
           <div class="form-group">
-            <label>Тип мероприятия <span class="req">*</span></label>
+            <label for="event_type">Тип мероприятия <span class="req">*</span></label>
             <select class="form-control" id="event_type">
               <option value="">— Выберите тип —</option>
               <option value="fashion_show">Показ мод</option>
@@ -110,20 +110,20 @@
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Дата мероприятия</label>
+              <label for="event_date">Дата мероприятия</label>
               <input type="date" class="form-control" id="event_date" />
             </div>
             <div class="form-group">
-              <label>Продолжительность (ч)</label>
+              <label for="event_duration">Продолжительность (ч)</label>
               <input type="number" class="form-control" id="event_duration" value="4" min="1" max="24" />
             </div>
           </div>
           <div class="form-group">
-            <label>Место проведения</label>
+            <label for="location">Место проведения</label>
             <input type="text" class="form-control" id="location" placeholder="Город, адрес или площадка" />
           </div>
           <div class="form-group">
-            <label>Бюджет</label>
+            <label for="budget">Бюджет</label>
             <select class="form-control" id="budget">
               <option value="">— Укажите бюджет —</option>
               <option value="до 30 000 руб">до 30 000 руб</option>
@@ -135,7 +135,7 @@
             </select>
           </div>
           <div class="form-group">
-            <label>Дополнительные пожелания</label>
+            <label for="comments">Дополнительные пожелания</label>
             <textarea class="form-control" id="comments" placeholder="Особые требования, дресс-код, тематика проекта..."></textarea>
           </div>
           <div class="booking-nav">
@@ -149,21 +149,21 @@
           <h3>Контактные данные</h3>
           <p class="hint">Ваши данные необходимы для связи. Мы не передаём их третьим лицам.</p>
           <div class="form-group">
-            <label>Ваше имя <span class="req">*</span></label>
+            <label for="client_name">Ваше имя <span class="req">*</span></label>
             <input type="text" class="form-control" id="client_name" placeholder="Иван Иванов" />
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Телефон <span class="req">*</span></label>
+              <label for="client_phone">Телефон <span class="req">*</span></label>
               <input type="tel" class="form-control" id="client_phone" placeholder="+7 (999) 000-00-00" />
             </div>
             <div class="form-group">
-              <label>Email</label>
+              <label for="client_email">Email</label>
               <input type="email" class="form-control" id="client_email" placeholder="your@email.com" />
             </div>
           </div>
           <div class="form-group">
-            <label>Telegram</label>
+            <label for="client_telegram">Telegram</label>
             <input type="text" class="form-control" id="client_telegram" placeholder="@username (без @)" />
             <div class="form-note">💡 Укажите username для уведомлений о статусе заявки через Telegram</div>
           </div>
