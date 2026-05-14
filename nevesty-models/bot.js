@@ -97,43 +97,56 @@ function sessionData(session) {
 
 // ─── Keyboards ────────────────────────────────────────────────────────────────
 
-const KB_MAIN_CLIENT = {
-  inline_keyboard: [
-    [{ text: '💃 Каталог моделей',      callback_data: 'cat_cat__0' }],
-    [{ text: '📝 Оформить заявку',      callback_data: 'bk_start'   }],
-    [{ text: '📋 Мои заявки',           callback_data: 'my_orders'  }],
+function buildClientKeyboard() {
+  const rows = [
+    [{ text: '💃 Каталог моделей',      callback_data: 'cat_cat__0'   }],
+    [{ text: '📝 Оформить заявку',      callback_data: 'bk_start'     }],
+    [{ text: '📋 Мои заявки',           callback_data: 'my_orders'    }],
     [{ text: '🔍 Проверить статус',     callback_data: 'check_status' }],
-    [{ text: '📞 Контакты',             callback_data: 'contacts'   }],
-  ]
-};
+    [{ text: '📞 Контакты',             callback_data: 'contacts'     }],
+  ];
+  if (SITE_URL.startsWith('https://')) {
+    rows.unshift([{ text: '🌐 Открыть сайт', web_app: { url: SITE_URL } }]);
+  }
+  return { inline_keyboard: rows };
+}
 
-const KB_MAIN_ADMIN = (badge) => ({
-  inline_keyboard: [
-    [{ text: `📋 Заявки${badge}`,       callback_data: 'adm_orders__0' }],
-    [{ text: '💃 Модели',               callback_data: 'adm_models_0'  }],
-    [{ text: '📊 Статистика',           callback_data: 'adm_stats'     }],
-    [{ text: '🤖 Фид агентов',          callback_data: 'agent_feed_0'  }],
-  ]
-});
+const KB_MAIN_ADMIN = (badge, score) => {
+  const health = score != null ? ` · 💚${score}%` : '';
+  return {
+    inline_keyboard: [
+      [{ text: `📋 Заявки${badge}`,        callback_data: 'adm_orders__0'  }],
+      [{ text: '💃 Модели',                callback_data: 'adm_models_0'   }],
+      [{ text: '📊 Статистика',            callback_data: 'adm_stats'      }],
+      [{ text: `🤖 Организм${health}`,     callback_data: 'adm_organism'   }],
+      [{ text: '📡 Фид агентов',           callback_data: 'agent_feed_0'   }],
+    ]
+  };
+};
 
 // ─── Client screens ───────────────────────────────────────────────────────────
 
 async function showMainMenu(chatId, name) {
   await clearSession(chatId);
   return safeSend(chatId,
-    `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\nВыберите действие:`,
-    { parse_mode: 'MarkdownV2', reply_markup: KB_MAIN_CLIENT }
+    `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\nВыберите действие:`,
+    { parse_mode: 'MarkdownV2', reply_markup: buildClientKeyboard() }
   );
 }
 
 async function showAdminMenu(chatId, name) {
   await clearSession(chatId);
   try {
-    const n = (await get("SELECT COUNT(*) as n FROM orders WHERE status='new'")).n;
-    const badge = n > 0 ? ` 🔴${n}` : '';
+    const [ordersRow, scoreRow] = await Promise.all([
+      get("SELECT COUNT(*) as n FROM orders WHERE status='new'").catch(()=>({n:0})),
+      get("SELECT message FROM agent_logs WHERE from_name='Orchestrator' ORDER BY created_at DESC LIMIT 1").catch(()=>null),
+    ]);
+    const badge = ordersRow.n > 0 ? ` 🔴${ordersRow.n}` : '';
+    const scoreMatch = scoreRow?.message?.match(/Health Score:\s*(\d+)%/);
+    const score = scoreMatch ? parseInt(scoreMatch[1]) : null;
     return safeSend(chatId,
-      `👑 *Панель администратора*${name ? `\n${esc(name)}` : ''}`,
-      { parse_mode: 'MarkdownV2', reply_markup: KB_MAIN_ADMIN(badge) }
+      `👑 *Панель администратора*${name ? `\n_${esc(name)}_` : ''}\n\nЗаявок в очереди: *${ordersRow.n}*`,
+      { parse_mode: 'MarkdownV2', reply_markup: KB_MAIN_ADMIN(badge, score) }
     );
   } catch (e) { console.error('[Bot] showAdminMenu:', e.message); }
 }
@@ -748,6 +761,38 @@ async function showAdminStats(chatId) {
   } catch (e) { console.error('[Bot] showAdminStats:', e.message); }
 }
 
+async function showOrganismStatus(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const [lastRun, critCount, highCount, okCount] = await Promise.all([
+      get("SELECT message, created_at FROM agent_logs WHERE from_name='Orchestrator' ORDER BY created_at DESC LIMIT 1").catch(()=>null),
+      get("SELECT COUNT(*) as n FROM agent_logs WHERE message LIKE '%🔴%' AND created_at > datetime('now','-1 hour')").catch(()=>({n:0})),
+      get("SELECT COUNT(*) as n FROM agent_logs WHERE message LIKE '%🟠%' AND created_at > datetime('now','-1 hour')").catch(()=>({n:0})),
+      get("SELECT COUNT(*) as n FROM agent_logs WHERE message LIKE '%✅%' AND created_at > datetime('now','-1 hour')").catch(()=>({n:0})),
+    ]);
+    const scoreMatch = lastRun?.message?.match(/Health Score:\s*(\d+)%/);
+    const score = scoreMatch ? parseInt(scoreMatch[1]) : null;
+    const scoreIcon = score == null ? '❓' : score >= 80 ? '💚' : score >= 60 ? '🟡' : '🔴';
+    const lastTime = lastRun?.created_at ? new Date(lastRun.created_at).toLocaleString('ru') : 'Ещё не запускался';
+    let text = `🌿 *Живой организм агентов*\n\n`;
+    text += `${scoreIcon} Health Score: *${score != null ? score + '%' : 'нет данных'}*\n`;
+    text += `Последний запуск: _${lastTime}_\n\n`;
+    text += `За последний час:\n`;
+    text += `🔴 Критических: ${critCount.n}\n`;
+    text += `🟠 Важных: ${highCount.n}\n`;
+    text += `✅ Ок: ${okCount.n}\n\n`;
+    text += `_25 агентов-органов непрерывно следят за здоровьем системы_`;
+    return safeSend(chatId, text, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [
+        [{ text: '🚀 Запустить проверку', callback_data: 'adm_run_organism' }],
+        [{ text: '📡 Фид агентов',        callback_data: 'agent_feed_0'      }],
+        [{ text: '← Меню',               callback_data: 'admin_menu'         }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showOrganismStatus:', e.message); }
+}
+
 async function showAdminModels(chatId, page) {
   try {
     const all = await query('SELECT * FROM models ORDER BY id DESC');
@@ -964,7 +1009,22 @@ function initBot(app) {
     if (data === 'contacts')   return showContacts(chatId);
     if (data === 'my_orders')  return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
-    if (data === 'adm_stats')  return showAdminStats(chatId);
+    if (data === 'adm_stats')    return showAdminStats(chatId);
+    if (data === 'adm_organism')    return showOrganismStatus(chatId);
+    if (data === 'adm_run_organism') {
+      if (!isAdmin(chatId)) return;
+      await safeSend(chatId, '🌿 Запускаю проверку организма... Результаты придут через 1-2 минуты.', {
+        reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_organism' }]] }
+      });
+      const { spawn } = require('child_process');
+      const proc = spawn('node', ['agents/run-organism.js'], {
+        cwd: require('path').join(__dirname),
+        detached: true,
+        stdio: 'ignore',
+      });
+      proc.unref();
+      return;
+    }
 
     // ── Catalog: cat_cat_{category}_{page}
     if (data.startsWith('cat_cat_')) {
