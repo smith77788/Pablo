@@ -636,7 +636,7 @@ async function showAdminMenu(chatId, firstName) {
     if (SITE_URL.startsWith('https://')) {
       adminKeyboard.push([{ text: '🌐 Панель (Mini App)', web_app: { url: `${SITE_URL}/admin/` } }]);
     } else {
-      adminKeyboard.push([{ text: '🌐 Открыть панель', url: `${SITE_URL}/admin/` }]);
+      // http:// URLs not allowed in Telegram inline keyboards — omit button
     }
     return safeSend(chatId,
       `👑 *Панель администратора*${name ? `\nДобро пожаловать${name}` : ''}`,
@@ -795,7 +795,7 @@ async function showAdminOrder(chatId, orderId) {
     if (actionRow.length) keyboard.push(actionRow);
     keyboard.push([
       { text: '💬 Написать клиенту', callback_data: `contact_order_${orderId}` },
-      { text: '🔗 Открыть', url: `${SITE_URL}/admin/#orders/${orderId}` }
+      ...(SITE_URL.startsWith('https://') ? [{ text: '🔗 Открыть', url: `${SITE_URL}/admin/#orders/${orderId}` }] : [])
     ]);
     keyboard.push([{ text: '← Назад', callback_data: 'admin_orders_all_0' }]);
 
@@ -905,7 +905,7 @@ async function showAdminModel(chatId, modelId) {
       reply_markup: {
         inline_keyboard: [
           [{ text: avail ? '🔴 Отметить недоступной' : '🟢 Отметить доступной', callback_data: `toggle_model_${m.id}` }],
-          [{ text: '🔗 Открыть в панели', url: `${SITE_URL}/admin/#models/${m.id}` }],
+          ...(SITE_URL.startsWith('https://') ? [[{ text: '🔗 Открыть в панели', url: `${SITE_URL}/admin/#models/${m.id}` }]] : []),
           [{ text: '← К моделям', callback_data: 'admin_models_0' }]
         ]
       }
