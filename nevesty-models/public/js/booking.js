@@ -223,6 +223,9 @@
 
       document.getElementById('orderNumDisplay').textContent = result.order_number;
 
+      // Haptic success feedback in Telegram Mini App
+      window._tgHaptic?.success();
+
       // Notify Telegram Mini App if running inside it
       if (window._tgWebAppOnBookingSuccess) {
         window._tgWebAppOnBookingSuccess(result.order_number);

@@ -22,15 +22,23 @@
   // ── Mini App banner ─────────────────────────────────────────────────────────
   function injectBanner() {
     if (document.getElementById('tg-webapp-banner')) return;
+    const BANNER_HEIGHT = 28;
     const banner = document.createElement('div');
     banner.id = 'tg-webapp-banner';
     banner.style.cssText =
       'background:linear-gradient(90deg,#229ED9 0%,#1a7bbf 100%);color:#fff;' +
       'text-align:center;font-size:0.75rem;letter-spacing:1px;padding:6px 16px;' +
-      'position:fixed;top:0;left:0;right:0;z-index:9999;pointer-events:none;';
+      'position:fixed;top:0;left:0;right:0;z-index:9999;pointer-events:none;' +
+      `height:${BANNER_HEIGHT}px;`;
     banner.textContent = user ? `Telegram Mini App · ${user.first_name}` : 'Telegram Mini App';
     document.body.prepend(banner);
-    document.body.style.paddingTop = '28px';
+    // Push down body content (non-fixed elements)
+    document.body.style.paddingTop = BANNER_HEIGHT + 'px';
+    // Push down the fixed navbar so it sits below the banner, not behind it
+    const navbar = document.querySelector('.navbar');
+    if (navbar) {
+      navbar.style.top = BANNER_HEIGHT + 'px';
+    }
   }
 
   // ── Back button ─────────────────────────────────────────────────────────────
@@ -55,9 +63,9 @@
     };
 
     const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
-    fillIfEmpty('#clientName', fullName);
-    fillIfEmpty('#clientEmail', '');
-    if (user.username) fillIfEmpty('#clientTelegram', user.username);
+    // Use correct IDs that match booking.html (underscore-separated)
+    fillIfEmpty('#client_name', fullName);
+    if (user.username) fillIfEmpty('#client_telegram', user.username);
 
     // Show notice
     const form = document.querySelector('.booking-form-wrap, .booking-section');
@@ -79,11 +87,12 @@
     tg.MainButton.setText('✅ Отправить заявку');
     tg.MainButton.color = '#C9A84C';
     tg.MainButton.textColor = '#000000';
-    tg.MainButton.show();
+    // Start hidden — show only when step 4 (confirmation) is active
+    tg.MainButton.hide();
 
     tg.MainButton.onClick(() => submitBtn.click());
 
-    // Sync disabled state
+    // Sync disabled state via MutationObserver on the button attribute
     const observer = new MutationObserver(() => {
       if (submitBtn.disabled) {
         tg.MainButton.disable();
@@ -92,6 +101,19 @@
       }
     });
     observer.observe(submitBtn, { attributes: true, attributeFilter: ['disabled'] });
+
+    // Watch the step4 section visibility to show/hide the Main Button
+    const step4 = document.getElementById('step4');
+    if (step4) {
+      const visibilityObserver = new MutationObserver(() => {
+        if (step4.classList.contains('active')) {
+          tg.MainButton.show();
+        } else {
+          tg.MainButton.hide();
+        }
+      });
+      visibilityObserver.observe(step4, { attributes: true, attributeFilter: ['class'] });
+    }
   }
 
   // ── Notify Telegram on successful booking ──────────────────────────────────

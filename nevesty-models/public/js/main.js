@@ -23,6 +23,9 @@ function toast(msg, type = 'info') {
   t.innerHTML = `<span>${type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ'}</span> ${msg}`;
   container.appendChild(t);
   setTimeout(() => t.remove(), 4000);
+  // Haptic feedback for Telegram Mini App
+  if (type === 'error') window._tgHaptic?.error();
+  else if (type === 'success') window._tgHaptic?.success();
 }
 
 const CATEGORIES = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
