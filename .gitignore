@@ -8,3 +8,4 @@ data/
 *.db
 *.sqlite
 .DS_Store
+nevesty-models.zip
