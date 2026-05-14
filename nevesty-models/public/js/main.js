@@ -110,6 +110,7 @@ function modelCard(m, onClick) {
     _render();
     lb.classList.add('lb-open');
     document.body.style.overflow = 'hidden';
+    document.getElementById('lb-close').focus();
   }
 
   function lbClose() {

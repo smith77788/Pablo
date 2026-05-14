@@ -249,9 +249,9 @@ function renderModels() {
         <div class="admin-model-meta">${m.height || '—'}см · ${m.hair_color || '—'} · ${_admin.CATEGORIES[m.category] || m.category}</div>
         <div style="margin-top:6px">${m.available ? '<span class="badge badge-available">Доступна</span>' : '<span class="badge badge-unavailable">Недоступна</span>'}</div>
         <div class="admin-model-actions">
-          <button class="btn btn-sm btn-ghost" data-action="edit" data-id="${m.id}">✏️ Ред.</button>
-          <a href="/catalog.html" target="_blank" class="btn btn-sm btn-ghost">👁</a>
-          <button class="btn btn-sm btn-danger" data-action="delete" data-id="${m.id}">🗑</button>
+          <button class="btn btn-sm btn-ghost" data-action="edit" data-id="${m.id}" aria-label="Редактировать ${m.name}">✏️ Ред.</button>
+          <a href="/catalog.html" target="_blank" class="btn btn-sm btn-ghost" aria-label="Просмотреть ${m.name} на сайте">👁</a>
+          <button class="btn btn-sm btn-danger" data-action="delete" data-id="${m.id}" aria-label="Удалить модель ${m.name}">🗑</button>
         </div>
       </div>
     </div>`).join('');
@@ -324,7 +324,7 @@ function fillForm(m) {
   document.getElementById('photosPreview').innerHTML = photos.map(p => `
     <div class="photo-item">
       <img src="${p}" />
-      <button class="photo-del" onclick="deletePhoto('${p}', ${m.id})">✕</button>
+      <button class="photo-del" onclick="deletePhoto('${p}', ${m.id})" aria-label="Удалить фото">✕</button>
     </div>`).join('');
 }
 
