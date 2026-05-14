@@ -210,7 +210,7 @@ function downloadCSV(url) {
 
 window._admin = {
   apiFetch, apiFetchForm, toast, adminConfirm, logout,
-  formatDate, formatDateTime, statusBadge,
+  formatDate, formatDateTime, statusBadge, escapeHtml,
   STATUS_OPTIONS, STATUS_LABELS, CATEGORIES, EVENT_LABELS,
   downloadCSV
 };

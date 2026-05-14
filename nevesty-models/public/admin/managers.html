@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Менеджеры — Nevesty Models Admin</title>
+  <meta name="robots" content="noindex, nofollow">
   <link rel="stylesheet" href="/css/admin.css" />
 </head>
 <body>
@@ -99,7 +100,7 @@ async function loadManagers() {
         <td>${m.role === 'superadmin' ? '<span class="badge badge-confirmed">Суперадмин</span>' : '<span class="badge badge-reviewing">Менеджер</span>'}</td>
         <td>${m.telegram_id || '<span style="color:var(--text-dim)">не указан</span>'}</td>
         <td>${_admin.formatDate(m.created_at)}</td>
-        <td>${m.username !== (JSON.parse(localStorage.getItem('admin_user') || '{}').username) ? `<button class="btn btn-sm btn-danger" onclick="deleteManager(${m.id}, '${m.username}')">Удалить</button>` : '<span style="color:var(--text-dim);font-size:0.75rem">это вы</span>'}</td>
+        <td>${m.username !== (JSON.parse(localStorage.getItem('admin_user') || '{}').username) ? `<button class="btn btn-sm btn-danger" data-action="del-manager" data-id="${m.id}" data-name="${_admin.escapeHtml(m.username)}" title="Удалить">🗑</button>` : '<span style="color:var(--text-dim);font-size:0.75rem">это вы</span>'}</td>
       </tr>`).join('');
   } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
 }
@@ -138,6 +139,11 @@ function deleteManager(id, name) {
 
 function showAddForm() { document.getElementById('addForm').style.display = 'block'; }
 function hideAddForm() { document.getElementById('addForm').style.display = 'none'; }
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-action="del-manager"]');
+  if (btn) deleteManager(+btn.dataset.id, btn.dataset.name);
+});
 
 loadManagers();
 </script>

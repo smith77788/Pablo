@@ -371,3 +371,13 @@ select.admin-input option { background: var(--bg2); }
   .admin-model-grid { grid-template-columns: 1fr 1fr; }
   .form-row-2, .form-row-3, .form-row-4 { grid-template-columns: 1fr; }
 }
+
+/* ─── FOCUS VISIBLE ──────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}

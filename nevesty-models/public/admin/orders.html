@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Заявки — Nevesty Models Admin</title>
+  <meta name="robots" content="noindex, nofollow">
   <link rel="stylesheet" href="/css/admin.css" />
   <style>
     /* ─── Bulk action bar ──────────────────────────── */
@@ -297,8 +298,8 @@ function renderTable(orders) {
         <input type="checkbox" class="row-check" data-id="${o.id}" ${checked}
           onchange="toggleRow(${o.id}, this.checked)" />
       </td>
-      <td><strong>${o.order_number}</strong>${unread}</td>
-      <td>${o.client_name}<br><span style="font-size:0.75rem;color:var(--text-dim)">${o.client_phone}</span></td>
+      <td><strong>${_admin.escapeHtml(o.order_number)}</strong>${unread}</td>
+      <td>${_admin.escapeHtml(o.client_name)}<br><span style="font-size:0.75rem;color:var(--text-dim)">${_admin.escapeHtml(o.client_phone)}</span></td>
       <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
       <td>${o.model_name || '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
@@ -509,16 +510,16 @@ function buildDetailHTML(o) {
     ? `<div class="detail-row"><div class="detail-label">${label}</div><div class="detail-value">${val}</div></div>`
     : '';
   return [
-    row('Клиент',           `<strong>${o.client_name}</strong>`),
-    row('Телефон',          `<a href="tel:${o.client_phone}" style="color:var(--gold)">${o.client_phone}</a>`),
-    o.client_email    ? row('Email',    `<a href="mailto:${o.client_email}" style="color:var(--gold)">${o.client_email}</a>`) : '',
-    o.client_telegram ? row('Telegram', `<a href="https://t.me/${o.client_telegram}" target="_blank" style="color:var(--gold)">@${o.client_telegram}</a>`) : '',
-    row('Мероприятие',      _admin.EVENT_LABELS[o.event_type] || o.event_type),
+    row('Клиент',           `<strong>${_admin.escapeHtml(o.client_name)}</strong>`),
+    row('Телефон',          `<a href="tel:${_admin.escapeHtml(o.client_phone)}" style="color:var(--gold)">${_admin.escapeHtml(o.client_phone)}</a>`),
+    o.client_email    ? row('Email',    `<a href="mailto:${_admin.escapeHtml(o.client_email)}" style="color:var(--gold)">${_admin.escapeHtml(o.client_email)}</a>`) : '',
+    o.client_telegram ? row('Telegram', `<a href="https://t.me/${_admin.escapeHtml(o.client_telegram)}" target="_blank" style="color:var(--gold)">@${_admin.escapeHtml(o.client_telegram)}</a>`) : '',
+    row('Мероприятие',      _admin.EVENT_LABELS[o.event_type] || _admin.escapeHtml(o.event_type)),
     o.event_date      ? row('Дата',     _admin.formatDate(o.event_date))           : '',
-    o.event_duration  ? row('Продолжительность', `${o.event_duration} ч`)          : '',
-    o.location        ? row('Место',    o.location)                                : '',
-    o.budget          ? row('Бюджет',   o.budget)                                  : '',
-    o.comments        ? row('Комментарий', `<span style="white-space:pre-wrap">${o.comments}</span>`) : '',
+    o.event_duration  ? row('Продолжительность', `${_admin.escapeHtml(String(o.event_duration))} ч`) : '',
+    o.location        ? row('Место',    _admin.escapeHtml(o.location))             : '',
+    o.budget          ? row('Бюджет',   _admin.escapeHtml(o.budget))               : '',
+    o.comments        ? row('Комментарий', `<span style="white-space:pre-wrap">${_admin.escapeHtml(o.comments)}</span>`) : '',
     row('Создана',          _admin.formatDateTime(o.created_at)),
   ].join('');
 }
@@ -544,18 +545,10 @@ function renderChat(messages) {
   }
   box.innerHTML = messages.map(m => `
     <div class="chat-msg ${m.sender_type}">
-      <div class="chat-bubble">${escapeHtml(m.content)}</div>
-      <div class="chat-meta">${m.sender_name || m.sender_type} · ${_admin.formatDateTime(m.created_at)}</div>
+      <div class="chat-bubble">${_admin.escapeHtml(m.content)}</div>
+      <div class="chat-meta">${_admin.escapeHtml(m.sender_name || m.sender_type)} · ${_admin.formatDateTime(m.created_at)}</div>
     </div>`).join('');
   box.scrollTop = box.scrollHeight;
-}
-
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 function startChatPoll() {

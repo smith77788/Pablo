@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
+let compression;
+try { compression = require('compression'); } catch {}
 const { initDatabase, get: dbGet, closeDatabase } = require('./database');
 const { initBot } = require('./bot');
 const apiRouter = require('./routes/api');
@@ -45,12 +47,19 @@ app.use(cors(ALLOWED_ORIGINS.length ? {
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
+// ─── Compression ──────────────────────────────────────────────────────────────
+if (compression) app.use(compression());
+
 // ─── Static files ─────────────────────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   maxAge: '7d',
   etag: true
 }));
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
+app.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
+  etag: true,
+  lastModified: true,
+}));
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 app.use('/api', apiRouter);

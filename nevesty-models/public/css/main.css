@@ -582,3 +582,13 @@ select.form-control option { background: var(--bg2); }
   .footer-grid { grid-template-columns: 1fr; }
   .catalog-grid { grid-template-columns: repeat(2,1fr); }
 }
+
+/* ─── FOCUS VISIBLE ──────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}

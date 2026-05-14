@@ -4,10 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nevesty Models — Модельное Агентство</title>
-  <meta name="description" content="Nevesty Models — ведущее модельное агентство. Профессиональные модели для fashion показов, фотосессий, корпоративных мероприятий." />
+  <meta name="description" content="Nevesty Models — профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.">
+  <meta name="theme-color" content="#080808">
+  <meta property="og:title" content="Nevesty Models — Модельное агентство">
+  <meta property="og:description" content="Профессиональные модели для любых мероприятий. Показы, фотосессии, корпоративы.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/og-image.jpg">
+  <meta property="og:site_name" content="Nevesty Models">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://nevesty-models.ru/">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="/css/main.css" />
 </head>
 <body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
   <!-- NAVBAR -->
   <nav class="navbar" id="navbar">
     <div class="nav-inner">
@@ -36,7 +47,7 @@
   </nav>
 
   <!-- HERO -->
-  <section class="hero" id="hero">
+  <section class="hero" id="main-content" tabindex="-1">
     <div class="hero-bg"></div>
     <div class="hero-lines">
       <div class="hero-line"></div>
@@ -291,15 +302,28 @@
   </footer>
 
   <!-- MODEL MODAL -->
-  <div class="modal-overlay" id="modelModal">
+  <div class="modal-overlay" id="modelModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
     <div class="modal" id="modalContent">
-      <button class="modal-close" id="modalClose">✕</button>
+      <button class="modal-close" id="modalClose" aria-label="Закрыть">✕</button>
       <div class="modal-inner" id="modalInner"><!-- injected by JS --></div>
     </div>
   </div>
 
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/js/main.js"></script>
+  <script src="/js/main.js" defer></script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Nevesty Models",
+  "url": "https://nevesty-models.ru",
+  "description": "Профессиональное модельное агентство",
+  "contactPoint": {
+    "@type": "ContactPoint",
+    "contactType": "customer service"
+  }
+}
+</script>
 </body>
 </html>
