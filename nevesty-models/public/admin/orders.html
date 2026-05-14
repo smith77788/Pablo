@@ -152,17 +152,28 @@
     <div id="listView" class="page-content">
       <div class="section-card">
 
-        <!-- Filters -->
+        <!-- Status filter buttons row -->
+        <div class="status-filter-bar" id="statusFilterBar">
+          <button class="sfilter-btn active-all" data-status="" onclick="setStatusFilter('')">Все</button>
+          <button class="sfilter-btn" data-status="new" onclick="setStatusFilter('new')">🆕 Новые</button>
+          <button class="sfilter-btn" data-status="reviewing" onclick="setStatusFilter('reviewing')">🔍 На рассмотрении</button>
+          <button class="sfilter-btn" data-status="confirmed" onclick="setStatusFilter('confirmed')">✅ Подтверждённые</button>
+          <button class="sfilter-btn" data-status="in_progress" onclick="setStatusFilter('in_progress')">▶️ В работе</button>
+          <button class="sfilter-btn" data-status="completed" onclick="setStatusFilter('completed')">🏁 Завершённые</button>
+          <button class="sfilter-btn" data-status="cancelled" onclick="setStatusFilter('cancelled')">❌ Отменённые</button>
+        </div>
+
+        <!-- Search + export row -->
         <div class="filters-bar">
-          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск: имя, номер, телефон..." />
-          <select class="filter-select" id="statusFilter">
+          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск по имени или телефону..." />
+          <select class="filter-select" id="statusFilter" style="display:none">
             <option value="">Все статусы</option>
-            <option value="new">🆕 Новые</option>
-            <option value="reviewing">🔍 На рассмотрении</option>
-            <option value="confirmed">✅ Подтверждённые</option>
-            <option value="in_progress">▶️ В процессе</option>
-            <option value="completed">🏁 Завершённые</option>
-            <option value="cancelled">❌ Отменённые</option>
+            <option value="new">Новые</option>
+            <option value="reviewing">На рассмотрении</option>
+            <option value="confirmed">Подтверждённые</option>
+            <option value="in_progress">В процессе</option>
+            <option value="completed">Завершённые</option>
+            <option value="cancelled">Отменённые</option>
           </select>
           <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
           <button class="btn-export" onclick="exportCSV()" title="Экспорт текущей выборки в CSV">⬇ CSV</button>
@@ -190,12 +201,13 @@
                 <th>Модель</th>
                 <th>Дата</th>
                 <th>Статус</th>
+                <th>Изменить статус</th>
                 <th>Создана</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="ordersBody">
-              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr>
+              <tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr>
             </tbody>
           </table>
         </div>
