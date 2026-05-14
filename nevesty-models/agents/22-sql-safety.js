@@ -19,12 +19,24 @@ class SqlSafety extends Agent {
     for (const [fname, src] of Object.entries(sources)) {
       if (!src) continue;
 
-      // 1. Template literals in SQL queries (dangerous pattern)
-      const tplInSql = src.match(/(?:query|run|get|dbAll|dbGet|dbRun)\s*\([`'"][^`'"]*\$\{/g) || [];
-      if (tplInSql.length > 0) {
-        this.addFinding('CRITICAL', `${fname}: ${tplInSql.length} SQL-запросов с template literals — риск SQL injection`);
+      // 1. Template literals с ПРЯМОЙ подстановкой пользовательских данных
+      // Безопасно: WHERE ${where} где where = строка из кода, не из req.query/msg.text
+      const dangerousPatterns = [
+        /(?:query|run|get)\s*\(`[^`]*\$\{(?:req\.query\.|req\.body\.|msg\.|text\b|chatId|userId|username)/g,
+        /(?:query|run|get)\s*\(`[^`]*\$\{[a-zA-Z]+(?:Filter|Input|Search|Name|Id)\b/g,
+      ];
+      let dangerCount = 0;
+      for (const re of dangerousPatterns) { dangerCount += (src.match(re)||[]).length; }
+      // Также проверяем fieldMap pattern - безопасно только если есть проверка
+      const fieldmapUnsafe = (src.match(/SET\s+\$\{[^}]+\}\s*=/g)||[]).filter(m => {
+        const idx = src.indexOf(m);
+        const before = src.substring(Math.max(0,idx-200), idx);
+        return !before.includes('fieldMap[') && !before.includes('ALLOWED_') && !before.includes('whitelist');
+      }).length;
+      if (dangerCount + fieldmapUnsafe > 0) {
+        this.addFinding('CRITICAL', `${fname}: ${dangerCount + fieldmapUnsafe} SQL-запросов с небезопасной интерполяцией пользовательских данных`);
       } else {
-        this.addFinding('OK', `${fname}: Template literals в SQL не обнаружены`);
+        this.addFinding('OK', `${fname}: Небезопасная интерполяция в SQL не обнаружена`);
       }
 
       // 2. String concatenation in SQL

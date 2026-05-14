@@ -77,28 +77,28 @@ async function runOrchestrator() {
     `🔴${criticalCount} 🟠${highCount} 🟡${mediumCount} ✅${okCount}, Health Score: ${healthScore}%`
   );
 
-  // ── Заголовок отчёта ────────────────────────────────────────────────────
+  // ── Отчёт (plain text — никогда не ломается Markdown-парсером) ─────────
+  const ts = new Date().toLocaleString('ru', { timeZone: 'Europe/Moscow' });
   const header = [
-    `🧠 *Отчёт организма — ${new Date().toLocaleString('ru')}*`,
+    `🧠 Отчёт организма — ${ts}`,
     ``,
-    `${icon} *Health Score: ${healthScore}%*`,
+    `${icon} Health Score: ${healthScore}%`,
     `🔴 CRITICAL: ${criticalCount}  🟠 HIGH: ${highCount}  🟡 MEDIUM: ${mediumCount}  ✅ OK: ${okCount}`,
     `⏱ ${elapsed}с | ${agents.length} агентов`,
     ``,
   ].join('\n');
 
-  // ── Детальный список проблем по агентам ────────────────────────────────
   let details = '';
   if (agentSummaries.length === 0) {
-    details = '✅ *Всё в порядке — проблем не найдено!*\n';
+    details = '✅ Всё в порядке — проблем не найдено!\n';
   } else {
     for (const a of agentSummaries) {
-      details += `\n${a.emoji} *${a.name}*`;
+      details += `\n${a.emoji} ${a.name}`;
       if (a.crit) details += ` 🔴${a.crit}`;
       if (a.high) details += ` 🟠${a.high}`;
       if (a.med)  details += ` 🟡${a.med}`;
       details += '\n';
-      a.issues.forEach(f => { details += `${f.sev} ${f.msg}\n`; });
+      a.issues.forEach(f => { details += `  ${f.sev} ${f.msg}\n`; });
     }
   }
 
@@ -110,15 +110,12 @@ async function runOrchestrator() {
     ]
   };
 
-  // Отправляем заголовок + кнопки
-  await tgSend(header + details.slice(0, 3500), { parse_mode: 'Markdown', reply_markup: keyboard });
-
-  // Если детали длинные — шлём продолжение отдельными сообщениями
-  if (details.length > 3500) {
-    const rest = splitMsg(details.slice(3500));
-    for (const chunk of rest) {
-      await tgSend(`📋 *Продолжение отчёта:*\n${chunk}`, { parse_mode: 'Markdown' });
-    }
+  // Отправляем без parse_mode — plain text всегда доходит
+  const fullMsg = header + details;
+  const chunks = splitMsg(fullMsg, 4000);
+  await tgSend(chunks[0], { reply_markup: keyboard });
+  for (let i = 1; i < chunks.length; i++) {
+    await tgSend(`📋 Продолжение (${i+1}/${chunks.length}):\n` + chunks[i]);
   }
 
   console.log(`\n🧠 Готово: Score=${healthScore}% 🔴${criticalCount} 🟠${highCount} 🟡${mediumCount} ✅${okCount} (${elapsed}с)\n`);

@@ -19,7 +19,7 @@ async function fixAndRecheck() {
   const t0 = Date.now();
   console.log('\n🔧 FIX & RECHECK\n' + '═'.repeat(50));
 
-  await tgSend('🔧 *Запущено авто-исправление*\n_Шаг 1/3: Auto Fixer..._', { parse_mode: 'Markdown' });
+  await tgSend('🔧 *Запущено авто-исправление*\n_Шаг 1/3: Auto Fixer..._', {});
 
   // ── Шаг 1: Auto Fixer (DB-уровень) ───────────────────────────────────────
   const fixer = new AutoFixer();
@@ -28,12 +28,12 @@ async function fixAndRecheck() {
   const fixerIssues = fixer.findings.filter(f => !['✅', '⚪'].includes(f.sev));
 
   // ── Шаг 2: Bug Hunter ─────────────────────────────────────────────────────
-  await tgSend('🐛 *Шаг 2/3: Bug Hunter проверяет код...*', { parse_mode: 'Markdown' });
+  await tgSend('🐛 *Шаг 2/3: Bug Hunter проверяет код...*', {});
   const hunter = new BugHunter();
   await hunter.run({ silent: true });
 
   // ── Шаг 3: Полная перепроверка ────────────────────────────────────────────
-  await tgSend('🧠 *Шаг 3/3: Полная перепроверка 25 агентами...*', { parse_mode: 'Markdown' });
+  await tgSend('🧠 *Шаг 3/3: Полная перепроверка 25 агентами...*', {});
   const result = await runOrchestrator();
 
   // ── Итоговый отчёт об исправлениях ───────────────────────────────────────
@@ -74,7 +74,6 @@ async function fixAndRecheck() {
   summary += `\n⏱ Общее время: ${elapsed}с`;
 
   await tgSend(summary, {
-    parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
         [{ text: '🔄 Перепроверить снова', callback_data: 'adm_run_organism' }],

@@ -79,9 +79,11 @@ SecurityGuard.prototype.analyze = async function() {
   if (botSrc.includes('WEBHOOK_SECRET')) this.addFinding('OK','Webhook secret перевіряється');
   if (apiSrc.includes('rateLimit') || apiSrc.includes('rate')) this.addFinding('OK','Rate limiting присутній на API');
   else this.addFinding('HIGH','Rate limiting на API потребує перевірки');
-  const jwtChecks = (apiSrc.match(/authenticateToken|jwt\.verify/g)||[]).length;
+  // auth middleware (require('../middleware/auth')) считается JWT-защитой
+  const authMiddlewareUsed = (apiSrc.match(/,\s*auth\s*,/g)||[]).length;
+  const jwtChecks = (apiSrc.match(/authenticateToken|jwt\.verify/g)||[]).length + authMiddlewareUsed;
   if (jwtChecks < 2) this.addFinding('HIGH',`JWT аутентифікація знайдена ${jwtChecks} разів`);
-  else this.addFinding('OK',`JWT аутентифікація у ${jwtChecks} роутах`);
+  else this.addFinding('OK',`JWT аутентифікація: auth middleware у ${authMiddlewareUsed} роутах`);
 };
 
 if (require.main === module) new SecurityGuard().run().then(() => process.exit(0));

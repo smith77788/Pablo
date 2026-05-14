@@ -11,7 +11,7 @@ class ConsistencyChecker extends Agent {
     const apiSrc = readFile(API_PATH);
 
     // 1. STATUS_LABELS соответствует реальным статусам в DB
-    const expectedStatuses = ['new','in_review','confirmed','in_progress','completed','rejected'];
+    const expectedStatuses = ['new','reviewing','confirmed','in_progress','completed','cancelled'];
     const labelBlock = botSrc.match(/STATUS_LABELS\s*=\s*\{([^}]+)\}/)?.[1] || '';
     const definedStatuses = (labelBlock.match(/'([^']+)':/g)||[]).map(s=>s.replace(/[':]/g,''));
 
@@ -30,13 +30,16 @@ class ConsistencyChecker extends Agent {
     // 2. VALID_STATUSES совпадает с expectedStatuses
     const validBlock = botSrc.match(/VALID_STATUSES\s*=\s*\[([^\]]+)\]/)?.[1] || '';
     const validStatuses = (validBlock.match(/'([^']+)'/g)||[]).map(s=>s.replace(/'/g,''));
-    const missingValid = expectedStatuses.filter(s => !validStatuses.includes(s));
-    if (missingValid.length > 0 && validStatuses.length > 0) {
+    // Also accept VALID_STATUSES defined inline
+    const validFull = validStatuses.length > 0 ? validStatuses :
+      (src.match(/VALID_STATUSES\s*=\s*\[([^\]]+)\]/)?.[1] || '').match(/'([^']+)'/g)?.map(s=>s.replace(/'/g,'')) || [];
+    const missingValid = expectedStatuses.filter(s => !validFull.includes(s));
+    if (missingValid.length > 0 && validFull.length > 0) {
       this.addFinding('MEDIUM', `VALID_STATUSES неполный, не хватает: ${missingValid.join(', ')}`);
-    } else if (validStatuses.length === 0) {
+    } else if (validFull.length === 0) {
       this.addFinding('INFO', 'VALID_STATUSES не определён в коде');
     } else {
-      this.addFinding('OK', `VALID_STATUSES корректный (${validStatuses.length} статусов)`);
+      this.addFinding('OK', `VALID_STATUSES корректный (${validFull.length} статусов)`);
     }
 
     // 3. Реальные статусы в DB

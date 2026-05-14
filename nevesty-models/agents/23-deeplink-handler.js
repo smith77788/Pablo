@@ -9,8 +9,9 @@ class DeeplinkHandler extends Agent {
   async analyze() {
     const src = readFile(BOT_PATH);
 
-    // 1. /start с параметром обрабатывается
-    const startHandler = src.includes("'/start'") || src.includes('"start"');
+    // 1. /start обрабатывается (onText regex или command handler)
+    const startHandler = src.includes("'/start'") || src.includes('"start"') ||
+      src.includes('/\\/start/') || src.includes("onText(/\\/start") || src.includes('onText(/\/start');
     if (!startHandler) {
       this.addFinding('HIGH', 'Команда /start не найдена');
       return;

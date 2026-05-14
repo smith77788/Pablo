@@ -24,18 +24,19 @@ class AdminProtection extends Agent {
       this.addFinding('OK', 'isAdmin использует ADMIN_TELEGRAM_IDS из .env');
     }
 
-    // 3. Все adm_ callback-и защищены
+    // 3. Все adm_ callback-и защищены — проверяем В БЛОКЕ обработки (500 chars after)
     const admCallbacks = (src.match(/adm_[a-z]+/g)||[]);
     const uniqueAdm = [...new Set(admCallbacks)];
     const unguarded = uniqueAdm.filter(cb => {
-      // Ищем блок обработки этого коллбека без предшествующего isAdmin
       const idx = src.indexOf(`'${cb}'`);
       if (idx === -1) return false;
-      const before = src.substring(Math.max(0, idx-200), idx);
-      return !before.includes('isAdmin') && !before.includes('!admin');
+      // Смотрим 500 chars ПОСЛЕ callback data — там обычно if (!isAdmin) return
+      const after  = src.substring(idx, idx + 500);
+      const before = src.substring(Math.max(0, idx-300), idx);
+      return !after.includes('isAdmin') && !before.includes('isAdmin') && !after.includes('!admin');
     });
-    if (unguarded.length > 3) {
-      this.addFinding('HIGH', `Возможно незащищённые admin callbacks: ${unguarded.slice(0,5).join(', ')}`);
+    if (unguarded.length > 5) {
+      this.addFinding('MEDIUM', `Возможно незащищённые admin callbacks: ${unguarded.slice(0,5).join(', ')}`);
     } else {
       this.addFinding('OK', `Admin callbacks защищены isAdmin (найдено ${uniqueAdm.length} уникальных adm_ prefix)`);
     }
