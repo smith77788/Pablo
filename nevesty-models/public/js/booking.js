@@ -223,6 +223,11 @@
 
       document.getElementById('orderNumDisplay').textContent = result.order_number;
 
+      // Notify Telegram Mini App if running inside it
+      if (window._tgWebAppOnBookingSuccess) {
+        window._tgWebAppOnBookingSuccess(result.order_number);
+      }
+
       // Telegram connect link
       const tgLink = document.getElementById('tgConnectLink');
       const tgBox = document.getElementById('tgConnectBox');

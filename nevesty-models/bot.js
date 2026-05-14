@@ -112,19 +112,18 @@ function parseSessionData(session) {
 async function showMainMenu(chatId, firstName) {
   await clearSession(chatId);
   const name = firstName ? `, ${esc(firstName)}` : '';
+  const keyboard = [
+    [{ text: '💃 Каталог моделей', callback_data: 'catalog_0' }],
+    [{ text: '📝 Оформить заявку', callback_data: 'start_booking' }],
+    [{ text: '📋 Мои заявки', callback_data: 'my_orders' }],
+    [{ text: '📞 Контакты', callback_data: 'contacts' }]
+  ];
+  if (SITE_URL.startsWith('https://')) {
+    keyboard.push([{ text: '🌐 Открыть сайт', web_app: { url: SITE_URL } }]);
+  }
   return safeSend(chatId,
     `💎 *Nevesty Models*\n\nДобро пожаловать${name}\\!\n\nЧем могу помочь?`,
-    {
-      parse_mode: 'MarkdownV2',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '💃 Каталог моделей', callback_data: 'catalog_0' }],
-          [{ text: '📝 Оформить заявку', callback_data: 'start_booking' }],
-          [{ text: '📋 Мои заявки', callback_data: 'my_orders' }],
-          [{ text: '📞 Контакты', callback_data: 'contacts' }]
-        ]
-      }
-    }
+    { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
   );
 }
 
@@ -604,20 +603,20 @@ async function showAdminMenu(chatId, firstName) {
   try {
     const newCount = (await get("SELECT COUNT(*) as n FROM orders WHERE status='new'")).n;
     const badge = newCount > 0 ? ` 🔴${newCount}` : '';
+    const adminKeyboard = [
+      [{ text: `📋 Заявки${badge}`, callback_data: 'admin_orders_all_0' }],
+      [{ text: '💃 Модели', callback_data: 'admin_models_0' }],
+      [{ text: '📊 Статистика', callback_data: 'admin_stats' }],
+      [{ text: '🤖 Фид агентов', callback_data: 'agent_feed_0' }],
+    ];
+    if (SITE_URL.startsWith('https://')) {
+      adminKeyboard.push([{ text: '🌐 Панель (Mini App)', web_app: { url: `${SITE_URL}/admin/` } }]);
+    } else {
+      adminKeyboard.push([{ text: '🌐 Открыть панель', url: `${SITE_URL}/admin/` }]);
+    }
     return safeSend(chatId,
       `👑 *Панель администратора*${name ? `\nДобро пожаловать${name}` : ''}`,
-      {
-        parse_mode: 'MarkdownV2',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: `📋 Заявки${badge}`, callback_data: 'admin_orders_all_0' }],
-            [{ text: '💃 Модели', callback_data: 'admin_models_0' }],
-            [{ text: '📊 Статистика', callback_data: 'admin_stats' }],
-            [{ text: '🤖 Фид агентов', callback_data: 'agent_feed_0' }],
-            [{ text: '🌐 Открыть панель', url: `${SITE_URL}/admin/` }]
-          ]
-        }
-      }
+      { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: adminKeyboard } }
     );
   } catch (e) {
     console.error('[Bot] showAdminMenu error:', e.message);
@@ -918,6 +917,20 @@ function initBot(app) {
       const code = err.code || (err.response && err.response.statusCode) || 'UNKNOWN';
       console.error(`[Bot] Polling error (${code}): ${err.message}`);
     });
+  }
+
+  // ─── Set menu button (Web App shortcut in chat header) ───────────────────
+  if (SITE_URL.startsWith('https://')) {
+    bot.setMyCommands([
+      { command: 'start', description: '🏠 Главное меню' },
+      { command: 'status', description: '📋 Статус заявки' },
+      { command: 'help', description: '📖 Справка' },
+      { command: 'cancel', description: '❌ Отменить действие' },
+    ]).catch(() => {});
+    // Global Web App menu button
+    bot.callApi('setChatMenuButton', {
+      menu_button: JSON.stringify({ type: 'web_app', text: '🌐 Сайт', web_app: { url: SITE_URL } })
+    }).catch(() => {});
   }
 
   // ─── /start ───────────────────────────────────────────────────────────────
