@@ -170,7 +170,7 @@ function openModelModal(id) {
           ${thumbsHtml ? `<div class="modal-thumbs">${thumbsHtml}</div>` : ''}
         </div>
         <div class="modal-info">
-          <h2>${m.name}</h2>
+          <h2 id="modalTitle">${m.name}</h2>
           <span class="modal-cat">${CATEGORIES[m.category] || m.category}</span>
           <div class="modal-params">
             <div class="modal-param"><label>Возраст</label><span>${m.age || '—'} лет</span></div>

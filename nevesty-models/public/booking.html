@@ -217,6 +217,7 @@
         <h3 style="font-size:1.3rem;color:var(--white);margin-bottom:8px">Проверить статус заявки</h3>
         <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:20px">Введите номер заявки (формат: NM-2024-1234)</p>
         <div style="display:flex;gap:12px">
+          <label for="statusInput" class="sr-only">Номер заявки</label>
           <input type="text" class="form-control" id="statusInput" placeholder="NM-2024-1234" style="flex:1" />
           <button class="btn-primary" onclick="window._booking.checkStatus()" style="padding:12px 24px;font-size:0.8rem">Проверить</button>
         </div>
