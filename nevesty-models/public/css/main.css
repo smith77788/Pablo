@@ -240,6 +240,26 @@ img { display: block; max-width: 100%; }
 }
 .model-avail.unavailable { background: #f44336; box-shadow: 0 0 8px rgba(244,67,54,0.6); }
 
+/* ─── SKELETON LOADER ────────────────────────────── */
+.model-card-skeleton {
+  background: var(--bg3, #1a1a1a);
+  aspect-ratio: 3/4;
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+.model-card-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(201,169,110,0.07) 50%, transparent 100%);
+  animation: nm-shimmer 1.5s infinite;
+}
+@keyframes nm-shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
 /* ─── SERVICES ───────────────────────────────────── */
 .services { padding: 100px 0; background: var(--bg2); }
 .services-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }

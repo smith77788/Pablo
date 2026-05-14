@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="/css/main.css" />
 </head>
 <body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
   <nav class="navbar scrolled">
     <div class="nav-inner">
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
@@ -26,10 +27,23 @@
         <a href="/#contact">Контакты</a>
         <a href="/booking.html" class="btn-nav" style="color:var(--bg);background:var(--gold);border-color:var(--gold)">Заказать</a>
       </div>
+      <div class="nav-burger" id="burgerBtn">
+        <span></span><span></span><span></span>
+      </div>
     </div>
   </nav>
 
-  <div class="booking-page">
+  <!-- MOBILE MENU -->
+  <nav class="nav-mobile" id="mobileMenu">
+    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <a href="/catalog.html">Модели</a>
+    <a href="/#services">Услуги</a>
+    <a href="/#about">О нас</a>
+    <a href="/#contact">Контакты</a>
+    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
+  </nav>
+
+  <div class="booking-page" id="main-content">
     <div class="container">
       <div class="booking-header">
         <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Бронирование</div>

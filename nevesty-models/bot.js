@@ -637,17 +637,15 @@ function initBot(app) {
         ? `📩 *Сообщение от клиента*\nЗаявка: *${order.order_number}*\nКлиент: ${clientName} (${username})\n\n`
         : `📩 *Новое сообщение от клиента*\n${clientName} (${username})\n\n`;
 
-      for (const adminId of adminIds) {
-        await safeSend(adminId, header + msg.text, {
-          parse_mode: 'Markdown',
-          reply_markup: order ? {
-            inline_keyboard: [[
-              { text: '💬 Ответить', callback_data: `contact_order_${order.id}` },
-              { text: '📋 Заявка', url: `${SITE_URL}/admin/#orders/${order.id}` }
-            ]]
-          } : undefined
-        });
-      }
+      await Promise.allSettled(adminIds.map(adminId => safeSend(adminId, header + msg.text, {
+        parse_mode: 'Markdown',
+        reply_markup: order ? {
+          inline_keyboard: [[
+            { text: '💬 Ответить', callback_data: `contact_order_${order.id}` },
+            { text: '📋 Заявка', url: `${SITE_URL}/admin/#orders/${order.id}` }
+          ]]
+        } : undefined
+      })));
 
       return safeSend(chatId, '✅ Ваше сообщение передано менеджеру. Мы ответим вам в ближайшее время!');
     }
@@ -667,9 +665,7 @@ function initBot(app) {
 async function notifyAdmin(text, opts = {}) {
   if (!bot) return;
   const adminIds = await getAdminChatIds();
-  for (const id of adminIds) {
-    await safeSend(id, text, { parse_mode: 'Markdown', ...opts });
-  }
+  await Promise.allSettled(adminIds.map(id => safeSend(id, text, { parse_mode: 'Markdown', ...opts })));
 }
 
 // ─── notifyNewOrder ───────────────────────────────────────────────────────────
@@ -700,24 +696,22 @@ async function notifyNewOrder(order) {
     (order.comments ? `\n💬 Комментарий:\n${order.comments}` : '');
 
   const adminIds = await getAdminChatIds();
-  for (const adminId of adminIds) {
-    await safeSend(adminId, text, {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '✅ Подтвердить', callback_data: `confirm_order_${order.id}` },
-            { text: '🔍 В работу', callback_data: `review_order_${order.id}` },
-            { text: '❌ Отклонить', callback_data: `reject_order_${order.id}` }
-          ],
-          [
-            { text: '💬 Написать клиенту', callback_data: `contact_order_${order.id}` },
-            { text: '🔗 Открыть заявку', url: `${SITE_URL}/admin/#orders/${order.id}` }
-          ]
+  await Promise.allSettled(adminIds.map(adminId => safeSend(adminId, text, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '✅ Подтвердить', callback_data: `confirm_order_${order.id}` },
+          { text: '🔍 В работу', callback_data: `review_order_${order.id}` },
+          { text: '❌ Отклонить', callback_data: `reject_order_${order.id}` }
+        ],
+        [
+          { text: '💬 Написать клиенту', callback_data: `contact_order_${order.id}` },
+          { text: '🔗 Открыть заявку', url: `${SITE_URL}/admin/#orders/${order.id}` }
         ]
-      }
-    });
-  }
+      ]
+    }
+  })));
 }
 
 // ─── notifyStatusChange ───────────────────────────────────────────────────────
