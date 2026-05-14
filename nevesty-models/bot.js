@@ -689,22 +689,23 @@ async function showAdminOrder(chatId, orderId) {
 
     const msgs = await query('SELECT * FROM messages WHERE order_id=? ORDER BY created_at DESC LIMIT 3', [orderId]);
 
+    const e = s => String(s||'').replace(/[_*`\[\]]/g, '\\$&');
     let text = `📋 *${o.order_number}*\nСтатус: ${STATUS_LABELS[o.status]||o.status}\n\n`;
-    text += `👤 ${o.client_name}\n📞 ${o.client_phone}\n`;
-    if (o.client_email)    text += `📧 ${o.client_email}\n`;
-    if (o.client_telegram) text += `💬 @${o.client_telegram.replace('@','')}\n`;
-    text += `\n🎭 ${EVENT_TYPES[o.event_type]||o.event_type}\n`;
-    if (o.event_date)      text += `📅 ${o.event_date}\n`;
-    if (o.event_duration)  text += `⏱ ${o.event_duration} ч.\n`;
-    if (o.location)        text += `📍 ${o.location}\n`;
-    if (o.model_name)      text += `💃 ${o.model_name}\n`;
-    if (o.budget)          text += `💰 ${o.budget}\n`;
-    if (o.comments)        text += `💬 ${o.comments}\n`;
+    text += `👤 ${e(o.client_name)}\n📞 ${e(o.client_phone)}\n`;
+    if (o.client_email)    text += `📧 ${e(o.client_email)}\n`;
+    if (o.client_telegram) text += `💬 @${e(o.client_telegram.replace('@',''))}\n`;
+    text += `\n🎭 ${e(EVENT_TYPES[o.event_type]||o.event_type)}\n`;
+    if (o.event_date)      text += `📅 ${e(o.event_date)}\n`;
+    if (o.event_duration)  text += `⏱ ${e(o.event_duration)} ч\\.\n`;
+    if (o.location)        text += `📍 ${e(o.location)}\n`;
+    if (o.model_name)      text += `💃 ${e(o.model_name)}\n`;
+    if (o.budget)          text += `💰 ${e(o.budget)}\n`;
+    if (o.comments)        text += `💬 ${e(o.comments)}\n`;
     if (msgs.length) {
       text += `\n📨 Последние сообщения:\n`;
       msgs.reverse().forEach(m => {
         const who = m.sender_type==='admin' ? '👤' : '🙋';
-        text += `${who} ${m.content}\n`;
+        text += `${who} ${e(m.content)}\n`;
       });
     }
 
@@ -724,7 +725,7 @@ async function showAdminOrder(chatId, orderId) {
     ]);
     keyboard.push([{ text: '← К заявкам', callback_data: 'adm_orders__0' }]);
 
-    return safeSend(chatId, text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
+    return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } });
   } catch (e) { console.error('[Bot] showAdminOrder:', e.message); }
 }
 
@@ -1005,7 +1006,7 @@ function initBot(app) {
 
     // ── Navigation
     if (data === 'main_menu') return isAdmin(chatId) ? showAdminMenu(chatId, q.from.first_name) : showMainMenu(chatId, q.from.first_name);
-    if (data === 'admin_menu') return showAdminMenu(chatId, q.from.first_name);
+    if (data === 'admin_menu') { if (!isAdmin(chatId)) return; return showAdminMenu(chatId, q.from.first_name); }
     if (data === 'contacts')   return showContacts(chatId);
     if (data === 'my_orders')  return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
@@ -1020,8 +1021,9 @@ function initBot(app) {
       const proc = spawn('node', ['agents/run-organism.js'], {
         cwd: require('path').join(__dirname),
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', 'ignore', 'pipe'],
       });
+      proc.stderr.on('data', d => console.error('[Organism]', d.toString().trim()));
       proc.unref();
       return;
     }

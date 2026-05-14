@@ -7,7 +7,9 @@ module.exports = function authMiddleware(req, res, next) {
   }
   const token = header.slice(7);
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const secret = process.env.JWT_SECRET;
+    if (!secret) { return res.status(500).json({ error: 'JWT_SECRET not configured' }); }
+    const payload = jwt.verify(token, secret);
     req.admin = payload;
     next();
   } catch {
