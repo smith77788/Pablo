@@ -49,24 +49,43 @@
     <!-- LIST VIEW -->
     <div id="listView" class="page-content">
       <div class="section-card">
-        <div class="filters-bar">
-          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск..." />
+        <div class="filters-bar" style="flex-wrap:wrap;gap:10px;align-items:center">
+          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск по имени..." style="min-width:180px;flex:1" />
           <select class="filter-select" id="categoryFilter">
             <option value="">Все категории</option>
             <option value="fashion">Fashion</option>
             <option value="commercial">Commercial</option>
             <option value="events">Events</option>
           </select>
-          <select class="filter-select" id="availFilter">
-            <option value="">Все</option>
-            <option value="1">Доступные</option>
-            <option value="0">Недоступные</option>
+          <div class="toggle-filter-group" style="display:flex;gap:4px">
+            <button class="btn btn-sm avail-filter-btn active" data-avail="" onclick="setAvailFilter(this,'')">Все</button>
+            <button class="btn btn-sm avail-filter-btn" data-avail="1" onclick="setAvailFilter(this,'1')" style="color:#27ae60">Свободные</button>
+            <button class="btn btn-sm avail-filter-btn" data-avail="0" onclick="setAvailFilter(this,'0')" style="color:#e74c3c">Занятые</button>
+          </div>
+          <!-- hidden backing value for fetchModels() -->
+          <select id="availFilter" style="display:none">
+            <option value=""></option>
+            <option value="1">1</option>
+            <option value="0">0</option>
           </select>
         </div>
-        <div class="section-card-body padded">
-          <div class="admin-model-grid" id="modelsGrid">
-            <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</div>
-          </div>
+        <div class="section-card-body" style="overflow-x:auto;padding:0">
+          <table class="models-table" id="modelsTable" style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="background:var(--bg-secondary,#f8f8f8);text-align:left">
+                <th style="padding:10px 12px;font-weight:600;font-size:13px;white-space:nowrap">Фото</th>
+                <th style="padding:10px 12px;font-weight:600;font-size:13px">Имя</th>
+                <th style="padding:10px 12px;font-weight:600;font-size:13px">Рост</th>
+                <th style="padding:10px 12px;font-weight:600;font-size:13px">Возраст</th>
+                <th style="padding:10px 12px;font-weight:600;font-size:13px">Город</th>
+                <th style="padding:10px 12px;font-weight:600;font-size:13px">Доступность</th>
+                <th style="padding:10px 12px;font-weight:600;font-size:13px">Действия</th>
+              </tr>
+            </thead>
+            <tbody id="modelsGrid">
+              <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -234,34 +253,50 @@ async function fetchModels() {
 }
 
 function renderModels() {
-  const grid = document.getElementById('modelsGrid');
+  const tbody = document.getElementById('modelsGrid');
   if (!allModels.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1"><div class="empty-state"><div class="empty-state-icon">💃</div><p>Модели не найдены</p></div></div>';
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state" style="text-align:center;padding:40px"><div class="empty-state-icon">💃</div><p>Модели не найдены</p></div></td></tr>';
     return;
   }
-  grid.innerHTML = allModels.map(m => `
-    <div class="admin-model-card">
-      <div class="admin-model-img">
-        ${m.photo_main ? `<img src="${m.photo_main}" alt="" loading="lazy" />` : `<div class="admin-model-placeholder">${(m.name || '?')[0]}</div>`}
-      </div>
-      <div class="admin-model-info">
-        <div class="admin-model-name">${m.name}</div>
-        <div class="admin-model-meta">${m.height || '—'}см · ${m.hair_color || '—'} · ${_admin.CATEGORIES[m.category] || m.category}</div>
-        <div style="margin-top:6px">${m.available ? '<span class="badge badge-available">Доступна</span>' : '<span class="badge badge-unavailable">Недоступна</span>'}</div>
-        <div class="admin-model-actions">
-          <button class="btn btn-sm btn-ghost" data-action="edit" data-id="${m.id}" aria-label="Редактировать ${m.name}">✏️ Ред.</button>
-          <a href="/catalog.html" target="_blank" class="btn btn-sm btn-ghost" aria-label="Просмотреть ${m.name} на сайте">👁</a>
-          <button class="btn btn-sm btn-danger" data-action="delete" data-id="${m.id}" aria-label="Удалить модель ${m.name}">🗑</button>
-        </div>
-      </div>
-    </div>`).join('');
+  tbody.innerHTML = allModels.map(m => {
+    const thumb = m.photo_main
+      ? `<img src="${m.photo_main}" alt="" loading="lazy" style="width:40px;height:40px;object-fit:cover;border-radius:6px;display:block" />`
+      : `<div style="width:40px;height:40px;border-radius:6px;background:var(--bg-secondary,#eee);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">${(m.name || '?')[0].toUpperCase()}</div>`;
+    const availDot = m.available
+      ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27ae60;margin-right:5px;vertical-align:middle"></span><span style="color:#27ae60;font-size:13px">Свободна</span>`
+      : `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#e74c3c;margin-right:5px;vertical-align:middle"></span><span style="color:#e74c3c;font-size:13px">Занята</span>`;
+    return `<tr style="border-bottom:1px solid var(--border-color,#eee)" data-id="${m.id}">
+      <td style="padding:8px 12px">${thumb}</td>
+      <td style="padding:8px 12px;font-weight:500;font-size:14px">${_admin.escHtml ? _admin.escHtml(m.name) : m.name}</td>
+      <td style="padding:8px 12px;font-size:13px;color:var(--text-dim)">${m.height ? m.height + ' см' : '—'}</td>
+      <td style="padding:8px 12px;font-size:13px;color:var(--text-dim)">${m.age || '—'}</td>
+      <td style="padding:8px 12px;font-size:13px;color:var(--text-dim)">${m.city ? _admin.escHtml ? _admin.escHtml(m.city) : m.city : '—'}</td>
+      <td style="padding:8px 12px">
+        <button class="btn btn-sm" data-action="toggle" data-id="${m.id}" data-avail="${m.available ? 1 : 0}"
+          style="padding:3px 10px;font-size:12px;background:${m.available ? '#eafaf1' : '#fdecea'};color:${m.available ? '#27ae60' : '#e74c3c'};border:1px solid ${m.available ? '#a9dfbf' : '#f5b7b1'};border-radius:20px;cursor:pointer"
+          aria-label="Переключить доступность ${m.name}">
+          ${availDot}
+        </button>
+      </td>
+      <td style="padding:8px 12px;white-space:nowrap">
+        <button class="btn btn-sm btn-ghost" data-action="edit" data-id="${m.id}" aria-label="Редактировать ${m.name}" style="margin-right:4px">✏️</button>
+        <button class="btn btn-sm btn-ghost" data-action="copy" data-id="${m.id}" aria-label="Копировать ID ${m.id}" style="margin-right:4px" title="Копировать ID">📋 ID</button>
+        <a href="/catalog.html" target="_blank" class="btn btn-sm btn-ghost" aria-label="Просмотреть ${m.name} на сайте" style="margin-right:4px">👁</a>
+        <button class="btn btn-sm btn-danger" data-action="delete" data-id="${m.id}" aria-label="Удалить модель ${m.name}">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
 
   // Attach events after render (avoids inline onclick XSS risk)
-  grid.querySelectorAll('[data-action="edit"]').forEach(btn => btn.addEventListener('click', () => editModel(+btn.dataset.id)));
-  grid.querySelectorAll('[data-action="delete"]').forEach(btn => btn.addEventListener('click', () => {
+  tbody.querySelectorAll('[data-action="edit"]').forEach(btn => btn.addEventListener('click', () => editModel(+btn.dataset.id)));
+  tbody.querySelectorAll('[data-action="delete"]').forEach(btn => btn.addEventListener('click', () => {
     const m = allModels.find(x => x.id === +btn.dataset.id);
     if (m) deleteModel(m.id, m.name);
   }));
+  tbody.querySelectorAll('[data-action="toggle"]').forEach(btn => btn.addEventListener('click', () => {
+    toggleAvailability(+btn.dataset.id, +btn.dataset.avail);
+  }));
+  tbody.querySelectorAll('[data-action="copy"]').forEach(btn => btn.addEventListener('click', () => copyId(+btn.dataset.id)));
 }
 
 function showList() {
@@ -406,11 +441,45 @@ document.getElementById('modelForm').addEventListener('submit', async (e) => {
   }
 });
 
+async function toggleAvailability(id, currentVal) {
+  const token = localStorage.getItem('jwt');
+  const res = await fetch('/api/models/' + id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ available: currentVal ? 0 : 1 })
+  });
+  if (res.ok) loadModels();
+  else _admin.toast('Ошибка обновления доступности', 'error');
+}
+
+function copyId(id) {
+  navigator.clipboard.writeText(String(id)).then(() => {
+    _admin.toast('ID ' + id + ' скопирован', 'success');
+  }).catch(() => {
+    // fallback for older browsers
+    const ta = document.createElement('textarea');
+    ta.value = String(id);
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    _admin.toast('ID ' + id + ' скопирован', 'success');
+  });
+}
+
+function setAvailFilter(btn, val) {
+  document.querySelectorAll('.avail-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('availFilter').value = val;
+  fetchModels();
+}
+
+function loadModels() { fetchModels(); }
+
 // Search / filter
 let searchTimer;
 document.getElementById('searchInput').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(fetchModels, 400); });
 document.getElementById('categoryFilter').addEventListener('change', fetchModels);
-document.getElementById('availFilter').addEventListener('change', fetchModels);
 
 // URL params
 const urlParams = new URLSearchParams(window.location.search);

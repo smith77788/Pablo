@@ -65,6 +65,22 @@
             </div>
           </div>
           <div class="filter-group">
+            <label>Город</label>
+            <select id="cityFilter" class="filter-search" style="padding:8px 14px;font-size:0.85rem;cursor:pointer">
+              <option value="">Все города</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Возраст</label>
+            <div class="filter-options" id="ageFilters">
+              <span class="filter-tag active" data-min="" data-max="">Любой</span>
+              <span class="filter-tag" data-min="18" data-max="22">18–22</span>
+              <span class="filter-tag" data-min="22" data-max="26">22–26</span>
+              <span class="filter-tag" data-min="26" data-max="30">26–30</span>
+              <span class="filter-tag" data-min="30" data-max="">30+</span>
+            </div>
+          </div>
+          <div class="filter-group">
             <label>Цвет волос</label>
             <div class="filter-options" id="hairFilters">
               <span class="filter-tag active" data-value="">Все</span>
@@ -83,11 +99,10 @@
             </div>
           </div>
           <div class="filter-group">
-            <label>Доступность</label>
-            <div class="filter-options" id="availFilters">
-              <span class="filter-tag active" data-value="">Все</span>
-              <span class="filter-tag" data-value="1">Свободна</span>
-            </div>
+            <label class="filter-avail-label">
+              <input type="checkbox" id="availableOnly" style="accent-color:var(--gold);width:15px;height:15px;cursor:pointer;vertical-align:middle;margin-right:6px" />
+              Только свободные
+            </label>
           </div>
           <button class="btn-filter-reset" id="resetFilters">Сбросить фильтры</button>
         </aside>
@@ -102,6 +117,7 @@
               <option value="height_desc">По росту ↓</option>
               <option value="height_asc">По росту ↑</option>
               <option value="name_asc">По имени А-Я</option>
+              <option value="age_asc">По возрасту (моложе)</option>
             </select>
           </div>
           <div class="catalog-grid" id="catalogGrid">

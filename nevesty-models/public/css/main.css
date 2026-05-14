@@ -702,3 +702,357 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .testimonials-grid { grid-template-columns: 1fr; }
   .pricing-grid { grid-template-columns: 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATIONS & MICRO-INTERACTIONS — appended
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── KEYFRAMES ──────────────────────────────────── */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(32px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(201,169,110,0.4); }
+  50%       { transform: scale(1.06); box-shadow: 0 0 0 6px rgba(201,169,110,0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+
+/* ─── FADE-IN-UP ANIMATION CLASS ─────────────────── */
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Elements waiting for IntersectionObserver — hidden until triggered */
+[data-animate] {
+  opacity: 0;
+  transform: translateY(32px);
+  transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-animate].is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Staggered children — add data-animate-delay="1..5" on siblings */
+[data-animate-delay="1"] { transition-delay: 0.1s; }
+[data-animate-delay="2"] { transition-delay: 0.2s; }
+[data-animate-delay="3"] { transition-delay: 0.3s; }
+[data-animate-delay="4"] { transition-delay: 0.4s; }
+[data-animate-delay="5"] { transition-delay: 0.5s; }
+
+/* ─── SKELETON LOADING ───────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg3) 0%,
+    #242420 40%,
+    rgba(201,169,110,0.07) 50%,
+    #242420 60%,
+    var(--bg3) 100%
+  );
+  background-size: 600px 100%;
+  animation: shimmer 1.6s infinite linear;
+  border-radius: var(--radius);
+  color: transparent !important;
+  pointer-events: none;
+}
+.skeleton * { visibility: hidden !important; }
+
+/* ─── BUTTON MICRO-INTERACTIONS ──────────────────── */
+/* All primary / outline / cta buttons get lift + glow */
+.btn-primary,
+.btn-outline,
+.cta-btn,
+.btn-next,
+.btn-back,
+.btn-nav,
+.btn-filter-reset,
+.btn-telegram {
+  transition: transform 0.22s ease, box-shadow 0.22s ease,
+              background 0.3s ease, border-color 0.3s ease,
+              color 0.3s ease, opacity 0.3s ease;
+  will-change: transform, box-shadow;
+}
+
+.btn-primary:hover,
+.cta-btn:hover,
+.btn-next:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(201,169,110,0.25);
+}
+
+.btn-outline:hover,
+.btn-nav:hover,
+.btn-back:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(201,169,110,0.12);
+}
+
+.btn-primary:active,
+.btn-outline:active,
+.cta-btn:active,
+.btn-next:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* ─── CARD MICRO-INTERACTIONS ────────────────────── */
+.service-card {
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 0.3s ease,
+              box-shadow 0.3s ease;
+}
+.service-card:hover {
+  transform: scale(1.02) translateY(-4px);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+}
+
+.pricing-card {
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 0.3s ease,
+              box-shadow 0.3s ease;
+}
+.pricing-card:hover {
+  transform: scale(1.02) translateY(-6px);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+}
+
+.testimonial-card {
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 0.3s ease;
+}
+.testimonial-card:hover {
+  transform: scale(1.01) translateY(-2px);
+}
+
+/* ─── NAV LINK UNDERLINE ANIMATION ───────────────── */
+.nav-links a:not(.btn-nav) {
+  position: relative;
+}
+.nav-links a:not(.btn-nav)::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: var(--gold);
+  transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.nav-links a:not(.btn-nav):hover::after { width: 100%; }
+
+/* ─── NOTIFICATION BADGE PULSE ───────────────────── */
+.badge-pulse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--gold);
+  color: var(--bg);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* ─── STATUS BADGES ──────────────────────────────── */
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  font-size: 0.65rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-weight: 600;
+  border-radius: 2px;
+}
+.status-new        { background: rgba(33, 150, 243, 0.15); color: #64b5f6; border: 1px solid rgba(33,150,243,0.3); }
+.status-confirmed  { background: rgba(76, 175, 80, 0.15);  color: #81c784; border: 1px solid rgba(76,175,80,0.3); }
+.status-pending    { background: rgba(255,193, 7, 0.15);   color: #ffd54f; border: 1px solid rgba(255,193,7,0.3); }
+.status-cancelled  { background: rgba(244, 67, 54, 0.15);  color: #ef9a9a; border: 1px solid rgba(244,67,54,0.3); }
+.status-completed  { background: rgba(201,169,110, 0.15);  color: var(--gold); border: 1px solid rgba(201,169,110,0.3); }
+.status-vip        { background: rgba(156, 39,176, 0.15);  color: #ce93d8; border: 1px solid rgba(156,39,176,0.3); }
+
+/* ─── STAR RATING ────────────────────────────────── */
+.stars {
+  display: inline-flex;
+  gap: 2px;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.stars .star-filled  { color: var(--gold); }
+.stars .star-half    { color: var(--gold); opacity: 0.6; }
+.stars .star-empty   { color: var(--text-dim); }
+
+/* Unicode star fallback via data attribute */
+.stars[data-score]::before {
+  content: attr(data-score-display);
+  color: var(--gold);
+  letter-spacing: 2px;
+}
+
+/* ─── TOAST NOTIFICATIONS ────────────────────────── */
+/* (extends the existing .toast defined above) */
+.toast-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+.toast-body { flex: 1; }
+.toast-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.toast-msg  { font-size: 0.78rem; color: var(--text-muted); }
+.toast-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 1rem; line-height: 1;
+  padding: 2px; flex-shrink: 0;
+  transition: color 0.2s ease;
+}
+.toast-close:hover { color: var(--text); }
+
+@keyframes toastOut {
+  to { transform: translateX(110%); opacity: 0; }
+}
+.toast.removing { animation: toastOut 0.3s ease forwards; }
+
+/* ─── SCROLL PROGRESS BAR ────────────────────────── */
+#scroll-progress {
+  position: fixed;
+  top: 0; left: 0;
+  width: 0%;
+  height: 2px;
+  background: linear-gradient(to right, var(--gold-dark), var(--gold), var(--gold-light));
+  z-index: 9999;
+  transition: width 0.1s linear;
+  pointer-events: none;
+}
+
+/* ─── HAMBURGER MENU ANIMATION ───────────────────── */
+.nav-burger.is-open span:nth-child(1) {
+  transform: translateY(6px) rotate(45deg);
+}
+.nav-burger.is-open span:nth-child(2) {
+  opacity: 0;
+  transform: scaleX(0);
+}
+.nav-burger.is-open span:nth-child(3) {
+  transform: translateY(-6px) rotate(-45deg);
+}
+.nav-burger span {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  transform-origin: center;
+}
+
+/* Mobile menu: slide-down open animation */
+.nav-mobile {
+  opacity: 0;
+  transform: translateY(-16px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+.nav-mobile.open {
+  display: flex;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: all;
+}
+
+/* ─── MOBILE — 480px BREAKPOINT ──────────────────── */
+@media (max-width: 480px) {
+  /* Hero: stack vertically, full-width CTAs */
+  .hero-content { padding: 0 16px; }
+  .hero-btns {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    width: 100%;
+    max-width: 320px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .btn-primary,
+  .btn-outline,
+  .cta-btn {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+  }
+
+  /* Full-width CTAs in CTA section */
+  .cta-section .hero-btns,
+  .cta-section .btn-primary,
+  .cta-section .btn-outline {
+    width: 100%;
+  }
+
+  /* Stats: single column on very small screens */
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-item { border-right: none; border-bottom: 1px solid var(--border); padding: 16px 0; }
+  .stat-item:nth-last-child(-n+2) { border-bottom: none; }
+
+  /* Catalog: single column */
+  .catalog-grid { grid-template-columns: 1fr !important; }
+
+  /* Booking steps — compact */
+  .booking-step-line { width: 24px; }
+  .booking-step-label { display: none; }
+
+  /* Modal: full-screen on very small viewports */
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal { max-height: 95vh; border-radius: 0; }
+
+  /* Hide decorative hero lines on mobile */
+  .hero-lines { display: none; }
+  .about-visual-accent { display: none; }
+  .steps-grid::before { display: none; }
+}
+
+/* ─── TOUCH TARGETS — min 44×44 px ──────────────── */
+@media (max-width: 900px) {
+  .btn-primary,
+  .btn-outline,
+  .cta-btn,
+  .btn-next,
+  .btn-back,
+  .btn-nav,
+  .btn-telegram,
+  .btn-filter-reset,
+  .filter-tag,
+  .nav-burger,
+  .modal-close,
+  .nav-mobile-close,
+  .nav-mobile a,
+  .footer-socials a,
+  .booking-step-num {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .form-control,
+  .filter-search,
+  .range-row input {
+    min-height: 44px;
+  }
+  .footer-col a {
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+  }
+}

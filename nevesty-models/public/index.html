@@ -57,8 +57,8 @@
     </div>
     <div class="hero-content">
       <div class="hero-label">Модельное агентство</div>
-      <h1>NEVESTY<br><em>Models</em></h1>
-      <p class="hero-tagline">Элегантность. Стиль. Совершенство.</p>
+      <h1 id="hero-title">NEVESTY<br><em>Models</em></h1>
+      <p class="hero-tagline" id="hero-subtitle">Элегантность. Стиль. Совершенство.</p>
       <p class="hero-desc">Мы создаём неповторимые образы для ваших мероприятий. Эксклюзивные модели для fashion-шоу, фотосессий и корпоративных событий.</p>
       <div class="hero-btns">
         <a href="/catalog.html" class="btn-primary">Смотреть каталог</a>
@@ -93,7 +93,7 @@
   </section>
 
   <!-- FEATURED MODELS -->
-  <section class="featured" id="models">
+  <section class="featured" id="models" data-animate>
     <div class="container">
       <div class="section-header">
         <div class="section-tag">Наши модели</div>
@@ -114,7 +114,7 @@
   </section>
 
   <!-- SERVICES -->
-  <section class="services" id="services">
+  <section class="services" id="services" data-animate>
     <div class="container">
       <div class="section-header">
         <div class="section-tag">Что мы предлагаем</div>
@@ -147,7 +147,7 @@
   </section>
 
   <!-- HOW IT WORKS -->
-  <section class="how-it-works">
+  <section class="how-it-works" data-animate>
     <div class="container">
       <div class="section-header">
         <div class="section-tag">Как это работает</div>
@@ -175,47 +175,15 @@
   </section>
 
   <!-- TESTIMONIALS -->
-  <section class="testimonials-section" id="reviews">
+  <section class="testimonials-section" id="reviews" data-animate>
     <div class="container">
       <div class="section-header">
         <div class="section-tag">Что говорят клиенты</div>
-        <h2>Отзывы</h2>
+        <h2>Отзывы клиентов</h2>
         <div class="gold-line"></div>
       </div>
-      <div class="testimonials-grid">
-        <div class="testimonial-card">
-          <div class="testimonial-stars">★★★★★</div>
-          <p class="testimonial-text">«Заказывали модель для показа новой коллекции нашего бренда. Анастасия — просто великолепна. Профессионализм на высшем уровне, чувство стиля безупречное. Будем обращаться снова.»</p>
-          <div class="testimonial-author">
-            <div class="testimonial-avatar">ДМ</div>
-            <div>
-              <strong>Дмитрий Марков</strong>
-              <span>Основатель Maison DM</span>
-            </div>
-          </div>
-        </div>
-        <div class="testimonial-card">
-          <div class="testimonial-stars">★★★★★</div>
-          <p class="testimonial-text">«Организовывали корпоратив на 300 человек. Агентство предоставило трёх хостес — пунктуальные, элегантные, всё под контролем. Гости были в восторге. Рекомендую без оговорок.»</p>
-          <div class="testimonial-author">
-            <div class="testimonial-avatar">АК</div>
-            <div>
-              <strong>Алёна Краснова</strong>
-              <span>HR-директор ТехноГрупп</span>
-            </div>
-          </div>
-        </div>
-        <div class="testimonial-card">
-          <div class="testimonial-stars">★★★★★</div>
-          <p class="testimonial-text">«Сотрудничаем с Nevesty Models уже 2 года для наших рекламных съёмок. Модели всегда готовы к работе, понимают задачу с полуслова. Качество съёмок выросло кратно.»</p>
-          <div class="testimonial-author">
-            <div class="testimonial-avatar">СВ</div>
-            <div>
-              <strong>Сергей Виноградов</strong>
-              <span>Арт-директор Studio V</span>
-            </div>
-          </div>
-        </div>
+      <div id="reviews-container" class="reviews-grid">
+        <!-- loaded dynamically -->
       </div>
     </div>
   </section>
@@ -231,13 +199,13 @@
   </section>
 
   <!-- PRICING -->
-  <section class="pricing-section" id="pricing">
+  <section class="pricing-section" id="pricing" data-animate>
     <div class="container">
       <div class="section-header">
         <div class="section-tag">Прозрачное ценообразование</div>
         <h2>Тарифы</h2>
         <div class="gold-line"></div>
-        <p>Стоимость зависит от формата мероприятия и длительности. Точная цена — после консультации.</p>
+        <p id="pricing-text">Стоимость зависит от формата мероприятия и длительности. Точная цена — после консультации.</p>
       </div>
       <div class="pricing-grid">
         <div class="pricing-card">
@@ -282,8 +250,75 @@
     </div>
   </section>
 
+  <!-- FAQ -->
+  <section class="faq-section section" id="faq-section" data-animate>
+    <div class="container">
+      <div class="section-header">
+        <div class="section-tag">Частые вопросы</div>
+        <h2>FAQ</h2>
+        <div class="gold-line"></div>
+      </div>
+      <div class="faq-list">
+        <div class="faq-item">
+          <button class="faq-question" aria-expanded="false">
+            Как быстро можно забронировать модель?
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer" hidden>
+            <p>Оставьте заявку на сайте или напишите нам в Telegram — менеджер свяжется с вами в течение часа. В срочных случаях подбор модели возможен за 2–4 часа.</p>
+          </div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-question" aria-expanded="false">
+            Какие параметры можно указать при выборе модели?
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer" hidden>
+            <p>Вы можете указать рост, параметры фигуры, цвет волос и глаз, размер обуви, категорию (fashion, commercial, events) и доступность на нужную дату.</p>
+          </div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-question" aria-expanded="false">
+            Есть ли минимальное время бронирования?
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer" hidden>
+            <p>Минимальное время — 2 часа для фотосессий. Для мероприятий и показов — от 4 часов. Возможно бронирование на полный день.</p>
+          </div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-question" aria-expanded="false">
+            Предоставляете ли вы модели для выездных съёмок в другие города?
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer" hidden>
+            <p>Да, мы работаем по всей стране. Выезд модели за пределы её города оговаривается отдельно — транспортные расходы и проживание оплачивает заказчик.</p>
+          </div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-question" aria-expanded="false">
+            Каков порядок оплаты?
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer" hidden>
+            <p>Оплата производится на основании договора: 50% предоплата при подтверждении бронирования, остаток — в день мероприятия. Принимаем безналичный расчёт и наличные.</p>
+          </div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-question" aria-expanded="false">
+            Что происходит, если модель заболела или не смогла приехать?
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer" hidden>
+            <p>В таком случае мы незамедлительно предлагаем замену с аналогичными характеристиками. Надёжность — наш приоритет: в базе более 200 моделей на замену.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ABOUT -->
-  <section class="about-section" id="about">
+  <section class="about-section" id="about" data-animate>
     <div class="container">
       <div class="about-grid">
         <div class="about-visual">
@@ -301,7 +336,7 @@
         <div class="about-content">
           <div class="section-tag">О компании</div>
           <h2 style="margin-bottom:24px">Nevesty Models</h2>
-          <p>Мы — модельное агентство полного цикла, работающее с 2014 года. За это время мы стали одним из ведущих агентств страны, объединив в своей базе более 200 профессиональных моделей.</p>
+          <p id="about-text">Мы — модельное агентство полного цикла, работающее с 2014 года. За это время мы стали одним из ведущих агентств страны, объединив в своей базе более 200 профессиональных моделей.</p>
           <p>Наша миссия — обеспечить клиентам безупречный сервис и предоставить моделей, которые идеально соответствуют концепции и задачам проекта.</p>
           <p>Каждая модель проходит строгий кастинг и профессиональную подготовку. Мы гарантируем пунктуальность, профессионализм и результат.</p>
           <div class="about-facts">

@@ -1,29 +1,151 @@
 #!/bin/bash
+# =============================================================================
+# Nevesty Models — Production Setup & Deploy Script
+# Usage: ./deploy.sh
+# =============================================================================
 set -e
 
-echo "🚀 Deploying Nevesty Models..."
+# --------------------------------------------------------------------------
+# Trap for unexpected errors
+# --------------------------------------------------------------------------
+trap 'echo ""; echo "❌ Deploy failed at line $LINENO. Check the output above for details." >&2; exit 1' ERR
 
-# Pull latest changes
-git pull origin main
+# Resolve the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Build and restart
-docker-compose pull 2>/dev/null || true
-docker-compose build --no-cache
-docker-compose up -d
+echo "============================================="
+echo "  Nevesty Models — Production Deploy"
+echo "============================================="
+echo ""
 
-# Wait for health check
-echo "⏳ Waiting for health check..."
-sleep 5
-for i in {1..10}; do
-  if curl -sf http://localhost:3000/health > /dev/null; then
-    echo "✅ Application is healthy!"
-    break
+# --------------------------------------------------------------------------
+# 1. Check .env
+# --------------------------------------------------------------------------
+echo "[ 1/9 ] Checking .env file..."
+if [ ! -f ".env" ]; then
+  echo "⚠️  WARNING: .env file not found!"
+  echo "   Copy .env.example and fill in your values:"
+  echo "   cp .env.example .env && nano .env"
+  echo ""
+  echo "   Continuing anyway — app may fail to start without proper config."
+  echo ""
+else
+  echo "   ✔ .env found"
+fi
+
+# --------------------------------------------------------------------------
+# 2. npm install --production
+# --------------------------------------------------------------------------
+echo "[ 2/9 ] Installing production dependencies..."
+npm install --production
+echo "   ✔ Dependencies installed"
+
+# --------------------------------------------------------------------------
+# 3. Create logs/ directory
+# --------------------------------------------------------------------------
+echo "[ 3/9 ] Ensuring logs/ directory exists..."
+mkdir -p logs
+echo "   ✔ logs/ ready"
+
+# --------------------------------------------------------------------------
+# 4. Initialize database
+# --------------------------------------------------------------------------
+echo "[ 4/9 ] Initializing database..."
+node database.js
+echo "   ✔ Database initialized"
+
+# --------------------------------------------------------------------------
+# 5. Run model seeder
+# --------------------------------------------------------------------------
+echo "[ 5/9 ] Seeding models..."
+node tools/seed-models.js
+echo "   ✔ Models seeded"
+
+# --------------------------------------------------------------------------
+# 6. Check / install PM2
+# --------------------------------------------------------------------------
+echo "[ 6/9 ] Checking PM2..."
+if ! command -v pm2 &>/dev/null; then
+  echo "   PM2 not found — installing globally..."
+  npm install -g pm2
+  echo "   ✔ PM2 installed"
+else
+  PM2_VERSION="$(pm2 --version)"
+  echo "   ✔ PM2 already installed (v${PM2_VERSION})"
+fi
+
+# --------------------------------------------------------------------------
+# 7. Start or reload via PM2
+# --------------------------------------------------------------------------
+echo "[ 7/9 ] Starting / reloading application..."
+# Check if any process from ecosystem.config.js is already managed by PM2
+if pm2 describe nevesty-models &>/dev/null 2>&1; then
+  echo "   App already running in PM2 — reloading..."
+  pm2 reload ecosystem.config.js
+  echo "   ✔ Application reloaded"
+else
+  echo "   Starting application for the first time..."
+  pm2 start ecosystem.config.js
+  echo "   ✔ Application started"
+fi
+
+# --------------------------------------------------------------------------
+# 8. Save PM2 process list
+# --------------------------------------------------------------------------
+echo "[ 8/9 ] Saving PM2 process list..."
+pm2 save
+echo "   ✔ Process list saved"
+
+# --------------------------------------------------------------------------
+# 9. PM2 startup hint
+# --------------------------------------------------------------------------
+echo "[ 9/9 ] PM2 startup configuration..."
+echo ""
+echo "   To enable PM2 to auto-start on system reboot, run the command"
+echo "   printed by:"
+echo ""
+echo "     pm2 startup"
+echo ""
+echo "   Copy-paste the generated sudo command and execute it."
+echo "   Then run: pm2 save"
+echo ""
+
+# --------------------------------------------------------------------------
+# Detect PORT from .env (fallback to 3000)
+# --------------------------------------------------------------------------
+APP_PORT=3000
+if [ -f ".env" ]; then
+  PARSED_PORT="$(grep -E '^PORT=' .env | head -1 | cut -d'=' -f2 | tr -d '[:space:]')"
+  if [ -n "$PARSED_PORT" ]; then
+    APP_PORT="$PARSED_PORT"
   fi
-  echo "  Attempt $i/10..."
-  sleep 3
-done
+fi
 
-# Show logs
-docker-compose logs --tail=20 app
+SITE_URL_VAL="http://localhost:${APP_PORT}"
+if [ -f ".env" ]; then
+  PARSED_SITE="$(grep -E '^SITE_URL=' .env | head -1 | cut -d'=' -f2 | tr -d '[:space:]')"
+  if [ -n "$PARSED_SITE" ] && [ "$PARSED_SITE" != "http://localhost:3000" ]; then
+    SITE_URL_VAL="$PARSED_SITE"
+  fi
+fi
 
-echo "🎉 Deploy complete!"
+# --------------------------------------------------------------------------
+# Success banner
+# --------------------------------------------------------------------------
+echo "============================================="
+echo "  ✅  Deploy complete!"
+echo "============================================="
+echo ""
+echo "  Server URL   : ${SITE_URL_VAL}"
+echo "  Admin panel  : ${SITE_URL_VAL}/admin/login.html"
+echo "  Agent dash   : ${SITE_URL_VAL}/dashboard/"
+echo ""
+echo "  Useful PM2 commands:"
+echo "    pm2 status                  — process list"
+echo "    pm2 logs nevesty-models     — live app logs"
+echo "    pm2 logs nevesty-scheduler  — live scheduler logs"
+echo "    pm2 reload ecosystem.config.js  — zero-downtime reload"
+echo "    pm2 restart ecosystem.config.js — hard restart"
+echo "    pm2 stop ecosystem.config.js    — stop all"
+echo ""

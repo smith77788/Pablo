@@ -14,6 +14,143 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    /* ── Progress bar ── */
+    .booking-progress-bar {
+      max-width: 640px; margin: 0 auto 48px; height: 3px;
+      background: var(--border); position: relative; overflow: hidden;
+    }
+    .booking-progress-fill {
+      position: absolute; left: 0; top: 0; height: 100%;
+      background: linear-gradient(90deg, var(--gold-dark), var(--gold));
+      transition: width 0.5s ease; width: 0%;
+    }
+
+    /* ── Step indicator enhancements ── */
+    .booking-step-num { font-weight: 600; }
+    .booking-step.done .booking-step-num::after {
+      content: '✓'; position: absolute;
+    }
+
+    /* ── Prefilled model card ── */
+    #prefilledModelCard { display: none; margin-bottom: 20px; }
+    .prefilled-model-card {
+      display: flex; align-items: center; gap: 16px;
+      background: rgba(201,169,110,0.07); border: 1px solid var(--gold);
+      padding: 16px; position: relative;
+    }
+    .prefilled-model-thumb {
+      width: 64px; height: 80px; flex-shrink: 0; overflow: hidden; background: var(--bg3);
+    }
+    .prefilled-model-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .prefilled-model-info { flex: 1; }
+    .prefilled-model-tag {
+      font-size: 0.65rem; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--gold); margin-bottom: 4px;
+    }
+    .prefilled-model-info strong { display: block; font-size: 1rem; color: var(--white); margin-bottom: 2px; }
+    .prefilled-model-info span { font-size: 0.8rem; color: var(--text-muted); }
+    .prefilled-model-clear {
+      background: none; border: none; color: var(--text-dim); cursor: pointer;
+      font-size: 1rem; padding: 4px 8px; flex-shrink: 0;
+      transition: color var(--transition);
+    }
+    .prefilled-model-clear:hover { color: var(--text); }
+
+    /* ── Model select thumb placeholder ── */
+    .model-select-thumb-placeholder {
+      width: 100%; height: 100%; background: var(--bg3);
+      display: flex; align-items: center; justify-content: center;
+      color: rgba(201,169,110,0.3); font-size: 1.4rem;
+    }
+    .model-select-check {
+      margin-left: auto; flex-shrink: 0;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--gold); color: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; opacity: 0; transition: opacity 0.2s;
+    }
+    .model-select-card.selected .model-select-check { opacity: 1; }
+
+    /* ── Service option cards ── */
+    #serviceOptions {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+      margin-bottom: 24px;
+    }
+    .service-option-card {
+      border: 1px solid var(--border); cursor: pointer; padding: 16px 12px;
+      text-align: center; transition: all var(--transition); user-select: none;
+      background: var(--bg2);
+    }
+    .service-option-card:hover { border-color: rgba(201,169,110,0.4); background: var(--bg3); }
+    .service-option-card.selected {
+      border-color: var(--gold); background: rgba(201,169,110,0.07);
+    }
+    .service-option-icon { font-size: 1.6rem; margin-bottom: 8px; line-height: 1; }
+    .service-option-label {
+      font-size: 0.72rem; letter-spacing: 0.5px; color: var(--text-muted);
+      line-height: 1.3;
+    }
+    .service-option-card.selected .service-option-label { color: var(--gold); }
+    @media (max-width: 640px) {
+      #serviceOptions { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* ── Summary enhancements ── */
+    .summary-model-card {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 20px; padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .summary-model-card img {
+      width: 48px; height: 60px; object-fit: cover; flex-shrink: 0;
+    }
+    .summary-model-card span { font-size: 0.9rem; color: var(--white); }
+    .summary-divider {
+      height: 1px; background: var(--border); margin: 8px 0 4px;
+    }
+    .summary-row--block {
+      flex-direction: column; gap: 6px;
+    }
+    .summary-row--block label { margin-bottom: 0; }
+    .summary-row--block span { color: var(--text-muted); font-size: 0.82rem; line-height: 1.6; }
+
+    /* ── Success step enhancements ── */
+    .success-redirect-note {
+      font-size: 0.8rem; color: var(--text-dim); margin-top: 16px;
+    }
+    .success-redirect-note span { color: var(--gold); }
+
+    /* ── Character counter ── */
+    .char-counter {
+      display: flex; justify-content: flex-end;
+      font-size: 0.72rem; color: var(--text-dim); margin-top: 4px;
+    }
+
+    /* ── Duration stepper ── */
+    .duration-stepper {
+      display: flex; align-items: center; gap: 0;
+    }
+    .duration-stepper button {
+      width: 40px; height: 48px; background: var(--bg3);
+      border: 1px solid var(--border); color: var(--text-muted);
+      cursor: pointer; font-size: 1.2rem; transition: all var(--transition);
+      flex-shrink: 0;
+    }
+    .duration-stepper button:hover { border-color: var(--gold); color: var(--gold); }
+    .duration-stepper input {
+      border-left: none; border-right: none; text-align: center;
+      flex: 1;
+    }
+
+    /* ── Booking step done label ── */
+    .booking-step.done .booking-step-label { color: var(--gold-dark); }
+
+    /* ── Phone hint ── */
+    .phone-hint {
+      font-size: 0.72rem; color: var(--text-dim); margin-top: 5px; line-height: 1.5;
+    }
+  </style>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -53,62 +190,113 @@
       </div>
 
       <!-- STEPS INDICATOR -->
-      <div class="booking-steps" id="stepsBar">
-        <div class="booking-step active" data-step="1">
+      <div class="booking-steps" id="stepsBar" role="list" aria-label="Шаги оформления">
+        <div class="booking-step active" data-step="1" role="listitem" aria-current="step">
           <div class="booking-step-num">1</div>
           <div class="booking-step-label">Модель</div>
         </div>
-        <div class="booking-step-line" id="line1"></div>
-        <div class="booking-step" data-step="2">
+        <div class="booking-step-line" id="line1" aria-hidden="true"></div>
+        <div class="booking-step" data-step="2" role="listitem">
           <div class="booking-step-num">2</div>
           <div class="booking-step-label">Мероприятие</div>
         </div>
-        <div class="booking-step-line" id="line2"></div>
-        <div class="booking-step" data-step="3">
+        <div class="booking-step-line" id="line2" aria-hidden="true"></div>
+        <div class="booking-step" data-step="3" role="listitem">
           <div class="booking-step-num">3</div>
           <div class="booking-step-label">Контакты</div>
         </div>
-        <div class="booking-step-line" id="line3"></div>
-        <div class="booking-step" data-step="4">
+        <div class="booking-step-line" id="line3" aria-hidden="true"></div>
+        <div class="booking-step" data-step="4" role="listitem">
           <div class="booking-step-num">4</div>
           <div class="booking-step-label">Подтверждение</div>
         </div>
       </div>
 
+      <!-- PROGRESS BAR -->
+      <div class="booking-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Прогресс оформления">
+        <div class="booking-progress-fill" id="progressFill"></div>
+      </div>
+
       <div class="booking-form-wrap">
-        <!-- STEP 1 — MODEL SELECTION -->
-        <div class="booking-section active" id="step1">
+
+        <!-- ══════════ STEP 1 — MODEL SELECTION ══════════ -->
+        <div class="booking-section active" id="step1" role="region" aria-label="Шаг 1: Выбор модели">
           <h3>Выберите модель</h3>
           <p class="hint">Необязательно — вы можете оформить заявку без выбора конкретной модели, и менеджер подберёт подходящий вариант</p>
-          <div class="model-select-none selected" id="noModelOption" onclick="window._booking.selectModel(null)">
+
+          <!-- Pre-filled model card (shown when ?model= param is present) -->
+          <div id="prefilledModelCard"></div>
+
+          <div class="model-select-none selected" id="noModelOption"
+               role="button" tabindex="0" aria-label="Менеджер подберёт модель сам"
+               onclick="window._booking.selectModel(null)"
+               onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectModel(null)">
             ✦ Менеджер подберёт модель сам
           </div>
-          <div style="margin-top:12px;font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px">— или выберите из каталога —</div>
-          <div class="model-select-grid" id="modelSelectGrid">
-            <!-- injected -->
+          <div style="margin-top:12px;font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px;text-align:center">— или выберите из каталога —</div>
+          <div class="model-select-grid" id="modelSelectGrid" role="group" aria-label="Список моделей">
+            <!-- injected by JS -->
           </div>
           <div class="booking-nav">
             <span></span>
-            <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
+            <button class="btn-next" onclick="window._booking.nextStep()" aria-label="Перейти к шагу 2">Далее →</button>
           </div>
         </div>
 
-        <!-- STEP 2 — EVENT DETAILS -->
-        <div class="booking-section" id="step2">
+        <!-- ══════════ STEP 2 — EVENT DETAILS ══════════ -->
+        <div class="booking-section" id="step2" role="region" aria-label="Шаг 2: Детали мероприятия">
           <h3>Детали мероприятия</h3>
           <p class="hint">Расскажите нам подробнее о вашем проекте</p>
+
+          <!-- Service type as visual cards -->
           <div class="form-group">
-            <label for="event_type">Тип мероприятия <span class="req">*</span></label>
-            <select class="form-control" id="event_type">
-              <option value="">— Выберите тип —</option>
-              <option value="fashion_show">Показ мод</option>
-              <option value="photo_shoot">Фотосессия</option>
-              <option value="event">Корпоратив / Мероприятие</option>
-              <option value="commercial">Коммерческая съёмка</option>
-              <option value="runway">Подиум</option>
-              <option value="other">Другое</option>
-            </select>
+            <label>Тип мероприятия <span class="req">*</span></label>
+            <div id="serviceOptions" role="group" aria-label="Тип мероприятия">
+              <div class="service-option-card" data-value="fashion_show"
+                   role="radio" aria-checked="false" tabindex="0"
+                   onclick="window._booking.selectService('fashion_show')"
+                   onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('fashion_show')">
+                <div class="service-option-icon">👗</div>
+                <div class="service-option-label">Показ мод</div>
+              </div>
+              <div class="service-option-card" data-value="photo_shoot"
+                   role="radio" aria-checked="false" tabindex="0"
+                   onclick="window._booking.selectService('photo_shoot')"
+                   onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('photo_shoot')">
+                <div class="service-option-icon">📸</div>
+                <div class="service-option-label">Фотосессия</div>
+              </div>
+              <div class="service-option-card" data-value="event"
+                   role="radio" aria-checked="false" tabindex="0"
+                   onclick="window._booking.selectService('event')"
+                   onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('event')">
+                <div class="service-option-icon">🥂</div>
+                <div class="service-option-label">Корпоратив / Мероприятие</div>
+              </div>
+              <div class="service-option-card" data-value="commercial"
+                   role="radio" aria-checked="false" tabindex="0"
+                   onclick="window._booking.selectService('commercial')"
+                   onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('commercial')">
+                <div class="service-option-icon">🎬</div>
+                <div class="service-option-label">Коммерческая съёмка</div>
+              </div>
+              <div class="service-option-card" data-value="runway"
+                   role="radio" aria-checked="false" tabindex="0"
+                   onclick="window._booking.selectService('runway')"
+                   onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('runway')">
+                <div class="service-option-icon">✦</div>
+                <div class="service-option-label">Подиум</div>
+              </div>
+              <div class="service-option-card" data-value="other"
+                   role="radio" aria-checked="false" tabindex="0"
+                   onclick="window._booking.selectService('other')"
+                   onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('other')">
+                <div class="service-option-icon">📋</div>
+                <div class="service-option-label">Другое</div>
+              </div>
+            </div>
           </div>
+
           <div class="form-row">
             <div class="form-group">
               <label for="event_date">Дата мероприятия</label>
@@ -116,13 +304,22 @@
             </div>
             <div class="form-group">
               <label for="event_duration">Продолжительность (ч)</label>
-              <input type="number" class="form-control" id="event_duration" value="4" min="1" max="24" />
+              <div class="duration-stepper">
+                <button type="button" aria-label="Уменьшить"
+                  onclick="const el=document.getElementById('event_duration');el.value=Math.max(1,+el.value-1)">−</button>
+                <input type="number" class="form-control" id="event_duration" value="4" min="1" max="24"
+                       aria-label="Количество часов" />
+                <button type="button" aria-label="Увеличить"
+                  onclick="const el=document.getElementById('event_duration');el.value=Math.min(24,+el.value+1)">+</button>
+              </div>
             </div>
           </div>
+
           <div class="form-group">
             <label for="location">Место проведения</label>
             <input type="text" class="form-control" id="location" placeholder="Город, адрес или площадка" />
           </div>
+
           <div class="form-group">
             <label for="budget">Бюджет</label>
             <select class="form-control" id="budget">
@@ -135,83 +332,108 @@
               <option value="по договорённости">по договорённости</option>
             </select>
           </div>
+
           <div class="form-group">
             <label for="comments">Дополнительные пожелания</label>
-            <textarea class="form-control" id="comments" placeholder="Особые требования, дресс-код, тематика проекта..."></textarea>
+            <textarea class="form-control" id="comments"
+              placeholder="Особые требования, дресс-код, тематика проекта..."
+              maxlength="500"></textarea>
+            <div class="char-counter"><span id="charCount">0</span> / 500</div>
           </div>
+
           <div class="booking-nav">
             <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
             <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
           </div>
         </div>
 
-        <!-- STEP 3 — CONTACTS -->
-        <div class="booking-section" id="step3">
+        <!-- ══════════ STEP 3 — CONTACTS ══════════ -->
+        <div class="booking-section" id="step3" role="region" aria-label="Шаг 3: Контактные данные">
           <h3>Контактные данные</h3>
           <p class="hint">Ваши данные необходимы для связи. Мы не передаём их третьим лицам.</p>
+
           <div class="form-group">
             <label for="client_name">Ваше имя <span class="req">*</span></label>
-            <input type="text" class="form-control" id="client_name" placeholder="Иван Иванов" />
+            <input type="text" class="form-control" id="client_name"
+              placeholder="Иван Иванов" autocomplete="name" />
           </div>
+
           <div class="form-row">
             <div class="form-group">
               <label for="client_phone">Телефон <span class="req">*</span></label>
-              <input type="tel" class="form-control" id="client_phone" placeholder="+7 (999) 000-00-00" />
+              <input type="tel" class="form-control" id="client_phone"
+                placeholder="+7 (999) 000-00-00"
+                autocomplete="tel" inputmode="tel" />
+              <div class="phone-hint">Формат: +7 XXX XXX-XX-XX (не менее 10 цифр)</div>
             </div>
             <div class="form-group">
               <label for="client_email">Email</label>
-              <input type="email" class="form-control" id="client_email" placeholder="your@email.com" />
+              <input type="email" class="form-control" id="client_email"
+                placeholder="your@email.com" autocomplete="email" />
             </div>
           </div>
+
           <div class="form-group">
             <label for="client_telegram">Telegram</label>
-            <input type="text" class="form-control" id="client_telegram" placeholder="@username (без @)" />
+            <input type="text" class="form-control" id="client_telegram"
+              placeholder="@username" autocomplete="off" />
             <div class="form-note">💡 Укажите username для уведомлений о статусе заявки через Telegram</div>
           </div>
+
           <div class="booking-nav">
             <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
             <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
           </div>
         </div>
 
-        <!-- STEP 4 — CONFIRM -->
-        <div class="booking-section" id="step4">
+        <!-- ══════════ STEP 4 — CONFIRM ══════════ -->
+        <div class="booking-section" id="step4" role="region" aria-label="Шаг 4: Подтверждение заявки">
           <h3>Подтверждение заявки</h3>
           <p class="hint">Проверьте данные перед отправкой</p>
-          <div class="order-summary" id="orderSummary">
-            <!-- injected -->
+
+          <div class="order-summary" id="orderSummary" aria-live="polite">
+            <!-- injected by JS -->
           </div>
+
           <div style="margin-bottom:20px;padding:16px;border:1px solid var(--border);font-size:0.8rem;color:var(--text-muted);line-height:1.7">
             Отправляя заявку, вы соглашаетесь на обработку персональных данных и связь по указанным контактам.
           </div>
+
           <div class="booking-nav">
             <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
             <button class="btn-next" id="submitBtn" onclick="window._booking.submit()">Отправить заявку ✓</button>
           </div>
         </div>
 
-        <!-- STEP 5 — SUCCESS -->
-        <div class="booking-section" id="step5">
+        <!-- ══════════ STEP 5 — SUCCESS ══════════ -->
+        <div class="booking-section" id="step5" role="region" aria-label="Заявка принята">
           <div class="success-box">
-            <div class="success-icon">✦</div>
+            <div class="success-icon" aria-hidden="true">✦</div>
             <h3>Заявка принята!</h3>
             <p>Ваш номер заявки:</p>
-            <div class="order-num-display" id="orderNumDisplay">—</div>
+            <div class="order-num-display" id="orderNumDisplay" aria-live="polite">—</div>
             <p>Менеджер свяжется с вами в течение 1 часа.</p>
             <p style="margin-top:8px">Сохраните номер заявки для отслеживания статуса.</p>
+
             <div class="tg-connect" id="tgConnectBox">
               <p>📱 Подключите Telegram для уведомлений о статусе заявки</p>
-              <a class="btn-telegram" id="tgConnectLink" href="#" target="_blank">
+              <a class="btn-telegram" id="tgConnectLink" href="#" target="_blank" rel="noopener">
                 ✈ Открыть в Telegram
               </a>
             </div>
-            <div style="margin-top:24px;display:flex;gap:12px;justify-content:center">
+
+            <div style="margin-top:24px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
               <a href="/" class="btn-outline">На главную</a>
               <a href="/catalog.html" class="btn-primary">Каталог моделей</a>
             </div>
+
+            <p class="success-redirect-note">
+              Автоматический переход на главную через <span id="redirectCountdown">5</span> сек…
+            </p>
           </div>
         </div>
-      </div>
+
+      </div><!-- /.booking-form-wrap -->
 
       <!-- STATUS CHECKER -->
       <div style="max-width:640px;margin:48px auto 0;border-top:1px solid var(--border);padding-top:40px" id="status">
@@ -219,15 +441,18 @@
         <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:20px">Введите номер заявки (формат: NM-2024-1234)</p>
         <div style="display:flex;gap:12px">
           <label for="statusInput" class="sr-only">Номер заявки</label>
-          <input type="text" class="form-control" id="statusInput" placeholder="NM-2024-1234" style="flex:1" />
+          <input type="text" class="form-control" id="statusInput"
+                 placeholder="NM-2024-1234" style="flex:1"
+                 onkeydown="if(event.key==='Enter')window._booking.checkStatus()" />
           <button class="btn-primary" onclick="window._booking.checkStatus()" style="padding:12px 24px;font-size:0.8rem">Проверить</button>
         </div>
-        <div id="statusResult" style="margin-top:16px"></div>
+        <div id="statusResult" style="margin-top:16px" aria-live="polite"></div>
       </div>
+
     </div>
   </div>
 
-  <div class="toast-container" id="toastContainer"></div>
+  <div class="toast-container" id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
   <script src="/js/main.js" defer></script>
   <script src="/js/booking.js" defer></script>
   <script src="/js/telegram-webapp.js" defer></script>

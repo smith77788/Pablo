@@ -1,273 +1,327 @@
 # Nevesty Models — Telegram Bot + Modeling Agency Website
 
-> Полнофункциональный сайт агентства моделей + Telegram-бот + система из 25 ИИ-агентов для непрерывного улучшения.
+> Full-featured modeling agency website + Telegram bot + a system of 16 AI agents for continuous quality improvement.
 
 ---
 
-## Стек технологий
+## Project Overview
 
-| Компонент | Технология |
-|-----------|------------|
-| Backend   | Node.js 18+ + Express |
-| Database  | SQLite3 (better-sqlite3 compatible) |
-| Telegram Bot | node-telegram-bot-api (polling) |
-| Auth | JWT + bcryptjs |
-| Process Manager | PM2 |
-| Frontend | Vanilla HTML/CSS/JS |
-| Agent Dashboard | React + React Flow |
+Nevesty Models is a production-ready platform for a modeling agency. It combines:
+
+- **Website** — public catalog, multi-step booking form, order status lookup
+- **Admin panel** — order management, model management, client messaging
+- **Telegram bot** — client catalog, 4-step booking flow, admin commands, notifications
+- **Telegram Mini App** — the website opens inside Telegram with auto-filled user data
+- **Agent system** — 16 specialised AI agents (Security, Reliability, QA, Ops) run automatically on every code change and report findings via Telegram
 
 ---
 
-## Структура проекта
+## Requirements
 
-```
-nevesty-models/
-├── bot.js              # Telegram-бот (4-шаговое бронирование, каталог, админ)
-├── server.js           # Express HTTP сервер
-├── database.js         # SQLite инициализация и helpers
-├── routes/
-│   └── api.js          # REST API (модели, заказы, авторизация)
-├── middleware/
-│   └── auth.js         # JWT middleware
-├── public/
-│   ├── index.html      # Главная страница
-│   ├── catalog.html    # Каталог моделей
-│   ├── booking.html    # Форма бронирования (4 шага)
-│   ├── admin/          # Админ-панель
-│   ├── dashboard/      # Дашборд агентов (React)
-│   └── js/
-│       ├── booking.js  # Логика формы бронирования
-│       └── telegram-webapp.js  # Telegram Mini App интеграция
-├── agents/
-│   ├── lib/base.js     # Базовый класс Agent
-│   ├── 01-ux-architect.js      # UX проверки меню и навигации
-│   ├── 02-booking-completeness.js  # Полнота полей бронирования
-│   ├── 03-model-showcase.js    # Витрина моделей
-│   ├── 04-order-lifecycle.js   # Жизненный цикл заказа
-│   ├── 05-client-experience.js # Клиентский опыт
-│   ├── 06-admin-experience.js  # Опыт администратора
-│   ├── 07-message-threading.js # Переписка админ↔клиент
-│   ├── 08-notification-engine.js  # Уведомления
-│   ├── 09-security-guard.js    # Безопасность (SQL, XSS, JWT)
-│   ├── 10-keyboard-optimizer.js   # Keyboard callback_data
-│   ├── 11-db-optimizer.js      # Индексы и оптимизация DB
-│   ├── 12-session-manager.js   # Управление сессиями (auto-fix)
-│   ├── 13-input-validator.js   # Валидация вводов пользователя
-│   ├── 14-markdown-safety.js   # Безопасность Markdown
-│   ├── 15-error-recovery.js    # Обработка ошибок
-│   ├── 16-photo-handler.js     # Работа с фото
-│   ├── 17-search-enhancer.js   # Поиск и фильтры
-│   ├── 18-response-formatter.js   # Форматирование ответов
-│   ├── 19-pagination-checker.js   # Пагинация списков
-│   ├── 20-state-machine.js     # Машина состояний бота
-│   ├── 21-admin-protection.js  # Защита admin-функций
-│   ├── 22-sql-safety.js        # SQL injection check
-│   ├── 23-deeplink-handler.js  # Deep links и Mini App
-│   ├── 24-performance-tuner.js # Производительность
-│   ├── 25-consistency-checker.js  # Согласованность констант
-│   ├── orchestrator.js         # Главный мозг — запускает 25 агентов
-│   ├── bug-hunter.js           # Охотник за багами в коде
-│   └── run-organism.js         # Master runner всего организма
-├── tools/
-│   └── notify.js       # CLI для Telegram-уведомлений
-├── .env.example        # Шаблон переменных окружения
-├── docker-compose.yml  # Docker конфигурация
-└── package.json
-```
+| Requirement | Version |
+|-------------|---------|
+| Node.js     | 18+     |
+| npm         | 8+      |
+| PM2         | any (installed by `deploy.sh`) |
+| SQLite      | bundled via `sqlite3` npm package |
+| OS          | Linux / macOS (Windows via WSL) |
 
 ---
 
-## Установка и запуск
+## Quick Start
 
-### 1. Требования
-
-- Node.js 18+
-- npm
-- PM2 (для продакшна): `npm install -g pm2`
-
-### 2. Клонирование
+### 1. Clone the repository
 
 ```bash
 git clone <repo_url>
 cd nevesty-models
-npm install
 ```
 
-### 3. Настройка .env
+### 2. Configure environment
 
-Создай файл `.env` (скопируй из `.env.example`):
+```bash
+cp .env.example .env
+nano .env   # fill in your values — see .env Variables below
+```
+
+### 3. Run deploy script (recommended)
+
+```bash
+./deploy.sh
+```
+
+This single command handles all setup steps: dependencies, database init, model seeding, PM2 install/start, and process persistence. See [What deploy.sh does](#what-deploysh-does) for details.
+
+### 4. Manual setup (alternative)
+
+```bash
+npm install --production
+mkdir -p logs
+node database.js          # initialise SQLite schema
+node tools/seed-models.js # populate sample models
+pm2 start ecosystem.config.js
+pm2 save
+pm2 startup               # copy-paste the printed sudo command
+```
+
+### 5. Development mode
+
+```bash
+npm install
+node server.js            # or: npx nodemon server.js
+```
+
+Open: `http://localhost:3000`
+
+---
+
+## What deploy.sh Does
+
+`deploy.sh` is a fully automated production setup script with bash error handling (`set -e` + `trap`):
+
+| Step | Action |
+|------|--------|
+| 1 | Warns if `.env` is missing (does not abort) |
+| 2 | Runs `npm install --production` |
+| 3 | Creates `logs/` directory if absent |
+| 4 | Initialises the SQLite database via `node database.js` |
+| 5 | Seeds sample models via `node tools/seed-models.js` |
+| 6 | Installs PM2 globally if not present |
+| 7 | Reloads with `pm2 reload` if already running, else `pm2 start` |
+| 8 | Runs `pm2 save` to persist process list across reboots |
+| 9 | Prints `pm2 startup` hint for systemd integration |
+
+---
+
+## .env Variables
+
+Copy from `.env.example` and fill in your values:
 
 ```env
-# Telegram Bot
-TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
-ADMIN_TELEGRAM_IDS=YOUR_TELEGRAM_ID_HERE
-BOT_USERNAME=YourBotUsername
-
-# Web
+# ── Server ────────────────────────────────────────────────────────────────
 PORT=3000
-SITE_URL=https://yourdomain.com
-JWT_SECRET=change-this-to-random-string
+NODE_ENV=production
 
-# Admin panel
-ADMIN_PASSWORD=admin123
+# ── Telegram Bot ──────────────────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN=your_bot_token_here          # from @BotFather
+BOT_USERNAME=your_bot_username_without_at       # e.g. NvestyModelsBot
+
+# ── Admins ────────────────────────────────────────────────────────────────
+# Comma-separated Telegram user IDs (get yours from @userinfobot)
+ADMIN_TELEGRAM_IDS=123456789,987654321
+
+# ── Security ──────────────────────────────────────────────────────────────
+JWT_SECRET=change-this-to-a-random-64-char-string
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123                         # change before going live!
+
+# ── Site ──────────────────────────────────────────────────────────────────
+SITE_URL=https://yourdomain.com                 # used in bot deep-links & Mini App
+
+# ── Webhook (optional) ────────────────────────────────────────────────────
+# If set, the bot switches from polling to webhook mode (requires HTTPS)
+WEBHOOK_URL=
+
+# ── Agency contact ────────────────────────────────────────────────────────
+AGENCY_PHONE=+7 (800) 555-00-00
+AGENCY_EMAIL=info@nevesty-models.ru
 ```
 
-**Как получить токен бота:**
-1. Открой [@BotFather](https://t.me/BotFather) в Telegram
-2. `/newbot` → введи имя → получи токен
-3. Скопируй в `.env`
+**How to get your bot token:** open [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token.
 
-**Как получить свой Telegram ID:**
-1. Открой [@userinfobot](https://t.me/userinfobot)
-2. Нажми Start — получишь свой ID
+**How to get your Telegram ID:** open [@userinfobot](https://t.me/userinfobot) → Start.
 
-### 4. Запуск для разработки
+---
+
+## PM2 Commands Reference
 
 ```bash
-node server.js
-```
+# Status
+pm2 status                          # list all processes
+pm2 show nevesty-models             # detailed info for one process
 
-Бот и веб-сервер запустятся вместе.
+# Logs
+pm2 logs                            # all processes, live
+pm2 logs nevesty-models             # app logs only
+pm2 logs nevesty-scheduler          # scheduler logs only
+pm2 logs --lines 200                # last 200 lines
 
-### 5. Запуск через PM2 (рекомендуется)
+# Lifecycle
+pm2 start ecosystem.config.js       # start all apps in config
+pm2 reload ecosystem.config.js      # zero-downtime reload (recommended)
+pm2 restart ecosystem.config.js     # hard restart
+pm2 stop ecosystem.config.js        # stop all
+pm2 delete ecosystem.config.js      # remove from PM2 list
 
-```bash
-pm2 start server.js --name nevesty-models --restart-delay=3000 --max-restarts=10
-pm2 save
-pm2 startup  # для автозапуска при перезагрузке
-```
+# Persistence
+pm2 save                            # save current process list
+pm2 startup                         # print systemd setup command
+pm2 unstartup                       # remove systemd integration
 
-### 6. Docker
+# Monitoring
+pm2 monit                           # real-time CPU/memory dashboard
 
-```bash
-docker-compose up -d
+# One-off agent run
+pm2 start agents/run-organism.js --name organism --no-autorestart
 ```
 
 ---
 
-## Функционал Telegram-бота
+## Agent System Overview
 
-### Клиентская часть
-- **Главное меню**: Каталог, Бронирование, Статус заказа, О нас
-- **Каталог**: фильтры по категориям (All / Fashion / Commercial / Events), пагинация, карточки моделей с фото
-- **Бронирование**: 4-шаговый мастер (выбор модели → детали события → контактные данные → подтверждение)
-- **Статус заказа**: поиск по номеру заказа
-- **Telegram Mini App**: открывает сайт внутри Telegram, автозаполняет форму из профиля пользователя
+16 specialised AI agents continuously monitor and improve the codebase. They are organised into four squads that Claude Code launches automatically after every significant change.
 
-### Административная часть (доступна только adminам)
-- Просмотр заказов с фильтрами по статусам
-- Изменение статуса заказа (new → in_review → confirmed → in_progress → completed / rejected)
-- Управление моделями (вкл/выкл доступность)
-- Переписка с клиентом через бота
-- Уведомления о новых заказах
+### Squads
 
-### Статусы заказов
-| Статус | Описание |
-|--------|----------|
-| `new` | Новый заказ |
-| `in_review` | На рассмотрении |
-| `confirmed` | Подтверждён |
-| `in_progress` | В процессе |
-| `completed` | Завершён |
-| `rejected` | Отклонён |
+| Squad | When triggered | Agents |
+|-------|---------------|--------|
+| **Reliability Squad** | After every code change | Security Auditor, Backend Reliability, Bot Integration, Frontend QA |
+| **Fix Squad** | When Reliability Squad finds issues | Fix-Backend, Fix-Frontend, Fix-Bot, Fix-Infra |
+| **Quality Squad** | Once per session | Code Reviewer, Accessibility Auditor, SEO Specialist, Performance Engineer |
+| **Ops Squad** | Before deploy | DevOps Engineer, Monitoring Engineer, DB Architect, Test Engineer |
 
----
+### Built-in agents (in `agents/`)
 
-## Система ИИ-агентов (Живой Организм)
+25 always-running bot/system agents check specific subsystems:
 
-25 агентов-программистов постоянно анализируют систему. Каждый агент — это орган живого организма.
-
-### Запуск полного цикла проверки
-
-```bash
-cd agents
-node run-organism.js
+```
+01-ux-architect       06-admin-experience   11-db-optimizer      16-photo-handler      21-admin-protection
+02-booking-complete   07-message-threading  12-session-manager   17-search-enhancer    22-sql-safety
+03-model-showcase     08-notification-engine 13-input-validator  18-response-formatter 23-deeplink-handler
+04-order-lifecycle    09-security-guard     14-markdown-safety   19-pagination-checker 24-performance-tuner
+05-client-experience  10-keyboard-optimizer 15-error-recovery    20-state-machine      25-consistency-checker
 ```
 
-Это запустит Bug Hunter + Orchestrator (все 25 агентов). Результаты отправятся в Telegram и запишутся в БД.
-
-### Запуск отдельного агента
+### Run the full organism
 
 ```bash
-node agents/01-ux-architect.js
-node agents/09-security-guard.js
-# и т.д.
+node agents/run-organism.js
 ```
 
-### Автоматический запуск каждые 30 минут (PM2)
+Launches Bug Hunter + Orchestrator (all 25 agents). Results go to Telegram and are stored in the database.
+
+### Automatic schedule (PM2 cron)
 
 ```bash
 pm2 start agents/run-organism.js --name organism --cron "*/30 * * * *" --no-autorestart
 pm2 save
 ```
 
-### Дашборд агентов
+### Telegram notifications
 
-Откройте в браузере: `http://localhost:3000/dashboard/`
+Agents send real-time updates via the built-in CLI tool:
+
+```bash
+node tools/notify.js --from "Agent: DevOps" "✅ Deploy complete"
+```
+
+---
+
+## Project Structure
+
+```
+nevesty-models/
+├── bot.js                      # Telegram bot (booking flow, catalog, admin)
+├── server.js                   # Express HTTP server (entry point)
+├── database.js                 # SQLite initialisation and helpers
+├── ecosystem.config.js         # PM2 process configuration
+├── deploy.sh                   # Production setup & deploy script
+├── routes/
+│   └── api.js                  # REST API
+├── middleware/
+│   └── auth.js                 # JWT middleware
+├── public/
+│   ├── index.html              # Homepage
+│   ├── catalog.html            # Model catalog
+│   ├── booking.html            # 4-step booking form
+│   ├── admin/                  # Admin panel
+│   ├── dashboard/              # Agent dashboard (React + React Flow)
+│   └── js/
+│       ├── booking.js          # Booking form logic
+│       └── telegram-webapp.js  # Telegram Mini App integration
+├── agents/                     # 25 AI agent modules + orchestrator
+├── tools/
+│   ├── notify.js               # CLI Telegram notifier
+│   └── seed-models.js          # Sample model data seeder
+├── logs/                       # PM2 logs (created by deploy.sh)
+├── uploads/                    # Model photos (served statically)
+├── data.db                     # SQLite database (auto-created)
+├── .env.example                # Environment variable template
+├── docker-compose.yml          # Docker alternative (optional)
+└── package.json
+```
+
+---
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/models` | List all active models |
+| GET | `/api/models/:id` | Single model card |
+| POST | `/api/orders` | Create a booking order |
+| GET | `/api/orders/:number` | Order status lookup |
+| GET | `/api/agent-logs` | Agent run logs (public) |
+| POST | `/api/auth/login` | Admin login (returns JWT) |
+| GET | `/admin/orders` | Order list (JWT required) |
+| PATCH | `/admin/orders/:id/status` | Update order status (JWT required) |
+
+---
+
+## Database (SQLite)
+
+File: `data.db` (auto-created on first run via `node database.js`)
+
+| Table | Description |
+|-------|-------------|
+| `models` | Agency models |
+| `orders` | Booking orders |
+| `telegram_sessions` | Bot conversation state |
+| `agent_logs` | AI agent run history |
+
+---
+
+## Order Statuses
+
+| Status | Description |
+|--------|-------------|
+| `new` | Just submitted |
+| `in_review` | Under review |
+| `confirmed` | Confirmed |
+| `in_progress` | Service in progress |
+| `completed` | Completed |
+| `rejected` | Rejected |
 
 ---
 
 ## Admin Panel
 
 - URL: `http://localhost:3000/admin/login.html`
-- Логин: `admin`
-- Пароль: `admin123` (измени в `.env` → `ADMIN_PASSWORD`)
+- Default login: `admin` / `admin123`
+- Change credentials in `.env` before going to production
 
 ---
 
-## API Endpoints
+## Agent Dashboard
 
-| Method | Path | Описание |
-|--------|------|----------|
-| GET | `/api/models` | Список моделей |
-| GET | `/api/models/:id` | Карточка модели |
-| POST | `/api/orders` | Создать заказ |
-| GET | `/api/orders/:number` | Статус заказа |
-| GET | `/api/agent-logs` | Логи агентов (публичный) |
-| POST | `/api/auth/login` | Авторизация в админку |
-| GET | `/admin/orders` | Список заказов (auth) |
-| PATCH | `/admin/orders/:id/status` | Изменить статус (auth) |
+- URL: `http://localhost:3000/dashboard/`
+- Shows live agent run results in a React Flow graph
 
 ---
 
-## База данных (SQLite)
+## Docker (Alternative)
 
-Файл: `data.db` (создаётся автоматически при первом запуске)
-
-### Таблицы
-
-- **models** — модели агентства
-- **orders** — заказы на бронирование
-- **telegram_sessions** — состояния диалогов в боте
-- **agent_logs** — логи работы ИИ-агентов
+```bash
+docker-compose up -d
+docker-compose logs -f app
+```
 
 ---
 
 ## Telegram Mini App
 
-Сайт открывается внутри Telegram как Mini App. Для полной работы нужен HTTPS.
+The website opens inside Telegram as a Mini App. Full functionality requires HTTPS.
 
-1. Настройте HTTPS (nginx + certbot или Cloudflare)
-2. Укажите в `.env`: `SITE_URL=https://yourdomain.com`
-3. В боте появятся кнопки, открывающие сайт внутри Telegram
-4. Форма бронирования автоматически заполняется данными из Telegram
-
----
-
-## Для Lovable / деплоя
-
-Если вы открываете этот проект в Lovable или деплоите на сервер:
-
-1. Установите Node.js 18+
-2. Запустите `npm install`
-3. Создайте `.env` по шаблону выше
-4. Запустите `node server.js`
-5. Бот работает в режиме polling — не нужен HTTPS для базовой работы
-6. Для Mini App и продакшна — настройте HTTPS и proxy через nginx
-
-### Важно: бот работает на вашем сервере (polling mode)
-
-Telegram-бот использует polling — он сам запрашивает обновления у серверов Telegram. Значит:
-- Бот должен работать 24/7 (используйте PM2 или Docker)
-- HTTPS не обязателен для бота, но нужен для Mini App
-- Бот и веб-сервер запускаются одним процессом (`server.js`)
+1. Set up HTTPS (nginx + certbot or Cloudflare Tunnel)
+2. Set `SITE_URL=https://yourdomain.com` in `.env`
+3. Bot buttons will open the site inside Telegram with auto-filled user data

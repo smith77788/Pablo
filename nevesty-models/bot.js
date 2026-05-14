@@ -104,6 +104,8 @@ function buildClientKeyboard() {
     [{ text: '📋 Мои заявки',           callback_data: 'my_orders'    }],
     [{ text: '🔍 Проверить статус',     callback_data: 'check_status' }],
     [{ text: '📞 Контакты',             callback_data: 'contacts'     }],
+    [{ text: '❓ FAQ',                  callback_data: 'faq'          },
+     { text: '👤 Мой профиль',         callback_data: 'profile'      }],
   ];
   // Mini App — открывает сайт внутри Telegram (требует https://)
   if (SITE_URL.startsWith('https://')) {
@@ -765,24 +767,70 @@ async function showAdminStats(chatId) {
       get("SELECT COUNT(*) as n FROM orders WHERE status='cancelled'"),
       get('SELECT COUNT(*) as n FROM models WHERE available=1'),
     ]);
-    return safeSend(chatId,
-      `📊 *Статистика Nevesty Models*\n\n` +
-      `Всего заявок: *${total.n}*\n` +
-      `🆕 Новых: *${newO.n}*\n` +
-      `🔍 На рассмотрении: *${rev.n}*\n` +
-      `✅ Подтверждено: *${conf.n}*\n` +
-      `▶️ В работе: *${ip.n}*\n` +
-      `🏁 Завершено: *${done.n}*\n` +
-      `❌ Отклонено: *${canc.n}*\n\n` +
-      `💃 Доступно моделей: *${models.n}*`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [
-          [{ text: '📋 Все заявки', callback_data: 'adm_orders__0' }],
-          [{ text: '← Меню',        callback_data: 'admin_menu'    }],
-        ]}
-      }
-    );
+
+    // Revenue estimate: confirmed + completed orders × avg price 15000₽
+    const paidOrders = (conf.n || 0) + (done.n || 0);
+    const AVG_PRICE = 15000;
+    const revenueEst = paidOrders * AVG_PRICE;
+
+    // Top 3 most popular models
+    let topModels = [];
+    try {
+      topModels = await query(
+        `SELECT m.name, COUNT(o.id) as cnt
+         FROM models m
+         JOIN orders o ON o.model_id = m.id
+         GROUP BY m.id, m.name
+         ORDER BY cnt DESC
+         LIMIT 3`
+      );
+    } catch {}
+
+    // Peak booking days of week
+    let peakDays = [];
+    try {
+      peakDays = await query(
+        `SELECT strftime('%w', created_at) as dow, COUNT(*) as cnt
+         FROM orders
+         GROUP BY dow
+         ORDER BY cnt DESC
+         LIMIT 3`
+      );
+    } catch {}
+    const DAY_NAMES = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+
+    let text = `📊 Статистика Nevesty Models\n\n`;
+    text += `Всего заявок: ${total.n}\n`;
+    text += `Новых: ${newO.n}\n`;
+    text += `На рассмотрении: ${rev.n}\n`;
+    text += `Подтверждено: ${conf.n}\n`;
+    text += `В работе: ${ip.n}\n`;
+    text += `Завершено: ${done.n}\n`;
+    text += `Отклонено: ${canc.n}\n\n`;
+    text += `Доступно моделей: ${models.n}\n\n`;
+    text += `Оценка выручки (подтв. + завершённые × 15 000 руб.): ~${revenueEst.toLocaleString('ru')} руб.\n`;
+
+    if (topModels.length) {
+      text += `\nТоп моделей по заявкам:\n`;
+      topModels.forEach((m, i) => {
+        text += `  ${i + 1}. ${m.name} — ${m.cnt} заявок\n`;
+      });
+    }
+
+    if (peakDays.length) {
+      text += `\nПиковые дни бронирований:\n`;
+      peakDays.forEach(d => {
+        const dayName = DAY_NAMES[parseInt(d.dow)] || d.dow;
+        text += `  ${dayName} — ${d.cnt} заявок\n`;
+      });
+    }
+
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: '📋 Все заявки', callback_data: 'adm_orders__0' }],
+        [{ text: '← Меню',        callback_data: 'admin_menu'    }],
+      ]}
+    });
   } catch (e) { console.error('[Bot] showAdminStats:', e.message); }
 }
 
@@ -1279,6 +1327,18 @@ function initBot(app) {
     );
   });
 
+  // ── /faq ───────────────────────────────────────────────────────────────────
+  bot.onText(/\/faq/, async (msg) => {
+    return showFaq(msg.chat.id);
+  });
+
+  // ── /profile ───────────────────────────────────────────────────────────────
+  bot.onText(/\/profile/, async (msg) => {
+    const chatId    = msg.chat.id;
+    const firstName = msg.from.first_name;
+    return showUserProfile(chatId, firstName);
+  });
+
   // ── /msg (admin direct reply) ──────────────────────────────────────────────
   bot.onText(/\/msg (\S+) (.+)/, async (msg, match) => {
     if (!isAdmin(msg.chat.id)) return;
@@ -1307,6 +1367,8 @@ function initBot(app) {
     if (data === 'main_menu') return isAdmin(chatId) ? showAdminMenu(chatId, q.from.first_name) : showMainMenu(chatId, q.from.first_name);
     if (data === 'admin_menu') { if (!isAdmin(chatId)) return; return showAdminMenu(chatId, q.from.first_name); }
     if (data === 'contacts')   return showContacts(chatId);
+    if (data === 'faq')        return showFaq(chatId);
+    if (data === 'profile')    return showUserProfile(chatId, q.from.first_name);
     if (data === 'my_orders')  return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
     if (data === 'adm_stats')    return showAdminStats(chatId);
@@ -1940,6 +2002,94 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus) {
 async function sendMessageToClient(clientChatId, orderNumber, text) {
   if (!bot || !clientChatId) return;
   await safeSend(clientChatId, `💬 *Сообщение от менеджера* \\(${esc(orderNumber)}\\):\n\n${esc(text)}`, { parse_mode: 'MarkdownV2' });
+}
+
+// ─── FAQ ──────────────────────────────────────────────────────────────────────
+
+async function showFaq(chatId) {
+  const text =
+    `FAQ - Часто задаваемые вопросы\n\n` +
+    `1. Как заказать модель?\n` +
+    `Нажмите "Оформить заявку" в главном меню, выберите модель и заполните форму. Менеджер свяжется с вами в течение 1 часа.\n\n` +
+    `2. Какова минимальная длительность работы?\n` +
+    `Минимальный заказ — 1 час. Доступны варианты 1, 2, 3, 4, 6, 8 и 12 часов.\n\n` +
+    `3. Какие типы мероприятий доступны?\n` +
+    `Показы мод, фотосессии, корпоративы и мероприятия, коммерческие съёмки, подиум и другие форматы.\n\n` +
+    `4. Как отследить статус заявки?\n` +
+    `Используйте команду /status НОМЕР-ЗАЯВКИ или кнопку "Проверить статус" в меню. Номер заявки приходит сразу после оформления.\n\n` +
+    `5. Можно ли выбрать конкретную модель?\n` +
+    `Да! В каталоге доступны все свободные модели с параметрами. Либо укажите пожелания, и менеджер подберёт подходящий вариант.\n\n` +
+    `6. В каких городах работает агентство?\n` +
+    `Мы работаем по всей России. Укажите город при оформлении заявки — менеджер уточнит условия выезда.\n\n` +
+    `7. Как происходит оплата?\n` +
+    `Оплата обсуждается с менеджером после подтверждения заявки. Принимаем банковский перевод и наличные.\n\n` +
+    `8. Можно ли отменить заявку?\n` +
+    `Да, свяжитесь с менеджером или напишите в чат. Отмена возможна не позднее чем за 24 часа до мероприятия без штрафных санкций.`;
+
+  return safeSend(chatId, text, {
+    reply_markup: { inline_keyboard: [
+      [{ text: '📝 Оформить заявку', callback_data: 'bk_start'   }],
+      [{ text: '📞 Контакты',        callback_data: 'contacts'   }],
+      [{ text: '🏠 Главное меню',    callback_data: 'main_menu'  }],
+    ]}
+  });
+}
+
+// ─── User Profile ──────────────────────────────────────────────────────────────
+
+async function showUserProfile(chatId, firstName) {
+  try {
+    const orders = await query(
+      `SELECT o.status, o.created_at FROM orders o
+       WHERE o.client_chat_id = ?
+       ORDER BY o.created_at ASC`,
+      [String(chatId)]
+    );
+
+    if (!orders.length) {
+      return safeSend(chatId,
+        `Ваш профиль\n\nИмя: ${firstName || 'Гость'}\n\nУ вас пока нет заявок. Оформите первую прямо сейчас и начните сотрудничество с Nevesty Models!`,
+        {
+          reply_markup: { inline_keyboard: [
+            [{ text: '📝 Оформить заявку', callback_data: 'bk_start'  }],
+            [{ text: '🏠 Главное меню',    callback_data: 'main_menu' }],
+          ]}
+        }
+      );
+    }
+
+    // Count by status
+    const counts = {};
+    for (const o of orders) {
+      counts[o.status] = (counts[o.status] || 0) + 1;
+    }
+
+    const firstDate = orders[0].created_at
+      ? new Date(orders[0].created_at).toLocaleDateString('ru')
+      : 'неизвестно';
+
+    let text = `Ваш профиль\n\n`;
+    text += `Имя: ${firstName || 'Гость'}\n`;
+    text += `Всего заявок: ${orders.length}\n`;
+    text += `Первая заявка: ${firstDate}\n\n`;
+    text += `По статусам:\n`;
+
+    const statusOrder = ['new','reviewing','confirmed','in_progress','completed','cancelled'];
+    for (const st of statusOrder) {
+      if (counts[st]) {
+        const label = STATUS_LABELS[st] || st;
+        text += `  ${label}: ${counts[st]}\n`;
+      }
+    }
+
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: '📋 Мои заявки',    callback_data: 'my_orders'  }],
+        [{ text: '📝 Новая заявка',  callback_data: 'bk_start'   }],
+        [{ text: '🏠 Главное меню',  callback_data: 'main_menu'  }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showUserProfile:', e.message); }
 }
 
 module.exports = { initBot, notifyAdmin, notifyNewOrder, notifyStatusChange, sendMessageToClient };

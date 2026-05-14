@@ -133,6 +133,15 @@ router.get('/agent-logs', async (req, res) => {
   }
 });
 
+// ─── Agent logs (auth-protected) ─────────────────────────────────────────────
+router.get('/admin/agent-logs', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const logs = await query('SELECT * FROM agent_logs ORDER BY created_at DESC LIMIT ?', [limit]);
+    res.json(logs);
+  } catch(e) { next(e); }
+});
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 router.get('/admin/stats', auth, async (req, res, next) => {
   try {
@@ -163,6 +172,24 @@ router.get('/admin/stats', auth, async (req, res, next) => {
        LEFT JOIN models m ON o.model_id = m.id
        ORDER BY o.created_at DESC LIMIT 8`
     );
+    // Last 7 days order counts
+    const daily7d = await query(
+      `SELECT date(created_at) as day, COUNT(*) as count
+       FROM orders
+       WHERE created_at >= date('now', '-6 days')
+       GROUP BY date(created_at)
+       ORDER BY day ASC`
+    );
+    const daily7dMap = {};
+    daily7d.forEach(r => { daily7dMap[r.day] = r.count; });
+    const daily7dFull = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+      daily7dFull.push({ day: key, label, count: daily7dMap[key] || 0 });
+    }
     res.json({
       total_orders: total.n,
       new_orders: newO.n,
@@ -171,7 +198,8 @@ router.get('/admin/stats', auth, async (req, res, next) => {
       available_models: availM.n,
       unread_messages: unread?.n || 0,
       by_status: byStatus,
-      recent
+      recent,
+      daily_7d: daily7dFull
     });
   } catch (e) { next(e); }
 });
@@ -179,13 +207,16 @@ router.get('/admin/stats', auth, async (req, res, next) => {
 // ─── Models (public) ──────────────────────────────────────────────────────────
 router.get('/models', async (req, res, next) => {
   try {
-    const { category, hair_color, min_height, max_height, available, search } = req.query;
+    const { category, hair_color, min_height, max_height, min_age, max_age, city, available, search } = req.query;
     let sql = 'SELECT * FROM models WHERE 1=1';
     const params = [];
     if (category && ALLOWED_CATEGORIES.includes(category)) { sql += ' AND category = ?'; params.push(category); }
     if (hair_color) { sql += ' AND hair_color = ?'; params.push(hair_color); }
     if (min_height && !isNaN(+min_height)) { sql += ' AND height >= ?'; params.push(+min_height); }
     if (max_height && !isNaN(+max_height)) { sql += ' AND height <= ?'; params.push(+max_height); }
+    if (min_age && !isNaN(+min_age)) { sql += ' AND age >= ?'; params.push(+min_age); }
+    if (max_age && !isNaN(+max_age)) { sql += ' AND age <= ?'; params.push(+max_age); }
+    if (city) { sql += ' AND city = ?'; params.push(city); }
     if (available === '1') { sql += ' AND available = 1'; }
     if (available === '0') { sql += ' AND available = 0'; }
     if (search) { sql += ' AND (name LIKE ? OR bio LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
@@ -202,6 +233,35 @@ router.get('/models/:id', async (req, res, next) => {
     const m = await get('SELECT * FROM models WHERE id = ?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
     res.json({ ...m, photos: JSON.parse(m.photos || '[]') });
+  } catch (e) { next(e); }
+});
+
+// ─── Models PATCH (quick availability toggle, public auth via JWT) ────────────
+router.patch('/api/models/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const { available } = req.body;
+    if (available === undefined) return res.status(400).json({ error: 'Поле available обязательно' });
+    const val = available ? 1 : 0;
+    const m = await get('SELECT id FROM models WHERE id = ?', [id]);
+    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
+    await run('UPDATE models SET available = ? WHERE id = ?', [val, id]);
+    res.json({ ok: true, available: val });
+  } catch (e) { next(e); }
+});
+
+router.patch('/models/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const { available } = req.body;
+    if (available === undefined) return res.status(400).json({ error: 'Поле available обязательно' });
+    const val = available ? 1 : 0;
+    const m = await get('SELECT id FROM models WHERE id = ?', [id]);
+    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
+    await run('UPDATE models SET available = ? WHERE id = ?', [val, id]);
+    res.json({ ok: true, available: val });
   } catch (e) { next(e); }
 });
 
@@ -558,6 +618,224 @@ router.put('/settings', auth, async (req, res, next) => {
       await run('INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', [key, v]);
     }
     res.json({ ok: true });
+  } catch(e) { next(e); }
+});
+
+// ─── Reviews (public) ─────────────────────────────────────────────────────────
+router.get('/reviews', async (req, res, next) => {
+  try {
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const model_id = req.query.model_id ? parseInt(req.query.model_id) : null;
+    let sql = 'SELECT r.id, r.client_name, r.rating, r.text, r.model_id, r.created_at, m.name as model_name FROM reviews r LEFT JOIN models m ON r.model_id = m.id WHERE r.approved = 1';
+    const params = [];
+    if (model_id && Number.isInteger(model_id) && model_id > 0) {
+      sql += ' AND r.model_id = ?';
+      params.push(model_id);
+    }
+    sql += ' ORDER BY r.created_at DESC LIMIT ?';
+    params.push(limit);
+    const reviews = await query(sql, params);
+    res.json(reviews);
+  } catch (e) { next(e); }
+});
+
+// ─── Reviews (admin) ──────────────────────────────────────────────────────────
+router.get('/admin/reviews', auth, async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+    const offset = (page - 1) * limit;
+    const approved = req.query.approved; // '0', '1', or undefined (all)
+    let where = '1=1';
+    const params = [];
+    if (approved === '0' || approved === '1') {
+      where += ' AND r.approved = ?';
+      params.push(parseInt(approved));
+    }
+    const [totalRow, reviews] = await Promise.all([
+      get(`SELECT COUNT(*) as n FROM reviews r WHERE ${where}`, params),
+      query(
+        `SELECT r.*, m.name as model_name FROM reviews r
+         LEFT JOIN models m ON r.model_id = m.id
+         WHERE ${where}
+         ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+        [...params, limit, offset]
+      )
+    ]);
+    res.json({ reviews, total: totalRow.n, page, pages: Math.ceil(totalRow.n / limit), limit });
+  } catch (e) { next(e); }
+});
+
+router.put('/admin/reviews/:id/approve', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const review = await get('SELECT id, approved FROM reviews WHERE id = ?', [id]);
+    if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
+    const newApproved = review.approved ? 0 : 1;
+    await run('UPDATE reviews SET approved = ? WHERE id = ?', [newApproved, id]);
+    res.json({ ok: true, approved: newApproved });
+  } catch (e) { next(e); }
+});
+
+router.delete('/admin/reviews/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const review = await get('SELECT id FROM reviews WHERE id = ?', [id]);
+    if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
+    await run('DELETE FROM reviews WHERE id = ?', [id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ─── Order notes (admin) ──────────────────────────────────────────────────────
+router.post('/orders/:id/notes', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const admin_note = sanitize(req.body.admin_note, 2000);
+    if (!admin_note) return res.status(400).json({ error: 'Заметка не может быть пустой' });
+    const order = await get('SELECT id FROM orders WHERE id = ?', [id]);
+    if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
+    const result = await run(
+      'INSERT INTO order_notes (order_id, admin_note) VALUES (?, ?)',
+      [id, admin_note]
+    );
+    res.json({ id: result.id });
+  } catch (e) { next(e); }
+});
+
+router.get('/orders/:id/notes', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const order = await get('SELECT id FROM orders WHERE id = ?', [id]);
+    if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
+    const notes = await query(
+      'SELECT * FROM order_notes WHERE order_id = ? ORDER BY created_at ASC',
+      [id]
+    );
+    res.json(notes);
+  } catch (e) { next(e); }
+});
+
+// ─── Extended stats ───────────────────────────────────────────────────────────
+router.get('/stats/extended', auth, async (req, res, next) => {
+  try {
+    const [
+      byDayOfWeek,
+      byMonth,
+      topModels,
+      avgDuration,
+      reviewStats
+    ] = await Promise.all([
+      // Orders by day of week (0=Sun ... 6=Sat)
+      query(
+        `SELECT CAST(strftime('%w', created_at) AS INTEGER) as day_of_week,
+                COUNT(*) as count
+         FROM orders
+         GROUP BY day_of_week
+         ORDER BY day_of_week`
+      ),
+      // Orders by month (last 12 months)
+      query(
+        `SELECT strftime('%Y-%m', created_at) as month,
+                COUNT(*) as count
+         FROM orders
+         WHERE created_at >= date('now', '-12 months')
+         GROUP BY month
+         ORDER BY month`
+      ),
+      // Top 5 most booked models
+      query(
+        `SELECT m.id, m.name, m.photo_main, m.category,
+                COUNT(o.id) as bookings,
+                SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) as completed
+         FROM models m
+         LEFT JOIN orders o ON o.model_id = m.id
+         GROUP BY m.id
+         ORDER BY bookings DESC
+         LIMIT 5`
+      ),
+      // Average booking duration per event type
+      query(
+        `SELECT event_type, ROUND(AVG(event_duration), 1) as avg_duration, COUNT(*) as count
+         FROM orders
+         GROUP BY event_type
+         ORDER BY count DESC`
+      ),
+      // Review summary
+      get(
+        `SELECT COUNT(*) as total,
+                SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) as approved,
+                ROUND(AVG(CASE WHEN approved = 1 THEN rating END), 2) as avg_rating
+         FROM reviews`
+      )
+    ]);
+
+    const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    const byDayNamed = byDayOfWeek.map(r => ({ ...r, day_name: DAY_NAMES[r.day_of_week] || '' }));
+
+    res.json({
+      orders_by_day_of_week: byDayNamed,
+      orders_by_month: byMonth,
+      top_models: topModels,
+      avg_duration_by_event: avgDuration,
+      review_stats: reviewStats || { total: 0, approved: 0, avg_rating: null }
+    });
+  } catch (e) { next(e); }
+});
+
+// ─── Export endpoints ─────────────────────────────────────────────────────────
+router.get('/export/orders', auth, async (req, res, next) => {
+  try {
+    const orders = await query(`
+      SELECT o.id, o.client_name, o.client_phone, o.service_type,
+             o.event_date, o.status, o.created_at,
+             m.name as model_name
+      FROM orders o LEFT JOIN models m ON o.model_id = m.id
+      ORDER BY o.created_at DESC
+    `);
+
+    const headers = ['ID','Клиент','Телефон','Услуга','Дата мероприятия','Статус','Дата заявки','Модель'];
+    const rows = orders.map(o => [
+      o.id, o.client_name, o.client_phone, o.service_type,
+      o.event_date || '', o.status, o.created_at, o.model_name || ''
+    ]);
+
+    const csv = [headers, ...rows]
+      .map(r => r.map(v => `"${String(v == null ? '' : v).replace(/"/g,'""')}"`).join(','))
+      .join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="orders-${Date.now()}.csv"`);
+    res.send('﻿' + csv); // BOM for Excel
+  } catch(e) { next(e); }
+});
+
+router.get('/export/models', auth, async (req, res, next) => {
+  try {
+    const models = await query('SELECT * FROM models ORDER BY name');
+    res.setHeader('Content-Disposition', `attachment; filename="models-${Date.now()}.json"`);
+    res.json(models);
+  } catch(e) { next(e); }
+});
+
+// ─── Stats (simple summary) ───────────────────────────────────────────────────
+router.get('/stats', auth, async (req, res, next) => {
+  try {
+    const [total, newCount, models, revenue] = await Promise.all([
+      get('SELECT COUNT(*) as n FROM orders'),
+      get("SELECT COUNT(*) as n FROM orders WHERE status='new'"),
+      get('SELECT COUNT(*) as n FROM models'),
+      get("SELECT COUNT(*) as n FROM orders WHERE status IN ('confirmed','completed','in_progress')")
+    ]);
+    res.json({
+      total: total.n, new: newCount.n,
+      models: models.n, activeOrders: revenue.n,
+      estimatedRevenue: revenue.n * 15000
+    });
   } catch(e) { next(e); }
 });
 

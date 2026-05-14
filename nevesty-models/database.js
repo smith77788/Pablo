@@ -122,6 +122,24 @@ async function initDatabase() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  await run(`CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_name TEXT NOT NULL,
+    rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+    text TEXT NOT NULL,
+    model_id INTEGER,
+    approved INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS order_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    admin_note TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(order_id) REFERENCES orders(id)
+  )`);
+
   // Default settings
   const defaults = [
     ['greeting',       'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],
@@ -138,6 +156,9 @@ async function initDatabase() {
   for (const [key, value] of defaults) {
     await run('INSERT OR IGNORE INTO bot_settings (key,value) VALUES (?,?)', [key, value]);
   }
+
+  // Migrations — add columns that may not exist in older DBs
+  await run(`ALTER TABLE models ADD COLUMN city TEXT`).catch(() => {});
 
   // Indexes for frequent queries
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
@@ -165,27 +186,50 @@ async function initDatabase() {
     await seedDemoModels();
   }
 
+  // Seed sample reviews if empty
+  const reviewCount = await get('SELECT COUNT(*) as n FROM reviews');
+  if (reviewCount.n === 0) {
+    await seedSampleReviews();
+  }
+
   console.log('Database initialized');
 }
 
 async function seedDemoModels() {
   const models = [
-    { name: 'Анастасия Белова', age: 22, height: 178, weight: 55, bust: 86, waist: 61, hips: 88, shoe_size: '38', hair_color: 'Блонд', eye_color: 'Голубые', bio: 'Профессиональная модель с опытом участия в показах ведущих дизайнеров. Специализируется на fashion и editorial съёмках.', category: 'fashion', instagram: '@anastasia_models' },
-    { name: 'Виктория Нова', age: 24, height: 175, weight: 53, bust: 84, waist: 60, hips: 86, shoe_size: '37', hair_color: 'Шатен', eye_color: 'Карие', bio: 'Универсальная модель для коммерческих и fashion проектов. Работала с крупнейшими брендами России и Европы.', category: 'commercial', instagram: '@victoria_nova_model' },
-    { name: 'Дарья Светлова', age: 20, height: 180, weight: 57, bust: 88, waist: 63, hips: 90, shoe_size: '39', hair_color: 'Рыжая', eye_color: 'Зелёные', bio: 'Начинающая модель с ярким имиджем. Идеально подходит для avant-garde и editorial проектов.', category: 'fashion', instagram: '@dasha_models' },
-    { name: 'Екатерина Морозова', age: 26, height: 172, weight: 54, bust: 85, waist: 62, hips: 87, shoe_size: '38', hair_color: 'Брюнетка', eye_color: 'Серые', bio: 'Опытная модель для корпоративных мероприятий, рекламных кампаний и роскошных событий.', category: 'events', instagram: '@kate_morozova_' },
-    { name: 'Полина Золотарёва', age: 23, height: 176, weight: 56, bust: 87, waist: 61, hips: 89, shoe_size: '38', hair_color: 'Блонд', eye_color: 'Голубые', bio: 'Fashion и lifestyle модель. Специализация: luxury brands, jewelry, beauty campaigns.', category: 'fashion', instagram: '@polina_models' },
-    { name: 'Алина Лебедева', age: 21, height: 174, weight: 52, bust: 83, waist: 59, hips: 85, shoe_size: '37', hair_color: 'Тёмный блонд', eye_color: 'Зелёные', bio: 'Танцовщица и модель. Идеально для динамичных fashion-show и event-проектов.', category: 'events', instagram: '@alina_lebedeva_m' },
+    { name: 'Анастасия Белова', age: 22, height: 178, weight: 55, bust: 86, waist: 61, hips: 88, shoe_size: '38', hair_color: 'Блонд', eye_color: 'Голубые', city: 'Москва', bio: 'Профессиональная модель с опытом участия в показах ведущих дизайнеров. Специализируется на fashion и editorial съёмках.', category: 'fashion', instagram: '@anastasia_models' },
+    { name: 'Виктория Нова', age: 24, height: 175, weight: 53, bust: 84, waist: 60, hips: 86, shoe_size: '37', hair_color: 'Шатен', eye_color: 'Карие', city: 'Санкт-Петербург', bio: 'Универсальная модель для коммерческих и fashion проектов. Работала с крупнейшими брендами России и Европы.', category: 'commercial', instagram: '@victoria_nova_model' },
+    { name: 'Дарья Светлова', age: 20, height: 180, weight: 57, bust: 88, waist: 63, hips: 90, shoe_size: '39', hair_color: 'Рыжая', eye_color: 'Зелёные', city: 'Москва', bio: 'Начинающая модель с ярким имиджем. Идеально подходит для avant-garde и editorial проектов.', category: 'fashion', instagram: '@dasha_models' },
+    { name: 'Екатерина Морозова', age: 26, height: 172, weight: 54, bust: 85, waist: 62, hips: 87, shoe_size: '38', hair_color: 'Брюнетка', eye_color: 'Серые', city: 'Казань', bio: 'Опытная модель для корпоративных мероприятий, рекламных кампаний и роскошных событий.', category: 'events', instagram: '@kate_morozova_' },
+    { name: 'Полина Золотарёва', age: 23, height: 176, weight: 56, bust: 87, waist: 61, hips: 89, shoe_size: '38', hair_color: 'Блонд', eye_color: 'Голубые', city: 'Санкт-Петербург', bio: 'Fashion и lifestyle модель. Специализация: luxury brands, jewelry, beauty campaigns.', category: 'fashion', instagram: '@polina_models' },
+    { name: 'Алина Лебедева', age: 21, height: 174, weight: 52, bust: 83, waist: 59, hips: 85, shoe_size: '37', hair_color: 'Тёмный блонд', eye_color: 'Зелёные', city: 'Екатеринбург', bio: 'Танцовщица и модель. Идеально для динамичных fashion-show и event-проектов.', category: 'events', instagram: '@alina_lebedeva_m' },
   ];
 
   for (const m of models) {
     await run(
-      `INSERT INTO models (name,age,height,weight,bust,waist,hips,shoe_size,hair_color,eye_color,bio,category,instagram,available)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
-      [m.name, m.age, m.height, m.weight, m.bust, m.waist, m.hips, m.shoe_size, m.hair_color, m.eye_color, m.bio, m.category, m.instagram]
+      `INSERT INTO models (name,age,height,weight,bust,waist,hips,shoe_size,hair_color,eye_color,city,bio,category,instagram,available)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+      [m.name, m.age, m.height, m.weight, m.bust, m.waist, m.hips, m.shoe_size, m.hair_color, m.eye_color, m.city, m.bio, m.category, m.instagram]
     );
   }
   console.log('Demo models seeded');
+}
+
+async function seedSampleReviews() {
+  const reviews = [
+    { client_name: 'Михаил Орлов',    rating: 5, text: 'Потрясающая работа агентства! Модели были профессиональны и пунктуальны. Мероприятие прошло на высшем уровне.',           model_id: null, approved: 1 },
+    { client_name: 'Светлана Иванова', rating: 5, text: 'Заказывали фотосессию для рекламной кампании. Результат превзошёл все ожидания. Обязательно обратимся снова.',          model_id: null, approved: 1 },
+    { client_name: 'Дмитрий Ковалёв', rating: 4, text: 'Очень хорошее агентство, широкий выбор моделей. Небольшая задержка при согласовании, но итогом довольны.',             model_id: null, approved: 1 },
+    { client_name: 'Анна Петрова',    rating: 5, text: 'Работали с агентством на корпоративном мероприятии. Модели отлично справились с ролью хостес. Рекомендуем!',           model_id: null, approved: 1 },
+    { client_name: 'Роман Смирнов',   rating: 5, text: 'Профессиональный подход на всех этапах: от подбора модели до самого мероприятия. Отличная команда, спасибо!',           model_id: null, approved: 0 },
+  ];
+  for (const r of reviews) {
+    await run(
+      'INSERT OR IGNORE INTO reviews (client_name, rating, text, model_id, approved) VALUES (?,?,?,?,?)',
+      [r.client_name, r.rating, r.text, r.model_id, r.approved]
+    );
+  }
+  console.log('Sample reviews seeded');
 }
 
 function generateOrderNumber() {
