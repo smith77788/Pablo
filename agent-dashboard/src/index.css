@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #080808;
+  color: #e5e7eb;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* React Flow overrides */
+.react-flow__background {
+  background: #080808 !important;
+}
+
+.react-flow__controls button {
+  background: #1a1a2e !important;
+  border-color: #C9A84C !important;
+  color: #C9A84C !important;
+}
+
+.react-flow__minimap {
+  background: #0d0d1a !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #0d0d1a;
+}
+::-webkit-scrollbar-thumb {
+  background: #C9A84C44;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C9A84C88;
+}
+
+/* Pulse animation for active agents */
+@keyframes agentPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 158, 217, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(34, 158, 217, 0); }
+}
+
+@keyframes goldPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.5); }
+  50% { box-shadow: 0 0 0 8px rgba(201, 168, 76, 0); }
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+.agent-working {
+  animation: agentPulse 2s infinite;
+}
+
+.agent-thinking {
+  animation: goldPulse 1.5s infinite;
+}
