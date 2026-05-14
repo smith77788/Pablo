@@ -174,6 +174,52 @@
     </div>
   </section>
 
+  <!-- TESTIMONIALS -->
+  <section class="testimonials-section" id="reviews">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-tag">Что говорят клиенты</div>
+        <h2>Отзывы</h2>
+        <div class="gold-line"></div>
+      </div>
+      <div class="testimonials-grid">
+        <div class="testimonial-card">
+          <div class="testimonial-stars">★★★★★</div>
+          <p class="testimonial-text">«Заказывали модель для показа новой коллекции нашего бренда. Анастасия — просто великолепна. Профессионализм на высшем уровне, чувство стиля безупречное. Будем обращаться снова.»</p>
+          <div class="testimonial-author">
+            <div class="testimonial-avatar">ДМ</div>
+            <div>
+              <strong>Дмитрий Марков</strong>
+              <span>Основатель Maison DM</span>
+            </div>
+          </div>
+        </div>
+        <div class="testimonial-card">
+          <div class="testimonial-stars">★★★★★</div>
+          <p class="testimonial-text">«Организовывали корпоратив на 300 человек. Агентство предоставило трёх хостес — пунктуальные, элегантные, всё под контролем. Гости были в восторге. Рекомендую без оговорок.»</p>
+          <div class="testimonial-author">
+            <div class="testimonial-avatar">АК</div>
+            <div>
+              <strong>Алёна Краснова</strong>
+              <span>HR-директор ТехноГрупп</span>
+            </div>
+          </div>
+        </div>
+        <div class="testimonial-card">
+          <div class="testimonial-stars">★★★★★</div>
+          <p class="testimonial-text">«Сотрудничаем с Nevesty Models уже 2 года для наших рекламных съёмок. Модели всегда готовы к работе, понимают задачу с полуслова. Качество съёмок выросло кратно.»</p>
+          <div class="testimonial-author">
+            <div class="testimonial-avatar">СВ</div>
+            <div>
+              <strong>Сергей Виноградов</strong>
+              <span>Арт-директор Studio V</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- CTA -->
   <section class="cta-section">
     <div class="container">
@@ -181,6 +227,58 @@
       <h2>Создайте незабываемый образ</h2>
       <p>Свяжитесь с нами сегодня и получите персональную консультацию от нашего менеджера</p>
       <a href="/booking.html" class="btn-primary" style="font-size:0.85rem;padding:18px 48px;">Оформить заявку</a>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section class="pricing-section" id="pricing">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-tag">Прозрачное ценообразование</div>
+        <h2>Тарифы</h2>
+        <div class="gold-line"></div>
+        <p>Стоимость зависит от формата мероприятия и длительности. Точная цена — после консультации.</p>
+      </div>
+      <div class="pricing-grid">
+        <div class="pricing-card">
+          <div class="pricing-label">Фотосессия</div>
+          <div class="pricing-price">от <strong>8 000</strong> ₽</div>
+          <div class="pricing-duration">за 2 часа</div>
+          <ul class="pricing-features">
+            <li>1 модель</li>
+            <li>Любая локация</li>
+            <li>Работа с 1-2 образами</li>
+            <li>Готовность в течение 24ч</li>
+          </ul>
+          <a href="/booking.html" class="btn-outline" style="width:100%;text-align:center;display:block">Заказать</a>
+        </div>
+        <div class="pricing-card pricing-featured">
+          <div class="pricing-badge">Популярное</div>
+          <div class="pricing-label">Мероприятие</div>
+          <div class="pricing-price">от <strong>15 000</strong> ₽</div>
+          <div class="pricing-duration">за 4 часа</div>
+          <ul class="pricing-features">
+            <li>1–2 модели / хостес</li>
+            <li>Корпоратив, выставка, приём</li>
+            <li>Фирменный образ</li>
+            <li>Менеджер на мероприятии</li>
+          </ul>
+          <a href="/booking.html" class="btn-primary" style="width:100%;text-align:center;display:block">Заказать</a>
+        </div>
+        <div class="pricing-card">
+          <div class="pricing-label">Показ мод</div>
+          <div class="pricing-price">от <strong>25 000</strong> ₽</div>
+          <div class="pricing-duration">полный день</div>
+          <ul class="pricing-features">
+            <li>2–5 моделей</li>
+            <li>Репетиция включена</li>
+            <li>Согласование образов</li>
+            <li>Координация на шоу</li>
+          </ul>
+          <a href="/booking.html" class="btn-outline" style="width:100%;text-align:center;display:block">Заказать</a>
+        </div>
+      </div>
+      <p style="text-align:center;color:var(--text-muted);font-size:0.8rem;margin-top:32px">Индивидуальные условия для регулярных клиентов и крупных проектов. <a href="/booking.html" style="color:var(--gold)">Свяжитесь с нами</a></p>
     </div>
   </section>
 
@@ -314,6 +412,17 @@
 
   <script src="/js/main.js" defer></script>
   <script src="/js/telegram-webapp.js" defer></script>
+<script>
+// Загрузить контакты из настроек бота
+fetch('/api/settings').then(r=>r.json()).then(s=>{
+  if(s.contacts_phone){
+    document.querySelectorAll('a[href^="tel:"]').forEach(el=>{el.href='tel:'+s.contacts_phone.replace(/[^+\d]/g,'');el.textContent=s.contacts_phone;});
+  }
+  if(s.contacts_email){
+    document.querySelectorAll('a[href^="mailto:"]').forEach(el=>{el.href='mailto:'+s.contacts_email;el.textContent=s.contacts_email;});
+  }
+}).catch(()=>{});
+</script>
   <script type="application/ld+json">
 {
   "@context": "https://schema.org",
