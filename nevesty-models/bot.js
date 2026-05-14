@@ -269,9 +269,9 @@ async function showModel(chatId, modelId) {
     if (m.hair_color)                      lines.push(`Волосы: *${esc(m.hair_color)}*`);
     if (m.eye_color)                       lines.push(`Глаза: *${esc(m.eye_color)}*`);
     if (m.category)                        lines.push(`Категория: *${esc(m.category)}*`);
-    if (m.instagram)                       lines.push(`Instagram: *${esc(m.instagram)}*`);
+    if (m.instagram)                       lines.push(`Instagram: @${esc(m.instagram)}`);
 
-    const bio  = m.bio  ? `\n\n${esc(m.bio)}`  : '';
+    const bio   = m.bio   ? `\n\n_${esc(m.bio)}_` : '';
     const avail = m.available ? '🟢 Доступна для заказа' : '🔴 Временно недоступна';
     const caption = `💃 *${esc(m.name)}*\n${lines.join(' \\| ')}${bio}\n\n${avail}`;
 
@@ -281,6 +281,33 @@ async function showModel(chatId, modelId) {
         [{ text: '← Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Меню', callback_data: 'main_menu' }],
       ].filter(r => r.length)
     };
+
+    // Собираем все фото: photo_main + галерея из поля photos
+    let galleryUrls = [];
+    try { galleryUrls = JSON.parse(m.photos || '[]'); } catch {}
+    if (m.photo_main && !galleryUrls.includes(m.photo_main)) {
+      galleryUrls.unshift(m.photo_main);
+    }
+
+    if (galleryUrls.length >= 2) {
+      // Отправляем медиагруппу (до 10 фото), последнее фото несёт caption
+      const media = galleryUrls.slice(0, 8).map((url, i) => {
+        const item = { type: 'photo', media: url };
+        if (i === galleryUrls.slice(0, 8).length - 1) {
+          item.caption        = caption;
+          item.parse_mode     = 'MarkdownV2';
+        }
+        return item;
+      });
+      try {
+        await bot.sendMediaGroup(chatId, media);
+      } catch (e) {
+        console.warn('[Bot] sendMediaGroup failed, fallback to single photo:', e.message);
+        await safePhoto(chatId, galleryUrls[0], { caption, parse_mode: 'MarkdownV2' });
+      }
+      // Кнопки шлём отдельным сообщением (медиагруппы не поддерживают reply_markup)
+      return safeSend(chatId, `📸 Фотогалерея: ${galleryUrls.length} фото`, { reply_markup: keyboard });
+    }
 
     if (m.photo_main) {
       return safePhoto(chatId, m.photo_main, { caption, parse_mode: 'MarkdownV2', reply_markup: keyboard });
