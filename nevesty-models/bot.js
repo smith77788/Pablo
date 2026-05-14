@@ -83,9 +83,21 @@ async function safeEdit(chatId, messageId, text, opts = {}) {
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
 
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 async function getSession(chatId) {
   try {
-    return await get('SELECT * FROM telegram_sessions WHERE chat_id = ?', [String(chatId)]);
+    const session = await get('SELECT * FROM telegram_sessions WHERE chat_id = ?', [String(chatId)]);
+    if (!session) return null;
+    // Expire stale non-idle sessions after 24 hours
+    if (session.state !== 'idle' && session.updated_at) {
+      const updatedAt = new Date(session.updated_at).getTime();
+      if (Date.now() - updatedAt > SESSION_TTL_MS) {
+        await clearSession(chatId);
+        return null;
+      }
+    }
+    return session;
   } catch { return null; }
 }
 
@@ -472,6 +484,18 @@ async function bookingAskBudget(chatId, data) {
 }
 
 async function bookingShowConfirm(chatId, data) {
+  // Guard: if required fields are missing (corrupted session), abort and restart
+  if (!data.client_name || !data.client_phone || !data.event_type || !data.event_date) {
+    await clearSession(chatId);
+    return safeSend(chatId,
+      '❌ Данные заявки повреждены или устарели\\. Начните заново:',
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '📝 Новая заявка', callback_data: 'start_booking' }]] }
+      }
+    );
+  }
+
   await setSession(chatId, 'bk_confirm', data);
 
   const dur = data.duration ? `${data.duration} ч.` : '';
@@ -591,7 +615,7 @@ async function handleBookingInput(chatId, session, text) {
       return bookingShowConfirm(chatId, data);
 
     default:
-      return safeSend(chatId, '⚠️ Нажмите /cancel чтобы сбросить состояние, или /start чтобы начать заново\\.');
+      return safeSend(chatId, '⚠️ Нажмите /cancel чтобы сбросить состояние, или /start чтобы начать заново\\.', { parse_mode: 'MarkdownV2' });
   }
 }
 
@@ -667,15 +691,20 @@ async function showAdminStats(chatId) {
 
 async function showAdminOrders(chatId, statusFilter = 'all', page = 0) {
   try {
-    const whereClause = statusFilter === 'all' ? '' : `WHERE o.status = '${statusFilter}'`;
-    const total = (await get(`SELECT COUNT(*) as n FROM orders o ${whereClause}`)).n;
+    // Validate statusFilter against known values to prevent SQL injection
+    const VALID_STATUSES = ['all', 'new', 'reviewing', 'confirmed', 'in_progress', 'completed', 'cancelled'];
+    if (!VALID_STATUSES.includes(statusFilter)) statusFilter = 'all';
+
+    const whereClause = statusFilter === 'all' ? '' : 'WHERE o.status = ?';
+    const whereParams = statusFilter === 'all' ? [] : [statusFilter];
+    const total = (await get(`SELECT COUNT(*) as n FROM orders o ${whereClause}`, whereParams)).n;
 
     const orders = await query(
       `SELECT o.*, m.name as model_name FROM orders o
        LEFT JOIN models m ON o.model_id = m.id
        ${whereClause}
        ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
-      [ORDERS_PER_PAGE, page * ORDERS_PER_PAGE]
+      [...whereParams, ORDERS_PER_PAGE, page * ORDERS_PER_PAGE]
     );
 
     if (!orders.length) {
@@ -1086,8 +1115,8 @@ function initBot(app) {
       return showCatalog(chatId, page);
     }
 
-    // ── Model detail (client)
-    if (data.startsWith('model_') && !data.startsWith('model_name')) {
+    // ── Model detail (client) — matches catalog model_<id> buttons only
+    if (/^model_\d+$/.test(data)) {
       const modelId = parseInt(data.replace('model_', ''));
       if (modelId) return showModel(chatId, modelId);
     }
@@ -1329,9 +1358,14 @@ function initBot(app) {
     }
 
     // ── Booking wizard step
-    const bookingStates = ['bk_name', 'bk_phone', 'bk_email', 'bk_date', 'bk_location', 'bk_budget'];
-    if (!isAdmin(chatId) && session && bookingStates.includes(session.state)) {
+    const bookingTextStates = ['bk_name', 'bk_phone', 'bk_email', 'bk_date', 'bk_location', 'bk_budget'];
+    const bookingButtonStates = ['bk_event', 'bk_model', 'bk_duration', 'bk_confirm'];
+    if (!isAdmin(chatId) && session && bookingTextStates.includes(session.state)) {
       return handleBookingInput(chatId, session, msg.text.trim());
+    }
+    // If user types text during a button-only step, remind them to use the buttons
+    if (!isAdmin(chatId) && session && bookingButtonStates.includes(session.state)) {
+      return safeSend(chatId, '⚠️ Пожалуйста, используйте кнопки ниже для выбора варианта\\. Чтобы отменить — нажмите /cancel\\.', { parse_mode: 'MarkdownV2' });
     }
 
     // ── Client message → forward to all admins
@@ -1385,6 +1419,11 @@ async function notifyAdmin(text, opts = {}) {
 
 async function notifyNewOrder(order) {
   if (!bot) return;
+  // Guard: order must have a valid id for callback buttons to work
+  if (!order || !order.id) {
+    console.error('[Bot] notifyNewOrder called with invalid order:', order);
+    return;
+  }
   let modelInfo = null;
   if (order.model_id) {
     try { modelInfo = await get('SELECT name FROM models WHERE id = ?', [order.model_id]); } catch {}
