@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AgentLog } from '../store';
+import type { AgentLog } from '../store';
 
 const ROLE_COLOR: Record<string, string> = {
   orchestrator: '#C9A84C',

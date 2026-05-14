@@ -4,8 +4,8 @@ import ReactFlow, {
   BackgroundVariant,
   Controls,
   MiniMap,
-  Node,
-  Edge,
+  type Node,
+  type Edge,
   useNodesState,
   useEdgesState,
 } from 'reactflow';
@@ -60,7 +60,7 @@ export function AgentCanvas() {
   })), [agents, selectedAgentId, setSelectedAgent]);
 
   const [nodes, , onNodesChange] = useNodesState(initialNodes);
-  const [edges, , onEdgesChange] = useEdgesState([]);
+  const [_edges, , onEdgesChange] = useEdgesState([]);
 
   // Sync nodes when agents change
   const syncedNodes = useMemo(() => nodes.map(n => {

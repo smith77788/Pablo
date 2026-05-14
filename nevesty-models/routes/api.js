@@ -119,6 +119,20 @@ router.put('/admin/me', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Agent logs feed — for dashboard ─────────────────────────────────────────
+router.get('/agent-logs', async (req, res) => {
+  try {
+    const limit = Math.min(100, parseInt(req.query.limit) || 50);
+    const logs = await query(
+      'SELECT * FROM agent_logs ORDER BY created_at DESC LIMIT ?',
+      [limit]
+    );
+    res.json(logs);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 router.get('/admin/stats', auth, async (req, res, next) => {
   try {

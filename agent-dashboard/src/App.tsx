@@ -1,122 +1,127 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect } from 'react';
+import { ReactFlowProvider } from 'reactflow';
+import { useDashboardStore } from './store';
+import { AgentCanvas } from './components/AgentCanvas';
+import { EventFeed } from './components/EventFeed';
+import { AgentDetails } from './components/AgentDetails';
+import { MetricsBar } from './components/MetricsBar';
 
-function App() {
-  const [count, setCount] = useState(0)
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:3000'
+  : '';
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+async function fetchLogs() {
+  const res = await fetch(`${API_BASE}/api/agent-logs?limit=100`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
-export default App
+export default function App() {
+  const { agents, logs, selectedAgentId, updateFromLogs, tickIdle } = useDashboardStore();
+
+  const selectedAgent = agents.find(a => a.id === selectedAgentId) || null;
+
+  // Poll every 3 seconds
+  useEffect(() => {
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const data = await fetchLogs();
+        if (!cancelled) updateFromLogs(data);
+      } catch (e) {
+        console.warn('Agent log fetch error:', e);
+      }
+    }
+
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [updateFromLogs]);
+
+  // Tick idle state every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(tickIdle, 5000);
+    return () => clearInterval(interval);
+  }, [tickIdle]);
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100vh',
+      background: '#080808',
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
+      overflow: 'hidden',
+    }}>
+      {/* Top metrics bar */}
+      <MetricsBar />
+
+      {/* Main content */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* Left: Agent canvas */}
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+          <ReactFlowProvider>
+            <AgentCanvas />
+          </ReactFlowProvider>
+        </div>
+
+        {/* Right panel */}
+        <div style={{
+          width: 300,
+          display: 'flex',
+          flexDirection: 'column',
+          background: '#0a0a0a',
+          borderLeft: '1px solid #C9A84C22',
+          overflow: 'hidden',
+        }}>
+          {/* Event Feed */}
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            borderBottom: '1px solid #1f2937',
+          }}>
+            <div style={{
+              padding: '8px 12px',
+              fontSize: 9,
+              color: '#C9A84C',
+              letterSpacing: '0.12em',
+              fontWeight: 700,
+              background: '#0d0d1a',
+              borderBottom: '1px solid #1f293733',
+              flexShrink: 0,
+            }}>
+              EVENT FEED
+            </div>
+            <EventFeed logs={logs} />
+          </div>
+
+          {/* Agent Details */}
+          <div style={{
+            height: 220,
+            flexShrink: 0,
+            overflow: 'auto',
+          }}>
+            <div style={{
+              padding: '8px 12px',
+              fontSize: 9,
+              color: '#C9A84C',
+              letterSpacing: '0.12em',
+              fontWeight: 700,
+              background: '#0d0d1a',
+              borderBottom: '1px solid #1f293733',
+            }}>
+              AGENT DETAILS
+            </div>
+            <AgentDetails agent={selectedAgent} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
