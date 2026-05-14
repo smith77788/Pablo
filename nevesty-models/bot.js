@@ -107,13 +107,12 @@ function buildClientKeyboard() {
     [{ text: '❓ FAQ',                  callback_data: 'faq'          },
      { text: '👤 Мой профиль',         callback_data: 'profile'      }],
   ];
-  // Mini App — открывает webapp.html (Telegram Mini App entry point, требует https://)
+  // Mini App — web_app на https, обычная url-кнопка на http
+  const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
   if (SITE_URL.startsWith('https://')) {
-    const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
     rows.unshift([{ text: '📱 Открыть Mini App', web_app: { url: webappUrl } }]);
   } else {
-    // На http — добавляем обычную ссылку на каталог (callback)
-    rows.unshift([{ text: '🌐 Открыть каталог', callback_data: 'cat_cat__0' }]);
+    rows.unshift([{ text: '📱 Открыть Mini App', url: webappUrl }]);
   }
   return { inline_keyboard: rows };
 }
@@ -133,6 +132,10 @@ const KB_MAIN_ADMIN = (badge, score) => {
       [{ text: '👑 Администраторы',          callback_data: 'adm_admins'     },
        { text: '📡 Фид агентов',            callback_data: 'agent_feed_0'   }],
       [{ text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    }],
+      [SITE_URL.startsWith('https://')
+        ? { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } }
+        : { text: '📱 Mini App', url: SITE_URL.replace(/\/$/, '') + '/webapp.html' },
+       { text: '🌐 Сайт', url: SITE_URL }],
     ]
   };
 };
