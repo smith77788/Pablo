@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Профиль модели — Nevesty Models</title>
+  <meta name="description" content="Подробный профиль модели агентства Nevesty Models. Параметры, портфолио, бронирование.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Nevesty Models">
+  <meta name="theme-color" content="#080808">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/css/main.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    /* ─── MODEL PAGE LAYOUT ─────────────────────────── */
+    .model-page {
+      padding-top: 60px; /* navbar height */
+      min-height: 100vh;
+    }
+
+    /* ─── HERO PHOTO ─────────────────────────────────── */
+    .model-hero {
+      position: relative;
+      height: 60vh;
+      overflow: hidden;
+      background: var(--bg3);
+    }
+    .model-hero-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center top;
+      display: block;
+    }
+    .model-hero-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1a1510, #0d0a07);
+      font-family: 'Playfair Display', serif;
+      font-size: 6rem;
+      color: rgba(201,169,110,0.15);
+    }
+    .model-hero-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 80px 40px 32px;
+      background: linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.5) 50%, transparent 100%);
+    }
+    .model-hero-name {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(2rem, 5vw, 4rem);
+      color: #fff;
+      font-weight: 600;
+      line-height: 1.1;
+      margin-bottom: 8px;
+    }
+    .model-hero-meta {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .model-hero-category {
+      font-size: 0.7rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--gold);
+      border: 1px solid rgba(201,169,110,0.5);
+      padding: 4px 14px;
+    }
+    .model-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.7rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 4px 14px;
+    }
+    .model-status-badge.available {
+      color: #4caf50;
+      border: 1px solid rgba(76,175,80,0.4);
+    }
+    .model-status-badge.unavailable {
+      color: #f44336;
+      border: 1px solid rgba(244,67,54,0.4);
+    }
+    .model-status-badge::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 6px currentColor;
+    }
+
+    /* ─── BACK LINK ──────────────────────────────────── */
+    .model-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 20px 0 0;
+      transition: color var(--transition);
+    }
+    .model-back:hover { color: var(--gold); }
+
+    /* ─── PROFILE BODY ───────────────────────────────── */
+    .model-profile {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    /* ─── STATS GRID ─────────────────────────────────── */
+    .model-stats {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      margin: 32px 0;
+    }
+    .model-stat {
+      background: var(--bg2);
+      padding: 24px 20px;
+      text-align: center;
+    }
+    .model-stat-label {
+      font-size: 0.65rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      display: block;
+      margin-bottom: 8px;
+    }
+    .model-stat-value {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.4rem;
+      color: var(--white);
+      display: block;
+      line-height: 1.1;
+    }
+    .model-stat-value.gold { color: var(--gold); }
+
+    /* ─── CONTENT COLUMNS ────────────────────────────── */
+    .model-content {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 48px;
+      align-items: start;
+    }
+
+    /* ─── BIO ─────────────────────────────────────────── */
+    .model-section-title {
+      font-size: 0.65rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 16px;
+      display: block;
+    }
+    .model-bio-text {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      line-height: 1.9;
+      margin-bottom: 40px;
+    }
+    .model-bio-empty {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      font-style: italic;
+      margin-bottom: 40px;
+    }
+
+    /* ─── PARAMETERS TABLE ───────────────────────────── */
+    .model-params-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 40px;
+    }
+    .model-param-item {
+      border-left: 2px solid var(--border);
+      padding: 8px 0 8px 14px;
+    }
+    .model-param-item label {
+      font-size: 0.65rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      display: block;
+      margin-bottom: 4px;
+    }
+    .model-param-item span {
+      font-size: 0.9rem;
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    /* ─── GALLERY ─────────────────────────────────────── */
+    .model-gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      margin-bottom: 40px;
+    }
+    .model-gallery-item {
+      position: relative;
+      padding-bottom: 133%;
+      overflow: hidden;
+      background: var(--bg3);
+      cursor: pointer;
+    }
+    .model-gallery-item img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.4s ease;
+    }
+    .model-gallery-item:hover img { transform: scale(1.05); }
+    .model-gallery-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, var(--bg3), var(--bg2));
+      font-family: 'Playfair Display', serif;
+      font-size: 2rem;
+      color: rgba(201,169,110,0.1);
+    }
+
+    /* ─── SIDEBAR / CTA ──────────────────────────────── */
+    .model-sidebar {
+      position: sticky;
+      top: 84px;
+    }
+    .model-cta-card {
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      padding: 32px 28px;
+    }
+    .model-cta-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.5rem;
+      color: var(--white);
+      margin-bottom: 8px;
+    }
+    .model-cta-hint {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.7;
+      margin-bottom: 28px;
+    }
+    .btn-book {
+      display: block;
+      width: 100%;
+      padding: 18px 24px;
+      background: var(--gold);
+      color: var(--bg);
+      font-size: 0.8rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      font-weight: 600;
+      text-align: center;
+      border: none;
+      cursor: pointer;
+      transition: all var(--transition);
+      text-decoration: none;
+    }
+    .btn-book:hover {
+      background: var(--gold-light);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(201,169,110,0.25);
+    }
+    .model-cta-divider {
+      margin: 20px 0;
+      border: none;
+      border-top: 1px solid var(--border);
+    }
+    .model-cta-contact {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      text-align: center;
+      line-height: 1.7;
+    }
+    .model-cta-contact a {
+      color: var(--gold);
+      text-decoration: none;
+    }
+    .model-cta-contact a:hover { color: var(--gold-light); }
+
+    /* ─── INSTAGRAM LINK ─────────────────────────────── */
+    .model-instagram-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 20px;
+      transition: color var(--transition);
+    }
+    .model-instagram-link:hover { color: var(--gold); }
+
+    /* ─── SKELETON ────────────────────────────────────── */
+    .skeleton-hero {
+      height: 60vh;
+      background: var(--bg3);
+      position: relative;
+      overflow: hidden;
+    }
+    .skeleton-hero::after,
+    .skeleton-block::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(201,169,110,0.07) 50%, transparent 100%);
+      animation: nm-shimmer 1.5s infinite;
+    }
+    .skeleton-block {
+      background: var(--bg3);
+      border-radius: 2px;
+      position: relative;
+      overflow: hidden;
+    }
+    .skeleton-text { height: 18px; margin-bottom: 12px; }
+    .skeleton-stat { height: 80px; }
+
+    /* ─── ERROR STATE ─────────────────────────────────── */
+    .model-error {
+      text-align: center;
+      padding: 80px 24px;
+    }
+    .model-error-icon {
+      font-size: 4rem;
+      margin-bottom: 24px;
+      opacity: 0.4;
+    }
+    .model-error h2 {
+      font-size: 2rem;
+      color: var(--white);
+      margin-bottom: 12px;
+    }
+    .model-error p {
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+
+    /* ─── RESPONSIVE ─────────────────────────────────── */
+    @media (max-width: 900px) {
+      .model-content {
+        grid-template-columns: 1fr;
+      }
+      .model-sidebar {
+        position: static;
+        order: -1;
+      }
+      .model-stats {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .model-hero {
+        height: 50vh;
+      }
+      .model-hero-overlay {
+        padding: 60px 20px 24px;
+      }
+      .model-hero-name {
+        font-size: 2rem;
+      }
+      .model-stats {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .model-params-grid {
+        grid-template-columns: 1fr;
+      }
+      .model-gallery-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .model-profile {
+        padding: 0 16px 60px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+
+  <nav class="navbar scrolled" id="navbar">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links">
+        <a href="/catalog.html" style="color:var(--gold)">Модели</a>
+        <a href="/#services">Услуги</a>
+        <a href="/#about">О нас</a>
+        <a href="/#contact">Контакты</a>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+    </div>
+  </nav>
+
+  <nav class="nav-mobile" id="mobileMenu">
+    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <a href="/catalog.html">Модели</a>
+    <a href="/#services">Услуги</a>
+    <a href="/#about">О нас</a>
+    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
+  </nav>
+
+  <div class="model-page" id="main-content">
+    <!-- SKELETON while loading -->
+    <div id="skeletonView">
+      <div class="skeleton-hero"></div>
+      <div style="max-width:1200px;margin:0 auto;padding:32px 24px 80px">
+        <div class="model-stats" style="grid-template-columns:repeat(5,1fr)">
+          <div class="model-stat skeleton-block skeleton-stat"></div>
+          <div class="model-stat skeleton-block skeleton-stat"></div>
+          <div class="model-stat skeleton-block skeleton-stat"></div>
+          <div class="model-stat skeleton-block skeleton-stat"></div>
+          <div class="model-stat skeleton-block skeleton-stat"></div>
+        </div>
+        <div style="max-width:700px">
+          <div class="skeleton-block skeleton-text" style="width:40%;margin-bottom:20px"></div>
+          <div class="skeleton-block skeleton-text"></div>
+          <div class="skeleton-block skeleton-text" style="width:85%"></div>
+          <div class="skeleton-block skeleton-text" style="width:70%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ERROR view -->
+    <div id="errorView" style="display:none">
+      <div class="model-profile">
+        <a href="/catalog.html" class="model-back">← Назад в каталог</a>
+        <div class="model-error">
+          <div class="model-error-icon">✦</div>
+          <h2 id="errorTitle">Модель не найдена</h2>
+          <p id="errorMsg">Возможно, профиль был удалён или указан неверный ID.</p>
+          <a href="/catalog.html" class="btn-primary">Вернуться в каталог</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROFILE view (filled by JS) -->
+    <div id="profileView" style="display:none">
+      <!-- Hero photo -->
+      <div class="model-hero" id="modelHero">
+        <div class="model-hero-placeholder" id="heroPlaceholder">✦</div>
+        <div class="model-hero-overlay">
+          <h1 class="model-hero-name" id="heroName"></h1>
+          <div class="model-hero-meta">
+            <span class="model-hero-category" id="heroCategory"></span>
+            <span class="model-status-badge" id="heroStatus"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Profile body -->
+      <div class="model-profile">
+        <a href="/catalog.html" class="model-back">← Назад в каталог</a>
+
+        <!-- Stats row -->
+        <div class="model-stats" id="statsGrid">
+          <div class="model-stat">
+            <span class="model-stat-label">Рост</span>
+            <span class="model-stat-value" id="statHeight">—</span>
+          </div>
+          <div class="model-stat">
+            <span class="model-stat-label">Возраст</span>
+            <span class="model-stat-value" id="statAge">—</span>
+          </div>
+          <div class="model-stat">
+            <span class="model-stat-label">Город</span>
+            <span class="model-stat-value" id="statCity" style="font-size:1rem"></span>
+          </div>
+          <div class="model-stat">
+            <span class="model-stat-label">Категория</span>
+            <span class="model-stat-value gold" id="statCategory" style="font-size:1rem"></span>
+          </div>
+          <div class="model-stat">
+            <span class="model-stat-label">Статус</span>
+            <span class="model-stat-value" id="statStatus" style="font-size:1rem"></span>
+          </div>
+        </div>
+
+        <!-- Content columns -->
+        <div class="model-content">
+          <!-- Left: bio, params, gallery -->
+          <div>
+            <!-- Bio -->
+            <div id="bioSection">
+              <span class="model-section-title">О модели</span>
+              <p class="model-bio-text" id="bioText"></p>
+            </div>
+
+            <!-- Parameters -->
+            <div id="paramsSection">
+              <span class="model-section-title">Параметры</span>
+              <div class="model-params-grid" id="paramsGrid"></div>
+            </div>
+
+            <!-- Gallery -->
+            <div id="gallerySection">
+              <span class="model-section-title">Портфолио</span>
+              <div class="model-gallery-grid" id="galleryGrid"></div>
+            </div>
+          </div>
+
+          <!-- Right: CTA sidebar -->
+          <div class="model-sidebar">
+            <div class="model-cta-card">
+              <div class="model-cta-title" id="ctaName"></div>
+              <p class="model-cta-hint">Забронируйте модель для вашего мероприятия — менеджер свяжется с вами в течение 1 часа.</p>
+              <a class="btn-book" id="bookBtn" href="/booking.html">
+                📋 Забронировать
+              </a>
+              <hr class="model-cta-divider">
+              <div class="model-cta-contact">
+                Есть вопросы?<br>
+                <a href="/#contact">Свяжитесь с нами</a>
+              </div>
+            </div>
+            <div id="instagramBlock" style="display:none;text-align:center">
+              <a class="model-instagram-link" id="instagramLink" href="#" target="_blank" rel="noopener">
+                ✦ Instagram
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lightbox overlay for gallery -->
+  <div id="lightbox" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.93);backdrop-filter:blur(8px);cursor:zoom-out;align-items:center;justify-content:center" onclick="closeLightbox()">
+    <img id="lightboxImg" src="" alt="" style="max-width:90vw;max-height:90vh;object-fit:contain;display:block">
+    <button onclick="closeLightbox()" style="position:absolute;top:20px;right:20px;background:var(--bg3);border:none;color:var(--text);width:44px;height:44px;font-size:1.3rem;cursor:pointer;display:flex;align-items:center;justify-content:center">✕</button>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="/js/main.js" defer></script>
+  <script src="/js/telegram-webapp.js" defer></script>
+  <script>
+    (function () {
+      const CATEGORY_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
+
+      // ── helpers ────────────────────────────────────────────────────────────────
+      function getParam(name) {
+        return new URLSearchParams(window.location.search).get(name);
+      }
+
+      function show(id) { document.getElementById(id).style.display = ''; }
+      function hide(id) { document.getElementById(id).style.display = 'none'; }
+      function el(id) { return document.getElementById(id); }
+      function setText(id, val) { const e = el(id); if (e) e.textContent = val || '—'; }
+
+      function showError(title, msg) {
+        hide('skeletonView');
+        hide('profileView');
+        el('errorTitle').textContent = title || 'Ошибка';
+        el('errorMsg').textContent = msg || '';
+        show('errorView');
+      }
+
+      // ── fetch & render ─────────────────────────────────────────────────────────
+      async function loadModel(id) {
+        let model;
+        try {
+          const resp = await fetch(`/api/models/${encodeURIComponent(id)}`);
+          if (resp.status === 404) { showError('Модель не найдена', 'Возможно, профиль был удалён или указан неверный ID.'); return; }
+          if (!resp.ok) { showError('Ошибка загрузки', `Сервер вернул ${resp.status}.`); return; }
+          model = await resp.json();
+        } catch (err) {
+          showError('Ошибка сети', 'Не удалось загрузить профиль. Проверьте соединение.');
+          return;
+        }
+
+        // Update page title & OG
+        document.title = `${model.name} — Nevesty Models`;
+        const ogTitle = document.querySelector('meta[property="og:title"]');
+        if (ogTitle) ogTitle.setAttribute('content', `${model.name} — Nevesty Models`);
+
+        renderModel(model);
+      }
+
+      function renderModel(m) {
+        const heroEl = el('modelHero');
+
+        // Hero photo
+        if (m.photo_main) {
+          const img = document.createElement('img');
+          img.className = 'model-hero-img';
+          img.src = m.photo_main;
+          img.alt = m.name;
+          img.loading = 'eager';
+          heroEl.insertBefore(img, heroEl.firstChild);
+          el('heroPlaceholder').style.display = 'none';
+        }
+
+        // Name & category overlay
+        el('heroName').textContent = m.name;
+
+        const catLabel = CATEGORY_LABELS[m.category] || m.category || 'Fashion';
+        el('heroCategory').textContent = catLabel;
+
+        const statusEl = el('heroStatus');
+        if (m.available) {
+          statusEl.textContent = 'Свободна';
+          statusEl.className = 'model-status-badge available';
+        } else {
+          statusEl.textContent = 'Занята';
+          statusEl.className = 'model-status-badge unavailable';
+        }
+
+        // Stats row
+        setText('statHeight', m.height ? `${m.height} см` : '—');
+        setText('statAge', m.age ? `${m.age} лет` : '—');
+        setText('statCity', m.city || '—');
+        setText('statCategory', catLabel);
+        el('statStatus').textContent = m.available ? 'Свободна' : 'Занята';
+        el('statStatus').style.color = m.available ? '#4caf50' : '#f44336';
+
+        // Bio
+        if (m.bio && m.bio.trim()) {
+          el('bioText').textContent = m.bio;
+        } else {
+          el('bioText').className = 'model-bio-empty';
+          el('bioText').textContent = 'Описание не добавлено.';
+        }
+
+        // Parameters
+        const params = [];
+        if (m.weight)    params.push(['Вес',         `${m.weight} кг`]);
+        if (m.bust)      params.push(['Грудь',       m.bust]);
+        if (m.waist)     params.push(['Талия',       m.waist]);
+        if (m.hips)      params.push(['Бёдра',       m.hips]);
+        if (m.shoe_size) params.push(['Обувь',       m.shoe_size]);
+        if (m.hair_color) params.push(['Волосы',     m.hair_color]);
+        if (m.eye_color)  params.push(['Глаза',      m.eye_color]);
+
+        const paramsGrid = el('paramsGrid');
+        if (params.length) {
+          params.forEach(([label, val]) => {
+            const item = document.createElement('div');
+            item.className = 'model-param-item';
+            item.innerHTML = `<label>${label}</label><span>${val}</span>`;
+            paramsGrid.appendChild(item);
+          });
+        } else {
+          el('paramsSection').style.display = 'none';
+        }
+
+        // Gallery (main photo + extra photos from array)
+        const allPhotos = [];
+        if (m.photo_main) allPhotos.push(m.photo_main);
+        const extras = Array.isArray(m.photos) ? m.photos : [];
+        extras.forEach(p => { if (p && !allPhotos.includes(p)) allPhotos.push(p); });
+
+        const galleryGrid = el('galleryGrid');
+        const GALLERY_SLOTS = 6;
+        for (let i = 0; i < GALLERY_SLOTS; i++) {
+          const item = document.createElement('div');
+          item.className = 'model-gallery-item';
+          if (allPhotos[i]) {
+            const img = document.createElement('img');
+            img.src = allPhotos[i];
+            img.alt = `${m.name} — фото ${i + 1}`;
+            img.loading = 'lazy';
+            item.appendChild(img);
+            const photoSrc = allPhotos[i];
+            item.addEventListener('click', () => openLightbox(photoSrc));
+          } else {
+            const ph = document.createElement('div');
+            ph.className = 'model-gallery-placeholder';
+            ph.textContent = '✦';
+            item.style.cursor = 'default';
+            item.appendChild(ph);
+          }
+          galleryGrid.appendChild(item);
+        }
+
+        // CTA sidebar
+        el('ctaName').textContent = m.name;
+        el('bookBtn').href = `/booking.html?model=${m.id}`;
+
+        // Instagram
+        if (m.instagram) {
+          const igBlock = el('instagramBlock');
+          igBlock.style.display = 'block';
+          const igLink = el('instagramLink');
+          const handle = m.instagram.replace(/^@/, '');
+          igLink.href = `https://instagram.com/${handle}`;
+          igLink.textContent = `✦ @${handle}`;
+        }
+
+        // Show profile, hide skeleton
+        hide('skeletonView');
+        hide('errorView');
+        el('profileView').style.display = 'block';
+      }
+
+      // ── lightbox ───────────────────────────────────────────────────────────────
+      window.openLightbox = function (src) {
+        const lb = el('lightbox');
+        el('lightboxImg').src = src;
+        lb.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+      };
+      window.closeLightbox = function () {
+        el('lightbox').style.display = 'none';
+        document.body.style.overflow = '';
+      };
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') window.closeLightbox();
+      });
+
+      // ── init ───────────────────────────────────────────────────────────────────
+      const modelId = getParam('id');
+      if (!modelId || isNaN(parseInt(modelId, 10))) {
+        // Wait for DOM
+        document.addEventListener('DOMContentLoaded', function () {
+          showError('Не указан ID модели', 'Используйте ссылку вида /model.html?id=123');
+        });
+      } else {
+        document.addEventListener('DOMContentLoaded', function () {
+          loadModel(parseInt(modelId, 10));
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

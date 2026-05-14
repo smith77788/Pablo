@@ -7,20 +7,101 @@
   <meta name="robots" content="noindex, nofollow">
   <link rel="stylesheet" href="/css/admin.css" />
   <style>
+    /* ─── Status bar charts ─────────────────────────── */
     .chart-bar-wrap { display:flex; flex-direction:column; gap:8px; }
     .chart-bar-row { display:flex; align-items:center; gap:12px; font-size:0.8rem; }
     .chart-bar-label { width:130px; color:var(--text-muted); flex-shrink:0; }
     .chart-bar-track { flex:1; height:20px; background:var(--bg2); border-radius:2px; overflow:hidden; position:relative; }
     .chart-bar-fill { height:100%; border-radius:2px; transition:width 0.6s ease; }
     .chart-bar-count { width:36px; text-align:right; color:var(--text); font-weight:600; }
+
+    /* ─── Activity items ────────────────────────────── */
     .activity-item { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--border); }
     .activity-item:last-child { border-bottom:none; }
     .activity-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
     .activity-text { font-size:0.82rem; color:var(--text-muted); flex:1; }
     .activity-text strong { color:var(--text); }
     .activity-time { font-size:0.72rem; color:var(--text-dim); }
+
+    /* ─── KPI deltas ────────────────────────────────── */
     .kpi-delta { font-size:0.7rem; color:var(--success); margin-top:4px; }
     .kpi-delta.down { color:var(--error); }
+
+    /* ─── New-orders badge pill ─────────────────────── */
+    .new-badge-pill {
+      display:inline-flex; align-items:center; gap:6px;
+      background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.35);
+      color:#60a5fa; border-radius:20px; padding:3px 10px 3px 8px;
+      font-size:0.75rem; font-weight:600; cursor:pointer;
+      transition:background 0.2s;
+    }
+    .new-badge-pill:hover { background:rgba(59,130,246,0.25); }
+    .new-badge-pill .badge-dot {
+      width:8px; height:8px; border-radius:50%;
+      background:#3b82f6; animation:pulseBadge 1.5s infinite;
+    }
+    @keyframes pulseBadge { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* ─── Mini 7-day bar chart ──────────────────────── */
+    .mini-chart {
+      display:flex; align-items:flex-end; gap:5px;
+      height:64px; padding:4px 0 0;
+    }
+    .mini-chart-col {
+      display:flex; flex-direction:column; align-items:center; flex:1; gap:3px;
+    }
+    .mini-chart-bar-wrap {
+      flex:1; display:flex; align-items:flex-end; width:100%;
+    }
+    .mini-chart-bar {
+      width:100%; border-radius:2px 2px 0 0;
+      background:var(--gold); opacity:0.7;
+      min-height:2px; transition:height 0.5s ease;
+    }
+    .mini-chart-bar.today { opacity:1; background:#c9a96e; }
+    .mini-chart-label {
+      font-size:0.6rem; color:var(--text-dim); white-space:nowrap;
+      text-align:center;
+    }
+    .mini-chart-count {
+      font-size:0.62rem; color:var(--text-muted); font-weight:600;
+    }
+
+    /* ─── Highlight animation on auto-refresh ───────── */
+    @keyframes highlightFade {
+      0%   { background:rgba(201,169,110,0.22); }
+      100% { background:transparent; }
+    }
+    .updated { animation:highlightFade 1.2s ease-out forwards; }
+
+    /* ─── Status color badges (inline style variants) ── */
+    .sbadge {
+      display:inline-block; padding:2px 8px; border-radius:3px;
+      font-size:0.72rem; font-weight:600; white-space:nowrap;
+    }
+    .sbadge-new       { background:rgba(59,130,246,0.15);  color:#3b82f6;  border:1px solid rgba(59,130,246,0.3);  }
+    .sbadge-reviewing { background:rgba(245,158,11,0.15);  color:#f59e0b;  border:1px solid rgba(245,158,11,0.3);  }
+    .sbadge-confirmed { background:rgba(16,185,129,0.15);  color:#10b981;  border:1px solid rgba(16,185,129,0.3);  }
+    .sbadge-in_progress{ background:rgba(139,92,246,0.15); color:#8b5cf6;  border:1px solid rgba(139,92,246,0.3);  }
+    .sbadge-completed  { background:rgba(107,114,128,0.15);color:#6b7280;  border:1px solid rgba(107,114,128,0.3); }
+    .sbadge-cancelled  { background:rgba(239,68,68,0.15);  color:#ef4444;  border:1px solid rgba(239,68,68,0.3);   }
+
+    /* ─── Agent feed ────────────────────────────────── */
+    .agent-feed-item {
+      display:flex; gap:10px; padding:9px 0;
+      border-bottom:1px solid var(--border); font-size:0.8rem;
+    }
+    .agent-feed-item:last-child { border-bottom:none; }
+    .agent-feed-from {
+      font-weight:600; color:var(--gold); flex-shrink:0;
+      min-width:120px; font-size:0.75rem;
+    }
+    .agent-feed-msg { color:var(--text-muted); flex:1; }
+    .agent-feed-time { color:var(--text-dim); font-size:0.68rem; white-space:nowrap; }
+
+    /* ─── Recent orders compact table ──────────────── */
+    .recent-compact td { padding:9px 12px; font-size:0.82rem; }
+    .recent-compact tr:hover { background:rgba(255,255,255,0.03); cursor:pointer; }
   </style>
 </head>
 <body>
@@ -57,26 +138,56 @@
     <header class="topbar">
       <div class="topbar-title">Dashboard</div>
       <div class="topbar-right">
-        <a href="/admin/orders.html?status=new" class="topbar-btn" id="newOrdersBtn">🆕 Новые заявки</a>
-        <button class="topbar-btn" onclick="loadDashboard()">↺ Обновить</button>
+        <!-- 🔔 New orders badge -->
+        <a href="/admin/orders.html?status=new" id="newOrdersPill" class="new-badge-pill" style="display:none">
+          <span class="badge-dot"></span>
+          <span id="newOrdersPillText">Новых заявок: 0</span>
+        </a>
+        <button class="topbar-btn" id="refreshBtn" onclick="loadDashboard()">↺ Обновить</button>
         <a href="/admin/orders.html#new" class="topbar-btn primary">+ Заявка</a>
       </div>
     </header>
 
     <div class="page-content">
-      <!-- KPI CARDS -->
+
+      <!-- ══════════════════ KPI CARDS ══════════════════ -->
       <div class="stat-cards" id="kpiCards">
-        <div class="stat-card"><div class="stat-card-label">Всего заявок</div><div class="stat-card-value" id="s_total">—</div><div class="stat-card-icon">📋</div></div>
-        <div class="stat-card"><div class="stat-card-label">Новых</div><div class="stat-card-value gold" id="s_new">—</div><div class="stat-card-icon">🆕</div><div class="kpi-delta" id="d_new"></div></div>
-        <div class="stat-card"><div class="stat-card-label">Активных</div><div class="stat-card-value" id="s_active">—</div><div class="stat-card-icon">▶️</div></div>
-        <div class="stat-card"><div class="stat-card-label">Моделей (своб.)</div><div class="stat-card-value" id="s_models">—</div><div class="stat-card-icon">💃</div></div>
-        <div class="stat-card"><div class="stat-card-label">Непрочит. сообщ.</div><div class="stat-card-value gold" id="s_unread">—</div><div class="stat-card-icon">💬</div></div>
+        <div class="stat-card">
+          <div class="stat-card-label">Всего заявок</div>
+          <div class="stat-card-value" id="s_total">—</div>
+          <div class="stat-card-icon">📋</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Новых</div>
+          <div class="stat-card-value gold" id="s_new">—</div>
+          <div class="stat-card-icon">🆕</div>
+          <div class="kpi-delta" id="d_new"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Активных</div>
+          <div class="stat-card-value" id="s_active">—</div>
+          <div class="stat-card-icon">▶️</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Моделей (своб.)</div>
+          <div class="stat-card-value" id="s_models">—</div>
+          <div class="stat-card-icon">💃</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Непрочит. сообщ.</div>
+          <div class="stat-card-value gold" id="s_unread">—</div>
+          <div class="stat-card-icon">💬</div>
+        </div>
       </div>
 
+      <!-- ══════════════════ ROW 2: STATUS CHART + 7-DAY CHART ══════════════════ -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
-        <!-- STATUS CHART -->
+
+        <!-- Status chart -->
         <div class="section-card">
-          <div class="section-card-header"><div class="section-card-title">📊 Заявки по статусам</div></div>
+          <div class="section-card-header">
+            <div class="section-card-title">📊 Заявки по статусам</div>
+          </div>
           <div class="section-card-body padded">
             <div class="chart-bar-wrap" id="statusChart">
               <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
@@ -84,82 +195,104 @@
           </div>
         </div>
 
-        <!-- QUICK ACTIONS -->
+        <!-- 7-day mini bar chart -->
         <div class="section-card">
+          <div class="section-card-header">
+            <div class="section-card-title">📅 Заявки за 7 дней</div>
+            <div style="font-size:0.72rem;color:var(--text-dim)" id="chart7dTotal"></div>
+          </div>
+          <div class="section-card-body padded">
+            <div class="mini-chart" id="miniChart">
+              <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════ ROW 3: RECENT ORDERS + QUICK ACTIONS ══════════════════ -->
+      <div style="display:grid;grid-template-columns:1fr auto;gap:24px;margin-bottom:24px">
+
+        <!-- Последние заявки (compact 5 rows) -->
+        <div class="section-card">
+          <div class="section-card-header">
+            <div class="section-card-title">📋 Последние заявки</div>
+            <a href="/admin/orders.html" class="btn btn-sm btn-ghost">Все заявки →</a>
+          </div>
+          <div class="section-card-body">
+            <table class="data-table recent-compact">
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>Клиент</th>
+                  <th>Мероприятие</th>
+                  <th>Дата</th>
+                  <th>Статус</th>
+                </tr>
+              </thead>
+              <tbody id="recentOrders">
+                <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-dim)">Загрузка...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Quick actions -->
+        <div class="section-card" style="min-width:220px">
           <div class="section-card-header"><div class="section-card-title">⚡ Быстрые действия</div></div>
           <div class="section-card-body padded">
             <div style="display:flex;flex-direction:column;gap:10px">
-              <a href="/admin/orders.html?status=new" class="btn btn-md btn-ghost" style="justify-content:flex-start">🆕 Обработать новые заявки</a>
+              <a href="/admin/orders.html?status=new" class="btn btn-md btn-ghost" style="justify-content:flex-start">🆕 Новые заявки</a>
               <a href="/admin/orders.html?status=confirmed" class="btn btn-md btn-ghost" style="justify-content:flex-start">✅ Подтверждённые</a>
-              <a href="/admin/orders.html" class="btn btn-md btn-ghost" style="justify-content:flex-start" id="unreadLink" style="display:none">💬 Непрочитанные сообщения <span id="unreadBadge" class="nav-badge" style="display:none"></span></a>
+              <a href="/admin/orders.html" class="btn btn-md btn-ghost" style="justify-content:flex-start" id="unreadLink" style="display:none">💬 Непрочитанные <span id="unreadBadge" class="nav-badge" style="display:none"></span></a>
               <a href="/admin/models.html?action=new" class="btn btn-md btn-ghost" style="justify-content:flex-start">+ Добавить модель</a>
-              <a href="/admin/orders.html" onclick="setTimeout(()=>_admin.downloadCSV('/admin/orders/export?'),100);return false;" class="btn btn-md btn-ghost" style="justify-content:flex-start">📥 Экспорт заявок (CSV)</a>
+              <a href="/admin/orders.html" onclick="setTimeout(()=>_admin.downloadCSV('/admin/orders/export?'),100);return false;" class="btn btn-md btn-ghost" style="justify-content:flex-start">📥 Экспорт CSV</a>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- RECENT ORDERS -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header">
-          <div class="section-card-title">📋 Последние заявки</div>
-          <a href="/admin/orders.html" class="btn btn-sm btn-ghost">Все заявки →</a>
-        </div>
-        <div class="section-card-body">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>№ заявки</th>
-                <th>Клиент</th>
-                <th>Мероприятие</th>
-                <th>Модель</th>
-                <th>Дата</th>
-                <th>Статус</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="recentOrders">
-              <tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-dim)">Загрузка...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <!-- ══════════════════ ROW 4: AGENT FEED + BOT INFO ══════════════════ -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
 
-      <!-- BOT INFO -->
-      <div class="section-card">
-        <div class="section-card-header"><div class="section-card-title">🤖 Telegram бот — статус и команды</div></div>
-        <div class="section-card-body padded">
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px">
-            <div>
-              <div style="font-size:0.7rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Команды менеджера</div>
-              <div style="font-size:0.82rem;color:var(--text-muted);line-height:2.1">
-                <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/orders</code> — последние 10 заявок</div>
-                <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/new_orders</code> — только новые</div>
-                <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/models</code> — список моделей</div>
-                <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/stats</code> — статистика</div>
+        <!-- Agent logs feed -->
+        <div class="section-card">
+          <div class="section-card-header">
+            <div class="section-card-title">🤖 Лог агентов</div>
+            <button class="btn btn-sm btn-ghost" onclick="loadAgentFeed()">↺</button>
+          </div>
+          <div class="section-card-body padded" id="agentFeed">
+            <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+          </div>
+        </div>
+
+        <!-- Bot commands -->
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">📱 Telegram бот — команды</div></div>
+          <div class="section-card-body padded">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+              <div>
+                <div style="font-size:0.7rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:10px">Менеджер</div>
+                <div style="font-size:0.82rem;color:var(--text-muted);line-height:2.1">
+                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/orders</code> — последние 10</div>
+                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/new_orders</code> — только новые</div>
+                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/models</code> — список</div>
+                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/stats</code> — статистика</div>
+                </div>
               </div>
-            </div>
-            <div>
-              <div style="font-size:0.7rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Команды клиента</div>
-              <div style="font-size:0.82rem;color:var(--text-muted);line-height:2.1">
-                <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/start</code> — приветствие</div>
-                <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/status NM-XXXX</code> — статус</div>
-                <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/cancel</code> — сброс диалога</div>
-                <div>Текст → переслать менеджеру</div>
-              </div>
-            </div>
-            <div>
-              <div style="font-size:0.7rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Уведомления бота</div>
-              <div style="font-size:0.82rem;color:var(--text-muted);line-height:2.1">
-                <div>🆕 Новая заявка → кнопки</div>
-                <div>✅ Подтвердить / ❌ Отклонить</div>
-                <div>💬 Ответить клиенту</div>
-                <div>📊 Смена статуса → клиент</div>
+              <div>
+                <div style="font-size:0.7rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:10px">Клиент</div>
+                <div style="font-size:0.82rem;color:var(--text-muted);line-height:2.1">
+                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/start</code> — приветствие</div>
+                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/status NM-XXXX</code></div>
+                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/cancel</code> — сброс</div>
+                  <div>Текст → переслать менеджеру</div>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
     </div>
   </div>
 </div>
@@ -167,25 +300,105 @@
 <div class="toast-container" id="toastContainer"></div>
 <script src="/js/admin.js"></script>
 <script>
+/* ─── Status color map ───────────────────────────────── */
 const STATUS_COLORS = {
-  new: '#2196f3', reviewing: '#ff9800', confirmed: '#4caf50',
-  in_progress: '#9c27b0', completed: '#c9a96e', cancelled: '#f44336'
+  new:        '#3b82f6',
+  reviewing:  '#f59e0b',
+  confirmed:  '#10b981',
+  in_progress:'#8b5cf6',
+  completed:  '#6b7280',
+  cancelled:  '#ef4444'
 };
 
+/* ─── Inline status badge (colored variant) ─────────── */
+function colorBadge(status) {
+  const label = _admin.STATUS_LABELS[status] || status;
+  return `<span class="sbadge sbadge-${status}">${label}</span>`;
+}
+
+/* ─── Highlight helper ───────────────────────────────── */
+function highlight(el) {
+  if (!el) return;
+  el.classList.remove('updated');
+  void el.offsetWidth; // reflow to restart animation
+  el.classList.add('updated');
+}
+
+/* ─── Smooth number update ───────────────────────────── */
+function setVal(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (el.textContent !== String(val)) {
+    el.textContent = val;
+    highlight(el);
+  }
+}
+
+/* ─── 7-day mini bar chart ───────────────────────────── */
+function renderMiniChart(daily7d) {
+  const wrap = document.getElementById('miniChart');
+  const total7 = daily7d.reduce((s, d) => s + d.count, 0);
+  document.getElementById('chart7dTotal').textContent = `${total7} заявок за неделю`;
+
+  const max = Math.max(...daily7d.map(d => d.count), 1);
+  const today = new Date().toISOString().slice(0, 10);
+
+  wrap.innerHTML = daily7d.map(d => {
+    const pct = Math.round((d.count / max) * 100);
+    const isToday = d.day === today;
+    return `
+      <div class="mini-chart-col">
+        <div class="mini-chart-count">${d.count || ''}</div>
+        <div class="mini-chart-bar-wrap">
+          <div class="mini-chart-bar${isToday ? ' today' : ''}" style="height:${Math.max(pct, 2)}%"></div>
+        </div>
+        <div class="mini-chart-label">${d.label}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ─── Agent feed ─────────────────────────────────────── */
+async function loadAgentFeed() {
+  const el = document.getElementById('agentFeed');
+  try {
+    const logs = await _admin.apiFetch('/admin/agent-logs?limit=3').catch(() =>
+      fetch('/api/agent-logs?limit=3').then(r => r.json())
+    );
+    if (!Array.isArray(logs) || !logs.length) {
+      el.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Активности агентов ещё нет</div>';
+      return;
+    }
+    el.innerHTML = logs.slice(0, 3).map(l => `
+      <div class="agent-feed-item">
+        <div class="agent-feed-from">${_admin.escapeHtml(l.from || 'Agent')}</div>
+        <div class="agent-feed-msg">${_admin.escapeHtml(l.message || l.text || l.msg || JSON.stringify(l))}</div>
+        <div class="agent-feed-time">${_admin.formatDateTime(l.created_at)}</div>
+      </div>`).join('');
+  } catch {
+    el.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Лог недоступен</div>';
+  }
+}
+
+/* ─── Main dashboard loader ──────────────────────────── */
 async function loadDashboard() {
   try {
     const stats = await _admin.apiFetch('/admin/stats');
 
-    // KPI
-    document.getElementById('s_total').textContent = stats.total_orders;
-    document.getElementById('s_new').textContent = stats.new_orders;
-    document.getElementById('s_active').textContent = stats.active_orders;
-    document.getElementById('s_models').textContent = `${stats.available_models}/${stats.total_models}`;
-    document.getElementById('s_unread').textContent = stats.unread_messages || 0;
+    // KPI cards — smooth update
+    setVal('s_total',  stats.total_orders);
+    setVal('s_new',    stats.new_orders);
+    setVal('s_active', stats.active_orders);
+    setVal('s_models', `${stats.available_models}/${stats.total_models}`);
+    setVal('s_unread', stats.unread_messages || 0);
 
-    // New orders btn
+    // 🔔 New orders badge pill
+    const pill     = document.getElementById('newOrdersPill');
+    const pillText = document.getElementById('newOrdersPillText');
     if (stats.new_orders > 0) {
-      document.getElementById('newOrdersBtn').textContent = `🆕 Новые заявки (${stats.new_orders})`;
+      pillText.textContent = `Новых заявок: ${stats.new_orders}`;
+      pill.style.display = 'inline-flex';
+    } else {
+      pill.style.display = 'none';
     }
 
     // Unread link
@@ -195,16 +408,18 @@ async function loadDashboard() {
     }
 
     // Status chart
-    const chartEl = document.getElementById('statusChart');
-    const byStatus = stats.by_status || [];
-    const total = byStatus.reduce((s, r) => s + r.count, 0) || 1;
+    const chartEl   = document.getElementById('statusChart');
+    const byStatus  = stats.by_status || [];
+    const total     = byStatus.reduce((s, r) => s + r.count, 0) || 1;
     const STATUS_RU = _admin.STATUS_LABELS;
     if (byStatus.length) {
       chartEl.innerHTML = byStatus
         .sort((a, b) => b.count - a.count)
         .map(r => `
           <div class="chart-bar-row">
-            <div class="chart-bar-label">${STATUS_RU[r.status] || r.status}</div>
+            <div class="chart-bar-label">
+              <span class="sbadge sbadge-${r.status}">${STATUS_RU[r.status] || r.status}</span>
+            </div>
             <div class="chart-bar-track">
               <div class="chart-bar-fill" style="width:${Math.round(r.count/total*100)}%;background:${STATUS_COLORS[r.status] || '#888'}"></div>
             </div>
@@ -214,29 +429,38 @@ async function loadDashboard() {
       chartEl.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Нет данных</div>';
     }
 
-    // Recent orders table
+    // 7-day mini chart
+    if (stats.daily_7d) renderMiniChart(stats.daily_7d);
+
+    // Recent orders — 5 rows compact
     const tbody = document.getElementById('recentOrders');
-    if (!stats.recent?.length) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-dim)">Заявок ещё нет</td></tr>';
+    const recent5 = (stats.recent || []).slice(0, 5);
+    if (!recent5.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-dim)">Заявок ещё нет</td></tr>';
     } else {
-      tbody.innerHTML = stats.recent.map(o => `
-        <tr style="cursor:pointer" onclick="window.location='/admin/orders.html?id=${o.id}'">
-          <td><strong>${o.order_number}</strong></td>
-          <td>${o.client_name}<br><span style="font-size:0.72rem;color:var(--text-dim)">${o.client_phone}</span></td>
+      tbody.innerHTML = recent5.map(o => `
+        <tr onclick="window.location='/admin/orders.html?id=${o.id}'" style="cursor:pointer">
+          <td><strong>${_admin.escapeHtml(o.order_number)}</strong></td>
+          <td>${_admin.escapeHtml(o.client_name)}<br><span style="font-size:0.7rem;color:var(--text-dim)">${_admin.escapeHtml(o.client_phone)}</span></td>
           <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
-          <td>${o.model_name || '<span style="color:var(--text-dim)">—</span>'}</td>
           <td>${_admin.formatDate(o.event_date || o.created_at)}</td>
-          <td>${_admin.statusBadge(o.status)}</td>
-          <td><a class="btn btn-sm btn-ghost" href="/admin/orders.html?id=${o.id}" onclick="event.stopPropagation()">Открыть →</a></td>
+          <td>${colorBadge(o.status)}</td>
         </tr>`).join('');
     }
+
   } catch (e) {
     _admin.toast('Ошибка загрузки: ' + e.message, 'error');
   }
 }
 
+/* ─── Init ───────────────────────────────────────────── */
 loadDashboard();
-setInterval(loadDashboard, 30000); // auto-refresh every 30s
+loadAgentFeed();
+
+// Auto-refresh every 30 seconds
+setInterval(loadDashboard, 30000);
+// Refresh agent feed every 60 seconds
+setInterval(loadAgentFeed, 60000);
 </script>
 </body>
 </html>

@@ -558,6 +558,46 @@ select.form-control option { background: var(--bg2); }
 .catalog-count { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 20px; }
 .no-results { grid-column: 1/-1; text-align: center; padding: 80px 0; color: var(--text-muted); }
 
+/* ─── MODEL CARD CHIPS & BADGES ──────────────────── */
+.model-card-chips {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0;
+}
+.mc-chip {
+  font-size: 0.7rem; padding: 3px 10px;
+  background: var(--bg2); border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.mc-city { color: var(--gold); border-color: rgba(201,169,110,0.25); background: rgba(201,169,110,0.06); }
+.model-card-bottom {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 12px; flex-wrap: wrap;
+}
+.model-status-badge {
+  font-size: 0.65rem; letter-spacing: 0.5px; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 0;
+}
+.status-free { background: rgba(76,175,80,0.12); color: #4caf50; border: 1px solid rgba(76,175,80,0.3); }
+.status-busy { background: rgba(244,67,54,0.1);  color: #f44336; border: 1px solid rgba(244,67,54,0.25); }
+.exp-badge {
+  font-size: 0.65rem; letter-spacing: 0.5px; text-transform: uppercase;
+  padding: 3px 10px;
+}
+.exp-junior { background: rgba(33,150,243,0.1);  color: #64b5f6; border: 1px solid rgba(33,150,243,0.25); }
+.exp-mid    { background: rgba(255,193,7,0.1);   color: #ffca28; border: 1px solid rgba(255,193,7,0.25); }
+.exp-senior { background: rgba(201,169,110,0.1); color: var(--gold); border: 1px solid rgba(201,169,110,0.3); }
+.btn-book-model {
+  display: block; width: 100%; text-align: center;
+  padding: 9px 16px; font-size: 0.75rem; letter-spacing: 1px; text-transform: uppercase;
+  background: transparent; border: 1px solid var(--gold); color: var(--gold);
+  cursor: pointer; transition: all var(--transition); text-decoration: none;
+}
+.btn-book-model:hover { background: var(--gold); color: #080808; }
+.filter-avail-label {
+  display: flex !important; align-items: center; cursor: pointer;
+  font-size: 0.85rem !important; letter-spacing: 0 !important; text-transform: none !important;
+  color: var(--text) !important;
+}
+
 /* ─── NOTIFICATIONS ──────────────────────────────── */
 .toast-container {
   position: fixed; bottom: 24px; right: 24px; z-index: 9999;
@@ -1055,4 +1095,53 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     display: flex;
     align-items: center;
   }
+}
+
+/* ─── REVIEWS GRID (dynamic) ─────────────────────── */
+.reviews-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  min-height: 60px;
+}
+@media (max-width: 900px) {
+  .reviews-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── FAQ ────────────────────────────────────────── */
+.faq-section { padding: 100px 0; }
+.faq-list { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 0; }
+.faq-item { border-bottom: 1px solid var(--border); }
+.faq-item:first-child { border-top: 1px solid var(--border); }
+.faq-question {
+  width: 100%; background: none; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 22px 0; gap: 16px;
+  font-family: 'Playfair Display', serif; font-size: 1rem;
+  color: var(--text); text-align: left;
+  transition: color var(--transition);
+}
+.faq-question:hover { color: var(--gold); }
+.faq-question[aria-expanded="true"] { color: var(--gold); }
+.faq-icon {
+  flex-shrink: 0; font-size: 1.4rem; color: var(--gold);
+  line-height: 1; transition: transform 0.25s ease;
+  font-weight: 300;
+}
+.faq-question[aria-expanded="true"] .faq-icon { transform: rotate(45deg); }
+.faq-answer {
+  padding: 0 0 22px;
+  color: var(--text-muted); font-size: 0.9rem; line-height: 1.85;
+}
+.faq-answer p { margin: 0; }
+
+/* ─── SCROLL ANIMATIONS ──────────────────────────── */
+.section-hidden {
+  opacity: 0;
+  transform: translateY(32px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+.section-visible {
+  opacity: 1;
+  transform: translateY(0);
 }

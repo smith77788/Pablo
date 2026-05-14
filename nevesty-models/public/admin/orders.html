@@ -66,6 +66,48 @@
     }
     /* Select-all checkbox header */
     #checkAll { width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer; }
+
+    /* ─── Status filter buttons ─────────────────────── */
+    .status-filter-bar {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 12px 24px; border-bottom: 1px solid var(--border);
+    }
+    .sfilter-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 3px; font-size: 0.75rem;
+      font-weight: 600; cursor: pointer; border: 1px solid transparent;
+      background: var(--bg2); color: var(--text-muted);
+      transition: all 0.15s; white-space: nowrap;
+    }
+    .sfilter-btn:hover { color: var(--text); border-color: var(--border); }
+    .sfilter-btn.active-all  { background:rgba(255,255,255,0.08); color:var(--text); border-color:var(--border); }
+    .sfilter-btn.active-new  { background:rgba(59,130,246,0.15); color:#3b82f6; border-color:rgba(59,130,246,0.4); }
+    .sfilter-btn.active-reviewing { background:rgba(245,158,11,0.15); color:#f59e0b; border-color:rgba(245,158,11,0.4); }
+    .sfilter-btn.active-confirmed { background:rgba(16,185,129,0.15); color:#10b981; border-color:rgba(16,185,129,0.4); }
+    .sfilter-btn.active-in_progress { background:rgba(139,92,246,0.15); color:#8b5cf6; border-color:rgba(139,92,246,0.4); }
+    .sfilter-btn.active-completed { background:rgba(107,114,128,0.15); color:#6b7280; border-color:rgba(107,114,128,0.4); }
+    .sfilter-btn.active-cancelled { background:rgba(239,68,68,0.15); color:#ef4444; border-color:rgba(239,68,68,0.4); }
+
+    /* ─── Inline status select ──────────────────────── */
+    .inline-status-select {
+      background: var(--bg2); border: 1px solid var(--border);
+      color: var(--text); font-size: 0.72rem; padding: 3px 6px;
+      border-radius: 3px; cursor: pointer; outline: none;
+      transition: border-color 0.2s;
+    }
+    .inline-status-select:focus { border-color: var(--gold); }
+
+    /* ─── Colored status badges ─────────────────────── */
+    .sbadge {
+      display: inline-block; padding: 2px 8px; border-radius: 3px;
+      font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+    }
+    .sbadge-new        { background:rgba(59,130,246,0.15);  color:#3b82f6;  border:1px solid rgba(59,130,246,0.3); }
+    .sbadge-reviewing  { background:rgba(245,158,11,0.15);  color:#f59e0b;  border:1px solid rgba(245,158,11,0.3); }
+    .sbadge-confirmed  { background:rgba(16,185,129,0.15);  color:#10b981;  border:1px solid rgba(16,185,129,0.3); }
+    .sbadge-in_progress{ background:rgba(139,92,246,0.15);  color:#8b5cf6;  border:1px solid rgba(139,92,246,0.3); }
+    .sbadge-completed  { background:rgba(107,114,128,0.15); color:#6b7280;  border:1px solid rgba(107,114,128,0.3); }
+    .sbadge-cancelled  { background:rgba(239,68,68,0.15);   color:#ef4444;  border:1px solid rgba(239,68,68,0.3); }
   </style>
 </head>
 <body>

@@ -78,23 +78,18 @@
   // ── Reset ────────────────────────────────────────────────────────────────────
   resetBtn?.addEventListener('click', () => {
     filters = { category: '', hair: '', city: '', ageMin: '', ageMax: '', availableOnly: false, sort: 'default' };
-    document.querySelectorAll('.filter-tag').forEach(t => {
-      // Active = first tag in its group (data-value="" or data-min="")
-      t.classList.toggle('active', t.dataset.value === '' || (t.dataset.min === '' && t.dataset.max === undefined ? false : t.dataset.min === ''));
-    });
-    // Re-activate "Все" / "Любой" tags properly
-    document.querySelectorAll('#categoryFilters .filter-tag[data-value=""]').forEach(t => t.classList.add('active'));
-    document.querySelectorAll('#hairFilters .filter-tag[data-value=""]').forEach(t => t.classList.add('active'));
-    document.querySelectorAll('#ageFilters .filter-tag[data-min=""][data-max=""]').forEach(t => t.classList.add('active'));
-    document.querySelectorAll('.filter-tag:not([data-value=""])').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('#ageFilters .filter-tag:not([data-min=""])').forEach(t => t.classList.remove('active'));
 
-    if (searchInput)   searchInput.value   = '';
-    if (minHeightEl)   minHeightEl.value   = '';
-    if (maxHeightEl)   maxHeightEl.value   = '';
-    if (citySelect)    citySelect.value    = '';
+    // Deactivate all tags, then activate the "all/any" defaults
+    document.querySelectorAll('#categoryFilters .filter-tag').forEach(t => t.classList.toggle('active', t.dataset.value === ''));
+    document.querySelectorAll('#hairFilters .filter-tag').forEach(t => t.classList.toggle('active', t.dataset.value === ''));
+    document.querySelectorAll('#ageFilters .filter-tag').forEach(t => t.classList.toggle('active', t.dataset.min === '' && t.dataset.max === ''));
+
+    if (searchInput)   searchInput.value    = '';
+    if (minHeightEl)   minHeightEl.value    = '';
+    if (maxHeightEl)   maxHeightEl.value    = '';
+    if (citySelect)    citySelect.value     = '';
     if (availCheckbox) availCheckbox.checked = false;
-    if (sortEl)        sortEl.value        = 'default';
+    if (sortEl)        sortEl.value         = 'default';
     render();
   });
 
@@ -189,10 +184,10 @@
               ${experienceBadge(m)}
               <span class="model-status-badge ${statusClass}">${statusText}</span>
             </div>
-            <a href="/booking.html?model=${m.id}"
+            <a href="/model.html?id=${m.id}"
                class="btn-book-model"
                onclick="event.stopPropagation()"
-               aria-label="Заказать модель ${escHtml(m.name)}">
+               aria-label="Открыть профиль модели ${escHtml(m.name)}">
               Подробнее
             </a>
           </div>

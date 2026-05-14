@@ -131,6 +131,7 @@ const KB_MAIN_ADMIN = (badge, score) => {
        { text: '📤 Экспорт заявок',         callback_data: 'adm_export'     }],
       [{ text: '👑 Администраторы',          callback_data: 'adm_admins'     },
        { text: '📡 Фид агентов',            callback_data: 'agent_feed_0'   }],
+      [{ text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    }],
     ]
   };
 };
@@ -1573,6 +1574,19 @@ function initBot(app) {
     // ── Settings
     if (data === 'adm_settings')  return showAdminSettings(chatId);
     if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; await setSession(chatId, 'adm_broadcast_msg', {}); return showBroadcast(chatId); }
+    if (data === 'adm_reviews')   { if (!isAdmin(chatId)) return; return showAdminReviews(chatId); }
+    if (data.startsWith('rev_approve_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('rev_approve_', ''));
+      await run('UPDATE reviews SET approved=1 WHERE id=?', [id]).catch(()=>{});
+      return safeSend(chatId, `Отзыв #${id} одобрен.`);
+    }
+    if (data.startsWith('rev_delete_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('rev_delete_', ''));
+      await run('DELETE FROM reviews WHERE id=?', [id]).catch(()=>{});
+      return safeSend(chatId, `Отзыв #${id} удалён.`);
+    }
     if (data === 'adm_admins')    return showAdminManagement(chatId);
     if (data === 'adm_export')    return exportOrders(chatId);
     if (data === 'adm_addmodel')  { if (!isAdmin(chatId)) return; return showAddModelStep(chatId, { _step: 'name' }); }
@@ -2090,6 +2104,33 @@ async function showUserProfile(chatId, firstName) {
       ]}
     });
   } catch (e) { console.error('[Bot] showUserProfile:', e.message); }
+}
+
+// ─── Admin Reviews ────────────────────────────────────────────────────────────
+
+async function showAdminReviews(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const reviews = await query('SELECT * FROM reviews WHERE approved=0 ORDER BY created_at DESC').catch(()=>[]);
+    if (!reviews.length) {
+      return safeSend(chatId, 'Нет отзывов на модерации.', {
+        reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+      });
+    }
+    for (const r of reviews) {
+      const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 1)));
+      const text = `Отзыв #${r.id}\nИмя: ${r.client_name}\nОценка: ${stars}\n\n${r.text}`;
+      await safeSend(chatId, text, {
+        reply_markup: { inline_keyboard: [[
+          { text: '✅ Одобрить', callback_data: `rev_approve_${r.id}` },
+          { text: '❌ Удалить',  callback_data: `rev_delete_${r.id}`  },
+        ]]}
+      });
+    }
+    return safeSend(chatId, `Всего на модерации: ${reviews.length}`, {
+      reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+    });
+  } catch (e) { console.error('[Bot] showAdminReviews:', e.message); }
 }
 
 module.exports = { initBot, notifyAdmin, notifyNewOrder, notifyStatusChange, sendMessageToClient };
