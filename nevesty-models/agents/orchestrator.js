@@ -1,5 +1,5 @@
 /** 🧠 Orchestrator — Prefrontal Cortex | Главный мозг: агрегирует, решает, подтверждает */
-const { logAgent, tgSend, dbAll, dbRun } = require('./lib/base');
+const { logAgent, tgSend, tgSendGetId, tgEditMessage, progressBar, dbAll, dbRun } = require('./lib/base');
 
 const agents = [
   require('./01-ux-architect'),       require('./02-booking-completeness'),
@@ -40,15 +40,40 @@ async function runOrchestrator() {
   const allFindings = [];
   let criticalCount = 0, highCount = 0, mediumCount = 0, okCount = 0;
   const agentSummaries = [];
+  const totalAgents = agents.length;
+  const BATCH = 5;
+  const totalBatches = Math.ceil(totalAgents / BATCH);
+
+  // Отправляем начальный прогресс-бар (редактируем одно сообщение)
+  const buildProgressMsg = (done, cur, crit, high, med, ok) => {
+    const pct = Math.round((done / totalAgents) * 100);
+    const bar = progressBar(done, totalAgents, 20);
+    const batchNum = Math.min(Math.ceil(done / BATCH) + 1, totalBatches);
+    return [
+      `🧠 Проверка организма...`,
+      ``,
+      `[${bar}] ${pct}%`,
+      `Батч ${batchNum}/${totalBatches}${cur ? ` · ${cur}` : ''}`,
+      `Агентов: ${done}/${totalAgents}`,
+      ``,
+      `🔴 ${crit}  🟠 ${high}  🟡 ${med}  ✅ ${ok}`,
+    ].join('\n');
+  };
+
+  const progressRef = await tgSendGetId(buildProgressMsg(0, '...', 0, 0, 0, 0));
+  let doneCount = 0;
 
   // Запускаем агентов параллельно батчами по 5 — быстро и без перегрузки DB
-  const BATCH = 5;
   for (let i = 0; i < agents.length; i += BATCH) {
     const batch = agents.slice(i, i + BATCH);
+    const batchNames = batch.map(A => new A().name).join(', ');
+    console.log(`  Батч ${Math.floor(i/BATCH)+1}: ${batchNames}`);
+
     const results = await Promise.allSettled(batch.map(AgentClass => {
       const agent = new AgentClass();
       return agent.run({ silent: true }).then(() => agent);
     }));
+
     for (const r of results) {
       if (r.status !== 'fulfilled') { console.error('Agent crashed:', r.reason?.message); continue; }
       const agent = r.value;
@@ -59,11 +84,23 @@ async function runOrchestrator() {
       const med  = findings.filter(f => f.sev === SEV_EMO.MEDIUM).length;
       const ok   = findings.filter(f => f.sev === SEV_EMO.OK).length;
       criticalCount += crit; highCount += high; mediumCount += med; okCount += ok;
+      doneCount++;
       if (crit + high + med > 0) {
         agentSummaries.push({ name: agent.name, emoji: agent.emoji, crit, high, med,
           issues: findings.filter(f => [SEV_EMO.CRITICAL, SEV_EMO.HIGH, SEV_EMO.MEDIUM].includes(f.sev)) });
       }
     }
+
+    // Обновляем прогресс-бар после каждого батча
+    if (progressRef) {
+      const nextBatch = agents[i + BATCH];
+      const nextName = nextBatch ? ` → ${new nextBatch().name}` : ' ✓';
+      await tgEditMessage(progressRef.chatId, progressRef.messageId,
+        buildProgressMsg(doneCount, nextName, criticalCount, highCount, mediumCount, okCount));
+    }
+
+    // Небольшая пауза между батчами для плавности
+    if (i + BATCH < agents.length) await new Promise(r => setTimeout(r, 400));
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -71,6 +108,13 @@ async function runOrchestrator() {
   const maxWeight   = allFindings.length * 100;
   const healthScore = maxWeight > 0 ? Math.max(0, Math.round((1 - totalWeight / maxWeight) * 100)) : 100;
   const icon = healthScore >= 80 ? '💚' : healthScore >= 60 ? '🟡' : '🔴';
+
+  // Обновляем прогресс-бар: финальное состояние
+  if (progressRef) {
+    await tgEditMessage(progressRef.chatId, progressRef.messageId,
+      `🧠 Проверка завершена ${icon}\n\n[████████████████████] 100%\nВсе ${totalAgents} агентов проверены за ${elapsed}с\n\n🔴 ${criticalCount}  🟠 ${highCount}  🟡 ${mediumCount}  ✅ ${okCount}\nHealth Score: ${healthScore}%`
+    );
+  }
 
   await logAgent('Orchestrator',
     `🧠 Проверка завершена: ${agents.length} агентов, ` +

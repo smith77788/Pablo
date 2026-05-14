@@ -57,37 +57,73 @@ function readFile(p) {
   catch { return ''; }
 }
 
-// ─── Telegram notify — с таймаутом 15с на запрос ─────────────────────────────
+// ─── Telegram — HTTP helper ───────────────────────────────────────────────────
 const https = require('https');
 const TG_TIMEOUT = 15000;
 
-function tgSend(text, opts = {}) {
-  const TOKEN    = process.env.TELEGRAM_BOT_TOKEN;
-  const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (!TOKEN || !ADMIN_IDS.length) return Promise.resolve();
-  const sends = ADMIN_IDS.map(chatId => new Promise(resolve => {
-    const body = { chat_id: chatId, text: text.slice(0, 4000), disable_web_page_preview: true, ...opts };
+function tgRequest(method, body) {
+  const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+  if (!TOKEN) return Promise.resolve(null);
+  return new Promise(resolve => {
     const payload = JSON.stringify(body);
     let settled = false;
-    const done = () => { if (!settled) { settled = true; resolve(); } };
+    let raw = '';
+    const done = (val = null) => { if (!settled) { settled = true; resolve(val); } };
 
     const req = https.request({
       hostname: 'api.telegram.org',
-      path: `/bot${TOKEN}/sendMessage`,
+      path: `/bot${TOKEN}/${method}`,
       method: 'POST',
       timeout: TG_TIMEOUT,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-    }, res => { res.on('data', ()=>{}); res.on('end', done); });
+    }, res => {
+      res.on('data', d => { raw += d; });
+      res.on('end', () => {
+        try { done(JSON.parse(raw)); } catch { done(null); }
+      });
+    });
 
-    req.on('error', done);
-    req.on('timeout', () => { req.destroy(); done(); });
+    req.on('error', () => done(null));
+    req.on('timeout', () => { req.destroy(); done(null); });
     req.write(payload);
     req.end();
+    setTimeout(() => done(null), TG_TIMEOUT + 1000);
+  });
+}
 
-    // Hard fallback
-    setTimeout(done, TG_TIMEOUT + 1000);
-  }));
+/** Send to all admins. Returns void. */
+function tgSend(text, opts = {}) {
+  const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!ADMIN_IDS.length) return Promise.resolve();
+  const sends = ADMIN_IDS.map(chatId =>
+    tgRequest('sendMessage', { chat_id: chatId, text: text.slice(0, 4000), disable_web_page_preview: true, ...opts })
+  );
   return Promise.allSettled(sends);
+}
+
+/** Send to first admin only, return {chatId, messageId} for later editing. */
+async function tgSendGetId(text, opts = {}) {
+  const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!ADMIN_IDS.length) return null;
+  const chatId = ADMIN_IDS[0];
+  const res = await tgRequest('sendMessage', { chat_id: chatId, text: text.slice(0, 4000), disable_web_page_preview: true, ...opts });
+  if (res?.ok && res.result?.message_id) return { chatId, messageId: res.result.message_id };
+  return null;
+}
+
+/** Edit a previously sent message. */
+function tgEditMessage(chatId, messageId, text, opts = {}) {
+  if (!chatId || !messageId) return Promise.resolve();
+  return tgRequest('editMessageText', {
+    chat_id: chatId, message_id: messageId,
+    text: text.slice(0, 4000), disable_web_page_preview: true, ...opts
+  });
+}
+
+/** Build ASCII progress bar: ████░░░░░░ */
+function progressBar(done, total, width = 20) {
+  const filled = Math.round((done / Math.max(total, 1)) * width);
+  return '█'.repeat(filled) + '░'.repeat(width - filled);
 }
 
 // ─── Log to agent_logs table ─────────────────────────────────────────────────
@@ -169,6 +205,7 @@ class Agent {
 }
 
 module.exports = {
-  Agent, dbRun, dbGet, dbAll, readFile, logAgent, tgSend, SEV,
+  Agent, dbRun, dbGet, dbAll, readFile, logAgent,
+  tgSend, tgSendGetId, tgEditMessage, progressBar, SEV,
   BOT_PATH, SRV_PATH, API_PATH, DB_MOD, DB_PATH
 };

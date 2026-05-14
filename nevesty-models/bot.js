@@ -133,6 +133,11 @@ const KB_MAIN_ADMIN = (badge, score) => {
 
 async function showMainMenu(chatId, name) {
   await clearSession(chatId);
+  const greeting = await getSetting('greeting').catch(() => null);
+  if (greeting) {
+    const text = greeting.replace('{name}', name || 'гость');
+    return safeSend(chatId, text, { reply_markup: buildClientKeyboard() });
+  }
   return safeSend(chatId,
     `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\nВыберите действие:`,
     { parse_mode: 'MarkdownV2', reply_markup: buildClientKeyboard() }
@@ -375,15 +380,25 @@ async function showOrderStatus(chatId, orderNum) {
 }
 
 async function showContacts(chatId) {
-  const phone = process.env.AGENCY_PHONE || '+7 (800) 555-00-00';
-  const email = process.env.AGENCY_EMAIL || 'info@nevesty-models.ru';
-  return safeSend(chatId,
-    `📞 *Контакты Nevesty Models*\n\nТелефон: ${esc(phone)}\nEmail: ${esc(email)}\nСайт: ${esc(SITE_URL)}\n\nПн\\-Вс: 09:00 — 21:00`,
-    {
-      parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
-    }
-  );
+  const [phone, email, addr] = await Promise.all([
+    getSetting('contacts_phone').catch(() => null),
+    getSetting('contacts_email').catch(() => null),
+    getSetting('contacts_addr').catch(() => null),
+  ]);
+  const lines = [
+    `📞 *Контакты Nevesty Models*`,
+    ``,
+    phone ? `Телефон: ${esc(phone)}` : null,
+    email ? `Email: ${esc(email)}` : null,
+    addr  ? `Адрес: ${esc(addr)}` : null,
+    `Сайт: ${esc(SITE_URL)}`,
+    ``,
+    `Пн\\-Вс: 09:00 — 21:00`,
+  ].filter(l => l !== null).join('\n');
+  return safeSend(chatId, lines, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+  });
 }
 
 // ─── Booking wizard — 4 steps (mirrors website exactly) ──────────────────────
