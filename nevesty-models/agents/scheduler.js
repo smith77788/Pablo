@@ -30,6 +30,7 @@ let lastScore     = null;
 let totalFixed    = 0;
 let totalCycles   = 0;
 let startupTime   = Date.now();
+let cycleRunning  = false;  // circuit breaker: skip if prev cycle still running
 
 // ─── Детальная запись каждого цикла ──────────────────────────────────────────
 
@@ -85,6 +86,12 @@ async function pruneOldLogs() {
 // ─── Основной цикл ───────────────────────────────────────────────────────────
 
 async function runCycle() {
+  if (cycleRunning) {
+    const ts = new Date().toLocaleString('ru', { timeZone: 'Europe/Moscow' });
+    console.log(`[${ts}] ⏭ Цикл пропущен — предыдущий ещё выполняется`);
+    return;
+  }
+  cycleRunning = true;
   cycleNumber++;
   totalCycles++;
   const t0 = Date.now();
@@ -145,6 +152,8 @@ async function runCycle() {
     if (cycleNumber <= 3 || cycleNumber % 10 === 0) {
       await tgSend(`🚨 Organism error [цикл #${cycleNumber}]: ${err.message}`).catch(() => {});
     }
+  } finally {
+    cycleRunning = false;
   }
 }
 

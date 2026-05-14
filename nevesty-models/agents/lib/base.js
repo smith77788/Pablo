@@ -13,7 +13,9 @@ const SRV_PATH = path.join(__dirname, '../../server.js');
 const API_PATH = path.join(__dirname, '../../routes/api.js');
 const DB_MOD   = path.join(__dirname, '../../database.js');
 
-// ─── Shared DB helpers — каждый запрос в отдельном соединении с таймаутом ─────
+// ─── Shared DB helpers — один постоянный write-коннект, очередь записей ───────
+// Вместо 140+ открытий соединений за цикл — одно постоянное.
+// Это устраняет lock-storm на бот во время работы агентов.
 const DB_TIMEOUT = 8000; // 8s max per query
 
 function withTimeout(promise, ms, label) {
@@ -23,20 +25,46 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
-function dbRun(sql, params = []) {
-  return withTimeout(new Promise((res, rej) => {
+// ── Persistent write connection ───────────────────────────────────────────────
+let _writeDb     = null;
+let _writeSerial = Promise.resolve();  // one writer at a time
+
+function _acquireWriteDb() {
+  if (_writeDb) return Promise.resolve(_writeDb);
+  return new Promise((resolve, reject) => {
     const db = new sqlite.Database(DB_PATH, sqlite.OPEN_READWRITE | sqlite.OPEN_CREATE, err => {
-      if (err) return rej(err);
-      db.configure('busyTimeout', 5000); // wait up to 5s for lock
-      db.run(sql, params, function(e) { db.close(); e ? rej(e) : res({ id: this.lastID, changes: this.changes }); });
+      if (err) return reject(err);
+      db.configure('busyTimeout', 5000);
+      db.run('PRAGMA journal_mode=WAL');
+      db.run('PRAGMA synchronous=NORMAL');
+      _writeDb = db;
+      db.on('error', () => { _writeDb = null; });
+      resolve(db);
     });
-  }), DB_TIMEOUT, sql.slice(0, 40));
+  });
 }
+
+function dbRun(sql, params = []) {
+  const task = _writeSerial.then(() =>
+    _acquireWriteDb()
+      .then(db => new Promise((res, rej) =>
+        db.run(sql, params, function(e) {
+          if (e && (e.code === 'SQLITE_MISUSE' || e.code === 'SQLITE_ABORT')) _writeDb = null;
+          e ? rej(e) : res({ id: this.lastID, changes: this.changes });
+        })
+      ))
+      .catch(e => { _writeDb = null; throw e; })
+  );
+  _writeSerial = task.catch(() => {});  // errors must not stall the queue
+  return withTimeout(task, DB_TIMEOUT, sql.slice(0, 40));
+}
+
 function dbGet(sql, params = []) {
   return withTimeout(new Promise((res, rej) => {
     const db = new sqlite.Database(DB_PATH, sqlite.OPEN_READONLY, err => {
       if (err) return rej(err);
       db.configure('busyTimeout', 5000);
+      db.run('PRAGMA journal_mode=WAL');
       db.get(sql, params, (e, row) => { db.close(); e ? rej(e) : res(row); });
     });
   }), DB_TIMEOUT, sql.slice(0, 40));
@@ -46,6 +74,7 @@ function dbAll(sql, params = []) {
     const db = new sqlite.Database(DB_PATH, sqlite.OPEN_READONLY, err => {
       if (err) return rej(err);
       db.configure('busyTimeout', 5000);
+      db.run('PRAGMA journal_mode=WAL');
       db.all(sql, params, (e, rows) => { db.close(); e ? rej(e) : res(rows); });
     });
   }), DB_TIMEOUT, sql.slice(0, 40));

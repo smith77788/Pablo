@@ -317,24 +317,45 @@ async function reportFixResult(finding, outcome, fixerName) {
 
 // ─── Known-good cache ─────────────────────────────────────────────────────────
 
-/** Load recent fixed patterns — skip findings we've already handled successfully. */
+/**
+ * Load suppression set:
+ * 1. Recently FIXED findings (skip — already resolved)
+ * 2. Findings reported 3+ times in last 7 days without fix (suppress repeated noise —
+ *    these are manual-action items; agents will keep finding them but we won't re-report
+ *    or re-attempt automated fixes every cycle)
+ */
 async function loadKnownGood() {
   try {
-    const rows = await dbAll(
+    const fixed = await dbAll(
       `SELECT message FROM agent_findings
        WHERE status = 'fixed' AND created_at > datetime('now', '-7 days')
        LIMIT 200`
     );
-    return new Set(rows.map(r => r.message));
+    // Suppress repeated unfixable findings (reported 3+ times, never fixed)
+    const repeated = await dbAll(
+      `SELECT message, COUNT(*) as n FROM agent_findings
+       WHERE status = 'open'
+         AND created_at > datetime('now', '-7 days')
+         AND (auto_fixable = 0 OR proposed_fix IS NULL OR proposed_fix = '')
+       GROUP BY message
+       HAVING n >= 3
+       LIMIT 300`
+    ).catch(() => []);
+
+    const suppressed = new Set([
+      ...fixed.map(r => r.message),
+      ...repeated.map(r => r.message),
+    ]);
+    return suppressed;
   } catch { return new Set(); }
 }
 
 // ─── PHASE 1 — ANALYSIS ───────────────────────────────────────────────────────
 
-async function analyzePhase(progressRef, buildProgressMsg, totalAgents, BATCH) {
+async function analyzePhase(progressRef, buildProgressMsg, totalAgents, BATCH, knownGood = new Set()) {
   const allFindings = [];
   const agentMap    = {};  // agentName → AgentClass
-  let criticalCount = 0, highCount = 0, mediumCount = 0, okCount = 0;
+  let criticalCount = 0, highCount = 0, mediumCount = 0, okCount = 0, suppressedCount = 0;
   const agentSummaries = [];
   let doneCount = 0;
 
@@ -369,17 +390,18 @@ async function analyzePhase(progressRef, buildProgressMsg, totalAgents, BATCH) {
 
       allFindings.push(...enriched);
 
-      const crit = findings.filter(f => f.sev === SEV_EMO.CRITICAL).length;
-      const high = findings.filter(f => f.sev === SEV_EMO.HIGH).length;
-      const med  = findings.filter(f => f.sev === SEV_EMO.MEDIUM).length;
+      const crit = findings.filter(f => f.sev === SEV_EMO.CRITICAL && !knownGood.has(f.msg)).length;
+      const high = findings.filter(f => f.sev === SEV_EMO.HIGH && !knownGood.has(f.msg)).length;
+      const med  = findings.filter(f => f.sev === SEV_EMO.MEDIUM && !knownGood.has(f.msg)).length;
       const ok   = findings.filter(f => f.sev === SEV_EMO.OK).length;
-      criticalCount += crit; highCount += high; mediumCount += med; okCount += ok;
+      const supp = findings.filter(f => knownGood.has(f.msg) && f.sev !== SEV_EMO.OK).length;
+      criticalCount += crit; highCount += high; mediumCount += med; okCount += ok; suppressedCount += supp;
       doneCount++;
 
       if (crit + high + med > 0) {
         agentSummaries.push({
           name: agent.name, emoji: agent.emoji, crit, high, med,
-          issues: enriched.filter(f => [SEV_EMO.CRITICAL, SEV_EMO.HIGH, SEV_EMO.MEDIUM].includes(f.sev)),
+          issues: enriched.filter(f => [SEV_EMO.CRITICAL, SEV_EMO.HIGH, SEV_EMO.MEDIUM].includes(f.sev) && !knownGood.has(f.msg)),
           AgentClass: agentMap[agent.name],
         });
       }
@@ -398,7 +420,7 @@ async function analyzePhase(progressRef, buildProgressMsg, totalAgents, BATCH) {
     if (i + BATCH < AGENT_CLASSES.length) await sleep(400);
   }
 
-  return { allFindings, agentSummaries, agentMap, criticalCount, highCount, mediumCount, okCount };
+  return { allFindings, agentSummaries, agentMap, criticalCount, highCount, mediumCount, okCount, suppressedCount };
 }
 
 // ─── PHASE 2 — DISCUSSION ─────────────────────────────────────────────────────
@@ -620,7 +642,7 @@ async function verifyPhase(agentSummaries, fixResults) {
 
 async function reportPhase({
   cycleId, elapsed, healthScore, icon,
-  criticalCount, highCount, mediumCount, okCount,
+  criticalCount, highCount, mediumCount, okCount, suppressedCount = 0,
   agentSummaries, fixResults, verifyResult,
   totalAgents,
 }) {
@@ -635,7 +657,8 @@ async function reportPhase({
     `Цикл: ${cycleId}`,
     ``,
     `${icon} Health Score: ${healthScore}%`,
-    `🔴 CRITICAL: ${criticalCount}  🟠 HIGH: ${highCount}  🟡 MEDIUM: ${mediumCount}  ✅ OK: ${okCount}`,
+    `🔴 КРИТИЧЕСКИХ: ${criticalCount}  🟠 ВЫСОКИХ: ${highCount}  🟡 СРЕДНИХ: ${mediumCount}  ✅ OK: ${okCount}`,
+    suppressedCount > 0 ? `🔇 Подавлено повторяющихся: ${suppressedCount} (требуют ручного действия — см. ниже)` : '',
     `⏱ ${elapsed}с | ${totalAgents} агентов`,
     ``,
     `🔧 Исправлено автоматически: ${fixedCount}`,
@@ -735,7 +758,8 @@ async function runSmartOrchestrator() {
   const {
     allFindings, agentSummaries, agentMap,
     criticalCount, highCount, mediumCount, okCount,
-  } = await analyzePhase(progressRef, buildProgressMsg, totalAgents, BATCH);
+    suppressedCount,
+  } = await analyzePhase(progressRef, buildProgressMsg, totalAgents, BATCH, knownGood);
 
   const elapsed1 = ((Date.now() - startTime) / 1000).toFixed(1);
 
@@ -752,6 +776,8 @@ async function runSmartOrchestrator() {
   await logAgent('SmartOrchestrator',
     `🧠 Анализ: ${totalAgents} агентов, 🔴${criticalCount} 🟠${highCount} 🟡${mediumCount} ✅${okCount}, ${elapsed1}с`
   );
+
+  console.log(`📚 Suppressed patterns (fixed + repeated unfixable): ${knownGood.size}`);
 
   // ── PHASE 2: Discussion ───────────────────────────────────────────────────
   const discussionResults = await discussionPhase(cycleId, allFindings, knownGood);
@@ -785,7 +811,7 @@ async function runSmartOrchestrator() {
     try {
       await new Promise((res, rej) => {
         const { exec } = require('child_process');
-        exec('pm2 restart nevesty-models --silent', (err) => err ? rej(err) : res());
+        exec('pm2 reload nevesty-models --silent', (err) => err ? rej(err) : res());
       });
       console.log('  🔄 Bot restarted after code fixes');
       await dbRun(
@@ -848,7 +874,7 @@ async function runSmartOrchestrator() {
   // ── PHASE 6: Report ───────────────────────────────────────────────────────
   await reportPhase({
     cycleId, elapsed, healthScore, icon,
-    criticalCount, highCount, mediumCount, okCount,
+    criticalCount, highCount, mediumCount, okCount, suppressedCount,
     agentSummaries, fixResults, verifyResult,
     totalAgents,
   });
