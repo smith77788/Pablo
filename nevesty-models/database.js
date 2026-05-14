@@ -116,6 +116,35 @@ async function initDatabase() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  // Agent communication blackboard
+  await run(`CREATE TABLE IF NOT EXISTS agent_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    message TEXT NOT NULL,
+    file TEXT,
+    line INTEGER,
+    auto_fixable INTEGER DEFAULT 0,
+    proposed_fix TEXT,
+    status TEXT DEFAULT 'open',
+    claimed_by TEXT,
+    claimed_at DATETIME,
+    fixed_by TEXT,
+    fix_summary TEXT,
+    fixed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS agent_discussions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_agent TEXT NOT NULL,
+    to_agent TEXT DEFAULT 'all',
+    topic TEXT NOT NULL,
+    message TEXT NOT NULL,
+    ref_finding_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   await run(`CREATE TABLE IF NOT EXISTS bot_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
