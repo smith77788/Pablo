@@ -80,7 +80,7 @@ async function runOrchestrator() {
     `Health Score: ${healthScore}%`
   );
 
-  // Финальный отчёт в Telegram
+  // Финальный отчёт в Telegram с кнопками управления
   const icon = healthScore >= 80 ? '💚' : healthScore >= 60 ? '🟡' : '🔴';
   const report = [
     `🧠 *Orchestrator — Итоговый отчёт*`,
@@ -92,7 +92,19 @@ async function runOrchestrator() {
     critical.length ? `*Топ проблем:*\n${critical.join('\n')}` : '✅ Критических проблем не найдено',
   ].join('\n');
 
-  await tgSend(report);
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: '🔧 Исправить всё и перепроверить', callback_data: 'adm_fix_organism' },
+      ],
+      [
+        { text: '🔄 Перепроверить', callback_data: 'adm_run_organism' },
+        { text: '📡 Фид агентов',   callback_data: 'agent_feed_0'     },
+      ],
+    ]
+  };
+
+  await tgSend(report, { parse_mode: 'Markdown', reply_markup: keyboard });
 
   console.log('\n' + '═'.repeat(60));
   console.log(`🧠 ORCHESTRATOR ЗАВЕРШИЛ РАБОТУ`);

@@ -44,12 +44,13 @@ function readFile(p) {
 
 // ─── Telegram notify ──────────────────────────────────────────────────────────
 const https = require('https');
-function tgSend(text) {
+function tgSend(text, opts = {}) {
   const TOKEN    = process.env.TELEGRAM_BOT_TOKEN;
   const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   if (!TOKEN || !ADMIN_IDS.length) return Promise.resolve();
   const sends = ADMIN_IDS.map(chatId => new Promise(resolve => {
-    const payload = JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true });
+    const body = { chat_id: chatId, text, disable_web_page_preview: true, ...opts };
+    const payload = JSON.stringify(body);
     const req = https.request({
       hostname: 'api.telegram.org',
       path: `/bot${TOKEN}/sendMessage`,

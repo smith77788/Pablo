@@ -786,9 +786,10 @@ async function showOrganismStatus(chatId) {
     return safeSend(chatId, text, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: [
-        [{ text: '🚀 Запустить проверку', callback_data: 'adm_run_organism' }],
-        [{ text: '📡 Фид агентов',        callback_data: 'agent_feed_0'      }],
-        [{ text: '← Меню',               callback_data: 'admin_menu'         }],
+        [{ text: '🔧 Исправить всё и перепроверить', callback_data: 'adm_fix_organism'  }],
+        [{ text: '🚀 Только проверить',             callback_data: 'adm_run_organism'  }],
+        [{ text: '📡 Фид агентов',                  callback_data: 'agent_feed_0'      }],
+        [{ text: '← Меню',                          callback_data: 'admin_menu'        }],
       ]}
     });
   } catch (e) { console.error('[Bot] showOrganismStatus:', e.message); }
@@ -1014,7 +1015,7 @@ function initBot(app) {
     if (data === 'adm_organism')    return showOrganismStatus(chatId);
     if (data === 'adm_run_organism') {
       if (!isAdmin(chatId)) return;
-      await safeSend(chatId, '🌿 Запускаю проверку организма... Результаты придут через 1-2 минуты.', {
+      await safeSend(chatId, '🌿 Запускаю проверку организма...\n\nРезультаты придут через 1-2 минуты.', {
         reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_organism' }]] }
       });
       const { spawn } = require('child_process');
@@ -1024,6 +1025,31 @@ function initBot(app) {
         stdio: ['ignore', 'ignore', 'pipe'],
       });
       proc.stderr.on('data', d => console.error('[Organism]', d.toString().trim()));
+      proc.unref();
+      return;
+    }
+
+    if (data === 'adm_fix_organism') {
+      if (!isAdmin(chatId)) return;
+      await safeSend(chatId,
+        '🔧 *Запускаю авто-исправление и перепроверку*\n\n' +
+        'Агенты:\n' +
+        '1\\. 🔧 Auto Fixer — исправляет базовые проблемы\n' +
+        '2\\. 🐛 Bug Hunter — проверяет код\n' +
+        '3\\. 🧠 Orchestrator — полная перепроверка всех 25 агентов\n\n' +
+        '_Результаты придут в чат через 2-3 минуты_',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_organism' }]] }
+        }
+      );
+      const { spawn } = require('child_process');
+      const proc = spawn('node', ['agents/fix-and-recheck.js'], {
+        cwd: require('path').join(__dirname),
+        detached: true,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      proc.stderr.on('data', d => console.error('[FixRecheck]', d.toString().trim()));
       proc.unref();
       return;
     }
