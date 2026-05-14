@@ -208,7 +208,7 @@ router.get('/admin/stats', auth, async (req, res, next) => {
 router.get('/models', async (req, res, next) => {
   try {
     const { category, hair_color, min_height, max_height, min_age, max_age, city, available, search } = req.query;
-    let sql = 'SELECT * FROM models WHERE 1=1';
+    let sql = 'SELECT id, name, age, height, city, category, available, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos FROM models WHERE 1=1';
     const params = [];
     if (category && ALLOWED_CATEGORIES.includes(category)) { sql += ' AND category = ?'; params.push(category); }
     if (hair_color) { sql += ' AND hair_color = ?'; params.push(hair_color); }
@@ -220,7 +220,7 @@ router.get('/models', async (req, res, next) => {
     if (available === '1') { sql += ' AND available = 1'; }
     if (available === '0') { sql += ' AND available = 0'; }
     if (search) { sql += ' AND (name LIKE ? OR bio LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-    sql += ' ORDER BY available DESC, id DESC';
+    sql += ' ORDER BY available DESC, id DESC LIMIT 200';
     const models = await query(sql, params);
     res.json(models.map(m => ({ ...m, photos: JSON.parse(m.photos || '[]') })));
   } catch (e) { next(e); }
@@ -832,7 +832,7 @@ router.get('/export/orders', auth, async (req, res, next) => {
 
 router.get('/export/models', auth, async (req, res, next) => {
   try {
-    const models = await query('SELECT * FROM models ORDER BY name');
+    const models = await query('SELECT id, name, age, height, city, category, available, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos FROM models ORDER BY name');
     res.setHeader('Content-Disposition', `attachment; filename="models-${Date.now()}.json"`);
     res.json(models);
   } catch(e) { next(e); }

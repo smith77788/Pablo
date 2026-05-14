@@ -156,6 +156,7 @@ async function showMainMenu(chatId, name) {
 }
 
 async function showAdminMenu(chatId, name) {
+  if (!isAdmin(chatId)) return;
   await clearSession(chatId);
   try {
     const [ordersRow, scoreRow] = await Promise.all([
@@ -852,16 +853,15 @@ async function showOrganismStatus(chatId) {
     const score = scoreMatch ? parseInt(scoreMatch[1]) : null;
     const scoreIcon = score == null ? '❓' : score >= 80 ? '💚' : score >= 60 ? '🟡' : '🔴';
     const lastTime = lastRun?.created_at ? new Date(lastRun.created_at).toLocaleString('ru') : 'Ещё не запускался';
-    let text = `🌿 *Живой организм агентов*\n\n`;
-    text += `${scoreIcon} Health Score: *${score != null ? score + '%' : 'нет данных'}*\n`;
-    text += `Последний запуск: _${lastTime}_\n\n`;
+    let text = `🌿 Живой организм агентов\n\n`;
+    text += `${scoreIcon} Health Score: ${score != null ? score + '%' : 'нет данных'}\n`;
+    text += `Последний запуск: ${lastTime}\n\n`;
     text += `За последний час:\n`;
     text += `🔴 Критических: ${critCount.n}\n`;
     text += `🟠 Важных: ${highCount.n}\n`;
     text += `✅ Ок: ${okCount.n}\n\n`;
-    text += `_25 агентов-органов непрерывно следят за здоровьем системы_`;
+    text += `25 агентов-органов непрерывно следят за здоровьем системы`;
     return safeSend(chatId, text, {
-      parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: [
         [{ text: '🚀 Запустить проверку',              callback_data: 'adm_run_organism' }],
         [{ text: '🔧 Исправить всё и перепроверить',   callback_data: 'adm_fix_organism' }],
@@ -915,7 +915,6 @@ async function showAdminModel(chatId, modelId) {
     text += `Статус: ${m.available ? '🟢 Доступна' : '🔴 Недоступна'}\n`;
     if (m.bio) text += `\n_${m.bio}_`;
     return safeSend(chatId, text, {
-      parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: [
         [{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${m.id}` },
          { text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${m.id}` }],
@@ -969,15 +968,14 @@ async function showAdminSettings(chatId) {
     getSetting('greeting'), getSetting('contacts_phone'), getSetting('contacts_email'),
     getSetting('contacts_insta'), getSetting('notif_new_order'), getSetting('notif_status'),
   ]);
-  const text = `⚙️ *Настройки бота и агентства*\n\n` +
-    `📝 Приветствие: _${(greeting||'').slice(0,50)}..._\n` +
-    `📞 Телефон: \`${phone||'—'}\`\n` +
-    `📧 Email: \`${email||'—'}\`\n` +
-    `📸 Instagram: \`${insta||'—'}\`\n` +
+  const text = `⚙️ Настройки бота и агентства\n\n` +
+    `📝 Приветствие: ${(greeting||'').slice(0,50)}${(greeting||'').length>50?'...':''}\n` +
+    `📞 Телефон: ${phone||'—'}\n` +
+    `📧 Email: ${email||'—'}\n` +
+    `📸 Instagram: ${insta||'—'}\n` +
     `🔔 Уведомления о заявках: ${notifNew==='1'?'✅ Вкл':'❌ Выкл'}\n` +
     `🔔 Уведомления о статусах: ${notifSt==='1'?'✅ Вкл':'❌ Выкл'}`;
   return safeSend(chatId, text, {
-    parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: [
       [{ text: '📝 Приветствие', callback_data: 'adm_set_greeting' },
        { text: 'ℹ️ О нас',      callback_data: 'adm_set_about'    }],
@@ -1011,77 +1009,77 @@ async function showAddModelStep(chatId, d) {
 
   if (step === 'name') {
     await setSession(chatId, 'adm_mdl_name', d);
-    return safeSend(chatId, header + '👤 Введите *имя модели*:', { parse_mode: 'Markdown',
+    return safeSend(chatId, header + '👤 Введите имя модели:', {
       reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
   }
   if (step === 'age') {
     await setSession(chatId, 'adm_mdl_age', d);
-    return safeSend(chatId, header + `Имя: *${d.name}*\n\n🎂 Введите *возраст* (лет):`, { parse_mode: 'Markdown',
+    return safeSend(chatId, header + `Имя: ${d.name}\n\n🎂 Введите возраст (лет):`, {
       reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_age' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
   }
   if (step === 'height') {
     await setSession(chatId, 'adm_mdl_height', d);
-    return safeSend(chatId, header + `Имя: *${d.name}*\n\n📏 Введите *рост* (см, например: 176):`, { parse_mode: 'Markdown',
+    return safeSend(chatId, header + `Имя: ${d.name}\n\n📏 Введите рост (см, например: 176):`, {
       reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_height' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
   }
   if (step === 'params') {
     await setSession(chatId, 'adm_mdl_params', d);
-    return safeSend(chatId, header + `📐 Введите *параметры* в формате *ОГ/ОТ/ОБ* (например: 86/60/88)\nили пропустите:`, { parse_mode: 'Markdown',
+    return safeSend(chatId, header + `📐 Введите параметры в формате ОГ/ОТ/ОБ (например: 86/60/88)\nили пропустите:`, {
       reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_params' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
   }
   if (step === 'shoe') {
     await setSession(chatId, 'adm_mdl_shoe', d);
-    return safeSend(chatId, header + `👟 Введите *размер обуви*:`, { parse_mode: 'Markdown',
+    return safeSend(chatId, header + `👟 Введите размер обуви:`, {
       reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_shoe' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
   }
   if (step === 'hair') {
     await setSession(chatId, 'adm_mdl_hair', d);
     const btns = MODEL_HAIR_COLORS.map(c => [{ text: c, callback_data: `adm_mdl_hair_${c}` }]);
     btns.push([{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_hair' }]);
-    return safeSend(chatId, header + `💇 Выберите *цвет волос*:`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: btns } });
+    return safeSend(chatId, header + `💇 Выберите цвет волос:`, { reply_markup: { inline_keyboard: btns } });
   }
   if (step === 'eye') {
     await setSession(chatId, 'adm_mdl_eye', d);
     const btns = MODEL_EYE_COLORS.map(c => [{ text: c, callback_data: `adm_mdl_eye_${c}` }]);
     btns.push([{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_eye' }]);
-    return safeSend(chatId, header + `👁 Выберите *цвет глаз*:`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: btns } });
+    return safeSend(chatId, header + `👁 Выберите цвет глаз:`, { reply_markup: { inline_keyboard: btns } });
   }
   if (step === 'category') {
     await setSession(chatId, 'adm_mdl_category', d);
     const btns = Object.entries(MODEL_CATEGORIES).map(([k,v]) => [{ text: v, callback_data: `adm_mdl_cat_${k}` }]);
-    return safeSend(chatId, header + `🏷 Выберите *категорию*:`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: btns } });
+    return safeSend(chatId, header + `🏷 Выберите категорию:`, { reply_markup: { inline_keyboard: btns } });
   }
   if (step === 'instagram') {
     await setSession(chatId, 'adm_mdl_instagram', d);
-    return safeSend(chatId, header + `📸 Введите *Instagram* (без @, например: anna_model):`, { parse_mode: 'Markdown',
+    return safeSend(chatId, header + `📸 Введите Instagram (без @, например: anna_model):`, {
       reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_instagram' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
   }
   if (step === 'bio') {
     await setSession(chatId, 'adm_mdl_bio', d);
-    return safeSend(chatId, header + `📝 Введите *описание/портфолио* модели:`, { parse_mode: 'Markdown',
+    return safeSend(chatId, header + `📝 Введите описание/портфолио модели:`, {
       reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_bio' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
   }
   if (step === 'photo') {
     await setSession(chatId, 'adm_mdl_photo', d);
-    return safeSend(chatId, header + `📷 Отправьте *фото модели* (главное фото карточки):`, { parse_mode: 'Markdown',
+    return safeSend(chatId, header + `📷 Отправьте фото модели (главное фото карточки):`, {
       reply_markup: { inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_photo' }, { text: '❌ Отмена', callback_data: 'admin_menu' }]] } });
   }
   if (step === 'confirm') {
     await setSession(chatId, 'adm_mdl_confirm', d);
     const params = d.bust ? `${d.bust}/${d.waist}/${d.hips}` : '—';
-    let summary = `✅ *Подтвердите добавление модели:*\n\n`;
-    summary += `👤 Имя: *${d.name}*\n`;
-    if (d.age)        summary += `🎂 Возраст: *${d.age}* лет\n`;
-    if (d.height)     summary += `📏 Рост: *${d.height}* см\n`;
-    if (d.bust)       summary += `📐 Параметры: *${params}*\n`;
-    if (d.shoe_size)  summary += `👟 Обувь: *${d.shoe_size}*\n`;
-    if (d.hair_color) summary += `💇 Волосы: *${d.hair_color}*\n`;
-    if (d.eye_color)  summary += `👁 Глаза: *${d.eye_color}*\n`;
-    if (d.category)   summary += `🏷 Категория: *${MODEL_CATEGORIES[d.category]||d.category}*\n`;
-    if (d.instagram)  summary += `📸 Instagram: *@${d.instagram}*\n`;
-    if (d.bio)        summary += `📝 Описание: _${d.bio.slice(0,80)}${d.bio.length>80?'...':''}_\n`;
+    let summary = `✅ Подтвердите добавление модели:\n\n`;
+    summary += `👤 Имя: ${d.name}\n`;
+    if (d.age)        summary += `🎂 Возраст: ${d.age} лет\n`;
+    if (d.height)     summary += `📏 Рост: ${d.height} см\n`;
+    if (d.bust)       summary += `📐 Параметры: ${params}\n`;
+    if (d.shoe_size)  summary += `👟 Обувь: ${d.shoe_size}\n`;
+    if (d.hair_color) summary += `💇 Волосы: ${d.hair_color}\n`;
+    if (d.eye_color)  summary += `👁 Глаза: ${d.eye_color}\n`;
+    if (d.category)   summary += `🏷 Категория: ${MODEL_CATEGORIES[d.category]||d.category}\n`;
+    if (d.instagram)  summary += `📸 Instagram: @${d.instagram}\n`;
+    if (d.bio)        summary += `📝 Описание: ${d.bio.slice(0,80)}${d.bio.length>80?'...':''}\n`;
     if (d.photo_id)   summary += `📷 Фото: ✅ загружено\n`;
-    return safeSend(chatId, summary, { parse_mode: 'Markdown',
+    return safeSend(chatId, summary, {
       reply_markup: { inline_keyboard: [
         [{ text: '✅ Добавить модель', callback_data: 'adm_mdl_save' }],
         [{ text: '❌ Отмена',          callback_data: 'admin_menu'   }],
@@ -1100,8 +1098,7 @@ async function saveNewModel(chatId, d) {
        d.category||'fashion', d.photo_file_id||null]
     );
     await clearSession(chatId);
-    return safeSend(chatId, `✅ *Модель «${d.name}» добавлена!*\n\nID: ${res.id}`, {
-      parse_mode: 'Markdown',
+    return safeSend(chatId, `✅ Модель «${d.name}» добавлена!\n\nID: ${res.id}`, {
       reply_markup: { inline_keyboard: [
         [{ text: '👁 Просмотреть карточку', callback_data: `adm_model_${res.id}` }],
         [{ text: '➕ Добавить ещё',          callback_data: 'adm_addmodel'         }],
@@ -1118,7 +1115,6 @@ async function showModelEditMenu(chatId, modelId) {
   const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
   if (!m) return safeSend(chatId, '❌ Модель не найдена.');
   return safeSend(chatId, `✏️ *Редактировать: ${m.name}*\n\nВыберите поле:`, {
-    parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: [
       [{ text: '👤 Имя',         callback_data: `adm_ef_${modelId}_name`       },
        { text: '🎂 Возраст',    callback_data: `adm_ef_${modelId}_age`        }],
@@ -1146,7 +1142,7 @@ async function showBroadcast(chatId) {
   const r = await get("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>({n:0}));
   return safeSend(chatId,
     `📢 *Рассылка клиентам*\n\nКлиентов с заявками: *${r.n}*\n\nВведите сообщение для рассылки — оно будет отправлено всем клиентам, которые оформляли заявки через бота.\n\n⚠️ _Используйте аккуратно_`,
-    { parse_mode: 'Markdown',
+    {
       reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] } }
   );
 }
@@ -1157,14 +1153,13 @@ async function sendBroadcast(chatId, text) {
   let sent = 0, failed = 0;
   for (const c of clients) {
     try {
-      await bot.sendMessage(c.client_chat_id, `📢 *Сообщение от Nevesty Models*\n\n${text}`, { parse_mode: 'Markdown' });
+      await bot.sendMessage(c.client_chat_id, `📢 *Сообщение от Nevesty Models*\n\n${text}`, {});
       sent++;
     } catch { failed++; }
     await new Promise(r => setTimeout(r, 50)); // rate limit
   }
   await clearSession(chatId);
   return safeSend(chatId, `✅ *Рассылка завершена*\n\nОтправлено: ${sent}\nОшибок: ${failed}`, {
-    parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
   });
 }
@@ -1181,7 +1176,6 @@ async function showAdminManagement(chatId) {
   dbAdmins.forEach(a => { text += `• ${a.username} (\`${a.telegram_id||'—'}\`) — ${a.role}\n`; });
   text += `\n_Чтобы добавить admin — нажмите «Добавить Telegram ID»_`;
   return safeSend(chatId, text, {
-    parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: [
       [{ text: '➕ Добавить Telegram ID', callback_data: 'adm_add_admin_id' }],
       [{ text: '← Меню',                 callback_data: 'admin_menu'        }],
@@ -1351,7 +1345,7 @@ function initBot(app) {
     const orderNum = match[1].trim().toUpperCase();
     const text     = match[2].trim();
     const order    = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]).catch(()=>null);
-    if (!order) return safeSend(chatId, `❌ Заявка *${esc(orderNum)}* не найдена.`, { parse_mode: 'Markdown' });
+    if (!order) return safeSend(chatId, `❌ Заявка *${esc(orderNum)}* не найдена.`, {});
     const admin = await get('SELECT username FROM admins WHERE telegram_id=?', [String(chatId)]).catch(()=>null);
     await run('INSERT INTO messages (order_id,sender_type,sender_name,content) VALUES (?,?,?,?)',
       [order.id, 'admin', admin?.username||'Менеджер', text]);
@@ -1376,8 +1370,8 @@ function initBot(app) {
     if (data === 'profile')    return showUserProfile(chatId, q.from.first_name);
     if (data === 'my_orders')  return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
-    if (data === 'adm_stats')    return showAdminStats(chatId);
-    if (data === 'adm_organism')    return showOrganismStatus(chatId);
+    if (data === 'adm_stats')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminStats(chatId); }
+    if (data === 'adm_organism')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showOrganismStatus(chatId); }
     if (data === 'adm_run_organism') {
       if (!isAdmin(chatId)) return;
       await safeSend(chatId, '🌿 Запускаю проверку организма...\n\nРезультаты придут через 1-2 минуты.', {
@@ -1576,7 +1570,7 @@ function initBot(app) {
     }
 
     // ── Settings
-    if (data === 'adm_settings')  return showAdminSettings(chatId);
+    if (data === 'adm_settings')  { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminSettings(chatId); }
     if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; await setSession(chatId, 'adm_broadcast_msg', {}); return showBroadcast(chatId); }
     if (data === 'adm_reviews')   { if (!isAdmin(chatId)) return; return showAdminReviews(chatId); }
     if (data.startsWith('rev_approve_')) {
@@ -1591,8 +1585,8 @@ function initBot(app) {
       await run('DELETE FROM reviews WHERE id=?', [id]).catch(()=>{});
       return safeSend(chatId, `Отзыв #${id} удалён.`);
     }
-    if (data === 'adm_admins')    return showAdminManagement(chatId);
-    if (data === 'adm_export')    return exportOrders(chatId);
+    if (data === 'adm_admins')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminManagement(chatId); }
+    if (data === 'adm_export')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return exportOrders(chatId); }
     if (data === 'adm_addmodel')  { if (!isAdmin(chatId)) return; return showAddModelStep(chatId, { _step: 'name' }); }
 
     // ── Settings inputs — set session and ask for text
@@ -1608,7 +1602,7 @@ function initBot(app) {
     if (settingPrompts[data]) {
       if (!isAdmin(chatId)) return;
       await setSession(chatId, data, {});
-      return safeSend(chatId, settingPrompts[data], { parse_mode: 'Markdown',
+      return safeSend(chatId, settingPrompts[data], {
         reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings' }]] } });
     }
 
@@ -1626,7 +1620,6 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       await setSession(chatId, 'adm_add_admin_id', {});
       return safeSend(chatId, '👑 Введите *Telegram ID* нового администратора:\n\n_Получить ID можно через @userinfobot_', {
-        parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_admins' }]] }
       });
     }
@@ -1689,14 +1682,14 @@ function initBot(app) {
       }
       if (field === 'photo') {
         await setSession(chatId, `adm_ef_${modelId}_photo`, {});
-        return safeSend(chatId, '📷 Отправьте новое *фото модели*:', { parse_mode: 'Markdown',
+        return safeSend(chatId, '📷 Отправьте новое *фото модели*:', {
           reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: `adm_editmodel_${modelId}` }]] } });
       }
       const fieldLabels = { name:'имя', age:'возраст', height:'рост (см)', weight:'вес (кг)',
                             shoe_size:'размер обуви', instagram:'Instagram', bio:'описание',
                             hair_color:'цвет волос', eye_color:'цвет глаз', params:'параметры (ОГ/ОТ/ОБ)' };
       await setSession(chatId, `adm_ef_${modelId}_${field}`, {});
-      return safeSend(chatId, `✏️ Введите новое *${fieldLabels[field]||field}*:`, { parse_mode: 'Markdown',
+      return safeSend(chatId, `✏️ Введите новое *${fieldLabels[field]||field}*:`, {
         reply_markup: { inline_keyboard: [[{ text: '← Отмена', callback_data: `adm_editmodel_${modelId}` }]] } });
     }
     if (data.startsWith('adm_efc_')) {  // edit field category
@@ -1716,7 +1709,6 @@ function initBot(app) {
       const id = parseInt(data.replace('adm_del_model_',''));
       const m = await get('SELECT name FROM models WHERE id=?', [id]).catch(()=>null);
       return safeSend(chatId, `🗑 *Удалить модель «${m?.name||id}»?*\n\nЭто действие необратимо!`, {
-        parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: [
           [{ text: '⚠️ Да, удалить', callback_data: `adm_del_confirm_${id}` }],
           [{ text: '← Отмена',       callback_data: `adm_model_${id}`        }],
@@ -1800,7 +1792,6 @@ function initBot(app) {
         await run('UPDATE admins SET telegram_id=? WHERE id=(SELECT MIN(id) FROM admins WHERE telegram_id IS NULL OR telegram_id="")', [newId]).catch(()=>{});
         await clearSession(chatId);
         return safeSend(chatId, `✅ Telegram ID \`${newId}\` добавлен!\n\n⚠️ Для постоянного добавления — также добавьте его в ADMIN_TELEGRAM_IDS в .env файле.`, {
-          parse_mode: 'Markdown',
           reply_markup: { inline_keyboard: [[{ text: '← Администраторы', callback_data: 'adm_admins' }]] }
         });
       }
@@ -1945,7 +1936,6 @@ function initBot(app) {
         ? `📩 *Сообщение от клиента*\nЗаявка: *${order.order_number}*\nКлиент: ${clientName} ${username}\n\n`
         : `📩 *Новое сообщение*\n${clientName} ${username}\n\n`;
       await Promise.allSettled(adminIds.map(id => safeSend(id, header + text, {
-        parse_mode: 'Markdown',
         reply_markup: order ? { inline_keyboard: [[
           { text: '💬 Ответить',   callback_data: `adm_contact_${order.id}` },
           { text: '📋 Заявка',     callback_data: `adm_order_${order.id}`   },
@@ -1966,7 +1956,7 @@ function initBot(app) {
 async function notifyAdmin(text, opts = {}) {
   if (!bot) return;
   const ids = await getAdminChatIds();
-  await Promise.allSettled(ids.map(id => safeSend(id, text, { parse_mode: 'Markdown', ...opts })));
+  await Promise.allSettled(ids.map(id => safeSend(id, text, { ...opts })));
 }
 
 async function notifyNewOrder(order) {
@@ -1991,7 +1981,6 @@ async function notifyNewOrder(order) {
 
   const ids = await getAdminChatIds();
   await Promise.allSettled(ids.map(id => safeSend(id, text, {
-    parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: [
       [
         { text: '✅ Подтвердить', callback_data: `adm_confirm_${order.id}` },
@@ -2014,7 +2003,7 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus) {
     cancelled:   `❌ *Заявка ${orderNumber} отклонена.*\n\nЕсли есть вопросы — свяжитесь с нами.`,
   };
   const text = msgs[newStatus];
-  if (text) await safeSend(clientChatId, text, { parse_mode: 'Markdown' });
+  if (text) await safeSend(clientChatId, text, {});
 }
 
 async function sendMessageToClient(clientChatId, orderNumber, text) {

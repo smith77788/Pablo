@@ -1,66 +1,75 @@
-/** 🕐 Scheduler — 24/7 organism runner. Checks every 6 hours automatically. */
+/**
+ * 🧬 Living Organism Scheduler
+ * Runs continuously, auto-detects issues, auto-fixes what it can,
+ * reports results to Telegram admins.
+ */
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
-const { tgSend } = require('./lib/base');
 const { runOrchestrator } = require('./orchestrator');
+const AutoFixer = require('./auto-fixer');
+const { tgSend, logAgent } = require('./lib/base');
 
-const INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+// Run immediately, then every 6 hours
+const INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-function timestamp() {
-  return new Date().toLocaleString('ru', { timeZone: 'Europe/Moscow' });
-}
+// Track consecutive failures to avoid spam
+let lastHealthScore = null;
+let failureCount = 0;
 
-function log(msg) {
-  console.log(`[${timestamp()}] ${msg}`);
-}
+async function runCycle() {
+  const ts = new Date().toLocaleString('ru', { timeZone: 'Europe/Moscow' });
+  console.log(`\n[${ts}] 🧬 Organism cycle starting...`);
 
-async function runCheck() {
-  log('🟢 Запуск планового organism-check...');
-  await tgSend(`🕐 Плановая проверка организма\n⏰ ${timestamp()}`);
-
-  let result;
   try {
-    result = await runOrchestrator();
-  } catch (err) {
-    log(`❌ Ошибка во время проверки: ${err.message}`);
-    console.error(err);
-    await tgSend(`⚠️ Scheduler: ошибка organism-check\n${err.message}`);
-    return;
-  }
+    // Step 1: Run auto-fixer FIRST (fix what we already know about)
+    const fixer = new AutoFixer();
+    await fixer.run({ silent: true });
+    const fixed = fixer.fixed || [];
 
-  const { healthScore, criticalCount, highCount, mediumCount, okCount } = result;
-  const icon = healthScore >= 80 ? '💚' : healthScore >= 60 ? '🟡' : '🔴';
+    // Step 2: Run full organism check
+    const result = await runOrchestrator();
+    const { healthScore, criticalCount, highCount } = result;
 
-  log(`✅ Проверка завершена. Health=${healthScore}% 🔴${criticalCount} 🟠${highCount} 🟡${mediumCount} ✅${okCount}`);
-  await tgSend(
-    `${icon} Плановая проверка завершена\n` +
-    `Health Score: ${healthScore}%\n` +
-    `🔴 ${criticalCount}  🟠 ${highCount}  🟡 ${mediumCount}  ✅ ${okCount}\n` +
-    `⏰ ${timestamp()}\n` +
-    `⏭ Следующая через 6 часов`
-  );
-}
-
-async function start() {
-  log('🚀 Scheduler запущен. Интервал: каждые 6 часов.');
-  await tgSend(`🚀 Nevesty Scheduler запущен\nOrganism будет проверяться каждые 6 часов\n⏰ ${timestamp()}`);
-
-  // Run immediately on start
-  await runCheck();
-
-  // Then repeat every 6 hours
-  setInterval(async () => {
-    try {
-      await runCheck();
-    } catch (err) {
-      log(`❌ Необработанная ошибка в setInterval: ${err.message}`);
-      console.error(err);
+    // Step 3: If health degraded significantly, run fixer again
+    if (lastHealthScore !== null && healthScore < lastHealthScore - 10) {
+      await tgSend(
+        `⚠️ Health score упал: ${lastHealthScore}% → ${healthScore}%\n` +
+        `🔴 ${criticalCount} критических, 🟠 ${highCount} высоких\n` +
+        `Запускаю авто-исправление...`
+      );
+      const fixer2 = new AutoFixer();
+      await fixer2.run({ silent: true });
     }
-  }, INTERVAL_MS);
+
+    // Step 4: Notify about significant events
+    if (fixed.length > 0) {
+      await tgSend(
+        `🔧 Авто-исправлено: ${fixed.length} проблем\n` +
+        fixed.slice(0, 5).map(f => `• ${f}`).join('\n')
+      );
+    }
+
+    lastHealthScore = healthScore;
+    failureCount = 0;
+
+    await logAgent('Scheduler', `Цикл завершён: Score=${healthScore}% fixed=${fixed.length}`);
+    console.log(`[Scheduler] Cycle done. Score=${healthScore}% fixed=${fixed.length}`);
+
+  } catch (err) {
+    failureCount++;
+    console.error(`[Scheduler] Cycle error (${failureCount}):`, err.message);
+    if (failureCount <= 3) {
+      await tgSend(`🚨 Organism scheduler error: ${err.message}`).catch(() => {});
+    }
+  }
 }
 
-start().catch(err => {
-  log(`❌ Fatal error in scheduler start: ${err.message}`);
-  console.error(err);
-  process.exit(1);
+// Run immediately
+console.log('🧬 Living Organism Scheduler started');
+tgSend('🟢 Organism scheduler запущен. Первая проверка начинается...').catch(() => {});
+
+runCycle().then(() => {
+  // Schedule recurring runs
+  setInterval(runCycle, INTERVAL_MS);
+  console.log(`[Scheduler] Next run in ${INTERVAL_MS / 3600000}h`);
 });
