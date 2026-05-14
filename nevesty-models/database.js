@@ -36,6 +36,13 @@ function get(sql, params = []) {
 async function initDatabase() {
   db = new sqlite3.Database(DB_PATH);
 
+  // Performance pragmas — set before any table operations
+  await run('PRAGMA journal_mode = WAL');
+  await run('PRAGMA synchronous = NORMAL');
+  await run('PRAGMA cache_size = 2000');
+  await run('PRAGMA temp_store = MEMORY');
+  await run('PRAGMA mmap_size = 67108864'); // 64 MB memory-mapped I/O
+
   await run(`CREATE TABLE IF NOT EXISTS admins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,

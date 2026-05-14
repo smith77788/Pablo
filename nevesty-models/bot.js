@@ -74,25 +74,59 @@ async function safePhoto(chatId, photo, opts = {}) {
 
 // ─── Session ──────────────────────────────────────────────────────────────────
 
+// ─── In-memory session cache (write-through to SQLite) ───────────────────────
+// Устраняет зависания когда SQLite занята агентами: чтение всегда из памяти,
+// запись сначала в память, затем асинхронно в SQLite.
+const _sessionCache = new Map(); // chatId → { state, data, updated_at }
+
 async function getSession(chatId) {
-  try { return await get('SELECT * FROM telegram_sessions WHERE chat_id=?', [String(chatId)]); }
-  catch { return null; }
+  const key = String(chatId);
+  if (_sessionCache.has(key)) return _sessionCache.get(key);
+  try {
+    const row = await get('SELECT * FROM telegram_sessions WHERE chat_id=?', [key]);
+    if (row) _sessionCache.set(key, row);
+    return row || null;
+  } catch { return null; }
 }
 
 async function setSession(chatId, state, data = {}) {
-  try {
-    await run(
-      `INSERT OR REPLACE INTO telegram_sessions (chat_id,state,data,updated_at)
-       VALUES (?,?,?,CURRENT_TIMESTAMP)`,
-      [String(chatId), state, JSON.stringify(data)]
-    );
-  } catch (e) { console.error('[Bot] setSession:', e.message); }
+  const key = String(chatId);
+  const rec = { chat_id: key, state, data: JSON.stringify(data), updated_at: new Date().toISOString() };
+  _sessionCache.set(key, rec);
+  // Persist to SQLite in background — bot doesn't wait for it
+  run(
+    `INSERT OR REPLACE INTO telegram_sessions (chat_id,state,data,updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP)`,
+    [key, state, JSON.stringify(data)]
+  ).catch(e => console.error('[Bot] setSession persist:', e.message));
 }
 
 async function clearSession(chatId) { await setSession(chatId, 'idle', {}); }
 
 function sessionData(session) {
-  try { return JSON.parse(session?.data || '{}'); } catch { return {}; }
+  try {
+    const d = session?.data;
+    return typeof d === 'string' ? JSON.parse(d || '{}') : (d || {});
+  } catch { return {}; }
+}
+
+// ─── In-memory settings cache (TTL 60s) ──────────────────────────────────────
+const _settingsCache = new Map(); // key → { value, expiresAt }
+const SETTINGS_TTL = 60_000;
+
+async function getSetting(key) {
+  const cached = _settingsCache.get(key);
+  if (cached && Date.now() < cached.expiresAt) return cached.value;
+  try {
+    const r = await get('SELECT value FROM bot_settings WHERE key=?', [key]);
+    const value = r?.value ?? null;
+    _settingsCache.set(key, { value, expiresAt: Date.now() + SETTINGS_TTL });
+    return value;
+  } catch { return cached?.value ?? null; }
+}
+
+async function setSetting(key, value) {
+  _settingsCache.set(key, { value, expiresAt: Date.now() + SETTINGS_TTL });
+  await run('INSERT OR REPLACE INTO bot_settings (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)', [key, value]);
 }
 
 // ─── Keyboards ────────────────────────────────────────────────────────────────
@@ -725,9 +759,10 @@ async function bkSubmit(chatId, data) {
 
 const VALID_STATUSES = ['new','reviewing','confirmed','in_progress','completed','cancelled'];
 
-async function showAdminOrders(chatId, statusFilter, page) {
+async function showAdminOrders(chatId, statusFilter, page = 0) {
   try {
     const safe = VALID_STATUSES.includes(statusFilter) ? statusFilter : null;
+    page = parseInt(page) || 0;
     const [total, orders] = await Promise.all([
       safe
         ? get('SELECT COUNT(*) as n FROM orders WHERE status=?', [safe])
@@ -1061,16 +1096,6 @@ async function showAgentDiscussions(chatId) {
       ]}
     });
   } catch (e) { console.error('[Bot] showAgentDiscussions:', e.message); }
-}
-
-// ─── Settings helper ──────────────────────────────────────────────────────────
-
-async function getSetting(key) {
-  try { const r = await get('SELECT value FROM bot_settings WHERE key=?', [key]); return r?.value ?? null; }
-  catch { return null; }
-}
-async function setSetting(key, value) {
-  await run('INSERT OR REPLACE INTO bot_settings (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)', [key, value]);
 }
 
 // ─── Settings menu ────────────────────────────────────────────────────────────
@@ -1949,13 +1974,17 @@ function initBot(app) {
         await run('UPDATE models SET photos=? WHERE id=?', [JSON.stringify(gallery), modelId]).catch(()=>{});
       }
       const newCount = all.length + 1;
-      return safeSend(chatId, `✅ Фото ${newCount}/8 добавлено!\n\nОтправьте следующее или нажмите «Готово».`, {
-        reply_markup: { inline_keyboard: [
-          [{ text: '✅ Готово',          callback_data: `adm_model_${modelId}`           }],
-          [{ text: '🗑 Очистить всё',   callback_data: `adm_gallery_clear_${modelId}`   }],
-          [{ text: '📷 К галерее',      callback_data: `adm_gallery_${modelId}`         }],
-        ]}
-      });
+      const remaining = 8 - newCount;
+      const doneText = remaining > 0
+        ? `✅ Фото ${newCount}/8 сохранено!\n\nМожно добавить ещё ${remaining} фото.`
+        : `✅ Фото ${newCount}/8 — галерея заполнена!`;
+      const buttons = [];
+      if (remaining > 0) {
+        buttons.push([{ text: `➕ Добавить ещё фото (${newCount}/8)`, callback_data: `adm_gallery_${modelId}` }]);
+      }
+      buttons.push([{ text: '✅ Готово — показать карточку', callback_data: `adm_model_${modelId}` }]);
+      buttons.push([{ text: '🗑 Очистить все фото',          callback_data: `adm_gallery_clear_${modelId}` }]);
+      return safeSend(chatId, doneText, { reply_markup: { inline_keyboard: buttons } });
     }
     if (state.startsWith('adm_ef_') && state.endsWith('_photo')) {
       const modelId = parseInt(state.replace('adm_ef_','').split('_')[0]);
