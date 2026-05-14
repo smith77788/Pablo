@@ -107,9 +107,10 @@ function buildClientKeyboard() {
     [{ text: '❓ FAQ',                  callback_data: 'faq'          },
      { text: '👤 Мой профиль',         callback_data: 'profile'      }],
   ];
-  // Mini App — открывает сайт внутри Telegram (требует https://)
+  // Mini App — открывает webapp.html (Telegram Mini App entry point, требует https://)
   if (SITE_URL.startsWith('https://')) {
-    rows.unshift([{ text: '🌐 Открыть сайт', web_app: { url: SITE_URL } }]);
+    const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
+    rows.unshift([{ text: '📱 Открыть Mini App', web_app: { url: webappUrl } }]);
   } else {
     // На http — добавляем обычную ссылку на каталог (callback)
     rows.unshift([{ text: '🌐 Открыть каталог', callback_data: 'cat_cat__0' }]);
