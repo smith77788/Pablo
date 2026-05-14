@@ -482,8 +482,17 @@ function stepHeader(step, title) {
   return `📝 *Бронирование · Шаг ${step}/4*\n${dots}\n\n*${title}*\n\n`;
 }
 
-// STEP 1 — model selection
+// STEP 1 — model selection (пропускается если модель уже выбрана)
 async function bkStep1(chatId, data = {}) {
+  // Если модель уже выбрана (например через кнопку «Заказать эту модель») — пропускаем
+  if (data.model_id && data.model_name) {
+    await safeSend(chatId,
+      `✅ Модель выбрана: *${esc(data.model_name)}*`,
+      { parse_mode: 'MarkdownV2' }
+    );
+    return bkStep2EventType(chatId, data);
+  }
+
   await setSession(chatId, 'bk_s1', data);
   try {
     const models = await query('SELECT id,name,height,hair_color FROM models WHERE available=1 ORDER BY id LIMIT 12');
@@ -491,9 +500,8 @@ async function bkStep1(chatId, data = {}) {
       text: `${m.name}  ·  ${m.height}см  ·  ${m.hair_color||''}`,
       callback_data: `bk_pick_${m.id}`
     }]);
-    const preNote = data.model_name ? `✅ Выбрана: *${esc(data.model_name)}*\n\n` : '';
     return safeSend(chatId,
-      stepHeader(1,'Выберите модель') + preNote + 'Выберите из списка или нажмите «Менеджер подберёт»:',
+      stepHeader(1,'Выберите модель') + 'Выберите из списка или нажмите «Менеджер подберёт»:',
       {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [
@@ -958,26 +966,49 @@ async function showAdminModel(chatId, modelId) {
     const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
     if (!m) return safeSend(chatId, '❌ Модель не найдена.');
     const cnt = (await get('SELECT COUNT(*) as n FROM orders WHERE model_id=?', [modelId])).n;
-    let text = `💃 *${m.name}*\n\n`;
-    if (m.age)    text += `🎂 Возраст: ${m.age} лет\n`;
-    if (m.height) text += `📏 Рост: ${m.height} см\n`;
-    if (m.weight) text += `⚖️ Вес: ${m.weight} кг\n`;
-    if (m.bust)   text += `📐 Параметры: ${m.bust}/${m.waist}/${m.hips}\n`;
-    if (m.shoe_size)  text += `👟 Обувь: ${m.shoe_size}\n`;
-    if (m.hair_color) text += `💇 Волосы: ${m.hair_color}\n`;
-    if (m.eye_color)  text += `👁 Глаза: ${m.eye_color}\n`;
-    if (m.instagram)  text += `📸 @${m.instagram}\n`;
-    text += `🏷 Категория: ${MODEL_CATEGORIES[m.category]||m.category}\n`;
+
+    let text = `💃 *${esc(m.name)}*\n\n`;
+    if (m.age)        text += `🎂 Возраст: ${m.age} лет\n`;
+    if (m.height)     text += `📏 Рост: ${m.height} см\n`;
+    if (m.weight)     text += `⚖️ Вес: ${m.weight} кг\n`;
+    if (m.bust)       text += `📐 Параметры: ${m.bust}/${m.waist}/${m.hips}\n`;
+    if (m.shoe_size)  text += `👟 Обувь: ${esc(m.shoe_size)}\n`;
+    if (m.hair_color) text += `💇 Волосы: ${esc(m.hair_color)}\n`;
+    if (m.eye_color)  text += `👁 Глаза: ${esc(m.eye_color)}\n`;
+    if (m.instagram)  text += `📸 @${esc(m.instagram)}\n`;
+    text += `🏷 Категория: ${esc(MODEL_CATEGORIES[m.category]||m.category)}\n`;
     text += `📋 Заявок: ${cnt}\n`;
     text += `Статус: ${m.available ? '🟢 Доступна' : '🔴 Недоступна'}\n`;
-    if (m.bio) text += `\n_${m.bio}_`;
-    return safeSend(chatId, text, {
-      reply_markup: { inline_keyboard: [
-        [{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${m.id}` },
-         { text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${m.id}` }],
-        [{ text: '← К моделям', callback_data: 'adm_models_0' }],
-      ]}
-    });
+    if (m.bio) text += `\n_${esc(m.bio)}_`;
+
+    const keyboard = { inline_keyboard: [
+      [{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${m.id}` },
+       { text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${m.id}` }],
+      [{ text: '← К моделям', callback_data: 'adm_models_0' }],
+    ]};
+
+    // Галерея: photo_main + photos[]
+    let galleryUrls = [];
+    try { galleryUrls = JSON.parse(m.photos || '[]'); } catch {}
+    if (m.photo_main && !galleryUrls.includes(m.photo_main)) galleryUrls.unshift(m.photo_main);
+
+    if (galleryUrls.length >= 2) {
+      const media = galleryUrls.slice(0, 8).map((url, i, arr) => {
+        const item = { type: 'photo', media: url };
+        if (i === arr.length - 1) { item.caption = text; item.parse_mode = 'MarkdownV2'; }
+        return item;
+      });
+      try {
+        await bot.sendMediaGroup(chatId, media);
+      } catch {
+        await safePhoto(chatId, galleryUrls[0], { caption: text, parse_mode: 'MarkdownV2' });
+      }
+      return safeSend(chatId, `📸 Фото: ${galleryUrls.length}`, { reply_markup: keyboard });
+    }
+    if (m.photo_main) {
+      return safePhoto(chatId, m.photo_main, { caption: text, parse_mode: 'MarkdownV2', reply_markup: keyboard });
+    }
+    return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
   } catch (e) { console.error('[Bot] showAdminModel:', e.message); }
 }
 
