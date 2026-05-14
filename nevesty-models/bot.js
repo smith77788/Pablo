@@ -105,8 +105,12 @@ function buildClientKeyboard() {
     [{ text: '🔍 Проверить статус',     callback_data: 'check_status' }],
     [{ text: '📞 Контакты',             callback_data: 'contacts'     }],
   ];
+  // Mini App — открывает сайт внутри Telegram (требует https://)
   if (SITE_URL.startsWith('https://')) {
     rows.unshift([{ text: '🌐 Открыть сайт', web_app: { url: SITE_URL } }]);
+  } else {
+    // На http — добавляем обычную ссылку на каталог (callback)
+    rows.unshift([{ text: '🌐 Открыть каталог', callback_data: 'cat_cat__0' }]);
   }
   return { inline_keyboard: rows };
 }
@@ -806,10 +810,10 @@ async function showOrganismStatus(chatId) {
     return safeSend(chatId, text, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: [
-        [{ text: '🔧 Исправить всё и перепроверить', callback_data: 'adm_fix_organism'  }],
-        [{ text: '🚀 Только проверить',             callback_data: 'adm_run_organism'  }],
-        [{ text: '📡 Фид агентов',                  callback_data: 'agent_feed_0'      }],
-        [{ text: '← Меню',                          callback_data: 'admin_menu'        }],
+        [{ text: '🚀 Запустить проверку',              callback_data: 'adm_run_organism' }],
+        [{ text: '🔧 Исправить всё и перепроверить',   callback_data: 'adm_fix_organism' }],
+        [{ text: '📡 Фид агентов',                     callback_data: 'agent_feed_0'     }],
+        [{ text: '← Панель',                           callback_data: 'admin_menu'       }],
       ]}
     });
   } catch (e) { console.error('[Bot] showOrganismStatus:', e.message); }

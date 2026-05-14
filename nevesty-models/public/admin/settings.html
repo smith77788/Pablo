@@ -94,6 +94,74 @@
           </div>
         </div>
       </div>
+
+      <!-- Bot settings -->
+      <div class="section-card" style="margin-top:24px">
+        <div class="section-card-header"><div class="section-card-title">🤖 Настройки бота</div></div>
+        <div class="section-card-body padded">
+          <div class="admin-form-group">
+            <label>Приветствие</label>
+            <textarea class="admin-input" id="s_greeting" rows="4" style="resize:vertical"></textarea>
+            <div style="font-size:0.75rem;color:var(--text-dim);margin-top:6px">Используйте {name} для имени клиента</div>
+          </div>
+          <div class="admin-form-group">
+            <label>О нас</label>
+            <textarea class="admin-input" id="s_about" rows="4" style="resize:vertical"></textarea>
+          </div>
+          <button class="btn btn-md btn-gold" onclick="saveBot()">Сохранить настройки бота</button>
+        </div>
+      </div>
+
+      <!-- Contacts -->
+      <div class="section-card" style="margin-top:24px">
+        <div class="section-card-header"><div class="section-card-title">📞 Контакты агентства</div></div>
+        <div class="section-card-body padded">
+          <div class="admin-form-group">
+            <label>Телефон</label>
+            <input class="admin-input" type="text" id="s_phone" />
+          </div>
+          <div class="admin-form-group">
+            <label>Email</label>
+            <input class="admin-input" type="email" id="s_email" />
+          </div>
+          <div class="admin-form-group">
+            <label>Instagram</label>
+            <input class="admin-input" type="text" id="s_insta" placeholder="без @" />
+          </div>
+          <div class="admin-form-group">
+            <label>Адрес</label>
+            <input class="admin-input" type="text" id="s_addr" />
+          </div>
+          <button class="btn btn-md btn-gold" onclick="saveContacts()">Сохранить контакты</button>
+        </div>
+      </div>
+
+      <!-- Pricing -->
+      <div class="section-card" style="margin-top:24px">
+        <div class="section-card-header"><div class="section-card-title">💰 Прайс-лист</div></div>
+        <div class="section-card-body padded">
+          <div class="admin-form-group">
+            <textarea class="admin-input" id="s_pricing" rows="8" style="resize:vertical"></textarea>
+          </div>
+          <button class="btn btn-md btn-gold" onclick="savePricing()">Сохранить прайс</button>
+        </div>
+      </div>
+
+      <!-- Notifications -->
+      <div class="section-card" style="margin-top:24px">
+        <div class="section-card-header"><div class="section-card-title">🔔 Уведомления</div></div>
+        <div class="section-card-body padded">
+          <div class="admin-form-group" style="display:flex;align-items:center;gap:12px">
+            <input type="checkbox" id="s_notif_new" style="width:18px;height:18px;cursor:pointer" />
+            <label for="s_notif_new" style="cursor:pointer;margin:0">Уведомлять при новой заявке</label>
+          </div>
+          <div class="admin-form-group" style="display:flex;align-items:center;gap:12px">
+            <input type="checkbox" id="s_notif_status" style="width:18px;height:18px;cursor:pointer" />
+            <label for="s_notif_status" style="cursor:pointer;margin:0">Уведомлять при смене статуса</label>
+          </div>
+          <button class="btn btn-md btn-gold" onclick="saveNotif()" style="margin-top:8px">Сохранить</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -106,6 +174,19 @@
     document.getElementById('p_username').value = me.username;
     document.getElementById('p_email').value = me.email || '';
     document.getElementById('p_telegram_id').value = me.telegram_id || '';
+  } catch(e) {}
+
+  try {
+    const s = await _admin.apiFetch('/settings');
+    document.getElementById('s_greeting').value = s.greeting || '';
+    document.getElementById('s_about').value = s.about || '';
+    document.getElementById('s_phone').value = s.contacts_phone || '';
+    document.getElementById('s_email').value = s.contacts_email || '';
+    document.getElementById('s_insta').value = s.contacts_insta || '';
+    document.getElementById('s_addr').value = s.contacts_addr || '';
+    document.getElementById('s_pricing').value = s.pricing || '';
+    document.getElementById('s_notif_new').checked = s.notif_new_order === '1';
+    document.getElementById('s_notif_status').checked = s.notif_status === '1';
   } catch(e) {}
 })();
 
@@ -138,6 +219,59 @@ async function changePassword() {
     document.getElementById('p_current').value = '';
     document.getElementById('p_new').value = '';
     document.getElementById('p_confirm').value = '';
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function saveBot() {
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        greeting: document.getElementById('s_greeting').value,
+        about: document.getElementById('s_about').value
+      })
+    });
+    _admin.toast('Настройки бота сохранены', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function saveContacts() {
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        contacts_phone: document.getElementById('s_phone').value,
+        contacts_email: document.getElementById('s_email').value,
+        contacts_insta: document.getElementById('s_insta').value,
+        contacts_addr: document.getElementById('s_addr').value
+      })
+    });
+    _admin.toast('Контакты сохранены', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function savePricing() {
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        pricing: document.getElementById('s_pricing').value
+      })
+    });
+    _admin.toast('Прайс сохранён', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function saveNotif() {
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        notif_new_order: document.getElementById('s_notif_new').checked ? '1' : '0',
+        notif_status: document.getElementById('s_notif_status').checked ? '1' : '0'
+      })
+    });
+    _admin.toast('Настройки уведомлений сохранены', 'success');
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
 }
 </script>

@@ -536,5 +536,30 @@ router.delete('/admin/managers/:id', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/settings — возвращает все настройки бота
+router.get('/settings', auth, async (req, res, next) => {
+  try {
+    const rows = await query('SELECT key, value FROM bot_settings ORDER BY key');
+    const settings = {};
+    rows.forEach(r => { settings[r.key] = r.value; });
+    res.json(settings);
+  } catch(e) { next(e); }
+});
+
+// PUT /api/settings — сохраняет настройки бота (принимает объект key:value)
+router.put('/settings', auth, async (req, res, next) => {
+  const ALLOWED_KEYS = ['greeting','about','contacts_phone','contacts_email','contacts_insta','contacts_addr','pricing','notif_new_order','notif_status','notif_message'];
+  try {
+    const body = req.body;
+    if (typeof body !== 'object' || !body) return res.status(400).json({ error: 'Invalid body' });
+    for (const [key, value] of Object.entries(body)) {
+      if (!ALLOWED_KEYS.includes(key)) continue;
+      const v = String(value ?? '').trim().slice(0, 2000);
+      await run('INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', [key, v]);
+    }
+    res.json({ ok: true });
+  } catch(e) { next(e); }
+});
+
 module.exports = router;
 module.exports.setBot = setBot;
