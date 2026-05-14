@@ -6,6 +6,128 @@
   <title>Настройки — Nevesty Models Admin</title>
   <meta name="robots" content="noindex, nofollow">
   <link rel="stylesheet" href="/css/admin.css" />
+  <style>
+    /* ─── Tab nav ─────────────────────────────────────── */
+    .settings-tabs {
+      display: flex; gap: 0; border-bottom: 1px solid var(--border);
+      margin-bottom: 28px; overflow-x: auto; scrollbar-width: none;
+    }
+    .settings-tabs::-webkit-scrollbar { display: none; }
+    .tab-btn {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-muted); padding: 12px 20px; font-size: 0.82rem;
+      font-weight: 500; letter-spacing: 0.3px; white-space: nowrap;
+      transition: all 0.2s; cursor: pointer; margin-bottom: -1px;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
+
+    /* ─── Tab panes ───────────────────────────────────── */
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* ─── Character count ─────────────────────────────── */
+    .char-count {
+      font-size: 0.72rem; color: var(--text-dim); text-align: right;
+      margin-top: 5px; transition: color 0.2s;
+    }
+    .char-count.warn { color: var(--warning); }
+    .char-count.danger { color: var(--error); }
+
+    /* ─── Telegram preview ────────────────────────────── */
+    .tg-preview-wrap {
+      background: #17212b; border: 1px solid #2b5278; border-radius: 12px;
+      padding: 20px; margin-top: 16px; display: none;
+    }
+    .tg-preview-label {
+      font-size: 0.68rem; letter-spacing: 2px; text-transform: uppercase;
+      color: #2b5278; margin-bottom: 12px; font-weight: 600;
+    }
+    .tg-bubble {
+      background: #2b5278; border-radius: 12px 12px 12px 4px;
+      padding: 12px 14px; max-width: 320px; font-size: 0.88rem;
+      line-height: 1.65; color: #e3e8ef; white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .tg-bubble-meta {
+      font-size: 0.68rem; color: #7a9bb5; margin-top: 6px; text-align: right;
+    }
+
+    /* ─── Toggle switch ───────────────────────────────── */
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 0; border-bottom: 1px solid var(--border);
+    }
+    .toggle-row:last-of-type { border-bottom: none; }
+    .toggle-row-info { flex: 1; }
+    .toggle-row-title { font-size: 0.88rem; color: var(--text); }
+    .toggle-row-desc { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+    .toggle-switch { position: relative; width: 42px; height: 24px; flex-shrink: 0; margin-left: 16px; }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; cursor: pointer; inset: 0; background: var(--bg4);
+      border: 1px solid var(--border2); border-radius: 24px; transition: 0.25s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute; width: 16px; height: 16px;
+      left: 3px; bottom: 3px; background: var(--text-muted);
+      border-radius: 50%; transition: 0.25s;
+    }
+    .toggle-switch input:checked + .toggle-slider { background: rgba(201,169,110,0.25); border-color: var(--gold); }
+    .toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); background: var(--gold); }
+
+    /* ─── Danger zone ─────────────────────────────────── */
+    .danger-zone {
+      border: 1px solid rgba(244,67,54,0.3); border-radius: 2px; margin-top: 28px;
+    }
+    .danger-zone-header {
+      padding: 16px 20px; border-bottom: 1px solid rgba(244,67,54,0.2);
+      font-size: 0.75rem; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--error); font-weight: 600;
+    }
+    .danger-zone-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+    .danger-action {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 16px; background: var(--bg2); border: 1px solid var(--border);
+    }
+    .danger-action-info strong { display: block; font-size: 0.88rem; color: var(--text); }
+    .danger-action-info span { font-size: 0.75rem; color: var(--text-muted); margin-top: 3px; display: block; }
+
+    /* ─── Save btn with spinner ───────────────────────── */
+    .btn-saving { position: relative; pointer-events: none; opacity: 0.7; }
+    .btn-saving::after {
+      content: ''; position: absolute; right: 14px; top: 50%; margin-top: -7px;
+      width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff; border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Section sub-divider ─────────────────────────── */
+    .settings-divider {
+      font-size: 0.68rem; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--gold); margin: 24px 0 12px; padding-bottom: 8px;
+      border-bottom: 1px solid rgba(201,169,110,0.15);
+    }
+
+    /* ─── Restore default link ────────────────────────── */
+    .restore-link {
+      font-size: 0.75rem; color: var(--text-dim); cursor: pointer;
+      text-decoration: underline; text-decoration-style: dotted; transition: color 0.2s;
+    }
+    .restore-link:hover { color: var(--gold); }
+
+    /* ─── Form row with actions ───────────────────────── */
+    .form-label-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .form-label-row label { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
+    .admin-form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; }
+
+    /* ─── Info note ───────────────────────────────────── */
+    .field-note { font-size: 0.75rem; color: var(--text-dim); margin-top: 6px; }
+  </style>
 </head>
 <body>
 <div class="admin-layout">
@@ -30,144 +152,392 @@
 
   <div class="main-content">
     <header class="topbar">
-      <div class="topbar-title">Настройки профиля</div>
+      <div class="topbar-title">Настройки</div>
     </header>
     <div class="page-content">
-      <!-- Profile settings -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
+
+      <!-- Tab navigation -->
+      <div class="settings-tabs" role="tablist">
+        <button class="tab-btn active" role="tab" aria-selected="true"  onclick="switchTab('profile')"      id="tab-profile">👤 Профиль</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('bot')"          id="tab-bot">🤖 Бот</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('contacts')"     id="tab-contacts">📞 Контакты</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('pricing')"      id="tab-pricing">💰 Прайс</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('appearance')"   id="tab-appearance">🎨 Внешний вид</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('notif')"        id="tab-notif">🔔 Уведомления</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('password')"     id="tab-password">🔑 Пароль</button>
+      </div>
+
+      <!-- ═══ TAB: Профиль ═══════════════════════════════════════════════════ -->
+      <div class="tab-pane active" id="pane-profile">
         <div class="section-card">
-          <div class="section-card-header"><div class="section-card-title">👤 Мой профиль</div></div>
-          <div class="section-card-body padded">
-            <div class="admin-form-group"><label>Логин</label><input class="admin-input" type="text" id="p_username" disabled /></div>
-            <div class="admin-form-group"><label>Email</label><input class="admin-input" type="email" id="p_email" /></div>
+          <div class="section-card-header"><div class="section-card-title">👤 Профиль администратора</div></div>
+          <div class="section-card-body padded" style="max-width:520px">
+            <div class="admin-form-group">
+              <label>Логин</label>
+              <input class="admin-input" type="text" id="p_username" disabled />
+            </div>
+            <div class="admin-form-group">
+              <label>Email</label>
+              <input class="admin-input" type="email" id="p_email" placeholder="admin@example.com" />
+            </div>
             <div class="admin-form-group">
               <label>Telegram ID</label>
               <input class="admin-input" type="text" id="p_telegram_id" placeholder="Числовой Telegram ID для уведомлений" />
-              <div style="font-size:0.75rem;color:var(--text-dim);margin-top:6px">Узнайте ID через @userinfobot в Telegram</div>
+              <div class="field-note">Узнайте ваш ID через <strong style="color:var(--gold)">@userinfobot</strong> в Telegram</div>
             </div>
-            <button class="btn btn-md btn-gold" onclick="saveProfile()">Сохранить</button>
+            <button class="btn btn-md btn-gold" id="btnSaveProfile" onclick="saveProfile(this)">Сохранить профиль</button>
           </div>
         </div>
+      </div>
 
+      <!-- ═══ TAB: Бот ════════════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-bot">
+        <!-- Bot settings (editable) -->
         <div class="section-card">
-          <div class="section-card-header"><div class="section-card-title">🔒 Изменить пароль</div></div>
+          <div class="section-card-header"><div class="section-card-title">🤖 Настройки бота</div></div>
           <div class="section-card-body padded">
-            <div class="admin-form-group"><label>Текущий пароль</label><input class="admin-input" type="password" id="p_current" /></div>
-            <div class="admin-form-group"><label>Новый пароль</label><input class="admin-input" type="password" id="p_new" /></div>
-            <div class="admin-form-group"><label>Повторите пароль</label><input class="admin-input" type="password" id="p_confirm" /></div>
-            <button class="btn btn-md btn-ghost" onclick="changePassword()">Изменить пароль</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bot info -->
-      <div class="section-card" style="margin-top:24px">
-        <div class="section-card-header"><div class="section-card-title">🤖 Telegram бот — команды</div></div>
-        <div class="section-card-body padded">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
-            <div>
-              <div style="font-size:0.75rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:16px">Для менеджеров</div>
-              <div style="font-size:0.85rem;color:var(--text-muted);line-height:2.2">
-                <div><code style="color:var(--gold)">/start</code> — приветствие и команды</div>
-                <div><code style="color:var(--gold)">/orders</code> — последние 10 заявок</div>
-                <div><code style="color:var(--gold)">/new_orders</code> — только новые заявки</div>
-                <div><code style="color:var(--gold)">/models</code> — список моделей</div>
-                <div><code style="color:var(--gold)">/stats</code> — статистика агентства</div>
+            <!-- Greeting -->
+            <div class="admin-form-group">
+              <div class="form-label-row">
+                <label>Приветствие (команда /start)</label>
+                <span class="restore-link" onclick="restoreDefault('greeting')">Вернуть по умолчанию</span>
+              </div>
+              <textarea class="admin-input" id="s_greeting" rows="5" style="resize:vertical"
+                oninput="updateCharCount(this,'cnt_greeting',500)"
+                placeholder="Привет, {name}! Добро пожаловать в Nevesty Models..."></textarea>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px">
+                <div class="field-note">Используйте <code style="color:var(--gold)">{name}</code> для имени клиента</div>
+                <div class="char-count" id="cnt_greeting">0 / 500</div>
+              </div>
+              <button class="btn btn-sm btn-ghost" style="margin-top:10px" onclick="previewGreeting()">👁 Предпросмотр в Telegram</button>
+              <div class="tg-preview-wrap" id="greetingPreview">
+                <div class="tg-preview-label">Telegram — как увидит клиент</div>
+                <div class="tg-bubble" id="greetingPreviewText"></div>
+                <div class="tg-bubble-meta">Nevesty Models Bot · только что</div>
               </div>
             </div>
-            <div>
-              <div style="font-size:0.75rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:16px">Для клиентов</div>
-              <div style="font-size:0.85rem;color:var(--text-muted);line-height:2.2">
-                <div><code style="color:var(--gold)">/start</code> — приветствие с кнопками</div>
-                <div><code style="color:var(--gold)">/status NM-XXXX</code> — статус заявки</div>
-                <div>Любое сообщение — переслать менеджеру</div>
-                <div><code style="color:var(--gold)">/start NM-XXXX</code> — привязать заявку</div>
+
+            <!-- About -->
+            <div class="admin-form-group" style="margin-top:20px">
+              <div class="form-label-row">
+                <label>О нас (команда /about)</label>
+                <span class="restore-link" onclick="restoreDefault('about')">Вернуть по умолчанию</span>
+              </div>
+              <textarea class="admin-input" id="s_about" rows="5" style="resize:vertical"
+                oninput="updateCharCount(this,'cnt_about',1000)"
+                placeholder="Nevesty Models — элитное модельное агентство..."></textarea>
+              <div class="char-count" id="cnt_about" style="margin-top:5px">0 / 1000</div>
+            </div>
+
+            <button class="btn btn-md btn-gold" id="btnSaveBot" onclick="saveBot(this)" style="margin-top:8px">Сохранить настройки бота</button>
+          </div>
+        </div>
+
+        <!-- Bot commands reference -->
+        <div class="section-card" style="margin-top:24px">
+          <div class="section-card-header"><div class="section-card-title">📋 Команды бота — справочник</div></div>
+          <div class="section-card-body padded">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+              <div>
+                <div class="settings-divider">Для менеджеров</div>
+                <div style="font-size:0.85rem;color:var(--text-muted);line-height:2.2">
+                  <div><code style="color:var(--gold)">/start</code> — приветствие и команды</div>
+                  <div><code style="color:var(--gold)">/orders</code> — последние 10 заявок</div>
+                  <div><code style="color:var(--gold)">/new_orders</code> — только новые заявки</div>
+                  <div><code style="color:var(--gold)">/models</code> — список моделей</div>
+                  <div><code style="color:var(--gold)">/stats</code> — статистика агентства</div>
+                </div>
+              </div>
+              <div>
+                <div class="settings-divider">Для клиентов</div>
+                <div style="font-size:0.85rem;color:var(--text-muted);line-height:2.2">
+                  <div><code style="color:var(--gold)">/start</code> — приветствие с кнопками</div>
+                  <div><code style="color:var(--gold)">/status NM-XXXX</code> — статус заявки</div>
+                  <div>Любое сообщение — переслать менеджеру</div>
+                  <div><code style="color:var(--gold)">/start NM-XXXX</code> — привязать заявку</div>
+                </div>
               </div>
             </div>
-          </div>
-          <div style="margin-top:24px;padding:16px;background:var(--bg2);border:1px solid var(--border);font-size:0.85rem;color:var(--text-muted);line-height:1.8">
-            <strong style="color:var(--text)">⚙️ Настройка бота:</strong><br>
-            1. Создайте бота через <strong style="color:var(--gold)">@BotFather</strong> в Telegram<br>
-            2. Скопируйте токен и укажите в файле <code style="color:var(--gold)">.env</code> как <code>TELEGRAM_BOT_TOKEN</code><br>
-            3. Укажите ваш Telegram ID в поле выше (получить через @userinfobot)<br>
-            4. Добавьте ID в <code>.env</code> → <code>ADMIN_TELEGRAM_IDS</code>
+            <div style="margin-top:20px;padding:14px 16px;background:var(--bg2);border:1px solid var(--border);font-size:0.82rem;color:var(--text-muted);line-height:1.9">
+              <strong style="color:var(--text)">⚙️ Первичная настройка:</strong><br>
+              1. Создайте бота через <strong style="color:var(--gold)">@BotFather</strong> в Telegram<br>
+              2. Скопируйте токен → файл <code style="color:var(--gold)">.env</code> → <code>TELEGRAM_BOT_TOKEN</code><br>
+              3. Узнайте свой Telegram ID через <strong style="color:var(--gold)">@userinfobot</strong><br>
+              4. Добавьте ID в <code>.env</code> → <code>ADMIN_TELEGRAM_IDS</code> (через запятую)
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Bot settings -->
-      <div class="section-card" style="margin-top:24px">
-        <div class="section-card-header"><div class="section-card-title">🤖 Настройки бота</div></div>
-        <div class="section-card-body padded">
-          <div class="admin-form-group">
-            <label>Приветствие</label>
-            <textarea class="admin-input" id="s_greeting" rows="4" style="resize:vertical"></textarea>
-            <div style="font-size:0.75rem;color:var(--text-dim);margin-top:6px">Используйте {name} для имени клиента</div>
+      <!-- ═══ TAB: Контакты ═══════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-contacts">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">📞 Контакты агентства</div></div>
+          <div class="section-card-body padded" style="max-width:560px">
+            <div class="admin-form-group">
+              <label>Телефон</label>
+              <input class="admin-input" type="text" id="s_phone" placeholder="+7 (999) 123-45-67" />
+            </div>
+            <div class="admin-form-group">
+              <label>Email</label>
+              <input class="admin-input" type="email" id="s_email" placeholder="info@nevesty-models.ru" />
+            </div>
+            <div class="admin-form-group">
+              <label>Instagram</label>
+              <div style="position:relative">
+                <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:0.9rem">@</span>
+                <input class="admin-input" type="text" id="s_insta" placeholder="nevesty_models" style="padding-left:28px" />
+              </div>
+            </div>
+            <div class="admin-form-group">
+              <label>Адрес</label>
+              <input class="admin-input" type="text" id="s_addr" placeholder="Москва, ул. Пречистенка, 1" />
+            </div>
+            <button class="btn btn-md btn-gold" id="btnSaveContacts" onclick="saveContacts(this)">Сохранить контакты</button>
           </div>
-          <div class="admin-form-group">
-            <label>О нас</label>
-            <textarea class="admin-input" id="s_about" rows="4" style="resize:vertical"></textarea>
-          </div>
-          <button class="btn btn-md btn-gold" onclick="saveBot()">Сохранить настройки бота</button>
         </div>
       </div>
 
-      <!-- Contacts -->
-      <div class="section-card" style="margin-top:24px">
-        <div class="section-card-header"><div class="section-card-title">📞 Контакты агентства</div></div>
-        <div class="section-card-body padded">
-          <div class="admin-form-group">
-            <label>Телефон</label>
-            <input class="admin-input" type="text" id="s_phone" />
+      <!-- ═══ TAB: Прайс ══════════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-pricing">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">💰 Прайс-лист</div></div>
+          <div class="section-card-body padded">
+            <div class="admin-form-group">
+              <div class="form-label-row" style="margin-bottom:8px">
+                <label style="margin:0">Текст прайс-листа</label>
+                <div class="char-count" id="cnt_pricing">0 / 2000</div>
+              </div>
+              <textarea class="admin-input" id="s_pricing" rows="12" style="resize:vertical"
+                oninput="updateCharCount(this,'cnt_pricing',2000)"
+                placeholder="Фотосессия — от 15 000 ₽ / 4 ч&#10;Показ мод — от 25 000 ₽&#10;Корпоратив — от 20 000 ₽ / 3 ч&#10;..."></textarea>
+              <div class="field-note">Текст отображается в боте по команде /pricing и на сайте</div>
+            </div>
+            <button class="btn btn-md btn-gold" id="btnSavePricing" onclick="savePricing(this)">Сохранить прайс</button>
           </div>
-          <div class="admin-form-group">
-            <label>Email</label>
-            <input class="admin-input" type="email" id="s_email" />
-          </div>
-          <div class="admin-form-group">
-            <label>Instagram</label>
-            <input class="admin-input" type="text" id="s_insta" placeholder="без @" />
-          </div>
-          <div class="admin-form-group">
-            <label>Адрес</label>
-            <input class="admin-input" type="text" id="s_addr" />
-          </div>
-          <button class="btn btn-md btn-gold" onclick="saveContacts()">Сохранить контакты</button>
         </div>
       </div>
 
-      <!-- Pricing -->
-      <div class="section-card" style="margin-top:24px">
-        <div class="section-card-header"><div class="section-card-title">💰 Прайс-лист</div></div>
-        <div class="section-card-body padded">
-          <div class="admin-form-group">
-            <textarea class="admin-input" id="s_pricing" rows="8" style="resize:vertical"></textarea>
+      <!-- ═══ TAB: Внешний вид ════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-appearance">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">🎨 Внешний вид сайта</div></div>
+          <div class="section-card-body padded" style="max-width:560px">
+            <div class="settings-divider">Агентство</div>
+            <div class="admin-form-group">
+              <label>Название агентства</label>
+              <input class="admin-input" type="text" id="s_agency_name" placeholder="Nevesty Models" />
+              <div class="field-note">Отображается в шапке сайта и в боте</div>
+            </div>
+            <div class="admin-form-group">
+              <label>Слоган / подзаголовок</label>
+              <input class="admin-input" type="text" id="s_tagline" placeholder="Элитное модельное агентство Москвы" />
+              <div class="field-note">Подзаголовок на главной странице (hero-секция)</div>
+            </div>
+
+            <div class="settings-divider" style="margin-top:24px">Фоновое изображение</div>
+            <div class="admin-form-group">
+              <label>URL hero-изображения</label>
+              <input class="admin-input" type="url" id="s_hero_image" placeholder="https://example.com/hero.jpg" />
+              <div class="field-note">Прямая ссылка на изображение (рекомендуется 1920×1080 px)</div>
+            </div>
+            <div id="heroPreviewWrap" style="display:none;margin-top:12px">
+              <div style="font-size:0.72rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px">Предпросмотр</div>
+              <img id="heroPreviewImg" src="" alt="Hero preview"
+                style="width:100%;max-height:180px;object-fit:cover;border:1px solid var(--border)" />
+            </div>
+
+            <button class="btn btn-md btn-ghost" style="margin-top:16px;margin-right:8px" onclick="previewHero()">👁 Предпросмотр</button>
+            <button class="btn btn-md btn-gold" id="btnSaveAppearance" onclick="saveAppearance(this)">Сохранить внешний вид</button>
           </div>
-          <button class="btn btn-md btn-gold" onclick="savePricing()">Сохранить прайс</button>
+        </div>
+
+        <!-- Integrations -->
+        <div class="section-card" style="margin-top:24px">
+          <div class="section-card-header"><div class="section-card-title">📊 Интеграции</div></div>
+          <div class="section-card-body padded" style="max-width:560px">
+            <div class="admin-form-group">
+              <label>Webhook URL</label>
+              <input class="admin-input" type="url" id="s_webhook_url" placeholder="https://hooks.example.com/notify" />
+              <div class="field-note">POST-запрос отправляется при новой заявке</div>
+            </div>
+
+            <div style="margin-top:20px">
+              <div class="toggle-row">
+                <div class="toggle-row-info">
+                  <div class="toggle-row-title">Telegram-уведомления включены</div>
+                  <div class="toggle-row-desc">Бот отправляет сообщения менеджерам при новых заявках</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="s_tg_notif_enabled" checked />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <button class="btn btn-md btn-gold" id="btnSaveIntegrations" onclick="saveIntegrations(this)" style="margin-top:20px">Сохранить интеграции</button>
+          </div>
         </div>
       </div>
 
-      <!-- Notifications -->
-      <div class="section-card" style="margin-top:24px">
-        <div class="section-card-header"><div class="section-card-title">🔔 Уведомления</div></div>
-        <div class="section-card-body padded">
-          <div class="admin-form-group" style="display:flex;align-items:center;gap:12px">
-            <input type="checkbox" id="s_notif_new" style="width:18px;height:18px;cursor:pointer" />
-            <label for="s_notif_new" style="cursor:pointer;margin:0">Уведомлять при новой заявке</label>
+      <!-- ═══ TAB: Уведомления ═════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-notif">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">🔔 Настройки уведомлений</div></div>
+          <div class="section-card-body padded" style="max-width:560px">
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Новая заявка</div>
+                <div class="toggle-row-desc">Уведомлять в Telegram при поступлении новой заявки</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="s_notif_new" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Смена статуса</div>
+                <div class="toggle-row-desc">Уведомлять клиента при изменении статуса его заявки</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="s_notif_status" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Новое сообщение от клиента</div>
+                <div class="toggle-row-desc">Уведомлять менеджера, когда клиент написал в бот</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="s_notif_message" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <button class="btn btn-md btn-gold" id="btnSaveNotif" onclick="saveNotif(this)" style="margin-top:20px">Сохранить</button>
           </div>
-          <div class="admin-form-group" style="display:flex;align-items:center;gap:12px">
-            <input type="checkbox" id="s_notif_status" style="width:18px;height:18px;cursor:pointer" />
-            <label for="s_notif_status" style="cursor:pointer;margin:0">Уведомлять при смене статуса</label>
-          </div>
-          <button class="btn btn-md btn-gold" onclick="saveNotif()" style="margin-top:8px">Сохранить</button>
         </div>
       </div>
-    </div>
+
+      <!-- ═══ TAB: Пароль ══════════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-password">
+        <div class="section-card" style="max-width:520px">
+          <div class="section-card-header"><div class="section-card-title">🔑 Изменить пароль</div></div>
+          <div class="section-card-body padded">
+            <div class="admin-form-group">
+              <label>Текущий пароль</label>
+              <input class="admin-input" type="password" id="p_current" autocomplete="current-password" />
+            </div>
+            <div class="admin-form-group">
+              <label>Новый пароль</label>
+              <input class="admin-input" type="password" id="p_new" autocomplete="new-password" />
+              <div class="field-note">Минимум 6 символов</div>
+            </div>
+            <div class="admin-form-group">
+              <label>Повторите новый пароль</label>
+              <input class="admin-input" type="password" id="p_confirm" autocomplete="new-password" />
+            </div>
+            <button class="btn btn-md btn-gold" id="btnChangePwd" onclick="changePassword(this)">Изменить пароль</button>
+          </div>
+        </div>
+
+        <!-- Danger zone -->
+        <div class="danger-zone">
+          <div class="danger-zone-header">⚠️ Опасная зона</div>
+          <div class="danger-zone-body">
+            <div class="danger-action">
+              <div class="danger-action-info">
+                <strong>Очистить кэш сессий</strong>
+                <span>Все активные сессии будут завершены. Потребуется повторный вход.</span>
+              </div>
+              <button class="btn btn-md btn-ghost" style="border-color:var(--error);color:var(--error);white-space:nowrap"
+                onclick="clearSessions()">Очистить кэш</button>
+            </div>
+            <div class="danger-action">
+              <div class="danger-action-info">
+                <strong>Экспортировать все заявки</strong>
+                <span>Скачать CSV-файл со всеми заявками агентства</span>
+              </div>
+              <button class="btn btn-md btn-ghost" style="white-space:nowrap"
+                onclick="exportOrders()">⬇ Скачать CSV</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /.page-content -->
   </div>
 </div>
+
 <div class="toast-container" id="toastContainer"></div>
 <script src="/js/admin.js"></script>
 <script>
+/* ─── Default values ──────────────────────────────────────── */
+const DEFAULTS = {
+  greeting: 'Привет, {name}! 👋\n\nДобро пожаловать в Nevesty Models — элитное модельное агентство.\n\nЧем могу помочь?',
+  about: 'Nevesty Models — профессиональное модельное агентство. Мы работаем с лучшими моделями для фотосессий, показов мод, мероприятий и рекламных проектов.'
+};
+
+/* ─── Tab switching ───────────────────────────────────────── */
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  const btn = document.getElementById('tab-' + name);
+  const pane = document.getElementById('pane-' + name);
+  if (btn) { btn.classList.add('active'); btn.setAttribute('aria-selected','true'); }
+  if (pane) pane.classList.add('active');
+}
+
+/* ─── Character count ─────────────────────────────────────── */
+function updateCharCount(el, counterId, max) {
+  const n = el.value.length;
+  const counter = document.getElementById(counterId);
+  if (!counter) return;
+  counter.textContent = n + ' / ' + max;
+  counter.className = 'char-count' + (n > max * 0.9 ? (n >= max ? ' danger' : ' warn') : '');
+}
+
+function initCharCount(id, counterId, max) {
+  const el = document.getElementById(id);
+  if (el) updateCharCount(el, counterId, max);
+}
+
+/* ─── Restore defaults ────────────────────────────────────── */
+function restoreDefault(field) {
+  const el = document.getElementById('s_' + field);
+  if (!el || !DEFAULTS[field]) return;
+  el.value = DEFAULTS[field];
+  if (field === 'greeting') updateCharCount(el, 'cnt_greeting', 500);
+  if (field === 'about')    updateCharCount(el, 'cnt_about', 1000);
+}
+
+/* ─── Greeting preview ────────────────────────────────────── */
+function previewGreeting() {
+  const text = document.getElementById('s_greeting').value.replace(/{name}/g, 'Александра');
+  const wrap = document.getElementById('greetingPreview');
+  const preEl = document.getElementById('greetingPreviewText');
+  preEl.textContent = text || '(пусто)';
+  wrap.style.display = 'block';
+  wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/* ─── Hero image preview ──────────────────────────────────── */
+function previewHero() {
+  const url = document.getElementById('s_hero_image').value.trim();
+  const wrap = document.getElementById('heroPreviewWrap');
+  const img  = document.getElementById('heroPreviewImg');
+  if (!url) { _admin.toast('Введите URL изображения', 'error'); return; }
+  img.src = url;
+  wrap.style.display = 'block';
+  img.onerror = () => _admin.toast('Не удалось загрузить изображение по этому URL', 'error');
+}
+
+/* ─── Save helpers ────────────────────────────────────────── */
+function startSave(btn) { btn.classList.add('btn-saving'); btn.disabled = true; }
+function endSave(btn)   { btn.classList.remove('btn-saving'); btn.disabled = false; }
+
+/* ─── Load all settings ───────────────────────────────────── */
 (async function() {
   try {
     const me = await _admin.apiFetch('/admin/me');
@@ -178,19 +548,42 @@
 
   try {
     const s = await _admin.apiFetch('/settings');
+
+    // Bot tab
     document.getElementById('s_greeting').value = s.greeting || '';
     document.getElementById('s_about').value = s.about || '';
+    initCharCount('s_greeting', 'cnt_greeting', 500);
+    initCharCount('s_about', 'cnt_about', 1000);
+
+    // Contacts tab
     document.getElementById('s_phone').value = s.contacts_phone || '';
     document.getElementById('s_email').value = s.contacts_email || '';
     document.getElementById('s_insta').value = s.contacts_insta || '';
     document.getElementById('s_addr').value = s.contacts_addr || '';
+
+    // Pricing tab
     document.getElementById('s_pricing').value = s.pricing || '';
+    initCharCount('s_pricing', 'cnt_pricing', 2000);
+
+    // Appearance tab
+    document.getElementById('s_agency_name').value = s.agency_name || '';
+    document.getElementById('s_tagline').value = s.tagline || '';
+    document.getElementById('s_hero_image').value = s.hero_image || '';
+
+    // Integrations
+    document.getElementById('s_webhook_url').value = s.webhook_url || '';
+    document.getElementById('s_tg_notif_enabled').checked = s.tg_notif_enabled !== '0';
+
+    // Notifications tab
     document.getElementById('s_notif_new').checked = s.notif_new_order === '1';
     document.getElementById('s_notif_status').checked = s.notif_status === '1';
+    document.getElementById('s_notif_message').checked = s.notif_message === '1';
   } catch(e) {}
 })();
 
-async function saveProfile() {
+/* ─── Save: Profile ───────────────────────────────────────── */
+async function saveProfile(btn) {
+  startSave(btn);
   try {
     await _admin.apiFetch('/admin/me', {
       method: 'PUT',
@@ -201,15 +594,18 @@ async function saveProfile() {
     });
     _admin.toast('Профиль обновлён', 'success');
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
 }
 
-async function changePassword() {
+/* ─── Save: Change password ───────────────────────────────── */
+async function changePassword(btn) {
   const current = document.getElementById('p_current').value;
-  const newPwd = document.getElementById('p_new').value;
+  const newPwd  = document.getElementById('p_new').value;
   const confirm = document.getElementById('p_confirm').value;
   if (!current || !newPwd) return _admin.toast('Заполните все поля', 'error');
-  if (newPwd !== confirm) return _admin.toast('Пароли не совпадают', 'error');
-  if (newPwd.length < 6) return _admin.toast('Пароль минимум 6 символов', 'error');
+  if (newPwd !== confirm)  return _admin.toast('Пароли не совпадают', 'error');
+  if (newPwd.length < 6)  return _admin.toast('Пароль минимум 6 символов', 'error');
+  startSave(btn);
   try {
     await _admin.apiFetch('/admin/me', {
       method: 'PUT',
@@ -220,9 +616,12 @@ async function changePassword() {
     document.getElementById('p_new').value = '';
     document.getElementById('p_confirm').value = '';
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
 }
 
-async function saveBot() {
+/* ─── Save: Bot settings ──────────────────────────────────── */
+async function saveBot(btn) {
+  startSave(btn);
   try {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
@@ -233,9 +632,12 @@ async function saveBot() {
     });
     _admin.toast('Настройки бота сохранены', 'success');
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
 }
 
-async function saveContacts() {
+/* ─── Save: Contacts ──────────────────────────────────────── */
+async function saveContacts(btn) {
+  startSave(btn);
   try {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
@@ -243,36 +645,102 @@ async function saveContacts() {
         contacts_phone: document.getElementById('s_phone').value,
         contacts_email: document.getElementById('s_email').value,
         contacts_insta: document.getElementById('s_insta').value,
-        contacts_addr: document.getElementById('s_addr').value
+        contacts_addr:  document.getElementById('s_addr').value
       })
     });
     _admin.toast('Контакты сохранены', 'success');
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
 }
 
-async function savePricing() {
+/* ─── Save: Pricing ───────────────────────────────────────── */
+async function savePricing(btn) {
+  startSave(btn);
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ pricing: document.getElementById('s_pricing').value })
+    });
+    _admin.toast('Прайс сохранён', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
+}
+
+/* ─── Save: Appearance ────────────────────────────────────── */
+async function saveAppearance(btn) {
+  startSave(btn);
   try {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        pricing: document.getElementById('s_pricing').value
+        agency_name: document.getElementById('s_agency_name').value,
+        tagline:     document.getElementById('s_tagline').value,
+        hero_image:  document.getElementById('s_hero_image').value
       })
     });
-    _admin.toast('Прайс сохранён', 'success');
+    _admin.toast('Внешний вид сохранён', 'success');
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
 }
 
-async function saveNotif() {
+/* ─── Save: Integrations ──────────────────────────────────── */
+async function saveIntegrations(btn) {
+  startSave(btn);
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        webhook_url:       document.getElementById('s_webhook_url').value,
+        tg_notif_enabled:  document.getElementById('s_tg_notif_enabled').checked ? '1' : '0'
+      })
+    });
+    _admin.toast('Интеграции сохранены', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
+}
+
+/* ─── Save: Notifications ─────────────────────────────────── */
+async function saveNotif(btn) {
+  startSave(btn);
   try {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
         notif_new_order: document.getElementById('s_notif_new').checked ? '1' : '0',
-        notif_status: document.getElementById('s_notif_status').checked ? '1' : '0'
+        notif_status:    document.getElementById('s_notif_status').checked ? '1' : '0',
+        notif_message:   document.getElementById('s_notif_message').checked ? '1' : '0'
       })
     });
     _admin.toast('Настройки уведомлений сохранены', 'success');
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
+}
+
+/* ─── Danger zone: clear sessions ────────────────────────── */
+async function clearSessions() {
+  _admin.adminConfirm(
+    'Очистить кэш сессий',
+    'Все активные сессии будут завершены. Вы тоже будете разлогинены.',
+    async () => {
+      try {
+        await _admin.apiFetch('/admin/sessions', { method: 'DELETE' });
+        _admin.toast('Кэш сессий очищен', 'success');
+        setTimeout(() => { localStorage.clear(); window.location.href = '/admin/login.html'; }, 1500);
+      } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+    }
+  );
+}
+
+/* ─── Danger zone: export orders ─────────────────────────── */
+function exportOrders() {
+  const token = localStorage.getItem('admin_token');
+  const a = document.createElement('a');
+  a.href = '/api/admin/orders/export?_t=' + encodeURIComponent(token);
+  a.download = 'orders_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  _admin.toast('Экспорт начат…', 'info');
 }
 </script>
 </body>

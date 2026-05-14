@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Nevesty Models</title>
+  <meta name="theme-color" content="#080808">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    /* ── Mini App reset ──────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    :root {
+      --tg-bg:       var(--tg-theme-bg-color, #080808);
+      --tg-surface:  var(--tg-theme-secondary-bg-color, #111111);
+      --tg-text:     var(--tg-theme-text-color, #f0ede8);
+      --tg-hint:     var(--tg-theme-hint-color, #888888);
+      --tg-link:     var(--tg-theme-link-color, #c9a96e);
+      --tg-button:   var(--tg-theme-button-color, #c9a96e);
+      --tg-btn-text: var(--tg-theme-button-text-color, #000000);
+      --gold:        #c9a96e;
+      --gold-light:  #e8d5b0;
+      --border:      #2a2a2a;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      background: var(--tg-bg);
+      color: var(--tg-text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    /* ── App shell ───────────────────────────────────── */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    /* ── Pages container ─────────────────────────────── */
+    #pages {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+    }
+
+    /* ── Individual page sections ────────────────────── */
+    .page {
+      display: none;
+      min-height: 100%;
+      padding: 0 0 80px;
+      animation: fadeIn 0.2s ease;
+    }
+    .page.active { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
+
+    /* ── Bottom navigation ───────────────────────────── */
+    #bottom-nav {
+      display: none;
+      flex-shrink: 0;
+      background: var(--tg-surface);
+      border-top: 1px solid var(--border);
+      padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+    }
+    #bottom-nav.visible { display: flex; }
+
+    .nav-tabs {
+      display: flex;
+      width: 100%;
+    }
+    .nav-tab {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 6px 4px;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: var(--tg-hint);
+      font-size: 0.65rem;
+      font-family: inherit;
+      transition: color 0.2s;
+      user-select: none;
+    }
+    .nav-tab .tab-icon { font-size: 1.35rem; line-height: 1; }
+    .nav-tab.active { color: var(--gold); }
+
+    /* ── Home page ───────────────────────────────────── */
+    #page-home {
+      padding: 0 0 100px;
+    }
+
+    .home-header {
+      position: relative;
+      text-align: center;
+      padding: 48px 24px 32px;
+      background: linear-gradient(180deg, #0d0d0d 0%, var(--tg-bg) 100%);
+    }
+
+    .home-logo {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--tg-text);
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .home-logo span { color: var(--gold); }
+
+    .home-tagline {
+      font-size: 0.78rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--tg-hint);
+      margin-top: 6px;
+    }
+
+    .home-gold-line {
+      width: 48px;
+      height: 2px;
+      background: var(--gold);
+      margin: 16px auto 0;
+      border-radius: 1px;
+    }
+
+    /* User greeting card */
+    .user-card {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      margin: 0 16px 20px;
+      padding: 14px 16px;
+      background: var(--tg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .user-card.visible { display: flex; }
+
+    .user-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--gold-dark, #a07840), var(--gold));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #000;
+      flex-shrink: 0;
+      font-family: 'Playfair Display', serif;
+    }
+    .user-info { flex: 1; min-width: 0; }
+    .user-name {
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--tg-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .user-sub {
+      font-size: 0.72rem;
+      color: var(--tg-hint);
+      margin-top: 1px;
+    }
+
+    /* Main action buttons */
+    .home-actions {
+      padding: 0 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .action-btn {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      width: 100%;
+      padding: 18px 20px;
+      background: var(--tg-surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      cursor: pointer;
+      text-align: left;
+      color: var(--tg-text);
+      font-family: inherit;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .action-btn:active { transform: scale(0.985); background: #1c1c1c; }
+
+    .action-btn-icon {
+      font-size: 1.7rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .action-btn-body { flex: 1; }
+    .action-btn-title {
+      font-size: 1rem;
+      font-weight: 600;
+      font-family: 'Playfair Display', Georgia, serif;
+      margin-bottom: 2px;
+    }
+    .action-btn-sub {
+      font-size: 0.75rem;
+      color: var(--tg-hint);
+    }
+    .action-btn-arrow {
+      color: var(--tg-hint);
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+
+    .action-btn.primary {
+      background: linear-gradient(135deg, #1a1408 0%, #2a2010 100%);
+      border-color: var(--gold);
+    }
+    .action-btn.primary .action-btn-title { color: var(--gold); }
+    .action-btn.primary:active { background: #221a08; }
+
+    /* ── Catalog page ────────────────────────────────── */
+    .page-header {
+      padding: 20px 16px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .page-title {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--tg-text);
+    }
+    .page-subtitle {
+      font-size: 0.78rem;
+      color: var(--tg-hint);
+      margin-top: 4px;
+    }
+
+    /* Filter pills */
+    .filter-row {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    .filter-row::-webkit-scrollbar { display: none; }
+
+    .filter-pill {
+      flex-shrink: 0;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--tg-hint);
+      font-family: inherit;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .filter-pill.active {
+      background: var(--gold);
+      border-color: var(--gold);
+      color: #000;
+      font-weight: 600;
+    }
+
+    /* Model grid */
+    .model-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      padding: 4px 12px 16px;
+    }
+
+    .model-card {
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--tg-surface);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .model-card:active { transform: scale(0.97); }
+
+    .model-card-img {
+      aspect-ratio: 3/4;
+      background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.5rem;
+      color: var(--tg-hint);
+      overflow: hidden;
+    }
+    .model-card-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .model-card-info {
+      padding: 8px 10px 10px;
+    }
+    .model-card-name {
+      font-family: 'Playfair Display', serif;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--tg-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .model-card-meta {
+      font-size: 0.7rem;
+      color: var(--tg-hint);
+      margin-top: 2px;
+    }
+
+    /* Full catalog link */
+    .catalog-link-wrap {
+      padding: 8px 16px 16px;
+    }
+    .catalog-ext-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--gold);
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+    .catalog-ext-btn:active { background: var(--tg-surface); }
+
+    /* ── Booking page ────────────────────────────────── */
+    .booking-wrap {
+      padding: 0 16px 24px;
+    }
+
+    .booking-info-card {
+      margin: 16px 0;
+      padding: 14px 16px;
+      background: rgba(201,169,78,0.08);
+      border: 1px solid rgba(201,169,78,0.3);
+      border-radius: 10px;
+      font-size: 0.82rem;
+      color: var(--gold-light, #e8d5b0);
+      line-height: 1.5;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--tg-hint);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+    .form-input, .form-select, .form-textarea {
+      width: 100%;
+      padding: 13px 14px;
+      background: var(--tg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--tg-text);
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+      border-color: var(--gold);
+    }
+    .form-input::placeholder, .form-textarea::placeholder {
+      color: var(--tg-hint);
+    }
+    .form-select option { background: #111; }
+    .form-textarea { min-height: 80px; resize: none; }
+
+    .booking-submit-btn {
+      width: 100%;
+      padding: 16px;
+      background: var(--gold);
+      color: #000;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: 'Playfair Display', serif;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: opacity 0.2s, transform 0.1s;
+      margin-top: 8px;
+    }
+    .booking-submit-btn:active { transform: scale(0.98); opacity: 0.9; }
+    .booking-submit-btn:disabled { opacity: 0.5; cursor: default; }
+
+    /* ── FAQ page ────────────────────────────────────── */
+    .faq-list {
+      padding: 8px 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .faq-item {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--tg-surface);
+    }
+
+    .faq-question {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 16px;
+      background: transparent;
+      border: none;
+      color: var(--tg-text);
+      font-size: 0.88rem;
+      font-weight: 600;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .faq-question:active { background: rgba(255,255,255,0.03); }
+    .faq-question .faq-arrow {
+      color: var(--tg-hint);
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    .faq-item.open .faq-arrow { transform: rotate(180deg); }
+
+    .faq-answer {
+      display: none;
+      padding: 0 16px 14px;
+      font-size: 0.82rem;
+      color: var(--tg-hint);
+      line-height: 1.6;
+    }
+    .faq-item.open .faq-answer { display: block; }
+
+    /* ── Loading spinner ─────────────────────────────── */
+    .spinner {
+      width: 28px; height: 28px;
+      border: 2px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 48px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast notification ──────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: calc(72px + env(safe-area-inset-bottom));
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(20,20,20,0.95);
+      border: 1px solid var(--border);
+      color: var(--tg-text);
+      font-size: 0.82rem;
+      padding: 10px 18px;
+      border-radius: 20px;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.25s, transform 0.25s;
+      z-index: 9999;
+      pointer-events: none;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Pages ─────────────────────────────────────────── -->
+  <div id="pages">
+
+    <!-- HOME PAGE -->
+    <section id="page-home" class="page active">
+      <div class="home-header">
+        <div class="home-logo">NEVESTY<span> MODELS</span></div>
+        <div class="home-tagline">Модельное агентство</div>
+        <div class="home-gold-line"></div>
+      </div>
+
+      <div id="user-card" class="user-card">
+        <div class="user-avatar" id="user-avatar-initial">N</div>
+        <div class="user-info">
+          <div class="user-name" id="user-name-text">Гость</div>
+          <div class="user-sub">Добро пожаловать в Nevesty Models</div>
+        </div>
+      </div>
+
+      <div class="home-actions">
+        <button class="action-btn primary" data-nav="catalog">
+          <div class="action-btn-icon">📋</div>
+          <div class="action-btn-body">
+            <div class="action-btn-title">Каталог моделей</div>
+            <div class="action-btn-sub">Просмотр портфолио</div>
+          </div>
+          <div class="action-btn-arrow">›</div>
+        </button>
+
+        <button class="action-btn" data-nav="booking">
+          <div class="action-btn-icon">📝</div>
+          <div class="action-btn-body">
+            <div class="action-btn-title">Забронировать</div>
+            <div class="action-btn-sub">Оставить заявку</div>
+          </div>
+          <div class="action-btn-arrow">›</div>
+        </button>
+
+        <button class="action-btn" data-nav="faq">
+          <div class="action-btn-icon">❓</div>
+          <div class="action-btn-body">
+            <div class="action-btn-title">FAQ</div>
+            <div class="action-btn-sub">Частые вопросы</div>
+          </div>
+          <div class="action-btn-arrow">›</div>
+        </button>
+      </div>
+    </section>
+
+    <!-- CATALOG PAGE -->
+    <section id="page-catalog" class="page">
+      <div class="page-header">
+        <div class="page-title">Каталог моделей</div>
+        <div class="page-subtitle">Профессиональные модели агентства</div>
+      </div>
+
+      <div class="filter-row" id="catalog-filters">
+        <button class="filter-pill active" data-filter="all">Все</button>
+        <button class="filter-pill" data-filter="runway">Подиум</button>
+        <button class="filter-pill" data-filter="photo">Фото</button>
+        <button class="filter-pill" data-filter="promo">Промо</button>
+        <button class="filter-pill" data-filter="event">Мероприятия</button>
+      </div>
+
+      <div class="model-grid" id="model-grid">
+        <div style="grid-column:1/-1;text-align:center;">
+          <div class="spinner"></div>
+        </div>
+      </div>
+
+      <div class="catalog-link-wrap">
+        <button class="catalog-ext-btn" id="open-full-catalog">
+          🌐 Открыть полный каталог
+        </button>
+      </div>
+    </section>
+
+    <!-- BOOKING PAGE -->
+    <section id="page-booking" class="page">
+      <div class="page-header">
+        <div class="page-title">Забронировать</div>
+        <div class="page-subtitle">Оставьте заявку — менеджер свяжется в течение часа</div>
+      </div>
+
+      <div class="booking-wrap">
+        <div class="booking-info-card" id="booking-tg-notice" style="display:none;">
+          ✅ Данные из Telegram предзаполнены автоматически
+        </div>
+
+        <form id="webapp-booking-form" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="wb-name">Ваше имя *</label>
+            <input class="form-input" id="wb-name" type="text" placeholder="Имя и фамилия" autocomplete="name" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="wb-phone">Телефон *</label>
+            <input class="form-input" id="wb-phone" type="tel" placeholder="+7 (___) ___-__-__" autocomplete="tel" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="wb-event-type">Тип мероприятия *</label>
+            <select class="form-select" id="wb-event-type" required>
+              <option value="">Выберите тип…</option>
+              <option>Фотосессия</option>
+              <option>Показ мод</option>
+              <option>Корпоратив</option>
+              <option>Рекламная съёмка</option>
+              <option>Промо-акция</option>
+              <option>Другое</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="wb-date">Дата мероприятия *</label>
+            <input class="form-input" id="wb-date" type="date" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="wb-comment">Комментарий</label>
+            <textarea class="form-textarea" id="wb-comment" placeholder="Расскажите о мероприятии, пожеланиях…"></textarea>
+          </div>
+
+          <button type="submit" class="booking-submit-btn" id="wb-submit">
+            Отправить заявку
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- FAQ PAGE -->
+    <section id="page-faq" class="page">
+      <div class="page-header">
+        <div class="page-title">FAQ</div>
+        <div class="page-subtitle">Ответы на частые вопросы</div>
+      </div>
+
+      <div class="faq-list">
+        <div class="faq-item">
+          <button class="faq-question">
+            Как заказать модель?
+            <span class="faq-arrow">⌄</span>
+          </button>
+          <div class="faq-answer">
+            Нажмите «Забронировать», заполните форму — менеджер свяжется с вами в течение часа для подтверждения деталей.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            Какова стоимость услуг?
+            <span class="faq-arrow">⌄</span>
+          </button>
+          <div class="faq-answer">
+            Стоимость зависит от типа мероприятия, количества моделей и продолжительности. Окончательная цена согласовывается с менеджером после заявки.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            За сколько дней нужно бронировать?
+            <span class="faq-arrow">⌄</span>
+          </button>
+          <div class="faq-answer">
+            Рекомендуем бронировать за 3–7 дней. Срочные заявки рассматриваются индивидуально — звоните менеджеру напрямую.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            Есть ли модели для международных проектов?
+            <span class="faq-arrow">⌄</span>
+          </button>
+          <div class="faq-answer">
+            Да, в нашем каталоге есть модели с опытом работы за рубежом и действующими визами. Уточняйте при заявке.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            Как происходит оплата?
+            <span class="faq-arrow">⌄</span>
+          </button>
+          <div class="faq-answer">
+            Принимаем банковский перевод и наличные. Аванс 30% при бронировании, остаток — в день мероприятия.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            Можно ли выбрать конкретную модель?
+            <span class="faq-arrow">⌄</span>
+          </button>
+          <div class="faq-answer">
+            Конечно! Просмотрите каталог, выберите понравившуюся модель и укажите её имя в комментарии к заявке.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            Что если модель заболела?
+            <span class="faq-arrow">⌄</span>
+          </button>
+          <div class="faq-answer">
+            В таких случаях мы заблаговременно предоставляем равноценную замену. Ваше мероприятие состоится в любом случае.
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /#pages -->
+
+  <!-- ── Bottom navigation ──────────────────────────────── -->
+  <nav id="bottom-nav">
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-nav="home">
+        <span class="tab-icon">🏠</span>
+        <span>Главная</span>
+      </button>
+      <button class="nav-tab" data-nav="catalog">
+        <span class="tab-icon">📋</span>
+        <span>Каталог</span>
+      </button>
+      <button class="nav-tab" data-nav="booking">
+        <span class="tab-icon">📝</span>
+        <span>Заявка</span>
+      </button>
+      <button class="nav-tab" data-nav="faq">
+        <span class="tab-icon">❓</span>
+        <span>FAQ</span>
+      </button>
+    </div>
+  </nav>
+
+</div><!-- /#app -->
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Telegram Mini App JS -->
+<script src="/js/telegram-webapp.js"></script>
+<script>
+  // ── Bootstrap the Mini App ────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    const App = new TelegramApp();
+    App.init();
+
+    // Expose for inline handlers
+    window._App = App;
+
+    // ── Home action buttons → navigate
+    document.querySelectorAll('[data-nav]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const page = btn.dataset.nav;
+        App.navigate(page);
+      });
+    });
+
+    // ── Catalog: filters (cosmetic — full data from API)
+    document.querySelectorAll('.filter-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        App.loadCatalog(pill.dataset.filter);
+      });
+    });
+
+    // ── Catalog: open full site
+    document.getElementById('open-full-catalog').addEventListener('click', () => {
+      App.openFullCatalog();
+    });
+
+    // ── FAQ: accordion
+    document.querySelectorAll('.faq-question').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const item = btn.closest('.faq-item');
+        const isOpen = item.classList.contains('open');
+        document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+        if (!isOpen) item.classList.add('open');
+      });
+    });
+
+    // ── Booking form
+    const bookingForm = document.getElementById('webapp-booking-form');
+    bookingForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      App.submitBooking();
+    });
+
+    // Input validation: enable/disable MainButton
+    ['wb-name', 'wb-phone', 'wb-event-type', 'wb-date'].forEach(id => {
+      document.getElementById(id).addEventListener('input', () => App.syncMainButton());
+    });
+  });
+</script>
+</body>
+</html>
