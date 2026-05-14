@@ -6,6 +6,8 @@ __pycache__/
 venv/
 data/
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 .DS_Store
 nevesty-models.zip
