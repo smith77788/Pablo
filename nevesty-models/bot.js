@@ -131,7 +131,8 @@ const KB_MAIN_ADMIN = (badge, score) => {
        { text: '📤 Экспорт заявок',         callback_data: 'adm_export'     }],
       [{ text: '👑 Администраторы',          callback_data: 'adm_admins'     },
        { text: '📡 Фид агентов',            callback_data: 'agent_feed_0'   }],
-      [{ text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    }],
+      [{ text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    },
+       { text: '💬 Обсуждения',            callback_data: 'adm_discussions'}],
       [SITE_URL.startsWith('https://')
         ? { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } }
         : { text: '📱 Mini App', url: SITE_URL.replace(/\/$/, '') + '/webapp.html' },
@@ -950,6 +951,31 @@ async function showAgentFeed(chatId, page) {
   } catch (e) { console.error('[Bot] showAgentFeed:', e.message); }
 }
 
+async function showAgentDiscussions(chatId) {
+  try {
+    const rows = await query('SELECT * FROM agent_discussions ORDER BY created_at DESC LIMIT 10');
+    if (!rows.length) return safeSend(chatId, '💬 Обсуждений агентов пока нет.', {
+      reply_markup: { inline_keyboard: [[{ text:'← Меню', callback_data:'admin_menu' }]] }
+    });
+    let text = `💬 *Обсуждения агентов*\n\n`;
+    const now = Date.now();
+    rows.reverse().forEach(d => {
+      const ageTo = d.to_agent ? esc(d.to_agent) : 'all';
+      const mins = Math.round((now - new Date(d.created_at).getTime()) / 60000);
+      const timeStr = mins < 60 ? `${mins} мин назад` : `${Math.round(mins/60)} ч назад`;
+      const snippet = esc((d.message || '').slice(0, 150));
+      text += `🤖 *${esc(d.from_agent || '?')}* → ${esc(ageTo)} \\(${esc(timeStr)}\\):\n"${snippet}${(d.message||'').length > 150 ? '…' : ''}"\n\n`;
+    });
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text:'🔄 Обновить', callback_data:'adm_discussions' }],
+        [{ text:'← Меню',     callback_data:'admin_menu'       }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showAgentDiscussions:', e.message); }
+}
+
 // ─── Settings helper ──────────────────────────────────────────────────────────
 
 async function getSetting(key) {
@@ -1730,6 +1756,12 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const page = parseInt(data.replace('agent_feed_','')) || 0;
       return showAgentFeed(chatId, page);
+    }
+
+    // ── Agent discussions feed
+    if (data === 'adm_discussions') {
+      if (!isAdmin(chatId)) return;
+      return showAgentDiscussions(chatId);
     }
   });
 
