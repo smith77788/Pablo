@@ -181,8 +181,39 @@ class Agent {
             `INSERT INTO agent_findings (agent_name, severity, message, file, line, auto_fixable, proposed_fix, status)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
             [this.name, f.sev, f.msg, f.file || null, f.line || null, f.autoFixable ? 1 : 0, f.proposedFix || null]
-          ).catch(() => {}); // don't fail if table doesn't exist yet
+          ).catch(() => {});
+
+          // CRITICAL и HIGH — агент сообщает в обсуждения
+          if ([SEV.CRITICAL, SEV.HIGH].includes(f.sev)) {
+            const fixHint = f.proposedFix
+              ? ` Предлагаю: ${f.proposedFix.slice(0, 100)}`
+              : f.autoFixable ? ' Могу исправить автоматически.' : ' Нужен ручной ревью.';
+            await dbRun(
+              `INSERT INTO agent_discussions (from_agent, to_agent, topic, message)
+               VALUES (?, ?, ?, ?)`,
+              [
+                this.name,
+                'Orchestrator',
+                `${f.sev} ${f.msg.slice(0, 80)}`,
+                `${this.emoji} Обнаружил проблему [${f.sev}] в ${f.file || 'коде'}: ${f.msg}.${fixHint}`,
+              ]
+            ).catch(() => {});
+          }
         }
+      }
+
+      // Если агент что-то исправил — сообщает об этом
+      for (const fix of this.fixed) {
+        await dbRun(
+          `INSERT INTO agent_discussions (from_agent, to_agent, topic, message)
+           VALUES (?, ?, ?, ?)`,
+          [
+            this.name,
+            'all',
+            `✅ Исправление`,
+            `${this.emoji} Автоматически исправил: ${fix.slice(0, 200)}`,
+          ]
+        ).catch(() => {});
       }
     } catch (e) {
       this.addFinding('HIGH', `Ошибка выполнения агента: ${e.message}`);

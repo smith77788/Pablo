@@ -97,6 +97,27 @@ function sessionData(session) {
 
 // ─── Keyboards ────────────────────────────────────────────────────────────────
 
+// Persistent ReplyKeyboard — всегда показывается внизу чата вместо клавиатуры
+const REPLY_KB_CLIENT = {
+  keyboard: [
+    [{ text: '💃 Каталог' }, { text: '📝 Подать заявку' }],
+    [{ text: '📋 Мои заявки' }, { text: '🔍 Статус заявки' }],
+    [{ text: '❓ FAQ' }, { text: '👤 Профиль' }, { text: '📞 Контакты' }],
+  ],
+  resize_keyboard: true,
+  persistent: true,
+};
+
+const REPLY_KB_ADMIN = {
+  keyboard: [
+    [{ text: '📋 Заявки' }, { text: '💃 Модели' }, { text: '📊 Статистика' }],
+    [{ text: '🤖 Организм' }, { text: '📡 Фид агентов' }, { text: '💬 Обсуждения' }],
+    [{ text: '⚙️ Настройки' }, { text: '📢 Рассылка' }, { text: '📤 Экспорт' }],
+  ],
+  resize_keyboard: true,
+  persistent: true,
+};
+
 function buildClientKeyboard() {
   const rows = [
     [{ text: '💃 Каталог моделей',      callback_data: 'cat_cat__0'   }],
@@ -107,12 +128,10 @@ function buildClientKeyboard() {
     [{ text: '❓ FAQ',                  callback_data: 'faq'          },
      { text: '👤 Мой профиль',         callback_data: 'profile'      }],
   ];
-  // Mini App — web_app на https, обычная url-кнопка на http
-  const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
   if (SITE_URL.startsWith('https://')) {
+    // Полноценный Mini App только на HTTPS
+    const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
     rows.unshift([{ text: '📱 Открыть Mini App', web_app: { url: webappUrl } }]);
-  } else {
-    rows.unshift([{ text: '📱 Открыть Mini App', url: webappUrl }]);
   }
   return { inline_keyboard: rows };
 }
@@ -133,10 +152,10 @@ const KB_MAIN_ADMIN = (badge, score) => {
        { text: '📡 Фид агентов',            callback_data: 'agent_feed_0'   }],
       [{ text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    },
        { text: '💬 Обсуждения',            callback_data: 'adm_discussions'}],
-      [SITE_URL.startsWith('https://')
-        ? { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } }
-        : { text: '📱 Mini App', url: SITE_URL.replace(/\/$/, '') + '/webapp.html' },
-       { text: '🌐 Сайт', url: SITE_URL }],
+      ...(SITE_URL.startsWith('https://') ? [[
+        { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } },
+        { text: '🌐 Сайт', url: SITE_URL },
+      ]] : []),
     ]
   };
 };
@@ -146,6 +165,11 @@ const KB_MAIN_ADMIN = (badge, score) => {
 async function showMainMenu(chatId, name) {
   await clearSession(chatId);
   const greeting = await getSetting('greeting').catch(() => null);
+  // Сначала показываем persistent ReplyKeyboard
+  await safeSend(chatId,
+    `💎 Nevesty Models — меню активировано`,
+    { reply_markup: REPLY_KB_CLIENT }
+  );
   if (greeting) {
     const text = greeting.replace('{name}', name || 'гость');
     return safeSend(chatId, text, { reply_markup: buildClientKeyboard() });
@@ -167,6 +191,11 @@ async function showAdminMenu(chatId, name) {
     const badge = ordersRow.n > 0 ? ` 🔴${ordersRow.n}` : '';
     const scoreMatch = scoreRow?.message?.match(/Health Score:\s*(\d+)%/);
     const score = scoreMatch ? parseInt(scoreMatch[1]) : null;
+    // Сначала показываем persistent ReplyKeyboard для быстрого доступа
+    await safeSend(chatId,
+      `👑 Панель администратора — меню активировано`,
+      { reply_markup: REPLY_KB_ADMIN }
+    );
     return safeSend(chatId,
       `👑 *Панель администратора*${name ? `\n_${esc(name)}_` : ''}\n\nЗаявок в очереди: *${ordersRow.n}*`,
       { parse_mode: 'MarkdownV2', reply_markup: KB_MAIN_ADMIN(badge, score) }
@@ -1292,6 +1321,20 @@ function initBot(app) {
     });
   }
 
+  // Регистрация команд в меню "/" Telegram
+  bot.setMyCommands([
+    { command: 'start',   description: '🏠 Главное меню' },
+    { command: 'catalog', description: '💃 Каталог моделей' },
+    { command: 'booking', description: '📝 Оформить заявку' },
+    { command: 'orders',  description: '📋 Мои заявки' },
+    { command: 'status',  description: '🔍 Статус заявки по номеру' },
+    { command: 'faq',     description: '❓ Часто задаваемые вопросы' },
+    { command: 'profile', description: '👤 Мой профиль' },
+    { command: 'contacts',description: '📞 Контакты агентства' },
+    { command: 'help',    description: '📖 Справка' },
+    { command: 'cancel',  description: '❌ Отменить действие' },
+  ]).catch(e => console.warn('[Bot] setMyCommands:', e.message));
+
   // ── /start ─────────────────────────────────────────────────────────────────
   bot.onText(/\/start(.*)/, async (msg, match) => {
     const chatId    = msg.chat.id;
@@ -1362,6 +1405,26 @@ function initBot(app) {
     const chatId    = msg.chat.id;
     const firstName = msg.from.first_name;
     return showUserProfile(chatId, firstName);
+  });
+
+  // ── /catalog ───────────────────────────────────────────────────────────────
+  bot.onText(/\/catalog/, async (msg) => {
+    return showCatalog(msg.chat.id, null, 0);
+  });
+
+  // ── /booking ───────────────────────────────────────────────────────────────
+  bot.onText(/\/booking/, async (msg) => {
+    return bkStep1(msg.chat.id);
+  });
+
+  // ── /orders ────────────────────────────────────────────────────────────────
+  bot.onText(/\/orders/, async (msg) => {
+    return showMyOrders(msg.chat.id);
+  });
+
+  // ── /contacts ──────────────────────────────────────────────────────────────
+  bot.onText(/\/contacts/, async (msg) => {
+    return showContacts(msg.chat.id);
   });
 
   // ── /msg (admin direct reply) ──────────────────────────────────────────────
@@ -1796,6 +1859,35 @@ function initBot(app) {
     const session = await getSession(chatId);
     const state   = session?.state || 'idle';
     const d       = sessionData(session);
+
+    // ── ReplyKeyboard кнопки клиента ─────────────────────────────────────────
+    if (state === 'idle' || state === 'check_status') {
+      // Клиентские кнопки
+      if (!isAdmin(chatId)) {
+        if (text === '💃 Каталог')         return showCatalog(chatId, null, 0);
+        if (text === '📝 Подать заявку')   return bkStep1(chatId);
+        if (text === '📋 Мои заявки')      return showMyOrders(chatId);
+        if (text === '🔍 Статус заявки') {
+          await setSession(chatId, 'check_status', {});
+          return safeSend(chatId, '🔍 Введите номер заявки (например, НМ-001):');
+        }
+        if (text === '❓ FAQ')             return showFaq(chatId);
+        if (text === '👤 Профиль')         return showUserProfile(chatId, msg.from.first_name);
+        if (text === '📞 Контакты')        return showContacts(chatId);
+      }
+      // Кнопки администратора
+      if (isAdmin(chatId)) {
+        if (text === '📋 Заявки')          return showAdminOrders(chatId, 0);
+        if (text === '💃 Модели')          return showAdminModels(chatId, 0);
+        if (text === '📊 Статистика')      return showAdminStats(chatId);
+        if (text === '🤖 Организм')        return showOrganismStatus(chatId);
+        if (text === '📡 Фид агентов')     return showAgentFeed(chatId, 0);
+        if (text === '💬 Обсуждения')      return showAgentDiscussions(chatId);
+        if (text === '⚙️ Настройки')      return showAdminSettings(chatId);
+        if (text === '📢 Рассылка')        return showBroadcast(chatId);
+        if (text === '📤 Экспорт')         return exportOrders(chatId);
+      }
+    }
 
     // ── Admin: settings text inputs
     if (isAdmin(chatId)) {

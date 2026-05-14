@@ -69,33 +69,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // ─── DB: ensure smart-orchestrator tables exist ───────────────────────────────
 
 async function ensureTables() {
-  await dbRun(`
-    CREATE TABLE IF NOT EXISTS agent_discussions (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-      finding_sev TEXT,
-      finding_msg TEXT,
-      agent_name  TEXT,
-      strategies  TEXT,   -- JSON array of proposed strategies
-      chosen      TEXT,   -- chosen strategy label
-      outcome     TEXT    -- 'fixed' | 'partial' | 'failed' | 'pending'
-    )
-  `);
-
-  await dbRun(`
-    CREATE TABLE IF NOT EXISTS agent_findings (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-      cycle_id      TEXT,
-      agent_name    TEXT,
-      finding_sev   TEXT,
-      finding_msg   TEXT,
-      file_hint     TEXT,
-      fix_strategy  TEXT,
-      fix_outcome   TEXT,   -- 'fixed' | 'partial' | 'failed' | 'skipped' | 'known-good'
-      verified_at   DATETIME
-    )
-  `);
+  // Both agent_findings and agent_discussions are created by database.js with canonical schemas.
+  // Nothing to do here — kept as hook for future schema migrations.
 }
 
 // ─── Fixer loader ─────────────────────────────────────────────────────────────
@@ -254,37 +229,62 @@ function bestStrategy(strategies) {
 
 async function logDiscussion(cycleId, finding, strategies, chosen) {
   try {
+    const agentName  = finding.agentName || 'Analyst';
+    const fixerName  = chosen.file ? `Fixer[${chosen.file}]` : 'FixCoordinator';
+    const topic      = `[${finding.sev}] ${finding.msg.slice(0, 80)}`;
+
+    // Agent reports finding to Orchestrator
     await dbRun(
-      `INSERT INTO agent_discussions (finding_sev, finding_msg, agent_name, strategies, chosen, outcome)
-       VALUES (?, ?, ?, ?, ?, 'pending')`,
+      `INSERT INTO agent_discussions (from_agent, to_agent, topic, message, ref_finding_id)
+       VALUES (?, ?, ?, ?, ?)`,
       [
-        finding.sev,
-        finding.msg,
-        finding.agentName || 'unknown',
-        JSON.stringify(strategies),
-        chosen.label,
+        agentName,
+        'Orchestrator',
+        topic,
+        `Обнаружена проблема (${finding.sev}): ${finding.msg}. ` +
+        `Файл: ${finding.fileHint || guessFile(finding.msg) || 'неизвестен'}. ` +
+        `Предлагаю ${strategies.length} стратег${strategies.length === 1 ? 'ию' : 'ии'}: ` +
+        strategies.map(s => `«${s.label}» (${(s.confidence * 100).toFixed(0)}%)`).join(', ') + '.',
+        null,
+      ]
+    );
+
+    // Orchestrator assigns the best strategy to fixer
+    await dbRun(
+      `INSERT INTO agent_discussions (from_agent, to_agent, topic, message, ref_finding_id)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        'Orchestrator',
+        fixerName,
+        topic,
+        `Принято. Выбираю стратегию «${chosen.label}» ` +
+        `(уверенность ${(chosen.confidence * 100).toFixed(0)}%, усилие: ${chosen.effort}). ` +
+        `${chosen.description}. Берись за ${chosen.file || 'связанный файл'}.`,
+        null,
       ]
     );
   } catch (e) {
-    // Non-fatal — tables might not be ready in edge cases
     console.warn('[SmartOrch] logDiscussion failed:', e.message);
   }
 }
 
 async function logFinding(cycleId, finding, strategy, outcome) {
   try {
+    const fixNote = strategy ? `[${strategy.label}] → ${outcome}` : outcome;
     await dbRun(
       `INSERT INTO agent_findings
-         (cycle_id, agent_name, finding_sev, finding_msg, file_hint, fix_strategy, fix_outcome)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (agent_name, severity, message, file, auto_fixable, proposed_fix, status, fixed_by, fix_summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        cycleId,
         finding.agentName || 'unknown',
         finding.sev,
         finding.msg,
-        finding.fileHint || guessFile(finding.msg) || '',
-        strategy ? strategy.label : 'none',
-        outcome,
+        finding.fileHint || guessFile(finding.msg) || null,
+        strategy && strategy.label !== 'manual-review' ? 1 : 0,
+        strategy ? strategy.description : null,
+        outcome === 'fixed' ? 'fixed' : 'open',
+        outcome === 'fixed' ? 'SmartOrchestrator' : null,
+        fixNote,
       ]
     );
   } catch (e) {
@@ -292,9 +292,21 @@ async function logFinding(cycleId, finding, strategy, outcome) {
   }
 }
 
-async function updateDiscussionOutcome(discId, outcome) {
+async function reportFixResult(finding, outcome, fixerName) {
   try {
-    await dbRun(`UPDATE agent_discussions SET outcome = ? WHERE id = ?`, [outcome, discId]);
+    const agentName = finding.agentName || 'Analyst';
+    const topic     = `[${finding.sev}] ${finding.msg.slice(0, 80)}`;
+    const resultMsg = outcome === 'fixed'
+      ? `Готово — патч применён, проблема устранена.`
+      : outcome === 'partial'
+        ? `Частично исправлено, требуется дополнительная ревизия.`
+        : `Не удалось исправить автоматически — нужен ручной ревью.`;
+
+    await dbRun(
+      `INSERT INTO agent_discussions (from_agent, to_agent, topic, message, ref_finding_id)
+       VALUES (?, ?, ?, ?, ?)`,
+      [fixerName || 'FixCoordinator', agentName, topic, resultMsg, null]
+    );
   } catch {}
 }
 
@@ -363,7 +375,7 @@ async function analyzePhase(progressRef, buildProgressMsg, totalAgents, BATCH) {
         agentSummaries.push({
           name: agent.name, emoji: agent.emoji, crit, high, med,
           issues: enriched.filter(f => [SEV_EMO.CRITICAL, SEV_EMO.HIGH, SEV_EMO.MEDIUM].includes(f.sev)),
-          AgentClass,
+          AgentClass: agentMap[agent.name],
         });
       }
     }
@@ -496,6 +508,7 @@ async function fixPhase(cycleId, fixPlan) {
 
         console.log(`    ${outcome === 'fixed' ? '✅' : '⚠️'} ${finding.msg.slice(0, 60)} → ${outcome}`);
         await logFinding(cycleId, finding, plan.strategy, outcome);
+        await reportFixResult(finding, outcome, fixer.name || 'Fixer');
         fixResults.push({ finding, strategy: plan.strategy, outcome, resultMsg });
       }
     } else {

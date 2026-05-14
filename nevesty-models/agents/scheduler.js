@@ -16,8 +16,8 @@ try {
 const AutoFixer = require('./auto-fixer');
 const { tgSend, logAgent, dbAll } = require('./lib/base');
 
-// Run immediately, then every 6 hours
-const INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Run immediately, then every 30 minutes
+const INTERVAL_MS = 30 * 60 * 1000;
 
 // Track consecutive failures to avoid spam
 let lastHealthScore = null;
@@ -75,12 +75,12 @@ async function runCycle() {
     // Step 6: Report auto-fixed findings
     try {
       const autoFixed = await dbAll(
-        "SELECT * FROM agent_findings WHERE status='fixed' ORDER BY updated_at DESC LIMIT 5"
+        "SELECT * FROM agent_findings WHERE status='fixed' ORDER BY fixed_at DESC, created_at DESC LIMIT 5"
       );
       if (autoFixed.length > 0) {
         let fMsg = `✅ Авто-исправленные находки (${autoFixed.length}):\n`;
         autoFixed.forEach(f => {
-          fMsg += `• [${f.severity || 'info'}] ${(f.title || f.description || '').slice(0, 100)}\n`;
+          fMsg += `• [${f.severity || 'info'}] ${(f.message || '').slice(0, 100)}\n`;
         });
         await tgSend(fMsg).catch(() => {});
       }
