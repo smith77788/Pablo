@@ -336,16 +336,30 @@ async function loadOrders(page) {
   }
 }
 
+/* ─── Inline status color map ────────────────────────── */
+const STATUS_COLORS_ORDERS = {
+  new:'#3b82f6', reviewing:'#f59e0b', confirmed:'#10b981',
+  in_progress:'#8b5cf6', completed:'#6b7280', cancelled:'#ef4444'
+};
+
+function colorBadge(status) {
+  const label = _admin.STATUS_LABELS[status] || status;
+  return `<span class="sbadge sbadge-${status}">${label}</span>`;
+}
+
 function renderTable(orders) {
   const tbody = document.getElementById('ordersBody');
   if (!orders.length) {
-    tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
     return;
   }
 
   tbody.innerHTML = orders.map(o => {
     const checked = selectedIds.has(o.id) ? 'checked' : '';
     const unread  = o.has_unread ? '<span class="unread-dot" title="Непрочитанные сообщения"></span>' : '';
+    const statusOpts = Object.entries(_admin.STATUS_LABELS).map(([v, l]) =>
+      `<option value="${v}"${v === o.status ? ' selected' : ''}>${l}</option>`
+    ).join('');
     return `
     <tr data-id="${o.id}" style="cursor:pointer" onclick="openDetail(${o.id})">
       <td class="cb-cell" onclick="event.stopPropagation()">
@@ -357,7 +371,13 @@ function renderTable(orders) {
       <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
       <td>${o.model_name || '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
-      <td>${_admin.statusBadge(o.status)}</td>
+      <td>${colorBadge(o.status)}</td>
+      <td onclick="event.stopPropagation()">
+        <select class="inline-status-select" data-order-id="${o.id}"
+          onchange="quickStatusChange(${o.id}, this.value, this)">
+          ${statusOpts}
+        </select>
+      </td>
       <td>${_admin.formatDateTime(o.created_at)}</td>
       <td><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openDetail(${o.id})">Открыть →</button></td>
     </tr>`;
@@ -686,6 +706,51 @@ function closeDetail() {
 }
 
 /* ═══════════════════════════════════════════════════════
+   STATUS FILTER BUTTONS
+═══════════════════════════════════════════════════════ */
+function setStatusFilter(status) {
+  // Sync hidden select (used by loadOrders)
+  document.getElementById('statusFilter').value = status;
+
+  // Update button active classes
+  document.querySelectorAll('#statusFilterBar .sfilter-btn').forEach(btn => {
+    const btnStatus = btn.getAttribute('data-status');
+    btn.className = 'sfilter-btn';
+    if (btnStatus === status) {
+      btn.classList.add(status === '' ? 'active-all' : `active-${status}`);
+    }
+  });
+
+  loadOrders(1);
+}
+
+/* ═══════════════════════════════════════════════════════
+   QUICK INLINE STATUS CHANGE
+═══════════════════════════════════════════════════════ */
+async function quickStatusChange(orderId, newStatus, selectEl) {
+  try {
+    await _admin.apiFetch(`/admin/orders/${orderId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: newStatus })
+    });
+    _admin.toast(`Статус изменён: ${_admin.STATUS_LABELS[newStatus] || newStatus}`, 'success');
+    // Update the badge in the same row
+    const row = selectEl.closest('tr');
+    if (row) {
+      const badgeCell = row.querySelector('.sbadge');
+      if (badgeCell) {
+        badgeCell.className = `sbadge sbadge-${newStatus}`;
+        badgeCell.textContent = _admin.STATUS_LABELS[newStatus] || newStatus;
+      }
+    }
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+    // Revert select
+    selectEl.value = selectEl.getAttribute('data-original') || newStatus;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
    SEARCH / FILTER
 ═══════════════════════════════════════════════════════ */
 let searchTimer;
@@ -699,11 +764,14 @@ document.getElementById('statusFilter').addEventListener('change', () => loadOrd
    INIT
 ═══════════════════════════════════════════════════════ */
 (function init() {
-  const params   = new URLSearchParams(window.location.search);
+  const params    = new URLSearchParams(window.location.search);
   const urlStatus = params.get('status');
   const urlId     = params.get('id');
-  if (urlStatus) document.getElementById('statusFilter').value = urlStatus;
-  loadOrders(1);
+  if (urlStatus) {
+    setStatusFilter(urlStatus);
+  } else {
+    loadOrders(1);
+  }
   if (urlId) setTimeout(() => openDetail(+urlId), 400);
 })();
 </script>

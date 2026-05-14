@@ -606,9 +606,25 @@ router.get('/settings', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// DELETE /api/admin/sessions — clear active sessions (JWT is stateless; signals client logout)
+router.delete('/admin/sessions', auth, async (req, res, next) => {
+  try {
+    // Stateless JWT — no server-side session store to clear.
+    // Client will clear localStorage on receipt of this response.
+    res.json({ ok: true, message: 'Sessions cleared' });
+  } catch(e) { next(e); }
+});
+
 // PUT /api/settings — сохраняет настройки бота (принимает объект key:value)
 router.put('/settings', auth, async (req, res, next) => {
-  const ALLOWED_KEYS = ['greeting','about','contacts_phone','contacts_email','contacts_insta','contacts_addr','pricing','notif_new_order','notif_status','notif_message'];
+  const ALLOWED_KEYS = [
+    'greeting', 'about',
+    'contacts_phone', 'contacts_email', 'contacts_insta', 'contacts_addr',
+    'pricing',
+    'notif_new_order', 'notif_status', 'notif_message',
+    'agency_name', 'tagline', 'hero_image',
+    'webhook_url', 'tg_notif_enabled',
+  ];
   try {
     const body = req.body;
     if (typeof body !== 'object' || !body) return res.status(400).json({ error: 'Invalid body' });
