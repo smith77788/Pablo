@@ -94,7 +94,16 @@
 
         <!-- CATALOG -->
         <div>
-          <div class="catalog-count" id="catalogCount">Загрузка...</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:16px;flex-wrap:wrap">
+            <div class="catalog-count" id="catalogCount">Загрузка...</div>
+            <select id="sortSelect" class="filter-search" style="width:auto;padding:8px 14px;font-size:0.8rem;cursor:pointer">
+              <option value="default">По умолчанию</option>
+              <option value="available">Сначала свободные</option>
+              <option value="height_desc">По росту ↓</option>
+              <option value="height_asc">По росту ↑</option>
+              <option value="name_asc">По имени А-Я</option>
+            </select>
+          </div>
           <div class="catalog-grid" id="catalogGrid">
             <!-- injected -->
           </div>

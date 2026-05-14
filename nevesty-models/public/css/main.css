@@ -638,3 +638,67 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   white-space: nowrap;
   border: 0;
 }
+
+/* ─── TESTIMONIALS ───────────────────────────────── */
+.testimonials-section { padding: 100px 0; background: var(--bg2); }
+.testimonials-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.testimonial-card {
+  background: var(--bg3); border: 1px solid var(--border);
+  padding: 36px 32px; display: flex; flex-direction: column; gap: 20px;
+  transition: border-color var(--transition);
+}
+.testimonial-card:hover { border-color: rgba(201,169,110,0.3); }
+.testimonial-stars { color: var(--gold); font-size: 1rem; letter-spacing: 3px; }
+.testimonial-text {
+  font-size: 0.9rem; color: var(--text-muted); line-height: 1.9;
+  font-style: italic; flex: 1;
+}
+.testimonial-author { display: flex; align-items: center; gap: 14px; }
+.testimonial-avatar {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; font-weight: 600; color: var(--bg); flex-shrink: 0;
+}
+.testimonial-author strong { display: block; font-size: 0.9rem; color: var(--text); font-family: 'Playfair Display', serif; }
+.testimonial-author span { font-size: 0.75rem; color: var(--text-dim); }
+
+/* ─── PRICING ────────────────────────────────────── */
+.pricing-section { padding: 100px 0; }
+.pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; align-items: start; }
+.pricing-card {
+  background: var(--bg3); border: 1px solid var(--border);
+  padding: 40px 32px; position: relative;
+  transition: all var(--transition);
+}
+.pricing-card:hover { border-color: rgba(201,169,110,0.3); transform: translateY(-4px); }
+.pricing-featured {
+  border-color: rgba(201,169,110,0.5);
+  background: linear-gradient(135deg, #1a1510, #0d0a07);
+}
+.pricing-badge {
+  position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+  background: var(--gold); color: var(--bg);
+  font-size: 0.65rem; font-weight: 600; letter-spacing: 2px; text-transform: uppercase;
+  padding: 5px 16px;
+}
+.pricing-label {
+  font-size: 0.7rem; letter-spacing: 3px; text-transform: uppercase;
+  color: var(--gold); margin-bottom: 16px;
+}
+.pricing-price { font-family: 'Playfair Display', serif; font-size: 1.2rem; color: var(--text-muted); margin-bottom: 4px; }
+.pricing-price strong { font-size: 2.5rem; color: var(--white); }
+.pricing-duration { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 28px; }
+.pricing-features {
+  list-style: none; margin-bottom: 32px;
+}
+.pricing-features li {
+  font-size: 0.85rem; color: var(--text-muted); padding: 8px 0;
+  border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;
+}
+.pricing-features li::before { content: '—'; color: var(--gold); font-size: 0.7rem; }
+
+@media (max-width: 900px) {
+  .testimonials-grid { grid-template-columns: 1fr; }
+  .pricing-grid { grid-template-columns: 1fr; }
+}
