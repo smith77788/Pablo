@@ -13,6 +13,8 @@ const {
   MODEL_EYE_COLORS,
   DURATIONS,
 } = require('./utils/constants');
+let mailer;
+try { mailer = require('./services/mailer'); } catch { mailer = null; }
 
 const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const SITE_URL  = process.env.SITE_URL || 'http://localhost:3000';
@@ -1152,6 +1154,15 @@ async function bkSubmit(chatId, data) {
     );
     if (order) {
       notifyNewOrder(order);
+      // Email notifications (non-blocking)
+      if (mailer) {
+        if (order.client_email) {
+          mailer.sendOrderConfirmation(order.client_email, order).catch(e => console.error('[mailer] bot order confirm:', e.message));
+        }
+        mailer.getAdminEmails().forEach(adminEmail => {
+          mailer.sendManagerNotification(adminEmail, order).catch(() => {});
+        });
+      }
       // CRM webhooks (non-blocking)
       try {
         const { notifyCRM } = require('./services/crm');
