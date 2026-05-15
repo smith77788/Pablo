@@ -640,7 +640,82 @@ async function initDatabase() {
   }
   scheduleVacuum();
 
+  // Automated DB backup every 6 hours
+  scheduleBackups();
+
   console.log('Database initialized');
+}
+
+// Automated DB backup every 6 hours
+function scheduleBackups() {
+  const DB_PATH = process.env.DB_PATH || './data/nevesty.db';
+  const BACKUP_DIR = process.env.BACKUP_DIR || './backups';
+
+  // Skip in test environment
+  if (process.env.NODE_ENV === 'test' || DB_PATH === ':memory:') return;
+
+  const runBackup = () => {
+    try {
+      const fs = require('fs');
+      const pathMod = require('path');
+
+      if (!fs.existsSync(DB_PATH)) return;
+      if (!fs.existsSync(BACKUP_DIR)) {
+        fs.mkdirSync(BACKUP_DIR, { recursive: true });
+      }
+
+      // Keep only last 8 backups (48 hours at 6h interval)
+      const backupFiles = fs.readdirSync(BACKUP_DIR)
+        .filter(f => f.startsWith('nevesty_') && f.endsWith('.db'))
+        .sort();
+      if (backupFiles.length >= 8) {
+        const toDelete = backupFiles.slice(0, backupFiles.length - 7);
+        toDelete.forEach(f => {
+          try { fs.unlinkSync(pathMod.join(BACKUP_DIR, f)); } catch(_) {}
+        });
+      }
+
+      // Create backup using SQLite .backup API via file copy
+      const now = new Date();
+      const stamp = now.toISOString().replace(/[:.]/g, '-').substring(0, 19);
+      const backupPath = pathMod.join(BACKUP_DIR, `nevesty_${stamp}.db`);
+
+      // Use SQLite backup command via node sqlite3
+      const src = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READONLY, (err) => {
+        if (err) { console.error('[Backup] Failed to open source DB:', err.message); return; }
+        const dst = new sqlite3.Database(backupPath, (err2) => {
+          if (err2) { console.error('[Backup] Failed to create backup DB:', err2.message); src.close(); return; }
+          // Copy via VACUUM INTO (SQLite 3.27+)
+          src.run(`VACUUM INTO '${backupPath}'`, (vacErr) => {
+            if (vacErr) {
+              // Fallback: file copy
+              dst.close(() => {
+                try {
+                  fs.copyFileSync(DB_PATH, backupPath);
+                  console.log(`[Backup] Created (file copy): ${backupPath}`);
+                } catch(copyErr) {
+                  console.error('[Backup] File copy failed:', copyErr.message);
+                }
+              });
+            } else {
+              dst.close(() => {});
+              console.log(`[Backup] Created (VACUUM INTO): ${backupPath}`);
+            }
+            src.close();
+          });
+        });
+      });
+    } catch(e) {
+      console.error('[Backup] Error:', e.message);
+    }
+  };
+
+  // Initial backup after 30s (after DB init)
+  setTimeout(runBackup, 30000).unref();
+
+  // Then every 6 hours
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+  setInterval(runBackup, SIX_HOURS).unref();
 }
 
 async function seedDemoModels() {
@@ -722,4 +797,4 @@ async function setSetting(key, value) {
   cache.del(`setting:${key}`);
 }
 
-module.exports = { initDatabase, initDB: initDatabase, query, run, get, generateOrderNumber, closeDatabase, getSetting, setSetting };
+module.exports = { initDatabase, initDB: initDatabase, query, run, get, generateOrderNumber, closeDatabase, getSetting, setSetting, scheduleBackups };

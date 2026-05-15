@@ -3319,6 +3319,151 @@ router.post('/admin/factory-experiments/:id/scale', auth, async (req, res, next)
   } catch (e) { next(e); }
 });
 
+// ─── Factory REST aliases (БЛОК 5.6) ─────────────────────────────────────────
+// GET /api/admin/factory/actions — growth_actions from factory.db
+router.get('/admin/factory/actions', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const Database = require('better-sqlite3');
+    const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
+    let actions = [];
+    if (fs.existsSync(factoryDbPath)) {
+      try {
+        const fdb = new Database(factoryDbPath, { readonly: true });
+        actions = fdb.prepare(
+          'SELECT * FROM growth_actions ORDER BY created_at DESC LIMIT ?'
+        ).all(limit);
+        fdb.close();
+      } catch (_) {}
+    }
+    res.json({ actions });
+  } catch (e) { next(e); }
+});
+
+// GET /api/admin/factory/decisions — decisions from factory.db
+router.get('/admin/factory/decisions', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const Database = require('better-sqlite3');
+    const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
+    let decisions = [];
+    if (fs.existsSync(factoryDbPath)) {
+      try {
+        const fdb = new Database(factoryDbPath, { readonly: true });
+        decisions = fdb.prepare(`
+          SELECT d.id, d.cycle_id, d.decision_type, d.rationale, d.executed, d.created_at,
+                 c.health_score, c.phase as cycle_phase
+          FROM decisions d
+          LEFT JOIN cycles c ON c.id = d.cycle_id
+          ORDER BY d.created_at DESC LIMIT ?
+        `).all(limit);
+        fdb.close();
+      } catch (_) {}
+    }
+    res.json({ decisions });
+  } catch (e) { next(e); }
+});
+
+// GET /api/admin/factory/experiments — experiments from factory.db
+router.get('/admin/factory/experiments', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const Database = require('better-sqlite3');
+    const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
+    let experiments = [];
+    if (fs.existsSync(factoryDbPath)) {
+      try {
+        const fdb = new Database(factoryDbPath, { readonly: true });
+        experiments = fdb.prepare(
+          'SELECT * FROM experiments ORDER BY created_at DESC LIMIT ?'
+        ).all(limit);
+        fdb.close();
+      } catch (_) {}
+    }
+    res.json({ experiments });
+  } catch (e) { next(e); }
+});
+
+// ── CRM Integration Webhooks (БЛОК 10.3) ──────────────────────────────────────
+
+// POST /api/admin/crm/sync/:provider — push order to CRM (stub, real integration via .env)
+router.post('/admin/crm/sync/:provider', auth, async (req, res, next) => {
+  try {
+    const { provider } = req.params;
+    const validProviders = ['amocrm', 'bitrix24'];
+    if (!validProviders.includes(provider)) {
+      return res.status(400).json({ error: 'Unknown provider. Supported: amocrm, bitrix24' });
+    }
+    const { order_id } = req.body;
+    if (!order_id) return res.status(400).json({ error: 'order_id required' });
+
+    const order = await get('SELECT * FROM orders WHERE id = ?', [order_id]);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    // Log the sync attempt (audit is best-effort)
+    await logAudit(req, `crm_sync_${provider}`, 'order', order_id, { provider }).catch(() => {});
+
+    // Stub — real integration reads WEBHOOK_URL_{PROVIDER} from .env
+    res.json({
+      ok: true,
+      provider,
+      order_id,
+      external_id: `${provider}_${order_id}_stub`,
+      synced_at: new Date().toISOString(),
+      message: `Order synced to ${provider} (stub — configure WEBHOOK_URL_${provider.toUpperCase()} in .env to enable real sync)`
+    });
+  } catch (e) { next(e); }
+});
+
+// POST /api/webhooks/crm/:provider — incoming CRM webhook (status change → update order)
+router.post('/webhooks/crm/:provider', async (req, res, next) => {
+  try {
+    const { provider } = req.params;
+    const payload = req.body;
+
+    console.log(`[CRM Webhook] ${provider}:`, JSON.stringify(payload).substring(0, 200));
+
+    // AmoCRM: status change payload has leads.update array
+    if (provider === 'amocrm' && payload.leads) {
+      const updates = payload.leads?.update || [];
+      for (const lead of updates) {
+        const orderIdField = lead.custom_fields?.find(f => f.name === 'order_id');
+        const orderId = orderIdField?.values?.[0]?.value;
+        if (orderId) {
+          // AmoCRM status → internal status mapping
+          const statusMap = { 142: 'confirmed', 143: 'completed', 144: 'cancelled' };
+          const newStatus = statusMap[lead.status_id];
+          if (newStatus) {
+            await run(
+              'UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+              [newStatus, orderId]
+            ).catch(() => {});
+          }
+        }
+      }
+    }
+
+    // Bitrix24: deal status change
+    if (provider === 'bitrix24' && payload.event === 'ONCRMDEALSTAGESET') {
+      const dealId = payload.data?.FIELDS_BEFORE?.ID;
+      const stageId = payload.data?.FIELDS_AFTER?.STAGE_ID;
+      if (dealId && stageId) {
+        // Bitrix24 stage → internal status mapping (customise to match your pipeline)
+        const stageMap = { 'WON': 'completed', 'LOSE': 'cancelled', 'C2:PREPARATION': 'confirmed' };
+        const newStatus = stageMap[stageId];
+        if (newStatus) {
+          await run(
+            'UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE payment_id=?',
+            [newStatus, String(dealId)]
+          ).catch(() => {});
+        }
+      }
+    }
+
+    res.json({ ok: true, received: true });
+  } catch (e) { next(e); }
+});
+
 // ─── DB stats endpoint ────────────────────────────────────────────────────────
 router.get('/admin/crm-status', auth, (req, res) => {
   res.json({
