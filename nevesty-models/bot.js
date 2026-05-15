@@ -839,8 +839,8 @@ async function showCatalog(chatId, cat, page, filter) {
       });
     }
 
-    const _rawPerPage = parseInt(await getSetting('catalog_per_page').catch(() => '6')) || 6;
-    const perPage = Math.min(12, Math.max(3, _rawPerPage));
+    const _rawPerPage = parseInt(await getSetting('catalog_per_page').catch(() => '5')) || 5;
+    const perPage = Math.min(20, Math.max(1, _rawPerPage));
     const total = models.length;
     const slice = models.slice(page * perPage, page * perPage + perPage);
 
@@ -7871,6 +7871,10 @@ function initBot(app) {
       await safeSend(chatId, '🔄 Запускаю цикл AI Factory...\n\nРезультат придёт через 1-2 минуты.', {
         reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] },
       });
+      // Notify all admins that a factory cycle was started manually
+      notifyAdmin('🏭 *AI Factory* — цикл запущен вручную из бота\nРезультат придёт через 1\\-2 минуты\\.', {
+        parse_mode: 'MarkdownV2',
+      }).catch(() => {});
       const { spawn } = require('child_process');
       const proc = spawn(
         'python3',
@@ -10710,8 +10714,8 @@ _Цены ориентировочные\\. Точная стоимость со
 
 async function showCatalogByCity(chatId, city, page = 0) {
   try {
-    const _rawPerPageCity = parseInt(await getSetting('catalog_per_page').catch(() => '6')) || 6;
-    const perPage = Math.min(12, Math.max(3, _rawPerPageCity));
+    const _rawPerPageCity = parseInt(await getSetting('catalog_per_page').catch(() => '5')) || 5;
+    const perPage = Math.min(20, Math.max(1, _rawPerPageCity));
     const models = city
       ? await query('SELECT * FROM models WHERE available=1 AND COALESCE(archived,0)=0 AND city=? ORDER BY id', [city])
       : await query('SELECT * FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id');
