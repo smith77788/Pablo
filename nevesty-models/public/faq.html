@@ -3,9 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FAQ — Часто задаваемые вопросы — Nevesty Models</title>
-  <meta name="description" content="Ответы на часто задаваемые вопросы о работе агентства Nevesty Models. Бронирование, цены, кастинг, оплата и многое другое.">
-  <meta property="og:title" content="FAQ — Nevesty Models">
+  <title>FAQ — Часто задаваемые вопросы | Nevesty Models</title>
+  <meta name="description" content="Ответы на часто задаваемые вопросы о работе модельного агентства Nevesty Models. Как заказать модель, стоимость услуг, зона работы.">
+  <meta name="keywords" content="FAQ, вопросы, ответы, модельное агентство, как заказать модель, стоимость моделей">
+  <meta name="theme-color" content="#080808">
+  <meta property="og:title" content="FAQ — Часто задаваемые вопросы | Nevesty Models">
   <meta property="og:description" content="Ответы на часто задаваемые вопросы о работе модельного агентства Nevesty Models.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
@@ -13,18 +15,33 @@
   <meta property="og:site_name" content="Nevesty Models">
   <meta property="og:locale" content="ru_RU">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@nevesty_models">
-  <meta name="theme-color" content="#080808">
-  <link rel="canonical" href="https://nevesty-models.ru/faq.html">
   <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://nevesty-models.ru/faq.html">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="/css/main.css" />
   <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+
+  <!-- Schema.org: BreadcrumbList (static) -->
+  <script type="application/ld+json" id="schema-breadcrumb">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
+      {"@type": "ListItem", "position": 2, "name": "FAQ", "item": "https://nevesty-models.ru/faq.html"}
+    ]
+  }
+  </script>
+  <!-- Schema.org: FAQPage (injected by JS after fetching items) -->
+  <script type="application/ld+json" id="schema-faqpage"></script>
+
   <style>
-    /* ─── FAQ PAGE ──────────────────────────────────── */
+    /* ─── FAQ HERO ─────────────────────────────────────────── */
     .faq-hero {
-      padding: 140px 0 80px;
+      padding: 140px 0 72px;
       background: linear-gradient(135deg, #080808 0%, #0f0a06 50%, #080808 100%);
       position: relative;
       overflow: hidden;
@@ -42,224 +59,234 @@
       z-index: 1;
     }
     .faq-hero h1 {
-      font-size: clamp(2.2rem, 5vw, 4rem);
+      font-size: clamp(2.2rem, 5vw, 3.6rem);
       color: var(--white);
       margin-bottom: 16px;
     }
-    .faq-hero h1 em {
-      color: var(--gold);
-      font-style: italic;
-    }
+    .faq-hero h1 em { color: var(--gold); font-style: italic; }
     .faq-hero p {
       color: var(--text-muted);
       font-size: 1rem;
       max-width: 520px;
-      margin: 0 auto;
+      margin: 0 auto 20px;
       line-height: 1.8;
     }
-
-    /* ─── SEARCH ─────────────────────────────────────── */
-    .faq-search-wrap {
-      margin: 48px auto 0;
-      max-width: 560px;
-      position: relative;
+    .faq-count-badge {
+      display: inline-block;
+      background: rgba(201,169,110,0.12);
+      border: 1px solid rgba(201,169,110,0.3);
+      color: var(--gold);
+      font-size: 0.72rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 6px 16px;
+      border-radius: 2px;
     }
-    .faq-search-wrap svg {
-      position: absolute;
-      left: 18px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--text-muted);
-      pointer-events: none;
-      flex-shrink: 0;
+
+    /* ─── BREADCRUMB ───────────────────────────────────────── */
+    .breadcrumb-bar {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 0;
+    }
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      flex-wrap: wrap;
+    }
+    .breadcrumb a {
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color var(--transition);
+    }
+    .breadcrumb a:hover { color: var(--gold); }
+    .breadcrumb-sep { color: var(--border2); }
+    .breadcrumb-current { color: var(--text-muted); }
+
+    /* ─── MAIN FAQ SECTION ─────────────────────────────────── */
+    .faq-main {
+      padding: 64px 0 100px;
+    }
+
+    /* ─── SEARCH BAR ───────────────────────────────────────── */
+    .faq-search-wrap {
+      max-width: 560px;
+      margin: 0 auto 48px;
+      position: relative;
     }
     .faq-search {
       width: 100%;
-      padding: 16px 20px 16px 52px;
-      background: var(--bg3);
+      padding: 14px 20px 14px 48px;
+      background: var(--bg2);
       border: 1px solid var(--border);
       color: var(--text);
-      font-family: 'Inter', sans-serif;
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       outline: none;
+      border-radius: 2px;
       transition: border-color var(--transition);
-      border-radius: var(--radius);
+      box-sizing: border-box;
     }
-    .faq-search::placeholder { color: var(--text-dim); }
     .faq-search:focus { border-color: rgba(201,169,110,0.5); }
-
-    /* ─── FAQ CONTENT ────────────────────────────────── */
-    .faq-section {
-      padding: 80px 0 40px;
+    .faq-search::placeholder { color: var(--text-dim); }
+    .faq-search-icon {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      font-size: 1rem;
+      pointer-events: none;
     }
 
-    .faq-category {
-      margin-bottom: 64px;
-    }
-    .faq-category-title {
+    /* ─── ACCORDION ────────────────────────────────────────── */
+    .faq-accordion {
+      max-width: 800px;
+      margin: 0 auto;
       display: flex;
-      align-items: center;
-      gap: 16px;
-      margin-bottom: 32px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border);
+      flex-direction: column;
+      gap: 0;
     }
-    .faq-category-title .cat-icon {
-      width: 40px;
-      height: 40px;
-      border: 1px solid rgba(201,169,110,0.35);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.1rem;
-      flex-shrink: 0;
-    }
-    .faq-category-title h2 {
-      font-size: 1.5rem;
-      color: var(--white);
-    }
-    .faq-category-title .cat-count {
-      margin-left: auto;
-      font-size: 0.7rem;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      color: var(--gold);
-      border: 1px solid rgba(201,169,110,0.3);
-      padding: 4px 12px;
-    }
-
-    /* ─── ACCORDION ──────────────────────────────────── */
-    .faq-item {
+    .faq-accordion-item {
       border: 1px solid var(--border);
+      border-top: none;
       background: var(--bg2);
-      margin-bottom: 8px;
       transition: border-color var(--transition);
-      overflow: hidden;
     }
-    .faq-item:hover {
-      border-color: rgba(201,169,110,0.3);
-    }
-    .faq-item.open {
-      border-color: rgba(201,169,110,0.5);
-      background: var(--bg3);
-    }
-    .faq-question {
+    .faq-accordion-item:first-child { border-top: 1px solid var(--border); border-radius: 2px 2px 0 0; }
+    .faq-accordion-item:last-child { border-radius: 0 0 2px 2px; }
+    .faq-accordion-item.open { border-color: rgba(201,169,110,0.35); }
+    .faq-accordion-item.open + .faq-accordion-item { border-top-color: rgba(201,169,110,0.2); }
+
+    .faq-accordion-btn {
       width: 100%;
+      background: none;
+      border: none;
+      padding: 20px 24px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding: 20px 24px;
-      background: none;
-      border: none;
+      cursor: pointer;
+      text-align: left;
       color: var(--text);
-      font-family: 'Inter', sans-serif;
+      transition: background var(--transition);
+    }
+    .faq-accordion-btn:hover { background: rgba(201,169,110,0.04); }
+    .faq-accordion-item.open .faq-accordion-btn { background: rgba(201,169,110,0.06); }
+
+    .faq-accordion-q {
       font-size: 0.95rem;
       font-weight: 500;
-      text-align: left;
-      cursor: pointer;
-      transition: color var(--transition);
+      color: var(--white);
+      line-height: 1.5;
+      flex: 1;
     }
-    .faq-question:hover { color: var(--gold); }
-    .faq-item.open .faq-question { color: var(--gold); }
-    .faq-icon {
-      flex-shrink: 0;
+    .faq-accordion-item.open .faq-accordion-q { color: var(--gold); }
+
+    .faq-accordion-icon {
       width: 28px;
       height: 28px;
-      border: 1px solid rgba(201,169,110,0.3);
+      border: 1px solid var(--border);
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: transform var(--transition), border-color var(--transition);
-      color: var(--gold);
+      flex-shrink: 0;
+      color: var(--text-dim);
       font-size: 1.1rem;
+      font-weight: 300;
+      transition: all var(--transition);
       line-height: 1;
     }
-    .faq-item.open .faq-icon {
-      transform: rotate(45deg);
+    .faq-accordion-item.open .faq-accordion-icon {
+      background: var(--gold);
       border-color: var(--gold);
+      color: #000;
+      transform: rotate(45deg);
     }
-    .faq-answer {
-      max-height: 0;
+
+    .faq-accordion-body {
       overflow: hidden;
-      transition: max-height 0.38s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease;
+      max-height: 0;
+      transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
     }
-    .faq-answer-inner {
-      padding: 0 24px 22px;
-      font-size: 0.9rem;
+    .faq-accordion-body.open {
+      max-height: 600px;
+    }
+    .faq-accordion-answer {
+      padding: 0 24px 20px 24px;
       color: var(--text-muted);
+      font-size: 0.88rem;
       line-height: 1.85;
       border-top: 1px solid var(--border);
     }
-    .faq-item.open .faq-answer {
-      max-height: 400px;
-    }
+    .faq-accordion-answer p { margin: 14px 0 0; }
+    .faq-accordion-answer p:first-child { margin-top: 14px; }
 
-    /* ─── NO RESULTS ─────────────────────────────────── */
-    .faq-no-results {
-      display: none;
+    /* ─── SKELETON LOADING ─────────────────────────────────── */
+    .faq-skeleton-item {
+      border: 1px solid var(--border);
+      border-top: none;
+      background: var(--bg2);
+      padding: 22px 24px;
+      animation: faqSkelPulse 1.4s ease-in-out infinite;
+    }
+    .faq-skeleton-item:first-child { border-top: 1px solid var(--border); }
+    @keyframes faqSkelPulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 0.9; }
+    }
+    .faq-skel-line {
+      height: 14px;
+      border-radius: 3px;
+      background: var(--border);
+    }
+    .faq-skel-line.short  { width: 40%; }
+    .faq-skel-line.medium { width: 68%; }
+    .faq-skel-line.long   { width: 88%; }
+
+    /* ─── NO RESULTS ───────────────────────────────────────── */
+    .faq-empty {
       text-align: center;
       padding: 64px 24px;
-      color: var(--text-muted);
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      display: none;
     }
-    .faq-no-results.visible { display: block; }
-    .faq-no-results p { font-size: 1rem; margin-top: 16px; }
-    .faq-no-results .no-res-icon { font-size: 3rem; }
+    .faq-empty-icon { font-size: 2.5rem; display: block; margin-bottom: 12px; }
 
-    /* ─── HIGHLIGHT ──────────────────────────────────── */
-    mark.faq-highlight {
+    /* ─── CTA BLOCK ────────────────────────────────────────── */
+    .faq-cta {
+      margin-top: 64px;
+      text-align: center;
+      padding: 48px 32px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .faq-cta-icon { font-size: 2.5rem; margin-bottom: 16px; display: block; }
+    .faq-cta h3 { color: var(--white); font-size: 1.3rem; margin-bottom: 10px; }
+    .faq-cta p { color: var(--text-muted); font-size: 0.88rem; max-width: 420px; margin: 0 auto 28px; line-height: 1.8; }
+    .faq-cta-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    /* ─── HIGHLIGHT SEARCH MATCH ───────────────────────────── */
+    mark.faq-hl {
       background: rgba(201,169,110,0.25);
       color: var(--gold);
       border-radius: 2px;
       padding: 0 2px;
     }
 
-    /* ─── CTA BOTTOM ─────────────────────────────────── */
-    .faq-cta {
-      padding: 80px 0 100px;
-      background: linear-gradient(135deg, #0f0c08, #1a1410, #0f0c08);
-      border-top: 1px solid var(--border);
-      text-align: center;
-    }
-    .faq-cta h2 {
-      font-size: clamp(1.6rem, 3vw, 2.5rem);
-      color: var(--white);
-      margin-bottom: 16px;
-    }
-    .faq-cta p {
-      color: var(--text-muted);
-      font-size: 0.95rem;
-      max-width: 480px;
-      margin: 0 auto 40px;
-      line-height: 1.8;
-    }
-    .faq-cta-btns {
-      display: flex;
-      gap: 16px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .faq-cta-arrow {
-      display: inline-block;
-      margin-left: 8px;
-      transition: transform var(--transition);
-    }
-    .btn-primary:hover .faq-cta-arrow,
-    .btn-outline:hover .faq-cta-arrow {
-      transform: translateX(4px);
-    }
-
-    /* ─── HIDDEN ITEMS (search) ───────────────────────── */
-    .faq-item.hidden,
-    .faq-category.hidden-cat { display: none; }
-
-    /* ─── RESPONSIVE ─────────────────────────────────── */
-    @media (max-width: 640px) {
-      .faq-hero { padding: 120px 0 60px; }
-      .faq-question { padding: 16px 18px; font-size: 0.88rem; }
-      .faq-answer-inner { padding: 0 18px 18px; }
-      .faq-category-title { flex-wrap: wrap; }
-      .faq-category-title .cat-count { margin-left: 0; }
+    /* ─── MOBILE ───────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .faq-accordion-btn { padding: 16px 18px; }
+      .faq-accordion-answer { padding: 0 18px 16px; }
+      .faq-cta { padding: 32px 20px; }
     }
   </style>
 </head>
@@ -270,15 +297,30 @@
   <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
     <div class="nav-inner">
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links">
+      <div class="nav-links" role="list">
         <a href="/catalog.html">Модели</a>
-        <a href="/#services">Услуги</a>
+        <a href="/pricing.html">Цены</a>
+        <a href="/cases.html">Кейсы</a>
         <a href="/about.html">О нас</a>
         <a href="/faq.html" style="color:var(--gold)">FAQ</a>
         <a href="/contact.html">Контакты</a>
+        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
+        <button onclick="DarkMode.toggle()"
+          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
+          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+        </button>
+        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
+           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
+           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
+          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+          <span>WhatsApp</span>
+        </a>
         <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
+      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu">
+        <span></span><span></span><span></span>
+      </button>
     </div>
   </nav>
 
@@ -286,25 +328,44 @@
   <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
     <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
     <a href="/catalog.html">Модели</a>
-    <a href="/#services">Услуги</a>
+    <a href="/pricing.html">Цены</a>
+    <a href="/cases.html">Кейсы</a>
     <a href="/about.html">О нас</a>
     <a href="/faq.html" style="color:var(--gold)">FAQ</a>
     <a href="/contact.html">Контакты</a>
+    <a href="/favorites.html">❤️ Избранное</a>
+    <a href="/cabinet.html">👤 Мои заявки</a>
     <a href="/booking.html" style="color:var(--gold)">Заказать</a>
   </nav>
+
+  <!-- BREADCRUMB -->
+  <div class="breadcrumb-bar">
+    <div class="container">
+      <nav class="breadcrumb" aria-label="Навигационная цепочка">
+        <a href="/">Главная</a>
+        <span class="breadcrumb-sep" aria-hidden="true">›</span>
+        <span class="breadcrumb-current" aria-current="page">FAQ</span>
+      </nav>
+    </div>
+  </div>
 
   <!-- HERO -->
   <section class="faq-hero" id="main-content" tabindex="-1">
     <div class="faq-hero-inner container">
-      <div class="section-tag" style="margin-bottom:20px">Справочный центр</div>
-      <h1>Часто задаваемые<br><em>вопросы</em></h1>
-      <p>Собрали ответы на самые популярные вопросы от клиентов и кандидаток. Не нашли нужное — напишите нам.</p>
+      <div class="section-tag" style="margin-bottom:20px">Помощь и поддержка</div>
+      <h1>Частые <em>вопросы</em></h1>
+      <p>Ответы на самые популярные вопросы о работе с агентством, выборе модели и оформлении заявок</p>
+      <div class="faq-count-badge" id="faqCountBadge" style="visibility:hidden">0 вопросов</div>
+    </div>
+  </section>
 
-      <!-- SEARCH -->
-      <div class="faq-search-wrap">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
+  <!-- MAIN FAQ CONTENT -->
+  <section class="faq-main" aria-label="Часто задаваемые вопросы">
+    <div class="container">
+
+      <!-- Search -->
+      <div class="faq-search-wrap" role="search">
+        <span class="faq-search-icon" aria-hidden="true">🔍</span>
         <input
           type="search"
           class="faq-search"
@@ -312,250 +373,53 @@
           placeholder="Поиск по вопросам..."
           aria-label="Поиск по FAQ"
           autocomplete="off"
+          oninput="filterFaq(this.value)"
         />
       </div>
-    </div>
-  </section>
 
-  <!-- FAQ CONTENT -->
-  <main class="faq-section" id="faqContent">
-    <div class="container">
-
-      <!-- CATEGORY: ДЛЯ КЛИЕНТОВ -->
-      <div class="faq-category" data-category="clients">
-        <div class="faq-category-title">
-          <div class="cat-icon">🤝</div>
-          <h2>Для клиентов</h2>
-          <span class="cat-count">5 вопросов</span>
+      <!-- Accordion container -->
+      <div class="faq-accordion" id="faqAccordion" role="list" aria-live="polite" aria-label="Список вопросов и ответов">
+        <!-- Skeleton loading state -->
+        <div class="faq-skeleton-item" aria-hidden="true">
+          <div class="faq-skel-line medium"></div>
         </div>
-
-        <div class="faq-item" data-question="Как происходит процесс бронирования?">
-          <button class="faq-question" aria-expanded="false">
-            Как происходит процесс бронирования?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Процесс прост и занимает всего несколько минут. Выберите модель из каталога, нажмите «Заказать» и заполните форму бронирования — укажите дату, время, формат мероприятия и пожелания. Наш менеджер свяжется с вами в течение одного часа для подтверждения и уточнения деталей. После согласования вы получите договор и счёт на оплату.
-            </div>
-          </div>
+        <div class="faq-skeleton-item" aria-hidden="true" style="border-top:none">
+          <div class="faq-skel-line long"></div>
         </div>
-
-        <div class="faq-item" data-question="Сколько стоят услуги?">
-          <button class="faq-question" aria-expanded="false">
-            Сколько стоят услуги?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Стоимость зависит от формата и продолжительности. Фотосессия начинается от 8 000 ₽ за 2 часа, мероприятие (хостес, корпоратив) — от 15 000 ₽ за 4 часа, показ мод — от 25 000 ₽ за полный день. Точная цена рассчитывается индивидуально с учётом количества моделей, локации и дополнительных требований. Для постоянных клиентов действуют специальные условия.
-            </div>
-          </div>
+        <div class="faq-skeleton-item" aria-hidden="true" style="border-top:none">
+          <div class="faq-skel-line short"></div>
         </div>
-
-        <div class="faq-item" data-question="Можно ли заказать модель на мероприятие?">
-          <button class="faq-question" aria-expanded="false">
-            Можно ли заказать модель на мероприятие?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Да, это одно из наших ключевых направлений. Мы предоставляем хостес и промо-моделей для корпоративных вечеров, выставок, светских приёмов, открытий и любых частных мероприятий. При необходимости подберём несколько моделей с координацией менеджера прямо на месте. Уточните детали при оформлении заявки.
-            </div>
-          </div>
+        <div class="faq-skeleton-item" aria-hidden="true" style="border-top:none">
+          <div class="faq-skel-line medium"></div>
         </div>
-
-        <div class="faq-item" data-question="Какие документы нужны?">
-          <button class="faq-question" aria-expanded="false">
-            Какие документы нужны для заключения договора?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Для физических лиц достаточно паспортных данных. Юридическим лицам и ИП необходимы реквизиты организации для оформления договора оказания услуг и закрывающих документов (акт + счёт-фактура). Все документы мы можем предоставить в электронном виде с ЭЦП или в бумажном формате.
-            </div>
-          </div>
-        </div>
-
-        <div class="faq-item" data-question="Как отменить бронирование?">
-          <button class="faq-question" aria-expanded="false">
-            Как отменить или перенести бронирование?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Отмену или перенос необходимо согласовать с менеджером. При отмене за 72 часа и более — предоплата возвращается в полном объёме. При отмене менее чем за 48 часов удерживается 50% стоимости. Перенос даты (при наличии свободного слота у модели) возможен без штрафов в любые сроки. Свяжитесь с нами по телефону или в Telegram.
-            </div>
-          </div>
+        <div class="faq-skeleton-item" aria-hidden="true" style="border-top:none">
+          <div class="faq-skel-line long"></div>
         </div>
       </div>
 
-      <!-- CATEGORY: ДЛЯ МОДЕЛЕЙ -->
-      <div class="faq-category" data-category="models">
-        <div class="faq-category-title">
-          <div class="cat-icon">✨</div>
-          <h2>Для моделей</h2>
-          <span class="cat-count">5 вопросов</span>
-        </div>
+      <!-- Empty / no results state -->
+      <div class="faq-empty" id="faqEmpty" role="status" aria-live="polite">
+        <span class="faq-empty-icon" aria-hidden="true">🔎</span>
+        По вашему запросу ничего не найдено.<br>
+        Попробуйте другой вопрос или <a href="/contact.html" style="color:var(--gold)">напишите нам напрямую</a>.
+      </div>
 
-        <div class="faq-item" data-question="Как попасть в агентство?">
-          <button class="faq-question" aria-expanded="false">
-            Как попасть в агентство?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Для начала отправьте заявку через форму на сайте или напишите нам в Telegram. Прикрепите несколько актуальных фотографий (лицо, рост, в полный рост) и укажите параметры. Если ваш типаж подходит нашим клиентам, мы пригласим вас на очный кастинг. После успешного прохождения кастинга вы будете добавлены в базу агентства.
-            </div>
-          </div>
-        </div>
-
-        <div class="faq-item" data-question="Какие требования к кандидаткам?">
-          <button class="faq-question" aria-expanded="false">
-            Какие требования к кандидаткам?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Базовые требования: возраст от 18 лет, рост от 168 см для подиума (для commercial и event — от 165 см). Важны ухоженный внешний вид, пунктуальность и коммуникабельность. Опыт работы моделью не обязателен — мы готовы обучить. Приветствуются языковые навыки (английский) и международный опыт, но это не обязательное условие.
-            </div>
-          </div>
-        </div>
-
-        <div class="faq-item" data-question="Как происходит оплата работы?">
-          <button class="faq-question" aria-expanded="false">
-            Как происходит оплата работы?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Оплата производится безналичным переводом на карту или расчётный счёт в течение 1–3 рабочих дней после завершения съёмки или мероприятия. Ставки обсуждаются индивидуально и зависят от формата работы, требований и вашего портфолио. Агентство работает по договору, что гарантирует прозрачность всех расчётов.
-            </div>
-          </div>
-        </div>
-
-        <div class="faq-item" data-question="Нужен ли опыт?">
-          <button class="faq-question" aria-expanded="false">
-            Нужен ли опыт в моделинге?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Опыт приветствуется, но не является обязательным требованием. Мы работаем как с опытными профессиональными моделями, так и с новичками, у которых есть потенциал. Для начинающих мы проводим вводные инструктажи и при необходимости направляем на подготовительные занятия с нашим хореографом и стилистом.
-            </div>
-          </div>
-        </div>
-
-        <div class="faq-item" data-question="Как проходит кастинг?">
-          <button class="faq-question" aria-expanded="false">
-            Как проходит кастинг?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Кастинг проходит в офисе агентства или онлайн (видеосозвон). Включает: личное знакомство, осмотр параметров, просмотр портфолио и короткий прогон по подиуму (или тест-видео для онлайн). Весь процесс занимает 20–40 минут. Кастинг бесплатный. Результат сообщается в течение 3 рабочих дней.
-            </div>
-          </div>
+      <!-- CTA -->
+      <div class="faq-cta" id="faqCta" style="display:none">
+        <span class="faq-cta-icon" aria-hidden="true">💬</span>
+        <h3>Не нашли ответ?</h3>
+        <p>Наш менеджер ответит на любой вопрос в течение часа — напишите в Telegram или оставьте заявку</p>
+        <div class="faq-cta-btns">
+          <a href="https://t.me/nevesty_models" target="_blank" rel="noopener" class="btn-primary">Написать в Telegram</a>
+          <a href="/contact.html" class="btn-outline">Контакты</a>
         </div>
       </div>
 
-      <!-- CATEGORY: ОБЩИЕ -->
-      <div class="faq-category" data-category="general">
-        <div class="faq-category-title">
-          <div class="cat-icon">💬</div>
-          <h2>Общие вопросы</h2>
-          <span class="cat-count">5 вопросов</span>
-        </div>
-
-        <div class="faq-item" data-question="Работаете ли вы в Дубае?">
-          <button class="faq-question" aria-expanded="false">
-            Работаете ли вы в Дубае и за рубежом?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Да, мы работаем на международном рынке. Дубай и страны ОАЭ — одно из наших активных направлений. Организуем выезды моделей на зарубежные мероприятия, показы и съёмки. Клиентам из-за рубежа предоставляем полный сервис: подбор модели, визовую поддержку, трансфер и координацию на месте. Свяжитесь с нами для обсуждения деталей.
-            </div>
-          </div>
-        </div>
-
-        <div class="faq-item" data-question="Есть ли приложение?">
-          <button class="faq-question" aria-expanded="false">
-            Есть ли мобильное приложение?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Отдельного мобильного приложения пока нет, однако наш сайт полностью адаптирован для смартфонов и планшетов. Также мы интегрированы с Telegram: вы можете просматривать каталог, оформлять заявки и отслеживать их статус прямо в Telegram через нашего бота <a href="https://t.me/nevesty_models" target="_blank" style="color:var(--gold)">@nevesty_models</a>.
-            </div>
-          </div>
-        </div>
-
-        <div class="faq-item" data-question="Как связаться с агентством?">
-          <button class="faq-question" aria-expanded="false">
-            Как связаться с агентством?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Вы можете связаться с нами несколькими способами: по телефону <a href="tel:+78005550000" style="color:var(--gold)">+7 (800) 555-00-00</a> (бесплатно, Пн–Вс 9:00–22:00), по email <a href="mailto:info@nevesty-models.ru" style="color:var(--gold)">info@nevesty-models.ru</a>, или написать в Telegram <a href="https://t.me/nevesty_models" target="_blank" style="color:var(--gold)">@nevesty_models</a>. Среднее время ответа — 15–30 минут в рабочее время.
-            </div>
-          </div>
-        </div>
-
-        <div class="faq-item" data-question="Безопасно ли бронировать онлайн?">
-          <button class="faq-question" aria-expanded="false">
-            Безопасно ли бронировать онлайн?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Абсолютно безопасно. Сайт работает по протоколу HTTPS, все платёжные операции осуществляются через сертифицированные платёжные шлюзы. Мы не храним данные банковских карт. Все договорённости фиксируются официальным договором. Агентство работает с 2014 года и имеет безупречную репутацию — более 500 успешных проектов и 98% довольных клиентов.
-            </div>
-          </div>
-        </div>
-
-        <div class="faq-item" data-question="Есть ли скидки для постоянных клиентов?">
-          <button class="faq-question" aria-expanded="false">
-            Есть ли скидки для постоянных клиентов?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" role="region">
-            <div class="faq-answer-inner">
-              Да, для постоянных клиентов действует программа лояльности. Начиная со второго заказа вы получаете персонального менеджера и приоритетный подбор модели. При сотрудничестве на постоянной основе (4+ заказа в год) предоставляются индивидуальные условия по стоимости. Также действуют сезонные акции — следите за нашим Telegram-каналом.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- NO RESULTS MESSAGE -->
-      <div class="faq-no-results" id="faqNoResults" aria-live="polite">
-        <div class="no-res-icon">🔍</div>
-        <p>По вашему запросу ничего не найдено.<br>Попробуйте другие ключевые слова.</p>
-      </div>
-
-    </div>
-  </main>
-
-  <!-- CTA BOTTOM -->
-  <section class="faq-cta">
-    <div class="container">
-      <div class="section-tag" style="margin-bottom:16px">Остались вопросы?</div>
-      <h2>Не нашли ответ?</h2>
-      <p>Напишите нам — мы ответим в течение 30 минут и поможем разобраться в любой ситуации.</p>
-      <div class="faq-cta-btns">
-        <a href="https://t.me/nevesty_models" target="_blank" rel="noopener" class="btn-primary">
-          Написать в Telegram<span class="faq-cta-arrow">→</span>
-        </a>
-        <a href="/booking.html" class="btn-outline">
-          Оформить заявку<span class="faq-cta-arrow">→</span>
-        </a>
-      </div>
     </div>
   </section>
 
   <!-- FOOTER -->
-  <footer class="footer">
+  <footer class="footer" role="contentinfo">
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
@@ -565,15 +429,19 @@
         <div class="footer-col">
           <h4>Агентство</h4>
           <a href="/catalog.html">Каталог моделей</a>
-          <a href="/#services">Услуги</a>
+          <a href="/pricing.html">Цены</a>
+          <a href="/cases.html">Кейсы</a>
           <a href="/about.html">О нас</a>
           <a href="/contact.html">Контакты</a>
         </div>
         <div class="footer-col">
           <h4>Клиентам</h4>
           <a href="/booking.html">Оформить заявку</a>
+          <a href="/cabinet.html">Мои заявки</a>
           <a href="/order-status.html">Статус заявки</a>
           <a href="/catalog.html">Выбрать модель</a>
+          <a href="/compare.html">Сравнить модели</a>
+          <a href="/favorites.html">Избранное</a>
           <a href="/faq.html" style="color:var(--gold)">FAQ</a>
           <a href="/privacy.html">Конфиденциальность</a>
         </div>
@@ -596,189 +464,186 @@
     </div>
   </footer>
 
+  <!-- Floating WhatsApp Button -->
+  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
+    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
+       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
+       onmouseover="this.style.background='#1da851';this.style.boxShadow='0 6px 20px rgba(37,211,102,0.5)'"
+       onmouseout="this.style.background='#25D366';this.style.boxShadow='0 4px 16px rgba(37,211,102,0.4)'">
+      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Написать в WhatsApp
+    </a>
+  </div>
+
   <div class="toast-container" id="toastContainer"></div>
+
   <script src="/js/main.js" defer></script>
-  <script src="/js/telegram-webapp.js" defer></script>
-  <script type="application/ld+json">
-[{
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  "name": "FAQ — Nevesty Models",
-  "url": "https://nevesty-models.ru/faq.html",
-  "mainEntity": [
-    {
-      "@type": "Question",
-      "name": "Как происходит процесс бронирования?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Выберите модель из каталога, нажмите «Заказать» и заполните форму бронирования. Наш менеджер свяжется с вами в течение одного часа."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "Сколько стоят услуги?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Фотосессия начинается от 8 000 ₽ за 2 часа, мероприятие — от 15 000 ₽ за 4 часа, показ мод — от 25 000 ₽ за полный день."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "Какие требования к кандидаткам?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Возраст от 18 лет, рост от 168 см для подиума (от 165 см для commercial и event). Опыт работы моделью не обязателен."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "Работаете ли вы за рубежом?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Да, мы работаем на международном рынке, в том числе в Дубае и странах ОАЭ. Организуем выезды моделей на зарубежные мероприятия и съёмки."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "Как отменить или перенести бронирование?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "При отмене за 72 часа и более — предоплата возвращается в полном объёме. При отмене менее чем за 48 часов удерживается 50% стоимости."
-      }
-    }
-  ]
-}
-,
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru",
-    "logo": "https://nevesty-models.ru/og-image.jpg",
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "contactType": "customer service",
-      "availableLanguage": "Russian"
-    }
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "itemListElement": [
-      {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
-      {"@type": "ListItem", "position": 2, "name": "FAQ", "item": "https://nevesty-models.ru/faq.html"}
-    ]
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "WebPage",
-    "name": "FAQ — Nevesty Models",
-    "description": "Ответы на частые вопросы о работе модельного агентства Nevesty Models: бронирование, цены, условия работы.",
-    "url": "https://nevesty-models.ru/faq.html",
-    "isPartOf": {"@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru"},
-    "inLanguage": "ru-RU",
-    "dateModified": "2026-05-15"
-  }
-]
-</script>
+  <script src="/js/darkmode.js"></script>
+  <script src="/js/analytics.js" defer></script>
 
   <script>
-  (function () {
-    // ── Accordion ──────────────────────────────────────────
-    document.querySelectorAll('.faq-question').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var item = btn.closest('.faq-item');
-        var isOpen = item.classList.contains('open');
+  // ─── FAQ state ─────────────────────────────────────────────────────────────
+  let faqItems = [];
 
-        // Close all open items in the same category
-        var category = item.closest('.faq-category');
-        category.querySelectorAll('.faq-item.open').forEach(function (openItem) {
-          openItem.classList.remove('open');
-          openItem.querySelector('.faq-question').setAttribute('aria-expanded', 'false');
-        });
+  // ─── Escape HTML ───────────────────────────────────────────────────────────
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
 
-        // Toggle clicked item
-        if (!isOpen) {
-          item.classList.add('open');
-          btn.setAttribute('aria-expanded', 'true');
-        }
-      });
-    });
+  // ─── Highlight search term ─────────────────────────────────────────────────
+  function highlight(text, query) {
+    if (!query) return escHtml(text);
+    const safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return escHtml(text).replace(
+      new RegExp('(' + safe + ')', 'gi'),
+      '<mark class="faq-hl">$1</mark>'
+    );
+  }
 
-    // ── Search / Filter ────────────────────────────────────
-    var searchInput = document.getElementById('faqSearch');
-    var noResults   = document.getElementById('faqNoResults');
-
-    function escapeRegex(str) {
-      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
-    function highlight(text, query) {
-      if (!query) return text;
-      var re = new RegExp('(' + escapeRegex(query) + ')', 'gi');
-      return text.replace(re, '<mark class="faq-highlight">$1</mark>');
-    }
-
-    function filterFAQ() {
-      var query = searchInput.value.trim().toLowerCase();
-      var visibleItems = 0;
-
-      document.querySelectorAll('.faq-category').forEach(function (cat) {
-        var catVisible = 0;
-
-        cat.querySelectorAll('.faq-item').forEach(function (item) {
-          var questionText = item.getAttribute('data-question') || '';
-          var answerText   = item.querySelector('.faq-answer-inner').textContent || '';
-          var combined     = (questionText + ' ' + answerText).toLowerCase();
-
-          if (!query || combined.includes(query)) {
-            item.classList.remove('hidden');
-            catVisible++;
-            visibleItems++;
-
-            // Restore / highlight
-            var qBtn = item.querySelector('.faq-question');
-            var originalQ = item.getAttribute('data-question');
-            var firstText = qBtn.childNodes[0];
-            if (firstText && firstText.nodeType === Node.TEXT_NODE) {
-              firstText.textContent = originalQ + ' ';
-            }
-            qBtn.innerHTML = highlight(originalQ, query) +
-              ' <span class="faq-icon" aria-hidden="true">+</span>';
-          } else {
-            item.classList.add('hidden');
-            // Close if open
-            item.classList.remove('open');
-            item.querySelector('.faq-question').setAttribute('aria-expanded', 'false');
+  // ─── Inject Schema.org FAQPage ─────────────────────────────────────────────
+  function injectFaqSchema(items) {
+    if (!items.length) return;
+    const schema = {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": items.map(function(item) {
+        return {
+          "@type": "Question",
+          "name": item.q,
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": item.a
           }
-        });
+        };
+      })
+    };
+    var el = document.getElementById('schema-faqpage');
+    if (el) el.textContent = JSON.stringify(schema, null, 2);
+  }
 
-        if (catVisible === 0) {
-          cat.classList.add('hidden-cat');
-        } else {
-          cat.classList.remove('hidden-cat');
-        }
-      });
+  // ─── Toggle accordion item ─────────────────────────────────────────────────
+  function toggleItem(btn) {
+    var item = btn.closest('.faq-accordion-item');
+    var body = item.querySelector('.faq-accordion-body');
+    var isOpen = item.classList.contains('open');
 
-      if (visibleItems === 0) {
-        noResults.classList.add('visible');
-      } else {
-        noResults.classList.remove('visible');
-      }
-    }
-
-    searchInput.addEventListener('input', filterFAQ);
-    searchInput.addEventListener('search', filterFAQ); // for clear button
-
-    // ── Open first item of each category by default ────────
-    document.querySelectorAll('.faq-category').forEach(function (cat) {
-      var first = cat.querySelector('.faq-item');
-      if (first) {
-        first.classList.add('open');
-        first.querySelector('.faq-question').setAttribute('aria-expanded', 'true');
-      }
+    // Close all open items
+    document.querySelectorAll('.faq-accordion-item.open').forEach(function(el) {
+      el.classList.remove('open');
+      el.querySelector('.faq-accordion-body').classList.remove('open');
+      el.querySelector('.faq-accordion-btn').setAttribute('aria-expanded', 'false');
     });
-  })();
+
+    // Open clicked item if it was closed
+    if (!isOpen) {
+      item.classList.add('open');
+      body.classList.add('open');
+      btn.setAttribute('aria-expanded', 'true');
+    }
+  }
+
+  // ─── Build accordion HTML ──────────────────────────────────────────────────
+  function buildAccordion(items, query) {
+    if (!items.length) return '';
+    return items.map(function(item, i) {
+      return '<div class="faq-accordion-item" role="listitem">' +
+        '<button class="faq-accordion-btn" aria-expanded="false"' +
+        ' aria-controls="faq-answer-' + i + '" onclick="toggleItem(this)">' +
+        '<span class="faq-accordion-q">' + highlight(item.q, query) + '</span>' +
+        '<span class="faq-accordion-icon" aria-hidden="true">+</span>' +
+        '</button>' +
+        '<div class="faq-accordion-body" id="faq-answer-' + i + '" role="region">' +
+        '<div class="faq-accordion-answer"><p>' + highlight(item.a, query) + '</p></div>' +
+        '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  // ─── Filter FAQ by search query ────────────────────────────────────────────
+  function filterFaq(query) {
+    var q = query.trim().toLowerCase();
+    var accordion = document.getElementById('faqAccordion');
+    var emptyEl   = document.getElementById('faqEmpty');
+
+    var filtered = q
+      ? faqItems.filter(function(item) {
+          return item.q.toLowerCase().indexOf(q) !== -1 ||
+                 item.a.toLowerCase().indexOf(q) !== -1;
+        })
+      : faqItems;
+
+    accordion.innerHTML = buildAccordion(filtered, q ? query.trim() : '');
+
+    if (filtered.length === 0) {
+      emptyEl.style.display = 'block';
+      accordion.style.display = 'none';
+    } else {
+      emptyEl.style.display = 'none';
+      accordion.style.display = 'flex';
+    }
+  }
+
+  // ─── Russian plural helper ─────────────────────────────────────────────────
+  function plural(n, one, few, many) {
+    var mod10 = n % 10, mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return n + ' ' + one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return n + ' ' + few;
+    return n + ' ' + many;
+  }
+
+  // ─── Load FAQ from API ─────────────────────────────────────────────────────
+  function loadFaq() {
+    var accordion = document.getElementById('faqAccordion');
+    var badge     = document.getElementById('faqCountBadge');
+    var ctaEl     = document.getElementById('faqCta');
+
+    fetch('/api/faq')
+      .then(function(resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(function(items) {
+        faqItems = Array.isArray(items) ? items : [];
+
+        // Update title & badge
+        if (faqItems.length) {
+          document.title = 'FAQ — ' + plural(faqItems.length, 'вопрос', 'вопроса', 'вопросов') + ' | Nevesty Models';
+          badge.textContent = plural(faqItems.length, 'вопрос', 'вопроса', 'вопросов');
+          badge.style.visibility = 'visible';
+        }
+
+        // Inject Schema.org FAQPage
+        injectFaqSchema(faqItems);
+
+        // Render accordion
+        accordion.innerHTML = buildAccordion(faqItems, '');
+        if (ctaEl) ctaEl.style.display = faqItems.length ? 'block' : 'none';
+      })
+      .catch(function(err) {
+        console.error('FAQ load error:', err);
+        accordion.innerHTML = '<div style="padding:32px 24px;color:var(--text-muted);font-size:0.88rem;text-align:center">Не удалось загрузить FAQ. <a href="/contact.html" style="color:var(--gold)">Свяжитесь с нами</a>.</div>';
+      });
+  }
+
+  // ─── WhatsApp button ───────────────────────────────────────────────────────
+  fetch('/api/settings/public').then(function(r) { return r.json(); }).then(function(d) {
+    if (d.contacts_whatsapp) {
+      var waNum = d.contacts_whatsapp.replace(/\D/g, '');
+      var waUrl = 'https://wa.me/' + waNum;
+      var btn = document.getElementById('whatsapp-btn');
+      if (btn) { btn.href = waUrl; btn.style.display = 'flex'; }
+      var floatEl   = document.getElementById('float-whatsapp');
+      var floatLink = document.getElementById('float-wa-link');
+      if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
+    }
+  }).catch(function() {});
+
+  // ─── Init ──────────────────────────────────────────────────────────────────
+  loadFaq();
   </script>
 </body>
 </html>

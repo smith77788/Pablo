@@ -183,6 +183,7 @@
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('email')"      id="tab-email">📧 Email</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('payment')"   id="tab-payment">💳 Оплата</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('password')"   id="tab-password">🔑 Пароль</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('faq')"         id="tab-faq">❓ FAQ</button>
       </div>
 
       <!-- ═══ TAB: Профиль ═══════════════════════════════════════════════════ -->
@@ -901,6 +902,34 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre>
               </div>
               <button class="btn btn-md btn-ghost" style="white-space:nowrap"
                 onclick="exportOrders()">⬇ Скачать CSV</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: FAQ ════════════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-faq">
+        <div class="section-card">
+          <div class="section-card-header">
+            <div class="section-card-title">❓ FAQ — Часто задаваемые вопросы</div>
+          </div>
+          <div class="section-card-body padded">
+            <div class="admin-form-group">
+              <div class="form-label-row">
+                <label>Элементы FAQ (JSON)</label>
+                <a href="/faq.html" target="_blank" style="font-size:0.75rem;color:var(--gold);text-decoration:none">↗ Просмотр страницы FAQ</a>
+              </div>
+              <textarea class="admin-input" id="faq_items" rows="14" style="resize:vertical;font-family:monospace;font-size:0.82rem"
+                placeholder='[&#10;  {"q": "Как заказать модель?", "a": "Ответ здесь..."},&#10;  {"q": "Стоимость услуг?", "a": "Ответ здесь..."}&#10;]'></textarea>
+              <div class="field-note">
+                Формат: JSON-массив объектов с полями <code style="color:var(--gold)">"q"</code> (вопрос) и <code style="color:var(--gold)">"a"</code> (ответ).<br>
+                Пример: <code style="color:var(--text-dim)">[{"q": "Вопрос?", "a": "Ответ."}]</code>
+              </div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:20px">
+              <button class="btn btn-md btn-gold" id="btnSaveFaq" onclick="saveFaq(this)">Сохранить FAQ</button>
+              <button class="btn btn-md btn-ghost" onclick="validateFaqJson()">Проверить JSON</button>
+              <span id="faqJsonStatus" style="font-size:0.78rem;color:var(--text-muted)"></span>
             </div>
           </div>
         </div>
