@@ -29,6 +29,7 @@ const ACTIVE_BOOKING_STATES = new Set([
   'bk_s2_budget', 'bk_s2_comments', 'bk_s3_name', 'bk_s3_phone',
   'bk_s3_email', 'bk_s3_tg', 'bk_s4',
   'leave_review_text', 'bk_quick_name', 'bk_quick_phone',
+  'profile_edit_name', 'profile_edit_phone',
 ]);
 
 function resetSessionTimer(chatId) {
@@ -4734,6 +4735,12 @@ function initBot(app) {
 
     // ── Профиль: изменить контакты
     if (data === 'profile_edit_contacts') return startEditProfile(chatId);
+    if (data === 'profile_edit_name') {
+      await setSession(chatId, 'profile_edit_name', {});
+      return safeSend(chatId, '👤 Введіть нове ім\'я:', {
+        reply_markup: { inline_keyboard: [[{ text: '❌ Скасувати', callback_data: 'profile' }]] }
+      });
+    }
     if (data === 'profile_edit_phone') {
       await setSession(chatId, 'profile_edit_phone', {});
       return safeSend(chatId, '📞 Введите новый номер телефона:', {
@@ -5242,6 +5249,23 @@ function initBot(app) {
           reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
         }
       );
+    }
+
+    // ── Edit profile name
+    if (state === 'profile_edit_name') {
+      if (!text || text.trim().length < 2) {
+        return safeSend(chatId, '❌ Введіть ім\'я (мінімум 2 символи):');
+      }
+      const newName = text.trim();
+      await run(
+        `UPDATE orders SET client_name=? WHERE client_chat_id=? AND id=(SELECT MAX(id) FROM orders WHERE client_chat_id=?)`,
+        [newName, String(chatId), String(chatId)]
+      ).catch(() => {});
+      await clearSession(chatId);
+      return safeSend(chatId, `✅ Ім'я оновлено: *${esc(newName)}*`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '👤 Мій профіль', callback_data: 'profile' }]] }
+      });
     }
 
     // ── Edit profile phone
@@ -6490,6 +6514,7 @@ async function startEditProfile(chatId) {
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
+        [{ text: '👤 Змінити ім\'я',   callback_data: 'profile_edit_name'  }],
         [{ text: '📞 Изменить телефон', callback_data: 'profile_edit_phone' }],
         [{ text: '← Профиль',           callback_data: 'profile'            }],
       ]}
@@ -6619,19 +6644,27 @@ async function showWishlist(chatId, page = 0) {
     }
 
     const totalRow = await get('SELECT COUNT(*) as c FROM wishlists WHERE chat_id=?', [String(chatId)]).catch(() => ({ c: items.length }));
-    const keyboard = items.map(m => [{
-      text: `${m.featured ? '⭐ ' : ''}${m.name} · ${MODEL_CATEGORIES[m.category] || m.category} · ${m.city || ''}`,
-      callback_data: `fav_view_${m.id}`
-    }]);
+
+    let text = `❤️ *Обрані моделі* \\(${totalRow.c}\\)\n\n`;
+    const keyboard = [];
+    for (const m of items) {
+      const star = m.featured ? '⭐ ' : '';
+      const cat  = MODEL_CATEGORIES[m.category] || m.category || '';
+      const city = m.city ? ` · ${esc(m.city)}` : '';
+      text += `${star}*${esc(m.name)}* · ${esc(cat)}${city}\n`;
+      keyboard.push([
+        { text: '👁 Переглянути', callback_data: `fav_view_${m.id}` },
+        { text: '❌ Видалити',    callback_data: `fav_remove_${m.id}` },
+      ]);
+    }
 
     const navRow = [];
-    if (page > 0) navRow.push({ text: '← Назад', callback_data: `fav_list_${page - 1}` });
-    if (hasMore) navRow.push({ text: 'Далее →', callback_data: `fav_list_${page + 1}` });
+    if (page > 0) navRow.push({ text: '◀️ Назад',  callback_data: `fav_list_${page - 1}` });
+    if (hasMore)  navRow.push({ text: 'Далі ▶️',   callback_data: `fav_list_${page + 1}` });
     if (navRow.length) keyboard.push(navRow);
-    keyboard.push([{ text: '💃 Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Главная', callback_data: 'main_menu' }]);
+    keyboard.push([{ text: '💃 Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Головна', callback_data: 'main_menu' }]);
 
-    return safeSend(chatId,
-      `❤️ *Избранные модели* \\(${items.length} из ${totalRow.c}\\)`,
+    return safeSend(chatId, text,
       { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
     );
   } catch (e) { console.error('[Bot] showWishlist:', e.message); }
@@ -6790,7 +6823,7 @@ function _registerNewFeatures() {
     }
     if (data.startsWith('fav_list_')) {
       const page = parseInt(data.replace('fav_list_', '')) || 0;
-      return showFavorites(chatId, page);
+      return showWishlist(chatId, page);
     }
 
     // View model from wishlist

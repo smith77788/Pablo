@@ -292,9 +292,11 @@ async function initDatabase() {
     ['contacts_insta', '@nevesty_models'],
     ['contacts_addr',  'Москва, ул. Пресненская, 8'],
     ['pricing',        'Fashion/Commercial — от 5000₽/час\nEvents — от 8000₽/час\nRunway — от 10000₽/час'],
-    ['notif_new_order', '1'],
-    ['notif_status',    '1'],
-    ['notif_message',   '1'],
+    ['notif_new_order',       '1'],
+    ['notif_status',          '1'],
+    ['notif_message',         '1'],
+    ['wishlist_enabled',      '1'],
+    ['quick_booking_enabled', '1'],
   ];
   for (const [key, value] of defaults) {
     await run('INSERT OR IGNORE INTO bot_settings (key,value) VALUES (?,?)', [key, value]);
@@ -484,6 +486,10 @@ async function initDatabase() {
     created_at TEXT DEFAULT (datetime('now'))
   )`).catch(() => {});
   await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (12, 'faq table')`).catch(() => {});
+
+  // Schema v13 — wishlists index & ensure INTEGER chat_id compatibility
+  await run(`CREATE INDEX IF NOT EXISTS idx_wishlists_chat_model ON wishlists(chat_id, model_id)`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (13, 'wishlists composite index, quick_booking_enabled & wishlist_enabled defaults')`).catch(() => {});
 
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
