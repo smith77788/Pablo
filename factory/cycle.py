@@ -3204,6 +3204,48 @@ def run_cycle() -> dict:
         logger.error("Phase 5.3b CEO Intelligence error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 5.3c — CEO STRATEGIC CORE: delegation + decision tracking
+    # Uses StrategicCore.delegate_next_cycle() and track_decisions()
+    # for enhanced CEO Intelligence (БЛОК 5.3).
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🧠 PHASE 5.3c: CEO STRATEGIC CORE DELEGATION + TRACKING")
+    try:
+        _ceo_sc = StrategicCore()
+
+        # Build dept_results summary from current cycle phases
+        _dept_results_for_delegation: dict = {}
+        for _phase_name, _phase_data in results.get("phases", {}).items():
+            if _phase_name in ("analytics", "ceo", "ceo_synthesis", "departments", "ideas",
+                               "ceo_intelligence", "ceo_experiment_proposals", "ceo_weekly_report"):
+                continue
+            if isinstance(_phase_data, dict):
+                _dept_results_for_delegation[_phase_name] = _phase_data
+
+        # Delegate next cycle focus using StrategicCore heuristics
+        _sc_delegation = _ceo_sc.delegate_next_cycle(_dept_results_for_delegation)
+
+        # Track recent decision execution rates
+        _sc_tracking = _ceo_sc.track_decisions(last_n=10)
+        _executed_count = sum(1 for t in _sc_tracking if t.get("executed"))
+        _tracking_rate = round(_executed_count / max(len(_sc_tracking), 1) * 100)
+
+        results["phases"]["ceo_strategic_delegation"] = {
+            "status": "ok",
+            "delegation_directive": _sc_delegation,
+            "decisions_tracked": len(_sc_tracking),
+            "execution_rate_pct": _tracking_rate,
+        }
+        summary_lines.append(f"🎯 CEO Delegation: {_sc_delegation[:80]}")
+        summary_lines.append(f"📋 Decision execution rate: {_tracking_rate}% ({_executed_count}/{len(_sc_tracking)})")
+        logger.info(
+            "[Phase5.3c] CEO strategic delegation: directive=%s, tracking_rate=%s%%",
+            _sc_delegation[:60], _tracking_rate,
+        )
+    except Exception as e:
+        results["phases"]["ceo_strategic_delegation"] = {"status": "error", "error": str(e)}
+        logger.error("Phase 5.3c CEO strategic delegation error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 29 — SOCIAL MEDIA DEPARTMENT (heuristic, always runs)
     # Generates Instagram content plan for the week
     # ════════════════════════════════════════════════════════════════

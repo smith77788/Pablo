@@ -498,6 +498,77 @@ class StrategicCore(FactoryAgent):
         )
         return summary
 
+    def delegate_next_cycle(self, dept_results: dict) -> str:
+        """Decide which department gets priority focus for the next cycle.
+
+        Scans department results for the lowest score / worst health and returns
+        a human-readable delegation directive for Telegram / CEO memo.
+
+        Args:
+            dept_results: mapping of department name → result dict.
+                          Each result may carry a 'score' (0-100) and/or 'status'
+                          ('ok', 'warning', 'error').
+        Returns:
+            Delegation string, e.g. "Приоритет следующего цикла: sales (требует внимания)"
+        """
+        worst_dept: str | None = None
+        worst_score = 999
+
+        status_weight = {"error": 0, "warning": 40, "ok": 100}
+
+        for dept, result in dept_results.items():
+            if not isinstance(result, dict):
+                continue
+            # Prefer an explicit numeric score; fall back to status → implicit score
+            score = result.get("score")
+            if score is None:
+                score = status_weight.get(result.get("status", "ok"), 100)
+            try:
+                score = int(score)
+            except (TypeError, ValueError):
+                score = 100
+
+            if score < worst_score:
+                worst_score = score
+                worst_dept = dept
+
+        if worst_dept and worst_score < 70:
+            directive = f"Приоритет следующего цикла: {worst_dept} (требует внимания, score={worst_score})"
+        elif worst_dept:
+            directive = f"Все департаменты работают штатно. Рекомендуемый фокус: {worst_dept} для проактивного роста"
+        else:
+            directive = "Все департаменты работают штатно"
+
+        logger.info("[CEO] Delegation: %s", directive)
+        return directive
+
+    def track_decisions(self, last_n: int = 10) -> list[dict]:
+        """Return recent decisions with their execution status for CEO tracking.
+
+        Args:
+            last_n: How many recent decisions to fetch.
+        Returns:
+            List of decision dicts with keys: id, decision_type, rationale,
+            executed, created_at.
+        """
+        rows = db.get_recent_decisions(last_n)
+        tracking = []
+        for row in rows:
+            tracking.append({
+                "id": row.get("id"),
+                "decision_type": row.get("decision_type"),
+                "rationale": (row.get("rationale") or "")[:120],
+                "executed": bool(row.get("executed")),
+                "created_at": row.get("created_at"),
+            })
+        if tracking:
+            executed_count = sum(1 for t in tracking if t["executed"])
+            logger.info(
+                "[CEO] Decision tracking: %d/%d executed",
+                executed_count, len(tracking),
+            )
+        return tracking
+
     def evaluate_experiment(self, experiment: dict) -> str:
         """Evaluate a running experiment and decide scale/iterate/kill."""
         conv_a = experiment.get("conversion_a", 0)
