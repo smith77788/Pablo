@@ -6403,7 +6403,8 @@ _Цены ориентировочные\\. Точная стоимость со
 
 async function showCatalogByCity(chatId, city, page = 0) {
   try {
-    const perPage = parseInt(await getSetting('catalog_per_page') || '5');
+    const _rawPerPageCity = parseInt(await getSetting('catalog_per_page').catch(() => '6')) || 6;
+    const perPage = Math.min(12, Math.max(3, _rawPerPageCity));
     const models = city
       ? await query('SELECT * FROM models WHERE available=1 AND city=? ORDER BY id', [city])
       : await query('SELECT * FROM models WHERE available=1 ORDER BY id');
