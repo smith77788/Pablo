@@ -2739,7 +2739,7 @@ async function doSendBroadcast(chatId) {
   for (const cid of recipients) {
     const result = await _sendOneBroadcastMsg(cid, photoId, text);
     if (result === 'ok') sent++; else failed++;
-    await new Promise(r => setTimeout(r, 10)); // 10ms delay between sends
+    await new Promise(r => setTimeout(r, 50)); // 50ms delay between sends (rate limit)
   }
   const durationSec = Math.round((Date.now() - startTime) / 1000);
 
@@ -2754,8 +2754,9 @@ async function doSendBroadcast(chatId) {
   await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, segment, duration: durationSec });
   await clearSession(chatId);
   const total = recipients.length;
+  const segLabel = _bcSegmentLabel(segment);
   return safeSend(chatId,
-    `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*\n📬 Всего: *${total}*\n⏱ Время: *${durationSec}с*`,
+    `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*\n📬 Всего: *${total}*\n🎯 Аудитория: *${esc(segLabel)}*\n⏱ Время: *${durationSec}с*`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
