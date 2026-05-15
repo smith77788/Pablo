@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { cache, TTL_SETTINGS } = require('./services/cache');
 
-const DB_PATH = path.join(__dirname, 'data.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data.db');
 let db;
 
 function query(sql, params = []) {
@@ -35,7 +35,7 @@ function get(sql, params = []) {
 }
 
 async function initDatabase() {
-  db = new sqlite3.Database(DB_PATH);
+  db = new sqlite3.Database(process.env.DB_PATH || DB_PATH);
 
   // Performance pragmas — set before any table operations
   await run('PRAGMA journal_mode=WAL');
@@ -546,4 +546,4 @@ async function setSetting(key, value) {
   cache.del(`setting:${key}`);
 }
 
-module.exports = { initDatabase, query, run, get, generateOrderNumber, closeDatabase, getSetting, setSetting };
+module.exports = { initDatabase, initDB: initDatabase, query, run, get, generateOrderNumber, closeDatabase, getSetting, setSetting };

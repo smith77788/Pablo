@@ -7,10 +7,23 @@
     "start": "node server.js",
     "start:prod": "NODE_ENV=production node server.js",
     "dev": "nodemon server.js",
-    "lint": "eslint bot.js server.js routes/api.js",
-    "lint:fix": "eslint bot.js server.js routes/api.js --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:legacy": "eslint bot.js server.js routes/api.js",
     "check": "node --check bot.js && node --check server.js && node --check routes/api.js",
-    "test": "echo 'Tests not yet configured' && exit 0"
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/api.test.js"
+    ],
+    "testTimeout": 10000
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -31,6 +44,7 @@
   },
   "devDependencies": {
     "eslint": "^10.3.0",
+    "jest": "^29.7.0",
     "nodemon": "^3.0.2"
   }
 }
