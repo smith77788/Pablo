@@ -466,7 +466,7 @@ const Profile = () => {
                           className="h-7 text-xs"
                         />
                         {(order.status === "new" || order.status === "processing") && (
-                          <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => cancelMutation.mutate(order.id)}>
+                          <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate(order.id)}>
                             <XCircle className="w-3.5 h-3.5 mr-1" /> Скасувати
                           </Button>
                         )}
@@ -578,7 +578,7 @@ const Profile = () => {
                     <Checkbox checked={addressForm.is_default} onCheckedChange={(v) => setAddressForm({ ...addressForm, is_default: v === true })} />
                     <span>Використовувати за замовчуванням</span>
                   </label>
-                  <Button className="w-full" onClick={() => saveAddress.mutate()} disabled={!addressForm.city || !addressForm.address}>Зберегти</Button>
+                  <Button className="w-full" onClick={() => saveAddress.mutate()} disabled={!addressForm.city || !addressForm.address || saveAddress.isPending}>Зберегти</Button>
                 </div>
               </DialogContent>
             </Dialog>
