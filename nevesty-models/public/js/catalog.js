@@ -156,14 +156,32 @@
   if (skeleton) skeleton.style.display = 'none';
   if (grid) grid.style.display = '';
 
-  // ── Populate city dropdown dynamically ───────────────────────────────────────
-  const cities = [...new Set(allModels.map(m => m.city).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
-  cities.forEach(city => {
-    const opt = document.createElement('option');
-    opt.value = city;
-    opt.textContent = city;
-    citySelect.appendChild(opt);
-  });
+  // ── Populate city dropdown from /api/cities (admin-managed list) ─────────────
+  try {
+    const citiesRes = await fetch('/api/cities');
+    if (citiesRes.ok) {
+      const citiesData = await citiesRes.json();
+      if (citiesData.ok && Array.isArray(citiesData.cities)) {
+        citiesData.cities.forEach(city => {
+          const opt = document.createElement('option');
+          opt.value = city;
+          opt.textContent = city;
+          if (citySelect) citySelect.appendChild(opt);
+        });
+      }
+    }
+  } catch (_) {
+    // Fallback: populate from loaded model data if API fails
+    const citiesFallback = [...new Set(allModels.map(m => m.city).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, 'ru')
+    );
+    citiesFallback.forEach(city => {
+      const opt = document.createElement('option');
+      opt.value = city;
+      opt.textContent = city;
+      if (citySelect) citySelect.appendChild(opt);
+    });
+  }
 
   // ── Apply initial values from URL ────────────────────────────────────────────
   function applyUrlParamsToUI() {

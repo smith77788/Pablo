@@ -295,6 +295,21 @@ router.get('/csrf-token', (req, res) => {
   res.json({ token: generateToken(ip) });
 });
 
+// ─── Cities list (public) ─────────────────────────────────────────────────────
+router.get('/cities', async (req, res) => {
+  try {
+    const citiesSetting =
+      (await getSetting('cities_list').catch(() => null)) || 'Москва,Санкт-Петербург,Краснодар,Екатеринбург';
+    const cities = citiesSetting
+      .split(',')
+      .map(c => c.trim())
+      .filter(Boolean);
+    res.json({ ok: true, cities });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 /** Helper: issue full JWT + refresh token pair for an admin */
