@@ -10,10 +10,13 @@ class SimpleCache {
     this._misses = 0;
   }
 
-  /** @param {string} key @param {number} [ttlMs] @returns {*|undefined} */
-  get(key, ttlMs) {
+  /** @param {string} key @param {number} [_ttlMs] @returns {*|undefined} */
+  get(key, _ttlMs) {
     const entry = this._store.get(key);
-    if (!entry) { this._misses++; return undefined; }
+    if (!entry) {
+      this._misses++;
+      return undefined;
+    }
     if (Date.now() > entry.expiresAt) {
       this._store.delete(key);
       this._misses++;
@@ -25,7 +28,7 @@ class SimpleCache {
 
   /** @param {string} key @param {*} value @param {number} [ttlMs] */
   set(key, value, ttlMs) {
-    const ttl = (typeof ttlMs === 'number' && ttlMs > 0) ? ttlMs : this._defaultTtl;
+    const ttl = typeof ttlMs === 'number' && ttlMs > 0 ? ttlMs : this._defaultTtl;
     this._store.set(key, { value, expiresAt: Date.now() + ttl });
   }
 
@@ -57,17 +60,16 @@ class SimpleCache {
       keys: this._store.size,
       hits: this._hits,
       misses: this._misses,
-      hit_rate: (this._hits + this._misses) > 0
-        ? Math.round(this._hits / (this._hits + this._misses) * 100) + '%'
-        : 'n/a',
+      hit_rate:
+        this._hits + this._misses > 0 ? Math.round((this._hits / (this._hits + this._misses)) * 100) + '%' : 'n/a',
     };
   }
 }
 
 // TTL constants (ms)
-const TTL_SETTINGS = 5 * 60 * 1000;   // 5 min — stable config values
-const TTL_CATALOG  = 2 * 60 * 1000;   // 2 min — model catalog pages
-const TTL_COUNTER  = 30 * 1000;        // 30 s  — frequently changing counters
+const TTL_SETTINGS = 5 * 60 * 1000; // 5 min — stable config values
+const TTL_CATALOG = 2 * 60 * 1000; // 2 min — model catalog pages
+const TTL_COUNTER = 30 * 1000; // 30 s  — frequently changing counters
 
 const cache = new SimpleCache(TTL_SETTINGS);
 

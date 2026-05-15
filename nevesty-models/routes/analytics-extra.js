@@ -27,7 +27,8 @@ function auth(req, res, next) {
 router.get('/admin/analytics/revenue', auth, async (req, res, next) => {
   try {
     const months = Math.min(Math.max(parseInt(req.query.months || '12'), 1), 36);
-    const rows = await query(`
+    const rows = await query(
+      `
       SELECT
         strftime('%Y-%m', created_at) AS month,
         COUNT(*) AS orders,
@@ -38,7 +39,9 @@ router.get('/admin/analytics/revenue', auth, async (req, res, next) => {
         AND created_at >= datetime('now', '-' || ? || ' months')
       GROUP BY month
       ORDER BY month ASC
-    `, [months]);
+    `,
+      [months]
+    );
 
     const months_rows = rows.map(r => ({
       month: r.month,
@@ -48,7 +51,9 @@ router.get('/admin/analytics/revenue', auth, async (req, res, next) => {
     }));
 
     res.json({ months: months_rows });
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ─── Model performance stats ──────────────────────────────────────────────────
@@ -59,7 +64,8 @@ router.get('/admin/analytics/model-stats/:id', auth, async (req, res, next) => {
 
     const [model, orderStats, monthlyOrders, reviews] = await Promise.all([
       get('SELECT id, name, city, category, available, featured FROM models WHERE id = ?', [modelId]),
-      get(`
+      get(
+        `
         SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
@@ -67,25 +73,31 @@ router.get('/admin/analytics/model-stats/:id', auth, async (req, res, next) => {
           SUM(CASE WHEN status IN ('new','reviewing','confirmed','in_progress') THEN 1 ELSE 0 END) AS active,
           AVG(COALESCE(CAST(REPLACE(REPLACE(budget,'₽',''),' ','') AS INTEGER), 0)) AS avg_budget
         FROM orders WHERE model_id = ?
-      `, [modelId]),
-      query(`
+      `,
+        [modelId]
+      ),
+      query(
+        `
         SELECT strftime('%Y-%m', created_at) AS month, COUNT(*) AS cnt
         FROM orders WHERE model_id = ? AND created_at >= datetime('now','-12 months')
         GROUP BY month ORDER BY month
-      `, [modelId]),
-      query(`
+      `,
+        [modelId]
+      ),
+      query(
+        `
         SELECT rating, COUNT(*) AS cnt, AVG(rating) AS avg_rating
         FROM reviews WHERE model_id = ? AND approved = 1
         GROUP BY rating ORDER BY rating DESC
-      `, [modelId]),
+      `,
+        [modelId]
+      ),
     ]);
 
     if (!model) return res.status(404).json({ error: 'Model not found' });
 
     const totalReviews = reviews.reduce((s, r) => s + r.cnt, 0);
-    const avgRating = totalReviews > 0
-      ? reviews.reduce((s, r) => s + r.rating * r.cnt, 0) / totalReviews
-      : null;
+    const avgRating = totalReviews > 0 ? reviews.reduce((s, r) => s + r.rating * r.cnt, 0) / totalReviews : null;
 
     res.json({
       model,
@@ -103,14 +115,17 @@ router.get('/admin/analytics/model-stats/:id', auth, async (req, res, next) => {
         distribution: reviews,
       },
     });
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ─── Daily heatmap (calendar view) ───────────────────────────────────────────
 router.get('/admin/analytics/heatmap', auth, async (req, res, next) => {
   try {
     const year = parseInt(req.query.year || new Date().getFullYear());
-    const rows = await query(`
+    const rows = await query(
+      `
       SELECT
         strftime('%Y-%m-%d', created_at) AS day,
         COUNT(*) AS cnt
@@ -118,13 +133,19 @@ router.get('/admin/analytics/heatmap', auth, async (req, res, next) => {
       WHERE created_at >= ? AND created_at < ?
       GROUP BY day
       ORDER BY day
-    `, [`${year}-01-01`, `${year + 1}-01-01`]);
+    `,
+      [`${year}-01-01`, `${year + 1}-01-01`]
+    );
 
     const heatmap = {};
-    rows.forEach(r => { heatmap[r.day] = r.cnt; });
+    rows.forEach(r => {
+      heatmap[r.day] = r.cnt;
+    });
 
     res.json({ year, heatmap });
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ─── Client LTV distribution ──────────────────────────────────────────────────
@@ -146,7 +167,7 @@ router.get('/admin/analytics/client-ltv', auth, async (req, res, next) => {
       LIMIT 50
     `);
 
-    const buckets = { '1': 0, '2': 0, '3-5': 0, '6+': 0 };
+    const buckets = { 1: 0, 2: 0, '3-5': 0, '6+': 0 };
     clients.forEach(c => {
       if (c.completed >= 6) buckets['6+']++;
       else if (c.completed >= 3) buckets['3-5']++;
@@ -154,7 +175,9 @@ router.get('/admin/analytics/client-ltv', auth, async (req, res, next) => {
       else buckets['1']++;
     });
 
-    const total = await get('SELECT COUNT(DISTINCT client_phone) AS cnt FROM orders WHERE client_phone IS NOT NULL AND client_phone != \'\'');
+    const total = await get(
+      "SELECT COUNT(DISTINCT client_phone) AS cnt FROM orders WHERE client_phone IS NOT NULL AND client_phone != ''"
+    );
 
     res.json({
       top_clients: clients.slice(0, 20).map(c => ({
@@ -169,7 +192,9 @@ router.get('/admin/analytics/client-ltv', auth, async (req, res, next) => {
       buckets,
       total_clients: total?.cnt || 0,
     });
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ─── Database backup ──────────────────────────────────────────────────────────
@@ -177,7 +202,6 @@ router.post('/admin/db-backup', auth, async (req, res, next) => {
   try {
     if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Superadmin only' });
 
-    const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'database.db');
     const backupDir = path.join(__dirname, '..', 'backups');
 
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
@@ -190,14 +214,17 @@ router.post('/admin/db-backup', auth, async (req, res, next) => {
     const stat = fs.statSync(backupPath);
     const sizeMB = (stat.size / 1024 / 1024).toFixed(2);
 
-    const files = fs.readdirSync(backupDir)
+    const files = fs
+      .readdirSync(backupDir)
       .filter(f => f.endsWith('.db'))
       .sort()
       .reverse();
 
     if (files.length > 10) {
       files.slice(10).forEach(f => {
-        try { fs.unlinkSync(path.join(backupDir, f)); } catch {}
+        try {
+          fs.unlinkSync(path.join(backupDir, f));
+        } catch {}
       });
     }
 
@@ -207,7 +234,9 @@ router.post('/admin/db-backup', auth, async (req, res, next) => {
       size_mb: sizeMB,
       backup_path: backupPath,
     });
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ─── List backups ─────────────────────────────────────────────────────────────
@@ -218,7 +247,8 @@ router.get('/admin/db-backups', auth, async (req, res, next) => {
     const backupDir = path.join(__dirname, '..', 'backups');
     if (!fs.existsSync(backupDir)) return res.json({ backups: [] });
 
-    const files = fs.readdirSync(backupDir)
+    const files = fs
+      .readdirSync(backupDir)
       .filter(f => f.endsWith('.db'))
       .map(f => {
         const stat = fs.statSync(path.join(backupDir, f));
@@ -227,7 +257,9 @@ router.get('/admin/db-backups', auth, async (req, res, next) => {
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
 
     res.json({ backups: files });
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
 module.exports = router;
