@@ -1714,6 +1714,26 @@ router.get('/admin/analytics/sources', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Monthly analytics trend ──────────────────────────────────────────────────
+router.get('/admin/analytics/monthly', auth, async (req, res, next) => {
+  try {
+    const months = Math.min(24, Math.max(3, parseInt(req.query.months) || 12));
+    const rows = await query(`
+      SELECT
+        strftime('%Y-%m', created_at) as month,
+        COUNT(*) as orders_count,
+        SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled,
+        SUM(CASE WHEN budget IS NOT NULL AND budget != '' THEN CAST(budget AS INTEGER) ELSE 0 END) as revenue
+      FROM orders
+      WHERE created_at >= date('now', '-' || ? || ' months')
+      GROUP BY month
+      ORDER BY month ASC
+    `, [months]);
+    res.json({ months: rows, count: rows.length });
+  } catch(e) { next(e); }
+});
+
 // ─── Client Cabinet ───────────────────────────────────────────────────────────
 // Rate-limit store: { ip: [timestamps] }
 const _clientRateLimits = new Map();

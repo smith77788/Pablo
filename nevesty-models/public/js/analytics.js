@@ -2,52 +2,97 @@
 window.NM = window.NM || {};
 
 NM.analytics = {
-  // GA4 event tracking
+  // GA4 + Yandex.Metrica event tracking
   event(name, params = {}) {
-    if (typeof gtag !== 'undefined') {
-      gtag('event', name, params);
-    }
-    if (typeof ym !== 'undefined' && window.YM_ID) {
-      ym(window.YM_ID, 'reachGoal', name, params);
-    }
+    try {
+      if (typeof gtag !== 'undefined') gtag('event', name, params);
+      if (typeof ym !== 'undefined' && window.YM_ID) ym(window.YM_ID, 'reachGoal', name, params);
+    } catch {}
   },
 
   // UTM parameter extraction
   getUTM() {
-    const params = new URLSearchParams(window.location.search);
+    const p = new URLSearchParams(window.location.search);
     return {
-      source: params.get('utm_source') || '',
-      medium: params.get('utm_medium') || '',
-      campaign: params.get('utm_campaign') || '',
-      content: params.get('utm_content') || '',
-      term: params.get('utm_term') || ''
+      source: p.get('utm_source') || '',
+      medium: p.get('utm_medium') || '',
+      campaign: p.get('utm_campaign') || '',
+      content: p.get('utm_content') || '',
+      term: p.get('utm_term') || ''
     };
   },
 
-  // Save UTM to sessionStorage
   saveUTM() {
     const utm = this.getUTM();
-    if (utm.source) {
-      sessionStorage.setItem('utm', JSON.stringify(utm));
-    }
+    if (utm.source) sessionStorage.setItem('utm', JSON.stringify(utm));
   },
 
-  // Get saved UTM (for form submission)
   getSavedUTM() {
-    try {
-      return JSON.parse(sessionStorage.getItem('utm') || '{}');
-    } catch { return {}; }
+    try { return JSON.parse(sessionStorage.getItem('utm') || '{}'); } catch { return {}; }
+  },
+
+  // ─── Named tracking events ─────────────────────────────────────
+
+  viewModel(modelId, modelName) {
+    this.event('view_model', { model_id: modelId, model_name: modelName, ...this.getSavedUTM() });
+  },
+
+  startBooking(modelId, eventType) {
+    this.event('begin_checkout', { model_id: modelId, event_type: eventType, ...this.getSavedUTM() });
+  },
+
+  submitOrder(eventType, budget) {
+    this.event('purchase', { event_type: eventType, value: budget || 0, currency: 'RUB', ...this.getSavedUTM() });
+  },
+
+  addToFavorites(modelId, modelName) {
+    this.event('add_to_wishlist', { model_id: modelId, model_name: modelName });
+  },
+
+  addToCompare(modelId, modelName) {
+    this.event('add_to_compare', { model_id: modelId, model_name: modelName });
+  },
+
+  searchModels(params) {
+    this.event('search', { search_term: JSON.stringify(params) });
+  },
+
+  filterCatalog(filterType, filterValue) {
+    this.event('filter_catalog', { filter_type: filterType, filter_value: filterValue });
+  },
+
+  clickWhatsApp() {
+    this.event('contact_whatsapp', { page: window.location.pathname });
+  },
+
+  clickTelegram() {
+    this.event('contact_telegram', { page: window.location.pathname });
+  },
+
+  openQuickBooking() {
+    this.event('quick_booking_open', { page: window.location.pathname });
+  },
+
+  submitQuickBooking() {
+    this.event('quick_booking_submit', { ...this.getSavedUTM() });
   }
 };
 
-// Auto-save UTM on page load
-document.addEventListener('DOMContentLoaded', () => NM.analytics.saveUTM());
-
-// Page view event
+// Auto-init
 document.addEventListener('DOMContentLoaded', () => {
+  NM.analytics.saveUTM();
   NM.analytics.event('page_view', {
     page_title: document.title,
     page_location: window.location.href,
     ...NM.analytics.getSavedUTM()
+  });
+
+  // Auto-track WhatsApp/Telegram link clicks
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href]');
+    if (!a) return;
+    const href = a.href || '';
+    if (href.includes('wa.me') || href.includes('whatsapp.com')) NM.analytics.clickWhatsApp();
+    if (href.startsWith('https://t.me/')) NM.analytics.clickTelegram();
   });
 });
