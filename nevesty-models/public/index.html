@@ -874,6 +874,7 @@ if (document.getElementById('reviews-container')) loadReviewsPage(1);
   {
     "@context": "https://schema.org",
     "@type": "LocalBusiness",
+    "@id": "https://nevesty-models.ru/#organization",
     "name": "Nevesty Models",
     "url": "https://nevesty-models.ru",
     "logo": "https://nevesty-models.ru/og-image.jpg",
@@ -907,6 +908,22 @@ if (document.getElementById('reviews-container')) loadReviewsPage(1);
     "isPartOf": {"@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru"},
     "inLanguage": "ru-RU",
     "dateModified": "2026-05-15"
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": "https://nevesty-models.ru/#website",
+    "name": "Nevesty Models",
+    "url": "https://nevesty-models.ru",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": {
+        "@type": "EntryPoint",
+        "urlTemplate": "https://nevesty-models.ru/search.html?q={search_term_string}"
+      },
+      "query-input": "required name=search_term_string"
+    },
+    "inLanguage": "ru-RU"
   }
 ]
 </script>

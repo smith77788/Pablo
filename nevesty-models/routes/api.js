@@ -5493,5 +5493,28 @@ router.post('/chat/ask', chatLimiter, async (req, res) => {
   }
 });
 
+// ─── SEO: Dynamic sitemap for model pages ──────────────────────────────────────
+router.get('/sitemap-models.xml', async (req, res, next) => {
+  try {
+    const models = await query(
+      'SELECT id, name, updated_at FROM models WHERE available=1 AND archived=0 ORDER BY updated_at DESC'
+    );
+    const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
+    for (const m of models) {
+      const lastmod = m.updated_at
+        ? (m.updated_at.split('T')[0] || m.updated_at.slice(0, 10))
+        : new Date().toISOString().slice(0, 10);
+      xml += `  <url>\n    <loc>${baseUrl}/model/${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
+    }
+    xml += '</urlset>';
+    res.set('Content-Type', 'application/xml');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(xml);
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
 module.exports.setBot = setBot;

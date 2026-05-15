@@ -1,7 +1,6 @@
 User-agent: *
 Allow: /
-Disallow: /api/admin/
-Disallow: /api/admin/*
+Disallow: /api/
 Disallow: /admin/
 Disallow: /uploads/
 Disallow: /offline.html
@@ -11,16 +10,14 @@ Sitemap: https://nevesty-models.ru/sitemap.xml
 
 User-agent: Googlebot
 Allow: /
+Disallow: /api/
 Disallow: /admin/
-Disallow: /api/admin/
-Disallow: /api/admin/*
 Disallow: /offline.html
 
 User-agent: Yandex
 Allow: /
+Disallow: /api/
 Disallow: /admin/
-Disallow: /api/admin/
-Disallow: /api/admin/*
 Disallow: /uploads/
 Disallow: /offline.html
 Crawl-delay: 3
