@@ -399,6 +399,9 @@ async function initDatabase() {
   await run(`ALTER TABLE orders ADD COLUMN paid_at DATETIME DEFAULT NULL`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_payment_id ON orders(payment_id)`).catch(() => {});
 
+  // Internal note column for quick manager notes (migration v9)
+  await run(`ALTER TABLE orders ADD COLUMN internal_note TEXT`).catch(err => { if (err && !err.message.includes('duplicate')) console.error(err); });
+
   // Indexes for frequent queries
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_model_id ON orders(model_id)`);

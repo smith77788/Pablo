@@ -6,7 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { query, run, get, generateOrderNumber } = require('../database');
+const { query, run, get, generateOrderNumber, getSetting } = require('../database');
 const auth = require('../middleware/auth');
 const mailer = require('../services/mailer');
 const payment = require('../services/payment');
@@ -848,13 +848,18 @@ router.get('/admin/quick-bookings', auth, async (req, res, next) => {
 // ─── Orders (admin) ───────────────────────────────────────────────────────────
 router.get('/admin/orders', auth, async (req, res, next) => {
   try {
-    const { status, search, from, to } = req.query;
+    const { status, search } = req.query;
+    // Support both from/to (legacy) and date_from/date_to (new)
+    const from     = req.query.date_from || req.query.from;
+    const to       = req.query.date_to   || req.query.to;
+    const model_id = req.query.model_id;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
     const offset = (page - 1) * limit;
     let where = '1=1';
     const params = [];
     if (status && ALLOWED_STATUSES.includes(status)) { where += ' AND o.status = ?'; params.push(status); }
+    if (model_id && !isNaN(+model_id) && +model_id > 0) { where += ' AND o.model_id = ?'; params.push(+model_id); }
     if (search) {
       where += ' AND (o.client_name LIKE ? OR o.order_number LIKE ? OR o.client_phone LIKE ?)';
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
@@ -1205,6 +1210,8 @@ router.put('/settings', auth, async (req, res, next) => {
     'agency_name', 'tagline', 'hero_image', 'webhook_url', 'tg_notif_enabled',
     // Payment
     'payment_provider', 'payment_min_amount', 'payment_prepay_percent',
+    // FAQ
+    'faq_items',
   ];
   try {
     const body = req.body;
@@ -1322,6 +1329,17 @@ router.post('/admin/orders/:id/notes', auth, async (req, res, next) => {
     await run(`INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)`, [id, note]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'DB error' }); }
+});
+
+// ─── Order internal note (quick patch) ───────────────────────────────────────
+router.patch('/admin/orders/:id/note', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const note = req.body.note !== undefined ? String(req.body.note).slice(0, 2000) : '';
+    await run('UPDATE orders SET internal_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [note, id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
 });
 
 // ─── Order status patch ────────────────────────────────────────────────────────
@@ -2121,6 +2139,33 @@ router.post('/webhooks/stripe', async (req, res, next) => {
     }
     res.json({ ok: true });
   } catch (e) { next(e); }
+});
+
+// ─── FAQ ──────────────────────────────────────────────────────────────────────
+const DEFAULT_FAQ_ITEMS = JSON.stringify([
+  {"q": "Как заказать модель?", "a": "Выберите модель в каталоге и нажмите «Забронировать» или напишите нам в Telegram. Менеджер свяжется с вами в течение часа."},
+  {"q": "Какова стоимость услуг?", "a": "Стоимость зависит от типа мероприятия, продолжительности и требований. Заполните форму заявки, и мы рассчитаем индивидуальную цену."},
+  {"q": "Работаете ли вы по всей России?", "a": "Да, наши модели работают по всей России. Возможен выезд в другие города."},
+  {"q": "Сколько времени занимает подтверждение заявки?", "a": "Обычно менеджер связывается в течение 1-2 часов. В срочных случаях звоните напрямую."},
+  {"q": "Можно ли посмотреть работы модели?", "a": "Да, портфолио каждой модели доступно на её странице в каталоге. Дополнительные материалы можно запросить у менеджера."}
+]);
+
+router.get('/faq', async (req, res) => {
+  try {
+    // Seed default FAQ items if not yet set
+    const existing = await get('SELECT value FROM bot_settings WHERE key = ?', ['faq_items']);
+    if (!existing) {
+      await run(
+        'INSERT OR IGNORE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
+        ['faq_items', DEFAULT_FAQ_ITEMS]
+      );
+    }
+    const raw = await getSetting('faq_items');
+    const items = raw ? JSON.parse(raw) : [];
+    res.json(items);
+  } catch (e) {
+    res.json([]);
+  }
 });
 
 module.exports = router;

@@ -180,11 +180,15 @@
             <option value="completed">Завершённые</option>
             <option value="cancelled">Отменённые</option>
           </select>
+          <select class="filter-select" id="modelFilter" onchange="loadOrders(1)" style="min-width:160px">
+            <option value="">Все модели</option>
+          </select>
           <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">с</label>
           <input class="filter-input" type="date" id="filterFrom" style="width:130px" onchange="loadOrders(1)" />
           <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">по</label>
           <input class="filter-input" type="date" id="filterTo" style="width:130px" onchange="loadOrders(1)" />
           <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
+          <button class="btn btn-sm btn-ghost" onclick="clearFilters()" title="Сбросить фильтры">✕ Сброс</button>
           <span id="refresh-indicator" class="hidden text-xs text-green-500 animate-pulse" style="display:none;font-size:0.7rem;color:var(--success)">↻ Обновление...</span>
           <button class="btn-export" onclick="toggleExportPanel()" title="Экспорт в CSV">📥 CSV ▾</button>
         </div>
@@ -327,6 +331,10 @@
 
               <button class="btn btn-md btn-gold" style="width:100%" onclick="saveOrder()">💾 Сохранить</button>
 
+              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:16px">Внутренняя заметка</div>
+              <textarea class="notes-area" id="internalNote" rows="3" placeholder="Быстрая заметка по заявке (не видна клиенту)..."></textarea>
+              <button class="btn btn-sm btn-ghost" style="width:100%;margin-top:6px" onclick="saveInternalNote()">Сохранить заметку</button>
+
               <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
                 <button class="btn btn-sm btn-ghost" onclick="quickStatus('confirmed')">✅ Подтвердить</button>
                 <button class="btn btn-sm btn-ghost" onclick="quickStatus('in_progress')">▶️ В процессе</button>
@@ -413,10 +421,11 @@ let managersCache    = null;   // loaded once
 ═══════════════════════════════════════════════════════ */
 async function loadOrders(page) {
   if (page !== undefined) currentPage = page;
-  const search = document.getElementById('searchInput').value.trim();
-  const status = document.getElementById('statusFilter').value;
-  const from   = document.getElementById('filterFrom').value;
-  const to     = document.getElementById('filterTo').value;
+  const search   = document.getElementById('searchInput').value.trim();
+  const status   = document.getElementById('statusFilter').value;
+  const from     = document.getElementById('filterFrom').value;
+  const to       = document.getElementById('filterTo').value;
+  const model_id = document.getElementById('modelFilter').value;
 
   // If search looks like a phone number, use dedicated search endpoint
   if (search && /^[\d\s\+\(\)\-]{7,}$/.test(search)) {
@@ -433,10 +442,11 @@ async function loadOrders(page) {
   }
 
   const params = new URLSearchParams({ page: currentPage, limit: PAGE_LIMIT });
-  if (status) params.set('status', status);
-  if (search) params.set('search', search);
-  if (from)   params.set('from', from);
-  if (to)     params.set('to', to);
+  if (status)   params.set('status', status);
+  if (search)   params.set('search', search);
+  if (from)     params.set('date_from', from);
+  if (to)       params.set('date_to', to);
+  if (model_id) params.set('model_id', model_id);
 
   try {
     const data = await _admin.apiFetch('/admin/orders?' + params);
@@ -740,6 +750,7 @@ async function openDetail(id) {
     document.getElementById('statusSelect').innerHTML = _admin.STATUS_OPTIONS;
     document.getElementById('statusSelect').value     = o.status;
     document.getElementById('adminNotes').value       = o.admin_notes || '';
+    document.getElementById('internalNote').value     = o.internal_note || '';
 
     populateManagerSelect(o.manager_id || null);
 
@@ -883,6 +894,17 @@ async function quickStatus(status) {
   await saveOrder();
 }
 
+async function saveInternalNote() {
+  const note = document.getElementById('internalNote').value;
+  try {
+    await _admin.apiFetch(`/admin/orders/${currentOrderId}/note`, {
+      method: 'PATCH',
+      body: JSON.stringify({ note })
+    });
+    _admin.toast('Заметка сохранена', 'success');
+  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
 /* ═══════════════════════════════════════════════════════
    CLOSE DETAIL
 ═══════════════════════════════════════════════════════ */
@@ -965,6 +987,26 @@ document.getElementById('searchInput').addEventListener('input', () => {
   searchTimer = setTimeout(() => loadOrders(1), 400);
 });
 document.getElementById('statusFilter').addEventListener('change', () => loadOrders(1));
+
+function clearFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('statusFilter').value = '';
+  document.getElementById('modelFilter').value = '';
+  document.getElementById('filterFrom').value = '';
+  document.getElementById('filterTo').value = '';
+  // Reset status filter buttons to "Все"
+  setStatusFilter('');
+}
+
+async function loadModelFilterOptions() {
+  try {
+    const data = await _admin.apiFetch('/admin/models?limit=200&available=');
+    const models = data.models || data || [];
+    const sel = document.getElementById('modelFilter');
+    sel.innerHTML = '<option value="">Все модели</option>' +
+      models.map(m => `<option value="${m.id}">${_admin.escapeHtml(m.name)}</option>`).join('');
+  } catch { /* ignore, models dropdown stays empty */ }
+}
 
 /* ═══════════════════════════════════════════════════════
    ORDER DETAIL MODAL
@@ -1118,10 +1160,24 @@ setInterval(() => {
 /* ═══════════════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════════════ */
-(function init() {
-  const params    = new URLSearchParams(window.location.search);
-  const urlStatus = params.get('status');
-  const urlId     = params.get('id');
+(async function init() {
+  const params     = new URLSearchParams(window.location.search);
+  const urlStatus  = params.get('status');
+  const urlId      = params.get('id');
+  const urlModelId = params.get('model_id');
+  const urlFrom    = params.get('date_from') || params.get('from');
+  const urlTo      = params.get('date_to')   || params.get('to');
+  const urlSearch  = params.get('search');
+
+  // Load model filter options early
+  await loadModelFilterOptions();
+
+  // Restore filter state from URL
+  if (urlModelId) document.getElementById('modelFilter').value = urlModelId;
+  if (urlFrom)    document.getElementById('filterFrom').value  = urlFrom;
+  if (urlTo)      document.getElementById('filterTo').value    = urlTo;
+  if (urlSearch)  document.getElementById('searchInput').value = urlSearch;
+
   if (urlStatus) {
     setStatusFilter(urlStatus);
   } else {
