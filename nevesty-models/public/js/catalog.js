@@ -125,17 +125,36 @@
     });
   }
 
-  bindTagGroup('categoryFilters', el => { filters.category = el.dataset.value; });
-  bindTagGroup('hairFilters',     el => { filters.hair = el.dataset.value; });
-  bindTagGroup('ageFilters',      el => {
+  bindTagGroup('categoryFilters', el => {
+    filters.category = el.dataset.value;
+    if (window.NM?.analytics) NM.analytics.filterCatalog('category', el.dataset.value);
+  });
+  bindTagGroup('hairFilters', el => {
+    filters.hair = el.dataset.value;
+    if (window.NM?.analytics) NM.analytics.filterCatalog('hair', el.dataset.value);
+  });
+  bindTagGroup('ageFilters', el => {
     filters.ageMin = el.dataset.min || '';
     filters.ageMax = el.dataset.max || '';
+    if (window.NM?.analytics) NM.analytics.filterCatalog('age', `${el.dataset.min || ''}–${el.dataset.max || ''}`);
   });
 
   // ── City, availability, sort ─────────────────────────────────────────────────
-  citySelect?.addEventListener('change', () => { filters.city = citySelect.value; render(); });
-  availCheckbox?.addEventListener('change', () => { filters.availableOnly = availCheckbox.checked; render(); });
-  sortEl?.addEventListener('change', () => { filters.sort = sortEl.value; render(); });
+  citySelect?.addEventListener('change', () => {
+    filters.city = citySelect.value;
+    if (window.NM?.analytics) NM.analytics.filterCatalog('city', citySelect.value);
+    render();
+  });
+  availCheckbox?.addEventListener('change', () => {
+    filters.availableOnly = availCheckbox.checked;
+    if (window.NM?.analytics) NM.analytics.filterCatalog('available', String(availCheckbox.checked));
+    render();
+  });
+  sortEl?.addEventListener('change', () => {
+    filters.sort = sortEl.value;
+    if (window.NM?.analytics) NM.analytics.filterCatalog('sort', sortEl.value);
+    render();
+  });
 
   // ── Debounced inputs ─────────────────────────────────────────────────────────
   function debounce(fn, ms) {
@@ -144,6 +163,7 @@
   }
   searchInput?.addEventListener('input', debounce(() => {
     filters.search = searchInput.value.trim();
+    if (filters.search && window.NM?.analytics) NM.analytics.filterCatalog('search', filters.search);
     render();
   }, 250));
   minHeightEl?.addEventListener('input', debounce(() => {
