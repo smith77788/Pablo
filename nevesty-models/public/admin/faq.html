@@ -62,6 +62,25 @@
       color: var(--text-dim); font-size: 0.9rem;
     }
     .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .category-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 3px;
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .cat-general   { background: rgba(108,117,125,0.18); color: #adb5bd; }
+    .cat-booking   { background: rgba(201,169,110,0.18); color: var(--gold); }
+    .cat-pricing   { background: rgba(39,174,96,0.18);  color: #27ae60; }
+    .cat-catalog   { background: rgba(52,152,219,0.18); color: #3498db; }
+    .filter-bar {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;
+    }
+    .filter-chip {
+      padding: 5px 14px; border-radius: 20px; font-size: 0.8rem; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg2); color: var(--text-muted);
+      transition: all 0.15s;
+    }
+    .filter-chip:hover, .filter-chip.active {
+      border-color: var(--gold); color: var(--gold); background: rgba(201,169,110,0.1);
+    }
   </style>
 </head>
 <body>
@@ -134,10 +153,18 @@
       <div class="section-card" style="margin-bottom:24px">
         <div class="section-card-header">
           <div class="section-card-title">Список вопросов и ответов</div>
-          <span style="font-size:0.8rem;color:var(--text-muted)" id="faq-count">Загрузка...</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:0.8rem;color:var(--text-muted)" id="faq-count">Загрузка...</span>
+            <button onclick="seedFaq()" class="btn btn-sm btn-ghost" title="Заполнить базовыми вопросами (только если FAQ пуст)">🌱 Seed</button>
+          </div>
         </div>
-        <div class="section-card-body" id="faq-list">
-          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
+        <div class="section-card-body">
+          <div class="filter-bar" id="category-filter">
+            <button class="filter-chip active" data-cat="" onclick="setFilter('')">Все</button>
+          </div>
+          <div id="faq-list">
+            <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
+          </div>
         </div>
       </div>
 
@@ -159,6 +186,16 @@
     <div class="form-group">
       <label>Ответ *</label>
       <textarea id="faqAnswer" placeholder="Введите развёрнутый ответ..."></textarea>
+    </div>
+
+    <div class="form-group">
+      <label>Категория</label>
+      <select id="faqCategory">
+        <option value="general">Общее</option>
+        <option value="booking">Бронирование</option>
+        <option value="pricing">Цены</option>
+        <option value="catalog">Каталог</option>
+      </select>
     </div>
 
     <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -186,10 +223,28 @@
 <script src="/js/admin.js"></script>
 <script>
 let faqItems = [];
+let activeFilter = '';
+
+const CAT_LABELS = {
+  general: 'Общее',
+  booking: 'Бронирование',
+  pricing: 'Цены',
+  catalog: 'Каталог',
+};
+
+function catClass(cat) {
+  const map = { general: 'cat-general', booking: 'cat-booking', pricing: 'cat-pricing', catalog: 'cat-catalog' };
+  return map[cat] || 'cat-general';
+}
+
+function catLabel(cat) {
+  return CAT_LABELS[cat] || cat || 'Общее';
+}
 
 async function loadFaq() {
   try {
     faqItems = await _admin.apiFetch('/admin/faq') || [];
+    renderCategories();
     renderFaq();
   } catch (e) {
     _admin.toast('Ошибка загрузки: ' + e.message, 'error');
@@ -197,14 +252,31 @@ async function loadFaq() {
   }
 }
 
+function renderCategories() {
+  const bar = document.getElementById('category-filter');
+  const cats = [...new Set(faqItems.map(f => f.category || 'general'))].sort();
+  bar.innerHTML = `<button class="filter-chip ${activeFilter === '' ? 'active' : ''}" data-cat="" onclick="setFilter('')">Все (${faqItems.length})</button>` +
+    cats.map(c => {
+      const cnt = faqItems.filter(f => (f.category || 'general') === c).length;
+      return `<button class="filter-chip ${activeFilter === c ? 'active' : ''}" data-cat="${c}" onclick="setFilter('${c}')">${catLabel(c)} (${cnt})</button>`;
+    }).join('');
+}
+
+function setFilter(cat) {
+  activeFilter = cat;
+  renderCategories();
+  renderFaq();
+}
+
 function renderFaq() {
   const container = document.getElementById('faq-list');
+  const filtered = activeFilter ? faqItems.filter(f => (f.category || 'general') === activeFilter) : faqItems;
   document.getElementById('faq-count').textContent = `${faqItems.length} вопросов`;
 
-  if (!faqItems.length) {
+  if (!filtered.length) {
     container.innerHTML = `<div class="empty-state">
       <div class="icon">❓</div>
-      <div>Вопросов пока нет</div>
+      <div>${faqItems.length ? 'Нет вопросов в этой категории' : 'Вопросов пока нет'}</div>
       <div style="margin-top:16px">
         <button onclick="openCreateModal()" class="btn btn-md btn-primary">Добавить первый вопрос</button>
       </div>
@@ -212,12 +284,15 @@ function renderFaq() {
     return;
   }
 
-  container.innerHTML = faqItems.map(item => `
+  container.innerHTML = filtered.map(item => {
+    const cat = item.category || 'general';
+    return `
     <div class="faq-item ${item.active ? '' : 'inactive'}" data-id="${item.id}">
       <div class="faq-question">${_admin.escapeHtml(item.question)}</div>
       <div class="faq-answer">${_admin.escapeHtml(item.answer || '').replace(/\n/g, '<br>')}</div>
       <div class="faq-meta">
         <span class="faq-order">Порядок: ${item.sort_order ?? 0}</span>
+        <span class="category-badge ${catClass(cat)}">${catLabel(cat)}</span>
         <span class="badge ${item.active ? 'badge-confirmed' : 'badge-cancelled'}" style="font-size:0.7rem">
           ${item.active ? 'Активен' : 'Скрыт'}
         </span>
@@ -229,7 +304,8 @@ function renderFaq() {
           <button class="btn btn-sm btn-danger" onclick="deleteFaq(${item.id})">🗑</button>
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function openCreateModal() {
@@ -237,6 +313,7 @@ function openCreateModal() {
   document.getElementById('editId').value = '';
   document.getElementById('faqQuestion').value = '';
   document.getElementById('faqAnswer').value = '';
+  document.getElementById('faqCategory').value = activeFilter || 'general';
   document.getElementById('faqOrder').value = '0';
   document.getElementById('faqActive').value = '1';
   document.getElementById('faqModal').classList.add('open');
@@ -250,6 +327,7 @@ function openEditModal(id) {
   document.getElementById('editId').value = id;
   document.getElementById('faqQuestion').value = item.question || '';
   document.getElementById('faqAnswer').value = item.answer || '';
+  document.getElementById('faqCategory').value = item.category || 'general';
   document.getElementById('faqOrder').value = item.sort_order ?? 0;
   document.getElementById('faqActive').value = item.active ? '1' : '0';
   document.getElementById('faqModal').classList.add('open');
@@ -264,6 +342,7 @@ async function saveFaq() {
   const id = document.getElementById('editId').value;
   const question = document.getElementById('faqQuestion').value.trim();
   const answer = document.getElementById('faqAnswer').value.trim();
+  const category = document.getElementById('faqCategory').value || 'general';
   const sort_order = parseInt(document.getElementById('faqOrder').value) || 0;
   const active = parseInt(document.getElementById('faqActive').value);
 
@@ -276,13 +355,13 @@ async function saveFaq() {
     if (id) {
       await _admin.apiFetch(`/admin/faq/${id}`, {
         method: 'PUT',
-        body: JSON.stringify({ question, answer, sort_order, active })
+        body: JSON.stringify({ question, answer, category, sort_order, active })
       });
       _admin.toast('Вопрос обновлён', 'success');
     } else {
       await _admin.apiFetch('/admin/faq', {
         method: 'POST',
-        body: JSON.stringify({ question, answer, sort_order })
+        body: JSON.stringify({ question, answer, category, sort_order })
       });
       _admin.toast('Вопрос добавлен', 'success');
     }
@@ -320,6 +399,20 @@ async function deleteFaq(id) {
       }
     }
   );
+}
+
+async function seedFaq() {
+  try {
+    const data = await _admin.apiFetch('/admin/faq/seed', { method: 'POST' });
+    if (data.seeded > 0) {
+      _admin.toast(`Добавлено ${data.seeded} базовых вопросов`, 'success');
+      loadFaq();
+    } else {
+      _admin.toast(data.message || 'FAQ уже заполнен', 'info');
+    }
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  }
 }
 
 // Close modal on overlay click

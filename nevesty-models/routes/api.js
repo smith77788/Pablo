@@ -4974,6 +4974,36 @@ router.delete('/admin/faq/:id', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// POST /admin/faq/seed — populate FAQ with default questions if table is empty
+router.post('/admin/faq/seed', auth, async (req, res, next) => {
+  try {
+    const count = await get('SELECT COUNT(*) as n FROM faq WHERE active=1');
+    if (count.n > 0) return res.json({ ok: true, seeded: 0, message: 'FAQ already has entries' });
+
+    const defaults = [
+      { q: 'Как забронировать модель?', a: 'Заполните форму на сайте или напишите нам в Telegram. Мы свяжемся с вами в течение 15 минут.', cat: 'booking' },
+      { q: 'Сколько стоит аренда модели?', a: 'Стоимость зависит от типа мероприятия, продолжительности и категории модели. Используйте калькулятор бюджета на сайте.', cat: 'pricing' },
+      { q: 'Как далеко заранее нужно бронировать?', a: 'Рекомендуем бронировать за 2-4 недели. Для крупных мероприятий — за 1-2 месяца.', cat: 'booking' },
+      { q: 'Работаете ли вы в других городах?', a: 'Да, наши модели работают по всей России. Возможна командировка в другие города.', cat: 'general' },
+      { q: 'Можно ли посмотреть портфолио?', a: 'Да, полное портфолио доступно в нашем каталоге на сайте. Каждая модель имеет детальную карточку с фотографиями.', cat: 'catalog' },
+      { q: 'Как проходит оплата?', a: 'Оплата производится после подтверждения заявки. Принимаем безналичный расчёт и наличные.', cat: 'pricing' },
+      { q: 'Что входит в услугу?', a: 'Услуга включает работу модели на мероприятии указанной продолжительности. Доп. услуги (трансфер, визажист) обсуждаются отдельно.', cat: 'general' },
+      { q: 'Как отменить бронирование?', a: 'Для отмены свяжитесь с менеджером не позднее чем за 48 часов до мероприятия. При более поздней отмене может применяться штраф.', cat: 'booking' },
+    ];
+
+    let seeded = 0;
+    for (const item of defaults) {
+      await run(
+        `INSERT INTO faq (question, answer, category, active, sort_order) VALUES (?,?,?,1,?)`,
+        [item.q, item.a, item.cat, seeded]
+      );
+      seeded++;
+    }
+
+    res.json({ ok: true, seeded });
+  } catch (e) { next(e); }
+});
+
 // ─── AI: FAQ generation (admin) ───────────────────────────────────────────────
 // POST /api/admin/faq/generate — generate FAQ items using Claude AI
 router.post('/admin/faq/generate', auth, async (req, res) => {
