@@ -22,6 +22,29 @@
     .dark .chart-export-btn { background: rgba(255,255,255,0.08); color: #9ca3af; }
     .chart-export-btn:hover { background: rgba(236,72,153,0.15); color: #ec4899; }
     .chart-error { display:flex; align-items:center; justify-content:center; height:100%; color:#9ca3af; font-size:14px; }
+
+    /* KPI cards */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 14px; margin-bottom: 8px; }
+    .kpi-card {
+      background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
+      padding: 20px 14px 16px; text-align: center; position: relative; overflow: hidden;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.09); }
+    .dark .kpi-card { background: #1f2937; border-color: #374151; }
+    .kpi-card::before {
+      content: ''; position: absolute; inset: 0; opacity: 0.06; border-radius: 14px;
+      background: var(--kpi-color, #ec4899);
+    }
+    .kpi-icon { font-size: 1.9rem; margin-bottom: 8px; line-height: 1; }
+    .kpi-value { font-size: 2rem; font-weight: 800; color: var(--kpi-color, #ec4899); line-height: 1.1; }
+    .kpi-label { font-size: 0.72rem; color: #6b7280; margin-top: 6px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; }
+    .dark .kpi-label { color: #9ca3af; }
+
+    /* Bar chart improvements */
+    #kpi-bar-wrap {
+      position: relative; height: 180px;
+    }
   </style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
@@ -41,36 +64,50 @@
   <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
 
     <!-- KPI Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm">
-        <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">Всего заявок</div>
-        <div id="kpi-total" class="text-2xl font-bold text-gray-900 dark:text-white">—</div>
-        <div id="kpi-total-delta" class="text-xs text-gray-400 mt-1"></div>
+    <div class="kpi-grid">
+      <div class="kpi-card" style="--kpi-color:#ec4899">
+        <div class="kpi-icon">📋</div>
+        <div class="kpi-value" id="kpi-total">—</div>
+        <div class="kpi-label">Всего заявок</div>
       </div>
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm">
-        <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">Завершённых</div>
-        <div id="kpi-completed" class="text-2xl font-bold text-green-600">—</div>
-        <div id="kpi-conv" class="text-xs text-gray-400 mt-1">конверсия</div>
+      <div class="kpi-card" style="--kpi-color:#3b82f6">
+        <div class="kpi-icon">📅</div>
+        <div class="kpi-value" id="kpi-today">—</div>
+        <div class="kpi-label">Сегодня</div>
       </div>
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm">
-        <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">Новых клиентов</div>
-        <div id="kpi-clients" class="text-2xl font-bold text-blue-600">—</div>
-        <div class="text-xs text-gray-400 mt-1">за период</div>
+      <div class="kpi-card" style="--kpi-color:#8b5cf6">
+        <div class="kpi-icon">⏳</div>
+        <div class="kpi-value" id="kpi-active">—</div>
+        <div class="kpi-label">Активных</div>
       </div>
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm">
-        <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">Активных сейчас</div>
-        <div id="kpi-active" class="text-2xl font-bold text-purple-600">—</div>
-        <div class="text-xs text-gray-400 mt-1">в работе</div>
+      <div class="kpi-card" style="--kpi-color:#22c55e">
+        <div class="kpi-icon">✅</div>
+        <div class="kpi-value" id="kpi-completed">—</div>
+        <div class="kpi-label" id="kpi-conv">Завершено</div>
+      </div>
+      <div class="kpi-card" style="--kpi-color:#06b6d4">
+        <div class="kpi-icon">👥</div>
+        <div class="kpi-value" id="kpi-clients">—</div>
+        <div class="kpi-label">Новых клиентов</div>
+      </div>
+      <div class="kpi-card" style="--kpi-color:#f59e0b">
+        <div class="kpi-icon">🔍</div>
+        <div class="kpi-value" id="kpi-pending">—</div>
+        <div class="kpi-label">На рассмотрении</div>
       </div>
     </div>
 
-    <!-- Orders Bar Chart (existing, kept) -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📊 Заявки по дням</h2>
-      <div id="chart-container" class="h-48 flex items-end gap-1 px-2">
-        <div class="text-gray-400 text-sm m-auto">Загрузка...</div>
+    <!-- Orders Bar Chart -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white">📊 Заявки по дням</h2>
+        <button class="chart-export-btn" onclick="exportChart('chart-daily', 'daily-orders.png')" title="Скачать PNG" style="position:static;margin:0"><i class="fas fa-download"></i></button>
       </div>
-      <div id="chart-labels" class="flex justify-between mt-2 text-xs text-gray-400 px-2"></div>
+      <div id="kpi-bar-wrap">
+        <div id="chart-daily-skeleton" class="skeleton h-full w-full rounded-lg" style="height:180px"></div>
+        <canvas id="chart-daily" class="hidden" style="max-height:180px"></canvas>
+        <div id="chart-daily-error" class="chart-error hidden" style="height:180px">Нет данных за период</div>
+      </div>
     </div>
 
     <!-- Row 1: Funnel Chart + Event Types Chart -->
@@ -291,9 +328,15 @@ async function loadAll() {
   setChartDefaults();
   // Reset skeletons
   ['funnel','events','models','sources'].forEach(showSkeleton);
+  // Reset daily chart skeleton
+  document.getElementById('chart-daily-skeleton').style.display = '';
+  document.getElementById('chart-daily-skeleton').classList.remove('hidden');
+  document.getElementById('chart-daily').classList.add('hidden');
+  document.getElementById('chart-daily-error').classList.add('hidden');
 
-  const [stats, chart, funnel, topModels, eventTypes, sources] = await Promise.all([
+  const [stats, basicStats, chart, funnel, topModels, eventTypes, sources] = await Promise.all([
     safeJson(fetch(`/api/admin/analytics/kpi?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
+    safeJson(fetch(`/api/admin/stats`, {headers:h}).then(r=>r.json())),
     safeJson(fetch(`/api/admin/orders-chart?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
     safeJson(fetch(`/api/admin/analytics/funnel?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
     safeJson(fetch(`/api/admin/analytics/top-models?days=${currentPeriod}&limit=10`, {headers:h}).then(r=>r.json())),
@@ -302,15 +345,27 @@ async function loadAll() {
   ]);
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
-  document.getElementById('kpi-total').textContent = stats.total ?? 0;
+  document.getElementById('kpi-total').textContent = stats.total ?? basicStats.total_orders ?? 0;
+  document.getElementById('kpi-active').textContent = stats.active ?? basicStats.active_orders ?? 0;
   document.getElementById('kpi-completed').textContent = stats.completed ?? 0;
-  const conv = stats.total > 0 ? Math.round((stats.completed ?? 0) / stats.total * 100) : 0;
-  document.getElementById('kpi-conv').textContent = `${conv}% конверсия`;
+  const conv = (stats.total || basicStats.total_orders || 0) > 0
+    ? Math.round((stats.completed ?? 0) / (stats.total || basicStats.total_orders) * 100) : 0;
+  document.getElementById('kpi-conv').textContent = conv > 0 ? `Завершено (${conv}%)` : 'Завершено';
   document.getElementById('kpi-clients').textContent = stats.new_clients ?? 0;
-  document.getElementById('kpi-active').textContent = stats.active ?? 0;
 
-  // ── Orders by-day bar chart (legacy renderer) ─────────────────────────────
-  renderChart(chart.days || []);
+  // Today: count from daily_7d last entry (today)
+  const todayData = basicStats.daily_7d || [];
+  const todayCount = todayData.length > 0 ? todayData[todayData.length - 1].count : 0;
+  document.getElementById('kpi-today').textContent = todayCount;
+
+  // Pending = "new" + "reviewing" status counts from kpi status map
+  const pendingCount = (stats.new_count || 0) + (stats.reviewing_count || 0)
+    || basicStats.new_orders || 0;
+  document.getElementById('kpi-pending').textContent = pendingCount;
+
+  // ── Orders by-day bar chart (Chart.js) ────────────────────────────────────
+  const days = chart.days || (basicStats.daily_7d ? basicStats.daily_7d.map(d => ({ day: d.day, label: d.label, count: d.count })) : []);
+  renderDailyChart(days);
 
   // ── Funnel: horizontal bar ─────────────────────────────────────────────────
   renderFunnelChart(funnel.stages || []);
@@ -554,27 +609,76 @@ function renderSourcesChart(sources) {
   });
 }
 
-// ── Legacy orders-by-day bar renderer ────────────────────────────────────────
-function renderChart(data) {
-  const container = document.getElementById('chart-container');
-  const labels    = document.getElementById('chart-labels');
-  if (!data.length) {
-    container.innerHTML = '<div class="text-gray-400 text-sm m-auto">Нет данных за период</div>';
-    return;
-  }
-  const maxVal = Math.max(...data.map(d=>d.count), 1);
-  container.innerHTML = data.map(d => `
-    <div class="flex flex-col items-center gap-1 flex-1 min-w-0">
-      <span class="text-xs text-gray-500">${d.count||0}</span>
-      <div class="w-full bg-pink-500 rounded-t-sm hover:bg-pink-600 transition-colors cursor-pointer"
-           title="${d.day||d.label}: ${d.count} заявок"
-           style="height:${Math.max(4,(d.count/maxVal)*160)}px"></div>
-    </div>`).join('');
-  const step = Math.ceil(data.length / 7);
-  labels.innerHTML = data
-    .filter((_,i) => i % step === 0 || i === data.length - 1)
-    .map(d => `<span>${(d.label||d.day||'').slice(-5)}</span>`)
-    .join('');
+// ── Daily orders Chart.js bar chart ─────────────────────────────────────────
+function renderDailyChart(data) {
+  destroyChart('daily');
+  const skeleton = document.getElementById('chart-daily-skeleton');
+  const canvas   = document.getElementById('chart-daily');
+  const errEl    = document.getElementById('chart-daily-error');
+  skeleton.classList.add('hidden');
+  if (!data.length) { errEl.classList.remove('hidden'); return; }
+  canvas.classList.remove('hidden');
+  const labels = data.map(d => d.label || (d.day || '').slice(-5));
+  const counts = data.map(d => d.count || 0);
+  _charts['daily'] = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Заявок',
+        data: counts,
+        backgroundColor: 'rgba(236,72,153,0.72)',
+        borderColor: '#ec4899',
+        borderWidth: 1.5,
+        borderRadius: 6,
+        hoverBackgroundColor: 'rgba(236,72,153,0.92)',
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: ctx => ` ${ctx.parsed.y} заявок` }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: {
+            font: { size: 11 },
+            color: isDark() ? '#9ca3af' : '#6b7280',
+            maxRotation: 45,
+            autoSkip: true,
+            maxTicksLimit: 14,
+          },
+          title: {
+            display: true,
+            text: 'Дата',
+            font: { size: 11 },
+            color: isDark() ? '#9ca3af' : '#6b7280',
+            padding: { top: 4 }
+          }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            precision: 0,
+            font: { size: 11 },
+            color: isDark() ? '#9ca3af' : '#6b7280',
+          },
+          grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+          title: {
+            display: true,
+            text: 'Заявок',
+            font: { size: 11 },
+            color: isDark() ? '#9ca3af' : '#6b7280',
+          }
+        }
+      }
+    }
+  });
 }
 
 async function loadMonthly() {

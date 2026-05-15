@@ -4727,6 +4727,46 @@ function initBot(app) {
       );
     }
 
+    // ── rev_rate_{rating}_{orderId} — альтернативний формат кнопок оцінки
+    if (data.startsWith('rev_rate_')) {
+      // rev_rate_5_123
+      const parts = data.split('_'); // ['rev', 'rate', '5', '123']
+      const rating  = parseInt(parts[2]);
+      const orderId = parseInt(parts[3]);
+      if (!rating || rating < 1 || rating > 5) return;
+      // Verify order belongs to this user (if orderId provided)
+      if (orderId) {
+        const order = await get(
+          'SELECT id, status FROM orders WHERE id=? AND client_chat_id=?',
+          [orderId, String(chatId)]
+        ).catch(() => null);
+        if (!order) {
+          return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
+        }
+        // Check for duplicate review
+        const existing = await get(
+          'SELECT id FROM reviews WHERE chat_id=? AND order_id=?',
+          [String(chatId), orderId]
+        ).catch(() => null);
+        if (existing) {
+          return safeSend(chatId, '✅ Ви вже залишали відгук на цю заявку\\.', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+          });
+        }
+      }
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      d.review_order_id = orderId || null;
+      d.review_rating   = rating;
+      await setSession(chatId, 'leave_review_text', d);
+      const starLabel = rating === 5 ? '🌟' : '⭐'.repeat(rating);
+      return safeSend(chatId,
+        `${starLabel} *Оцінка: ${rating}/5*\n\nТепер напишіть короткий відгук \\(або надішліть «\\.» щоб пропустити\\):`,
+        { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '❌ Скасувати', callback_data: 'main_menu' }]] } }
+      );
+    }
+
     // ── Повторить заявку
     if (data.startsWith('repeat_order_')) {
       const orderId = parseInt(data.replace('repeat_order_', ''));
