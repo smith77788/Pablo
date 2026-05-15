@@ -1086,6 +1086,18 @@ router.get('/admin/orders/:id', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+router.get('/admin/orders/:id/history', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const history = await query(
+      'SELECT * FROM order_status_history WHERE order_id=? ORDER BY changed_at DESC',
+      [id]
+    );
+    res.json(history);
+  } catch (e) { next(e); }
+});
+
 router.put('/admin/orders/:id', auth, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
@@ -1098,6 +1110,13 @@ router.put('/admin/orders/:id', auth, async (req, res, next) => {
       `UPDATE orders SET status=COALESCE(?,status), admin_notes=?, manager_id=COALESCE(?,manager_id), updated_at=CURRENT_TIMESTAMP WHERE id=?`,
       [status || null, admin_notes !== undefined ? sanitize(admin_notes, 2000) : order.admin_notes, manager_id || null, id]
     );
+    // Log status change to history
+    if (status && status !== order.status) {
+      await run(
+        'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by, notes) VALUES (?,?,?,?,?)',
+        [id, order.status, status, req.admin.username || 'admin', admin_notes || null]
+      ).catch(() => {}); // non-blocking
+    }
     if (botInstance && order.client_chat_id && status && status !== order.status) {
       botInstance.notifyStatusChange(order.client_chat_id, order.order_number, status);
     }
@@ -1613,6 +1632,13 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
     const order = await get('SELECT id, client_chat_id, client_email, client_phone, order_number, status as prev_status, client_name, event_type, event_date, event_duration, location, budget FROM orders WHERE id=?', [id]);
     if (!order) return res.status(404).json({ error: 'Not found' });
     await run(`UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, [status, id]);
+    // Log status change to history
+    if (status !== order.prev_status) {
+      await run(
+        'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by) VALUES (?,?,?,?)',
+        [id, order.prev_status, status, req.admin.username || 'admin']
+      ).catch(() => {}); // non-blocking
+    }
     if (botInstance && order.client_chat_id && status !== order.prev_status) {
       botInstance.notifyStatusChange(order.client_chat_id, order.order_number, status).catch(() => {});
     }
