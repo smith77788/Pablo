@@ -40,13 +40,13 @@ function resetSessionTimer(chatId) {
       const state = sess?.state;
       if (state && ACTIVE_BOOKING_STATES.has(state)) {
         await safeSend(chatId,
-          '⏰ *Продолжить?*\n\nВы не завершили оформление\\. Хотите продолжить или начать заново?',
+          '⏰ *Сесія завершилась через неактивність\\.*\n\nВи не завершили оформлення заявки\\. Хочете продовжити або почати заново?',
           {
             parse_mode: 'MarkdownV2',
             reply_markup: {
               inline_keyboard: [
-                [{ text: '▶ Продолжить',    callback_data: 'session_continue' }],
-                [{ text: '🔄 Начать заново', callback_data: 'session_restart'  }],
+                [{ text: '▶ Продовжити',    callback_data: 'session_continue' }],
+                [{ text: '🔄 Почати заново', callback_data: 'session_restart'  }],
               ]
             }
           }
@@ -3243,9 +3243,20 @@ function initBot(app) {
   bot.onText(/\/cancel/, async (msg) => {
     const chatId = msg.chat.id;
     await clearSession(chatId);
-    return safeSend(chatId, '❌ Действие отменено\\.', {
+    if (isAdmin(chatId)) {
+      return safeSend(chatId, '❌ Действие отменено\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+      });
+    }
+    const clientKb = await buildClientKeyboard();
+    await safeSend(chatId, '❌ Дія скасована\\.', {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+      reply_markup: REPLY_KB_CLIENT,
+    });
+    return safeSend(chatId, '↩️ *Повертаємось до головного меню\\.*\n\n_Оберіть дію нижче або скористайтесь кнопками клавіатури\\._', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: clientKb,
     });
   });
 
@@ -3259,7 +3270,17 @@ function initBot(app) {
     const chatId = msg.chat.id;
     const text = isAdmin(chatId)
       ? `📖 *Команды администратора:*\n\n/start — главное меню\n/cancel — отменить действие\n/help — помощь\n\nДля управления ботом используйте меню 👆`
-      : `📖 *Помощь:*\n\n/start — главное меню\n/cancel — отменить действие\n/help — эта справка\n\nПо вопросам — нажмите «💬 Менеджер» в меню`;
+      : `📖 *Доступні команди:*\n\n` +
+        `/start — Головне меню\n` +
+        `/catalog — Каталог моделей\n` +
+        `/booking — Оформити заявку\n` +
+        `/myorders — Мої заявки\n` +
+        `/wishlist — Вибране\n` +
+        `/faq — Часті запитання\n` +
+        `/profile — Мій профіль\n` +
+        `/cancel — Скасувати поточну дію\n` +
+        `/help — Ця довідка\n\n` +
+        `_Якщо щось не працює — натисніть «💬 Менеджер» в меню\\._`;
     return safeSend(chatId, text, { parse_mode: 'MarkdownV2' });
   });
 
@@ -3287,6 +3308,11 @@ function initBot(app) {
 
   // ── /orders ────────────────────────────────────────────────────────────────
   bot.onText(/\/orders/, async (msg) => {
+    return showMyOrders(msg.chat.id);
+  });
+
+  // ── /myorders (alias for /orders) ──────────────────────────────────────────
+  bot.onText(/\/myorders/, async (msg) => {
     return showMyOrders(msg.chat.id);
   });
 
