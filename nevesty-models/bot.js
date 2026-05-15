@@ -4880,18 +4880,27 @@ function initBot(app) {
 
     // ── Leave review: text input
     if (state === 'leave_review_text') {
-      if (!text || text.length < 5) {
-        return safeSend(chatId, '❌ Отзыв слишком короткий. Напишите хотя бы несколько слов:');
+      if (!text) {
+        return safeSend(chatId, '❌ Введите текст отзыва или отправьте «.» чтобы пропустить:');
+      }
+      // Allow "." as a shortcut to skip writing text
+      const reviewText = text.trim() === '.' ? '' : text.trim();
+      if (reviewText && reviewText.length < 3) {
+        return safeSend(chatId, '❌ Отзыв слишком короткий. Напишите хотя бы несколько слов или отправьте «.» чтобы пропустить:');
       }
       const orderId = d.review_order_id;
       const rating  = d.review_rating || 5;
       let clientName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || 'Клиент';
+      let modelId = null;
       try {
-        const ord = await get('SELECT client_name FROM orders WHERE id=?', [orderId]);
+        const ord = await get('SELECT client_name, model_id FROM orders WHERE id=?', [orderId]);
         if (ord?.client_name) clientName = ord.client_name;
+        if (ord?.model_id) modelId = ord.model_id;
       } catch {}
-      await run('INSERT INTO reviews (client_name, rating, text, model_id, approved) VALUES (?,?,?,?,0)',
-        [clientName, rating, text, null]).catch(e => console.error('[Bot] insert review:', e.message));
+      await run(
+        'INSERT OR IGNORE INTO reviews (chat_id, order_id, client_name, rating, text, model_id, approved) VALUES (?,?,?,?,?,?,0)',
+        [String(chatId), orderId || null, clientName, rating, reviewText, modelId]
+      ).catch(e => console.error('[Bot] insert review:', e.message));
       await clearSession(chatId);
 
       // Bonus points for good review (rating 4-5)
@@ -4904,8 +4913,11 @@ function initBot(app) {
       await grantAchievement(chatId, 'first_review').catch(()=>{});
 
       const adminIds2 = await getAdminChatIds();
+      const reviewPreview = reviewText
+        ? `\n\n${esc(reviewText.substring(0, 200))}`
+        : ' _(текст не указан)_';
       await Promise.allSettled(adminIds2.map(id => safeSend(id,
-        `⭐ Новый отзыв от *${esc(clientName)}*\nОценка: ${'⭐'.repeat(rating)}\n\n${esc(text)}`,
+        `⭐ Новый отзыв от *${esc(clientName)}*\nОценка: ${'⭐'.repeat(rating)}${reviewPreview}`,
         {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [[{ text: '✅ Модерация отзывов', callback_data: 'adm_reviews' }]] }
@@ -5122,11 +5134,18 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus) {
     [{ text: '📝 Повторить заявку',  callback_data: 'bk_start'      }],
   ]};
 
-  // После завершения — предлагаем оставить отзыв
+  // После завершения — предлагаем оставить отзыв (если отзывы включены)
+  let reviewsEnabledForCompleted = false;
+  let reviewOrderId = null;
   if (newStatus === 'completed') {
     try {
-      const order = await get('SELECT id FROM orders WHERE order_number=?', [orderNumber]).catch(()=>null);
-      if (order) {
+      const [reviewsEnabled, order] = await Promise.all([
+        getSetting('reviews_enabled').catch(()=>null),
+        get('SELECT id FROM orders WHERE order_number=?', [orderNumber]).catch(()=>null),
+      ]);
+      reviewOrderId = order?.id || null;
+      if (reviewsEnabled === '1' && order) {
+        reviewsEnabledForCompleted = true;
         keyboard.inline_keyboard.unshift([
           { text: '⭐ Оставить отзыв', callback_data: `leave_review_${order.id}` }
         ]);
@@ -5153,6 +5172,35 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus) {
   } catch {}
 
   await safeSend(clientChatId, text, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
+
+  // Отправляем отдельное приглашение к отзыву с задержкой (если отзывы включены и клиент прошёл порог)
+  if (reviewsEnabledForCompleted && reviewOrderId) {
+    try {
+      const [reviewsMinCompleted, reviewsPromptText] = await Promise.all([
+        getSetting('reviews_min_completed').catch(()=>null),
+        getSetting('reviews_prompt_text').catch(()=>null),
+      ]);
+      const minCompleted = parseInt(reviewsMinCompleted) || 1;
+      const completedCount = await get(
+        "SELECT COUNT(*) as n FROM orders WHERE client_chat_id=? AND status='completed'",
+        [String(clientChatId)]
+      ).catch(() => ({ n: 0 }));
+      if ((completedCount?.n || 0) >= minCompleted) {
+        const promptText = reviewsPromptText ||
+          'Понравилось сотрудничество? Оставьте отзыв — это займёт 1 минуту 😊';
+        setTimeout(async () => {
+          await safeSend(clientChatId, promptText, {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '⭐ Оставить отзыв', callback_data: `leave_review_${reviewOrderId}` }],
+                [{ text: '⏩ Позже',          callback_data: 'review_skip'                   }],
+              ],
+            },
+          }).catch(() => {});
+        }, 3000);
+      }
+    } catch {}
+  }
 }
 
 async function sendMessageToClient(clientChatId, orderNumber, text) {
@@ -5930,6 +5978,38 @@ async function showPublicReviews(chatId, page) {
 
 async function startLeaveReview(chatId, orderId) {
   orderId = parseInt(orderId) || 0;
+
+  // Validate order if orderId provided
+  if (orderId) {
+    const order = await get(
+      'SELECT id, order_number, status FROM orders WHERE id=? AND client_chat_id=?',
+      [orderId, String(chatId)]
+    ).catch(() => null);
+    if (!order) {
+      return safeSend(chatId, '❌ Заявка не найдена или не принадлежит вам\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+      });
+    }
+    if (order.status !== 'completed') {
+      return safeSend(chatId, '⚠️ Отзыв можно оставить только после завершения заявки\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] },
+      });
+    }
+    // Check duplicate review for this order
+    const existing = await get(
+      'SELECT id FROM reviews WHERE chat_id=? AND order_id=?',
+      [String(chatId), orderId]
+    ).catch(() => null);
+    if (existing) {
+      return safeSend(chatId, '✅ Вы уже оставили отзыв для этой заявки\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+      });
+    }
+  }
+
   const text = orderId
     ? `⭐ *Оставить отзыв о заявке*\n\nОцените работу агентства по 5\\-балльной шкале:`
     : `⭐ *Оставить отзыв*\n\nОцените работу агентства Nevesty Models\\!`;

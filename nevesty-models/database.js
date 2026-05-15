@@ -274,6 +274,9 @@ async function initDatabase() {
   // Migration — add order_id to reviews for follow-up tracking
   await run(`ALTER TABLE reviews ADD COLUMN order_id INTEGER DEFAULT NULL`).catch(() => {});
 
+  // Migration — add chat_id to reviews to track which client left the review
+  await run(`ALTER TABLE reviews ADD COLUMN chat_id TEXT DEFAULT NULL`).catch(() => {});
+
   // Migration — add review_requested timestamp to orders
   await run(`ALTER TABLE orders ADD COLUMN review_requested DATETIME DEFAULT NULL`).catch(() => {});
 
