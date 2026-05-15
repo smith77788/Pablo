@@ -1359,5 +1359,98 @@ router.post('/admin/db-vacuum', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Analytics: KPI ──────────────────────────────────────────────────────────
+router.get('/admin/analytics/kpi', auth, async (req, res, next) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    const [total, completed, active, new_clients, statuses] = await Promise.all([
+      get(`SELECT COUNT(*) as cnt FROM orders WHERE created_at >= ?`, [since]),
+      get(`SELECT COUNT(*) as cnt FROM orders WHERE status='completed' AND created_at >= ?`, [since]),
+      get(`SELECT COUNT(*) as cnt FROM orders WHERE status IN ('new','reviewing','confirmed','in_progress')`),
+      get(`SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE created_at >= ? AND client_chat_id IS NOT NULL`, [since]),
+      query(`SELECT status, COUNT(*) as cnt FROM orders WHERE created_at >= ? GROUP BY status`, [since]),
+    ]);
+
+    const statusMap = {};
+    statuses.forEach(s => { statusMap[s.status] = s.cnt; });
+
+    res.json({
+      total: total?.cnt || 0,
+      completed: completed?.cnt || 0,
+      active: active?.cnt || 0,
+      new_clients: new_clients?.cnt || 0,
+      ...Object.fromEntries(Object.entries(statusMap).map(([k, v]) => [k + '_count', v]))
+    });
+  } catch (e) { next(e); }
+});
+
+// ─── Analytics: Conversion funnel ────────────────────────────────────────────
+router.get('/admin/analytics/funnel', auth, async (req, res, next) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const statuses = ['new', 'reviewing', 'confirmed', 'in_progress', 'completed'];
+    const labelMap = {
+      new: '🆕 Новые',
+      reviewing: '🔍 На рассмотрении',
+      confirmed: '✅ Подтверждены',
+      in_progress: '🔄 В работе',
+      completed: '🏁 Завершены'
+    };
+    const stages = await Promise.all(statuses.map(async s => ({
+      label: labelMap[s],
+      status: s,
+      count: (await get(`SELECT COUNT(*) as cnt FROM orders WHERE status=? AND created_at >= ?`, [s, since]))?.cnt || 0
+    })));
+    res.json({ stages });
+  } catch (e) { next(e); }
+});
+
+// ─── Analytics: Top models ────────────────────────────────────────────────────
+router.get('/admin/analytics/top-models', auth, async (req, res, next) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 5));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const models = await query(`
+      SELECT m.name, m.view_count as views, COUNT(o.id) as orders
+      FROM models m
+      LEFT JOIN orders o ON m.id = o.model_id AND o.created_at >= ?
+      WHERE m.archived = 0
+      GROUP BY m.id
+      ORDER BY orders DESC, views DESC
+      LIMIT ?`, [since, limit]);
+    res.json({ models });
+  } catch (e) { next(e); }
+});
+
+// ─── Analytics: Event types distribution ─────────────────────────────────────
+router.get('/admin/analytics/event-types', auth, async (req, res, next) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const types = await query(
+      `SELECT event_type as type, COUNT(*) as count FROM orders WHERE created_at >= ? GROUP BY event_type ORDER BY count DESC`,
+      [since]
+    );
+    res.json({ types });
+  } catch (e) { next(e); }
+});
+
+// ─── Analytics: Order sources (utm_source) ────────────────────────────────────
+router.get('/admin/analytics/sources', auth, async (req, res, next) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const sources = await query(
+      `SELECT COALESCE(NULLIF(utm_source,''), 'unknown') as source, COUNT(*) as count FROM orders WHERE created_at >= ? GROUP BY source ORDER BY count DESC`,
+      [since]
+    );
+    res.json({ sources });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;
 module.exports.setBot = setBot;

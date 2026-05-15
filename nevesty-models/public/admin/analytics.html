@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Аналитика — Admin Nevesty Models</title>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+  <div class="bg-white dark:bg-gray-800 border-b px-6 py-4 flex items-center gap-4 sticky top-0 z-10">
+    <a href="/admin/" class="text-gray-400 hover:text-gray-600"><i class="fas fa-arrow-left"></i></a>
+    <h1 class="text-xl font-bold text-gray-900 dark:text-white">📈 Аналитика</h1>
+    <!-- Period selector -->
+    <div class="ml-auto flex gap-2">
+      <button onclick="setPeriod(7)" class="period-btn px-3 py-1.5 text-sm border rounded-lg">7 дней</button>
+      <button onclick="setPeriod(30)" class="period-btn px-3 py-1.5 text-sm border rounded-lg bg-pink-600 text-white border-pink-600">30 дней</button>
+      <button onclick="setPeriod(90)" class="period-btn px-3 py-1.5 text-sm border rounded-lg">90 дней</button>
+    </div>
+  </div>
+
+  <div class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm">
+        <div class="text-sm text-gray-500 mb-1">Всего заявок</div>
+        <div id="kpi-total" class="text-2xl font-bold text-gray-900 dark:text-white">—</div>
+        <div id="kpi-total-delta" class="text-xs text-gray-400 mt-1"></div>
+      </div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm">
+        <div class="text-sm text-gray-500 mb-1">Завершённых</div>
+        <div id="kpi-completed" class="text-2xl font-bold text-green-600">—</div>
+        <div id="kpi-conv" class="text-xs text-gray-400 mt-1">конверсия</div>
+      </div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm">
+        <div class="text-sm text-gray-500 mb-1">Новых клиентов</div>
+        <div id="kpi-clients" class="text-2xl font-bold text-blue-600">—</div>
+      </div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm">
+        <div class="text-sm text-gray-500 mb-1">Активных сейчас</div>
+        <div id="kpi-active" class="text-2xl font-bold text-purple-600">—</div>
+      </div>
+    </div>
+
+    <!-- Orders Chart -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+      <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📊 Заявки по дням</h2>
+      <div id="chart-container" class="h-48 flex items-end gap-1 px-2">
+        <div class="text-gray-400 text-sm">Загрузка...</div>
+      </div>
+      <div id="chart-labels" class="flex justify-between mt-2 text-xs text-gray-400 px-2"></div>
+    </div>
+
+    <!-- Conversion Funnel -->
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🎯 Воронка конверсии</h2>
+        <div id="funnel" class="space-y-3"></div>
+      </div>
+
+      <!-- Top Models -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">⭐ Топ моделей</h2>
+        <div id="top-models" class="space-y-3"></div>
+      </div>
+    </div>
+
+    <!-- Event Types Distribution -->
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📋 Типы событий</h2>
+        <div id="event-types" class="space-y-2"></div>
+      </div>
+      <!-- Source distribution -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🔗 Источники заявок</h2>
+        <div id="sources" class="space-y-2"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const token = localStorage.getItem('admin_token');
+if (!token) window.location.href = '/admin/login.html';
+const h = { 'Authorization': `Bearer ${token}` };
+let currentPeriod = 30;
+
+function setPeriod(days) {
+  currentPeriod = days;
+  document.querySelectorAll('.period-btn').forEach(b => {
+    const btnDays = parseInt(b.textContent);
+    b.className = 'period-btn px-3 py-1.5 text-sm border rounded-lg' + (btnDays === days ? ' bg-pink-600 text-white border-pink-600' : '');
+  });
+  loadAll();
+}
+
+async function safeJson(promise) {
+  try { return await promise; } catch { return {}; }
+}
+
+async function loadAll() {
+  const [stats, chart, funnel, topModels, eventTypes, sources] = await Promise.all([
+    safeJson(fetch(`/api/admin/analytics/kpi?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
+    safeJson(fetch(`/api/admin/orders-chart?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
+    safeJson(fetch(`/api/admin/analytics/funnel?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
+    safeJson(fetch(`/api/admin/analytics/top-models?days=${currentPeriod}&limit=5`, {headers:h}).then(r=>r.json())),
+    safeJson(fetch(`/api/admin/analytics/event-types?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
+    safeJson(fetch(`/api/admin/analytics/sources?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
+  ]);
+
+  // KPIs
+  document.getElementById('kpi-total').textContent = stats.total || 0;
+  document.getElementById('kpi-completed').textContent = stats.completed || 0;
+  const conv = stats.total > 0 ? Math.round(stats.completed / stats.total * 100) : 0;
+  document.getElementById('kpi-conv').textContent = `${conv}% конверсия`;
+  document.getElementById('kpi-clients').textContent = stats.new_clients || 0;
+  document.getElementById('kpi-active').textContent = stats.active || 0;
+
+  // Chart — existing endpoint returns { days: [...], total: N }
+  renderChart(chart.days || []);
+
+  // Funnel
+  const funnelData = funnel.stages || [
+    { label: '🆕 Новые', count: stats.new_count || 0 },
+    { label: '🔍 На рассмотрении', count: stats.reviewing_count || 0 },
+    { label: '✅ Подтверждены', count: stats.confirmed_count || 0 },
+    { label: '🏁 Завершены', count: stats.completed || 0 },
+  ];
+  const maxFunnel = Math.max(...funnelData.map(f=>f.count), 1);
+  document.getElementById('funnel').innerHTML = funnelData.map(f => `
+    <div>
+      <div class="flex justify-between text-sm mb-1">
+        <span class="text-gray-700 dark:text-gray-300">${f.label}</span>
+        <span class="font-medium text-gray-900 dark:text-white">${f.count}</span>
+      </div>
+      <div class="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+        <div class="h-full bg-pink-500 rounded-full" style="width:${(f.count/maxFunnel*100).toFixed(1)}%"></div>
+      </div>
+    </div>`).join('');
+
+  // Top models
+  const models = topModels.models || [];
+  document.getElementById('top-models').innerHTML = models.length ? models.map((m,i) => `
+    <div class="flex items-center gap-3">
+      <span class="text-lg font-bold text-gray-400">${i+1}</span>
+      <div class="flex-1">
+        <div class="font-medium text-gray-900 dark:text-white text-sm">${m.name}</div>
+        <div class="text-xs text-gray-400">${m.orders} заявок · ${m.views||0} просмотров</div>
+      </div>
+    </div>`).join('') : '<div class="text-gray-400 text-sm">Нет данных</div>';
+
+  // Event types
+  const events = eventTypes.types || [];
+  const totalEvents = events.reduce((s,e)=>s+e.count,0) || 1;
+  const eventLabels = { fashion_show:'👗 Показ мод', photo_shoot:'📸 Съёмка', event:'🎉 Мероприятие', commercial:'📺 Реклама', runway:'🏃 Подиум', wedding:'💒 Свадьба', corporate:'🏢 Корпоратив', fashion:'👗 Показ мод', other:'📋 Другое' };
+  document.getElementById('event-types').innerHTML = events.length ? events.map(e => `
+    <div class="flex items-center gap-2">
+      <span class="text-sm text-gray-600 dark:text-gray-400 w-36 truncate">${eventLabels[e.type]||e.type||'—'}</span>
+      <div class="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+        <div class="h-full bg-blue-400 rounded-full" style="width:${(e.count/totalEvents*100).toFixed(0)}%"></div>
+      </div>
+      <span class="text-sm font-medium text-gray-900 dark:text-white w-8 text-right">${e.count}</span>
+    </div>`).join('') : '<div class="text-gray-400 text-sm">Нет данных</div>';
+
+  // Sources (utm_source)
+  const srcs = sources.sources || [];
+  const totalSrc = srcs.reduce((s,e)=>s+e.count,0) || 1;
+  const srcLabels = { website:'🌐 Сайт', bot:'🤖 Telegram бот', contact_form:'📞 Форма контактов', unknown:'❓ Неизвестно', '':'❓ Неизвестно' };
+  document.getElementById('sources').innerHTML = srcs.length ? srcs.map(s => `
+    <div class="flex items-center gap-2">
+      <span class="text-sm text-gray-600 dark:text-gray-400 w-36 truncate">${srcLabels[s.source]||s.source||'❓ Неизвестно'}</span>
+      <div class="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+        <div class="h-full bg-purple-400 rounded-full" style="width:${(s.count/totalSrc*100).toFixed(0)}%"></div>
+      </div>
+      <span class="text-sm font-medium text-gray-900 dark:text-white w-8 text-right">${s.count}</span>
+    </div>`).join('') : '<div class="text-gray-400 text-sm">Нет данных</div>';
+}
+
+function renderChart(data) {
+  const container = document.getElementById('chart-container');
+  const labels = document.getElementById('chart-labels');
+  if (!data.length) { container.innerHTML = '<div class="text-gray-400 text-sm m-auto">Нет данных за период</div>'; return; }
+  const maxVal = Math.max(...data.map(d=>d.count), 1);
+  container.innerHTML = data.map(d => `
+    <div class="flex flex-col items-center gap-1 flex-1 min-w-0">
+      <span class="text-xs text-gray-500">${d.count||0}</span>
+      <div class="w-full bg-pink-500 rounded-t-sm hover:bg-pink-600 transition-colors cursor-pointer"
+           title="${d.day||d.label}: ${d.count} заявок"
+           style="height:${Math.max(4, (d.count/maxVal)*160)}px"></div>
+    </div>`).join('');
+  // Show every Nth label to avoid overlap
+  const step = Math.ceil(data.length / 7);
+  labels.innerHTML = data.filter((_,i)=>i%step===0||i===data.length-1).map(d=>`<span>${(d.label||d.day||'').slice(-5)}</span>`).join('');
+}
+
+loadAll();
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>
