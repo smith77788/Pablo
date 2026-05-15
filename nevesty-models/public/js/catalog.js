@@ -302,6 +302,7 @@
             <div class="model-card-bottom">
               ${experienceBadge(m)}
               <span class="model-status-badge ${statusClass}">${statusText}</span>
+              ${m.order_count > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.7">📋 ${m.order_count}</span>` : ''}
             </div>
             <a href="/model.html?id=${m.id}"
                class="btn-book-model"

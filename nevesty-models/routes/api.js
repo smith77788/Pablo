@@ -421,7 +421,7 @@ router.get('/models', async (req, res, next) => {
     }
 
     const { category, hair_color, min_height, max_height, min_age, max_age, city, available, search } = req.query;
-    let sql = 'SELECT id, name, age, height, city, category, available, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos FROM models WHERE 1=1';
+    let sql = 'SELECT id, name, age, height, city, category, available, featured, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos, (SELECT COUNT(*) FROM orders WHERE model_id=models.id) as order_count FROM models WHERE 1=1';
     const params = [];
     if (category && ALLOWED_CATEGORIES.includes(category)) { sql += ' AND category = ?'; params.push(category); }
     if (hair_color) { sql += ' AND hair_color = ?'; params.push(hair_color); }
