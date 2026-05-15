@@ -54,6 +54,7 @@ const STRINGS = {
   errorSend: '❌ Ошибка при отправке\\.  Попробуйте позже\\.',
   errorNotFound: '❌ Запись не найдена.',
   errorAccessDenied: '⛔ Нет доступа.',
+  errorAccessDeniedShort: '⛔ Нет доступа',
   errorNoAccess: '⛔ У вас нет доступа к этой функции\\.',
   errorInvalidName: '❌ Введите ваше имя (минимум 2 символа):',
   errorInvalidPhone: '❌ Введите корректный номер телефона (7-20 символов):',

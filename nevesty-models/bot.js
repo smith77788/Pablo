@@ -5788,14 +5788,14 @@ function initBot(app) {
     if (data === 'check_status') return showStatusInput(chatId);
     if (data === 'adm_stats' || data === 'adm_stats_refresh') {
       if (!isAdmin(chatId)) {
-        await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true }).catch(() => {});
         return;
       }
       return showAdminStats(chatId);
     }
     if (data === 'adm_stats_csv') {
       if (!isAdmin(chatId)) {
-        await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true }).catch(() => {});
         return;
       }
       const csvUrl = `${SITE_URL.replace(/\/$/, '')}/api/admin/orders/export?format=csv`;
@@ -5803,7 +5803,7 @@ function initBot(app) {
     }
     if (data === 'adm_organism') {
       if (!isAdmin(chatId)) {
-        await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true }).catch(() => {});
         return;
       }
       return showOrganismStatus(chatId);
@@ -6734,7 +6734,7 @@ function initBot(app) {
     // ── Settings
     if (data === 'adm_settings') {
       if (!isAdmin(chatId)) {
-        await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true }).catch(() => {});
         return;
       }
       return showAdminSettings(chatId, 'main');
@@ -7479,14 +7479,14 @@ function initBot(app) {
     }
     if (data === 'adm_admins') {
       if (!isAdmin(chatId)) {
-        await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true }).catch(() => {});
         return;
       }
       return showAdminManagement(chatId);
     }
     if (data === 'adm_export') {
       if (!isAdmin(chatId)) {
-        await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true }).catch(() => {});
         return;
       }
       return showExportMenu(chatId);
