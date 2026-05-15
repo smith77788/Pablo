@@ -1085,6 +1085,30 @@ def _notify_admins_telegram(briefing: dict, decisions: list, cycle_id: str) -> N
             pass  # Don't fail the cycle on notification error
 
 
+def run_departments_parallel(departments: dict) -> dict:
+    """Run multiple department .run() callables in parallel using ThreadPoolExecutor.
+
+    Args:
+        departments: {name: dept_instance} where dept_instance has a .run() method.
+
+    Returns:
+        {name: result_dict} — same keys as input; errors are captured per-department.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: dict = {}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(dept.run): name for name, dept in departments.items()}
+        for future in as_completed(futures, timeout=30):
+            name = futures[future]
+            try:
+                results[name] = future.result(timeout=25)
+            except Exception as e:
+                logger.error("[parallel/%s] error: %s", name, e)
+                results[name] = {"error": str(e), "department": name}
+    return results
+
+
 def run_cycle() -> dict:
     """Один полный цикл AI-офиса. Возвращает сводку."""
     cycle_start = time.time()
@@ -1578,6 +1602,68 @@ def run_cycle() -> dict:
             summary_lines.append(f"🔬 Research: {', '.join(research_result.get('roles_used', []))}")
     except Exception as e:
         logger.error("Research dept phase error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 7b — FINANCE + RESEARCH DEPARTMENTS (heuristic, always runs)
+    # Uses finance_department.py and research_department.py — no API required.
+    # Runs in parallel via run_departments_parallel().
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n💰 PHASE 7b: Finance + Research (heuristic, parallel)")
+    try:
+        from factory.agents.finance_department import FinanceDepartment as _FinDeptHeuristic
+        from factory.agents.research_department import ResearchDepartment as _ResDeptHeuristic
+
+        _fin7b = _FinDeptHeuristic()
+        _res7b = _ResDeptHeuristic()
+
+        _dept7b_ctx = {"insights": insights, "metrics": all_metrics, "nevesty_kpis": nevesty_kpis}
+
+        # Run finance and research in parallel (both are fully heuristic)
+        _dept7b_results = run_departments_parallel({
+            "finance": type("_FinRunner", (), {
+                "run": lambda self: _fin7b.execute_task("прогноз выручки бюджет расходы", _dept7b_ctx)
+            })(),
+            "research": type("_ResRunner", (), {
+                "run": lambda self: _res7b.execute_task("рынок конкуренты тренды инсайты", _dept7b_ctx)
+            })(),
+        })
+
+        _fin7b_result = _dept7b_results.get("finance", {})
+        _res7b_result = _dept7b_results.get("research", {})
+
+        if _fin7b_result and not _fin7b_result.get("error"):
+            results["phases"].setdefault("finance_heuristic", {}).update({
+                "roles_used": _fin7b_result.get("roles_used", []),
+                "trend": _fin7b_result.get("trend"),
+                "confidence": _fin7b_result.get("confidence"),
+                "revenue_forecast": _fin7b_result.get("revenue_forecast", {}),
+                "status": "ok",
+            })
+            logger.info("[Phase7b] Finance heuristic: trend=%s, confidence=%s",
+                        _fin7b_result.get("trend"), _fin7b_result.get("confidence"))
+            summary_lines.append(
+                f"💰 Finance heuristic (7b): trend={_fin7b_result.get('trend')}, "
+                f"confidence={_fin7b_result.get('confidence')}"
+            )
+
+        if _res7b_result and not _res7b_result.get("error"):
+            results["phases"].setdefault("research_heuristic", {}).update({
+                "roles_used": _res7b_result.get("roles_used", []),
+                "top_opportunities": _res7b_result.get("top_opportunities", []),
+                "strategic_alerts": _res7b_result.get("strategic_alerts", []),
+                "market_opportunity_score": _res7b_result.get("market_opportunity_score", 0),
+                "confidence": _res7b_result.get("confidence"),
+                "status": "ok",
+            })
+            logger.info("[Phase7b] Research heuristic: opp_score=%s, alerts=%d",
+                        _res7b_result.get("market_opportunity_score"),
+                        len(_res7b_result.get("strategic_alerts", [])))
+            summary_lines.append(
+                f"🔬 Research heuristic (7b): opp_score={_res7b_result.get('market_opportunity_score')}, "
+                f"alerts={len(_res7b_result.get('strategic_alerts', []))}"
+            )
+    except Exception as e:
+        logger.error("Phase 7b Finance+Research heuristic error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # PHASE 12 — SALES DEPARTMENT (все 4 агента индивидуально)

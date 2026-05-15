@@ -243,3 +243,69 @@ class InsightSynthesizer:
             f"  • Рост выручки: {trend_arrow} {abs(growth):.1f}%\n\n"
             f"💡 Инсайт: {'Позитивная динамика — усилить маркетинг.' if growth > 5 else 'Стабильно — оптимизировать воронку.'}\n"
         )
+
+
+# ──────────────────────────────────────────────────────────────
+# ResearchDepartment — facade
+# ──────────────────────────────────────────────────────────────
+
+class ResearchDepartment:
+    """Facade that orchestrates all Research Department heuristic agents (no API calls)."""
+
+    def __init__(self) -> None:
+        self.researcher = MarketResearcher()
+        self.analyst = CompetitorAnalyst()
+        self.spotter = TrendSpotter()
+        self.synthesizer = InsightSynthesizer()
+
+    def execute_task(self, task: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run full research cycle using all department agents.
+
+        Works without an API key — all logic is heuristic.
+        """
+        ctx = context or {}
+        kpis = ctx.get("nevesty_kpis", {})
+
+        # Determine top segment from KPIs or task keyword
+        task_lower = (task or "").lower()
+        top_segment = "commercial"
+        for seg in ("fashion", "events", "promo"):
+            if seg in task_lower:
+                top_segment = seg
+                break
+
+        market = self.researcher.analyze_market_segment(top_segment)
+        gaps = self.analyst.identify_competitive_gaps(["fashion", "events", "commercial"])
+        trends = self.spotter.get_actionable_trends()[:3]
+
+        conversion_rate = float(kpis.get("conversion_rate_pct", 0)) / 100
+        avg_budget = float(kpis.get("avg_check", 0))
+        insights = self.synthesizer.synthesize_insights(
+            market, gaps, trends,
+            {"conversion_rate": conversion_rate, "avg_budget": avg_budget},
+        )
+
+        all_insights = [
+            insights.get("executive_summary", ""),
+            *insights.get("top_opportunities", []),
+        ]
+
+        return {
+            "department": "research",
+            "task": task,
+            "roles_used": ["market_researcher", "competitor_analyst", "trend_spotter", "insight_synthesizer"],
+            "insights": [i for i in all_insights if i],
+            "top_opportunities": insights.get("top_opportunities", []),
+            "strategic_alerts": insights.get("strategic_alerts", []),
+            "market_opportunity_score": market.get("opportunity_score", 0),
+            "recommended_focus": insights.get("recommended_focus", top_segment),
+            "confidence": insights.get("confidence_level", "low"),
+            "result": {
+                "summary": (
+                    f"Research cycle: segment={top_segment}, "
+                    f"opp_score={market.get('opportunity_score', 0)}, "
+                    f"alerts={len(insights.get('strategic_alerts', []))}"
+                )
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
