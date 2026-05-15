@@ -450,6 +450,45 @@ class FinanceDepartment:
         self.pricing = PricingStrategist()
         self.planner = BudgetPlanner()
 
+    def execute_task(self, task: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Execute a finance task using all department agents.
+
+        Adapts the context dict (may include nevesty_kpis) into run_analysis format.
+        """
+        ctx = context or {}
+        kpis = ctx.get("nevesty_kpis", {})
+        monthly_revenue = float(kpis.get("revenue_month") or 0.0)
+        orders_month = int(kpis.get("orders_this_month") or 0)
+
+        # Build revenue history from KPIs if no explicit history provided
+        revenue_history = ctx.get("revenue_history", [])
+        if not revenue_history and monthly_revenue > 0:
+            revenue_history = [{"revenue": monthly_revenue}]
+
+        costs = ctx.get("costs", {})
+
+        analysis = self.run_analysis({"revenue_history": revenue_history, "costs": costs})
+
+        forecast_3m = analysis.get("revenue_forecast_3m", [0.0, 0.0, 0.0])
+        forecast_next = forecast_3m[0] if forecast_3m else 0.0
+
+        return {
+            "roles_used": ["revenue_forecaster", "cost_optimizer", "pricing_strategist", "budget_planner"],
+            "revenue_forecast": analysis,
+            "trend": analysis.get("trend", "stable"),
+            "confidence": analysis.get("confidence", "low"),
+            "cost_analysis": analysis.get("cost_analysis", {}),
+            "budget_plan": analysis.get("budget_plan", {}),
+            "insights": analysis.get("cost_analysis", {}).get("suggestions", []),
+            "result": {
+                "summary": (
+                    f"Finance cycle: 3-month forecast {forecast_next:.0f}, "
+                    f"trend={analysis.get('trend', 'stable')}, "
+                    f"confidence={analysis.get('confidence', 'low')}"
+                )
+            },
+        }
+
     def run_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Run full financial analysis cycle.
 

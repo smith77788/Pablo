@@ -550,3 +550,86 @@ class TestFinanceDepartment:
         assert hasattr(dept, 'optimizer')
         assert hasattr(dept, 'pricing')
         assert hasattr(dept, 'planner')
+
+
+class TestFinanceDepartmentExecuteTask:
+    """Tests for FinanceDepartment.execute_task method."""
+
+    def test_execute_task_returns_dict(self, dept):
+        result = dept.execute_task("run finance analysis")
+        assert isinstance(result, dict)
+
+    def test_execute_task_returns_roles_used(self, dept):
+        result = dept.execute_task("run finance analysis")
+        assert "roles_used" in result
+        assert isinstance(result["roles_used"], list)
+
+    def test_execute_task_roles_used_has_four_agents(self, dept):
+        result = dept.execute_task("run finance analysis")
+        assert len(result["roles_used"]) == 4
+
+    def test_execute_task_roles_used_contains_all_expected_agents(self, dept):
+        result = dept.execute_task("run finance analysis")
+        expected = {"revenue_forecaster", "cost_optimizer", "pricing_strategist", "budget_planner"}
+        assert set(result["roles_used"]) == expected
+
+    def test_execute_task_returns_result_with_summary(self, dept):
+        result = dept.execute_task("run finance analysis")
+        assert "result" in result
+        assert "summary" in result["result"]
+        assert isinstance(result["result"]["summary"], str)
+
+    def test_execute_task_returns_trend_string(self, dept):
+        result = dept.execute_task("analyze finances")
+        assert "trend" in result
+        assert isinstance(result["trend"], str)
+
+    def test_execute_task_returns_confidence_string(self, dept):
+        result = dept.execute_task("analyze finances")
+        assert "confidence" in result
+        assert isinstance(result["confidence"], str)
+
+    def test_execute_task_returns_insights_list(self, dept):
+        result = dept.execute_task("optimize costs")
+        assert "insights" in result
+        assert isinstance(result["insights"], list)
+
+    def test_execute_task_none_context_no_error(self, dept):
+        """execute_task should work when context=None."""
+        result = dept.execute_task("finance report", context=None)
+        assert isinstance(result, dict)
+        assert "roles_used" in result
+
+    def test_execute_task_empty_context_no_error(self, dept):
+        """execute_task should work with an empty context dict."""
+        result = dept.execute_task("finance report", context={})
+        assert isinstance(result, dict)
+        assert "roles_used" in result
+
+    def test_execute_task_with_nevesty_kpis_context(self, dept):
+        """execute_task should integrate nevesty_kpis properly."""
+        context = {
+            "nevesty_kpis": {
+                "revenue_month": 50_000,
+                "orders_this_month": 20,
+                "avg_check": 2_500,
+            }
+        }
+        result = dept.execute_task("full analysis", context=context)
+        assert result["confidence"] in ("low", "medium", "high")
+
+    def test_execute_task_zero_revenue_kpis(self, dept):
+        """Zero revenue in KPIs should still return valid structure."""
+        context = {"nevesty_kpis": {"revenue_month": 0}}
+        result = dept.execute_task("analysis", context=context)
+        assert "result" in result
+        assert "0" in result["result"]["summary"]
+
+    def test_execute_task_with_costs_in_context(self, dept):
+        """Costs passed in context should appear in cost_analysis."""
+        context = {
+            "revenue_history": [30_000, 35_000, 40_000],
+            "costs": {"marketing": 5_000, "ops": 3_000},
+        }
+        result = dept.execute_task("budget review", context=context)
+        assert "cost_analysis" in result
