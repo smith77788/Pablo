@@ -2254,7 +2254,7 @@ router.get('/reviews', async (req, res, next) => {
   try {
     const usePagination = req.query.page !== undefined;
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
     const model_id = req.query.model_id ? parseInt(req.query.model_id) : null;
     let where = 'r.approved = 1';

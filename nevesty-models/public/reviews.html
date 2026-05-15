@@ -2,6 +2,8 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
+  <!-- Flash-prevention: apply theme class before first paint -->
+  <script>try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Отзывы клиентов — Nevesty Models</title>
   <meta name="description" content="Реальные отзывы клиентов агентства Nevesty Models. Узнайте, что говорят о работе с нашими профессиональными моделями.">
@@ -48,6 +50,21 @@
       {"@type": "ListItem", "position": 1, "name": "Главная", "item": "/"},
       {"@type": "ListItem", "position": 2, "name": "Отзывы", "item": "/reviews.html"}
     ]
+  }
+  </script>
+  <script type="application/ld+json" id="schema-aggregate-rating">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Nevesty Models",
+    "url": "https://nevesty-models.ru",
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": "5.0",
+      "bestRating": "5",
+      "worstRating": "1",
+      "ratingCount": "1"
+    }
   }
   </script>
   <style>
@@ -330,6 +347,10 @@ function renderReviews() {
           ${r.model_name ? `<div class="review-model-tag">💃 ${esc(r.model_name)}</div>` : ''}
         </div>
       </div>
+      ${r.admin_reply ? `<div style="margin-top:12px;padding:10px 14px;background:rgba(201,169,110,0.07);border-left:2px solid rgba(201,169,110,0.4);border-radius:0 6px 6px 0">
+        <div style="font-size:0.72rem;letter-spacing:1px;text-transform:uppercase;color:var(--gold);margin-bottom:4px">Ответ агентства</div>
+        <p style="font-size:0.82rem;color:var(--text-muted);line-height:1.6;margin:0">${esc(r.admin_reply)}</p>
+      </div>` : ''}
     </div>
   `).join('');
 
@@ -357,6 +378,19 @@ async function loadReviews() {
     document.getElementById('statTotal').textContent = total;
     document.getElementById('statRating').textContent = avgRating + (total > 0 ? ' ★' : '');
     document.getElementById('statFive').textContent = fiveStars;
+
+    // Update Schema.org AggregateRating structured data dynamically
+    if (total > 0) {
+      try {
+        const schemaEl = document.getElementById('schema-aggregate-rating');
+        if (schemaEl) {
+          const schema = JSON.parse(schemaEl.textContent);
+          schema.aggregateRating.ratingValue = avgRating;
+          schema.aggregateRating.ratingCount = String(total);
+          schemaEl.textContent = JSON.stringify(schema);
+        }
+      } catch (_) {}
+    }
 
     renderReviews();
   } catch (e) {
