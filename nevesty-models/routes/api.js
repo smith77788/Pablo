@@ -1160,6 +1160,19 @@ router.post('/admin/notify', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/admin/broadcasts — list all scheduled_broadcasts with stats
+router.get('/admin/broadcasts', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(50, parseInt(req.query.limit) || 20);
+    const rows = await query(
+      `SELECT id, text, segment, scheduled_at, status, sent_count, error_count, sent_at, created_at
+       FROM scheduled_broadcasts ORDER BY created_at DESC LIMIT ?`,
+      [limit]
+    );
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
 // ─── Managers ─────────────────────────────────────────────────────────────────
 router.get('/admin/managers', auth, async (req, res, next) => {
   try {
@@ -1993,15 +2006,15 @@ router.get('/admin/analytics/monthly', auth, async (req, res, next) => {
 router.get('/admin/analytics/extended', auth, async (req, res, next) => {
   try {
     const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
-    const since = `datetime('now', '-${days} days')`;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
     // Top cities by order count
     const topCities = await query(
       `SELECT m.city, COUNT(o.id) as cnt
        FROM orders o JOIN models m ON o.model_id = m.id
-       WHERE m.city IS NOT NULL AND m.city != '' AND o.created_at >= ${since}
+       WHERE m.city IS NOT NULL AND m.city != '' AND o.created_at >= ?
        GROUP BY m.city ORDER BY cnt DESC LIMIT 5`,
-      []
+      [since]
     );
 
     // Repeat clients (clients with > 1 order)
