@@ -469,6 +469,7 @@ router.patch('/models/:id', auth, async (req, res, next) => {
     const m = await get('SELECT id FROM models WHERE id = ?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
     await run('UPDATE models SET available = ? WHERE id = ?', [val, id]);
+    cache.delByPrefix('catalog:'); // invalidate catalog cache
     res.json({ ok: true, available: val });
   } catch (e) { next(e); }
 });
@@ -1060,8 +1061,9 @@ router.put('/settings', auth, async (req, res, next) => {
       if (!ALLOWED_KEYS.includes(key)) continue;
       const v = String(value ?? '').trim().slice(0, 2000);
       await run('INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', [key, v]);
-      cache.del(`setting:${key}`); // invalidate setting cache entry
+      cache.del(`setting:${key}`); // invalidate individual setting cache entry
     }
+    cache.del('settings:public'); // invalidate public settings bundle
     res.json({ ok: true });
   } catch(e) { next(e); }
 });
@@ -1770,6 +1772,162 @@ router.post('/admin/email/test', auth, async (req, res, next) => {
     } else {
       res.status(500).json({ ok: false, error: result.error || 'Ошибка отправки' });
     }
+  } catch (e) { next(e); }
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAYMENT ROUTES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Helper: look up payment_provider from bot_settings
+async function getPaymentProvider() {
+  const row = await get('SELECT value FROM bot_settings WHERE key=?', ['payment_provider']).catch(() => null);
+  return row?.value || 'disabled';
+}
+
+// POST /api/orders/:id/pay — create payment for an order
+// Auth: admin JWT  OR  client phone token
+router.post('/orders/:id/pay', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid order ID' });
+
+    let authorized = false;
+    const authHeader = req.headers.authorization || '';
+    if (authHeader.startsWith('Bearer ')) {
+      try {
+        jwt.verify(authHeader.slice(7), process.env.JWT_SECRET || 'secret');
+        authorized = true;
+      } catch {}
+    }
+
+    const { phone, return_url } = req.body;
+    const order = await get('SELECT * FROM orders WHERE id=?', [id]);
+    if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
+
+    if (!authorized && phone) {
+      const clean = (p) => p.replace(/\D/g, '').replace(/^[78]/, '');
+      const clientClean = clean(String(phone));
+      const orderClean  = clean(order.client_phone || '');
+      if (clientClean.length >= 7 && clientClean === orderClean) authorized = true;
+    }
+
+    if (!authorized) return res.status(401).json({ error: 'Необходима авторизация' });
+
+    const provider = await getPaymentProvider();
+    if (provider === 'disabled' || !provider) {
+      return res.status(400).json({ error: 'Оплата не настроена' });
+    }
+
+    const siteUrl     = process.env.SITE_URL || 'http://localhost:3000';
+    const returnUrl   = return_url || `${siteUrl}/order-status.html?id=${order.id}`;
+    const description = `Оплата заявки ${order.order_number}`;
+    const amountStr   = (order.budget || '').replace(/[^\d]/g, '');
+    const amount      = amountStr ? Math.max(1, parseInt(amountStr, 10)) : 1000;
+
+    let result;
+    if (provider === 'yookassa') {
+      result = await payment.createYooKassaPayment(order.id, amount, description, returnUrl);
+    } else if (provider === 'stripe') {
+      result = await payment.createStripePayment(order.id, amount, description, 'rub');
+    } else {
+      return res.status(400).json({ error: `Неизвестный провайдер: ${provider}` });
+    }
+
+    if (result.error) return res.status(502).json({ error: result.error });
+
+    await run(
+      'UPDATE orders SET payment_id=?, payment_status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+      [result.payment_id, 'pending', id]
+    );
+
+    res.json({
+      payment_url:   result.payment_url || null,
+      payment_id:    result.payment_id,
+      client_secret: result.client_secret || null,
+      provider,
+    });
+  } catch (e) { next(e); }
+});
+
+// POST /api/webhooks/yookassa
+router.post('/webhooks/yookassa', async (req, res, next) => {
+  try {
+    const body  = req.body;
+    const event = Buffer.isBuffer(body) ? JSON.parse(body.toString('utf8')) : body;
+
+    if (event?.event === 'payment.succeeded') {
+      const paymentId   = event?.object?.id;
+      const metaOrderId = event?.object?.metadata?.order_id;
+      if (paymentId) {
+        const ord = metaOrderId
+          ? await get('SELECT * FROM orders WHERE id=?', [parseInt(metaOrderId)]).catch(() => null)
+          : await get('SELECT * FROM orders WHERE payment_id=?', [paymentId]).catch(() => null);
+        if (ord) {
+          await run(
+            `UPDATE orders SET payment_status='paid', paid_at=CURRENT_TIMESTAMP,
+             status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+            [ord.id]
+          );
+          if (botInstance && ord.client_chat_id && typeof botInstance.notifyPaymentSuccess === 'function') {
+            botInstance.notifyPaymentSuccess(ord.client_chat_id, ord.order_number).catch(() => {});
+          }
+          if (botInstance?.notifyAdmin) {
+            botInstance.notifyAdmin(
+              `💳 *Оплата получена!* Заявка ${ord.order_number}
+Клиент: ${ord.client_name}`
+            ).catch(() => {});
+          }
+        }
+      }
+    }
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// POST /api/webhooks/stripe
+router.post('/webhooks/stripe', async (req, res, next) => {
+  try {
+    const sig  = req.headers['stripe-signature'] || '';
+    const body = req.body;
+
+    if (process.env.STRIPE_WEBHOOK_SECRET && sig) {
+      const rawBody = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body));
+      if (!payment.verifyStripeWebhook(rawBody, sig)) {
+        return res.status(403).json({ error: 'Invalid Stripe signature' });
+      }
+    }
+
+    const event = Buffer.isBuffer(body) ? JSON.parse(body.toString('utf8')) : body;
+
+    if (event?.type === 'payment_intent.succeeded') {
+      const pi          = event?.data?.object;
+      const paymentId   = pi?.id;
+      const metaOrderId = pi?.metadata?.order_id;
+      if (paymentId) {
+        const ord = metaOrderId
+          ? await get('SELECT * FROM orders WHERE id=?', [parseInt(metaOrderId)]).catch(() => null)
+          : await get('SELECT * FROM orders WHERE payment_id=?', [paymentId]).catch(() => null);
+        if (ord) {
+          await run(
+            `UPDATE orders SET payment_status='paid', paid_at=CURRENT_TIMESTAMP,
+             status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+            [ord.id]
+          );
+          if (botInstance && ord.client_chat_id && typeof botInstance.notifyPaymentSuccess === 'function') {
+            botInstance.notifyPaymentSuccess(ord.client_chat_id, ord.order_number).catch(() => {});
+          }
+          if (botInstance?.notifyAdmin) {
+            botInstance.notifyAdmin(
+              `💳 *Оплата Stripe получена!* Заявка ${ord.order_number}
+Клиент: ${ord.client_name}`
+            ).catch(() => {});
+          }
+        }
+      }
+    }
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
