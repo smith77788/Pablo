@@ -4595,19 +4595,19 @@ router.get('/stats/extended', auth, async (req, res, next) => {
 router.get('/export/orders', auth, async (req, res, next) => {
   try {
     const orders = await query(`
-      SELECT o.id, o.client_name, o.client_phone, o.service_type,
+      SELECT o.id, o.client_name, o.client_phone, o.event_type,
              o.event_date, o.status, o.created_at,
              m.name as model_name
       FROM orders o LEFT JOIN models m ON o.model_id = m.id
       ORDER BY o.created_at DESC
     `);
 
-    const headers = ['ID', 'Клиент', 'Телефон', 'Услуга', 'Дата мероприятия', 'Статус', 'Дата заявки', 'Модель'];
+    const headers = ['ID', 'Клиент', 'Телефон', 'Тип события', 'Дата мероприятия', 'Статус', 'Дата заявки', 'Модель'];
     const rows = orders.map(o => [
       o.id,
       o.client_name,
       o.client_phone,
-      o.service_type,
+      o.event_type,
       o.event_date || '',
       o.status,
       o.created_at,
