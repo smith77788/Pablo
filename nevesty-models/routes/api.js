@@ -1429,6 +1429,61 @@ router.get('/orders/status', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Public: lookup orders by phone (client cabinet) ─────────────────────────
+// GET /api/orders/by-phone?phone=79991234567
+// Rate-limited: reuses clientRateLimit (10/hour per IP), defined below at line ~3423.
+// NOTE: clientRateLimit is defined later in this file; use a simple inline limiter here.
+const _byPhoneLimits = new Map();
+function byPhoneLimiter(req, res, next) {
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000; // 15 minutes
+  const maxReqs = 5;
+  const timestamps = (_byPhoneLimits.get(ip) || []).filter(t => now - t < windowMs);
+  if (timestamps.length >= maxReqs) {
+    return res.status(429).json({ error: 'Слишком много запросов. Попробуйте через 15 минут.' });
+  }
+  timestamps.push(now);
+  _byPhoneLimits.set(ip, timestamps);
+  next();
+}
+
+router.get('/orders/by-phone', byPhoneLimiter, async (req, res, next) => {
+  try {
+    const rawPhone = (req.query.phone || '').trim();
+    const digits = rawPhone.replace(/\D/g, '');
+    // Normalize: strip leading 7 or 8 to get 10-digit base
+    let phone10 = null;
+    if (digits.length === 11 && (digits[0] === '7' || digits[0] === '8')) phone10 = digits.slice(1);
+    else if (digits.length === 10) phone10 = digits;
+    if (!phone10) return res.json({ orders: [], total: 0 });
+
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const placeholders = patterns.map(() => '?').join(',');
+
+    const EVENT_RU = {
+      fashion_show: 'Показ мод', photo_shoot: 'Фотосессия', event: 'Мероприятие',
+      commercial: 'Коммерческая съёмка', runway: 'Подиум', other: 'Другое'
+    };
+
+    const orders = await query(
+      `SELECT o.id, o.order_number, o.created_at, o.event_type, o.event_date,
+              o.budget, o.status, o.model_id, o.comments, o.location, o.client_name,
+              m.name as model_name, m.photo_main as model_photo
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${placeholders})
+          OR REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${placeholders})
+       GROUP BY o.id
+       ORDER BY o.created_at DESC LIMIT 20`,
+      [...patterns, ...patterns]
+    );
+
+    const result = orders.map(o => ({ ...o, event_type_ru: EVENT_RU[o.event_type] || o.event_type }));
+    res.json({ orders: result, total: result.length });
+  } catch (e) { next(e); }
+});
+
 // ─── Favorites (wishlist) — stored by localStorage key on site, chat_id in bot ─
 // GET  /api/favorites?ids=1,2,3        → public, returns model stubs for given IDs
 // POST /api/favorites/check            → check if model is in DB (validation)

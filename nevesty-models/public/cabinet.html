@@ -352,11 +352,11 @@
 
       <!-- ══════════ LOGIN PANEL ══════════ -->
       <div class="cabinet-login" id="loginPanel">
-        <!-- Step 1: Phone entry -->
+        <!-- Phone entry: direct lookup, no OTP -->
         <div id="stepPhone">
-          <div class="cabinet-login-icon">👤</div>
-          <h2>Войти в личный кабинет</h2>
-          <p>Введите номер телефона, указанный при оформлении заявки — мы отправим код подтверждения.</p>
+          <div class="cabinet-login-icon">📋</div>
+          <h2>Мои заявки</h2>
+          <p>Введите номер телефона, указанный при оформлении заявки — мы покажем все ваши заявки.</p>
           <label for="phoneInput" class="sr-only">Номер телефона</label>
           <input
             type="tel"
@@ -368,32 +368,12 @@
             aria-label="Ваш номер телефона"
           />
           <div class="cabinet-login-hint">Формат: +7 (XXX) XXX-XX-XX или 8XXXXXXXXXX</div>
-          <button class="cabinet-login-btn" id="searchBtn" onclick="Cabinet.requestCode()">
-            Получить код
+          <button class="cabinet-login-btn" id="searchBtn" onclick="Cabinet.search()">
+            Найти заявки →
           </button>
-        </div>
-        <!-- Step 2: OTP code entry -->
-        <div id="stepCode" style="display:none">
-          <div class="cabinet-login-icon">📱</div>
-          <h2>Введите код</h2>
-          <p id="otpHint">Код отправлен на ваш номер. Действует 10 минут.</p>
-          <input
-            type="text"
-            class="cabinet-phone-input"
-            id="otpInput"
-            placeholder="000000"
-            inputmode="numeric"
-            autocomplete="one-time-code"
-            maxlength="6"
-            aria-label="Код подтверждения"
-            style="letter-spacing:6px;text-align:center;font-size:1.5rem"
-          />
-          <button class="cabinet-login-btn" id="verifyBtn" onclick="Cabinet.verifyCode()">
-            Войти
-          </button>
-          <button onclick="Cabinet.backToPhone()" style="background:none;border:none;color:var(--text-dim);font-size:0.8rem;cursor:pointer;margin-top:8px;display:block;text-align:center;width:100%">
-            ← Изменить номер
-          </button>
+          <div class="cabinet-login-hint" style="margin-top:12px">
+            Нет заявок? <a href="/booking.html" style="color:var(--gold);text-decoration:none">Оформить первую →</a>
+          </div>
         </div>
         <div class="cabinet-login-error" id="loginError" role="alert"></div>
       </div>
@@ -858,11 +838,24 @@
       hideError();
     }
 
-    // ── Load orders (after auth) ──────────────────────────────────
+    // ── Load orders by phone (no auth required) ───────────────────
     async function loadOrders(phone10) {
       try {
-        const r = await fetch(`/api/client/orders?phone=${encodeURIComponent('7' + phone10)}`);
+        const r = await fetch(`/api/orders/by-phone?phone=${encodeURIComponent('7' + phone10)}`);
         const data = await r.json();
+        if (r.status === 404) {
+          // No orders found — show empty state
+          _orders = [];
+          sessionStorage.setItem('cabinet_phone', _phone);
+          showOrders();
+          renderOrders([]);
+          return;
+        }
+        if (r.status === 429) {
+          showLogin();
+          showError('Превышен лимит запросов. Попробуйте через 15 минут.');
+          return;
+        }
         if (!r.ok) { showLogin(); showError(data.error || 'Ошибка сервера'); return; }
         _orders = data.orders || [];
         sessionStorage.setItem('cabinet_phone', _phone);
@@ -875,7 +868,7 @@
       }
     }
 
-    // ── Legacy search (kept for auto-login from session) ──────────
+    // ── Direct phone search (no OTP) ──────────────────────────────
     async function search() {
       const raw = (document.getElementById('phoneInput').value || '').trim();
       if (!raw) { showError('Введите номер телефона'); return; }
@@ -883,8 +876,16 @@
       if (!phone10) { showError('Некорректный формат номера. Укажите 10 цифр.'); return; }
       _phone = raw;
       hideError();
+
+      const btn = document.getElementById('searchBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Ищем…'; }
       showSkeleton();
-      await loadOrders(phone10);
+
+      try {
+        await loadOrders(phone10);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Найти заявки →'; }
+      }
     }
 
     // ── Logout ────────────────────────────────────────────────────
@@ -1023,7 +1024,7 @@
       const phone10 = normalizePhone(_phone);
       if (!phone10) return;
       try {
-        const r = await fetch(`/api/client/orders?phone=${encodeURIComponent('7' + phone10)}`);
+        const r = await fetch(`/api/orders/by-phone?phone=${encodeURIComponent('7' + phone10)}`);
         if (!r.ok) return;
         const data = await r.json();
         const newOrders = data.orders || [];
@@ -1070,9 +1071,12 @@
       });
 
       // Close modal on backdrop click
-      document.getElementById('reviewModal').addEventListener('click', e => {
-        if (e.target === document.getElementById('reviewModal')) closeReview();
-      });
+      const reviewModalEl = document.getElementById('reviewModal');
+      if (reviewModalEl) {
+        reviewModalEl.addEventListener('click', e => {
+          if (e.target === reviewModalEl) closeReview();
+        });
+      }
 
       // Escape key closes modal
       document.addEventListener('keydown', e => {
@@ -1084,7 +1088,7 @@
     }
 
     // Expose public API
-    window.Cabinet = { search, requestCode, verifyCode, backToPhone, logout, toggleCard, openReview, closeReview, setStar, submitReview, startPolling, stopPolling };
+    window.Cabinet = { search, logout, toggleCard, openReview, closeReview, setStar, submitReview, startPolling, stopPolling };
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', init);
