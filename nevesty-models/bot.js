@@ -4293,6 +4293,11 @@ function initBot(app) {
     if (data === 'my_orders')  return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
     if (data === 'adm_stats' || data === 'adm_stats_refresh')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminStats(chatId); }
+    if (data === 'adm_stats_csv') {
+      if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; }
+      const csvUrl = `${SITE_URL.replace(/\/$/, '')}/api/admin/orders/export?format=csv`;
+      return safeSend(chatId, esc(`📎 Ссылка на экспорт заявок (CSV):\n${csvUrl}`), { parse_mode: 'MarkdownV2' });
+    }
     if (data === 'adm_organism')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showOrganismStatus(chatId); }
     if (data === 'adm_run_organism') {
       if (!isAdmin(chatId)) return;

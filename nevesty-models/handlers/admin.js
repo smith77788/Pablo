@@ -197,7 +197,7 @@ async function showAdminStats(chatId) {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         [{ text: '🔄 Обновить', callback_data: 'adm_stats_refresh' }, { text: '← Меню', callback_data: 'admin_menu' }],
-        [{ text: '📋 Все заявки', callback_data: 'adm_orders__0' }],
+        [{ text: '📤 Экспорт CSV', callback_data: 'adm_stats_csv' }, { text: '📋 Все заявки', callback_data: 'adm_orders__0' }],
         [{ text: '📊 Аналитика (сайт)', url: 'https://nevesty-models.ru/admin/analytics.html' }],
       ]}
     });

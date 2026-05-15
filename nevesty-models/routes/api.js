@@ -23,6 +23,7 @@ let strictLimiter    = (req, res, next) => next(); // fallback: no-op
 let authLimiter      = (req, res, next) => next(); // fallback: no-op
 let aiMatchLimiter   = (req, res, next) => next(); // fallback: no-op
 let bookingLimiter   = (req, res, next) => next(); // fallback: no-op — 5/hour for /orders
+let wishlistLimiter  = (req, res, next) => next(); // fallback: no-op — 60/15min for wishlist
 try {
   const rateLimit = require('express-rate-limit');
   // Contact form: 3 requests per hour per IP
@@ -64,6 +65,14 @@ try {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Слишком много запросов. Попробуйте через час.' },
+  });
+  // Wishlist: 60 requests per 15 minutes per IP (add/remove/list)
+  wishlistLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много запросов к избранному. Попробуйте позже.' },
   });
 } catch { /* express-rate-limit not available */ }
 
@@ -1854,6 +1863,87 @@ router.get('/favorites', async (req, res, next) => {
       rawIds
     );
     res.json(models);
+  } catch (e) { next(e); }
+});
+
+// ─── User Wishlist — Telegram bot users (chat_id based, no JWT required) ─────
+// GET    /api/user/wishlist?chat_id=123         → list all wishlist entries for user
+// POST   /api/user/wishlist { chat_id, model_id } → add model to wishlist (409 if duplicate)
+// DELETE /api/user/wishlist/:model_id?chat_id=123 → remove model from wishlist
+
+router.get('/user/wishlist', wishlistLimiter, async (req, res, next) => {
+  try {
+    const chatId = parseInt(req.query.chat_id);
+    if (!chatId || chatId <= 0) return res.status(400).json({ error: 'chat_id обязателен' });
+
+    const rows = await query(
+      `SELECT w.id, w.model_id, w.created_at,
+              m.name, m.category, m.city, m.featured, m.available, m.photo_main
+       FROM wishlists w
+       JOIN models m ON m.id = w.model_id AND (m.archived IS NULL OR m.archived = 0)
+       WHERE w.chat_id = ?
+       ORDER BY w.created_at DESC`,
+      [String(chatId)]
+    );
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+router.post('/user/wishlist', wishlistLimiter, async (req, res, next) => {
+  try {
+    const chatId  = parseInt(req.body.chat_id);
+    const modelId = parseInt(req.body.model_id);
+    if (!chatId  || chatId  <= 0) return res.status(400).json({ error: 'chat_id обязателен' });
+    if (!modelId || modelId <= 0) return res.status(400).json({ error: 'model_id обязателен' });
+
+    // Verify the model exists and is not archived
+    const model = await get(
+      'SELECT id FROM models WHERE id=? AND (archived IS NULL OR archived=0)',
+      [modelId]
+    );
+    if (!model) return res.status(404).json({ error: 'Модель не найдена' });
+
+    try {
+      await run(
+        'INSERT INTO wishlists (chat_id, model_id) VALUES (?,?)',
+        [String(chatId), modelId]
+      );
+      // Also sync to favorites table for compatibility
+      await run(
+        'INSERT OR IGNORE INTO favorites (chat_id, model_id) VALUES (?,?)',
+        [String(chatId), modelId]
+      ).catch(() => {});
+      res.status(201).json({ ok: true });
+    } catch (e) {
+      if (e.message && e.message.includes('UNIQUE')) {
+        return res.status(409).json({ error: 'Модель уже в избранном' });
+      }
+      throw e;
+    }
+  } catch (e) { next(e); }
+});
+
+router.delete('/user/wishlist/:model_id', wishlistLimiter, async (req, res, next) => {
+  try {
+    const chatId  = parseInt(req.query.chat_id);
+    const modelId = parseInt(req.params.model_id);
+    if (!chatId  || chatId  <= 0) return res.status(400).json({ error: 'chat_id обязателен' });
+    if (!modelId || modelId <= 0) return res.status(400).json({ error: 'model_id обязателен' });
+
+    const result = await run(
+      'DELETE FROM wishlists WHERE chat_id=? AND model_id=?',
+      [String(chatId), modelId]
+    );
+    // Also sync to favorites table for compatibility
+    await run(
+      'DELETE FROM favorites WHERE chat_id=? AND model_id=?',
+      [String(chatId), modelId]
+    ).catch(() => {});
+
+    if (!result || result.changes === 0) {
+      return res.status(404).json({ error: 'Запись не найдена' });
+    }
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
