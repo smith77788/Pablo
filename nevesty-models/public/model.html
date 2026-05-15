@@ -1164,35 +1164,57 @@
             }
             el.setAttribute('content', content);
           };
+          const removeMeta = (attr, val) => {
+            const el = document.querySelector(`meta[${attr}="${val}"]`);
+            if (el) el.remove();
+          };
 
           const baseUrl = window.location.origin;
           const title = `${model.name} — Модель агентства Nevesty Models`;
           const desc = model.bio
             ? model.bio.substring(0, 155)
             : `${model.name}: профессиональная модель${model.city ? ' в ' + model.city : ''}.${model.height ? ' Рост ' + model.height + ' см.' : ''} Бронируйте на Nevesty Models.`;
-          const img =
-            model.photos && model.photos.length > 0
-              ? baseUrl + model.photos[0]
-              : model.photo_main
-                ? baseUrl + model.photo_main
-                : baseUrl + '/images/og-default.svg';
+          const isRealPhoto = (model.photos && model.photos.length > 0) || model.photo_main;
+          const img = isRealPhoto
+            ? baseUrl + (model.photos && model.photos.length > 0 ? model.photos[0] : model.photo_main)
+            : baseUrl + '/images/og-default.svg';
 
           document.title = title;
           setMeta('name', 'description', desc);
 
-          // Open Graph
+          // Open Graph — core
           setMeta('property', 'og:type', 'profile');
           setMeta('property', 'og:title', title);
           setMeta('property', 'og:description', desc);
-          setMeta('property', 'og:image', img);
           setMeta('property', 'og:url', `${baseUrl}/model/${model.id}`);
           setMeta('property', 'og:site_name', 'Nevesty Models');
+          setMeta('property', 'og:locale', 'ru_RU');
+
+          // Open Graph — image with dimensions and alt
+          setMeta('property', 'og:image', img);
+          setMeta('property', 'og:image:alt', `Фото модели ${model.name} — Nevesty Models`);
+          if (isRealPhoto) {
+            // Real uploaded photos are portrait; remove the default 1200×630 dimensions
+            removeMeta('property', 'og:image:width');
+            removeMeta('property', 'og:image:height');
+          } else {
+            setMeta('property', 'og:image:width', '1200');
+            setMeta('property', 'og:image:height', '630');
+          }
+
+          // Open Graph — profile namespace (first/last name)
+          const nameParts = (model.name || '').trim().split(/\s+/);
+          setMeta('property', 'profile:first_name', nameParts[0] || model.name);
+          if (nameParts.length > 1) {
+            setMeta('property', 'profile:last_name', nameParts.slice(1).join(' '));
+          }
 
           // Twitter Card
           setMeta('name', 'twitter:card', 'summary_large_image');
           setMeta('name', 'twitter:title', title);
           setMeta('name', 'twitter:description', desc);
           setMeta('name', 'twitter:image', img);
+          setMeta('name', 'twitter:image:alt', `Фото модели ${model.name} — Nevesty Models`);
 
           // Canonical link — always points to /model/:id (the SEO-canonical URL)
           let canonicalEl = document.querySelector('link[rel="canonical"]');
@@ -1239,6 +1261,28 @@
           if (model.height)
             personSchema.height = { '@type': 'QuantitativeValue', value: model.height, unitCode: 'CMT' };
           if (model.instagram) personSchema.sameAs = [`https://instagram.com/${model.instagram.replace(/^@/, '')}`];
+          if (model.hair_color) personSchema.hairColor = model.hair_color;
+          if (model.eye_color) personSchema.eyeColor = model.eye_color;
+          if (model.age) personSchema.age = model.age;
+
+          // Physical measurements as additionalProperty
+          const measurements = [
+            model.weight && { '@type': 'PropertyValue', name: 'Вес', value: model.weight, unitCode: 'KGM' },
+            model.bust && { '@type': 'PropertyValue', name: 'Бюст', value: model.bust, unitCode: 'CMT' },
+            model.waist && { '@type': 'PropertyValue', name: 'Талия', value: model.waist, unitCode: 'CMT' },
+            model.hips && { '@type': 'PropertyValue', name: 'Бёдра', value: model.hips, unitCode: 'CMT' },
+            model.shoe_size && { '@type': 'PropertyValue', name: 'Размер обуви', value: model.shoe_size },
+          ].filter(Boolean);
+          if (measurements.length > 0) personSchema.additionalProperty = measurements;
+
+          // Offer for booking
+          personSchema.makesOffer = {
+            '@type': 'Offer',
+            name: `Бронирование модели ${model.name}`,
+            url: `${baseUrl}/booking.html?model=${model.id}`,
+            seller: { '@type': 'Organization', name: 'Nevesty Models', url: baseUrl },
+            availability: model.available ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+          };
 
           const breadcrumbSchema = {
             '@context': 'https://schema.org',
