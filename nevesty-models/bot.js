@@ -2495,6 +2495,89 @@ function initBot(app) {
     if (data === 'adm_export')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return exportOrders(chatId); }
     if (data === 'adm_addmodel')  { if (!isAdmin(chatId)) return; return showAddModelStep(chatId, { _step: 'name' }); }
 
+    // ── Export period filters
+    if (data === 'adm_export_today') { if (!isAdmin(chatId)) return; return doExportOrders(chatId, 'today'); }
+    if (data === 'adm_export_week')  { if (!isAdmin(chatId)) return; return doExportOrders(chatId, 'week');  }
+    if (data === 'adm_export_month') { if (!isAdmin(chatId)) return; return doExportOrders(chatId, 'month'); }
+    if (data === 'adm_export_all')   { if (!isAdmin(chatId)) return; return doExportOrders(chatId, 'all');   }
+
+    // ── Bulk: новые → В работу
+    if (data === 'adm_bulk_new_to_review') {
+      if (!isAdmin(chatId)) return;
+      const result = await run("UPDATE orders SET status='reviewing', updated_at=CURRENT_TIMESTAMP WHERE status='new'");
+      return safeSend(chatId, `✅ Переведено ${result.changes} заявок в статус «На рассмотрении»`, {
+        reply_markup: { inline_keyboard: [[{ text: '📋 К заявкам', callback_data: 'adm_orders__0' }]] }
+      });
+    }
+
+    // ── Quick actions from orders list
+    if (data.startsWith('adm_quick_confirm_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_quick_confirm_', ''));
+      return adminChangeStatus(chatId, id, 'confirmed');
+    }
+    if (data.startsWith('adm_quick_complete_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_quick_complete_', ''));
+      return adminChangeStatus(chatId, id, 'completed');
+    }
+
+    // ── Assign manager: show list
+    if (data.startsWith('adm_assign_mgr_') && !data.match(/adm_assign_mgr_\d+_\d+/)) {
+      if (!isAdmin(chatId)) return;
+      const orderId = parseInt(data.replace('adm_assign_mgr_', ''));
+      const admins = await query("SELECT id, username, role FROM admins ORDER BY id").catch(()=>[]);
+      if (!admins.length) return safeSend(chatId, '❌ Нет администраторов в базе.');
+      const btns = admins.map(a => [{
+        text: `${a.username} (${a.role})`,
+        callback_data: `adm_assign_mgr_${orderId}_${a.id}`
+      }]);
+      btns.push([{ text: '← Назад', callback_data: `adm_order_${orderId}` }]);
+      return safeSend(chatId, `👤 *Выберите менеджера для заявки*:`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: btns }
+      });
+    }
+
+    // ── Assign manager: set
+    if (data.match(/^adm_assign_mgr_\d+_\d+$/)) {
+      if (!isAdmin(chatId)) return;
+      const parts = data.replace('adm_assign_mgr_', '').split('_');
+      const orderId = parseInt(parts[0]);
+      const adminId = parseInt(parts[1]);
+      await run('UPDATE orders SET manager_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [adminId, orderId]);
+      const [admin, order] = await Promise.all([
+        get('SELECT username, telegram_id FROM admins WHERE id=?', [adminId]).catch(()=>null),
+        get('SELECT order_number FROM orders WHERE id=?', [orderId]).catch(()=>null),
+      ]);
+      // Notify assigned manager if they have a telegram_id
+      if (admin?.telegram_id && String(admin.telegram_id) !== String(chatId)) {
+        safeSend(admin.telegram_id,
+          `👤 Вам назначена заявка *${esc(order?.order_number||String(orderId))}*\n\nНажмите, чтобы открыть:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]] }
+          }
+        ).catch(()=>{});
+      }
+      await safeSend(chatId, `✅ Менеджер *${esc(admin?.username||String(adminId))}* назначен на заявку\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] }
+      });
+      return;
+    }
+
+    // ── Order note: start input
+    if (data.startsWith('adm_note_') && !data.startsWith('adm_note_input_')) {
+      if (!isAdmin(chatId)) return;
+      const orderId = parseInt(data.replace('adm_note_', ''));
+      await setSession(chatId, `adm_note_input_${orderId}`, {});
+      return safeSend(chatId, `📝 *Введите заметку к заявке:*`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: `adm_order_${orderId}` }]] }
+      });
+    }
+
     // ── Settings inputs — set session and ask for text
     const settingPrompts = {
       'adm_set_greeting':           '📝 Введите новый текст *приветствия* (при /start):',
@@ -2997,6 +3080,18 @@ function initBot(app) {
       // ── Admin search order input
       if (state === 'adm_search_order_input') {
         return searchAdminOrders(chatId, text);
+      }
+
+      // ── Order note input
+      if (state.startsWith('adm_note_input_')) {
+        const orderId = parseInt(state.replace('adm_note_input_', ''));
+        if (!orderId) { await clearSession(chatId); return; }
+        await run('INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)', [orderId, text]);
+        await clearSession(chatId);
+        return safeSend(chatId, `✅ Заметка добавлена\\.`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] }
+        });
       }
     }
 
