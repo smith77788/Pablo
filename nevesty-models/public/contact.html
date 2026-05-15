@@ -946,13 +946,10 @@
           // Telegram: prefer tg_channel from settings, fallback to bot_username from config
           const tgBtn = document.getElementById('tg-contact-btn');
           if (tgBtn) {
-            const tgChannel = d.tg_channel || d.telegram_channel_id;
-            const botUsername = cfg.bot_username;
             if (tgChannel) {
-              const tgHandle = tgChannel.replace(/^@/, '');
-              tgBtn.href = `https://t.me/${tgHandle}`;
+              tgBtn.href = `https://t.me/${tgChannel.replace(/^@/, '')}`;
             } else if (botUsername) {
-              tgBtn.href = `https://t.me/${botUsername}`;
+              tgBtn.href = `https://t.me/${botUsername.replace(/^@/, '')}`;
             }
             // always show the button
             tgBtn.style.display = 'flex';
