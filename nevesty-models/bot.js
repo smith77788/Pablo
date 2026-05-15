@@ -2125,7 +2125,40 @@ function initBot(app) {
     }
 
     // ── Settings
-    if (data === 'adm_settings')  { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminSettings(chatId); }
+    if (data === 'adm_settings')  { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminSettings(chatId, 'main'); }
+    // Подразделы настроек
+    if (data === 'adm_settings_contacts') { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'contacts'); }
+    if (data === 'adm_settings_notifs')   { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'notifs');   }
+    if (data === 'adm_settings_catalog')  { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'catalog');  }
+    if (data === 'adm_settings_booking')  { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'booking');  }
+    if (data === 'adm_settings_reviews')  { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'reviews');  }
+    if (data === 'adm_settings_cities')   { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'cities');   }
+    if (data === 'adm_settings_bot')      { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'bot');      }
+    if (data === 'adm_settings_limits')   { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'limits');   }
+    // Toggle настройки каталога
+    if (data === 'adm_catalog_sort_date')     { if (!isAdmin(chatId)) return; await setSetting('catalog_sort','date');     return showAdminSettings(chatId,'catalog'); }
+    if (data === 'adm_catalog_sort_featured') { if (!isAdmin(chatId)) return; await setSetting('catalog_sort','featured'); return showAdminSettings(chatId,'catalog'); }
+    if (data === 'adm_catalog_city_on')       { if (!isAdmin(chatId)) return; await setSetting('catalog_show_city','1');   return showAdminSettings(chatId,'catalog'); }
+    if (data === 'adm_catalog_city_off')      { if (!isAdmin(chatId)) return; await setSetting('catalog_show_city','0');   return showAdminSettings(chatId,'catalog'); }
+    if (data === 'adm_catalog_badge_on')      { if (!isAdmin(chatId)) return; await setSetting('catalog_show_featured_badge','1'); return showAdminSettings(chatId,'catalog'); }
+    if (data === 'adm_catalog_badge_off')     { if (!isAdmin(chatId)) return; await setSetting('catalog_show_featured_badge','0'); return showAdminSettings(chatId,'catalog'); }
+    // Toggle настройки бронирования
+    if (data === 'adm_booking_quick_on')        { if (!isAdmin(chatId)) return; await setSetting('quick_booking_enabled','1');  return showAdminSettings(chatId,'booking'); }
+    if (data === 'adm_booking_quick_off')       { if (!isAdmin(chatId)) return; await setSetting('quick_booking_enabled','0');  return showAdminSettings(chatId,'booking'); }
+    if (data === 'adm_booking_autoconfirm_on')  { if (!isAdmin(chatId)) return; await setSetting('booking_auto_confirm','1');   return showAdminSettings(chatId,'booking'); }
+    if (data === 'adm_booking_autoconfirm_off') { if (!isAdmin(chatId)) return; await setSetting('booking_auto_confirm','0');   return showAdminSettings(chatId,'booking'); }
+    if (data === 'adm_booking_email_on')        { if (!isAdmin(chatId)) return; await setSetting('booking_require_email','1');  return showAdminSettings(chatId,'booking'); }
+    if (data === 'adm_booking_email_off')       { if (!isAdmin(chatId)) return; await setSetting('booking_require_email','0');  return showAdminSettings(chatId,'booking'); }
+    // Toggle настройки отзывов
+    if (data === 'adm_reviews_on')       { if (!isAdmin(chatId)) return; await setSetting('reviews_enabled','1');        return showAdminSettings(chatId,'reviews'); }
+    if (data === 'adm_reviews_off')      { if (!isAdmin(chatId)) return; await setSetting('reviews_enabled','0');        return showAdminSettings(chatId,'reviews'); }
+    if (data === 'adm_reviews_auto_on')  { if (!isAdmin(chatId)) return; await setSetting('reviews_auto_approve','1');   return showAdminSettings(chatId,'reviews'); }
+    if (data === 'adm_reviews_auto_off') { if (!isAdmin(chatId)) return; await setSetting('reviews_auto_approve','0');   return showAdminSettings(chatId,'reviews'); }
+    // Toggle настройки бота
+    if (data === 'adm_wishlist_on')  { if (!isAdmin(chatId)) return; await setSetting('wishlist_enabled','1'); return showAdminSettings(chatId,'bot'); }
+    if (data === 'adm_wishlist_off') { if (!isAdmin(chatId)) return; await setSetting('wishlist_enabled','0'); return showAdminSettings(chatId,'bot'); }
+    if (data === 'adm_search_on')    { if (!isAdmin(chatId)) return; await setSetting('search_enabled','1');   return showAdminSettings(chatId,'bot'); }
+    if (data === 'adm_search_off')   { if (!isAdmin(chatId)) return; await setSetting('search_enabled','0');   return showAdminSettings(chatId,'bot'); }
     if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; await setSession(chatId, 'adm_broadcast_msg', {}); return showBroadcast(chatId); }
     if (data === 'adm_reviews')   { if (!isAdmin(chatId)) return; return showAdminReviews(chatId); }
     if (data.startsWith('rev_approve_')) {
@@ -2146,13 +2179,30 @@ function initBot(app) {
 
     // ── Settings inputs — set session and ask for text
     const settingPrompts = {
-      'adm_set_greeting': '📝 Введите новый текст *приветствия*\n\n_Текущий отображается при /start_:',
-      'adm_set_about':    'ℹ️ Введите новый текст *«О нас»*:',
-      'adm_set_phone':    '📞 Введите новый *номер телефона* агентства:',
-      'adm_set_email':    '📧 Введите новый *email* агентства:',
-      'adm_set_insta':    '📸 Введите новый *Instagram* (без @):',
-      'adm_set_addr':     '📍 Введите новый *адрес* агентства:',
-      'adm_set_pricing':  '💰 Введите новый *прайс-лист*\n(Можно несколько строк):',
+      'adm_set_greeting':           '📝 Введите новый текст *приветствия* (при /start):',
+      'adm_set_about':              'ℹ️ Введите новый текст *«О нас»*:',
+      'adm_set_phone':              '📞 Введите новый *номер телефона* агентства:',
+      'adm_set_email':              '📧 Введите новый *email* агентства:',
+      'adm_set_insta':              '📸 Введите новый *Instagram* (без @):',
+      'adm_set_addr':               '📍 Введите новый *адрес* агентства:',
+      'adm_set_pricing':            '💰 Введите новый *прайс-лист* (можно несколько строк):',
+      'adm_set_whatsapp':           '📱 Введите *WhatsApp* номер (с кодом страны, например +79001234567):',
+      'adm_set_site_url':           '🌐 Введите *URL сайта* (например https://nevesty-models.ru):',
+      'adm_set_mgr_hours':          '🕐 Введите *часы работы менеджера* (например: Пн-Пт 9:00-20:00):',
+      'adm_set_mgr_reply':          '💬 Введите *авто-ответ менеджера* при обращении:',
+      'adm_set_catalog_per_page':   '📄 Введите *кол-во моделей на странице* (рекомендуется 5-10):',
+      'adm_set_catalog_title':      '📌 Введите *заголовок каталога*:',
+      'adm_set_booking_min_budget': '💰 Введите *минимальный бюджет* для заявки (оставьте пустым — без лимита):',
+      'adm_set_booking_confirm_msg':'💬 Введите *сообщение после бронирования*:',
+      'adm_set_reviews_min':        '🔢 Введите *минимум завершённых заявок* для написания отзыва:',
+      'adm_set_reviews_prompt':     '📝 Введите *текст приглашения к отзыву*:',
+      'adm_set_cities_list':        '🏙 Введите *список городов* через запятую (например: Москва, Санкт-Петербург, Казань):',
+      'adm_set_welcome_photo':      '🖼 Введите *URL фото* для приветствия (или отправьте ссылку на изображение):',
+      'adm_set_main_menu_text':     '📋 Введите *текст главного меню* бота:',
+      'adm_set_model_max_photos':   '🖼 Введите *максимальное кол-во фото* у модели:',
+      'adm_set_client_max_orders':  '📋 Введите *максимум активных заявок* у одного клиента:',
+      'adm_set_client_msg_delay':   '⏱ Введите *минимальный интервал* между сообщениями клиента (секунды):',
+      'adm_set_api_rate_limit':     '🔒 Введите *rate limit* API (запросов в минуту):',
     };
     if (settingPrompts[data]) {
       if (!isAdmin(chatId)) return;
@@ -2537,13 +2587,30 @@ function initBot(app) {
     // ── Admin: settings text inputs
     if (isAdmin(chatId)) {
       const settingStates = {
-        'adm_set_greeting': ['greeting',       '📝 Приветствие обновлено!'],
-        'adm_set_about':    ['about',           'ℹ️ Текст «О нас» обновлён!'],
-        'adm_set_phone':    ['contacts_phone',  '📞 Телефон обновлён!'],
-        'adm_set_email':    ['contacts_email',  '📧 Email обновлён!'],
-        'adm_set_insta':    ['contacts_insta',  '📸 Instagram обновлён!'],
-        'adm_set_addr':     ['contacts_addr',   '📍 Адрес обновлён!'],
-        'adm_set_pricing':  ['pricing',         '💰 Прайс-лист обновлён!'],
+        'adm_set_greeting':           ['greeting',                    '📝 Приветствие обновлено!'],
+        'adm_set_about':              ['about',                       'ℹ️ Текст «О нас» обновлён!'],
+        'adm_set_phone':              ['contacts_phone',               '📞 Телефон обновлён!'],
+        'adm_set_email':              ['contacts_email',               '📧 Email обновлён!'],
+        'adm_set_insta':              ['contacts_insta',               '📸 Instagram обновлён!'],
+        'adm_set_addr':               ['contacts_addr',                '📍 Адрес обновлён!'],
+        'adm_set_pricing':            ['pricing',                      '💰 Прайс-лист обновлён!'],
+        'adm_set_whatsapp':           ['contacts_whatsapp',            '📱 WhatsApp обновлён!'],
+        'adm_set_site_url':           ['site_url',                     '🌐 URL сайта обновлён!'],
+        'adm_set_mgr_hours':          ['manager_hours',                '🕐 Часы работы обновлены!'],
+        'adm_set_mgr_reply':          ['manager_reply',                '💬 Авто-ответ обновлён!'],
+        'adm_set_catalog_per_page':   ['catalog_per_page',             '📄 Кол-во на странице обновлено!'],
+        'adm_set_catalog_title':      ['catalog_title',                '📌 Заголовок каталога обновлён!'],
+        'adm_set_booking_min_budget': ['booking_min_budget',           '💰 Мин. бюджет обновлён!'],
+        'adm_set_booking_confirm_msg':['booking_confirm_msg',          '💬 Сообщение брони обновлено!'],
+        'adm_set_reviews_min':        ['reviews_min_completed',        '🔢 Мин. заявок обновлено!'],
+        'adm_set_reviews_prompt':     ['reviews_prompt_text',          '📝 Приглашение к отзыву обновлено!'],
+        'adm_set_cities_list':        ['cities_list',                  '🏙 Список городов обновлён!'],
+        'adm_set_welcome_photo':      ['welcome_photo_url',            '🖼 Фото приветствия обновлено!'],
+        'adm_set_main_menu_text':     ['main_menu_text',               '📋 Текст меню обновлён!'],
+        'adm_set_model_max_photos':   ['model_max_photos',             '🖼 Лимит фото обновлён!'],
+        'adm_set_client_max_orders':  ['client_max_active_orders',     '📋 Лимит заявок обновлён!'],
+        'adm_set_client_msg_delay':   ['client_msg_delay_sec',         '⏱ Интервал сообщений обновлён!'],
+        'adm_set_api_rate_limit':     ['api_rate_limit',               '🔒 Rate limit обновлён!'],
       };
       if (settingStates[state]) {
         const [key, okMsg] = settingStates[state];
