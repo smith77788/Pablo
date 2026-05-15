@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Рассылки — Nevesty Models Admin</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="stylesheet" href="/css/admin.css" />
+  <style>
+    .broadcast-card {
+      background: var(--bg1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px;
+      margin-bottom: 12px;
+      transition: border-color 0.2s;
+    }
+    .broadcast-card:hover { border-color: rgba(201,169,110,0.3); }
+    .broadcast-text {
+      font-size: 0.9rem; color: var(--text);
+      line-height: 1.6; white-space: pre-wrap;
+      max-height: 100px; overflow: hidden;
+      position: relative;
+    }
+    .broadcast-meta {
+      display: flex; align-items: center; gap: 12px; margin-top: 12px;
+      font-size: 0.78rem; flex-wrap: wrap;
+    }
+    .broadcast-segment {
+      background: rgba(201,169,110,0.15); color: var(--gold);
+      border: 1px solid rgba(201,169,110,0.3);
+      border-radius: 20px; padding: 2px 10px;
+      font-size: 0.75rem; font-weight: 600;
+    }
+    .badge-status {
+      border-radius: 20px; padding: 2px 10px;
+      font-size: 0.72rem; font-weight: 700;
+    }
+    .badge-status.pending   { background: rgba(255,193,7,0.15); color: #ffc107; border: 1px solid rgba(255,193,7,0.3); }
+    .badge-status.sent      { background: rgba(40,167,69,0.15);  color: #28a745; border: 1px solid rgba(40,167,69,0.3); }
+    .badge-status.cancelled { background: rgba(200,50,50,0.15);  color: #e05555; border: 1px solid rgba(200,50,50,0.3); }
+    .badge-status.sending   { background: rgba(0,123,255,0.15);  color: #007bff; border: 1px solid rgba(0,123,255,0.3); }
+    .create-form {
+      background: var(--bg1); border: 1px solid var(--border);
+      border-radius: 8px; padding: 24px; margin-bottom: 28px;
+    }
+    .create-form textarea {
+      width: 100%; min-height: 100px; resize: vertical;
+      background: var(--bg2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 12px;
+      font-size: 0.9rem; font-family: inherit;
+    }
+    .create-form textarea:focus {
+      outline: none; border-color: var(--gold);
+    }
+    .form-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 14px; }
+    .form-row > * { flex: 1; min-width: 180px; }
+    .form-row label { display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 6px; }
+    .stats-row { display: flex; gap: 16px; margin-top: 8px; }
+    .stat-chip { font-size: 0.78rem; color: var(--text-dim); }
+    .stat-chip.ok { color: #28a745; }
+    .stat-chip.err { color: #e05555; }
+    .empty-state { text-align: center; padding: 48px; color: var(--text-dim); }
+  </style>
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-text">Nevesty Models</div>
+      <div class="sidebar-logo-sub">Панель управления</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Главная</div>
+      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+      <div class="nav-section-label">Бизнес</div>
+      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки</a>
+      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+      <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+      <a href="/admin/broadcasts.html" class="active"><span class="nav-icon">📢</span> Рассылки</a>
+      <div class="nav-section-label">AI</div>
+      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+      <div class="nav-section-label">Настройки</div>
+      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+      <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user">
+        <div class="sidebar-avatar sidebar-user-letter">A</div>
+        <div class="sidebar-user-info">
+          <strong class="sidebar-user-name">—</strong>
+          <span class="sidebar-user-role">—</span>
+        </div>
+      </div>
+      <button class="btn-logout" data-action="logout">Выйти</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <div class="topbar-title">📢 Рассылки</div>
+      <div class="topbar-right">
+        <button onclick="loadBroadcasts()" class="topbar-btn">↺ Обновить</button>
+      </div>
+    </header>
+
+    <div class="page-content">
+
+      <!-- Create new broadcast -->
+      <div class="create-form">
+        <div style="font-weight:600;font-size:1rem;margin-bottom:16px;color:var(--text)">📝 Новая рассылка</div>
+
+        <label style="display:block;font-size:0.78rem;color:var(--text-muted);margin-bottom:6px">Текст сообщения <span style="color:var(--gold)">*</span></label>
+        <textarea id="broadcastText" placeholder="Введите текст рассылки…"></textarea>
+
+        <div class="form-row">
+          <div>
+            <label>Аудитория</label>
+            <select id="broadcastSegment" class="admin-input">
+              <option value="all">Все клиенты</option>
+              <option value="completed">Завершённые заявки</option>
+              <option value="active">Активные 30 дней</option>
+            </select>
+          </div>
+          <div>
+            <label>Отложить до (необязательно)</label>
+            <input type="datetime-local" id="broadcastScheduled" class="admin-input" />
+          </div>
+          <div>
+            <label>Фото (URL, необязательно)</label>
+            <input type="url" id="broadcastPhoto" class="admin-input" placeholder="https://…" />
+          </div>
+        </div>
+
+        <div style="margin-top:16px;display:flex;gap:12px;align-items:center">
+          <button class="btn btn-gold" onclick="createBroadcast()" id="createBtn">📢 Отправить</button>
+          <span id="createStatus" style="font-size:0.82rem;color:var(--text-dim)"></span>
+        </div>
+      </div>
+
+      <!-- List -->
+      <div class="section-card">
+        <div class="section-card-header">
+          <div class="section-card-title">📋 История рассылок</div>
+        </div>
+        <div id="broadcastList" class="section-card-body">
+          <div style="padding:24px;color:var(--text-dim)">Загрузка…</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+<script src="/js/admin.js"></script>
+<script>
+const SEGMENT_LABELS = { all: 'Все', completed: 'Завершённые', active: 'Активные 30д' };
+const STATUS_LABELS  = { pending: 'Ожидает', sending: 'Отправляется', sent: 'Отправлено', cancelled: 'Отменено' };
+
+async function loadBroadcasts() {
+  const cont = document.getElementById('broadcastList');
+  try {
+    const rows = await _admin.apiFetch('/admin/broadcasts?limit=50');
+    if (!rows || !rows.length) {
+      cont.innerHTML = '<div class="empty-state">📭 Рассылок пока нет</div>';
+      return;
+    }
+    cont.innerHTML = rows.map(r => `
+      <div class="broadcast-card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+          <div class="broadcast-text">${_admin.escapeHtml(r.text || '')}</div>
+          ${r.status === 'pending'
+            ? `<button onclick="cancelBroadcast(${r.id})" class="btn btn-sm" style="color:#e05555;border-color:rgba(200,50,50,0.3);white-space:nowrap;flex-shrink:0">❌ Отменить</button>`
+            : ''}
+        </div>
+        <div class="broadcast-meta">
+          <span class="badge-status ${r.status || 'pending'}">${STATUS_LABELS[r.status] || r.status}</span>
+          <span class="broadcast-segment">${SEGMENT_LABELS[r.segment] || r.segment}</span>
+          <span style="color:var(--text-dim)">📅 ${(r.scheduled_at || r.created_at || '').slice(0,16).replace('T',' ')}</span>
+          ${r.sent_at ? `<span style="color:var(--text-dim)">✓ ${r.sent_at.slice(0,16).replace('T',' ')}</span>` : ''}
+          <span style="color:var(--text-dim)">👤 ${_admin.escapeHtml(r.created_by || '—')}</span>
+        </div>
+        ${(r.sent_count != null || r.error_count != null) ? `
+        <div class="stats-row" style="margin-top:8px">
+          ${r.sent_count != null  ? `<span class="stat-chip ok">✅ ${r.sent_count} доставлено</span>` : ''}
+          ${r.error_count != null && r.error_count > 0 ? `<span class="stat-chip err">❌ ${r.error_count} ошибок</span>` : ''}
+        </div>` : ''}
+      </div>
+    `).join('');
+  } catch (e) {
+    cont.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function createBroadcast() {
+  const text = document.getElementById('broadcastText').value.trim();
+  const segment = document.getElementById('broadcastSegment').value;
+  const scheduledRaw = document.getElementById('broadcastScheduled').value;
+  const photoUrl = document.getElementById('broadcastPhoto').value.trim();
+  const statusEl = document.getElementById('createStatus');
+  const btn = document.getElementById('createBtn');
+
+  if (!text) { _admin.toast('Введите текст рассылки', 'error'); return; }
+
+  const body = { text, segment };
+  if (scheduledRaw) body.scheduled_at = new Date(scheduledRaw).toISOString();
+  if (photoUrl) body.photo_url = photoUrl;
+
+  btn.disabled = true;
+  statusEl.textContent = 'Создаётся…';
+  try {
+    const result = await _admin.apiFetch('/admin/broadcasts', { method: 'POST', body: JSON.stringify(body) });
+    _admin.toast(scheduledRaw ? 'Рассылка запланирована!' : 'Рассылка поставлена в очередь!', 'success');
+    document.getElementById('broadcastText').value = '';
+    document.getElementById('broadcastScheduled').value = '';
+    document.getElementById('broadcastPhoto').value = '';
+    statusEl.textContent = '';
+    loadBroadcasts();
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+    statusEl.textContent = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function cancelBroadcast(id) {
+  if (!confirm('Отменить рассылку?')) return;
+  try {
+    await _admin.apiFetch(`/admin/broadcasts/${id}`, { method: 'DELETE' });
+    _admin.toast('Рассылка отменена', 'success');
+    loadBroadcasts();
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+loadBroadcasts();
+</script>
+</body>
+</html>
