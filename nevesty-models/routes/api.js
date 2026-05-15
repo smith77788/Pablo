@@ -2575,7 +2575,7 @@ router.get('/admin/managers/:id/stats', auth, async (req, res) => {
         avg_days_to_complete: cycleRow?.avg_days ? Math.round(cycleRow.avg_days) : null,
       }
     });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
+  } catch (e) { console.error('[Admin] Manager stats error:', e.message); res.json({ ok: false, error: 'Internal error' }); }
 });
 
 // GET /api/settings/public — public read-only settings (no auth required, cached 5 min)
@@ -4267,7 +4267,8 @@ router.get('/admin/db/backups', auth, (req, res) => {
 
     res.json({ backups: files, backup_dir: backupDir, count: files.length });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[Backups] Error listing backups:', err.message);
+    res.status(500).json({ error: 'Failed to list backups' });
   }
 });
 
@@ -4492,7 +4493,7 @@ router.get('/admin/analytics/revenue', auth, async (req, res) => {
       LIMIT ?
     `, [months, months]);
     res.json({ ok: true, months: rows.reverse(), data: rows });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
+  } catch (e) { console.error('[Admin] Analytics revenue-months error:', e.message); res.json({ ok: false, error: 'Internal error' }); }
 });
 
 // ─── Analytics: Repeat vs new clients ────────────────────────────────────────
@@ -4504,7 +4505,7 @@ router.get('/admin/analytics/repeat-clients', auth, async (req, res) => {
     ]);
     const newClients = (total?.n || 0) - (repeat?.n || 0);
     res.json({ ok: true, data: { total: total?.n || 0, repeat: repeat?.n || 0, new: newClients } });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
+  } catch (e) { console.error('[Admin] Analytics repeat-clients error:', e.message); res.json({ ok: false, error: 'Internal error' }); }
 });
 
 // ─── Analytics: Heatmap (orders per day) ─────────────────────────────────────
@@ -5300,7 +5301,8 @@ router.post('/admin/faq/generate', auth, async (req, res) => {
 
     res.json({ ok: true, items });
   } catch (e) {
-    res.json({ ok: false, error: e.message });
+    console.error('[Admin] FAQ generate error:', e.message);
+    res.json({ ok: false, error: 'Internal error' });
   }
 });
 
