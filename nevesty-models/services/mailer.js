@@ -2,8 +2,8 @@
 
 /**
  * Mailer service — email notifications via nodemailer
- * Uses SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM env vars
- * If env not configured — silently logs, does not throw
+ * Supports: SMTP (any provider), SendGrid (SENDGRID_API_KEY)
+ * DEV_MODE: if no SMTP or SendGrid configured — logs to console, no throw
  */
 
 let nodemailer;
@@ -12,6 +12,13 @@ try {
 } catch {
   nodemailer = null;
 }
+
+/**
+ * DEV_MODE is active when neither SMTP nor SendGrid credentials are set.
+ * In DEV_MODE all emails are logged to console instead of being sent.
+ */
+const DEV_MODE =
+  !process.env.SENDGRID_API_KEY && !(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
 // ─── Status labels (RU) ──────────────────────────────────────────────────────
 const STATUS_LABELS = {
@@ -44,10 +51,30 @@ const STATUS_COLORS = {
 
 // ─── Create transporter ───────────────────────────────────────────────────────
 function createTransporter() {
+  // DEV_MODE: return a fake transporter that logs to console
+  if (DEV_MODE) {
+    return {
+      sendMail: async opts => {
+        console.log('[mailer DEV]', opts.to, '|', opts.subject);
+        return { messageId: 'dev-' + Date.now() };
+      },
+    };
+  }
+
   if (!nodemailer) {
     console.log('[mailer] nodemailer not available — skipping email');
     return null;
   }
+
+  // SendGrid via SMTP relay
+  if (process.env.SENDGRID_API_KEY) {
+    return nodemailer.createTransport({
+      host: 'smtp.sendgrid.net',
+      port: 587,
+      auth: { user: 'apikey', pass: process.env.SENDGRID_API_KEY },
+    });
+  }
+
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
     console.log('[mailer] SMTP not configured (SMTP_HOST/SMTP_USER/SMTP_PASS missing) — skipping email');
@@ -67,10 +94,14 @@ async function send(to, subject, html) {
   if (!to) return;
   const transporter = createTransporter();
   if (!transporter) return;
-  const from = process.env.SMTP_FROM || `Nevesty Models <${process.env.SMTP_USER}>`;
+  const from =
+    process.env.SMTP_FROM ||
+    (process.env.FROM_EMAIL
+      ? `"${process.env.FROM_NAME || 'Nevesty Models'}" <${process.env.FROM_EMAIL}>`
+      : `Nevesty Models <${process.env.SMTP_USER || 'noreply@nevesty-models.ru'}>`);
   try {
     await transporter.sendMail({ from, to, subject, html });
-    console.log(`[mailer] sent "${subject}" → ${to}`);
+    if (!DEV_MODE) console.log(`[mailer] sent "${subject}" → ${to}`);
   } catch (e) {
     console.error(`[mailer] error sending to ${to}:`, e.message);
   }
@@ -415,9 +446,10 @@ async function sendPasswordReset(toEmail, resetLink) {
 // ─── 7. Test email ───────────────────────────────────────────────────────────
 async function sendTestEmail(toEmail) {
   if (!toEmail) return { ok: false, error: 'No recipient' };
+  if (DEV_MODE) return { ok: false, error: 'DEV_MODE: SMTP/SendGrid not configured' };
   const transporter = createTransporter();
   if (!transporter) return { ok: false, error: 'SMTP not configured' };
-  const from = process.env.SMTP_FROM || `Nevesty Models <${process.env.SMTP_USER}>`;
+  const from = process.env.SMTP_FROM || process.env.FROM_EMAIL || `Nevesty Models <${process.env.SMTP_USER}>`;
   const html = wrapHtml(
     'Тестовое письмо',
     `
@@ -459,4 +491,5 @@ module.exports = {
   sendPasswordReset,
   sendTestEmail,
   getAdminEmails,
+  DEV_MODE,
 };

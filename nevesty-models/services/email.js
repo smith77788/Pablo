@@ -1,88 +1,42 @@
 'use strict';
+
 /**
- * Email notification service using Nodemailer.
- * Falls back gracefully if not configured.
+ * Email notification service — thin wrapper / re-export from mailer.js
+ *
+ * All logic (DEV_MODE, SendGrid, SMTP, HTML templates) lives in mailer.js.
+ * This module exposes the API expected by БЛОК 10.1 and keeps backward
+ * compatibility with any code that still requires services/email.js.
  */
-const nodemailer = require('nodemailer');
 
-let transporter = null;
+const mailer = require('./mailer');
 
-function getTransporter() {
-  if (transporter) return transporter;
+/**
+ * DEV_MODE = true when neither SMTP nor SendGrid credentials are configured.
+ * Emails are logged to console instead of being sent.
+ */
+const DEV_MODE = mailer.DEV_MODE;
 
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+/** Send order confirmation email to client. */
+const sendOrderConfirmation = mailer.sendOrderConfirmation;
 
-  if (!host || !user || !pass) return null;
+/** Send status-change notification email to client. */
+const sendStatusChange = mailer.sendStatusChange;
 
-  transporter = nodemailer.createTransport({
-    host,
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: { user, pass },
-  });
-  return transporter;
+/**
+ * Send contact-form submission to admin email.
+ * Alias for mailer.sendContactFormEmail.
+ */
+async function sendContactFormToAdmin(adminEmail, { name, phone, message, email }) {
+  return mailer.sendContactFormEmail(adminEmail, { name, phone, email, message });
 }
 
-async function sendOrderStatusEmail(order, newStatus, statusLabel) {
-  const t = getTransporter();
-  if (!t) return false; // not configured
-  if (!order.client_email) return false;
+/** Get list of configured admin email addresses. */
+const getAdminEmails = mailer.getAdminEmails;
 
-  const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-  const agencyName = 'Nevesty Models';
-
-  const subject = `Статус заявки #${order.order_number} изменён на: ${statusLabel}`;
-  const html = `
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-      <h2 style="color:#c9a96e">${agencyName}</h2>
-      <p>Здравствуйте, ${order.client_name || 'клиент'}!</p>
-      <p>Статус вашей заявки <strong>#${order.order_number}</strong> изменён на: <strong>${statusLabel}</strong></p>
-      ${order.event_type ? `<p>Тип мероприятия: ${order.event_type}</p>` : ''}
-      ${order.event_date ? `<p>Дата: ${order.event_date}</p>` : ''}
-      <p style="margin-top:24px">Если у вас есть вопросы, свяжитесь с нами.</p>
-      <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
-      <p style="color:#999;font-size:12px">${agencyName} — профессиональное агентство моделей</p>
-    </div>
-  `;
-
-  try {
-    await t.sendMail({ from: `"${agencyName}" <${fromEmail}>`, to: order.client_email, subject, html });
-    return true;
-  } catch (e) {
-    console.error('[Email] sendOrderStatusEmail error:', e.message);
-    return false;
-  }
-}
-
-async function sendNewOrderEmail(order) {
-  const t = getTransporter();
-  if (!t || !order.client_email) return false;
-
-  const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-  const agencyName = 'Nevesty Models';
-
-  const subject = `Заявка #${order.order_number} принята!`;
-  const html = `
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-      <h2 style="color:#c9a96e">${agencyName}</h2>
-      <p>Здравствуйте, ${order.client_name || 'клиент'}!</p>
-      <p>Ваша заявка <strong>#${order.order_number}</strong> успешно принята.</p>
-      <p>Наш менеджер свяжется с вами в течение 1-2 часов.</p>
-      ${order.event_type ? `<p>Тип мероприятия: ${order.event_type}</p>` : ''}
-      ${order.event_date ? `<p>Дата: ${order.event_date}</p>` : ''}
-      <p style="margin-top:24px">Спасибо за обращение!</p>
-    </div>
-  `;
-
-  try {
-    await t.sendMail({ from: `"${agencyName}" <${fromEmail}>`, to: order.client_email, subject, html });
-    return true;
-  } catch (e) {
-    console.error('[Email] sendNewOrderEmail error:', e.message);
-    return false;
-  }
-}
-
-module.exports = { sendOrderStatusEmail, sendNewOrderEmail, getTransporter };
+module.exports = {
+  DEV_MODE,
+  sendOrderConfirmation,
+  sendStatusChange,
+  sendContactFormToAdmin,
+  getAdminEmails,
+};
