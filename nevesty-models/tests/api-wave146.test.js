@@ -250,3 +250,70 @@ describe('PATCH /api/cabinet/profile', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ─── 5. cabinet/orders/:id/repeat ────────────────────────────────────────────
+
+describe('POST /api/cabinet/orders/:id/repeat', () => {
+  it('без auth → 401', async () => {
+    const res = await request(app).post(`/api/cabinet/orders/${orderId}/repeat`);
+    expect(res.status).toBe(401);
+  });
+
+  it('повторить завершённую заявку → 201 + новый order_number', async () => {
+    const res = await request(app)
+      .post(`/api/cabinet/orders/${orderId}/repeat`)
+      .set('Authorization', `Bearer ${clientToken}`);
+    expect(res.status).toBe(201);
+    expect(res.body.ok).toBe(true);
+    expect(typeof res.body.id).toBe('number');
+    expect(res.body.order_number).toMatch(/^NM-/);
+  });
+
+  it('повторить активную заявку → 409', async () => {
+    // Create a new active order
+    const csrf = await getCsrf();
+    const or = await request(app).post('/api/orders').set('x-csrf-token', csrf).send({
+      client_name: 'Тест Клиентов',
+      client_phone: TEST_PHONE,
+      event_type: 'other',
+    });
+    const newId = or.body.id || or.body.order?.id;
+    expect(newId).toBeTruthy();
+
+    const res = await request(app)
+      .post(`/api/cabinet/orders/${newId}/repeat`)
+      .set('Authorization', `Bearer ${clientToken}`);
+    expect(res.status).toBe(409);
+  });
+
+  it('повторить чужую заявку → 404', async () => {
+    // Create order for different phone
+    const csrf = await getCsrf();
+    const or = await request(app)
+      .post('/api/orders')
+      .set('x-csrf-token', csrf)
+      .send({ client_name: 'Чужой', client_phone: '79000111222', event_type: 'other' });
+    const foreignId = or.body.id || or.body.order?.id;
+
+    // Complete it via admin
+    const csrf2 = await getCsrf();
+    await request(app)
+      .patch(`/api/admin/orders/${foreignId}/status`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .set('x-csrf-token', csrf2)
+      .send({ status: 'completed' });
+
+    // Try to repeat as our client
+    const res = await request(app)
+      .post(`/api/cabinet/orders/${foreignId}/repeat`)
+      .set('Authorization', `Bearer ${clientToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('несуществующий ID → 404', async () => {
+    const res = await request(app)
+      .post('/api/cabinet/orders/999999/repeat')
+      .set('Authorization', `Bearer ${clientToken}`);
+    expect(res.status).toBe(404);
+  });
+});

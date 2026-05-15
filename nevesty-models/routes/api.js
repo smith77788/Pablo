@@ -7874,6 +7874,61 @@ router.patch('/cabinet/profile', requireClientAuth, async (req, res, next) => {
   }
 });
 
+// POST /api/cabinet/orders/:id/repeat — repeat an existing order (prefill from previous)
+router.post('/cabinet/orders/:id/repeat', requireClientAuth, async (req, res, next) => {
+  try {
+    const srcId = parseInt(req.params.id);
+    if (!Number.isInteger(srcId) || srcId <= 0) return res.status(400).json({ ok: false, error: 'Invalid order ID' });
+
+    const phone10 = req.clientPhone;
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const ph = patterns.map(() => '?').join(',');
+
+    // Verify the source order belongs to this client
+    const src = await get(
+      `SELECT * FROM orders
+       WHERE id=?
+         AND (REPLACE(REPLACE(REPLACE(REPLACE(client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+           OR REPLACE(REPLACE(REPLACE(REPLACE(client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph}))`,
+      [srcId, ...patterns, ...patterns]
+    );
+
+    if (!src) return res.status(404).json({ ok: false, error: 'Заявка не найдена' });
+    if (!['completed', 'cancelled'].includes(src.status)) {
+      return res.status(409).json({ ok: false, error: 'Повторить можно только завершённую или отменённую заявку' });
+    }
+
+    const ALLOWED_TYPES = ['fashion_show', 'photo_shoot', 'event', 'commercial', 'runway', 'other'];
+    const eventType = ALLOWED_TYPES.includes(src.event_type) ? src.event_type : 'other';
+
+    const shortId = Math.random().toString(36).slice(2, 8).toUpperCase();
+    const orderNumber = `NM-${shortId}`;
+
+    const result = await run(
+      `INSERT INTO orders
+         (order_number, client_name, client_phone, client_email, event_type, model_id,
+          budget, location, comments, status, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+      [
+        orderNumber,
+        src.client_name,
+        src.client_phone,
+        src.client_email || null,
+        eventType,
+        src.model_id || null,
+        src.budget || null,
+        src.location || null,
+        src.comments || null,
+        'new',
+      ]
+    );
+
+    res.status(201).json({ ok: true, id: result.id, order_number: orderNumber });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── CRM incoming webhooks (БЛОК 10.3) ───────────────────────────────────────
 const { registerWebhooks: _registerCrmWebhooks } = require('../services/crm');
 _registerCrmWebhooks(router);
