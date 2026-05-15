@@ -217,6 +217,40 @@ function taskFactoryHealthCheck() {
   });
 }
 
+// Таск: каждые 6 часов — резервное копирование БД
+async function taskDatabaseBackup() {
+  try {
+    const backupDir = path.join(__dirname, '..', 'backup');
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+
+    const dbPath = path.join(__dirname, '..', 'data.db');
+    if (!fs.existsSync(dbPath)) return; // DB not yet created
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const backupPath = path.join(backupDir, `nevesty-${ts}.db`);
+
+    // SQLite backup via file copy (safe with WAL mode)
+    fs.copyFileSync(dbPath, backupPath);
+
+    // Keep only last 28 backups (7 days × 4/day)
+    const backups = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('nevesty-') && f.endsWith('.db'))
+      .sort();
+    if (backups.length > 28) {
+      backups.slice(0, backups.length - 28).forEach(f =>
+        fs.unlinkSync(path.join(backupDir, f))
+      );
+    }
+
+    console.log(`[Scheduler] DB backup: ${backupPath}`);
+  } catch (err) {
+    console.error('[Scheduler] DB backup failed:', err.message);
+  }
+}
+
+// Запустить сразу и каждые 6 часов
+taskDatabaseBackup();
+setInterval(taskDatabaseBackup, 6 * 60 * 60 * 1000);
+
 // ─── Lazy bot instance for client messaging ───────────────────────────────────
 function getBot() {
   const TelegramBot = require('node-telegram-bot-api');

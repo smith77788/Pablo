@@ -427,10 +427,19 @@ async function initDatabase() {
     ['idx_reviews_status',          'CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status)'],
     ['idx_factory_tasks_status_pri','CREATE INDEX IF NOT EXISTS idx_factory_tasks_status_pri ON factory_tasks(status, priority)'],
     ['idx_audit_created',           'CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)'],
+    // v9 indexes
+    ['idx_orders_payment_status',   'CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders(payment_status)'],
+    ['idx_models_status',           'CREATE INDEX IF NOT EXISTS idx_models_status ON models(available)'],
+    ['idx_reviews_approved',        'CREATE INDEX IF NOT EXISTS idx_reviews_approved ON reviews(approved)'],
+    ['idx_reviews_model_id',        'CREATE INDEX IF NOT EXISTS idx_reviews_model_id ON reviews(model_id)'],
+    ['idx_models_city',             'CREATE INDEX IF NOT EXISTS idx_models_city ON models(city)'],
   ];
   for (const [name, sql] of perfIndexes) {
     await run(sql).catch(e => console.log(`Index ${name}: ${e.message}`));
   }
+
+  // Schema version 9 — indexes and schema versioning
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (9, 'indexes and schema versioning')`).catch(() => {});
 
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);

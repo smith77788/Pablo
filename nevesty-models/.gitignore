@@ -1,6 +1,9 @@
 node_modules/
 .env
 data.db
+backup/
+*.db
+!*.db.example
 uploads/*.jpg
 uploads/*.jpeg
 uploads/*.png
