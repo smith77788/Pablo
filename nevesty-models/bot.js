@@ -223,7 +223,10 @@ const KB_MAIN_ADMIN = (badge, score) => {
 
 async function showMainMenu(chatId, name) {
   await clearSession(chatId);
-  const greeting = await getSetting('greeting').catch(() => null);
+  const [greeting, menuText] = await Promise.all([
+    getSetting('greeting').catch(() => null),
+    getSetting('main_menu_text').catch(() => null),
+  ]);
   // Сначала показываем persistent ReplyKeyboard
   await safeSend(chatId,
     `💎 Nevesty Models — меню активировано`,
@@ -234,8 +237,9 @@ async function showMainMenu(chatId, name) {
     // Greeting is user-edited content — send as plain text to avoid injection
     return safeSend(chatId, text, { reply_markup: buildClientKeyboard() });
   }
+  const greetingText = menuText || 'Выберите действие:';
   return safeSend(chatId,
-    `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\nВыберите действие:`,
+    `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\n${esc(greetingText)}`,
     { parse_mode: 'MarkdownV2', reply_markup: buildClientKeyboard() }
   );
 }
