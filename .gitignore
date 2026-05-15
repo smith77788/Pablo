@@ -13,3 +13,6 @@ data/
 nevesty-models.zip
 factory.log
 logs/
+factory/.last_run
+factory/history/
+
