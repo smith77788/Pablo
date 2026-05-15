@@ -25,8 +25,9 @@ async function showAdminStats(chatId) {
       total, todayOrders, weekOrders, monthOrders,
       active,
       done, canc,
-      newClients, newClientsMonth,
+      _newClients, newClientsMonth,
       totalNew, confirmed,
+      totalClients,
     ] = await Promise.all([
       get('SELECT COUNT(*) as n FROM orders'),
       get("SELECT COUNT(*) as n FROM orders WHERE date(created_at) = date('now')"),
@@ -39,6 +40,7 @@ async function showAdminStats(chatId) {
       get("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE created_at >= datetime('now','-30 days') AND client_chat_id IS NOT NULL"),
       get("SELECT COUNT(*) as n FROM orders WHERE status != 'cancelled'"),
       get("SELECT COUNT(*) as n FROM orders WHERE status IN ('confirmed','completed')"),
+      get("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND CAST(client_chat_id AS INTEGER) > 0"),
     ]);
 
     // Conversion: new→confirmed ratio
@@ -69,7 +71,7 @@ async function showAdminStats(chatId) {
       if (checkRow && checkRow.avg) avgCheck = Math.round(checkRow.avg);
     } catch {}
 
-    // Top-3 models by order count
+    // Top-5 models by order count
     let topModels = [];
     try {
       topModels = await query(
@@ -78,7 +80,7 @@ async function showAdminStats(chatId) {
          JOIN orders o ON o.model_id = m.id
          GROUP BY m.id, m.name
          ORDER BY cnt DESC
-         LIMIT 3`
+         LIMIT 5`
       );
     } catch {}
 
@@ -128,69 +130,72 @@ async function showAdminStats(chatId) {
       repeatClients = rc?.n || 0;
     } catch {}
 
-    const medals = ['🥇','🥈','🥉'];
     const fmt = n => esc(n.toLocaleString('ru'));
 
-    let text = `*📊 Статистика агентства*\n\n`;
+    let text = `📊 *Статистика агентства*\n\n`;
 
-    // Daily / weekly / monthly / total
-    text += `📅 *Сегодня:* ${esc(String(todayOrders.n))} заявок \\| ${esc(String(newClients.n))} новых клиентов\n`;
-    text += `📅 *Неделя:* ${esc(String(weekOrders.n))} заявок`;
-    if (revenue.week > 0) text += ` \\| ${fmt(revenue.week)} руб\\.`;
-    text += `\n`;
-    text += `📅 *Месяц:* ${esc(String(monthOrders.n))} заявок`;
-    if (revenue.month > 0) text += ` \\| ${fmt(revenue.month)} руб\\.`;
-    text += `\n`;
-    text += `📅 *Всего:* ${esc(String(total.n))} заявок\n`;
+    // Заявки section
+    text += `📋 *Заявки*\n`;
+    text += `• Сьогодні: ${esc(String(todayOrders.n))}\n`;
+    text += `• Цей тиждень: ${esc(String(weekOrders.n))}\n`;
+    text += `• Цей місяць: ${esc(String(monthOrders.n))}\n`;
+    text += `• Всього: ${esc(String(total.n))}\n`;
 
-    // Revenue total
-    if (revenue.total > 0) {
-      text += `\n💰 *Выручка за всё время:* ${fmt(revenue.total)} руб\\. \\(_подтверждённые/завершённые_\\)\n`;
-    }
+    // Revenue section
+    text += `\n💰 *Виручка* _\\(confirmed \\+ completed\\)_\n`;
+    text += `• Цей місяць: ${revenue.month > 0 ? fmt(revenue.month) + ' грн' : esc('0 грн')}\n`;
+    text += `• Всього: ${revenue.total > 0 ? fmt(revenue.total) + ' грн' : esc('0 грн')}\n`;
 
-    // Top-3 models
+    // Conversion section
+    text += `\n📈 *Конверсія*\n`;
+    text += `• new → confirmed: ${esc(String(conversion))}%\n`;
+    if (avgCheck) text += `• Середній чек: ${fmt(avgCheck)} грн\n`;
+
+    // Top-5 models
     if (topModels.length) {
-      text += `\n🏆 *Топ\\-3 модели по заявкам:*\n`;
+      text += `\n👑 *Топ\\-5 моделей*\n`;
       topModels.forEach((m, i) => {
-        text += `  ${medals[i] || `${i+1}\\.`} ${esc(m.name)} — ${esc(String(m.cnt))} заявок\n`;
+        text += `${i+1}\\. ${esc(m.name)} — ${esc(String(m.cnt))} заявок\n`;
       });
     }
 
     // Top-3 cities
     if (topCities.length) {
-      text += `\n🏙 *Топ\\-3 города:*\n`;
+      text += `\n🏙️ *Топ\\-3 міста*\n`;
       topCities.forEach((c, i) => {
-        text += `  ${medals[i] || `${i+1}\\.`} ${esc(c.city)} — ${esc(String(c.cnt))} заявок\n`;
+        text += `${i+1}\\. ${esc(c.city)} — ${esc(String(c.cnt))} заявок\n`;
       });
+    }
+
+    // Clients section
+    text += `\n👥 *Клієнти*\n`;
+    text += `• Всього: ${esc(String(totalClients?.n || 0))}\n`;
+    text += `• Нових за місяць: ${esc(String(newClientsMonth.n))}\n`;
+    text += `• Повторних: ${esc(String(repeatClients))}\n`;
+
+    // Active orders now
+    text += `\n⏱ Активних заявок зараз: ${esc(String(active.n))}\n`;
+
+    // Additional metrics (bonus)
+    if (done.n > 0 || canc.n > 0) {
+      text += `\n_✅ Завершено: ${esc(String(done.n))}  ❌ Відхилено: ${esc(String(canc.n))}_\n`;
+    }
+    if (avgCycleDays !== null) {
+      text += `_⏱ Середній цикл угоди: ${esc(String(avgCycleDays))} дн\\._\n`;
     }
 
     // Top-5 by views (bonus)
     if (topViewed.length) {
-      text += `\n👁 *Топ\\-5 по просмотрам:*\n`;
+      text += `\n👁 *Топ\\-5 по переглядах:*\n`;
       topViewed.forEach((m, i) => {
-        text += `  ${i+1}\\. ${esc(m.name)} — 👁 ${esc(String(m.view_count || 0))} просм\\., 📋 ${esc(String(m.order_count || 0))} заявок\n`;
+        text += `  ${i+1}\\. ${esc(m.name)} — 👁 ${esc(String(m.view_count || 0))} перегл\\., 📋 ${esc(String(m.order_count || 0))} заявок\n`;
       });
-    }
-
-    // Conversion & avg check
-    text += `\n📊 *Конверсия:* ${esc(String(conversion))}% \\(_new→confirmed_\\)\n`;
-    if (avgCheck) text += `💳 *Средний чек:* ${fmt(avgCheck)} руб\\.\n`;
-
-    // Active & new clients
-    text += `\n🔄 *Активных заявок сейчас:* ${esc(String(active.n))}\n`;
-    text += `⭐ *Новых клиентов за месяц:* ${esc(String(newClientsMonth.n))}\n`;
-
-    // Additional metrics
-    text += `✅ *Завершено:* ${esc(String(done.n))}  ❌ *Отклонено:* ${esc(String(canc.n))}\n`;
-    text += `🔁 *Повторные клиенты:* ${esc(String(repeatClients))}\n`;
-    if (avgCycleDays !== null) {
-      text += `⏱ *Средний цикл сделки:* ${esc(String(avgCycleDays))} дн\\.\n`;
     }
 
     // Broadcast stats
     const bcastRow = await get(`SELECT COUNT(*) as total, SUM(sent_count) as sent FROM scheduled_broadcasts WHERE status='sent'`).catch(() => null);
     if (bcastRow?.total > 0) {
-      text += `📢 *Рассылки:* ${esc(String(bcastRow.total))} отправлено, ${esc(String(bcastRow.sent || 0))} доставлено\n`;
+      text += `\n📢 *Розсилки:* ${esc(String(bcastRow.total))} відправлено, ${esc(String(bcastRow.sent || 0))} доставлено\n`;
     }
 
     return safeSend(chatId, text, {

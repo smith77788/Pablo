@@ -300,15 +300,25 @@
   }, 400));
 
   // ── Reset ────────────────────────────────────────────────────────────────────
-  resetBtn?.addEventListener('click', () => {
+  // Defined as local function so it can be called before window.resetFilters is assigned
+  function doReset() {
     filters = { category: '', hair: '', city: '', ageMin: '', ageMax: '', availableOnly: false, sort: 'default', search: '', minHeight: '', maxHeight: '' };
     if (ageMinEl) ageMinEl.value = '';
     if (ageMaxEl) ageMaxEl.value = '';
     if (minHeightEl) minHeightEl.value = '';
     if (maxHeightEl) maxHeightEl.value = '';
-    applyUrlParamsToUI();
+    if (searchInput) searchInput.value = '';
+    if (citySelect) citySelect.value = '';
+    if (sortEl) sortEl.value = 'default';
+    if (availCheckbox) availCheckbox.checked = false;
+    document.querySelectorAll('#categoryFilters .filter-tag').forEach(t => { t.classList.toggle('active', t.dataset.value === ''); t.setAttribute('aria-pressed', t.dataset.value === '' ? 'true' : 'false'); });
+    document.querySelectorAll('#hairFilters .filter-tag').forEach(t => { t.classList.toggle('active', t.dataset.value === ''); t.setAttribute('aria-pressed', t.dataset.value === '' ? 'true' : 'false'); });
+    document.querySelectorAll('#ageFilters .filter-tag').forEach(t => { const isAny = !t.dataset.min && !t.dataset.max; t.classList.toggle('active', isAny); t.setAttribute('aria-pressed', isAny ? 'true' : 'false'); });
+    document.querySelectorAll('#heightFilters .filter-tag').forEach(t => { const isAny = !t.dataset.hmin && !t.dataset.hmax; t.classList.toggle('active', isAny); t.setAttribute('aria-pressed', isAny ? 'true' : 'false'); });
+    history.replaceState(null, '', window.location.pathname);
     render();
-  });
+  }
+  resetBtn?.addEventListener('click', doReset);
 
   // ── Experience label ─────────────────────────────────────────────────────────
   function experienceBadge(m) {
@@ -408,7 +418,7 @@
 
     // Sort
     switch (filters.sort) {
-      case 'featured':    list = [...list].sort((a, b) => (b.available - a.available) || (b.id - a.id)); break;
+      case 'featured':    list = [...list].sort((a, b) => (b.featured - a.featured) || (b.available - a.available) || (b.id - a.id)); break;
       case 'name_asc':    list = [...list].sort((a, b) => a.name.localeCompare(b.name, 'ru')); break;
       case 'newest':      list = [...list].sort((a, b) => b.id - a.id); break;
       case 'available':   list = [...list].sort((a, b) => b.available - a.available); break;
@@ -631,6 +641,44 @@
       NM.analytics.event('model_view', { model_id: modelId, model_name: modelName });
     }
   });
+
+  // ── Global API (for external scripts and share-link button) ──────────────────
+  window.buildFilterParams = function () {
+    const params = new URLSearchParams();
+    if (filters.category)    params.set('category', filters.category);
+    if (filters.hair)        params.set('hair', filters.hair);
+    if (filters.city)        params.set('city', filters.city);
+    if (filters.minHeight || filters.maxHeight) {
+      if (filters.minHeight && !filters.maxHeight) params.set('height', filters.minHeight + '+');
+      else if (filters.minHeight && filters.maxHeight) params.set('height', `${filters.minHeight}-${filters.maxHeight}`);
+      else params.set('height', filters.maxHeight);
+    }
+    if (filters.ageMin || filters.ageMax) {
+      if (filters.ageMin && !filters.ageMax) params.set('age', filters.ageMin + '+');
+      else if (filters.ageMin && filters.ageMax) params.set('age', `${filters.ageMin}-${filters.ageMax}`);
+      else params.set('age', filters.ageMax);
+    }
+    if (filters.availableOnly) params.set('available', '1');
+    if (filters.sort && filters.sort !== 'default') params.set('sort', filters.sort);
+    if (filters.search) params.set('q', filters.search);
+    return params;
+  };
+
+  window.applyFilters = function () {
+    const params = window.buildFilterParams();
+    const qs = params.toString();
+    history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+    render();
+  };
+
+  window.restoreFiltersFromURL = function () {
+    const p = getUrlParams();
+    Object.assign(filters, p);
+    applyUrlParamsToUI();
+    render();
+  };
+
+  window.resetFilters = doReset;
 
   render();
   _updateFavBadge();

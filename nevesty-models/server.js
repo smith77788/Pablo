@@ -257,7 +257,7 @@ app.get('/model/:id', async (req, res) => {
     if (!model) return res.redirect('/catalog.html');
 
     const siteUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
-    let photoUrl = `${siteUrl}/img/og-default.jpg`;
+    let photoUrl = `${siteUrl}/images/og-default.svg`;
     if (model.photo_main) {
       photoUrl = `${siteUrl}/uploads/${model.photo_main}`;
     } else if (model.photos) {

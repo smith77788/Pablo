@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1510;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#080808;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#grad)"/>
+  <text x="600" y="280" font-family="Georgia,serif" font-size="96" fill="#c9a96e" text-anchor="middle" font-weight="bold">N</text>
+  <text x="600" y="390" font-family="Georgia,serif" font-size="60" fill="#ffffff" text-anchor="middle" font-weight="600">Nevesty Models</text>
+  <text x="600" y="460" font-family="Arial,sans-serif" font-size="26" fill="#888888" text-anchor="middle">Профессиональное модельное агентство</text>
+</svg>

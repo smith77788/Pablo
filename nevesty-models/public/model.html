@@ -10,10 +10,14 @@
   <meta property="og:title" content="Профиль модели — Nevesty Models">
   <meta property="og:description" content="Профессиональная модель агентства Nevesty Models. Параметры, портфолио и бронирование онлайн.">
   <meta property="og:type" content="profile">
-  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
+  <meta property="og:image" content="https://nevesty-models.ru/images/og-default.svg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
   <meta property="og:url" content="https://nevesty-models.ru/model.html">
   <meta property="og:site_name" content="Nevesty Models">
+  <meta property="og:locale" content="ru_RU">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@nevesty_models">
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#080808">
   <link rel="manifest" href="/manifest.json">
@@ -790,7 +794,7 @@
           : `${model.name}: профессиональная модель${model.city ? ' в ' + model.city : ''}.${model.height ? ' Рост ' + model.height + ' см.' : ''} Бронируйте на Nevesty Models.`;
         const img = model.photos && model.photos.length > 0
           ? baseUrl + model.photos[0]
-          : (model.photo_main ? baseUrl + model.photo_main : baseUrl + '/images/og-default.jpg');
+          : (model.photo_main ? baseUrl + model.photo_main : baseUrl + '/images/og-default.svg');
 
         document.title = title;
         setMeta('name', 'description', desc);
@@ -827,7 +831,7 @@
         const baseUrl = window.location.origin;
         const img = model.photos && model.photos.length > 0
           ? baseUrl + model.photos[0]
-          : (model.photo_main ? baseUrl + model.photo_main : baseUrl + '/images/placeholder.jpg');
+          : (model.photo_main ? baseUrl + model.photo_main : baseUrl + '/images/og-default.svg');
 
         const personSchema = {
           "@context": "https://schema.org",

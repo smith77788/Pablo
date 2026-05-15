@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#080808"/>
+  <rect x="0" y="0" width="1200" height="630" fill="url(#grad)"/>
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1510;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#080808;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+  <text x="600" y="260" font-family="Georgia,serif" font-size="96" fill="#c9a96e" text-anchor="middle" font-weight="bold">NEVESTY</text>
+  <text x="600" y="370" font-family="Georgia,serif" font-size="72" fill="#ffffff" text-anchor="middle" font-style="italic">Models</text>
+  <text x="600" y="460" font-family="Arial,sans-serif" font-size="28" fill="#888888" text-anchor="middle">Модельное агентство — fashion, commercial, events</text>
+  <line x1="400" y1="420" x2="800" y2="420" stroke="#c9a96e" stroke-width="1" opacity="0.5"/>
+</svg>
