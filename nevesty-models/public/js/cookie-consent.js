@@ -68,12 +68,20 @@
   }
 
   function init() {
-    if (getCookie(COOKIE_KEY)) return; // already consented
+    if (getCookie(COOKIE_KEY)) return; // already consented (cookie)
+    // Also check localStorage for pages that use the static banner approach
+    if (localStorage.getItem('cookie_consent')) return;
+    // If a static banner already exists in the DOM, let it handle consent
+    if (document.getElementById('cookie-banner')) return;
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', createBanner);
+      document.addEventListener('DOMContentLoaded', () => {
+        if (!document.getElementById('cookie-banner')) createBanner();
+      });
     } else {
       // Small delay to avoid flashing on page load
-      setTimeout(createBanner, 800);
+      setTimeout(() => {
+        if (!document.getElementById('cookie-banner')) createBanner();
+      }, 800);
     }
   }
 

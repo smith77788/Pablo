@@ -1190,7 +1190,7 @@ async function bkStep1(chatId, data = {}) {
   await setSession(chatId, 'bk_s1', data);
   resetSessionTimer(chatId);
   try {
-    const models = await query('SELECT id,name,height,hair_color FROM models WHERE available=1 ORDER BY id LIMIT 12');
+    const models = await query('SELECT id,name,height,hair_color FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id LIMIT 12');
     const btns = models.map(m => [{
       text: `${m.name}  ·  ${m.height}см  ·  ${m.hair_color||''}`,
       callback_data: `bk_pick_${m.id}`
@@ -4723,7 +4723,7 @@ function initBot(app) {
       resetSessionTimer(chatId);
       try {
         const currentModelIds = Array.isArray(d.model_ids) ? d.model_ids : (d.model_id ? [d.model_id] : []);
-        const models = await query('SELECT id,name,height,hair_color FROM models WHERE available=1 ORDER BY id LIMIT 12');
+        const models = await query('SELECT id,name,height,hair_color FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id LIMIT 12');
         // Exclude already selected models
         const available = models.filter(m => !currentModelIds.includes(m.id));
         const btns = available.map(m => [{
@@ -8471,7 +8471,7 @@ async function showTopModels(chatId, page = 0) {
     const models = await query(
       `SELECT m.*,
         (SELECT COUNT(*) FROM orders o WHERE o.model_id=m.id AND o.status NOT IN ('cancelled','new')) as book_count
-       FROM models m WHERE m.available=1
+       FROM models m WHERE m.available=1 AND COALESCE(m.archived,0)=0
        ORDER BY m.featured DESC, book_count DESC, m.id ASC`
     ).catch(() => []);
 
@@ -8642,8 +8642,8 @@ async function showCatalogByCity(chatId, city, page = 0) {
     const _rawPerPageCity = parseInt(await getSetting('catalog_per_page').catch(() => '6')) || 6;
     const perPage = Math.min(12, Math.max(3, _rawPerPageCity));
     const models = city
-      ? await query('SELECT * FROM models WHERE available=1 AND city=? ORDER BY id', [city])
-      : await query('SELECT * FROM models WHERE available=1 ORDER BY id');
+      ? await query('SELECT * FROM models WHERE available=1 AND COALESCE(archived,0)=0 AND city=? ORDER BY id', [city])
+      : await query('SELECT * FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id');
 
     if (!models.length) {
       return safeSend(chatId, `📭 Моделей в городе «${city}» нет\\.`, {
