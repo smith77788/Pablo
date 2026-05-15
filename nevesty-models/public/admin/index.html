@@ -193,7 +193,7 @@
       <div class="nav-section-label">Бизнес</div>
       <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
       <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
-      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы <span class="nav-badge" id="pendingBadge" style="display:none">0</span></a>
       <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
       <div class="nav-section-label">AI</div>
       <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
@@ -266,6 +266,11 @@
           <div class="kpi-card-value" id="k_new_clients">—</div>
           <div class="kpi-card-icon">👤</div>
         </div>
+        <a href="/admin/reviews.html?approved=0" class="kpi-card" style="text-decoration:none;display:block;cursor:pointer" title="Перейти к отзывам">
+          <div class="kpi-card-label">Отзывов на проверке</div>
+          <div class="kpi-card-value" id="k_pending_reviews" style="color:var(--gold)">—</div>
+          <div class="kpi-card-icon">⭐</div>
+        </a>
       </div>
 
       <!-- ══════════════════ KPI CARDS ══════════════════ -->
@@ -613,6 +618,19 @@ async function loadKpiCards() {
     setKpi('k_active',      d.active_orders);
     setKpi('k_completed',   d.completed_orders);
     setKpi('k_new_clients', d.new_clients_30d);
+    if (d.pending_reviews !== undefined) setKpi('k_pending_reviews', d.pending_reviews);
+  } catch { /* silently skip */ }
+  // Load pending reviews separately if not in extended stats
+  try {
+    const rv = await _admin.apiFetch('/admin/reviews?approved=0&limit=1');
+    const cnt = rv.total ?? 0;
+    const el = document.getElementById('k_pending_reviews');
+    if (el && el.textContent === '—') el.textContent = cnt;
+    if (cnt > 0) {
+      document.getElementById('pendingBadge')?.style && (document.getElementById('pendingBadge').style.display = '');
+      const pb = document.getElementById('pendingBadge');
+      if (pb) pb.textContent = cnt;
+    }
   } catch { /* silently skip */ }
 }
 
