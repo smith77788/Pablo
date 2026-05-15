@@ -4,7 +4,7 @@ const API = '/api';
 async function apiFetch(path, opts = {}) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json', ...opts.headers },
-    ...opts
+    ...opts,
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Ошибка запроса');
@@ -35,18 +35,17 @@ function placeholderImg(name) {
 }
 
 function modelCard(m, onClick) {
-  const availDot = m.available
-    ? '<div class="model-avail"></div>'
-    : '<div class="model-avail unavailable"></div>';
+  const availDot = m.available ? '<div class="model-avail"></div>' : '<div class="model-avail unavailable"></div>';
   return `
     <div class="model-card" onclick="${onClick}(${m.id})" role="button" tabindex="0"
          onkeydown="if(event.key==='Enter'||event.key===' '){${onClick}(${m.id})}">
       ${availDot}
       <div class="model-card-img">
-        ${m.photo_main
-          ? `<img data-src="${m.photo_main}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+        ${
+          m.photo_main
+            ? `<img data-src="${m.photo_main}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                alt="${m.name}" class="lazy-img" decoding="async" />`
-          : placeholderImg(m.name)
+            : placeholderImg(m.name)
         }
         <div class="model-card-overlay">
           <div class="model-card-tag">${CATEGORIES[m.category] || m.category}</div>
@@ -73,17 +72,20 @@ function initLazyImages() {
     return;
   }
 
-  const lazyObserver = new IntersectionObserver((entries, observer) => {
-    entries.forEach(entry => {
-      if (!entry.isIntersecting) return;
-      const img = entry.target;
-      img.src = img.dataset.src;
-      img.removeAttribute('data-src');
-      img.classList.remove('lazy-img');
-      img.addEventListener('load', () => img.classList.add('lazy-loaded'), { once: true });
-      observer.unobserve(img);
-    });
-  }, { rootMargin: '200px 0px' });
+  const lazyObserver = new IntersectionObserver(
+    (entries, observer) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const img = entry.target;
+        img.src = img.dataset.src;
+        img.removeAttribute('data-src');
+        img.classList.remove('lazy-img');
+        img.addEventListener('load', () => img.classList.add('lazy-loaded'), { once: true });
+        observer.unobserve(img);
+      });
+    },
+    { rootMargin: '200px 0px' }
+  );
 
   document.querySelectorAll('img.lazy-img[data-src]').forEach(img => lazyObserver.observe(img));
 
@@ -178,13 +180,21 @@ function renderStars(rating) {
     document.getElementById('lb-next').style.display = _photos.length > 1 ? 'flex' : 'none';
   }
 
-  function lbPrev() { _idx = (_idx - 1 + _photos.length) % _photos.length; _render(); }
-  function lbNext() { _idx = (_idx + 1) % _photos.length; _render(); }
+  function lbPrev() {
+    _idx = (_idx - 1 + _photos.length) % _photos.length;
+    _render();
+  }
+  function lbNext() {
+    _idx = (_idx + 1) % _photos.length;
+    _render();
+  }
 
   document.getElementById('lb-close').addEventListener('click', lbClose);
   document.getElementById('lb-prev').addEventListener('click', lbPrev);
   document.getElementById('lb-next').addEventListener('click', lbNext);
-  lb.addEventListener('click', e => { if (e.target === lb) lbClose(); });
+  lb.addEventListener('click', e => {
+    if (e.target === lb) lbClose();
+  });
 
   document.addEventListener('keydown', e => {
     if (!lb.classList.contains('lb-open')) return;
@@ -211,27 +221,30 @@ function openModelModal(id) {
       }
       if (window.NM?.analytics) NM.analytics.viewModel(m.id, m.name);
       const photos = Array.isArray(m.photos) ? m.photos : [];
-      const allPhotos = m.photo_main
-        ? [m.photo_main, ...photos.filter(p => p !== m.photo_main)]
-        : photos;
+      const allPhotos = m.photo_main ? [m.photo_main, ...photos.filter(p => p !== m.photo_main)] : photos;
 
       window._currentModalPhotos = allPhotos;
       window._currentModalPhotoIdx = 0;
 
-      const thumbsHtml = allPhotos.slice(0, 6).map((p, i) =>
-        `<div class="modal-thumb ${i === 0 ? 'active' : ''}"
+      const thumbsHtml = allPhotos
+        .slice(0, 6)
+        .map(
+          (p, i) =>
+            `<div class="modal-thumb ${i === 0 ? 'active' : ''}"
               onclick="switchModalPhoto('${p}',${i})"
               role="button" tabindex="0"
               onkeydown="if(event.key==='Enter'){switchModalPhoto('${p}',${i})}">
            <img src="${p}" alt="${m.name} фото ${i + 1}" />
          </div>`
-      ).join('');
+        )
+        .join('');
 
-      const mainImgHtml = (m.photo_main || allPhotos[0])
-        ? `<img id="modalMainImg" src="${m.photo_main || allPhotos[0]}" alt="${m.name}"
+      const mainImgHtml =
+        m.photo_main || allPhotos[0]
+          ? `<img id="modalMainImg" src="${m.photo_main || allPhotos[0]}" alt="${m.name}"
                onclick="window._lightbox && window._lightbox.show(window._currentModalPhotos, window._currentModalPhotoIdx || 0)"
                title="Нажмите для просмотра в полном размере" />`
-        : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+          : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
                 background:var(--bg3);font-family:'Playfair Display',serif;
                 font-size:6rem;color:rgba(201,169,110,0.15)">${m.name[0]}</div>`;
 
@@ -251,24 +264,32 @@ function openModelModal(id) {
           </div>
           <span class="modal-cat">${CATEGORIES[m.category] || m.category}</span>
           <div class="modal-params">
-            ${m.age    ? `<div class="modal-param"><label>Возраст</label><span>${m.age} лет</span></div>` : ''}
+            ${m.age ? `<div class="modal-param"><label>Возраст</label><span>${m.age} лет</span></div>` : ''}
             ${m.height ? `<div class="modal-param"><label>Рост</label><span>${m.height} см</span></div>` : ''}
-            ${(m.bust && m.waist && m.hips) ? `<div class="modal-param"><label>Параметры</label><span>${m.bust}/${m.waist}/${m.hips}</span></div>` : ''}
-            ${m.shoe_size  ? `<div class="modal-param"><label>Размер обуви</label><span>${m.shoe_size}</span></div>` : ''}
+            ${m.bust && m.waist && m.hips ? `<div class="modal-param"><label>Параметры</label><span>${m.bust}/${m.waist}/${m.hips}</span></div>` : ''}
+            ${m.shoe_size ? `<div class="modal-param"><label>Размер обуви</label><span>${m.shoe_size}</span></div>` : ''}
             ${m.hair_color ? `<div class="modal-param"><label>Цвет волос</label><span>${m.hair_color}</span></div>` : ''}
-            ${m.eye_color  ? `<div class="modal-param"><label>Цвет глаз</label><span>${m.eye_color}</span></div>` : ''}
-            ${m.city       ? `<div class="modal-param"><label>Город</label><span>${m.city}</span></div>` : ''}
+            ${m.eye_color ? `<div class="modal-param"><label>Цвет глаз</label><span>${m.eye_color}</span></div>` : ''}
+            ${m.city ? `<div class="modal-param"><label>Город</label><span>${m.city}</span></div>` : ''}
             ${m.experience ? `<div class="modal-param"><label>Опыт</label><span>${m.experience}</span></div>` : ''}
           </div>
           ${m.bio ? `<div class="modal-bio"><p>${m.bio}</p></div>` : ''}
-          ${m.instagram ? `<div class="modal-insta">📸 <a href="https://instagram.com/${m.instagram.replace('@','')}" target="_blank" rel="noopener" style="color:var(--gold)">${m.instagram}</a></div>` : ''}
+          ${m.instagram ? `<div class="modal-insta">📸 <a href="https://instagram.com/${m.instagram.replace('@', '')}" target="_blank" rel="noopener" style="color:var(--gold)">${m.instagram}</a></div>` : ''}
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:24px">
             <a href="/booking.html?model=${m.id}" class="btn-primary" style="padding:14px 32px;font-size:0.8rem;display:inline-flex;align-items:center;gap:8px"
                onclick="if(window.NM?.analytics) NM.analytics.startBooking(${m.id}, '${m.category || ''}')">
               📋 Забронировать
             </a>
             <button id="modal-fav-btn" onclick="window._toggleModalFav(${m.id})" class="btn-outline" style="padding:14px 24px;font-size:0.8rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
-              ${(function() { try { const favs = JSON.parse(localStorage.getItem('nm_favorites') || '[]'); const isFavd = favs.some(f => (typeof f === 'object' ? f.id === m.id : f === m.id)); return isFavd ? '❤️ В избранном' : '🤍 В избранное'; } catch(e) { return '🤍 В избранное'; } })()}
+              ${(function () {
+                try {
+                  const favs = JSON.parse(localStorage.getItem('nm_favorites') || '[]');
+                  const isFavd = favs.some(f => (typeof f === 'object' ? f.id === m.id : f === m.id));
+                  return isFavd ? '❤️ В избранном' : '🤍 В избранное';
+                } catch (e) {
+                  return '🤍 В избранное';
+                }
+              })()}
             </button>
             <button onclick="closeModal()" class="btn-outline" style="padding:14px 24px;font-size:0.8rem;cursor:pointer">
               Закрыть
@@ -289,7 +310,9 @@ function switchModalPhoto(src, idx) {
   if (img) {
     img.style.opacity = '0';
     img.src = src;
-    img.onload = () => { img.style.opacity = '1'; };
+    img.onload = () => {
+      img.style.opacity = '1';
+    };
     img.style.transition = 'opacity 0.2s ease';
   }
   window._currentModalPhotoIdx = idx;
@@ -307,9 +330,13 @@ window.switchModalPhoto = switchModalPhoto;
 /* ─── Navbar scroll ────────────────────────────────── */
 const navbar = document.getElementById('navbar');
 if (navbar && !navbar.classList.contains('scrolled')) {
-  window.addEventListener('scroll', () => {
-    navbar.classList.toggle('scrolled', window.scrollY > 60);
-  }, { passive: true });
+  window.addEventListener(
+    'scroll',
+    () => {
+      navbar.classList.toggle('scrolled', window.scrollY > 60);
+    },
+    { passive: true }
+  );
 }
 
 /* ─── Smooth scroll for anchor links ──────────────── */
@@ -333,13 +360,17 @@ const mobileClose = document.getElementById('mobileClose');
 if (burgerBtn) {
   burgerBtn.addEventListener('click', () => mobileMenu.classList.add('open'));
   mobileClose?.addEventListener('click', () => mobileMenu.classList.remove('open'));
-  mobileMenu?.querySelectorAll('a').forEach(a => a.addEventListener('click', () => mobileMenu.classList.remove('open')));
+  mobileMenu
+    ?.querySelectorAll('a')
+    .forEach(a => a.addEventListener('click', () => mobileMenu.classList.remove('open')));
 }
 
 /* ─── Modal close ──────────────────────────────────── */
 const modalOverlay = document.getElementById('modelModal');
 document.getElementById('modalClose')?.addEventListener('click', closeModal);
-modalOverlay?.addEventListener('click', e => { if (e.target === modalOverlay) closeModal(); });
+modalOverlay?.addEventListener('click', e => {
+  if (e.target === modalOverlay) closeModal();
+});
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && modalOverlay?.classList.contains('open')) closeModal();
 });
@@ -350,20 +381,29 @@ function closeModal() {
 window.closeModal = closeModal;
 
 /* ─── Modal fav toggle ─────────────────────────────── */
-window._toggleModalFav = function(modelId) {
+window._toggleModalFav = function (modelId) {
   const FAV_KEY = 'nm_favorites';
   let favs = [];
-  try { favs = JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch {}
+  try {
+    favs = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+  } catch {}
   const idx = favs.findIndex(f => (typeof f === 'object' ? f.id === modelId : f === modelId));
   const btn = document.getElementById('modal-fav-btn');
   if (idx === -1) {
-    if (favs.length >= 50) { alert('Максимум 50 в избранном'); return; }
+    if (favs.length >= 50) {
+      alert('Максимум 50 в избранном');
+      return;
+    }
     favs.push(modelId);
-    try { localStorage.setItem(FAV_KEY, JSON.stringify(favs)); } catch {}
+    try {
+      localStorage.setItem(FAV_KEY, JSON.stringify(favs));
+    } catch {}
     if (btn) btn.innerHTML = '❤️ В избранном';
   } else {
     favs.splice(idx, 1);
-    try { localStorage.setItem(FAV_KEY, JSON.stringify(favs)); } catch {}
+    try {
+      localStorage.setItem(FAV_KEY, JSON.stringify(favs));
+    } catch {}
     if (btn) btn.innerHTML = '🤍 В избранное';
   }
   // Sync badge in catalog if available
@@ -386,9 +426,15 @@ function animateCounters() {
 
 const statsBar = document.querySelector('.stats-bar');
 if (statsBar) {
-  const observer = new IntersectionObserver(entries => {
-    if (entries[0].isIntersecting) { animateCounters(); observer.disconnect(); }
-  }, { threshold: 0.3 });
+  const observer = new IntersectionObserver(
+    entries => {
+      if (entries[0].isIntersecting) {
+        animateCounters();
+        observer.disconnect();
+      }
+    },
+    { threshold: 0.3 }
+  );
   observer.observe(statsBar);
 }
 
@@ -405,7 +451,9 @@ if (featuredGrid) {
       featuredGrid.innerHTML = featured.map(m => modelCard(m, 'openModelModal')).join('');
       initLazyImages();
     })
-    .catch(() => { featuredGrid.innerHTML = ''; });
+    .catch(() => {
+      featuredGrid.innerHTML = '';
+    });
 }
 
 /* ─── Reviews section ──────────────────────────────── */
@@ -415,28 +463,32 @@ if (reviewsContainer) {
   apiFetch('/reviews?limit=6')
     .then(data => {
       // API may return array directly or {reviews:[...]} object
-      const reviews = Array.isArray(data) ? data : (data && Array.isArray(data.reviews) ? data.reviews : []);
+      const reviews = Array.isArray(data) ? data : data && Array.isArray(data.reviews) ? data.reviews : [];
       if (!reviews.length) {
         // Hide the whole section if no approved reviews
         if (reviewsSection) reviewsSection.style.display = 'none';
         return;
       }
-      reviewsContainer.innerHTML = reviews.slice(0, 6).map((r, i) => {
-        const name = r.client_name || r.author_name || 'Клиент';
-        const initials = name
-          .split(' ')
-          .map(w => w[0] || '')
-          .slice(0, 2)
-          .join('')
-          .toUpperCase() || 'К';
-        const rating = Math.max(1, Math.min(5, r.rating || 5));
-        const starsHtml = Array.from({ length: 5 }, (_, i) =>
-          `<span style="color:${i < rating ? '#f5c542' : 'rgba(255,255,255,0.15)'}">★</span>`
-        ).join('');
-        const dateStr = r.created_at
-          ? new Date(r.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
-          : '';
-        return `
+      reviewsContainer.innerHTML = reviews
+        .slice(0, 6)
+        .map((r, i) => {
+          const name = r.client_name || r.author_name || 'Клиент';
+          const initials =
+            name
+              .split(' ')
+              .map(w => w[0] || '')
+              .slice(0, 2)
+              .join('')
+              .toUpperCase() || 'К';
+          const rating = Math.max(1, Math.min(5, r.rating || 5));
+          const starsHtml = Array.from(
+            { length: 5 },
+            (_, i) => `<span style="color:${i < rating ? '#f5c542' : 'rgba(255,255,255,0.15)'}">★</span>`
+          ).join('');
+          const dateStr = r.created_at
+            ? new Date(r.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+            : '';
+          return `
           <div class="testimonial-card" style="animation-delay:${i * 0.07}s">
             <div class="testimonial-stars">${starsHtml}</div>
             <p class="testimonial-text">${r.text ? `«${r.text}»` : ''}</p>
@@ -449,7 +501,8 @@ if (reviewsContainer) {
               </div>
             </div>
           </div>`;
-      }).join('');
+        })
+        .join('');
     })
     .catch(() => {
       // Hide section on API error too
@@ -553,15 +606,22 @@ if (reviewsContainer) {
 
 /* ─── Scroll animation for [data-animate] sections ─── */
 (function initScrollAnimations() {
+  // Guard: if animations.js already initialized, skip to avoid double-init
+  if (window._nm_scroll_anim_init) return;
+  window._nm_scroll_anim_init = true;
+
   if (!('IntersectionObserver' in window)) return;
-  const observer = new IntersectionObserver(entries => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('section-visible');
-        observer.unobserve(entry.target);
-      }
-    });
-  }, { threshold: 0.08 });
+  const observer = new IntersectionObserver(
+    entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('section-visible', 'is-visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    },
+    { threshold: 0.08 }
+  );
 
   document.querySelectorAll('[data-animate]').forEach(el => {
     el.classList.add('section-hidden');
@@ -595,7 +655,7 @@ initLazyImages();
 (function initInstallPrompt() {
   let deferredPrompt = null;
 
-  window.addEventListener('beforeinstallprompt', (e) => {
+  window.addEventListener('beforeinstallprompt', e => {
     e.preventDefault();
     deferredPrompt = e;
 
@@ -607,7 +667,7 @@ initLazyImages();
   });
 
   // Install button click
-  document.addEventListener('click', async (e) => {
+  document.addEventListener('click', async e => {
     const btn = e.target.closest('#install-btn');
     if (!btn || !deferredPrompt) return;
     deferredPrompt.prompt();

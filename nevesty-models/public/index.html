@@ -1,1125 +1,1902 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- Flash-prevention: apply theme class before first paint -->
-  <script>try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>
-  <title>Nevesty Models — Модельное Агентство</title>
-  <meta name="description" content="Модельное агентство Nevesty Models — профессиональные модели для свадеб, корпоративов и фотосессий. Забронируйте модель онлайн.">
-  <meta name="keywords" content="модельное агентство, аренда моделей, свадебные модели, корпоратив, фотосессия, невесты, модели для мероприятий">
-  <meta name="theme-color" content="#080808">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://nevesty-models.ru/">
-  <meta property="og:title" content="Nevesty Models — Агентство моделей">
-  <meta property="og:description" content="Профессиональные модели для ваших мероприятий. Более 50 проверенных моделей, работаем по всей России.">
-  <meta property="og:image" content="https://nevesty-models.ru/img/og-home.svg">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@nevesty_models">
-  <meta name="twitter:title" content="Nevesty Models — Агентство моделей">
-  <meta name="twitter:description" content="Профессиональные модели для ваших мероприятий. Более 50 проверенных моделей, работаем по всей России.">
-  <meta name="twitter:image" content="https://nevesty-models.ru/img/og-home.svg">
-  <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://nevesty-models.ru/">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
-  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
-  <link rel="dns-prefetch" href="https://telegram.org">
-  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
-  <link rel="preload" href="/css/main.css" as="style">
-  <link rel="stylesheet" href="/css/main.css" />
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843' }
-          }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Flash-prevention: apply theme class before first paint -->
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light') {
+          document.documentElement.classList.add('light');
+        } else if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
         }
-      }
-    }
-  </script>
-  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
-  <!-- Google Analytics 4 (loads only if consent given) -->
-  <script>
-    window._ga_id = ''; // loaded from API
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ga_measurement_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      window._ga_id = d.ga_measurement_id;
-      var s = document.createElement('script');
-      s.async = true;
-      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
-      document.head.appendChild(s);
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      window.gtag = gtag;
-      gtag('js', new Date());
-      gtag('config', d.ga_measurement_id, { 'send_page_view': true });
-      window._ga_ready = true;
-    }).catch(()=>{});
-  </script>
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      window.YM_ID = d.ym_counter_id;
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-  <!-- Analytics wrapper -->
-  <script src="/js/analytics.js"></script>
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-  <!-- NAVBAR -->
-  <nav class="navbar" id="navbar" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links" role="list">
-        <a href="/catalog.html">Модели</a>
-        <a href="/pricing.html">Цены</a>
-        <a href="/cases.html">Кейсы</a>
-        <a href="/about.html">О нас</a>
-        <a href="/reviews.html">Отзывы</a>
-        <a href="/faq.html">FAQ</a>
-        <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
-        <a href="/cabinet.html" style="font-size:0.9rem" aria-label="Мои заявки"><span aria-hidden="true">👤</span> Мои заявки</a>
-        <button onclick="DarkMode.toggle()"
-          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
-          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
-        </button>
-        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
-           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
-           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
-          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-          <span>WhatsApp</span>
-        </a>
-        <a href="/booking.html" class="btn-nav">Заказать</a>
-      </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu">
-        <span></span><span></span><span></span>
-      </button>
-    </div>
-  </nav>
-
-  <!-- MOBILE MENU -->
-  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-    <a href="/catalog.html">Модели</a>
-    <a href="/pricing.html">Цены</a>
-    <a href="/cases.html">Кейсы</a>
-    <a href="/about.html">О нас</a>
-    <a href="/reviews.html">Отзывы</a>
-    <a href="/faq.html">FAQ</a>
-    <a href="/contact.html">Контакты</a>
-    <a href="/favorites.html"><span aria-hidden="true">❤️</span> Избранное</a>
-    <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
-    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
-  </nav>
-
-  <main id="main-content" tabindex="-1">
-  <!-- HERO -->
-  <section class="hero" aria-label="Главная страница агентства">
-    <div class="hero-bg"></div>
-    <div class="hero-lines">
-      <div class="hero-line"></div>
-      <div class="hero-line"></div>
-      <div class="hero-line"></div>
-    </div>
-    <div class="hero-content">
-      <div class="hero-label">Модельное агентство</div>
-      <h1 id="hero-title">NEVESTY<br><em>Models</em></h1>
-      <p class="hero-tagline" id="hero-subtitle">Элегантность. Стиль. Совершенство.</p>
-      <p class="hero-desc">Мы создаём неповторимые образы для ваших мероприятий. Эксклюзивные модели для fashion-шоу, фотосессий и корпоративных событий.</p>
-      <div class="hero-btns">
-        <a href="/catalog.html" class="btn-primary">Смотреть каталог</a>
-        <a href="/booking.html" class="btn-outline">Оформить заявку</a>
-      </div>
-      <div class="quick-form" style="display:flex;gap:8px;flex-wrap:wrap;max-width:500px;margin:24px auto 0">
-        <input type="text" id="qf-name" placeholder="Ваше имя" aria-label="Ваше имя" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
-        <input type="tel" id="qf-phone" placeholder="+7 (999) 123-45-67" aria-label="Номер телефона" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
-        <button onclick="quickSubmitForm()" style="padding:12px 24px;background:#c8a96e;color:#000;border:none;border-radius:8px;font-weight:600;cursor:pointer;white-space:nowrap" aria-label="Залишити заявку — відправити форму">Залишити заявку</button>
-      </div>
-    </div>
-    <div class="hero-scroll">Листайте</div>
-  </section>
-
-  <!-- STATS -->
-  <section class="stats-bar">
-    <div class="container">
-      <div class="stats-grid">
-        <div class="stat-item">
-          <span class="stat-num" data-count="200" id="live-model-count">0</span>
-          <div class="stat-label">Моделей в базе</div>
-        </div>
-        <div class="stat-item">
-          <span class="stat-num" data-count="500">0</span>
-          <div class="stat-label">Успешных проектов</div>
-        </div>
-        <div class="stat-item">
-          <span class="stat-num" data-count="10">0</span>
-          <div class="stat-label">Лет на рынке</div>
-        </div>
-        <div class="stat-item">
-          <span class="stat-num" data-count="150">0</span>
-          <div class="stat-label">Клиентов</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- PARTNERS -->
-  <section class="partners-section" aria-label="Наши партнёры">
-    <div class="container">
-      <p class="partners-label">Работаем с брендами</p>
-      <div class="partners-list" aria-hidden="true">
-        <span>L'Oréal</span>
-        <span>Mercedes-Benz</span>
-        <span>Sberbank</span>
-        <span>Yandex</span>
-        <span>Samsung</span>
-        <span>MTC</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- FEATURED MODELS -->
-  <section class="featured" id="models" data-animate aria-label="Каталог моделей">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Наши модели</div>
-        <h2>Звёзды агентства</h2>
-        <div class="gold-line"></div>
-        <p>Каждая модель — это уникальная личность с безупречным профессионализмом и яркой индивидуальностью</p>
-      </div>
-      <div class="models-grid-3" id="featuredGrid" role="list" aria-label="Избранные модели" aria-live="polite">
-        <!-- injected by JS -->
-        <div class="model-card-skeleton" aria-hidden="true"></div>
-        <div class="model-card-skeleton" aria-hidden="true"></div>
-        <div class="model-card-skeleton" aria-hidden="true"></div>
-      </div>
-      <div style="text-align:center;margin-top:48px">
-        <a href="/catalog.html" class="btn-outline">Смотреть все модели</a>
-      </div>
-    </div>
-  </section>
-
-  <!-- SERVICES -->
-  <section class="services" id="services" data-animate aria-labelledby="services-heading">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Что мы предлагаем</div>
-        <h2 id="services-heading">Наши услуги</h2>
-        <div class="gold-line"></div>
-      </div>
-      <div class="services-grid" role="list">
-        <div class="service-card" role="listitem">
-          <span class="service-icon" aria-hidden="true">👗</span>
-          <h3>Показы мод</h3>
-          <p>Профессиональные модели для подиумных показов и fashion-презентаций любого масштаба.</p>
-        </div>
-        <div class="service-card" role="listitem">
-          <span class="service-icon" aria-hidden="true">📸</span>
-          <h3>Фотосессии</h3>
-          <p>Опытные модели для рекламных кампаний, каталогов, editorial и lifestyle съёмок.</p>
-        </div>
-        <div class="service-card" role="listitem">
-          <span class="service-icon" aria-hidden="true">🥂</span>
-          <h3>Мероприятия</h3>
-          <p>Элегантные хостес и промо-модели для корпоративных, светских и частных мероприятий.</p>
-        </div>
-        <div class="service-card" role="listitem">
-          <span class="service-icon" aria-hidden="true">🎬</span>
-          <h3>Коммерческая съёмка</h3>
-          <p>Модели для телевизионной рекламы, видеороликов и digital-контента.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- HOW IT WORKS -->
-  <section class="how-it-works" data-animate>
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Как это работает</div>
-        <h2>Просто и быстро</h2>
-        <div class="gold-line"></div>
-      </div>
-      <div class="steps-grid">
-        <div class="step">
-          <div class="step-num">01</div>
-          <h3>Выберите модель</h3>
-          <p>Просмотрите каталог и выберите подходящую модель по параметрам, типажу и стилю.</p>
-        </div>
-        <div class="step">
-          <div class="step-num">02</div>
-          <h3>Оформите заявку</h3>
-          <p>Заполните форму бронирования, укажите дату и детали мероприятия. Это займёт 2 минуты.</p>
-        </div>
-        <div class="step">
-          <div class="step-num">03</div>
-          <h3>Получите результат</h3>
-          <p>Наш менеджер свяжется с вами в течение часа для подтверждения и согласования деталей.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- TESTIMONIALS -->
-  <section class="testimonials-section" id="reviews" data-animate>
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Что говорят клиенты</div>
-        <h2>Отзывы клиентов</h2>
-        <div class="gold-line"></div>
-      </div>
-      <div id="reviews-container" class="reviews-grid">
-        <!-- loaded dynamically -->
-      </div>
-      <div id="reviews-pagination" style="display:none;justify-content:center;align-items:center;gap:16px;margin-top:32px;flex-wrap:wrap;">
-        <button id="reviews-prev" class="btn-outline" onclick="loadReviewsPage(currentReviewsPage - 1)" style="font-size:0.85rem;padding:12px 28px;" disabled>◀ Назад</button>
-        <span id="reviews-page-info" style="color:var(--text-muted);font-size:0.85rem;"></span>
-        <button id="reviews-next" class="btn-outline" onclick="loadReviewsPage(currentReviewsPage + 1)" style="font-size:0.85rem;padding:12px 28px;">Вперёд ▶</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- CTA -->
-  <section class="cta-section">
-    <div class="container">
-      <div class="section-tag">Готовы начать?</div>
-      <h2>Создайте незабываемый образ</h2>
-      <p>Свяжитесь с нами сегодня и получите персональную консультацию от нашего менеджера</p>
-      <div class="trust-badges">
-        <span>&#10003; Быстрый ответ 15 мин</span>
-        <span>&#10003; Опыт с 2014 года</span>
-        <span>&#10003; 500+ успешных проектов</span>
-      </div>
-      <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
-        <a href="/booking.html" class="btn-primary" style="font-size:0.85rem;padding:18px 48px;">Оформить заявку</a>
-        <button class="btn-outline" onclick="openQuickBooking()" style="font-size:0.85rem;padding:18px 48px;background:none;cursor:pointer;" aria-label="Заказать звонок"><span aria-hidden="true">⚡</span> Заказать звонок</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- QUICK BOOKING POPUP MODAL -->
-  <div class="qb-modal" id="qbModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle">
-    <div class="qb-modal-box">
-      <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
-      <div id="qbForm">
-        <div class="qb-modal-title" id="qbModalTitle">⚡ Быстрая заявка</div>
-        <div class="qb-modal-sub">Оставьте контакты — менеджер свяжется за 15 минут</div>
-        <label for="qbName" class="sr-only">Ваше имя</label>
-        <input class="qb-input" id="qbName" type="text" placeholder="Ваше имя" autocomplete="name" aria-required="true" />
-        <label for="qbPhone" class="sr-only">Телефон</label>
-        <input class="qb-input" id="qbPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" aria-required="true" />
-        <label for="qbComment" class="sr-only">Тип мероприятия</label>
-        <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
-        <button class="qb-btn" onclick="submitQb()" aria-label="Отправить быструю заявку">Отправить заявку →</button>
-      </div>
-      <div class="qb-success" id="qbSuccess">
-        <div class="qb-success-icon">✅</div>
-        <p>Заявка принята! Менеджер свяжется с вами в течение 15 минут.</p>
-      </div>
-    </div>
-  </div>
-  <script>
-  function openQbModal() {
-    document.getElementById('qbModal')?.classList.add('open');
-    document.getElementById('qbName')?.focus();
-  }
-  function closeQbModal() {
-    document.getElementById('qbModal')?.classList.remove('open');
-  }
-  document.getElementById('qbModal')?.addEventListener('click', e => {
-    if (e.target.id === 'qbModal') closeQbModal();
-  });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeQbModal();
-  });
-  async function submitQb() {
-    const name = document.getElementById('qbName')?.value.trim();
-    const phone = document.getElementById('qbPhone')?.value.trim();
-    if (!name || !phone) { alert('Пожалуйста, заполните имя и телефон'); return; }
-    try {
-      await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_name: name, client_phone: phone, comments: document.getElementById('qbComment')?.value.trim() || '', event_type: 'other', quick_booking: true })
-      });
-      document.getElementById('qbForm').style.display = 'none';
-      document.getElementById('qbSuccess').style.display = 'block';
-      setTimeout(closeQbModal, 3000);
-    } catch (e) { alert('Ошибка отправки. Попробуйте позже.'); }
-  }
-  </script>
-
-  <!-- QUICK BOOKING MODAL -->
-  <div id="quickBookingModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,0.8);backdrop-filter:blur(6px);align-items:center;justify-content:center">
-    <div style="background:var(--bg2);border:1px solid var(--border);padding:40px 32px;max-width:420px;width:90%;position:relative">
-      <button onclick="closeQuickBooking()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-muted);font-size:1.3rem;cursor:pointer" aria-label="Закрыть диалог">✕</button>
-      <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Быстрая заявка</div>
-      <h3 id="qbModalTitle" style="font-size:1.5rem;color:var(--white);margin-bottom:8px">Заказать звонок</h3>
-      <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:24px">Оставьте имя и телефон — менеджер свяжется в течение часа</p>
-      <div id="qbForm" role="form" aria-label="Форма быстрой заявки">
-        <div style="margin-bottom:16px">
-          <label for="qbName" style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);display:block;margin-bottom:6px">Ваше имя *</label>
-          <input type="text" id="qbName" placeholder="Иван Иванов" class="form-control" autocomplete="name" aria-required="true" />
-        </div>
-        <div style="margin-bottom:24px">
-          <label for="qbPhone" style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);display:block;margin-bottom:6px">Телефон *</label>
-          <input type="tel" id="qbPhone" placeholder="+7 (999) 000-00-00" class="form-control" autocomplete="tel" inputmode="tel" aria-required="true" />
-        </div>
-        <div id="qbError" role="alert" style="color:#f44336;font-size:0.8rem;margin-bottom:12px;display:none"></div>
-        <button onclick="submitQuickBooking()" class="btn-primary" style="width:100%;font-size:0.85rem;padding:16px;" aria-label="Отправить заявку на звонок">Отправить заявку</button>
-      </div>
-      <div id="qbSuccess" style="display:none;text-align:center;padding:20px 0">
-        <div style="font-size:3rem;margin-bottom:16px">✦</div>
-        <h4 style="color:var(--white);margin-bottom:8px">Заявка принята!</h4>
-        <p style="color:var(--text-muted);font-size:0.85rem">Менеджер позвонит вам в течение часа.</p>
-        <div id="qbOrderNum" style="color:var(--gold);font-size:0.9rem;margin-top:12px"></div>
-      </div>
-    </div>
-  </div>
-  <script>
-  function openQuickBooking() {
-    const m = document.getElementById('quickBookingModal');
-    m.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-    document.getElementById('qbName').focus();
-  }
-  function closeQuickBooking() {
-    document.getElementById('quickBookingModal').style.display = 'none';
-    document.body.style.overflow = '';
-  }
-  document.getElementById('quickBookingModal').addEventListener('click', function(e) {
-    if (e.target === this) closeQuickBooking();
-  });
-  async function submitQuickBooking() {
-    const name  = document.getElementById('qbName').value.trim();
-    const phone = document.getElementById('qbPhone').value.trim();
-    const err   = document.getElementById('qbError');
-    err.style.display = 'none';
-    if (!name || name.length < 2) { err.textContent = 'Введите имя'; err.style.display = 'block'; return; }
-    if (!phone || phone.replace(/\D/g,'').length < 7) { err.textContent = 'Введите корректный номер телефона'; err.style.display = 'block'; return; }
-    try {
-      let csrfToken = '';
-      try { const ct = await fetch('/api/csrf-token'); const cd = await ct.json(); csrfToken = cd.token || ''; } catch {}
-      const r = await fetch('/api/quick-booking', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
-        body: JSON.stringify({ client_name: name, client_phone: phone })
-      });
-      const d = await r.json();
-      if (!r.ok) { err.textContent = d.error || 'Ошибка. Попробуйте позже.'; err.style.display = 'block'; return; }
-      document.getElementById('qbForm').style.display = 'none';
-      document.getElementById('qbSuccess').style.display = 'block';
-      if (d.order_number) document.getElementById('qbOrderNum').textContent = 'Номер заявки: ' + d.order_number;
-    } catch(e) { err.textContent = 'Ошибка сети. Попробуйте позже.'; err.style.display = 'block'; }
-  }
-  document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeQuickBooking(); });
-  </script>
-
-  <!-- PRICING -->
-  <section class="pricing-section" id="pricing" data-animate>
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Прозрачное ценообразование</div>
-        <h2>Тарифы</h2>
-        <div class="gold-line"></div>
-        <p id="pricing-text">Стоимость зависит от формата мероприятия и длительности. Точная цена — после консультации.</p>
-      </div>
-      <div class="pricing-grid">
-        <div class="pricing-card">
-          <div class="pricing-label">Фотосессия</div>
-          <div class="pricing-price">от <strong>8 000</strong> ₽</div>
-          <div class="pricing-duration">за 2 часа</div>
-          <ul class="pricing-features">
-            <li>1 модель</li>
-            <li>Любая локация</li>
-            <li>Работа с 1-2 образами</li>
-            <li>Готовность в течение 24ч</li>
-          </ul>
-          <a href="/booking.html" class="btn-outline" style="width:100%;text-align:center;display:block">Заказать</a>
-        </div>
-        <div class="pricing-card pricing-featured">
-          <div class="pricing-badge">Популярное</div>
-          <div class="pricing-label">Мероприятие</div>
-          <div class="pricing-price">от <strong>15 000</strong> ₽</div>
-          <div class="pricing-duration">за 4 часа</div>
-          <ul class="pricing-features">
-            <li>1–2 модели / хостес</li>
-            <li>Корпоратив, выставка, приём</li>
-            <li>Фирменный образ</li>
-            <li>Менеджер на мероприятии</li>
-          </ul>
-          <a href="/booking.html" class="btn-primary" style="width:100%;text-align:center;display:block">Заказать</a>
-        </div>
-        <div class="pricing-card">
-          <div class="pricing-label">Показ мод</div>
-          <div class="pricing-price">от <strong>25 000</strong> ₽</div>
-          <div class="pricing-duration">полный день</div>
-          <ul class="pricing-features">
-            <li>2–5 моделей</li>
-            <li>Репетиция включена</li>
-            <li>Согласование образов</li>
-            <li>Координация на шоу</li>
-          </ul>
-          <a href="/booking.html" class="btn-outline" style="width:100%;text-align:center;display:block">Заказать</a>
-        </div>
-      </div>
-      <p style="text-align:center;color:var(--text-muted);font-size:0.8rem;margin-top:32px">Индивидуальные условия для регулярных клиентов и крупных проектов. <a href="/booking.html" style="color:var(--gold)">Свяжитесь с нами</a></p>
-    </div>
-  </section>
-
-  <!-- FAQ -->
-  <section class="faq-section section" id="faq-section" data-animate>
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Частые вопросы</div>
-        <h2>FAQ</h2>
-        <div class="gold-line"></div>
-      </div>
-      <div class="faq-list">
-        <div class="faq-item">
-          <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-1">
-            Как быстро можно забронировать модель?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" id="idx-faq-1" hidden aria-hidden="true">
-            <p>Оставьте заявку на сайте или напишите нам в Telegram — менеджер свяжется с вами в течение часа. В срочных случаях подбор модели возможен за 2–4 часа.</p>
-          </div>
-        </div>
-        <div class="faq-item">
-          <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-2">
-            Какие параметры можно указать при выборе модели?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" id="idx-faq-2" hidden aria-hidden="true">
-            <p>Вы можете указать рост, параметры фигуры, цвет волос и глаз, размер обуви, категорию (fashion, commercial, events) и доступность на нужную дату.</p>
-          </div>
-        </div>
-        <div class="faq-item">
-          <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-3">
-            Есть ли минимальное время бронирования?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" id="idx-faq-3" hidden aria-hidden="true">
-            <p>Минимальное время — 2 часа для фотосессий. Для мероприятий и показов — от 4 часов. Возможно бронирование на полный день.</p>
-          </div>
-        </div>
-        <div class="faq-item">
-          <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-4">
-            Предоставляете ли вы модели для выездных съёмок в другие города?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" id="idx-faq-4" hidden aria-hidden="true">
-            <p>Да, мы работаем по всей стране. Выезд модели за пределы её города оговаривается отдельно — транспортные расходы и проживание оплачивает заказчик.</p>
-          </div>
-        </div>
-        <div class="faq-item">
-          <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-5">
-            Каков порядок оплаты?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" id="idx-faq-5" hidden aria-hidden="true">
-            <p>Оплата производится на основании договора: 50% предоплата при подтверждении бронирования, остаток — в день мероприятия. Принимаем безналичный расчёт и наличные.</p>
-          </div>
-        </div>
-        <div class="faq-item">
-          <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-6">
-            Что происходит, если модель заболела или не смогла приехать?
-            <span class="faq-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="faq-answer" id="idx-faq-6" hidden aria-hidden="true">
-            <p>В таком случае мы незамедлительно предлагаем замену с аналогичными характеристиками. Надёжность — наш приоритет: в базе более 200 моделей на замену.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ABOUT -->
-  <section class="about-section" id="about" data-animate>
-    <div class="container">
-      <div class="about-grid">
-        <div class="about-visual">
-          <div class="about-visual-main">
-            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1510,#0d0a07)">
-              <span style="font-family:'Playfair Display',serif;font-size:8rem;color:rgba(201,169,110,0.1);user-select:none">N</span>
-            </div>
-          </div>
-          <div class="about-visual-accent"></div>
-          <div class="about-badge">
-            <strong>10</strong>
-            <span>лет опыта</span>
-          </div>
-        </div>
-        <div class="about-content">
-          <div class="section-tag">О компании</div>
-          <h2 style="margin-bottom:24px">Nevesty Models</h2>
-          <p id="about-text">Мы — модельное агентство полного цикла, работающее с 2014 года. За это время мы стали одним из ведущих агентств страны, объединив в своей базе более 200 профессиональных моделей.</p>
-          <p>Наша миссия — обеспечить клиентам безупречный сервис и предоставить моделей, которые идеально соответствуют концепции и задачам проекта.</p>
-          <p>Каждая модель проходит строгий кастинг и профессиональную подготовку. Мы гарантируем пунктуальность, профессионализм и результат.</p>
-          <div class="about-facts">
-            <div class="about-fact">
-              <strong>200+</strong>
-              <span>моделей в базе</span>
-            </div>
-            <div class="about-fact">
-              <strong>500+</strong>
-              <span>проектов выполнено</span>
-            </div>
-            <div class="about-fact">
-              <strong>98%</strong>
-              <span>довольных клиентов</span>
-            </div>
-            <div class="about-fact">
-              <strong>24/7</strong>
-              <span>поддержка менеджера</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CONTACTS -->
-  <section class="stats-bar" id="contact">
-    <div class="container">
-      <div class="section-header" style="margin-bottom:40px">
-        <div class="section-tag">Контакты</div>
-        <h2>Свяжитесь с нами</h2>
-        <div class="gold-line"></div>
-      </div>
-      <div class="stats-grid">
-        <div class="stat-item">
-          <span style="font-size:2rem;display:block;margin-bottom:12px" aria-hidden="true">📞</span>
-          <div class="stat-label">Телефон</div>
-          <a href="tel:+78005550000" style="color:var(--gold);font-size:0.9rem;display:block;margin-top:6px">+7 (800) 555-00-00</a>
-        </div>
-        <div class="stat-item">
-          <span style="font-size:2rem;display:block;margin-bottom:12px" aria-hidden="true">✉️</span>
-          <div class="stat-label">Email</div>
-          <a href="mailto:info@nevesty-models.ru" style="color:var(--gold);font-size:0.9rem;display:block;margin-top:6px">info@nevesty-models.ru</a>
-        </div>
-        <div class="stat-item">
-          <span style="font-size:2rem;display:block;margin-bottom:12px" aria-hidden="true">💬</span>
-          <div class="stat-label">Telegram</div>
-          <a href="https://t.me/nevesty_models" style="color:var(--gold);font-size:0.9rem;display:block;margin-top:6px" target="_blank">@nevesty_models</a>
-        </div>
-        <div class="stat-item">
-          <span style="font-size:2rem;display:block;margin-bottom:12px" aria-hidden="true">🕐</span>
-          <div class="stat-label">Режим работы</div>
-          <span style="color:var(--text-muted);font-size:0.85rem;display:block;margin-top:6px">Пн–Вс: 9:00–22:00</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  </main><!-- /#main-content -->
-
-  <!-- SCROLL TO TOP -->
-  <button id="scroll-top" aria-label="Вернуться наверх" title="Вернуться наверх">&#8679;</button>
-
-  <!-- FOOTER -->
-  <footer class="footer" role="contentinfo">
-    <div class="container">
-      <div class="footer-grid">
-        <div class="footer-brand">
-          <div class="nav-logo" style="font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--gold)">NEVESTY <span style="color:var(--text)">MODELS</span></div>
-          <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
-        </div>
-        <div class="footer-col">
-          <h4>Агентство</h4>
-          <a href="/catalog.html">Каталог моделей</a>
+      } catch (e) {}
+    </script>
+    <title>Nevesty Models — Модельное Агентство</title>
+    <meta
+      name="description"
+      content="Модельное агентство Nevesty Models — профессиональные модели для свадеб, корпоративов и фотосессий. Забронируйте модель онлайн."
+    />
+    <meta
+      name="keywords"
+      content="модельное агентство, аренда моделей, свадебные модели, корпоратив, фотосессия, невесты, модели для мероприятий"
+    />
+    <meta name="theme-color" content="#080808" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://nevesty-models.ru/" />
+    <meta property="og:title" content="Nevesty Models — Агентство моделей" />
+    <meta
+      property="og:description"
+      content="Профессиональные модели для ваших мероприятий. Более 50 проверенных моделей, работаем по всей России."
+    />
+    <meta property="og:image" content="https://nevesty-models.ru/img/og-home.svg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@nevesty_models" />
+    <meta name="twitter:title" content="Nevesty Models — Агентство моделей" />
+    <meta
+      name="twitter:description"
+      content="Профессиональные модели для ваших мероприятий. Более 50 проверенных моделей, работаем по всей России."
+    />
+    <meta name="twitter:image" content="https://nevesty-models.ru/img/og-home.svg" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://nevesty-models.ru/" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.tailwindcss.com" />
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
+    <link rel="dns-prefetch" href="https://telegram.org" />
+    <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
+    <link rel="preload" href="/css/main.css" as="style" />
+    <link rel="stylesheet" href="/css/main.css" />
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              pink: {
+                50: '#fdf2f8',
+                100: '#fce7f3',
+                200: '#fbcfe8',
+                300: '#f9a8d4',
+                400: '#f472b6',
+                500: '#ec4899',
+                600: '#db2777',
+                700: '#be185d',
+                800: '#9d174d',
+                900: '#831843',
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+    <!-- Google Analytics 4 (loads only if consent given) -->
+    <script>
+      window._ga_id = ''; // loaded from API
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ga_measurement_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          window._ga_id = d.ga_measurement_id;
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+          function gtag() {
+            dataLayer.push(arguments);
+          }
+          window.gtag = gtag;
+          gtag('js', new Date());
+          gtag('config', d.ga_measurement_id, { send_page_view: true });
+          window._ga_ready = true;
+        })
+        .catch(() => {});
+    </script>
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          window.YM_ID = d.ym_counter_id;
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+    <!-- Analytics wrapper -->
+    <script src="/js/analytics.js"></script>
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+    <!-- NAVBAR -->
+    <nav class="navbar" id="navbar" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links" role="list">
+          <a href="/catalog.html">Модели</a>
           <a href="/pricing.html">Цены</a>
           <a href="/cases.html">Кейсы</a>
-        <a href="/about.html">О нас</a>
-          <a href="/contact.html">Контакты</a>
-        </div>
-        <div class="footer-col">
-          <h4>Клиентам</h4>
-          <a href="/booking.html">Оформить заявку</a>
-          <a href="/cabinet.html">Мои заявки</a>
-          <a href="/order-status.html">Статус заявки</a>
-          <a href="/catalog.html">Выбрать модель</a>
-          <a href="/compare.html">Сравнить модели</a>
-          <a href="/favorites.html">Избранное</a>
+          <a href="/about.html">О нас</a>
+          <a href="/reviews.html">Отзывы</a>
           <a href="/faq.html">FAQ</a>
-          <a href="/privacy.html">Конфиденциальность</a>
+          <a href="/contact.html">Контакты</a>
+          <a href="/favorites.html" aria-label="Избранное" style="font-size: 1.1rem"
+            ><span aria-hidden="true">❤️</span></a
+          >
+          <a href="/cabinet.html" style="font-size: 0.9rem" aria-label="Мои заявки"
+            ><span aria-hidden="true">👤</span> Мои заявки</a
+          >
+          <button
+            onclick="DarkMode.toggle()"
+            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            aria-label="Переключить тему"
+            title="Dark/Light mode"
+            style="background: none; border: none; cursor: pointer; padding: 4px 8px"
+          >
+            <span class="dark-mode-icon" style="font-size: 1.1rem">🌙</span>
+          </button>
+          <a
+            id="whatsapp-btn"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            style="
+              display: none;
+              align-items: center;
+              gap: 6px;
+              background: #25d366;
+              color: #fff;
+              padding: 6px 14px;
+              border-radius: 8px;
+              font-size: 0.8rem;
+              font-weight: 600;
+              transition: background 0.2s;
+              text-decoration: none;
+            "
+            onmouseover="this.style.background = '#1da851'"
+            onmouseout="this.style.background = '#25D366'"
+          >
+            <svg
+              style="width: 16px; height: 16px; flex-shrink: 0"
+              fill="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+              />
+            </svg>
+            <span>WhatsApp</span>
+          </a>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
         </div>
-        <div class="footer-col">
-          <h4>Связаться</h4>
-          <a href="tel:+78005550000">+7 (800) 555-00-00</a>
-          <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
-          <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
-          <a href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- MOBILE MENU -->
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/pricing.html">Цены</a>
+      <a href="/cases.html">Кейсы</a>
+      <a href="/about.html">О нас</a>
+      <a href="/reviews.html">Отзывы</a>
+      <a href="/faq.html">FAQ</a>
+      <a href="/contact.html">Контакты</a>
+      <a href="/favorites.html"><span aria-hidden="true">❤️</span> Избранное</a>
+      <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+    </nav>
+
+    <main id="main-content" tabindex="-1">
+      <!-- HERO -->
+      <section class="hero" aria-label="Главная страница агентства">
+        <div class="hero-bg"></div>
+        <div class="hero-lines">
+          <div class="hero-line"></div>
+          <div class="hero-line"></div>
+          <div class="hero-line"></div>
+        </div>
+        <div class="hero-content">
+          <div class="hero-label">Модельное агентство</div>
+          <h1 id="hero-title">NEVESTY<br /><em>Models</em></h1>
+          <p class="hero-tagline" id="hero-subtitle">Элегантность. Стиль. Совершенство.</p>
+          <p class="hero-desc">
+            Мы создаём неповторимые образы для ваших мероприятий. Эксклюзивные модели для fashion-шоу, фотосессий и
+            корпоративных событий.
+          </p>
+          <div class="hero-btns">
+            <a href="/catalog.html" class="btn-primary">Смотреть каталог</a>
+            <a href="/booking.html" class="btn-outline">Оформить заявку</a>
+          </div>
+          <div
+            class="quick-form"
+            style="display: flex; gap: 8px; flex-wrap: wrap; max-width: 500px; margin: 24px auto 0"
+          >
+            <input
+              type="text"
+              id="qf-name"
+              placeholder="Ваше имя"
+              aria-label="Ваше имя"
+              style="
+                flex: 1;
+                min-width: 150px;
+                padding: 12px 16px;
+                border-radius: 8px;
+                border: none;
+                background: rgba(255, 255, 255, 0.1);
+                color: #fff;
+              "
+            />
+            <input
+              type="tel"
+              id="qf-phone"
+              placeholder="+7 (999) 123-45-67"
+              aria-label="Номер телефона"
+              style="
+                flex: 1;
+                min-width: 150px;
+                padding: 12px 16px;
+                border-radius: 8px;
+                border: none;
+                background: rgba(255, 255, 255, 0.1);
+                color: #fff;
+              "
+            />
+            <button
+              onclick="quickSubmitForm()"
+              style="
+                padding: 12px 24px;
+                background: #c8a96e;
+                color: #000;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+                cursor: pointer;
+                white-space: nowrap;
+              "
+              aria-label="Залишити заявку — відправити форму"
+            >
+              Залишити заявку
+            </button>
+          </div>
+        </div>
+        <div class="hero-scroll">Листайте</div>
+      </section>
+
+      <!-- STATS -->
+      <section class="stats-bar">
+        <div class="container">
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-num" data-count="200" id="live-model-count">0</span>
+              <div class="stat-label">Моделей в базе</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-num" data-count="500">0</span>
+              <div class="stat-label">Успешных проектов</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-num" data-count="10">0</span>
+              <div class="stat-label">Лет на рынке</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-num" data-count="150">0</span>
+              <div class="stat-label">Клиентов</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PARTNERS -->
+      <section class="partners-section" aria-label="Наши партнёры">
+        <div class="container">
+          <p class="partners-label">Работаем с брендами</p>
+          <div class="partners-list" aria-hidden="true">
+            <span>L'Oréal</span>
+            <span>Mercedes-Benz</span>
+            <span>Sberbank</span>
+            <span>Yandex</span>
+            <span>Samsung</span>
+            <span>MTC</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- FEATURED MODELS -->
+      <section class="featured" id="models" data-animate aria-label="Каталог моделей">
+        <div class="container">
+          <div class="section-header">
+            <div class="section-tag">Наши модели</div>
+            <h2>Звёзды агентства</h2>
+            <div class="gold-line"></div>
+            <p>Каждая модель — это уникальная личность с безупречным профессионализмом и яркой индивидуальностью</p>
+          </div>
+          <div class="models-grid-3" id="featuredGrid" role="list" aria-label="Избранные модели" aria-live="polite">
+            <!-- injected by JS -->
+            <div class="model-card-skeleton" aria-hidden="true"></div>
+            <div class="model-card-skeleton" aria-hidden="true"></div>
+            <div class="model-card-skeleton" aria-hidden="true"></div>
+          </div>
+          <div style="text-align: center; margin-top: 48px">
+            <a href="/catalog.html" class="btn-outline">Смотреть все модели</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- SERVICES -->
+      <section class="services" id="services" data-animate aria-labelledby="services-heading">
+        <div class="container">
+          <div class="section-header">
+            <div class="section-tag">Что мы предлагаем</div>
+            <h2 id="services-heading">Наши услуги</h2>
+            <div class="gold-line"></div>
+          </div>
+          <div class="services-grid" role="list">
+            <div class="service-card" role="listitem">
+              <span class="service-icon" aria-hidden="true">👗</span>
+              <h3>Показы мод</h3>
+              <p>Профессиональные модели для подиумных показов и fashion-презентаций любого масштаба.</p>
+            </div>
+            <div class="service-card" role="listitem">
+              <span class="service-icon" aria-hidden="true">📸</span>
+              <h3>Фотосессии</h3>
+              <p>Опытные модели для рекламных кампаний, каталогов, editorial и lifestyle съёмок.</p>
+            </div>
+            <div class="service-card" role="listitem">
+              <span class="service-icon" aria-hidden="true">🥂</span>
+              <h3>Мероприятия</h3>
+              <p>Элегантные хостес и промо-модели для корпоративных, светских и частных мероприятий.</p>
+            </div>
+            <div class="service-card" role="listitem">
+              <span class="service-icon" aria-hidden="true">🎬</span>
+              <h3>Коммерческая съёмка</h3>
+              <p>Модели для телевизионной рекламы, видеороликов и digital-контента.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- HOW IT WORKS -->
+      <section class="how-it-works" data-animate>
+        <div class="container">
+          <div class="section-header">
+            <div class="section-tag">Как это работает</div>
+            <h2>Просто и быстро</h2>
+            <div class="gold-line"></div>
+          </div>
+          <div class="steps-grid">
+            <div class="step">
+              <div class="step-num">01</div>
+              <h3>Выберите модель</h3>
+              <p>Просмотрите каталог и выберите подходящую модель по параметрам, типажу и стилю.</p>
+            </div>
+            <div class="step">
+              <div class="step-num">02</div>
+              <h3>Оформите заявку</h3>
+              <p>Заполните форму бронирования, укажите дату и детали мероприятия. Это займёт 2 минуты.</p>
+            </div>
+            <div class="step">
+              <div class="step-num">03</div>
+              <h3>Получите результат</h3>
+              <p>Наш менеджер свяжется с вами в течение часа для подтверждения и согласования деталей.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TESTIMONIALS -->
+      <section class="testimonials-section" id="reviews" data-animate>
+        <div class="container">
+          <div class="section-header">
+            <div class="section-tag">Что говорят клиенты</div>
+            <h2>Отзывы клиентов</h2>
+            <div class="gold-line"></div>
+          </div>
+          <div id="reviews-container" class="reviews-grid">
+            <!-- loaded dynamically -->
+          </div>
+          <div
+            id="reviews-pagination"
+            style="
+              display: none;
+              justify-content: center;
+              align-items: center;
+              gap: 16px;
+              margin-top: 32px;
+              flex-wrap: wrap;
+            "
+          >
+            <button
+              id="reviews-prev"
+              class="btn-outline"
+              onclick="loadReviewsPage(currentReviewsPage - 1)"
+              style="font-size: 0.85rem; padding: 12px 28px"
+              disabled
+            >
+              ◀ Назад
+            </button>
+            <span id="reviews-page-info" style="color: var(--text-muted); font-size: 0.85rem"></span>
+            <button
+              id="reviews-next"
+              class="btn-outline"
+              onclick="loadReviewsPage(currentReviewsPage + 1)"
+              style="font-size: 0.85rem; padding: 12px 28px"
+            >
+              Вперёд ▶
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="cta-section">
+        <div class="container">
+          <div class="section-tag">Готовы начать?</div>
+          <h2>Создайте незабываемый образ</h2>
+          <p>Свяжитесь с нами сегодня и получите персональную консультацию от нашего менеджера</p>
+          <div class="trust-badges">
+            <span>&#10003; Быстрый ответ 15 мин</span>
+            <span>&#10003; Опыт с 2014 года</span>
+            <span>&#10003; 500+ успешных проектов</span>
+          </div>
+          <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap">
+            <a href="/booking.html" class="btn-primary" style="font-size: 0.85rem; padding: 18px 48px"
+              >Оформить заявку</a
+            >
+            <button
+              class="btn-outline"
+              onclick="openQuickBooking()"
+              style="font-size: 0.85rem; padding: 18px 48px; background: none; cursor: pointer"
+              aria-label="Заказать звонок"
+            >
+              <span aria-hidden="true">⚡</span> Заказать звонок
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- QUICK BOOKING POPUP MODAL -->
+      <div class="qb-modal" id="qbModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle">
+        <div class="qb-modal-box">
+          <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
+          <div id="qbForm">
+            <div class="qb-modal-title" id="qbModalTitle">⚡ Быстрая заявка</div>
+            <div class="qb-modal-sub">Оставьте контакты — менеджер свяжется за 15 минут</div>
+            <label for="qbName" class="sr-only">Ваше имя</label>
+            <input
+              class="qb-input"
+              id="qbName"
+              type="text"
+              placeholder="Ваше имя"
+              autocomplete="name"
+              aria-required="true"
+            />
+            <label for="qbPhone" class="sr-only">Телефон</label>
+            <input
+              class="qb-input"
+              id="qbPhone"
+              type="tel"
+              placeholder="+7 999 123-45-67"
+              autocomplete="tel"
+              aria-required="true"
+            />
+            <label for="qbComment" class="sr-only">Тип мероприятия</label>
+            <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
+            <button class="qb-btn" onclick="submitQb()" aria-label="Отправить быструю заявку">
+              Отправить заявку →
+            </button>
+          </div>
+          <div class="qb-success" id="qbSuccess">
+            <div class="qb-success-icon">✅</div>
+            <p>Заявка принята! Менеджер свяжется с вами в течение 15 минут.</p>
+          </div>
         </div>
       </div>
-      <div class="footer-bottom">
-        <p>© 2024 Nevesty Models. Все права защищены.</p>
-        <div class="footer-socials" aria-label="Социальные сети">
-          <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"><span aria-hidden="true">📸</span></a>
-          <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"><span aria-hidden="true">✈</span></a>
-          <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"><span aria-hidden="true">V</span></a>
+      <script>
+        function openQbModal() {
+          document.getElementById('qbModal')?.classList.add('open');
+          document.getElementById('qbName')?.focus();
+        }
+        function closeQbModal() {
+          document.getElementById('qbModal')?.classList.remove('open');
+        }
+        document.getElementById('qbModal')?.addEventListener('click', e => {
+          if (e.target.id === 'qbModal') closeQbModal();
+        });
+        document.addEventListener('keydown', e => {
+          if (e.key === 'Escape') closeQbModal();
+        });
+        async function submitQb() {
+          const name = document.getElementById('qbName')?.value.trim();
+          const phone = document.getElementById('qbPhone')?.value.trim();
+          if (!name || !phone) {
+            alert('Пожалуйста, заполните имя и телефон');
+            return;
+          }
+          try {
+            await fetch('/api/orders', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                client_name: name,
+                client_phone: phone,
+                comments: document.getElementById('qbComment')?.value.trim() || '',
+                event_type: 'other',
+                quick_booking: true,
+              }),
+            });
+            document.getElementById('qbForm').style.display = 'none';
+            document.getElementById('qbSuccess').style.display = 'block';
+            setTimeout(closeQbModal, 3000);
+          } catch (e) {
+            alert('Ошибка отправки. Попробуйте позже.');
+          }
+        }
+      </script>
+
+      <!-- QUICK BOOKING MODAL -->
+      <div
+        id="quickBookingModal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="qbModalTitle"
+        style="
+          display: none;
+          position: fixed;
+          inset: 0;
+          z-index: 4000;
+          background: rgba(0, 0, 0, 0.8);
+          backdrop-filter: blur(6px);
+          align-items: center;
+          justify-content: center;
+        "
+      >
+        <div
+          style="
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            padding: 40px 32px;
+            max-width: 420px;
+            width: 90%;
+            position: relative;
+          "
+        >
+          <button
+            onclick="closeQuickBooking()"
+            style="
+              position: absolute;
+              top: 12px;
+              right: 16px;
+              background: none;
+              border: none;
+              color: var(--text-muted);
+              font-size: 1.3rem;
+              cursor: pointer;
+            "
+            aria-label="Закрыть диалог"
+          >
+            ✕
+          </button>
+          <div
+            style="
+              font-size: 0.7rem;
+              letter-spacing: 3px;
+              text-transform: uppercase;
+              color: var(--gold);
+              margin-bottom: 12px;
+            "
+          >
+            Быстрая заявка
+          </div>
+          <h3 id="qbModalTitle" style="font-size: 1.5rem; color: var(--white); margin-bottom: 8px">Заказать звонок</h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 24px">
+            Оставьте имя и телефон — менеджер свяжется в течение часа
+          </p>
+          <div id="qbForm" role="form" aria-label="Форма быстрой заявки">
+            <div style="margin-bottom: 16px">
+              <label
+                for="qbName"
+                style="
+                  font-size: 0.7rem;
+                  letter-spacing: 1px;
+                  text-transform: uppercase;
+                  color: var(--text-dim);
+                  display: block;
+                  margin-bottom: 6px;
+                "
+                >Ваше имя *</label
+              >
+              <input
+                type="text"
+                id="qbName"
+                placeholder="Иван Иванов"
+                class="form-control"
+                autocomplete="name"
+                aria-required="true"
+              />
+            </div>
+            <div style="margin-bottom: 24px">
+              <label
+                for="qbPhone"
+                style="
+                  font-size: 0.7rem;
+                  letter-spacing: 1px;
+                  text-transform: uppercase;
+                  color: var(--text-dim);
+                  display: block;
+                  margin-bottom: 6px;
+                "
+                >Телефон *</label
+              >
+              <input
+                type="tel"
+                id="qbPhone"
+                placeholder="+7 (999) 000-00-00"
+                class="form-control"
+                autocomplete="tel"
+                inputmode="tel"
+                aria-required="true"
+              />
+            </div>
+            <div
+              id="qbError"
+              role="alert"
+              style="color: #f44336; font-size: 0.8rem; margin-bottom: 12px; display: none"
+            ></div>
+            <button
+              onclick="submitQuickBooking()"
+              class="btn-primary"
+              style="width: 100%; font-size: 0.85rem; padding: 16px"
+              aria-label="Отправить заявку на звонок"
+            >
+              Отправить заявку
+            </button>
+          </div>
+          <div id="qbSuccess" style="display: none; text-align: center; padding: 20px 0">
+            <div style="font-size: 3rem; margin-bottom: 16px">✦</div>
+            <h4 style="color: var(--white); margin-bottom: 8px">Заявка принята!</h4>
+            <p style="color: var(--text-muted); font-size: 0.85rem">Менеджер позвонит вам в течение часа.</p>
+            <div id="qbOrderNum" style="color: var(--gold); font-size: 0.9rem; margin-top: 12px"></div>
+          </div>
         </div>
       </div>
+      <script>
+        function openQuickBooking() {
+          const m = document.getElementById('quickBookingModal');
+          m.style.display = 'flex';
+          document.body.style.overflow = 'hidden';
+          document.getElementById('qbName').focus();
+        }
+        function closeQuickBooking() {
+          document.getElementById('quickBookingModal').style.display = 'none';
+          document.body.style.overflow = '';
+        }
+        document.getElementById('quickBookingModal').addEventListener('click', function (e) {
+          if (e.target === this) closeQuickBooking();
+        });
+        async function submitQuickBooking() {
+          const name = document.getElementById('qbName').value.trim();
+          const phone = document.getElementById('qbPhone').value.trim();
+          const err = document.getElementById('qbError');
+          err.style.display = 'none';
+          if (!name || name.length < 2) {
+            err.textContent = 'Введите имя';
+            err.style.display = 'block';
+            return;
+          }
+          if (!phone || phone.replace(/\D/g, '').length < 7) {
+            err.textContent = 'Введите корректный номер телефона';
+            err.style.display = 'block';
+            return;
+          }
+          try {
+            let csrfToken = '';
+            try {
+              const ct = await fetch('/api/csrf-token');
+              const cd = await ct.json();
+              csrfToken = cd.token || '';
+            } catch {}
+            const r = await fetch('/api/quick-booking', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+              body: JSON.stringify({ client_name: name, client_phone: phone }),
+            });
+            const d = await r.json();
+            if (!r.ok) {
+              err.textContent = d.error || 'Ошибка. Попробуйте позже.';
+              err.style.display = 'block';
+              return;
+            }
+            document.getElementById('qbForm').style.display = 'none';
+            document.getElementById('qbSuccess').style.display = 'block';
+            if (d.order_number) document.getElementById('qbOrderNum').textContent = 'Номер заявки: ' + d.order_number;
+          } catch (e) {
+            err.textContent = 'Ошибка сети. Попробуйте позже.';
+            err.style.display = 'block';
+          }
+        }
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape') closeQuickBooking();
+        });
+      </script>
+
+      <!-- PRICING -->
+      <section class="pricing-section" id="pricing" data-animate>
+        <div class="container">
+          <div class="section-header">
+            <div class="section-tag">Прозрачное ценообразование</div>
+            <h2>Тарифы</h2>
+            <div class="gold-line"></div>
+            <p id="pricing-text">
+              Стоимость зависит от формата мероприятия и длительности. Точная цена — после консультации.
+            </p>
+          </div>
+          <div class="pricing-grid">
+            <div class="pricing-card">
+              <div class="pricing-label">Фотосессия</div>
+              <div class="pricing-price">от <strong>8 000</strong> ₽</div>
+              <div class="pricing-duration">за 2 часа</div>
+              <ul class="pricing-features">
+                <li>1 модель</li>
+                <li>Любая локация</li>
+                <li>Работа с 1-2 образами</li>
+                <li>Готовность в течение 24ч</li>
+              </ul>
+              <a href="/booking.html" class="btn-outline" style="width: 100%; text-align: center; display: block"
+                >Заказать</a
+              >
+            </div>
+            <div class="pricing-card pricing-featured">
+              <div class="pricing-badge">Популярное</div>
+              <div class="pricing-label">Мероприятие</div>
+              <div class="pricing-price">от <strong>15 000</strong> ₽</div>
+              <div class="pricing-duration">за 4 часа</div>
+              <ul class="pricing-features">
+                <li>1–2 модели / хостес</li>
+                <li>Корпоратив, выставка, приём</li>
+                <li>Фирменный образ</li>
+                <li>Менеджер на мероприятии</li>
+              </ul>
+              <a href="/booking.html" class="btn-primary" style="width: 100%; text-align: center; display: block"
+                >Заказать</a
+              >
+            </div>
+            <div class="pricing-card">
+              <div class="pricing-label">Показ мод</div>
+              <div class="pricing-price">от <strong>25 000</strong> ₽</div>
+              <div class="pricing-duration">полный день</div>
+              <ul class="pricing-features">
+                <li>2–5 моделей</li>
+                <li>Репетиция включена</li>
+                <li>Согласование образов</li>
+                <li>Координация на шоу</li>
+              </ul>
+              <a href="/booking.html" class="btn-outline" style="width: 100%; text-align: center; display: block"
+                >Заказать</a
+              >
+            </div>
+          </div>
+          <p style="text-align: center; color: var(--text-muted); font-size: 0.8rem; margin-top: 32px">
+            Индивидуальные условия для регулярных клиентов и крупных проектов.
+            <a href="/booking.html" style="color: var(--gold)">Свяжитесь с нами</a>
+          </p>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section class="faq-section section" id="faq-section" data-animate>
+        <div class="container">
+          <div class="section-header">
+            <div class="section-tag">Частые вопросы</div>
+            <h2>FAQ</h2>
+            <div class="gold-line"></div>
+          </div>
+          <div class="faq-list">
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-1">
+                Как быстро можно забронировать модель?
+                <span class="faq-icon" aria-hidden="true">+</span>
+              </button>
+              <div class="faq-answer" id="idx-faq-1" hidden aria-hidden="true">
+                <p>
+                  Оставьте заявку на сайте или напишите нам в Telegram — менеджер свяжется с вами в течение часа. В
+                  срочных случаях подбор модели возможен за 2–4 часа.
+                </p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-2">
+                Какие параметры можно указать при выборе модели?
+                <span class="faq-icon" aria-hidden="true">+</span>
+              </button>
+              <div class="faq-answer" id="idx-faq-2" hidden aria-hidden="true">
+                <p>
+                  Вы можете указать рост, параметры фигуры, цвет волос и глаз, размер обуви, категорию (fashion,
+                  commercial, events) и доступность на нужную дату.
+                </p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-3">
+                Есть ли минимальное время бронирования?
+                <span class="faq-icon" aria-hidden="true">+</span>
+              </button>
+              <div class="faq-answer" id="idx-faq-3" hidden aria-hidden="true">
+                <p>
+                  Минимальное время — 2 часа для фотосессий. Для мероприятий и показов — от 4 часов. Возможно
+                  бронирование на полный день.
+                </p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-4">
+                Предоставляете ли вы модели для выездных съёмок в другие города?
+                <span class="faq-icon" aria-hidden="true">+</span>
+              </button>
+              <div class="faq-answer" id="idx-faq-4" hidden aria-hidden="true">
+                <p>
+                  Да, мы работаем по всей стране. Выезд модели за пределы её города оговаривается отдельно —
+                  транспортные расходы и проживание оплачивает заказчик.
+                </p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-5">
+                Каков порядок оплаты?
+                <span class="faq-icon" aria-hidden="true">+</span>
+              </button>
+              <div class="faq-answer" id="idx-faq-5" hidden aria-hidden="true">
+                <p>
+                  Оплата производится на основании договора: 50% предоплата при подтверждении бронирования, остаток — в
+                  день мероприятия. Принимаем безналичный расчёт и наличные.
+                </p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false" aria-controls="idx-faq-6">
+                Что происходит, если модель заболела или не смогла приехать?
+                <span class="faq-icon" aria-hidden="true">+</span>
+              </button>
+              <div class="faq-answer" id="idx-faq-6" hidden aria-hidden="true">
+                <p>
+                  В таком случае мы незамедлительно предлагаем замену с аналогичными характеристиками. Надёжность — наш
+                  приоритет: в базе более 200 моделей на замену.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ABOUT -->
+      <section class="about-section" id="about" data-animate>
+        <div class="container">
+          <div class="about-grid">
+            <div class="about-visual">
+              <div class="about-visual-main">
+                <div
+                  style="
+                    position: absolute;
+                    inset: 0;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: linear-gradient(135deg, #1a1510, #0d0a07);
+                  "
+                >
+                  <span
+                    style="
+                      font-family: 'Playfair Display', serif;
+                      font-size: 8rem;
+                      color: rgba(201, 169, 110, 0.1);
+                      user-select: none;
+                    "
+                    >N</span
+                  >
+                </div>
+              </div>
+              <div class="about-visual-accent"></div>
+              <div class="about-badge">
+                <strong>10</strong>
+                <span>лет опыта</span>
+              </div>
+            </div>
+            <div class="about-content">
+              <div class="section-tag">О компании</div>
+              <h2 style="margin-bottom: 24px">Nevesty Models</h2>
+              <p id="about-text">
+                Мы — модельное агентство полного цикла, работающее с 2014 года. За это время мы стали одним из ведущих
+                агентств страны, объединив в своей базе более 200 профессиональных моделей.
+              </p>
+              <p>
+                Наша миссия — обеспечить клиентам безупречный сервис и предоставить моделей, которые идеально
+                соответствуют концепции и задачам проекта.
+              </p>
+              <p>
+                Каждая модель проходит строгий кастинг и профессиональную подготовку. Мы гарантируем пунктуальность,
+                профессионализм и результат.
+              </p>
+              <div class="about-facts">
+                <div class="about-fact">
+                  <strong>200+</strong>
+                  <span>моделей в базе</span>
+                </div>
+                <div class="about-fact">
+                  <strong>500+</strong>
+                  <span>проектов выполнено</span>
+                </div>
+                <div class="about-fact">
+                  <strong>98%</strong>
+                  <span>довольных клиентов</span>
+                </div>
+                <div class="about-fact">
+                  <strong>24/7</strong>
+                  <span>поддержка менеджера</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CONTACTS -->
+      <section class="stats-bar" id="contact">
+        <div class="container">
+          <div class="section-header" style="margin-bottom: 40px">
+            <div class="section-tag">Контакты</div>
+            <h2>Свяжитесь с нами</h2>
+            <div class="gold-line"></div>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span style="font-size: 2rem; display: block; margin-bottom: 12px" aria-hidden="true">📞</span>
+              <div class="stat-label">Телефон</div>
+              <a href="tel:+78005550000" style="color: var(--gold); font-size: 0.9rem; display: block; margin-top: 6px"
+                >+7 (800) 555-00-00</a
+              >
+            </div>
+            <div class="stat-item">
+              <span style="font-size: 2rem; display: block; margin-bottom: 12px" aria-hidden="true">✉️</span>
+              <div class="stat-label">Email</div>
+              <a
+                href="mailto:info@nevesty-models.ru"
+                style="color: var(--gold); font-size: 0.9rem; display: block; margin-top: 6px"
+                >info@nevesty-models.ru</a
+              >
+            </div>
+            <div class="stat-item">
+              <span style="font-size: 2rem; display: block; margin-bottom: 12px" aria-hidden="true">💬</span>
+              <div class="stat-label">Telegram</div>
+              <a
+                href="https://t.me/nevesty_models"
+                style="color: var(--gold); font-size: 0.9rem; display: block; margin-top: 6px"
+                target="_blank"
+                >@nevesty_models</a
+              >
+            </div>
+            <div class="stat-item">
+              <span style="font-size: 2rem; display: block; margin-bottom: 12px" aria-hidden="true">🕐</span>
+              <div class="stat-label">Режим работы</div>
+              <span style="color: var(--text-muted); font-size: 0.85rem; display: block; margin-top: 6px"
+                >Пн–Вс: 9:00–22:00</span
+              >
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <!-- /#main-content -->
+
+    <!-- SCROLL TO TOP -->
+    <button id="scroll-top" aria-label="Вернуться наверх" title="Вернуться наверх">&#8679;</button>
+
+    <!-- FOOTER -->
+    <footer class="footer" role="contentinfo">
+      <div class="container">
+        <div class="footer-grid">
+          <div class="footer-brand">
+            <div class="nav-logo" style="font-family: 'Playfair Display', serif; font-size: 1.3rem; color: var(--gold)">
+              NEVESTY <span style="color: var(--text)">MODELS</span>
+            </div>
+            <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
+          </div>
+          <div class="footer-col">
+            <h4>Агентство</h4>
+            <a href="/catalog.html">Каталог моделей</a>
+            <a href="/pricing.html">Цены</a>
+            <a href="/cases.html">Кейсы</a>
+            <a href="/about.html">О нас</a>
+            <a href="/contact.html">Контакты</a>
+          </div>
+          <div class="footer-col">
+            <h4>Клиентам</h4>
+            <a href="/booking.html">Оформить заявку</a>
+            <a href="/cabinet.html">Мои заявки</a>
+            <a href="/order-status.html">Статус заявки</a>
+            <a href="/catalog.html">Выбрать модель</a>
+            <a href="/compare.html">Сравнить модели</a>
+            <a href="/favorites.html">Избранное</a>
+            <a href="/faq.html">FAQ</a>
+            <a href="/privacy.html">Конфиденциальность</a>
+          </div>
+          <div class="footer-col">
+            <h4>Связаться</h4>
+            <a href="tel:+78005550000">+7 (800) 555-00-00</a>
+            <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
+            <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
+            <a href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>© 2024 Nevesty Models. Все права защищены.</p>
+          <div class="footer-socials" aria-label="Социальные сети">
+            <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"
+              ><span aria-hidden="true">📸</span></a
+            >
+            <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"
+              ><span aria-hidden="true">✈</span></a
+            >
+            <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"
+              ><span aria-hidden="true">V</span></a
+            >
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- MODEL MODAL -->
+    <div
+      class="modal-overlay"
+      id="modelModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modalTitle"
+      tabindex="-1"
+    >
+      <div class="modal" id="modalContent">
+        <button class="modal-close" id="modalClose" aria-label="Закрыть">✕</button>
+        <div class="modal-inner" id="modalInner"><!-- injected by JS --></div>
+      </div>
     </div>
-  </footer>
 
-  <!-- MODEL MODAL -->
-  <div class="modal-overlay" id="modelModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
-    <div class="modal" id="modalContent">
-      <button class="modal-close" id="modalClose" aria-label="Закрыть">✕</button>
-      <div class="modal-inner" id="modalInner"><!-- injected by JS --></div>
-    </div>
-  </div>
+    <div class="toast-container" id="toastContainer"></div>
 
-  <div class="toast-container" id="toastContainer"></div>
-
-  <script src="/js/main.js" defer></script>
-  <script src="/js/telegram-webapp.js" defer></script>
-  <script src="/js/darkmode.js"></script>
-<script>
-// Загрузить контакты из настроек бота
-fetch('/api/settings').then(r=>r.json()).then(s=>{
-  if(s.contacts_phone){
-    document.querySelectorAll('a[href^="tel:"]').forEach(el=>{el.href='tel:'+s.contacts_phone.replace(/[^+\d]/g,'');el.textContent=s.contacts_phone;});
-  }
-  if(s.contacts_email){
-    document.querySelectorAll('a[href^="mailto:"]').forEach(el=>{el.href='mailto:'+s.contacts_email;el.textContent=s.contacts_email;});
-  }
-}).catch(()=>{});
-// WhatsApp button init from public settings
-fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-  const wa = d.contacts_whatsapp;
-  if (wa) {
-    const waNum = wa.replace(/\D/g,'');
-    const waUrl = `https://wa.me/${waNum}`;
-    const btn = document.getElementById('whatsapp-btn');
-    if (btn) { btn.href = waUrl; btn.style.display = 'flex'; }
-    const floatEl = document.getElementById('float-whatsapp');
-    const floatLink = document.getElementById('float-wa-link');
-    if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
-  }
-}).catch(()=>{});
-// Quick form submission from hero
-async function quickSubmitForm() {
-  const name = document.getElementById('qf-name')?.value.trim();
-  const phone = document.getElementById('qf-phone')?.value.trim();
-  if (!name || name.length < 2) { alert('Введіть ваше ім\'я'); return; }
-  if (!phone || phone.replace(/\D/g,'').length < 7) { alert('Введіть коректний номер телефону'); return; }
-  try {
-    const r = await fetch('/api/contact', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name, phone, message: 'Швидка заявка з головної сторінки' }) });
-    if (!r.ok) throw new Error();
-    alert('✅ Дякуємо! Менеджер зв\'яжеться найближчим часом.');
-    document.getElementById('qf-name').value = '';
-    document.getElementById('qf-phone').value = '';
-  } catch { alert('Помилка. Спробуйте пізніше або напишіть нам напряму.'); }
-}
-// Load about text and pricing from public settings
-fetch('/api/settings/public').then(r => r.json()).then(d => {
-  // About text
-  const aboutEl = document.getElementById('about-text');
-  if (aboutEl && d.about_text) aboutEl.textContent = d.about_text;
-  // Agency name
-  document.querySelectorAll('[data-setting="agency_name"]').forEach(el => { if (d.agency_name) el.textContent = d.agency_name; });
-  // Pricing cards on homepage
-  const fmt = v => v ? Number(v).toLocaleString('ru-RU') + ' ₽' : null;
-  const pCards = document.querySelectorAll('.pricing-section .pricing-price strong');
-  if (pCards[0] && d.pricing_start_from) pCards[0].textContent = Number(d.pricing_start_from).toLocaleString('ru-RU');
-  if (pCards[1] && d.pricing_event_from) pCards[1].textContent = Number(d.pricing_event_from).toLocaleString('ru-RU');
-  if (pCards[2] && d.pricing_premium_from) pCards[2].textContent = Number(d.pricing_premium_from).toLocaleString('ru-RU');
-}).catch(() => {});
-// ─── Reviews with pagination ──────────────────────────────────────────────────
-var currentReviewsPage = 1;
-var reviewsLimit = 6;
-
-function loadReviewsPage(page) {
-  page = Math.max(1, page);
-  const cont = document.getElementById('reviews-container');
-  if (!cont) return;
-  cont.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:24px">Загрузка отзывов…</div>';
-
-  const stars = n => '★'.repeat(Math.max(1, Math.min(5, n || 5))) + '☆'.repeat(5 - Math.max(1, Math.min(5, n || 5)));
-  const fmtDate = s => { try { return new Date(s).toLocaleDateString('ru-RU', { year:'numeric', month:'long', day:'numeric' }); } catch { return ''; } };
-  const truncate = (t, len) => { t = String(t || ''); return t.length > len ? t.slice(0, len).trimEnd() + '…' : t; };
-  const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-  fetch('/api/reviews?page=' + page + '&limit=' + reviewsLimit)
-    .then(r => r.ok ? r.json() : null)
-    .then(data => {
-      if (!data) throw new Error('fetch error');
-      // API returns { reviews, total, page, pages, limit } when page param is present
-      const list = Array.isArray(data) ? data : (data.reviews || []);
-      const total = data.total || list.length;
-      const pages = data.pages || Math.ceil(total / reviewsLimit);
-      currentReviewsPage = data.page || page;
-
-      if (!list.length) {
-        if (page > 1) {
-          // Went past last page — go back
-          loadReviewsPage(1);
+    <script src="/js/main.js" defer></script>
+    <script src="/js/telegram-webapp.js" defer></script>
+    <script src="/js/animations.js" defer></script>
+    <script src="/js/darkmode.js"></script>
+    <script>
+      // Загрузить контакты из настроек бота
+      fetch('/api/settings')
+        .then(r => r.json())
+        .then(s => {
+          if (s.contacts_phone) {
+            document.querySelectorAll('a[href^="tel:"]').forEach(el => {
+              el.href = 'tel:' + s.contacts_phone.replace(/[^+\d]/g, '');
+              el.textContent = s.contacts_phone;
+            });
+          }
+          if (s.contacts_email) {
+            document.querySelectorAll('a[href^="mailto:"]').forEach(el => {
+              el.href = 'mailto:' + s.contacts_email;
+              el.textContent = s.contacts_email;
+            });
+          }
+        })
+        .catch(() => {});
+      // WhatsApp button init from public settings
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          const wa = d.contacts_whatsapp;
+          if (wa) {
+            const waNum = wa.replace(/\D/g, '');
+            const waUrl = `https://wa.me/${waNum}`;
+            const btn = document.getElementById('whatsapp-btn');
+            if (btn) {
+              btn.href = waUrl;
+              btn.style.display = 'flex';
+            }
+            const floatEl = document.getElementById('float-whatsapp');
+            const floatLink = document.getElementById('float-wa-link');
+            if (floatEl && floatLink) {
+              floatLink.href = waUrl;
+              floatEl.style.display = 'block';
+            }
+          }
+        })
+        .catch(() => {});
+      // Quick form submission from hero
+      async function quickSubmitForm() {
+        const name = document.getElementById('qf-name')?.value.trim();
+        const phone = document.getElementById('qf-phone')?.value.trim();
+        if (!name || name.length < 2) {
+          alert("Введіть ваше ім'я");
           return;
         }
-        cont.innerHTML = '';
-        const section = document.getElementById('reviews');
-        if (section) section.style.display = 'none';
-        return;
+        if (!phone || phone.replace(/\D/g, '').length < 7) {
+          alert('Введіть коректний номер телефону');
+          return;
+        }
+        try {
+          const r = await fetch('/api/contact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, phone, message: 'Швидка заявка з головної сторінки' }),
+          });
+          if (!r.ok) throw new Error();
+          alert("✅ Дякуємо! Менеджер зв'яжеться найближчим часом.");
+          document.getElementById('qf-name').value = '';
+          document.getElementById('qf-phone').value = '';
+        } catch {
+          alert('Помилка. Спробуйте пізніше або напишіть нам напряму.');
+        }
       }
+      // Load about text and pricing from public settings
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          // About text
+          const aboutEl = document.getElementById('about-text');
+          if (aboutEl && d.about_text) aboutEl.textContent = d.about_text;
+          // Agency name
+          document.querySelectorAll('[data-setting="agency_name"]').forEach(el => {
+            if (d.agency_name) el.textContent = d.agency_name;
+          });
+          // Pricing cards on homepage
+          const fmt = v => (v ? Number(v).toLocaleString('ru-RU') + ' ₽' : null);
+          const pCards = document.querySelectorAll('.pricing-section .pricing-price strong');
+          if (pCards[0] && d.pricing_start_from)
+            pCards[0].textContent = Number(d.pricing_start_from).toLocaleString('ru-RU');
+          if (pCards[1] && d.pricing_event_from)
+            pCards[1].textContent = Number(d.pricing_event_from).toLocaleString('ru-RU');
+          if (pCards[2] && d.pricing_premium_from)
+            pCards[2].textContent = Number(d.pricing_premium_from).toLocaleString('ru-RU');
+        })
+        .catch(() => {});
+      // ─── Reviews with pagination ──────────────────────────────────────────────────
+      var currentReviewsPage = 1;
+      var reviewsLimit = 6;
 
-      cont.innerHTML = list.map(r => `
+      function loadReviewsPage(page) {
+        page = Math.max(1, page);
+        const cont = document.getElementById('reviews-container');
+        if (!cont) return;
+        cont.innerHTML =
+          '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:24px">Загрузка отзывов…</div>';
+
+        const stars = n =>
+          '★'.repeat(Math.max(1, Math.min(5, n || 5))) + '☆'.repeat(5 - Math.max(1, Math.min(5, n || 5)));
+        const fmtDate = s => {
+          try {
+            return new Date(s).toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
+          } catch {
+            return '';
+          }
+        };
+        const truncate = (t, len) => {
+          t = String(t || '');
+          return t.length > len ? t.slice(0, len).trimEnd() + '…' : t;
+        };
+        const esc = s =>
+          String(s || '').replace(
+            /[&<>"']/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+          );
+
+        fetch('/api/reviews?page=' + page + '&limit=' + reviewsLimit)
+          .then(r => (r.ok ? r.json() : null))
+          .then(data => {
+            if (!data) throw new Error('fetch error');
+            // API returns { reviews, total, page, pages, limit } when page param is present
+            const list = Array.isArray(data) ? data : data.reviews || [];
+            const total = data.total || list.length;
+            const pages = data.pages || Math.ceil(total / reviewsLimit);
+            currentReviewsPage = data.page || page;
+
+            if (!list.length) {
+              if (page > 1) {
+                // Went past last page — go back
+                loadReviewsPage(1);
+                return;
+              }
+              cont.innerHTML = '';
+              const section = document.getElementById('reviews');
+              if (section) section.style.display = 'none';
+              return;
+            }
+
+            cont.innerHTML = list
+              .map(
+                r => `
         <div class="testimonial-card" style="background:var(--bg2);border:1px solid var(--border);padding:28px;border-radius:2px;display:flex;flex-direction:column;gap:0">
           <div style="color:#f59e0b;font-size:1.1rem;margin-bottom:10px">${stars(r.rating)}</div>
           <p style="color:var(--text);font-size:0.9rem;line-height:1.6;margin-bottom:16px;flex:1">"${esc(truncate(r.text, 200))}"</p>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
             <div style="display:flex;align-items:center;gap:10px">
-              <div style="width:36px;height:36px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:0.9rem;flex-shrink:0">${esc((r.client_name||'А').charAt(0).toUpperCase())}</div>
+              <div style="width:36px;height:36px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:0.9rem;flex-shrink:0">${esc((r.client_name || 'А').charAt(0).toUpperCase())}</div>
               <div>
-                <div style="color:var(--white);font-size:0.85rem;font-weight:600">${esc(r.client_name||'Клиент')}</div>
+                <div style="color:var(--white);font-size:0.85rem;font-weight:600">${esc(r.client_name || 'Клиент')}</div>
                 ${r.model_name ? `<div style="color:var(--text-muted);font-size:0.75rem">Модель: ${esc(r.model_name)}</div>` : ''}
               </div>
             </div>
             ${r.created_at ? `<div style="color:var(--text-muted);font-size:0.72rem;white-space:nowrap">${fmtDate(r.created_at)}</div>` : ''}
           </div>
-        </div>`).join('');
+        </div>`
+              )
+              .join('');
 
-      // Pagination controls
-      const pag = document.getElementById('reviews-pagination');
-      if (pag) {
-        pag.style.display = pages > 1 ? 'flex' : 'none';
-        const prevBtn = document.getElementById('reviews-prev');
-        const nextBtn = document.getElementById('reviews-next');
-        const info = document.getElementById('reviews-page-info');
-        if (prevBtn) prevBtn.disabled = currentReviewsPage <= 1;
-        if (nextBtn) nextBtn.disabled = currentReviewsPage >= pages;
-        if (info) info.textContent = 'Страница ' + currentReviewsPage + ' из ' + pages;
-      }
+            // Pagination controls
+            const pag = document.getElementById('reviews-pagination');
+            if (pag) {
+              pag.style.display = pages > 1 ? 'flex' : 'none';
+              const prevBtn = document.getElementById('reviews-prev');
+              const nextBtn = document.getElementById('reviews-next');
+              const info = document.getElementById('reviews-page-info');
+              if (prevBtn) prevBtn.disabled = currentReviewsPage <= 1;
+              if (nextBtn) nextBtn.disabled = currentReviewsPage >= pages;
+              if (info) info.textContent = 'Страница ' + currentReviewsPage + ' из ' + pages;
+            }
 
-      // Append action buttons (once)
-      const section = document.getElementById('reviews');
-      if (section && !section.querySelector('.reviews-actions')) {
-        const actions = document.createElement('div');
-        actions.className = 'reviews-actions';
-        actions.style.cssText = 'display:flex;gap:16px;justify-content:center;margin-top:24px;flex-wrap:wrap';
-        actions.innerHTML = `
+            // Append action buttons (once)
+            const section = document.getElementById('reviews');
+            if (section && !section.querySelector('.reviews-actions')) {
+              const actions = document.createElement('div');
+              actions.className = 'reviews-actions';
+              actions.style.cssText = 'display:flex;gap:16px;justify-content:center;margin-top:24px;flex-wrap:wrap';
+              actions.innerHTML = `
           <a href="/catalog.html" class="btn-outline" style="font-size:0.85rem;padding:14px 36px">Все отзывы</a>
           <a href="https://t.me/Verdiktnikbot" target="_blank" rel="noopener" class="btn-primary" style="font-size:0.85rem;padding:14px 36px">Оставить отзыв</a>`;
-        section.querySelector('.container').appendChild(actions);
+              section.querySelector('.container').appendChild(actions);
+            }
+          })
+          .catch(() => {
+            if (cont)
+              cont.innerHTML =
+                '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:24px">Ошибка загрузки отзывов</div>';
+          });
       }
-    })
-    .catch(() => {
-      if (cont) cont.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:24px">Ошибка загрузки отзывов</div>';
-    });
-}
 
-// Load reviews on page init
-if (document.getElementById('reviews-container')) loadReviewsPage(1);
-</script>
+      // Load reviews on page init
+      if (document.getElementById('reviews-container')) loadReviewsPage(1);
+    </script>
 
-  <!-- PWA Install Banner -->
-  <div id="install-banner" style="display:none; position:fixed; bottom:70px; left:16px; right:16px; background:var(--bg2); border:1px solid var(--gold); padding:12px 16px; border-radius:8px; z-index:1000; align-items:center; gap:12px; box-shadow:0 4px 20px rgba(0,0,0,0.4);" role="dialog" aria-label="Установить приложение">
-    <span style="flex:1; font-size:0.875rem; color:var(--text)"><span aria-hidden="true">📱</span> Установить приложение Nevesty Models</span>
-    <button id="install-btn" style="background:var(--gold); color:#000; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; white-space:nowrap; font-size:0.85rem;">Установить</button>
-    <button onclick="document.getElementById('install-banner').style.display='none'" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem; padding:0 4px; line-height:1;" aria-label="Закрыть">✕</button>
-  </div>
+    <!-- PWA Install Banner -->
+    <div
+      id="install-banner"
+      style="
+        display: none;
+        position: fixed;
+        bottom: 70px;
+        left: 16px;
+        right: 16px;
+        background: var(--bg2);
+        border: 1px solid var(--gold);
+        padding: 12px 16px;
+        border-radius: 8px;
+        z-index: 1000;
+        align-items: center;
+        gap: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      "
+      role="dialog"
+      aria-label="Установить приложение"
+    >
+      <span style="flex: 1; font-size: 0.875rem; color: var(--text)"
+        ><span aria-hidden="true">📱</span> Установить приложение Nevesty Models</span
+      >
+      <button
+        id="install-btn"
+        style="
+          background: var(--gold);
+          color: #000;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-weight: 600;
+          white-space: nowrap;
+          font-size: 0.85rem;
+        "
+      >
+        Установить
+      </button>
+      <button
+        onclick="document.getElementById('install-banner').style.display = 'none'"
+        style="
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          font-size: 1.2rem;
+          padding: 0 4px;
+          line-height: 1;
+        "
+        aria-label="Закрыть"
+      >
+        ✕
+      </button>
+    </div>
 
-  <!-- Floating CTA Button -->
-  <button class="floating-cta" onclick="openQbModal()" aria-label="Оставить заявку">
-    ⚡ Заявка
-  </button>
+    <!-- Floating CTA Button -->
+    <button class="floating-cta" onclick="openQbModal()" aria-label="Оставить заявку">⚡ Заявка</button>
 
-  <!-- Sticky Telegram Button -->
-  <div id="sticky-telegram" style="position:fixed;bottom:84px;right:24px;z-index:401">
-    <a href="https://t.me/nevesty_agency" target="_blank" rel="noopener"
-       style="width:52px;height:52px;border-radius:50%;background:#229ED9;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.3);text-decoration:none;transition:transform 0.2s,box-shadow 0.2s"
-       title="Написать в Telegram"
-       onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 18px rgba(34,158,217,0.5)'"
-       onmouseout="this.style.transform='';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.3)'">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="white" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8l-1.72 8.13c-.13.59-.47.73-.95.46l-2.62-1.93-1.26 1.21c-.14.14-.26.26-.53.26l.19-2.69 4.9-4.42c.21-.19-.05-.29-.33-.1L7.5 14.3l-2.56-.8c-.56-.17-.57-.56.12-.83l10.01-3.86c.46-.17.86.11.57.99z"/></svg>
-    </a>
-  </div>
+    <!-- Sticky Telegram Button -->
+    <div id="sticky-telegram" style="position: fixed; bottom: 84px; right: 24px; z-index: 401">
+      <a
+        href="https://t.me/nevesty_agency"
+        target="_blank"
+        rel="noopener"
+        style="
+          width: 52px;
+          height: 52px;
+          border-radius: 50%;
+          background: #229ed9;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+          text-decoration: none;
+          transition:
+            transform 0.2s,
+            box-shadow 0.2s;
+        "
+        title="Написать в Telegram"
+        onmouseover="
+          this.style.transform = 'translateY(-2px)';
+          this.style.boxShadow = '0 6px 18px rgba(34,158,217,0.5)';
+        "
+        onmouseout="
+          this.style.transform = '';
+          this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+        "
+      >
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+          <path
+            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8l-1.72 8.13c-.13.59-.47.73-.95.46l-2.62-1.93-1.26 1.21c-.14.14-.26.26-.53.26l.19-2.69 4.9-4.42c.21-.19-.05-.29-.33-.1L7.5 14.3l-2.56-.8c-.56-.17-.57-.56.12-.83l10.01-3.86c.46-.17.86.11.57.99z"
+          />
+        </svg>
+      </a>
+    </div>
 
-  <!-- Floating WhatsApp Button -->
-  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
-    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
-       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
-       onmouseover="this.style.background='#1da851';this.style.boxShadow='0 6px 20px rgba(37,211,102,0.5)'"
-       onmouseout="this.style.background='#25D366';this.style.boxShadow='0 4px 16px rgba(37,211,102,0.4)'">
-      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      Написать в WhatsApp
-    </a>
-  </div>
-  <script type="application/ld+json">
-[
-  {
-    "@context": "https://schema.org",
-    "@type": "LocalBusiness",
-    "@id": "https://nevesty-models.ru/#organization",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru",
-    "logo": "https://nevesty-models.ru/og-image.jpg",
-    "description": "Профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.",
-    "email": "info@nevesty-models.ru",
-    "telephone": "+7-800-555-00-00",
-    "openingHours": ["Mo-Fr 09:00-21:00", "Sa-Su 10:00-18:00"],
-    "priceRange": "₽₽",
-    "currenciesAccepted": "RUB",
-    "paymentAccepted": "Cash, Credit Card",
-    "areaServed": "RU",
-    "numberOfEmployees": {"@type": "QuantitativeValue", "value": 20},
-    "sameAs": [
-      "https://instagram.com/nevesty_models",
-      "https://t.me/nevesty_models",
-      "https://vk.com/nevesty_models"
-    ],
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "telephone": "+7-800-555-00-00",
-      "contactType": "customer service",
-      "availableLanguage": "Russian"
-    }
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "WebPage",
-    "name": "Nevesty Models — Модельное Агентство",
-    "description": "Модельное агентство Nevesty Models — профессиональные модели для свадеб, корпоративов и фотосессий. Забронируйте модель онлайн.",
-    "url": "https://nevesty-models.ru/",
-    "isPartOf": {"@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru"},
-    "inLanguage": "ru-RU",
-    "dateModified": "2026-05-15"
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    "@id": "https://nevesty-models.ru/#website",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru",
-    "potentialAction": {
-      "@type": "SearchAction",
-      "target": {
-        "@type": "EntryPoint",
-        "urlTemplate": "https://nevesty-models.ru/search.html?q={search_term_string}"
-      },
-      "query-input": "required name=search_term_string"
-    },
-    "inLanguage": "ru-RU"
-  }
-]
-</script>
+    <!-- Floating WhatsApp Button -->
+    <div id="float-whatsapp" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 400">
+      <a
+        id="float-wa-link"
+        href="#"
+        target="_blank"
+        rel="noopener"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #25d366;
+          color: #fff;
+          padding: 14px 20px;
+          border-radius: 50px;
+          box-shadow: 0 4px 16px rgba(37, 211, 102, 0.4);
+          text-decoration: none;
+          font-size: 0.85rem;
+          font-weight: 600;
+          transition: all 0.2s;
+        "
+        onmouseover="
+          this.style.background = '#1da851';
+          this.style.boxShadow = '0 6px 20px rgba(37,211,102,0.5)';
+        "
+        onmouseout="
+          this.style.background = '#25D366';
+          this.style.boxShadow = '0 4px 16px rgba(37,211,102,0.4)';
+        "
+      >
+        <svg style="width: 22px; height: 22px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+          <path
+            d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+          />
+        </svg>
+        Написать в WhatsApp
+      </a>
+    </div>
+    <script type="application/ld+json">
+      [
+        {
+          "@context": "https://schema.org",
+          "@type": "LocalBusiness",
+          "@id": "https://nevesty-models.ru/#organization",
+          "name": "Nevesty Models",
+          "url": "https://nevesty-models.ru",
+          "logo": "https://nevesty-models.ru/og-image.jpg",
+          "description": "Профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.",
+          "email": "info@nevesty-models.ru",
+          "telephone": "+7-800-555-00-00",
+          "openingHours": ["Mo-Fr 09:00-21:00", "Sa-Su 10:00-18:00"],
+          "priceRange": "₽₽",
+          "currenciesAccepted": "RUB",
+          "paymentAccepted": "Cash, Credit Card",
+          "areaServed": "RU",
+          "numberOfEmployees": { "@type": "QuantitativeValue", "value": 20 },
+          "sameAs": [
+            "https://instagram.com/nevesty_models",
+            "https://t.me/nevesty_models",
+            "https://vk.com/nevesty_models"
+          ],
+          "contactPoint": {
+            "@type": "ContactPoint",
+            "telephone": "+7-800-555-00-00",
+            "contactType": "customer service",
+            "availableLanguage": "Russian"
+          }
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          "name": "Nevesty Models — Модельное Агентство",
+          "description": "Модельное агентство Nevesty Models — профессиональные модели для свадеб, корпоративов и фотосессий. Забронируйте модель онлайн.",
+          "url": "https://nevesty-models.ru/",
+          "isPartOf": { "@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru" },
+          "inLanguage": "ru-RU",
+          "dateModified": "2026-05-15"
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          "@id": "https://nevesty-models.ru/#website",
+          "name": "Nevesty Models",
+          "url": "https://nevesty-models.ru",
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": {
+              "@type": "EntryPoint",
+              "urlTemplate": "https://nevesty-models.ru/search.html?q={search_term_string}"
+            },
+            "query-input": "required name=search_term_string"
+          },
+          "inLanguage": "ru-RU"
+        }
+      ]
+    </script>
 
-  <!-- Dark mode & animation styles -->
-  <style>
-    html { scroll-behavior: smooth; }
+    <!-- Dark mode & animation styles -->
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
 
-    /* ── Partners section ── */
-    .partners-section { padding: 36px 0; background: var(--bg3); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); text-align: center; }
-    .partners-label { font-size: 0.65rem; letter-spacing: 3px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 20px; }
-    .partners-list { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: center; align-items: center; }
-    .partners-list span { font-size: 0.95rem; font-weight: 600; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; opacity: 0.55; transition: opacity 0.2s; }
-    .partners-list span:hover { opacity: 1; }
+      /* ── Partners section ── */
+      .partners-section {
+        padding: 36px 0;
+        background: var(--bg3);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        text-align: center;
+      }
+      .partners-label {
+        font-size: 0.65rem;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 20px;
+      }
+      .partners-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 32px;
+        justify-content: center;
+        align-items: center;
+      }
+      .partners-list span {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text-dim);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        opacity: 0.55;
+        transition: opacity 0.2s;
+      }
+      .partners-list span:hover {
+        opacity: 1;
+      }
 
-    /* ── Trust badges ── */
-    .trust-badges { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content: center; margin-bottom: 28px; }
-    .trust-badges span { font-size: 0.82rem; color: var(--text-muted); }
-    .trust-badges span::first-letter { color: var(--gold); }
+      /* ── Trust badges ── */
+      .trust-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 24px;
+        justify-content: center;
+        margin-bottom: 28px;
+      }
+      .trust-badges span {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+      }
+      .trust-badges span::first-letter {
+        color: var(--gold);
+      }
 
-    /* ── Scroll-to-top ── */
-    #scroll-top { position: fixed; bottom: 90px; right: 24px; z-index: 500; width: 44px; height: 44px; background: var(--gold); color: #000; border: none; border-radius: 50%; font-size: 1.4rem; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.3s ease, transform 0.2s ease; pointer-events: none; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-    #scroll-top.visible { opacity: 1; pointer-events: auto; }
-    #scroll-top:hover { transform: translateY(-2px); }
+      /* ── Scroll-to-top ── */
+      #scroll-top {
+        position: fixed;
+        bottom: 90px;
+        right: 24px;
+        z-index: 500;
+        width: 44px;
+        height: 44px;
+        background: var(--gold);
+        color: #000;
+        border: none;
+        border-radius: 50%;
+        font-size: 1.4rem;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0;
+        transition:
+          opacity 0.3s ease,
+          transform 0.2s ease;
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+      #scroll-top.visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #scroll-top:hover {
+        transform: translateY(-2px);
+      }
 
-    /* Fade-in animation */
-    @keyframes fadeInUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
+      /* Fade-in animation */
+      @keyframes fadeInUp {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
 
-    .animate-fade-in {
-      animation: fadeInUp 0.4s ease-out forwards;
-    }
+      .animate-fade-in {
+        animation: fadeInUp 0.4s ease-out forwards;
+      }
 
-    /* Model card hover */
-    .model-card {
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    .model-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 12px 24px -6px rgba(236, 72, 153, 0.15);
-    }
+      /* Model card hover */
+      .model-card {
+        transition:
+          transform 0.2s ease,
+          box-shadow 0.2s ease;
+      }
+      .model-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 24px -6px rgba(236, 72, 153, 0.15);
+      }
 
-    /* Dark mode transitions */
-    * { transition: background-color 0.2s, border-color 0.2s, color 0.2s; }
+      /* Dark mode transitions */
+      * {
+        transition:
+          background-color 0.2s,
+          border-color 0.2s,
+          color 0.2s;
+      }
 
-    /* Dark mode overrides */
-    html.dark body { background-color: #111827; color: #f9fafb; }
-    html.dark .navbar, html.dark .nav-mobile { background-color: #1f2937; border-color: #374151; }
-    html.dark .footer { background-color: #1f2937; }
-    html.dark .model-card, html.dark .service-card, html.dark .pricing-card,
-    html.dark .testimonial-card, html.dark .step { background-color: #1f2937; border-color: #374151; }
-    html.dark h1, html.dark h2, html.dark h3, html.dark h4 { color: #f9fafb; }
-    html.dark p { color: #d1d5db; }
-    html.dark input, html.dark textarea, html.dark select { background-color: #374151; border-color: #4b5563; color: #f9fafb; }
+      /* Dark mode overrides */
+      html.dark body {
+        background-color: #111827;
+        color: #f9fafb;
+      }
+      html.dark .navbar,
+      html.dark .nav-mobile {
+        background-color: #1f2937;
+        border-color: #374151;
+      }
+      html.dark .footer {
+        background-color: #1f2937;
+      }
+      html.dark .model-card,
+      html.dark .service-card,
+      html.dark .pricing-card,
+      html.dark .testimonial-card,
+      html.dark .step {
+        background-color: #1f2937;
+        border-color: #374151;
+      }
+      html.dark h1,
+      html.dark h2,
+      html.dark h3,
+      html.dark h4 {
+        color: #f9fafb;
+      }
+      html.dark p {
+        color: #d1d5db;
+      }
+      html.dark input,
+      html.dark textarea,
+      html.dark select {
+        background-color: #374151;
+        border-color: #4b5563;
+        color: #f9fafb;
+      }
 
-    /* Skeleton sub-elements */
-    .skeleton-img { height: 200px; margin-bottom: 12px; border-radius: 8px; }
-    .skeleton-title { height: 20px; width: 60%; margin-bottom: 8px; }
-    .skeleton-text.short { width: 40%; }
-    html.dark .skeleton {
-      background: linear-gradient(90deg, #2a2a4a 25%, #3a3a5a 50%, #2a2a4a 75%);
-      background-size: 200% 100%;
-      animation: shimmer 1.5s infinite;
-    }
-  </style>
+      /* Skeleton sub-elements */
+      .skeleton-img {
+        height: 200px;
+        margin-bottom: 12px;
+        border-radius: 8px;
+      }
+      .skeleton-title {
+        height: 20px;
+        width: 60%;
+        margin-bottom: 8px;
+      }
+      .skeleton-text.short {
+        width: 40%;
+      }
+      html.dark .skeleton {
+        background: linear-gradient(90deg, #2a2a4a 25%, #3a3a5a 50%, #2a2a4a 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+      }
+    </style>
 
-  <!-- Cookie Banner (gold-accented, GDPR) -->
-  <div id="cookie-banner" role="alertdialog" aria-labelledby="cookie-title" aria-describedby="cookie-desc"
-       style="display:none;position:fixed;bottom:0;left:0;right:0;background:rgba(10,10,10,0.97);padding:16px 24px;z-index:9998;border-top:1px solid rgba(201,169,110,0.3);backdrop-filter:blur(12px);">
-    <div style="max-width:1200px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
-      <p id="cookie-desc" style="margin:0;font-size:0.85rem;color:var(--text-muted);flex:1;min-width:200px;line-height:1.5">
-        <span id="cookie-title" class="sr-only">Уведомление об использовании cookies</span>
-        Мы используем cookies для улучшения сайта.
-        <a href="/privacy.html" style="color:var(--gold);text-decoration:underline">Подробнее →</a>
-      </p>
-      <div style="display:flex;gap:10px;flex-shrink:0">
-        <button onclick="NM.cookies.reject()" style="padding:9px 16px;font-size:0.82rem;border:1px solid rgba(201,169,110,0.4);background:transparent;color:var(--gold);cursor:pointer;" aria-label="Только необходимые cookies">Только нужные</button>
-        <button onclick="NM.cookies.accept()" style="padding:9px 22px;font-size:0.82rem;background:var(--gold);border:none;color:#000;cursor:pointer;font-weight:600;" aria-label="Принять все cookies">Принять</button>
+    <!-- Cookie Banner (gold-accented, GDPR) -->
+    <div
+      id="cookie-banner"
+      role="alertdialog"
+      aria-labelledby="cookie-title"
+      aria-describedby="cookie-desc"
+      style="
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(10, 10, 10, 0.97);
+        padding: 16px 24px;
+        z-index: 9998;
+        border-top: 1px solid rgba(201, 169, 110, 0.3);
+        backdrop-filter: blur(12px);
+      "
+    >
+      <div
+        style="
+          max-width: 1200px;
+          margin: 0 auto;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        "
+      >
+        <p
+          id="cookie-desc"
+          style="margin: 0; font-size: 0.85rem; color: var(--text-muted); flex: 1; min-width: 200px; line-height: 1.5"
+        >
+          <span id="cookie-title" class="sr-only">Уведомление об использовании cookies</span>
+          Мы используем cookies для улучшения сайта.
+          <a href="/privacy.html" style="color: var(--gold); text-decoration: underline">Подробнее →</a>
+        </p>
+        <div style="display: flex; gap: 10px; flex-shrink: 0">
+          <button
+            onclick="NM.cookies.reject()"
+            style="
+              padding: 9px 16px;
+              font-size: 0.82rem;
+              border: 1px solid rgba(201, 169, 110, 0.4);
+              background: transparent;
+              color: var(--gold);
+              cursor: pointer;
+            "
+            aria-label="Только необходимые cookies"
+          >
+            Только нужные
+          </button>
+          <button
+            onclick="NM.cookies.accept()"
+            style="
+              padding: 9px 22px;
+              font-size: 0.82rem;
+              background: var(--gold);
+              border: none;
+              color: #000;
+              cursor: pointer;
+              font-weight: 600;
+            "
+            aria-label="Принять все cookies"
+          >
+            Принять
+          </button>
+        </div>
       </div>
     </div>
-  </div>
-  <script>
-  window.NM = window.NM || {};
-  NM.cookies = {
-    accept() {
-      localStorage.setItem("cookie_consent", "accepted");
-      const b = document.getElementById("cookie-banner");
-      if (b) { b.style.transition = 'transform 0.3s ease'; b.style.transform = 'translateY(100%)'; setTimeout(() => b.style.display = 'none', 350); }
-    },
-    reject() {
-      localStorage.setItem("cookie_consent", "rejected");
-      const b = document.getElementById("cookie-banner");
-      if (b) { b.style.transition = 'transform 0.3s ease'; b.style.transform = 'translateY(100%)'; setTimeout(() => b.style.display = 'none', 350); }
-    }
-  };
-  document.addEventListener("DOMContentLoaded", () => {
-    if (!localStorage.getItem("cookie_consent")) {
-      const b = document.getElementById("cookie-banner");
-      if (b) {
-        b.style.display = 'block';
-        b.style.transform = 'translateY(100%)';
-        setTimeout(() => { b.style.transition = 'transform 0.35s ease'; b.style.transform = 'translateY(0)'; }, 1000);
-      }
-    }
-  });
-  </script>
-  <script>
-  // Track recently visited pages for offline fallback
-  (function () {
-    try {
-      var pages = JSON.parse(localStorage.getItem('nm_recent_pages') || '[]');
-      var cur = { url: location.pathname + location.search, title: document.title };
-      pages = pages.filter(function(p) { return p.url !== cur.url; });
-      pages.unshift(cur);
-      localStorage.setItem('nm_recent_pages', JSON.stringify(pages.slice(0, 10)));
-    } catch(e) {}
-  })();
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function() {
-      navigator.serviceWorker.register('/sw.js')
-        .catch(function(e) { console.log('SW reg failed:', e); });
-    });
-  }
-  </script>
-  <script src="/js/cookie-consent.js" defer></script>
-  <script>
-  // ── Animated stat counters (IntersectionObserver) ──
-  (function animateCounters() {
-    const counters = document.querySelectorAll('.stat-num[data-count]');
-    if (!counters.length || !window.IntersectionObserver) return;
-    const observer = new IntersectionObserver(function(entries) {
-      entries.forEach(function(entry) {
-        if (!entry.isIntersecting) return;
-        const el = entry.target;
-        const target = parseInt(el.dataset.count, 10);
-        if (!target) return;
-        let current = 0;
-        const step = Math.max(1, Math.ceil(target / 60));
-        const timer = setInterval(function() {
-          current = Math.min(current + step, target);
-          el.textContent = current + (el.dataset.suffix || '+');
-          if (current >= target) clearInterval(timer);
-        }, 30);
-        observer.unobserve(el);
+    <script>
+      window.NM = window.NM || {};
+      NM.cookies = {
+        accept() {
+          localStorage.setItem('cookie_consent', 'accepted');
+          const b = document.getElementById('cookie-banner');
+          if (b) {
+            b.style.transition = 'transform 0.3s ease';
+            b.style.transform = 'translateY(100%)';
+            setTimeout(() => (b.style.display = 'none'), 350);
+          }
+        },
+        reject() {
+          localStorage.setItem('cookie_consent', 'rejected');
+          const b = document.getElementById('cookie-banner');
+          if (b) {
+            b.style.transition = 'transform 0.3s ease';
+            b.style.transform = 'translateY(100%)';
+            setTimeout(() => (b.style.display = 'none'), 350);
+          }
+        },
+      };
+      document.addEventListener('DOMContentLoaded', () => {
+        if (!localStorage.getItem('cookie_consent')) {
+          const b = document.getElementById('cookie-banner');
+          if (b) {
+            b.style.display = 'block';
+            b.style.transform = 'translateY(100%)';
+            setTimeout(() => {
+              b.style.transition = 'transform 0.35s ease';
+              b.style.transform = 'translateY(0)';
+            }, 1000);
+          }
+        }
       });
-    }, { threshold: 0.5 });
-    counters.forEach(function(c) { observer.observe(c); });
-  })();
+    </script>
+    <script>
+      // Track recently visited pages for offline fallback
+      (function () {
+        try {
+          var pages = JSON.parse(localStorage.getItem('nm_recent_pages') || '[]');
+          var cur = { url: location.pathname + location.search, title: document.title };
+          pages = pages.filter(function (p) {
+            return p.url !== cur.url;
+          });
+          pages.unshift(cur);
+          localStorage.setItem('nm_recent_pages', JSON.stringify(pages.slice(0, 10)));
+        } catch (e) {}
+      })();
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function (e) {
+            console.log('SW reg failed:', e);
+          });
+        });
+      }
+    </script>
+    <script src="/js/cookie-consent.js" defer></script>
+    <script>
+      // ── Animated stat counters (IntersectionObserver) ──
+      (function animateCounters() {
+        const counters = document.querySelectorAll('.stat-num[data-count]');
+        if (!counters.length || !window.IntersectionObserver) return;
+        const observer = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (!entry.isIntersecting) return;
+              const el = entry.target;
+              const target = parseInt(el.dataset.count, 10);
+              if (!target) return;
+              let current = 0;
+              const step = Math.max(1, Math.ceil(target / 60));
+              const timer = setInterval(function () {
+                current = Math.min(current + step, target);
+                el.textContent = current + (el.dataset.suffix || '+');
+                if (current >= target) clearInterval(timer);
+              }, 30);
+              observer.unobserve(el);
+            });
+          },
+          { threshold: 0.5 }
+        );
+        counters.forEach(function (c) {
+          observer.observe(c);
+        });
+      })();
 
-  // ── Live model count from API ──
-  fetch('/api/models?limit=1').then(function(r) { return r.json(); }).then(function(d) {
-    var countEl = document.getElementById('live-model-count');
-    if (countEl && d && d.total) {
-      countEl.dataset.count = d.total;
-    }
-  }).catch(function() {});
+      // ── Live model count from API ──
+      fetch('/api/models?limit=1')
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (d) {
+          var countEl = document.getElementById('live-model-count');
+          if (countEl && d && d.total) {
+            countEl.dataset.count = d.total;
+          }
+        })
+        .catch(function () {});
 
-  // ── Scroll-to-top button ──
-  (function() {
-    var btn = document.getElementById('scroll-top');
-    if (!btn) return;
-    window.addEventListener('scroll', function() {
-      if (window.scrollY > 400) { btn.classList.add('visible'); }
-      else { btn.classList.remove('visible'); }
-    }, { passive: true });
-    btn.addEventListener('click', function() {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-  })();
-  </script>
-  <script src="/js/chat-widget.js" defer></script>
-  <script>
-  // ── Analytics event tracking (БЛОК 9.3) ─────────────────────────
-  // Track model card clicks by data-model-id attribute
-  document.addEventListener('click', function(e) {
-    var card = e.target.closest('[data-model-id]');
-    if (card) {
-      var modelId = card.dataset.modelId;
-      var modelName = card.dataset.modelName || 'unknown';
-      if (window.NM && NM.analytics) NM.analytics.viewModel(modelId, modelName);
-    }
-    // Track explicit booking button clicks by data-action="book"
-    var bookBtn = e.target.closest('[data-action="book"]');
-    if (bookBtn) {
-      var mId = bookBtn.dataset.modelId;
-      var mType = bookBtn.dataset.eventType || '';
-      if (window.NM && NM.analytics) NM.analytics.startBooking(mId, mType);
-    }
-  });
-  // Track successful order submission dispatched as a window event
-  window.addEventListener('order_submitted', function(e) {
-    var detail = (e && e.detail) || {};
-    if (window.NM && NM.analytics) NM.analytics.submitOrder(detail.event_type || '', detail.budget || 0);
-  });
-  </script>
-</body>
+      // ── Scroll-to-top button ──
+      (function () {
+        var btn = document.getElementById('scroll-top');
+        if (!btn) return;
+        window.addEventListener(
+          'scroll',
+          function () {
+            if (window.scrollY > 400) {
+              btn.classList.add('visible');
+            } else {
+              btn.classList.remove('visible');
+            }
+          },
+          { passive: true }
+        );
+        btn.addEventListener('click', function () {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      })();
+    </script>
+    <script src="/js/chat-widget.js" defer></script>
+    <script>
+      // ── Analytics event tracking (БЛОК 9.3) ─────────────────────────
+      // Track model card clicks by data-model-id attribute
+      document.addEventListener('click', function (e) {
+        var card = e.target.closest('[data-model-id]');
+        if (card) {
+          var modelId = card.dataset.modelId;
+          var modelName = card.dataset.modelName || 'unknown';
+          if (window.NM && NM.analytics) NM.analytics.viewModel(modelId, modelName);
+        }
+        // Track explicit booking button clicks by data-action="book"
+        var bookBtn = e.target.closest('[data-action="book"]');
+        if (bookBtn) {
+          var mId = bookBtn.dataset.modelId;
+          var mType = bookBtn.dataset.eventType || '';
+          if (window.NM && NM.analytics) NM.analytics.startBooking(mId, mType);
+        }
+      });
+      // Track successful order submission dispatched as a window event
+      window.addEventListener('order_submitted', function (e) {
+        var detail = (e && e.detail) || {};
+        if (window.NM && NM.analytics) NM.analytics.submitOrder(detail.event_type || '', detail.budget || 0);
+      });
+    </script>
+  </body>
 </html>

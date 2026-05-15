@@ -16,8 +16,8 @@
     }
 
     function updateProgress() {
-      var scrollTop  = window.scrollY || document.documentElement.scrollTop;
-      var docHeight  = document.documentElement.scrollHeight - window.innerHeight;
+      var scrollTop = window.scrollY || document.documentElement.scrollTop;
+      var docHeight = document.documentElement.scrollHeight - window.innerHeight;
       var pct = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
       bar.style.width = pct.toFixed(2) + '%';
     }
@@ -28,10 +28,14 @@
 
   /* ─── INTERSECTION OBSERVER — [data-animate] ──── */
   function initFadeInUp() {
+    // Guard: if main.js already initialized scroll animations, skip to avoid double-init
+    if (window._nm_scroll_anim_init) return;
+    window._nm_scroll_anim_init = true;
+
     if (!('IntersectionObserver' in window)) {
       // Fallback: just make everything visible immediately
       document.querySelectorAll('[data-animate]').forEach(function (el) {
-        el.classList.add('is-visible');
+        el.classList.add('is-visible', 'section-visible');
       });
       return;
     }
@@ -41,14 +45,14 @@
         entries.forEach(function (entry) {
           if (entry.isIntersecting) {
             var el = entry.target;
-            el.classList.add('is-visible');
+            el.classList.add('is-visible', 'section-visible');
             observer.unobserve(el); // animate only once
           }
         });
       },
       {
-        threshold: 0.12,      // trigger when 12% of the element is visible
-        rootMargin: '0px 0px -40px 0px' // slight bottom offset so it fires a bit before
+        threshold: 0.12, // trigger when 12% of the element is visible
+        rootMargin: '0px 0px -40px 0px', // slight bottom offset so it fires a bit before
       }
     );
 
@@ -79,10 +83,10 @@
 
   /* ─── TOAST HELPER (global) ───────────────────── */
   window.showToast = function (title, msg, type, durationMs) {
-    type        = type        || 'info';      // 'success' | 'error' | 'info'
-    durationMs  = durationMs  || 4000;
+    type = type || 'info'; // 'success' | 'error' | 'info'
+    durationMs = durationMs || 4000;
 
-    var icons   = { success: '✓', error: '✕', info: 'ℹ' };
+    var icons = { success: '✓', error: '✕', info: 'ℹ' };
     var container = document.querySelector('.toast-container');
     if (!container) {
       container = document.createElement('div');
@@ -93,10 +97,12 @@
     var toast = document.createElement('div');
     toast.className = 'toast ' + type;
     toast.innerHTML =
-      '<span class="toast-icon">' + (icons[type] || icons.info) + '</span>' +
+      '<span class="toast-icon">' +
+      (icons[type] || icons.info) +
+      '</span>' +
       '<div class="toast-body">' +
-        (title ? '<div class="toast-title">' + title + '</div>' : '') +
-        (msg   ? '<div class="toast-msg">'   + msg   + '</div>' : '') +
+      (title ? '<div class="toast-title">' + title + '</div>' : '') +
+      (msg ? '<div class="toast-msg">' + msg + '</div>' : '') +
       '</div>' +
       '<button class="toast-close" aria-label="Dismiss">&times;</button>';
 
@@ -104,7 +110,9 @@
 
     function dismiss() {
       toast.classList.add('removing');
-      toast.addEventListener('animationend', function () { toast.remove(); });
+      toast.addEventListener('animationend', function () {
+        toast.remove();
+      });
     }
 
     toast.querySelector('.toast-close').addEventListener('click', dismiss);

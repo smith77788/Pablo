@@ -1,1238 +1,1645 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- Flash-prevention: apply theme class before first paint -->
-  <script>try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>
-  <title>Профиль модели — Nevesty Models</title>
-  <meta name="description" content="Подробный профиль модели агентства Nevesty Models. Параметры, портфолио, бронирование.">
-  <meta property="og:title" content="Профиль модели — Nevesty Models">
-  <meta property="og:description" content="Профессиональная модель агентства Nevesty Models. Параметры, портфолио и бронирование онлайн.">
-  <meta property="og:type" content="profile">
-  <meta property="og:image" content="https://nevesty-models.ru/images/og-default.svg">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:url" content="https://nevesty-models.ru/model.html">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@nevesty_models">
-  <meta name="robots" content="index, follow">
-  <meta name="theme-color" content="#080808">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
-  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
-  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
-  <link rel="stylesheet" href="/css/main.css" />
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843' }
-          }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Flash-prevention: apply theme class before first paint -->
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light') {
+          document.documentElement.classList.add('light');
+        } else if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
         }
+      } catch (e) {}
+    </script>
+    <title>Профиль модели — Nevesty Models</title>
+    <meta
+      name="description"
+      content="Подробный профиль модели агентства Nevesty Models. Параметры, портфолио, бронирование."
+    />
+    <meta property="og:title" content="Профиль модели — Nevesty Models" />
+    <meta
+      property="og:description"
+      content="Профессиональная модель агентства Nevesty Models. Параметры, портфолио и бронирование онлайн."
+    />
+    <meta property="og:type" content="profile" />
+    <meta property="og:image" content="https://nevesty-models.ru/images/og-default.svg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:url" content="https://nevesty-models.ru/model.html" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@nevesty_models" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#080808" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.tailwindcss.com" />
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
+    <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
+    <link rel="stylesheet" href="/css/main.css" />
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              pink: {
+                50: '#fdf2f8',
+                100: '#fce7f3',
+                200: '#fbcfe8',
+                300: '#f9a8d4',
+                400: '#f472b6',
+                500: '#ec4899',
+                600: '#db2777',
+                700: '#be185d',
+                800: '#9d174d',
+                900: '#831843',
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+    <!-- Google Analytics 4 (loads only if consent given) -->
+    <script>
+      window._ga_id = ''; // loaded from API
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ga_measurement_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          window._ga_id = d.ga_measurement_id;
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+          function gtag() {
+            dataLayer.push(arguments);
+          }
+          window.gtag = gtag;
+          gtag('js', new Date());
+          gtag('config', d.ga_measurement_id, { send_page_view: true });
+          window._ga_ready = true;
+        })
+        .catch(() => {});
+    </script>
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          window.YM_ID = d.ym_counter_id;
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+    <!-- Analytics wrapper -->
+    <script src="/js/analytics.js"></script>
+    <style>
+      /* ─── MODEL PAGE LAYOUT ─────────────────────────── */
+      .model-page {
+        padding-top: 60px; /* navbar height */
+        min-height: 100vh;
       }
-    }
-  </script>
-  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
-  <!-- Google Analytics 4 (loads only if consent given) -->
-  <script>
-    window._ga_id = ''; // loaded from API
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ga_measurement_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      window._ga_id = d.ga_measurement_id;
-      var s = document.createElement('script');
-      s.async = true;
-      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
-      document.head.appendChild(s);
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      window.gtag = gtag;
-      gtag('js', new Date());
-      gtag('config', d.ga_measurement_id, { 'send_page_view': true });
-      window._ga_ready = true;
-    }).catch(()=>{});
-  </script>
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      window.YM_ID = d.ym_counter_id;
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-  <!-- Analytics wrapper -->
-  <script src="/js/analytics.js"></script>
-  <style>
-    /* ─── MODEL PAGE LAYOUT ─────────────────────────── */
-    .model-page {
-      padding-top: 60px; /* navbar height */
-      min-height: 100vh;
-    }
 
-    /* ─── HERO PHOTO ─────────────────────────────────── */
-    .model-hero {
-      position: relative;
-      height: 60vh;
-      overflow: hidden;
-      background: var(--bg3);
-    }
-    .model-hero-img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      object-position: center top;
-      display: block;
-    }
-    .model-hero-placeholder {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(135deg, #1a1510, #0d0a07);
-      font-family: 'Playfair Display', serif;
-      font-size: 6rem;
-      color: rgba(201,169,110,0.15);
-    }
-    .model-hero-overlay {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      padding: 80px 40px 32px;
-      background: linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.5) 50%, transparent 100%);
-    }
-    .model-hero-name {
-      font-family: 'Playfair Display', serif;
-      font-size: clamp(2rem, 5vw, 4rem);
-      color: #fff;
-      font-weight: 600;
-      line-height: 1.1;
-      margin-bottom: 8px;
-    }
-    .model-hero-meta {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-    .model-hero-category {
-      font-size: 0.7rem;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-      color: var(--gold);
-      border: 1px solid rgba(201,169,110,0.5);
-      padding: 4px 14px;
-    }
-    .model-status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.7rem;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      padding: 4px 14px;
-    }
-    .model-status-badge.available {
-      color: #4caf50;
-      border: 1px solid rgba(76,175,80,0.4);
-    }
-    .model-status-badge.unavailable {
-      color: #f44336;
-      border: 1px solid rgba(244,67,54,0.4);
-    }
-    .model-status-badge::before {
-      content: '';
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: currentColor;
-      box-shadow: 0 0 6px currentColor;
-    }
-
-    /* ─── BREADCRUMBS ───────────────────────────────── */
-    .breadcrumbs {
-      padding: 12px 0 4px;
-      font-size: 0.75rem;
-      color: var(--text-dim);
-    }
-    .breadcrumbs-list {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      flex-wrap: wrap;
-    }
-    .breadcrumbs-list a {
-      color: var(--text-muted);
-      text-decoration: none;
-      transition: color var(--transition);
-    }
-    .breadcrumbs-list a:hover { color: var(--gold); }
-    .breadcrumbs-sep { color: var(--border); }
-    .breadcrumbs-list [aria-current="page"] { color: var(--gold); }
-
-    /* ─── BACK LINK ──────────────────────────────────── */
-    .model-back {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.75rem;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      padding: 20px 0 0;
-      transition: color var(--transition);
-    }
-    .model-back:hover { color: var(--gold); }
-
-    /* ─── PROFILE BODY ───────────────────────────────── */
-    .model-profile {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 24px 80px;
-    }
-
-    /* ─── STATS GRID ─────────────────────────────────── */
-    .model-stats {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 1px;
-      background: var(--border);
-      border: 1px solid var(--border);
-      margin: 32px 0;
-    }
-    .model-stat {
-      background: var(--bg2);
-      padding: 24px 20px;
-      text-align: center;
-    }
-    .model-stat-label {
-      font-size: 0.65rem;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      display: block;
-      margin-bottom: 8px;
-    }
-    .model-stat-value {
-      font-family: 'Playfair Display', serif;
-      font-size: 1.4rem;
-      color: var(--white);
-      display: block;
-      line-height: 1.1;
-    }
-    .model-stat-value.gold { color: var(--gold); }
-
-    /* ─── CONTENT COLUMNS ────────────────────────────── */
-    .model-content {
-      display: grid;
-      grid-template-columns: 1fr 340px;
-      gap: 48px;
-      align-items: start;
-    }
-
-    /* ─── BIO ─────────────────────────────────────────── */
-    .model-section-title {
-      font-size: 0.65rem;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-      color: var(--gold);
-      margin-bottom: 16px;
-      display: block;
-    }
-    .model-bio-text {
-      font-size: 0.95rem;
-      color: var(--text-muted);
-      line-height: 1.9;
-      margin-bottom: 40px;
-    }
-    .model-bio-empty {
-      font-size: 0.9rem;
-      color: var(--text-dim);
-      font-style: italic;
-      margin-bottom: 40px;
-    }
-
-    /* ─── PARAMETERS TABLE ───────────────────────────── */
-    .model-params-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 40px;
-    }
-    .model-param-item {
-      border-left: 2px solid var(--border);
-      padding: 8px 0 8px 14px;
-    }
-    .model-param-item label {
-      font-size: 0.65rem;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      display: block;
-      margin-bottom: 4px;
-    }
-    .model-param-item span {
-      font-size: 0.9rem;
-      color: var(--text);
-      font-weight: 500;
-    }
-
-    /* ─── GALLERY ─────────────────────────────────────── */
-    .model-gallery-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 4px;
-      margin-bottom: 40px;
-    }
-    .model-gallery-item {
-      position: relative;
-      padding-bottom: 133%;
-      overflow: hidden;
-      background: var(--bg3);
-      cursor: pointer;
-    }
-    .model-gallery-item img {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      transition: transform 0.4s ease;
-    }
-    .model-gallery-item:hover img { transform: scale(1.05); }
-    .model-gallery-placeholder {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(135deg, var(--bg3), var(--bg2));
-      font-family: 'Playfair Display', serif;
-      font-size: 2rem;
-      color: rgba(201,169,110,0.1);
-    }
-
-    /* ─── SIDEBAR / CTA ──────────────────────────────── */
-    .model-sidebar {
-      position: sticky;
-      top: 84px;
-    }
-    .model-cta-card {
-      border: 1px solid var(--border);
-      background: var(--bg2);
-      padding: 32px 28px;
-    }
-    .model-cta-title {
-      font-family: 'Playfair Display', serif;
-      font-size: 1.5rem;
-      color: var(--white);
-      margin-bottom: 8px;
-    }
-    .model-cta-hint {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      line-height: 1.7;
-      margin-bottom: 28px;
-    }
-    .btn-book {
-      display: block;
-      width: 100%;
-      padding: 18px 24px;
-      background: var(--gold);
-      color: var(--bg);
-      font-size: 0.8rem;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      font-weight: 600;
-      text-align: center;
-      border: none;
-      cursor: pointer;
-      transition: all var(--transition);
-      text-decoration: none;
-    }
-    .btn-book:hover {
-      background: var(--gold-light);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(201,169,110,0.25);
-    }
-    .model-cta-divider {
-      margin: 20px 0;
-      border: none;
-      border-top: 1px solid var(--border);
-    }
-    .model-cta-contact {
-      font-size: 0.75rem;
-      color: var(--text-dim);
-      text-align: center;
-      line-height: 1.7;
-    }
-    .model-cta-contact a {
-      color: var(--gold);
-      text-decoration: none;
-    }
-    .model-cta-contact a:hover { color: var(--gold-light); }
-
-    /* ─── INSTAGRAM LINK ─────────────────────────────── */
-    .model-instagram-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 20px;
-      transition: color var(--transition);
-    }
-    .model-instagram-link:hover { color: var(--gold); }
-
-    /* ─── SKELETON ────────────────────────────────────── */
-    .skeleton-hero {
-      height: 60vh;
-      background: var(--bg3);
-      position: relative;
-      overflow: hidden;
-    }
-    .skeleton-hero::after,
-    .skeleton-block::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(90deg, transparent 0%, rgba(201,169,110,0.07) 50%, transparent 100%);
-      animation: nm-shimmer 1.5s infinite;
-    }
-    .skeleton-block {
-      background: var(--bg3);
-      border-radius: 2px;
-      position: relative;
-      overflow: hidden;
-    }
-    .skeleton-text { height: 18px; margin-bottom: 12px; }
-    .skeleton-stat { height: 80px; }
-
-    /* ─── ERROR STATE ─────────────────────────────────── */
-    .model-error {
-      text-align: center;
-      padding: 80px 24px;
-    }
-    .model-error-icon {
-      font-size: 4rem;
-      margin-bottom: 24px;
-      opacity: 0.4;
-    }
-    .model-error h2 {
-      font-size: 2rem;
-      color: var(--white);
-      margin-bottom: 12px;
-    }
-    .model-error p {
-      color: var(--text-muted);
-      margin-bottom: 32px;
-    }
-
-    /* ─── RESPONSIVE ─────────────────────────────────── */
-    @media (max-width: 900px) {
-      .model-content {
-        grid-template-columns: 1fr;
-      }
-      .model-sidebar {
-        position: static;
-        order: -1;
-      }
-      .model-stats {
-        grid-template-columns: repeat(3, 1fr);
-      }
-    }
-
-    @media (max-width: 900px) {
-      #related-models {
-        grid-template-columns: repeat(3, 1fr) !important;
-      }
-    }
-    @media (max-width: 640px) {
-      #related-models {
-        grid-template-columns: repeat(2, 1fr) !important;
-      }
+      /* ─── HERO PHOTO ─────────────────────────────────── */
       .model-hero {
-        height: 50vh;
+        position: relative;
+        height: 60vh;
+        overflow: hidden;
+        background: var(--bg3);
+      }
+      .model-hero-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center top;
+        display: block;
+      }
+      .model-hero-placeholder {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #1a1510, #0d0a07);
+        font-family: 'Playfair Display', serif;
+        font-size: 6rem;
+        color: rgba(201, 169, 110, 0.15);
       }
       .model-hero-overlay {
-        padding: 60px 20px 24px;
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 80px 40px 32px;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.5) 50%, transparent 100%);
       }
       .model-hero-name {
-        font-size: 2rem;
+        font-family: 'Playfair Display', serif;
+        font-size: clamp(2rem, 5vw, 4rem);
+        color: #fff;
+        font-weight: 600;
+        line-height: 1.1;
+        margin-bottom: 8px;
       }
-      .model-stats {
-        grid-template-columns: repeat(2, 1fr);
+      .model-hero-meta {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
       }
-      .model-params-grid {
-        grid-template-columns: 1fr;
+      .model-hero-category {
+        font-size: 0.7rem;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: var(--gold);
+        border: 1px solid rgba(201, 169, 110, 0.5);
+        padding: 4px 14px;
       }
-      .model-gallery-grid {
-        grid-template-columns: repeat(2, 1fr);
+      .model-status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.7rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        padding: 4px 14px;
       }
+      .model-status-badge.available {
+        color: #4caf50;
+        border: 1px solid rgba(76, 175, 80, 0.4);
+      }
+      .model-status-badge.unavailable {
+        color: #f44336;
+        border: 1px solid rgba(244, 67, 54, 0.4);
+      }
+      .model-status-badge::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 6px currentColor;
+      }
+
+      /* ─── BREADCRUMBS ───────────────────────────────── */
+      .breadcrumbs {
+        padding: 12px 0 4px;
+        font-size: 0.75rem;
+        color: var(--text-dim);
+      }
+      .breadcrumbs-list {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        flex-wrap: wrap;
+      }
+      .breadcrumbs-list a {
+        color: var(--text-muted);
+        text-decoration: none;
+        transition: color var(--transition);
+      }
+      .breadcrumbs-list a:hover {
+        color: var(--gold);
+      }
+      .breadcrumbs-sep {
+        color: var(--border);
+      }
+      .breadcrumbs-list [aria-current='page'] {
+        color: var(--gold);
+      }
+
+      /* ─── BACK LINK ──────────────────────────────────── */
+      .model-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.75rem;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        padding: 20px 0 0;
+        transition: color var(--transition);
+      }
+      .model-back:hover {
+        color: var(--gold);
+      }
+
+      /* ─── PROFILE BODY ───────────────────────────────── */
       .model-profile {
-        padding: 0 16px 60px;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 24px 80px;
       }
-    }
-  </style>
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
 
-  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links">
-        <a href="/catalog.html" style="color:var(--gold)">Модели</a>
-        <a href="/about.html">О нас</a>
-        <a href="/reviews.html">Отзывы</a>
-        <a href="/pricing.html">Цены</a>
-        <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" aria-label="Избранное" style="font-size:0.9rem;display:inline-flex;align-items:center;gap:4px;color:var(--text-muted)">
-          <span aria-hidden="true">❤️</span>
-          <span id="fav-nav-badge" style="background:red;color:white;border-radius:50%;padding:0 5px;font-size:0.7rem;min-width:18px;text-align:center;display:inline-block;line-height:18px"></span>
-        </a>
-        <button onclick="DarkMode.toggle()"
-          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
-          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+      /* ─── STATS GRID ─────────────────────────────────── */
+      .model-stats {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 1px;
+        background: var(--border);
+        border: 1px solid var(--border);
+        margin: 32px 0;
+      }
+      .model-stat {
+        background: var(--bg2);
+        padding: 24px 20px;
+        text-align: center;
+      }
+      .model-stat-label {
+        font-size: 0.65rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        display: block;
+        margin-bottom: 8px;
+      }
+      .model-stat-value {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.4rem;
+        color: var(--white);
+        display: block;
+        line-height: 1.1;
+      }
+      .model-stat-value.gold {
+        color: var(--gold);
+      }
+
+      /* ─── CONTENT COLUMNS ────────────────────────────── */
+      .model-content {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        gap: 48px;
+        align-items: start;
+      }
+
+      /* ─── BIO ─────────────────────────────────────────── */
+      .model-section-title {
+        font-size: 0.65rem;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 16px;
+        display: block;
+      }
+      .model-bio-text {
+        font-size: 0.95rem;
+        color: var(--text-muted);
+        line-height: 1.9;
+        margin-bottom: 40px;
+      }
+      .model-bio-empty {
+        font-size: 0.9rem;
+        color: var(--text-dim);
+        font-style: italic;
+        margin-bottom: 40px;
+      }
+
+      /* ─── PARAMETERS TABLE ───────────────────────────── */
+      .model-params-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 40px;
+      }
+      .model-param-item {
+        border-left: 2px solid var(--border);
+        padding: 8px 0 8px 14px;
+      }
+      .model-param-item label {
+        font-size: 0.65rem;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        display: block;
+        margin-bottom: 4px;
+      }
+      .model-param-item span {
+        font-size: 0.9rem;
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      /* ─── GALLERY ─────────────────────────────────────── */
+      .model-gallery-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 4px;
+        margin-bottom: 40px;
+      }
+      .model-gallery-item {
+        position: relative;
+        padding-bottom: 133%;
+        overflow: hidden;
+        background: var(--bg3);
+        cursor: pointer;
+      }
+      .model-gallery-item img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.4s ease;
+      }
+      .model-gallery-item:hover img {
+        transform: scale(1.05);
+      }
+      .model-gallery-placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, var(--bg3), var(--bg2));
+        font-family: 'Playfair Display', serif;
+        font-size: 2rem;
+        color: rgba(201, 169, 110, 0.1);
+      }
+
+      /* ─── SIDEBAR / CTA ──────────────────────────────── */
+      .model-sidebar {
+        position: sticky;
+        top: 84px;
+      }
+      .model-cta-card {
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        padding: 32px 28px;
+      }
+      .model-cta-title {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.5rem;
+        color: var(--white);
+        margin-bottom: 8px;
+      }
+      .model-cta-hint {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        line-height: 1.7;
+        margin-bottom: 28px;
+      }
+      .btn-book {
+        display: block;
+        width: 100%;
+        padding: 18px 24px;
+        background: var(--gold);
+        color: var(--bg);
+        font-size: 0.8rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        font-weight: 600;
+        text-align: center;
+        border: none;
+        cursor: pointer;
+        transition: all var(--transition);
+        text-decoration: none;
+      }
+      .btn-book:hover {
+        background: var(--gold-light);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(201, 169, 110, 0.25);
+      }
+      .model-cta-divider {
+        margin: 20px 0;
+        border: none;
+        border-top: 1px solid var(--border);
+      }
+      .model-cta-contact {
+        font-size: 0.75rem;
+        color: var(--text-dim);
+        text-align: center;
+        line-height: 1.7;
+      }
+      .model-cta-contact a {
+        color: var(--gold);
+        text-decoration: none;
+      }
+      .model-cta-contact a:hover {
+        color: var(--gold-light);
+      }
+
+      /* ─── INSTAGRAM LINK ─────────────────────────────── */
+      .model-instagram-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 20px;
+        transition: color var(--transition);
+      }
+      .model-instagram-link:hover {
+        color: var(--gold);
+      }
+
+      /* ─── SKELETON ────────────────────────────────────── */
+      .skeleton-hero {
+        height: 60vh;
+        background: var(--bg3);
+        position: relative;
+        overflow: hidden;
+      }
+      .skeleton-hero::after,
+      .skeleton-block::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent 0%, rgba(201, 169, 110, 0.07) 50%, transparent 100%);
+        animation: nm-shimmer 1.5s infinite;
+      }
+      .skeleton-block {
+        background: var(--bg3);
+        border-radius: 2px;
+        position: relative;
+        overflow: hidden;
+      }
+      .skeleton-text {
+        height: 18px;
+        margin-bottom: 12px;
+      }
+      .skeleton-stat {
+        height: 80px;
+      }
+
+      /* ─── ERROR STATE ─────────────────────────────────── */
+      .model-error {
+        text-align: center;
+        padding: 80px 24px;
+      }
+      .model-error-icon {
+        font-size: 4rem;
+        margin-bottom: 24px;
+        opacity: 0.4;
+      }
+      .model-error h2 {
+        font-size: 2rem;
+        color: var(--white);
+        margin-bottom: 12px;
+      }
+      .model-error p {
+        color: var(--text-muted);
+        margin-bottom: 32px;
+      }
+
+      /* ─── RESPONSIVE ─────────────────────────────────── */
+      @media (max-width: 900px) {
+        .model-content {
+          grid-template-columns: 1fr;
+        }
+        .model-sidebar {
+          position: static;
+          order: -1;
+        }
+        .model-stats {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      @media (max-width: 900px) {
+        #related-models {
+          grid-template-columns: repeat(3, 1fr) !important;
+        }
+      }
+      @media (max-width: 640px) {
+        #related-models {
+          grid-template-columns: repeat(2, 1fr) !important;
+        }
+        .model-hero {
+          height: 50vh;
+        }
+        .model-hero-overlay {
+          padding: 60px 20px 24px;
+        }
+        .model-hero-name {
+          font-size: 2rem;
+        }
+        .model-stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .model-params-grid {
+          grid-template-columns: 1fr;
+        }
+        .model-gallery-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .model-profile {
+          padding: 0 16px 60px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+
+    <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links">
+          <a href="/catalog.html" style="color: var(--gold)">Модели</a>
+          <a href="/about.html">О нас</a>
+          <a href="/reviews.html">Отзывы</a>
+          <a href="/pricing.html">Цены</a>
+          <a href="/contact.html">Контакты</a>
+          <a
+            href="/favorites.html"
+            aria-label="Избранное"
+            style="font-size: 0.9rem; display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted)"
+          >
+            <span aria-hidden="true">❤️</span>
+            <span
+              id="fav-nav-badge"
+              style="
+                background: red;
+                color: white;
+                border-radius: 50%;
+                padding: 0 5px;
+                font-size: 0.7rem;
+                min-width: 18px;
+                text-align: center;
+                display: inline-block;
+                line-height: 18px;
+              "
+            ></span>
+          </a>
+          <button
+            onclick="DarkMode.toggle()"
+            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            aria-label="Переключить тему"
+            title="Dark/Light mode"
+            style="background: none; border: none; cursor: pointer; padding: 4px 8px"
+          >
+            <span class="dark-mode-icon" style="font-size: 1.1rem">🌙</span>
+          </button>
+          <a
+            id="whatsapp-btn"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            style="
+              display: none;
+              align-items: center;
+              gap: 6px;
+              background: #25d366;
+              color: #fff;
+              padding: 6px 14px;
+              border-radius: 8px;
+              font-size: 0.8rem;
+              font-weight: 600;
+              transition: background 0.2s;
+              text-decoration: none;
+            "
+            onmouseover="this.style.background = '#1da851'"
+            onmouseout="this.style.background = '#25D366'"
+          >
+            <svg style="width: 16px; height: 16px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+              <path
+                d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+              />
+            </svg>
+            <span>WhatsApp</span>
+          </a>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
+        </div>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
+          <span></span><span></span><span></span>
         </button>
-        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
-           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
-           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
-          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-          <span>WhatsApp</span>
-        </a>
-        <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
-    </div>
-  </nav>
+    </nav>
 
-  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-    <a href="/catalog.html">Модели</a>
-    <a href="/about.html">О нас</a>
-    <a href="/reviews.html">Отзывы</a>
-    <a href="/pricing.html">Цены</a>
-    <a href="/contact.html">Контакты</a>
-    <a href="/favorites.html">❤️ Избранное</a>
-    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
-  </nav>
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/about.html">О нас</a>
+      <a href="/reviews.html">Отзывы</a>
+      <a href="/pricing.html">Цены</a>
+      <a href="/contact.html">Контакты</a>
+      <a href="/favorites.html">❤️ Избранное</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+    </nav>
 
-  <div class="model-page" id="main-content" role="main">
-    <!-- SKELETON while loading -->
-    <div id="skeletonView" aria-busy="true" aria-label="Загрузка профиля модели">
-      <div class="skeleton-hero"></div>
-      <div style="max-width:1200px;margin:0 auto;padding:32px 24px 80px">
-        <div class="model-stats" style="grid-template-columns:repeat(5,1fr)">
-          <div class="model-stat skeleton-block skeleton-stat"></div>
-          <div class="model-stat skeleton-block skeleton-stat"></div>
-          <div class="model-stat skeleton-block skeleton-stat"></div>
-          <div class="model-stat skeleton-block skeleton-stat"></div>
-          <div class="model-stat skeleton-block skeleton-stat"></div>
-        </div>
-        <div style="max-width:700px">
-          <div class="skeleton-block skeleton-text" style="width:40%;margin-bottom:20px"></div>
-          <div class="skeleton-block skeleton-text"></div>
-          <div class="skeleton-block skeleton-text" style="width:85%"></div>
-          <div class="skeleton-block skeleton-text" style="width:70%"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ERROR view -->
-    <div id="errorView" style="display:none">
-      <div class="model-profile">
-        <a href="/catalog.html" class="model-back">← Назад в каталог</a>
-        <div class="model-error">
-          <div class="model-error-icon">✦</div>
-          <h2 id="errorTitle">Модель не найдена</h2>
-          <p id="errorMsg">Возможно, профиль был удалён или указан неверный ID.</p>
-          <a href="/catalog.html" class="btn-primary">Вернуться в каталог</a>
-        </div>
-      </div>
-    </div>
-
-    <!-- PROFILE view (filled by JS) -->
-    <div id="profileView" style="display:none">
-      <!-- Hero photo -->
-      <div class="model-hero" id="modelHero">
-        <div class="model-hero-placeholder" id="heroPlaceholder">✦</div>
-        <div class="model-hero-overlay">
-          <h1 class="model-hero-name" id="heroName"></h1>
-          <div class="model-hero-meta">
-            <span class="model-hero-category" id="heroCategory"></span>
-            <span class="model-status-badge" id="heroStatus"></span>
+    <div class="model-page" id="main-content" role="main">
+      <!-- SKELETON while loading -->
+      <div id="skeletonView" aria-busy="true" aria-label="Загрузка профиля модели">
+        <div class="skeleton-hero"></div>
+        <div style="max-width: 1200px; margin: 0 auto; padding: 32px 24px 80px">
+          <div class="model-stats" style="grid-template-columns: repeat(5, 1fr)">
+            <div class="model-stat skeleton-block skeleton-stat"></div>
+            <div class="model-stat skeleton-block skeleton-stat"></div>
+            <div class="model-stat skeleton-block skeleton-stat"></div>
+            <div class="model-stat skeleton-block skeleton-stat"></div>
+            <div class="model-stat skeleton-block skeleton-stat"></div>
+          </div>
+          <div style="max-width: 700px">
+            <div class="skeleton-block skeleton-text" style="width: 40%; margin-bottom: 20px"></div>
+            <div class="skeleton-block skeleton-text"></div>
+            <div class="skeleton-block skeleton-text" style="width: 85%"></div>
+            <div class="skeleton-block skeleton-text" style="width: 70%"></div>
           </div>
         </div>
       </div>
 
-      <!-- Profile body -->
-      <div class="model-profile">
-        <nav class="breadcrumbs" aria-label="Хлебные крошки">
-          <ol class="breadcrumbs-list">
-            <li><a href="/">Главная</a></li>
-            <li class="breadcrumbs-sep" aria-hidden="true">›</li>
-            <li><a href="/catalog.html">Каталог</a></li>
-            <li class="breadcrumbs-sep" aria-hidden="true">›</li>
-            <li aria-current="page" id="breadcrumbModelName">Модель</li>
-          </ol>
-        </nav>
-        <a href="/catalog.html" class="model-back">← Назад в каталог</a>
-
-        <!-- Stats row -->
-        <div class="model-stats" id="statsGrid">
-          <div class="model-stat">
-            <span class="model-stat-label">Рост</span>
-            <span class="model-stat-value" id="statHeight">—</span>
-          </div>
-          <div class="model-stat">
-            <span class="model-stat-label">Возраст</span>
-            <span class="model-stat-value" id="statAge">—</span>
-          </div>
-          <div class="model-stat">
-            <span class="model-stat-label">Город</span>
-            <span class="model-stat-value" id="statCity" style="font-size:1rem"></span>
-          </div>
-          <div class="model-stat">
-            <span class="model-stat-label">Категория</span>
-            <span class="model-stat-value gold" id="statCategory" style="font-size:1rem"></span>
-          </div>
-          <div class="model-stat">
-            <span class="model-stat-label">Статус</span>
-            <span class="model-stat-value" id="statStatus" style="font-size:1rem"></span>
-          </div>
-          <div class="model-stat" id="statViewsWrap" style="display:none">
-            <span class="model-stat-label">Просмотры</span>
-            <span class="model-stat-value" id="statViews" style="font-size:1rem">—</span>
+      <!-- ERROR view -->
+      <div id="errorView" style="display: none">
+        <div class="model-profile">
+          <a href="/catalog.html" class="model-back">← Назад в каталог</a>
+          <div class="model-error">
+            <div class="model-error-icon">✦</div>
+            <h2 id="errorTitle">Модель не найдена</h2>
+            <p id="errorMsg">Возможно, профиль был удалён или указан неверный ID.</p>
+            <a href="/catalog.html" class="btn-primary">Вернуться в каталог</a>
           </div>
         </div>
+      </div>
 
-        <!-- Video section (if available) -->
-        <div id="video-section" class="hidden mt-6" style="margin-bottom:32px">
-          <span class="model-section-title">🎬 Видео-портфолио</span>
-          <video id="model-video" controls class="w-full rounded-xl max-h-64 bg-black" playsinline style="width:100%;border-radius:12px;max-height:320px;background:#000;display:block">
-            <source id="video-src" src="" type="video/mp4">
-          </video>
-        </div>
-
-        <!-- Content columns -->
-        <div class="model-content">
-          <!-- Left: bio, params, gallery -->
-          <div>
-            <!-- Bio -->
-            <div id="bioSection">
-              <span class="model-section-title">О модели</span>
-              <p class="model-bio-text" id="bioText"></p>
+      <!-- PROFILE view (filled by JS) -->
+      <div id="profileView" style="display: none">
+        <!-- Hero photo -->
+        <div class="model-hero" id="modelHero">
+          <div class="model-hero-placeholder" id="heroPlaceholder">✦</div>
+          <div class="model-hero-overlay">
+            <h1 class="model-hero-name" id="heroName"></h1>
+            <div class="model-hero-meta">
+              <span class="model-hero-category" id="heroCategory"></span>
+              <span class="model-status-badge" id="heroStatus"></span>
             </div>
+          </div>
+        </div>
 
-            <!-- Parameters -->
-            <div id="paramsSection">
-              <span class="model-section-title">Параметры</span>
-              <div class="model-params-grid" id="paramsGrid"></div>
+        <!-- Profile body -->
+        <div class="model-profile">
+          <nav class="breadcrumbs" aria-label="Хлебные крошки">
+            <ol class="breadcrumbs-list">
+              <li><a href="/">Главная</a></li>
+              <li class="breadcrumbs-sep" aria-hidden="true">›</li>
+              <li><a href="/catalog.html">Каталог</a></li>
+              <li class="breadcrumbs-sep" aria-hidden="true">›</li>
+              <li aria-current="page" id="breadcrumbModelName">Модель</li>
+            </ol>
+          </nav>
+          <a href="/catalog.html" class="model-back">← Назад в каталог</a>
+
+          <!-- Stats row -->
+          <div class="model-stats" id="statsGrid">
+            <div class="model-stat">
+              <span class="model-stat-label">Рост</span>
+              <span class="model-stat-value" id="statHeight">—</span>
             </div>
-
-            <!-- Gallery -->
-            <div id="gallerySection">
-              <span class="model-section-title">Портфолио</span>
-              <div class="model-gallery-grid" id="galleryGrid"></div>
+            <div class="model-stat">
+              <span class="model-stat-label">Возраст</span>
+              <span class="model-stat-value" id="statAge">—</span>
             </div>
+            <div class="model-stat">
+              <span class="model-stat-label">Город</span>
+              <span class="model-stat-value" id="statCity" style="font-size: 1rem"></span>
+            </div>
+            <div class="model-stat">
+              <span class="model-stat-label">Категория</span>
+              <span class="model-stat-value gold" id="statCategory" style="font-size: 1rem"></span>
+            </div>
+            <div class="model-stat">
+              <span class="model-stat-label">Статус</span>
+              <span class="model-stat-value" id="statStatus" style="font-size: 1rem"></span>
+            </div>
+            <div class="model-stat" id="statViewsWrap" style="display: none">
+              <span class="model-stat-label">Просмотры</span>
+              <span class="model-stat-value" id="statViews" style="font-size: 1rem">—</span>
+            </div>
+          </div>
 
-            <!-- Availability calendar section -->
-            <div id="availabilitySection" style="margin-top:40px;margin-bottom:32px">
-              <span class="model-section-title">📅 Доступность</span>
-              <div id="availabilityContent" style="margin-top:12px">
-                <div style="color:var(--text-dim);font-size:0.9rem">Загрузка...</div>
+          <!-- Video section (if available) -->
+          <div id="video-section" class="hidden mt-6" style="margin-bottom: 32px">
+            <span class="model-section-title">🎬 Видео-портфолио</span>
+            <video
+              id="model-video"
+              controls
+              class="w-full rounded-xl max-h-64 bg-black"
+              playsinline
+              style="width: 100%; border-radius: 12px; max-height: 320px; background: #000; display: block"
+            >
+              <source id="video-src" src="" type="video/mp4" />
+            </video>
+          </div>
+
+          <!-- Content columns -->
+          <div class="model-content">
+            <!-- Left: bio, params, gallery -->
+            <div>
+              <!-- Bio -->
+              <div id="bioSection">
+                <span class="model-section-title">О модели</span>
+                <p class="model-bio-text" id="bioText"></p>
               </div>
-            </div>
 
-            <!-- Reviews -->
-            <div id="model-reviews" class="mt-8" style="margin-top:40px">
-              <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">
-                <span class="model-section-title" style="margin-bottom:0">Отзывы о работе с моделью</span>
-                <div id="reviews-avg" style="display:none;align-items:center;gap:6px;background:rgba(201,169,110,0.08);border:1px solid rgba(201,169,110,0.2);border-radius:20px;padding:4px 12px">
-                  <span id="reviews-avg-stars" style="color:var(--gold);font-size:1rem"></span>
-                  <span id="reviews-avg-val" style="color:var(--gold);font-weight:700;font-size:0.9rem"></span>
-                  <span id="reviews-avg-count" style="color:var(--text-dim);font-size:0.8rem"></span>
+              <!-- Parameters -->
+              <div id="paramsSection">
+                <span class="model-section-title">Параметры</span>
+                <div class="model-params-grid" id="paramsGrid"></div>
+              </div>
+
+              <!-- Gallery -->
+              <div id="gallerySection">
+                <span class="model-section-title">Портфолио</span>
+                <div class="model-gallery-grid" id="galleryGrid"></div>
+              </div>
+
+              <!-- Availability calendar section -->
+              <div id="availabilitySection" style="margin-top: 40px; margin-bottom: 32px">
+                <span class="model-section-title">📅 Доступность</span>
+                <div id="availabilityContent" style="margin-top: 12px">
+                  <div style="color: var(--text-dim); font-size: 0.9rem">Загрузка...</div>
                 </div>
               </div>
-              <div id="reviews-list" style="display:flex;flex-direction:column;gap:16px">
-                <div style="color:var(--text-dim);font-size:0.9rem">Загрузка отзывов...</div>
-              </div>
-              <div id="reviews-pagination" style="margin-top:16px;text-align:center"></div>
-            </div>
-          </div>
 
-          <!-- Right: CTA sidebar -->
-          <div class="model-sidebar">
-            <div class="model-cta-card">
-              <div class="model-cta-title" id="ctaName"></div>
-              <p class="model-cta-hint">Забронируйте модель для вашего мероприятия — менеджер свяжется с вами в течение 1 часа.</p>
-              <!-- Upcoming busy dates notice -->
-              <div id="busyDatesNotice" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:8px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);font-size:0.8rem;color:#fca5a5;line-height:1.5">
-                <span style="font-weight:600">📅 Занята:</span> <span id="busyDatesText"></span>
-              </div>
-              <a class="btn-book" id="bookBtn" href="/booking.html"
-                 onclick="if(window.NM?.analytics && window._currentModel) NM.analytics.startBooking(window._currentModel.id, window._currentModel.category || '')">
-                📋 Забронировать
-              </a>
-              <a id="book-btn-quick" href="/booking.html"
-                 class="btn-book" style="display:none;margin-top:8px;background:transparent;border:1px solid var(--gold);color:var(--gold)"
-                 onclick="if(window.NM?.analytics && window._currentModel) NM.analytics.startBooking(window._currentModel.id, window._currentModel.category || '')">
-                <i class="fas fa-calendar-check" style="margin-right:6px"></i>
-                Быстрое бронирование
-              </a>
-              <button id="favBtn" onclick="toggleFavorite()" aria-label="Добавить в избранное" style="display:block;width:100%;margin-top:10px;padding:14px 24px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">
-                <span aria-hidden="true">❤️</span> В избранное
-              </button>
-              <button id="compareBtn" onclick="toggleCompareModel()" aria-label="Добавить к сравнению" style="display:block;width:100%;margin-top:8px;padding:14px 24px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">
-                ⚖️ Добавить к сравнению
-              </button>
-              <!-- Social sharing -->
-              <div style="display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap">
-                <span style="font-size:0.75rem;color:var(--text-dim);white-space:nowrap">Поделиться:</span>
-                <button onclick="shareModel('vk')"
-                  style="padding:6px 14px;background:#4C75A3;color:#fff;font-size:0.75rem;border:none;border-radius:6px;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">VK</button>
-                <button onclick="shareModel('tg')"
-                  style="padding:6px 14px;background:#2CA5E0;color:#fff;font-size:0.75rem;border:none;border-radius:6px;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Telegram</button>
-                <button id="copy-btn" onclick="shareModel('copy')"
-                  style="padding:6px 14px;background:var(--bg3);color:var(--text-muted);font-size:0.75rem;border:1px solid var(--border);border-radius:6px;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Копировать</button>
-              </div>
-              <hr class="model-cta-divider">
-              <div class="model-cta-contact">
-                Есть вопросы?<br>
-                <a href="/#contact">Свяжитесь с нами</a>
+              <!-- Reviews -->
+              <div id="model-reviews" class="mt-8" style="margin-top: 40px">
+                <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap">
+                  <span class="model-section-title" style="margin-bottom: 0">Отзывы о работе с моделью</span>
+                  <div
+                    id="reviews-avg"
+                    style="
+                      display: none;
+                      align-items: center;
+                      gap: 6px;
+                      background: rgba(201, 169, 110, 0.08);
+                      border: 1px solid rgba(201, 169, 110, 0.2);
+                      border-radius: 20px;
+                      padding: 4px 12px;
+                    "
+                  >
+                    <span id="reviews-avg-stars" style="color: var(--gold); font-size: 1rem"></span>
+                    <span id="reviews-avg-val" style="color: var(--gold); font-weight: 700; font-size: 0.9rem"></span>
+                    <span id="reviews-avg-count" style="color: var(--text-dim); font-size: 0.8rem"></span>
+                  </div>
+                </div>
+                <div id="reviews-list" style="display: flex; flex-direction: column; gap: 16px">
+                  <div style="color: var(--text-dim); font-size: 0.9rem">Загрузка отзывов...</div>
+                </div>
+                <div id="reviews-pagination" style="margin-top: 16px; text-align: center"></div>
               </div>
             </div>
-            <div id="instagramBlock" style="display:none;text-align:center">
-              <a class="model-instagram-link" id="instagramLink" href="#" target="_blank" rel="noopener">
-                ✦ Instagram
-              </a>
+
+            <!-- Right: CTA sidebar -->
+            <div class="model-sidebar">
+              <div class="model-cta-card">
+                <div class="model-cta-title" id="ctaName"></div>
+                <p class="model-cta-hint">
+                  Забронируйте модель для вашего мероприятия — менеджер свяжется с вами в течение 1 часа.
+                </p>
+                <!-- Upcoming busy dates notice -->
+                <div
+                  id="busyDatesNotice"
+                  style="
+                    display: none;
+                    margin-bottom: 10px;
+                    padding: 10px 14px;
+                    border-radius: 8px;
+                    background: rgba(239, 68, 68, 0.08);
+                    border: 1px solid rgba(239, 68, 68, 0.25);
+                    font-size: 0.8rem;
+                    color: #fca5a5;
+                    line-height: 1.5;
+                  "
+                >
+                  <span style="font-weight: 600">📅 Занята:</span> <span id="busyDatesText"></span>
+                </div>
+                <a
+                  class="btn-book"
+                  id="bookBtn"
+                  href="/booking.html"
+                  onclick="
+                    if (window.NM?.analytics && window._currentModel)
+                      NM.analytics.startBooking(window._currentModel.id, window._currentModel.category || '');
+                  "
+                >
+                  📋 Забронировать
+                </a>
+                <a
+                  id="book-btn-quick"
+                  href="/booking.html"
+                  class="btn-book"
+                  style="
+                    display: none;
+                    margin-top: 8px;
+                    background: transparent;
+                    border: 1px solid var(--gold);
+                    color: var(--gold);
+                  "
+                  onclick="
+                    if (window.NM?.analytics && window._currentModel)
+                      NM.analytics.startBooking(window._currentModel.id, window._currentModel.category || '');
+                  "
+                >
+                  <i class="fas fa-calendar-check" style="margin-right: 6px"></i>
+                  Быстрое бронирование
+                </a>
+                <button
+                  id="favBtn"
+                  onclick="toggleFavorite()"
+                  aria-label="Добавить в избранное"
+                  style="
+                    display: block;
+                    width: 100%;
+                    margin-top: 10px;
+                    padding: 14px 24px;
+                    background: transparent;
+                    border: 1px solid var(--border);
+                    color: var(--text-muted);
+                    font-size: 0.8rem;
+                    letter-spacing: 1.5px;
+                    text-transform: uppercase;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                  "
+                >
+                  <span aria-hidden="true">❤️</span> В избранное
+                </button>
+                <button
+                  id="compareBtn"
+                  onclick="toggleCompareModel()"
+                  aria-label="Добавить к сравнению"
+                  style="
+                    display: block;
+                    width: 100%;
+                    margin-top: 8px;
+                    padding: 14px 24px;
+                    background: transparent;
+                    border: 1px solid var(--border);
+                    color: var(--text-muted);
+                    font-size: 0.8rem;
+                    letter-spacing: 1.5px;
+                    text-transform: uppercase;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                  "
+                >
+                  ⚖️ Добавить к сравнению
+                </button>
+                <!-- Social sharing -->
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap">
+                  <span style="font-size: 0.75rem; color: var(--text-dim); white-space: nowrap">Поделиться:</span>
+                  <button
+                    onclick="shareModel('vk')"
+                    style="
+                      padding: 6px 14px;
+                      background: #4c75a3;
+                      color: #fff;
+                      font-size: 0.75rem;
+                      border: none;
+                      border-radius: 6px;
+                      cursor: pointer;
+                      transition: opacity 0.2s;
+                    "
+                    onmouseover="this.style.opacity = '0.85'"
+                    onmouseout="this.style.opacity = '1'"
+                  >
+                    VK
+                  </button>
+                  <button
+                    onclick="shareModel('tg')"
+                    style="
+                      padding: 6px 14px;
+                      background: #2ca5e0;
+                      color: #fff;
+                      font-size: 0.75rem;
+                      border: none;
+                      border-radius: 6px;
+                      cursor: pointer;
+                      transition: opacity 0.2s;
+                    "
+                    onmouseover="this.style.opacity = '0.85'"
+                    onmouseout="this.style.opacity = '1'"
+                  >
+                    Telegram
+                  </button>
+                  <button
+                    id="copy-btn"
+                    onclick="shareModel('copy')"
+                    style="
+                      padding: 6px 14px;
+                      background: var(--bg3);
+                      color: var(--text-muted);
+                      font-size: 0.75rem;
+                      border: 1px solid var(--border);
+                      border-radius: 6px;
+                      cursor: pointer;
+                      transition: opacity 0.2s;
+                    "
+                    onmouseover="this.style.opacity = '0.85'"
+                    onmouseout="this.style.opacity = '1'"
+                  >
+                    Копировать
+                  </button>
+                </div>
+                <hr class="model-cta-divider" />
+                <div class="model-cta-contact">
+                  Есть вопросы?<br />
+                  <a href="/#contact">Свяжитесь с нами</a>
+                </div>
+              </div>
+              <div id="instagramBlock" style="display: none; text-align: center">
+                <a class="model-instagram-link" id="instagramLink" href="#" target="_blank" rel="noopener">
+                  ✦ Instagram
+                </a>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Related Models -->
-      <div class="mt-12" id="related-models-section" style="max-width:1200px;margin:0 auto;padding:0 24px 60px">
-        <h2 style="font-family:'Playfair Display',serif;font-size:1.6rem;color:var(--white);margin-bottom:24px">💃 Похожие модели</h2>
-        <div id="related-models" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px">
-          <!-- Loaded dynamically -->
+        <!-- Related Models -->
+        <div class="mt-12" id="related-models-section" style="max-width: 1200px; margin: 0 auto; padding: 0 24px 60px">
+          <h2
+            style="font-family: 'Playfair Display', serif; font-size: 1.6rem; color: var(--white); margin-bottom: 24px"
+          >
+            💃 Похожие модели
+          </h2>
+          <div id="related-models" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px">
+            <!-- Loaded dynamically -->
+          </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Lightbox overlay for gallery -->
-  <div id="lightbox" role="dialog" aria-modal="true" aria-label="Просмотр фото" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.93);backdrop-filter:blur(8px);align-items:center;justify-content:center"
-       onclick="if(event.target===this)closeLightbox()">
-    <button onclick="closeLightbox()" aria-label="Закрыть"
-      style="position:absolute;top:20px;right:20px;background:var(--bg3);border:none;color:var(--text);width:44px;height:44px;font-size:1.3rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10">✕</button>
-    <button onclick="prevPhoto()" aria-label="Предыдущее фото"
-      style="position:absolute;left:16px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.5);border:none;color:#fff;width:48px;height:48px;font-size:2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10;border-radius:50%">‹</button>
-    <img id="lightboxImg" src="" alt="" style="max-width:90vw;max-height:90vh;object-fit:contain;display:block">
-    <button onclick="nextPhoto()" aria-label="Следующее фото"
-      style="position:absolute;right:16px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.5);border:none;color:#fff;width:48px;height:48px;font-size:2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10;border-radius:50%">›</button>
-    <div id="lightboxCounter" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);color:#fff;font-size:0.85rem;opacity:0.7;pointer-events:none"></div>
-  </div>
+    <!-- Lightbox overlay for gallery -->
+    <div
+      id="lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Просмотр фото"
+      style="
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 3000;
+        background: rgba(0, 0, 0, 0.93);
+        backdrop-filter: blur(8px);
+        align-items: center;
+        justify-content: center;
+      "
+      onclick="if (event.target === this) closeLightbox();"
+    >
+      <button
+        onclick="closeLightbox()"
+        aria-label="Закрыть"
+        style="
+          position: absolute;
+          top: 20px;
+          right: 20px;
+          background: var(--bg3);
+          border: none;
+          color: var(--text);
+          width: 44px;
+          height: 44px;
+          font-size: 1.3rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10;
+        "
+      >
+        ✕
+      </button>
+      <button
+        onclick="prevPhoto()"
+        aria-label="Предыдущее фото"
+        style="
+          position: absolute;
+          left: 16px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: rgba(0, 0, 0, 0.5);
+          border: none;
+          color: #fff;
+          width: 48px;
+          height: 48px;
+          font-size: 2rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10;
+          border-radius: 50%;
+        "
+      >
+        ‹
+      </button>
+      <img
+        id="lightboxImg"
+        src=""
+        alt=""
+        style="max-width: 90vw; max-height: 90vh; object-fit: contain; display: block"
+      />
+      <button
+        onclick="nextPhoto()"
+        aria-label="Следующее фото"
+        style="
+          position: absolute;
+          right: 16px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: rgba(0, 0, 0, 0.5);
+          border: none;
+          color: #fff;
+          width: 48px;
+          height: 48px;
+          font-size: 2rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10;
+          border-radius: 50%;
+        "
+      >
+        ›
+      </button>
+      <div
+        id="lightboxCounter"
+        style="
+          position: absolute;
+          bottom: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          color: #fff;
+          font-size: 0.85rem;
+          opacity: 0.7;
+          pointer-events: none;
+        "
+      ></div>
+    </div>
 
-  <div class="toast-container" id="toastContainer"></div>
-  <script src="/js/main.js" defer></script>
-  <script src="/js/telegram-webapp.js" defer></script>
-  <script src="/js/darkmode.js"></script>
-  <script>
-    (function () {
-      const CATEGORY_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/main.js" defer></script>
+    <script src="/js/telegram-webapp.js" defer></script>
+    <script src="/js/animations.js" defer></script>
+    <script src="/js/darkmode.js"></script>
+    <script>
+      (function () {
+        const CATEGORY_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
 
-      // ── helpers ────────────────────────────────────────────────────────────────
-      function getParam(name) {
-        return new URLSearchParams(window.location.search).get(name);
-      }
-
-      function show(id) { document.getElementById(id).style.display = ''; }
-      function hide(id) { document.getElementById(id).style.display = 'none'; }
-      function el(id) { return document.getElementById(id); }
-      function setText(id, val) { const e = el(id); if (e) e.textContent = val || '—'; }
-
-      function showError(title, msg) {
-        hide('skeletonView');
-        hide('profileView');
-        el('errorTitle').textContent = title || 'Ошибка';
-        el('errorMsg').textContent = msg || '';
-        show('errorView');
-      }
-
-      // ── SEO: update meta/OG tags dynamically ──────────────────────────────────
-      function updateMetaTags(model) {
-        const setMeta = (attr, val, content) => {
-          let el = document.querySelector(`meta[${attr}="${val}"]`);
-          if (!el) { el = document.createElement('meta'); el.setAttribute(attr, val); document.head.appendChild(el); }
-          el.setAttribute('content', content);
-        };
-
-        const baseUrl = window.location.origin;
-        const title = `${model.name} — Модель агентства Nevesty Models`;
-        const desc = model.bio
-          ? model.bio.substring(0, 155)
-          : `${model.name}: профессиональная модель${model.city ? ' в ' + model.city : ''}.${model.height ? ' Рост ' + model.height + ' см.' : ''} Бронируйте на Nevesty Models.`;
-        const img = model.photos && model.photos.length > 0
-          ? baseUrl + model.photos[0]
-          : (model.photo_main ? baseUrl + model.photo_main : baseUrl + '/images/og-default.svg');
-
-        document.title = title;
-        setMeta('name', 'description', desc);
-
-        // Open Graph
-        setMeta('property', 'og:type', 'profile');
-        setMeta('property', 'og:title', title);
-        setMeta('property', 'og:description', desc);
-        setMeta('property', 'og:image', img);
-        setMeta('property', 'og:url', `${baseUrl}/model.html?id=${model.id}`);
-        setMeta('property', 'og:site_name', 'Nevesty Models');
-
-        // Twitter Card
-        setMeta('name', 'twitter:card', 'summary_large_image');
-        setMeta('name', 'twitter:title', title);
-        setMeta('name', 'twitter:description', desc);
-        setMeta('name', 'twitter:image', img);
-
-        // Canonical link
-        let canonicalEl = document.querySelector('link[rel="canonical"]');
-        if (!canonicalEl) {
-          canonicalEl = document.createElement('link');
-          canonicalEl.rel = 'canonical';
-          document.head.appendChild(canonicalEl);
-        }
-        canonicalEl.href = `${baseUrl}/model.html?id=${model.id}`;
-      }
-
-      // ── SEO: inject Schema.org JSON-LD ────────────────────────────────────────
-      function injectSchemaOrg(model) {
-        // Remove any previously injected schema to avoid duplicates on navigation
-        document.querySelectorAll('script[id^="schema-model"]').forEach(s => s.remove());
-
-        const baseUrl = window.location.origin;
-        const img = model.photos && model.photos.length > 0
-          ? baseUrl + model.photos[0]
-          : (model.photo_main ? baseUrl + model.photo_main : baseUrl + '/images/og-default.svg');
-
-        const personSchema = {
-          "@context": "https://schema.org",
-          "@type": "Person",
-          "name": model.name,
-          "jobTitle": "Профессиональная модель",
-          "description": model.bio
-            ? model.bio.substring(0, 200)
-            : `Профессиональная модель агентства Nevesty Models.${model.city ? ' Город: ' + model.city + '.' : ''}${model.category ? ' Специализация: ' + model.category + '.' : ''}`,
-          "url": `${baseUrl}/model.html?id=${model.id}`,
-          "image": img,
-          "worksFor": {
-            "@type": "Organization",
-            "name": "Nevesty Models",
-            "url": baseUrl
-          },
-          "knowsAbout": [model.category, "Моделинг", "Модельный бизнес"].filter(Boolean)
-        };
-
-        if (model.city) personSchema.address = { "@type": "PostalAddress", "addressLocality": model.city };
-        if (model.height) personSchema.height = { "@type": "QuantitativeValue", "value": model.height, "unitCode": "CMT" };
-        if (model.instagram) personSchema.sameAs = [`https://instagram.com/${model.instagram.replace(/^@/, '')}`];
-
-        const breadcrumbSchema = {
-          "@context": "https://schema.org",
-          "@type": "BreadcrumbList",
-          "itemListElement": [
-            { "@type": "ListItem", "position": 1, "name": "Главная", "item": baseUrl + "/" },
-            { "@type": "ListItem", "position": 2, "name": "Каталог моделей", "item": baseUrl + "/catalog.html" },
-            { "@type": "ListItem", "position": 3, "name": model.name, "item": `${baseUrl}/model.html?id=${model.id}` }
-          ]
-        };
-
-        const script = document.createElement('script');
-        script.id = 'schema-model-person';
-        script.type = 'application/ld+json';
-        script.textContent = JSON.stringify([personSchema, breadcrumbSchema]);
-        document.head.appendChild(script);
-      }
-
-      // ── fetch & render ─────────────────────────────────────────────────────────
-      async function loadModel(id) {
-        let model;
-        try {
-          const resp = await fetch(`/api/models/${encodeURIComponent(id)}`);
-          if (resp.status === 404) { showError('Модель не найдена', 'Возможно, профиль был удалён или указан неверный ID.'); return; }
-          if (!resp.ok) { showError('Ошибка загрузки', `Сервер вернул ${resp.status}.`); return; }
-          model = await resp.json();
-        } catch (err) {
-          showError('Ошибка сети', 'Не удалось загрузить профиль. Проверьте соединение.');
-          return;
+        // ── helpers ────────────────────────────────────────────────────────────────
+        function getParam(name) {
+          return new URLSearchParams(window.location.search).get(name);
         }
 
-        // Update page title & meta/OG tags dynamically
-        updateMetaTags(model);
-
-        // Inject Schema.org structured data
-        injectSchemaOrg(model);
-
-        renderModel(model);
-        loadModelReviews(model.id);
-        loadRelatedModels(model);
-        if (window.NM?.analytics) NM.analytics.viewModel(model.id, model.name);
-        // Track model view (fire and forget)
-        fetch(`/api/models/${model.id}/view`, { method: 'POST' });
-
-        // GA4 view_item event
-        if (window.gtag && model) {
-          gtag('event', 'view_item', {
-            item_id: model.id,
-            item_name: model.name,
-            item_category: model.category,
-            item_variant: model.city,
-          });
+        function show(id) {
+          document.getElementById(id).style.display = '';
         }
-        // Yandex Metrica goal
-        if (window.ym && window.YM_ID) {
-          ym(window.YM_ID, 'reachGoal', 'model_view', { model_id: model.id, category: model.category });
+        function hide(id) {
+          document.getElementById(id).style.display = 'none';
         }
-      }
-
-      function renderModel(m) {
-        _currentModel = m; // capture for toggleFavorite
-        window._currentModel = m; // expose for analytics onclick handlers
-        const heroEl = el('modelHero');
-
-        // Hero photo
-        if (m.photo_main) {
-          const img = document.createElement('img');
-          img.className = 'model-hero-img';
-          img.src = m.photo_main;
-          img.alt = m.name;
-          img.loading = 'eager';
-          heroEl.insertBefore(img, heroEl.firstChild);
-          el('heroPlaceholder').style.display = 'none';
+        function el(id) {
+          return document.getElementById(id);
+        }
+        function setText(id, val) {
+          const e = el(id);
+          if (e) e.textContent = val || '—';
         }
 
-        // Breadcrumb
-        const breadcrumbName = el('breadcrumbModelName');
-        if (breadcrumbName) breadcrumbName.textContent = m.name;
-
-        // Name & category overlay
-        el('heroName').textContent = m.name;
-
-        const catLabel = CATEGORY_LABELS[m.category] || m.category || 'Fashion';
-        el('heroCategory').textContent = catLabel;
-
-        const statusEl = el('heroStatus');
-        if (m.available) {
-          statusEl.textContent = 'Свободна';
-          statusEl.className = 'model-status-badge available';
-        } else {
-          statusEl.textContent = 'Занята';
-          statusEl.className = 'model-status-badge unavailable';
+        function showError(title, msg) {
+          hide('skeletonView');
+          hide('profileView');
+          el('errorTitle').textContent = title || 'Ошибка';
+          el('errorMsg').textContent = msg || '';
+          show('errorView');
         }
 
-        // Stats row
-        setText('statHeight', m.height ? `${m.height} см` : '—');
-        setText('statAge', m.age ? `${m.age} лет` : '—');
-        setText('statCity', m.city || '—');
-        setText('statCategory', catLabel);
-        el('statStatus').textContent = m.available ? 'Свободна' : 'Занята';
-        el('statStatus').style.color = m.available ? '#4caf50' : '#f44336';
-        // Views count
-        const vc = m.view_count || 0;
-        if (vc > 0) {
-          setText('statViews', vc.toLocaleString('ru'));
-          const wrap = el('statViewsWrap');
-          if (wrap) wrap.style.display = '';
-        }
-
-        // Bio
-        if (m.bio && m.bio.trim()) {
-          el('bioText').textContent = m.bio;
-        } else {
-          el('bioText').className = 'model-bio-empty';
-          el('bioText').textContent = 'Описание не добавлено.';
-        }
-
-        // Parameters
-        const params = [];
-        if (m.weight)    params.push(['Вес',         `${m.weight} кг`]);
-        if (m.bust)      params.push(['Грудь',       m.bust]);
-        if (m.waist)     params.push(['Талия',       m.waist]);
-        if (m.hips)      params.push(['Бёдра',       m.hips]);
-        if (m.shoe_size) params.push(['Обувь',       m.shoe_size]);
-        if (m.hair_color) params.push(['Волосы',     m.hair_color]);
-        if (m.eye_color)  params.push(['Глаза',      m.eye_color]);
-
-        const paramsGrid = el('paramsGrid');
-        if (params.length) {
-          params.forEach(([label, val]) => {
-            const item = document.createElement('div');
-            item.className = 'model-param-item';
-            item.innerHTML = `<label>${label}</label><span>${val}</span>`;
-            paramsGrid.appendChild(item);
-          });
-        } else {
-          el('paramsSection').style.display = 'none';
-        }
-
-        // Gallery (main photo + extra photos from array)
-        const allPhotos = [];
-        if (m.photo_main) allPhotos.push(m.photo_main);
-        const extras = Array.isArray(m.photos) ? m.photos : [];
-        extras.forEach(p => { if (p && !allPhotos.includes(p)) allPhotos.push(p); });
-
-        const galleryGrid = el('galleryGrid');
-        const GALLERY_SLOTS = 6;
-        const realPhotos = allPhotos.slice(0, GALLERY_SLOTS);
-        for (let i = 0; i < GALLERY_SLOTS; i++) {
-          const item = document.createElement('div');
-          item.className = 'model-gallery-item';
-          if (allPhotos[i]) {
-            const img = document.createElement('img');
-            img.src = allPhotos[i];
-            img.alt = `${m.name} — фото ${i + 1}`;
-            img.loading = 'lazy';
-            img.style.cursor = 'zoom-in';
-            item.appendChild(img);
-            const capturedIdx = i;
-            item.addEventListener('click', () => openLightbox(realPhotos, capturedIdx));
-          } else {
-            const ph = document.createElement('div');
-            ph.className = 'model-gallery-placeholder';
-            ph.textContent = '✦';
-            item.style.cursor = 'default';
-            item.appendChild(ph);
-          }
-          galleryGrid.appendChild(item);
-        }
-
-        // Video support
-        if (m.video_url) {
-          el('video-src').src = m.video_url;
-          el('model-video').load();
-          el('video-section').classList.remove('hidden');
-          el('video-section').style.display = '';
-        }
-
-        // CTA sidebar
-        el('ctaName').textContent = m.name;
-        el('bookBtn').href = `/booking.html?model=${m.id}&model_id=${m.id}&model_name=${encodeURIComponent(m.name)}`;
-
-        // Upcoming busy dates notice
-        if (Array.isArray(m.busy_dates) && m.busy_dates.length) {
-          const fmt = d => {
-            try {
-              return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-            } catch { return d; }
+        // ── SEO: update meta/OG tags dynamically ──────────────────────────────────
+        function updateMetaTags(model) {
+          const setMeta = (attr, val, content) => {
+            let el = document.querySelector(`meta[${attr}="${val}"]`);
+            if (!el) {
+              el = document.createElement('meta');
+              el.setAttribute(attr, val);
+              document.head.appendChild(el);
+            }
+            el.setAttribute('content', content);
           };
-          const notice = el('busyDatesNotice');
-          const text = el('busyDatesText');
-          if (notice && text) {
-            // Show up to 3 upcoming dates
-            const shown = m.busy_dates.slice(0, 3).map(fmt);
-            text.textContent = shown.join(', ') + (m.busy_dates.length > 3 ? ` и ещё ${m.busy_dates.length - 3}` : '');
-            notice.style.display = 'block';
+
+          const baseUrl = window.location.origin;
+          const title = `${model.name} — Модель агентства Nevesty Models`;
+          const desc = model.bio
+            ? model.bio.substring(0, 155)
+            : `${model.name}: профессиональная модель${model.city ? ' в ' + model.city : ''}.${model.height ? ' Рост ' + model.height + ' см.' : ''} Бронируйте на Nevesty Models.`;
+          const img =
+            model.photos && model.photos.length > 0
+              ? baseUrl + model.photos[0]
+              : model.photo_main
+                ? baseUrl + model.photo_main
+                : baseUrl + '/images/og-default.svg';
+
+          document.title = title;
+          setMeta('name', 'description', desc);
+
+          // Open Graph
+          setMeta('property', 'og:type', 'profile');
+          setMeta('property', 'og:title', title);
+          setMeta('property', 'og:description', desc);
+          setMeta('property', 'og:image', img);
+          setMeta('property', 'og:url', `${baseUrl}/model.html?id=${model.id}`);
+          setMeta('property', 'og:site_name', 'Nevesty Models');
+
+          // Twitter Card
+          setMeta('name', 'twitter:card', 'summary_large_image');
+          setMeta('name', 'twitter:title', title);
+          setMeta('name', 'twitter:description', desc);
+          setMeta('name', 'twitter:image', img);
+
+          // Canonical link
+          let canonicalEl = document.querySelector('link[rel="canonical"]');
+          if (!canonicalEl) {
+            canonicalEl = document.createElement('link');
+            canonicalEl.rel = 'canonical';
+            document.head.appendChild(canonicalEl);
           }
-        }
-        // Quick booking pre-fill button
-        const quickBookBtn = el('book-btn-quick');
-        if (quickBookBtn) {
-          quickBookBtn.href = `/booking.html?model_id=${m.id}&model_name=${encodeURIComponent(m.name)}`;
+          canonicalEl.href = `${baseUrl}/model.html?id=${model.id}`;
         }
 
-        // Instagram
-        if (m.instagram) {
-          const igBlock = el('instagramBlock');
-          igBlock.style.display = 'block';
-          const igLink = el('instagramLink');
-          const handle = m.instagram.replace(/^@/, '');
-          igLink.href = `https://instagram.com/${handle}`;
-          igLink.textContent = `✦ @${handle}`;
-        }
+        // ── SEO: inject Schema.org JSON-LD ────────────────────────────────────────
+        function injectSchemaOrg(model) {
+          // Remove any previously injected schema to avoid duplicates on navigation
+          document.querySelectorAll('script[id^="schema-model"]').forEach(s => s.remove());
 
-        // Load availability section
-        loadAvailabilitySection(m.id, m.busy_dates || []);
+          const baseUrl = window.location.origin;
+          const img =
+            model.photos && model.photos.length > 0
+              ? baseUrl + model.photos[0]
+              : model.photo_main
+                ? baseUrl + model.photo_main
+                : baseUrl + '/images/og-default.svg';
 
-        // Show profile, hide skeleton
-        hide('skeletonView');
-        hide('errorView');
-        el('profileView').style.display = 'block';
-        // Re-sync fav/compare buttons now that model is rendered
-        updateFavBtn();
-        updateCompareBtn();
-      }
-
-      // ── Availability section ──────────────────────────────────────────────────
-      function loadAvailabilitySection(modelId, busyDates) {
-        const container = el('availabilityContent');
-        if (!container) return;
-        // Filter busy dates in next 30 days
-        const today = new Date();
-        const todayStr = today.toISOString().slice(0, 10);
-        const in30 = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-        const upcomingBusy = (busyDates || []).filter(d => d >= todayStr && d <= in30);
-        if (!upcomingBusy.length) {
-          container.innerHTML = `<div style="display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:8px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);font-size:0.9rem;color:#6ee7b7">
-            <span>✅</span> <span>Свободна в ближайшие 30 дней</span>
-          </div>`;
-        } else {
-          const fmt = d => {
-            try { return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }); }
-            catch { return d; }
+          const personSchema = {
+            '@context': 'https://schema.org',
+            '@type': 'Person',
+            name: model.name,
+            jobTitle: 'Профессиональная модель',
+            description: model.bio
+              ? model.bio.substring(0, 200)
+              : `Профессиональная модель агентства Nevesty Models.${model.city ? ' Город: ' + model.city + '.' : ''}${model.category ? ' Специализация: ' + model.category + '.' : ''}`,
+            url: `${baseUrl}/model.html?id=${model.id}`,
+            image: img,
+            worksFor: {
+              '@type': 'Organization',
+              name: 'Nevesty Models',
+              url: baseUrl,
+            },
+            knowsAbout: [model.category, 'Моделинг', 'Модельный бизнес'].filter(Boolean),
           };
-          const dateList = upcomingBusy.map(d =>
-            `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);font-size:0.8rem;color:#fca5a5">${fmt(d)}</span>`
-          ).join('');
-          container.innerHTML = `<div style="padding:10px 16px;border-radius:8px;background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2)">
-            <div style="font-size:0.8rem;color:#9ca3af;margin-bottom:8px">Занята в ближайшие 30 дней:</div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px">${dateList}</div>
-          </div>`;
+
+          if (model.city) personSchema.address = { '@type': 'PostalAddress', addressLocality: model.city };
+          if (model.height)
+            personSchema.height = { '@type': 'QuantitativeValue', value: model.height, unitCode: 'CMT' };
+          if (model.instagram) personSchema.sameAs = [`https://instagram.com/${model.instagram.replace(/^@/, '')}`];
+
+          const breadcrumbSchema = {
+            '@context': 'https://schema.org',
+            '@type': 'BreadcrumbList',
+            itemListElement: [
+              { '@type': 'ListItem', position: 1, name: 'Главная', item: baseUrl + '/' },
+              { '@type': 'ListItem', position: 2, name: 'Каталог моделей', item: baseUrl + '/catalog.html' },
+              { '@type': 'ListItem', position: 3, name: model.name, item: `${baseUrl}/model.html?id=${model.id}` },
+            ],
+          };
+
+          const script = document.createElement('script');
+          script.id = 'schema-model-person';
+          script.type = 'application/ld+json';
+          script.textContent = JSON.stringify([personSchema, breadcrumbSchema]);
+          document.head.appendChild(script);
         }
-      }
 
-      // ── Related Models ────────────────────────────────────────────────────────
-      function safeParseJSON(v, fallback) {
-        try { return JSON.parse(v) || fallback; } catch { return fallback; }
-      }
-
-      async function loadRelatedModels(model) {
-        try {
-          const params = new URLSearchParams();
-          if (model.category) params.append('category', model.category);
-          if (model.city) params.append('city', model.city);
-          params.append('limit', '4');
-          params.append('exclude', model.id);
-
-          const resp = await fetch(`/api/models/related?${params}`);
-          const { models = [] } = await resp.json();
-
-          const container = document.getElementById('related-models');
-          const section = document.getElementById('related-models-section');
-          if (!models.length) {
-            if (section) section.style.display = 'none';
+        // ── fetch & render ─────────────────────────────────────────────────────────
+        async function loadModel(id) {
+          let model;
+          try {
+            const resp = await fetch(`/api/models/${encodeURIComponent(id)}`);
+            if (resp.status === 404) {
+              showError('Модель не найдена', 'Возможно, профиль был удалён или указан неверный ID.');
+              return;
+            }
+            if (!resp.ok) {
+              showError('Ошибка загрузки', `Сервер вернул ${resp.status}.`);
+              return;
+            }
+            model = await resp.json();
+          } catch (err) {
+            showError('Ошибка сети', 'Не удалось загрузить профиль. Проверьте соединение.');
             return;
           }
 
-          container.innerHTML = models.map(m => {
-            const photos = safeParseJSON(m.photos, []);
-            const photo = m.photo_main || (photos[0] || '');
-            return `
+          // Update page title & meta/OG tags dynamically
+          updateMetaTags(model);
+
+          // Inject Schema.org structured data
+          injectSchemaOrg(model);
+
+          renderModel(model);
+          loadModelReviews(model.id);
+          loadRelatedModels(model);
+          if (window.NM?.analytics) NM.analytics.viewModel(model.id, model.name);
+          // Track model view (fire and forget)
+          fetch(`/api/models/${model.id}/view`, { method: 'POST' });
+
+          // GA4 view_item event
+          if (window.gtag && model) {
+            gtag('event', 'view_item', {
+              item_id: model.id,
+              item_name: model.name,
+              item_category: model.category,
+              item_variant: model.city,
+            });
+          }
+          // Yandex Metrica goal
+          if (window.ym && window.YM_ID) {
+            ym(window.YM_ID, 'reachGoal', 'model_view', { model_id: model.id, category: model.category });
+          }
+        }
+
+        function renderModel(m) {
+          _currentModel = m; // capture for toggleFavorite
+          window._currentModel = m; // expose for analytics onclick handlers
+          const heroEl = el('modelHero');
+
+          // Hero photo
+          if (m.photo_main) {
+            const img = document.createElement('img');
+            img.className = 'model-hero-img';
+            img.src = m.photo_main;
+            img.alt = m.name;
+            img.loading = 'eager';
+            heroEl.insertBefore(img, heroEl.firstChild);
+            el('heroPlaceholder').style.display = 'none';
+          }
+
+          // Breadcrumb
+          const breadcrumbName = el('breadcrumbModelName');
+          if (breadcrumbName) breadcrumbName.textContent = m.name;
+
+          // Name & category overlay
+          el('heroName').textContent = m.name;
+
+          const catLabel = CATEGORY_LABELS[m.category] || m.category || 'Fashion';
+          el('heroCategory').textContent = catLabel;
+
+          const statusEl = el('heroStatus');
+          if (m.available) {
+            statusEl.textContent = 'Свободна';
+            statusEl.className = 'model-status-badge available';
+          } else {
+            statusEl.textContent = 'Занята';
+            statusEl.className = 'model-status-badge unavailable';
+          }
+
+          // Stats row
+          setText('statHeight', m.height ? `${m.height} см` : '—');
+          setText('statAge', m.age ? `${m.age} лет` : '—');
+          setText('statCity', m.city || '—');
+          setText('statCategory', catLabel);
+          el('statStatus').textContent = m.available ? 'Свободна' : 'Занята';
+          el('statStatus').style.color = m.available ? '#4caf50' : '#f44336';
+          // Views count
+          const vc = m.view_count || 0;
+          if (vc > 0) {
+            setText('statViews', vc.toLocaleString('ru'));
+            const wrap = el('statViewsWrap');
+            if (wrap) wrap.style.display = '';
+          }
+
+          // Bio
+          if (m.bio && m.bio.trim()) {
+            el('bioText').textContent = m.bio;
+          } else {
+            el('bioText').className = 'model-bio-empty';
+            el('bioText').textContent = 'Описание не добавлено.';
+          }
+
+          // Parameters
+          const params = [];
+          if (m.weight) params.push(['Вес', `${m.weight} кг`]);
+          if (m.bust) params.push(['Грудь', m.bust]);
+          if (m.waist) params.push(['Талия', m.waist]);
+          if (m.hips) params.push(['Бёдра', m.hips]);
+          if (m.shoe_size) params.push(['Обувь', m.shoe_size]);
+          if (m.hair_color) params.push(['Волосы', m.hair_color]);
+          if (m.eye_color) params.push(['Глаза', m.eye_color]);
+
+          const paramsGrid = el('paramsGrid');
+          if (params.length) {
+            params.forEach(([label, val]) => {
+              const item = document.createElement('div');
+              item.className = 'model-param-item';
+              item.innerHTML = `<label>${label}</label><span>${val}</span>`;
+              paramsGrid.appendChild(item);
+            });
+          } else {
+            el('paramsSection').style.display = 'none';
+          }
+
+          // Gallery (main photo + extra photos from array)
+          const allPhotos = [];
+          if (m.photo_main) allPhotos.push(m.photo_main);
+          const extras = Array.isArray(m.photos) ? m.photos : [];
+          extras.forEach(p => {
+            if (p && !allPhotos.includes(p)) allPhotos.push(p);
+          });
+
+          const galleryGrid = el('galleryGrid');
+          const GALLERY_SLOTS = 6;
+          const realPhotos = allPhotos.slice(0, GALLERY_SLOTS);
+          for (let i = 0; i < GALLERY_SLOTS; i++) {
+            const item = document.createElement('div');
+            item.className = 'model-gallery-item';
+            if (allPhotos[i]) {
+              const img = document.createElement('img');
+              img.src = allPhotos[i];
+              img.alt = `${m.name} — фото ${i + 1}`;
+              img.loading = 'lazy';
+              img.style.cursor = 'zoom-in';
+              item.appendChild(img);
+              const capturedIdx = i;
+              item.addEventListener('click', () => openLightbox(realPhotos, capturedIdx));
+            } else {
+              const ph = document.createElement('div');
+              ph.className = 'model-gallery-placeholder';
+              ph.textContent = '✦';
+              item.style.cursor = 'default';
+              item.appendChild(ph);
+            }
+            galleryGrid.appendChild(item);
+          }
+
+          // Video support
+          if (m.video_url) {
+            el('video-src').src = m.video_url;
+            el('model-video').load();
+            el('video-section').classList.remove('hidden');
+            el('video-section').style.display = '';
+          }
+
+          // CTA sidebar
+          el('ctaName').textContent = m.name;
+          el('bookBtn').href = `/booking.html?model=${m.id}&model_id=${m.id}&model_name=${encodeURIComponent(m.name)}`;
+
+          // Upcoming busy dates notice
+          if (Array.isArray(m.busy_dates) && m.busy_dates.length) {
+            const fmt = d => {
+              try {
+                return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+              } catch {
+                return d;
+              }
+            };
+            const notice = el('busyDatesNotice');
+            const text = el('busyDatesText');
+            if (notice && text) {
+              // Show up to 3 upcoming dates
+              const shown = m.busy_dates.slice(0, 3).map(fmt);
+              text.textContent =
+                shown.join(', ') + (m.busy_dates.length > 3 ? ` и ещё ${m.busy_dates.length - 3}` : '');
+              notice.style.display = 'block';
+            }
+          }
+          // Quick booking pre-fill button
+          const quickBookBtn = el('book-btn-quick');
+          if (quickBookBtn) {
+            quickBookBtn.href = `/booking.html?model_id=${m.id}&model_name=${encodeURIComponent(m.name)}`;
+          }
+
+          // Instagram
+          if (m.instagram) {
+            const igBlock = el('instagramBlock');
+            igBlock.style.display = 'block';
+            const igLink = el('instagramLink');
+            const handle = m.instagram.replace(/^@/, '');
+            igLink.href = `https://instagram.com/${handle}`;
+            igLink.textContent = `✦ @${handle}`;
+          }
+
+          // Load availability section
+          loadAvailabilitySection(m.id, m.busy_dates || []);
+
+          // Show profile, hide skeleton
+          hide('skeletonView');
+          hide('errorView');
+          el('profileView').style.display = 'block';
+          // Re-sync fav/compare buttons now that model is rendered
+          updateFavBtn();
+          updateCompareBtn();
+        }
+
+        // ── Availability section ──────────────────────────────────────────────────
+        function loadAvailabilitySection(modelId, busyDates) {
+          const container = el('availabilityContent');
+          if (!container) return;
+          // Filter busy dates in next 30 days
+          const today = new Date();
+          const todayStr = today.toISOString().slice(0, 10);
+          const in30 = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+          const upcomingBusy = (busyDates || []).filter(d => d >= todayStr && d <= in30);
+          if (!upcomingBusy.length) {
+            container.innerHTML = `<div style="display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:8px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);font-size:0.9rem;color:#6ee7b7">
+            <span>✅</span> <span>Свободна в ближайшие 30 дней</span>
+          </div>`;
+          } else {
+            const fmt = d => {
+              try {
+                return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+              } catch {
+                return d;
+              }
+            };
+            const dateList = upcomingBusy
+              .map(
+                d =>
+                  `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);font-size:0.8rem;color:#fca5a5">${fmt(d)}</span>`
+              )
+              .join('');
+            container.innerHTML = `<div style="padding:10px 16px;border-radius:8px;background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2)">
+            <div style="font-size:0.8rem;color:#9ca3af;margin-bottom:8px">Занята в ближайшие 30 дней:</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">${dateList}</div>
+          </div>`;
+          }
+        }
+
+        // ── Related Models ────────────────────────────────────────────────────────
+        function safeParseJSON(v, fallback) {
+          try {
+            return JSON.parse(v) || fallback;
+          } catch {
+            return fallback;
+          }
+        }
+
+        async function loadRelatedModels(model) {
+          try {
+            const params = new URLSearchParams();
+            if (model.category) params.append('category', model.category);
+            if (model.city) params.append('city', model.city);
+            params.append('limit', '4');
+            params.append('exclude', model.id);
+
+            const resp = await fetch(`/api/models/related?${params}`);
+            const { models = [] } = await resp.json();
+
+            const container = document.getElementById('related-models');
+            const section = document.getElementById('related-models-section');
+            if (!models.length) {
+              if (section) section.style.display = 'none';
+              return;
+            }
+
+            container.innerHTML = models
+              .map(m => {
+                const photos = safeParseJSON(m.photos, []);
+                const photo = m.photo_main || photos[0] || '';
+                return `
               <a href="/model.html?id=${m.id}"
                  style="display:block;background:var(--bg2);border:1px solid var(--border);overflow:hidden;text-decoration:none;transition:border-color 0.2s,transform 0.2s"
                  onmouseover="this.style.borderColor='var(--gold)';this.querySelector('img')&&(this.querySelector('img').style.transform='scale(1.05)')"
                  onmouseout="this.style.borderColor='var(--border)';this.querySelector('img')&&(this.querySelector('img').style.transform='scale(1)')">
                 <div style="position:relative;padding-bottom:133%;overflow:hidden;background:var(--bg3)">
-                  ${photo ? `<img src="${escHtml(photo)}" alt="${escHtml(m.name)}"
-                    style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform 0.3s ease" loading="lazy">` :
-                    `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:rgba(201,169,110,0.2);font-size:3rem;font-family:'Playfair Display',serif">✦</div>`}
+                  ${
+                    photo
+                      ? `<img src="${escHtml(photo)}" alt="${escHtml(m.name)}"
+                    style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform 0.3s ease" loading="lazy">`
+                      : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:rgba(201,169,110,0.2);font-size:3rem;font-family:'Playfair Display',serif">✦</div>`
+                  }
                 </div>
                 <div style="padding:12px">
                   <div style="font-weight:600;color:var(--white);font-size:0.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(m.name)}</div>
                   ${m.height ? `<div style="font-size:0.78rem;color:var(--text-dim);margin-top:2px">${m.height} см</div>` : ''}
                 </div>
               </a>`;
-          }).join('');
-        } catch (e) {
-          const section = document.getElementById('related-models-section');
-          if (section) section.style.display = 'none';
+              })
+              .join('');
+          } catch (e) {
+            const section = document.getElementById('related-models-section');
+            if (section) section.style.display = 'none';
+          }
         }
-      }
 
-      // ── lightbox ───────────────────────────────────────────────────────────────
-      let _lbPhotos = [], _lbIdx = 0;
-      window.openLightbox = function (photos, idx) {
-        _lbPhotos = Array.isArray(photos) ? photos : [photos];
-        _lbIdx = idx || 0;
-        updateLightboxImg();
-        el('lightbox').style.display = 'flex';
-        document.body.style.overflow = 'hidden';
-      };
-      function updateLightboxImg() {
-        el('lightboxImg').src = _lbPhotos[_lbIdx];
-        const counter = el('lightboxCounter');
-        if (counter) counter.textContent = _lbPhotos.length > 1 ? `${_lbIdx + 1} / ${_lbPhotos.length}` : '';
-      }
-      window.prevPhoto = function () {
-        _lbIdx = (_lbIdx - 1 + _lbPhotos.length) % _lbPhotos.length;
-        updateLightboxImg();
-      };
-      window.nextPhoto = function () {
-        _lbIdx = (_lbIdx + 1) % _lbPhotos.length;
-        updateLightboxImg();
-      };
-      window.closeLightbox = function () {
-        el('lightbox').style.display = 'none';
-        document.body.style.overflow = '';
-      };
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') window.closeLightbox();
-        if (e.key === 'ArrowLeft') window.prevPhoto();
-        if (e.key === 'ArrowRight') window.nextPhoto();
-      });
+        // ── lightbox ───────────────────────────────────────────────────────────────
+        let _lbPhotos = [],
+          _lbIdx = 0;
+        window.openLightbox = function (photos, idx) {
+          _lbPhotos = Array.isArray(photos) ? photos : [photos];
+          _lbIdx = idx || 0;
+          updateLightboxImg();
+          el('lightbox').style.display = 'flex';
+          document.body.style.overflow = 'hidden';
+        };
+        function updateLightboxImg() {
+          el('lightboxImg').src = _lbPhotos[_lbIdx];
+          const counter = el('lightboxCounter');
+          if (counter) counter.textContent = _lbPhotos.length > 1 ? `${_lbIdx + 1} / ${_lbPhotos.length}` : '';
+        }
+        window.prevPhoto = function () {
+          _lbIdx = (_lbIdx - 1 + _lbPhotos.length) % _lbPhotos.length;
+          updateLightboxImg();
+        };
+        window.nextPhoto = function () {
+          _lbIdx = (_lbIdx + 1) % _lbPhotos.length;
+          updateLightboxImg();
+        };
+        window.closeLightbox = function () {
+          el('lightbox').style.display = 'none';
+          document.body.style.overflow = '';
+        };
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape') window.closeLightbox();
+          if (e.key === 'ArrowLeft') window.prevPhoto();
+          if (e.key === 'ArrowRight') window.nextPhoto();
+        });
 
-      // ── Reviews ───────────────────────────────────────────────────────────────
-      function escHtml(s) {
-        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-      }
-      let _reviewsPage = 1;
-      let _reviewsModelId = null;
-      const REVIEWS_PER_PAGE = 5;
+        // ── Reviews ───────────────────────────────────────────────────────────────
+        function escHtml(s) {
+          return String(s || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        }
+        let _reviewsPage = 1;
+        let _reviewsModelId = null;
+        const REVIEWS_PER_PAGE = 5;
 
-      async function loadModelReviews(modelId, page) {
-        _reviewsModelId = modelId;
-        page = page || 1;
-        _reviewsPage = page;
-        try {
-          const resp = await fetch(`/api/reviews?model_id=${modelId}&page=${page}&limit=${REVIEWS_PER_PAGE}`);
-          const data = await resp.json();
-          const container = el('reviews-list');
-          if (!container) return;
-          // Support both old array response and new paginated response
-          const reviews = Array.isArray(data) ? data : (data.reviews || []);
-          const total = data.total || reviews.length;
-          const pages = data.pages || 1;
+        async function loadModelReviews(modelId, page) {
+          _reviewsModelId = modelId;
+          page = page || 1;
+          _reviewsPage = page;
+          try {
+            const resp = await fetch(`/api/reviews?model_id=${modelId}&page=${page}&limit=${REVIEWS_PER_PAGE}`);
+            const data = await resp.json();
+            const container = el('reviews-list');
+            if (!container) return;
+            // Support both old array response and new paginated response
+            const reviews = Array.isArray(data) ? data : data.reviews || [];
+            const total = data.total || reviews.length;
+            const pages = data.pages || 1;
 
-          if (!reviews.length && page === 1) {
-            container.innerHTML = '<p style="color:var(--text-dim);font-size:0.9rem">Пока нет отзывов</p>';
-            el('reviews-avg') && (el('reviews-avg').style.display = 'none');
-            el('reviews-pagination') && (el('reviews-pagination').innerHTML = '');
-            return;
-          }
-
-          // Show avg rating header
-          const rated = reviews.filter(r => r.rating > 0);
-          if (rated.length > 0 && page === 1) {
-            const avg = rated.reduce((s, r) => s + r.rating, 0) / rated.length;
-            const avgEl = el('reviews-avg');
-            if (avgEl) {
-              avgEl.style.display = 'flex';
-              el('reviews-avg-stars').textContent = '★'.repeat(Math.round(avg)) + '☆'.repeat(5 - Math.round(avg));
-              el('reviews-avg-val').textContent = avg.toFixed(1);
-              el('reviews-avg-count').textContent = `(${total} отзыв${total === 1 ? '' : total < 5 ? 'а' : 'ов'})`;
+            if (!reviews.length && page === 1) {
+              container.innerHTML = '<p style="color:var(--text-dim);font-size:0.9rem">Пока нет отзывов</p>';
+              el('reviews-avg') && (el('reviews-avg').style.display = 'none');
+              el('reviews-pagination') && (el('reviews-pagination').innerHTML = '');
+              return;
             }
-          }
 
-          container.innerHTML = reviews.map(r => `
+            // Show avg rating header
+            const rated = reviews.filter(r => r.rating > 0);
+            if (rated.length > 0 && page === 1) {
+              const avg = rated.reduce((s, r) => s + r.rating, 0) / rated.length;
+              const avgEl = el('reviews-avg');
+              if (avgEl) {
+                avgEl.style.display = 'flex';
+                el('reviews-avg-stars').textContent = '★'.repeat(Math.round(avg)) + '☆'.repeat(5 - Math.round(avg));
+                el('reviews-avg-val').textContent = avg.toFixed(1);
+                el('reviews-avg-count').textContent = `(${total} отзыв${total === 1 ? '' : total < 5 ? 'а' : 'ов'})`;
+              }
+            }
+
+            container.innerHTML = reviews
+              .map(
+                r => `
             <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px">
               <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
                 <div style="width:40px;height:40px;background:rgba(201,169,110,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700;font-size:1rem;flex-shrink:0">
@@ -1240,274 +1647,362 @@
                 </div>
                 <div>
                   <div style="font-weight:600;color:var(--white);font-size:0.9rem">${escHtml(r.client_name || 'Анонимно')}</div>
-                  <div style="font-size:0.85rem;color:var(--gold)">${'★'.repeat(r.rating || 5)}${'☆'.repeat(5-(r.rating||5))}</div>
+                  <div style="font-size:0.85rem;color:var(--gold)">${'★'.repeat(r.rating || 5)}${'☆'.repeat(5 - (r.rating || 5))}</div>
                 </div>
               </div>
               ${r.text ? `<p style="color:var(--text-muted);font-size:0.9rem;line-height:1.7;margin:0 0 10px">${escHtml(r.text)}</p>` : ''}
               ${r.created_at ? `<div style="font-size:0.75rem;color:var(--text-dim);margin-bottom:${r.admin_reply ? '12px' : '0'}">${new Date(r.created_at).toLocaleDateString('ru-RU')}</div>` : ''}
-              ${r.admin_reply ? `
+              ${
+                r.admin_reply
+                  ? `
               <div style="margin-top:10px;padding:10px 14px;background:rgba(201,169,110,0.06);border-left:3px solid var(--gold);border-radius:0 6px 6px 0">
                 <div style="font-size:0.72rem;color:var(--gold);font-weight:600;margin-bottom:4px">💬 Ответ агентства${r.reply_at ? ' · ' + new Date(r.reply_at).toLocaleDateString('ru-RU') : ''}:</div>
                 <div style="font-size:0.85rem;color:var(--text-muted);line-height:1.6">${escHtml(r.admin_reply)}</div>
-              </div>` : ''}
+              </div>`
+                  : ''
+              }
             </div>
-          `).join('');
+          `
+              )
+              .join('');
 
-          // Pagination
-          const pag = el('reviews-pagination');
-          if (pag) {
-            let pagHtml = '';
-            if (page > 1) pagHtml += `<button onclick="loadModelReviews(${modelId},${page-1})" style="padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;border-radius:6px;cursor:pointer;margin-right:6px">← Назад</button>`;
-            if (page < pages) pagHtml += `<button onclick="loadModelReviews(${modelId},${page+1})" style="padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;border-radius:6px;cursor:pointer">Ещё отзывы →</button>`;
-            if (pages > 1) pagHtml += `<span style="font-size:0.75rem;color:var(--text-dim);margin-left:8px">${page} / ${pages}</span>`;
-            pag.innerHTML = pagHtml;
+            // Pagination
+            const pag = el('reviews-pagination');
+            if (pag) {
+              let pagHtml = '';
+              if (page > 1)
+                pagHtml += `<button onclick="loadModelReviews(${modelId},${page - 1})" style="padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;border-radius:6px;cursor:pointer;margin-right:6px">← Назад</button>`;
+              if (page < pages)
+                pagHtml += `<button onclick="loadModelReviews(${modelId},${page + 1})" style="padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;border-radius:6px;cursor:pointer">Ещё отзывы →</button>`;
+              if (pages > 1)
+                pagHtml += `<span style="font-size:0.75rem;color:var(--text-dim);margin-left:8px">${page} / ${pages}</span>`;
+              pag.innerHTML = pagHtml;
+            }
+          } catch (e) {
+            /* silent fail */
           }
-        } catch (e) { /* silent fail */ }
-      }
-      window.loadModelReviews = loadModelReviews;
-
-      // ── Social sharing ────────────────────────────────────────────────────────
-      window.shareModel = function(platform) {
-        const url = encodeURIComponent(window.location.href);
-        const title = encodeURIComponent(document.title);
-        if (platform === 'vk') window.open(`https://vk.com/share.php?url=${url}&title=${title}`, '_blank', 'noopener');
-        if (platform === 'tg') window.open(`https://t.me/share/url?url=${url}&text=${title}`, '_blank', 'noopener');
-        if (platform === 'copy') {
-          navigator.clipboard.writeText(window.location.href).then(() => {
-            const btn = document.getElementById('copy-btn');
-            if (btn) { btn.textContent = '✓ Скопировано'; setTimeout(() => { btn.textContent = 'Копировать'; }, 2000); }
-          }).catch(() => {});
         }
-      };
+        window.loadModelReviews = loadModelReviews;
 
-      // ── Favorites (wishlist) ───────────────────────────────────────────────────
-      const FAV_KEY = 'nm_favorites';
-      // Store current loaded model for use in toggleFavorite
-      let _currentModel = null;
-
-      function getFavs() {
-        try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; }
-      }
-      function saveFavs(arr) {
-        try { localStorage.setItem(FAV_KEY, JSON.stringify(arr)); } catch {}
-      }
-      function updateFavNavBadge() {
-        const count = getFavs().length;
-        const badge = document.getElementById('fav-nav-badge');
-        if (badge) badge.textContent = count > 0 ? count : '';
-      }
-      window.toggleFavorite = function() {
-        const id = parseInt(getParam('id'), 10);
-        if (!id) return;
-        const favs = getFavs();
-        const idx = favs.findIndex(f => (typeof f === 'object' ? f.id === id : f === id));
-        const btn = document.getElementById('favBtn');
-        if (idx === -1) {
-          // Store full model object so favorites.html can display without extra API calls
-          const modelData = _currentModel ? {
-            id: _currentModel.id,
-            name: _currentModel.name,
-            city: _currentModel.city || '',
-            category: _currentModel.category || '',
-            photo: _currentModel.photo_main || '',
-            photo_main: _currentModel.photo_main || '',
-            height: _currentModel.height || 0,
-            age: _currentModel.age || 0,
-            available: !!_currentModel.available
-          } : { id };
-          favs.push(modelData);
-          saveFavs(favs);
-          updateFavNavBadge();
-          if (window.NM?.analytics) NM.analytics.addToFavorites(id, _currentModel?.name || '');
-          if (btn) { btn.innerHTML = '<span aria-hidden="true">💔</span> В избранном'; btn.style.color = '#e07070'; btn.style.borderColor = '#e07070'; }
-        } else {
-          favs.splice(idx, 1);
-          saveFavs(favs);
-          updateFavNavBadge();
-          if (btn) { btn.innerHTML = '<span aria-hidden="true">❤️</span> В избранное'; btn.style.color = ''; btn.style.borderColor = ''; }
-        }
-      };
-      function updateFavBtn() {
-        const id = parseInt(getParam('id'), 10);
-        if (!id) return;
-        const btn = document.getElementById('favBtn');
-        if (!btn) return;
-        const favs = getFavs();
-        const inFav = favs.some(f => (typeof f === 'object' ? f.id === id : f === id));
-        if (inFav) {
-          btn.innerHTML = '<span aria-hidden="true">💔</span> В избранном';
-          btn.style.color = '#e07070';
-          btn.style.borderColor = '#e07070';
-        } else {
-          btn.innerHTML = '<span aria-hidden="true">❤️</span> В избранное';
-          btn.style.color = '';
-          btn.style.borderColor = '';
-        }
-        updateFavNavBadge();
-      }
-
-      // ── Compare ───────────────────────────────────────────────────────────────
-      const COMPARE_KEY = 'nm_compare';
-      const MAX_COMPARE = 3;
-      function getCompareIds() {
-        try { return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]'); } catch { return []; }
-      }
-      function saveCompareIds(ids) {
-        try { localStorage.setItem(COMPARE_KEY, JSON.stringify(ids)); } catch {}
-      }
-      window.toggleCompareModel = function() {
-        const id = parseInt(getParam('id'), 10);
-        if (!id) return;
-        const ids = getCompareIds();
-        const idx = ids.indexOf(id);
-        const btn = document.getElementById('compareBtn');
-        if (idx === -1) {
-          if (ids.length >= MAX_COMPARE) {
-            showToastMsg(`Максимум ${MAX_COMPARE} модели для сравнения`);
-            return;
+        // ── Social sharing ────────────────────────────────────────────────────────
+        window.shareModel = function (platform) {
+          const url = encodeURIComponent(window.location.href);
+          const title = encodeURIComponent(document.title);
+          if (platform === 'vk')
+            window.open(`https://vk.com/share.php?url=${url}&title=${title}`, '_blank', 'noopener');
+          if (platform === 'tg') window.open(`https://t.me/share/url?url=${url}&text=${title}`, '_blank', 'noopener');
+          if (platform === 'copy') {
+            navigator.clipboard
+              .writeText(window.location.href)
+              .then(() => {
+                const btn = document.getElementById('copy-btn');
+                if (btn) {
+                  btn.textContent = '✓ Скопировано';
+                  setTimeout(() => {
+                    btn.textContent = 'Копировать';
+                  }, 2000);
+                }
+              })
+              .catch(() => {});
           }
-          ids.push(id);
-          saveCompareIds(ids);
-          if (btn) {
+        };
+
+        // ── Favorites (wishlist) ───────────────────────────────────────────────────
+        const FAV_KEY = 'nm_favorites';
+        // Store current loaded model for use in toggleFavorite
+        let _currentModel = null;
+
+        function getFavs() {
+          try {
+            return JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+          } catch {
+            return [];
+          }
+        }
+        function saveFavs(arr) {
+          try {
+            localStorage.setItem(FAV_KEY, JSON.stringify(arr));
+          } catch {}
+        }
+        function updateFavNavBadge() {
+          const count = getFavs().length;
+          const badge = document.getElementById('fav-nav-badge');
+          if (badge) badge.textContent = count > 0 ? count : '';
+        }
+        window.toggleFavorite = function () {
+          const id = parseInt(getParam('id'), 10);
+          if (!id) return;
+          const favs = getFavs();
+          const idx = favs.findIndex(f => (typeof f === 'object' ? f.id === id : f === id));
+          const btn = document.getElementById('favBtn');
+          if (idx === -1) {
+            // Store full model object so favorites.html can display without extra API calls
+            const modelData = _currentModel
+              ? {
+                  id: _currentModel.id,
+                  name: _currentModel.name,
+                  city: _currentModel.city || '',
+                  category: _currentModel.category || '',
+                  photo: _currentModel.photo_main || '',
+                  photo_main: _currentModel.photo_main || '',
+                  height: _currentModel.height || 0,
+                  age: _currentModel.age || 0,
+                  available: !!_currentModel.available,
+                }
+              : { id };
+            favs.push(modelData);
+            saveFavs(favs);
+            updateFavNavBadge();
+            if (window.NM?.analytics) NM.analytics.addToFavorites(id, _currentModel?.name || '');
+            if (btn) {
+              btn.innerHTML = '<span aria-hidden="true">💔</span> В избранном';
+              btn.style.color = '#e07070';
+              btn.style.borderColor = '#e07070';
+            }
+          } else {
+            favs.splice(idx, 1);
+            saveFavs(favs);
+            updateFavNavBadge();
+            if (btn) {
+              btn.innerHTML = '<span aria-hidden="true">❤️</span> В избранное';
+              btn.style.color = '';
+              btn.style.borderColor = '';
+            }
+          }
+        };
+        function updateFavBtn() {
+          const id = parseInt(getParam('id'), 10);
+          if (!id) return;
+          const btn = document.getElementById('favBtn');
+          if (!btn) return;
+          const favs = getFavs();
+          const inFav = favs.some(f => (typeof f === 'object' ? f.id === id : f === id));
+          if (inFav) {
+            btn.innerHTML = '<span aria-hidden="true">💔</span> В избранном';
+            btn.style.color = '#e07070';
+            btn.style.borderColor = '#e07070';
+          } else {
+            btn.innerHTML = '<span aria-hidden="true">❤️</span> В избранное';
+            btn.style.color = '';
+            btn.style.borderColor = '';
+          }
+          updateFavNavBadge();
+        }
+
+        // ── Compare ───────────────────────────────────────────────────────────────
+        const COMPARE_KEY = 'nm_compare';
+        const MAX_COMPARE = 3;
+        function getCompareIds() {
+          try {
+            return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]');
+          } catch {
+            return [];
+          }
+        }
+        function saveCompareIds(ids) {
+          try {
+            localStorage.setItem(COMPARE_KEY, JSON.stringify(ids));
+          } catch {}
+        }
+        window.toggleCompareModel = function () {
+          const id = parseInt(getParam('id'), 10);
+          if (!id) return;
+          const ids = getCompareIds();
+          const idx = ids.indexOf(id);
+          const btn = document.getElementById('compareBtn');
+          if (idx === -1) {
+            if (ids.length >= MAX_COMPARE) {
+              showToastMsg(`Максимум ${MAX_COMPARE} модели для сравнения`);
+              return;
+            }
+            ids.push(id);
+            saveCompareIds(ids);
+            if (btn) {
+              btn.textContent = '⚖️ Убрать из сравнения';
+              btn.style.color = 'var(--gold)';
+              btn.style.borderColor = 'var(--gold)';
+            }
+            showToastMsg('Добавлено в сравнение ⚖️');
+          } else {
+            ids.splice(idx, 1);
+            saveCompareIds(ids);
+            if (btn) {
+              btn.textContent = '⚖️ Добавить к сравнению';
+              btn.style.color = '';
+              btn.style.borderColor = '';
+            }
+            showToastMsg('Убрано из сравнения');
+          }
+        };
+        function updateCompareBtn() {
+          const id = parseInt(getParam('id'), 10);
+          if (!id) return;
+          const btn = document.getElementById('compareBtn');
+          if (!btn) return;
+          const ids = getCompareIds();
+          if (ids.includes(id)) {
             btn.textContent = '⚖️ Убрать из сравнения';
             btn.style.color = 'var(--gold)';
             btn.style.borderColor = 'var(--gold)';
-          }
-          showToastMsg('Добавлено в сравнение ⚖️');
-        } else {
-          ids.splice(idx, 1);
-          saveCompareIds(ids);
-          if (btn) {
+          } else {
             btn.textContent = '⚖️ Добавить к сравнению';
             btn.style.color = '';
             btn.style.borderColor = '';
           }
-          showToastMsg('Убрано из сравнения');
         }
-      };
-      function updateCompareBtn() {
-        const id = parseInt(getParam('id'), 10);
-        if (!id) return;
-        const btn = document.getElementById('compareBtn');
-        if (!btn) return;
-        const ids = getCompareIds();
-        if (ids.includes(id)) {
-          btn.textContent = '⚖️ Убрать из сравнения';
-          btn.style.color = 'var(--gold)';
-          btn.style.borderColor = 'var(--gold)';
+        function showToastMsg(msg) {
+          const c = document.getElementById('toastContainer');
+          if (!c) return;
+          const t = document.createElement('div');
+          t.className = 'toast';
+          t.textContent = msg;
+          c.appendChild(t);
+          setTimeout(() => t.remove(), 3000);
+        }
+
+        // ── init ───────────────────────────────────────────────────────────────────
+        const modelId = getParam('id');
+        if (!modelId || isNaN(parseInt(modelId, 10))) {
+          // Wait for DOM
+          document.addEventListener('DOMContentLoaded', function () {
+            showError('Не указан ID модели', 'Используйте ссылку вида /model.html?id=123');
+          });
         } else {
-          btn.textContent = '⚖️ Добавить к сравнению';
-          btn.style.color = '';
-          btn.style.borderColor = '';
+          document.addEventListener('DOMContentLoaded', function () {
+            loadModel(parseInt(modelId, 10));
+            updateFavBtn();
+            updateCompareBtn();
+          });
         }
-      }
-      function showToastMsg(msg) {
-        const c = document.getElementById('toastContainer');
-        if (!c) return;
-        const t = document.createElement('div');
-        t.className = 'toast';
-        t.textContent = msg;
-        c.appendChild(t);
-        setTimeout(() => t.remove(), 3000);
-      }
+      })();
+    </script>
 
-      // ── init ───────────────────────────────────────────────────────────────────
-      const modelId = getParam('id');
-      if (!modelId || isNaN(parseInt(modelId, 10))) {
-        // Wait for DOM
-        document.addEventListener('DOMContentLoaded', function () {
-          showError('Не указан ID модели', 'Используйте ссылку вида /model.html?id=123');
-        });
-      } else {
-        document.addEventListener('DOMContentLoaded', function () {
-          loadModel(parseInt(modelId, 10));
-          updateFavBtn();
-          updateCompareBtn();
-        });
-      }
-    })();
-  </script>
+    <!-- Floating WhatsApp Button -->
+    <div id="float-whatsapp" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 400">
+      <a
+        id="float-wa-link"
+        href="#"
+        target="_blank"
+        rel="noopener"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #25d366;
+          color: #fff;
+          padding: 14px 20px;
+          border-radius: 50px;
+          box-shadow: 0 4px 16px rgba(37, 211, 102, 0.4);
+          text-decoration: none;
+          font-size: 0.85rem;
+          font-weight: 600;
+          transition: all 0.2s;
+        "
+        onmouseover="
+          this.style.background = '#1da851';
+          this.style.boxShadow = '0 6px 20px rgba(37,211,102,0.5)';
+        "
+        onmouseout="
+          this.style.background = '#25D366';
+          this.style.boxShadow = '0 4px 16px rgba(37,211,102,0.4)';
+        "
+      >
+        <svg style="width: 22px; height: 22px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+          <path
+            d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+          />
+        </svg>
+        Написать в WhatsApp
+      </a>
+    </div>
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          const wa = d.contacts_whatsapp;
+          if (wa) {
+            const waNum = wa.replace(/\D/g, '');
+            const waUrl = `https://wa.me/${waNum}`;
+            const btn = document.getElementById('whatsapp-btn');
+            if (btn) {
+              btn.href = waUrl;
+              btn.style.display = 'flex';
+            }
+            const floatEl = document.getElementById('float-whatsapp');
+            const floatLink = document.getElementById('float-wa-link');
+            if (floatEl && floatLink) {
+              floatLink.href = waUrl;
+              floatEl.style.display = 'block';
+            }
+          }
+        })
+        .catch(() => {});
+    </script>
+    <script src="/js/cookie-consent.js" defer></script>
 
-  <!-- Floating WhatsApp Button -->
-  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
-    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
-       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
-       onmouseover="this.style.background='#1da851';this.style.boxShadow='0 6px 20px rgba(37,211,102,0.5)'"
-       onmouseout="this.style.background='#25D366';this.style.boxShadow='0 4px 16px rgba(37,211,102,0.4)'">
-      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      Написать в WhatsApp
-    </a>
-  </div>
-  <script>
-  fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-    const wa = d.contacts_whatsapp;
-    if (wa) {
-      const waNum = wa.replace(/\D/g,'');
-      const waUrl = `https://wa.me/${waNum}`;
-      const btn = document.getElementById('whatsapp-btn');
-      if (btn) { btn.href = waUrl; btn.style.display = 'flex'; }
-      const floatEl = document.getElementById('float-whatsapp');
-      const floatLink = document.getElementById('float-wa-link');
-      if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
-    }
-  }).catch(()=>{});
-  </script>
-  <script src="/js/cookie-consent.js" defer></script>
-
-  <!-- QUICK BOOKING POPUP MODAL -->
-  <div class="qb-modal" id="qbModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle">
-    <div class="qb-modal-box">
-      <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
-      <div id="qbForm">
-        <div class="qb-modal-title" id="qbModalTitle">⚡ Быстрая заявка</div>
-        <div class="qb-modal-sub">Оставьте контакты — менеджер свяжется за 15 минут</div>
-        <input class="qb-input" id="qbName" type="text" placeholder="Ваше имя" autocomplete="name" />
-        <input class="qb-input" id="qbPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" />
-        <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
-        <button class="qb-btn" onclick="submitQb()">Отправить заявку →</button>
-      </div>
-      <div class="qb-success" id="qbSuccess">
-        <div class="qb-success-icon">✅</div>
-        <p>Заявка принята! Менеджер свяжется с вами в течение 15 минут.</p>
+    <!-- QUICK BOOKING POPUP MODAL -->
+    <div class="qb-modal" id="qbModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle">
+      <div class="qb-modal-box">
+        <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
+        <div id="qbForm">
+          <div class="qb-modal-title" id="qbModalTitle">⚡ Быстрая заявка</div>
+          <div class="qb-modal-sub">Оставьте контакты — менеджер свяжется за 15 минут</div>
+          <input class="qb-input" id="qbName" type="text" placeholder="Ваше имя" autocomplete="name" />
+          <input class="qb-input" id="qbPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" />
+          <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
+          <button class="qb-btn" onclick="submitQb()">Отправить заявку →</button>
+        </div>
+        <div class="qb-success" id="qbSuccess">
+          <div class="qb-success-icon">✅</div>
+          <p>Заявка принята! Менеджер свяжется с вами в течение 15 минут.</p>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- Floating CTA Button -->
-  <button class="floating-cta" onclick="openQbModal()" aria-label="Оставить заявку">
-    ⚡ Заявка
-  </button>
+    <!-- Floating CTA Button -->
+    <button class="floating-cta" onclick="openQbModal()" aria-label="Оставить заявку">⚡ Заявка</button>
 
-  <script>
-  function openQbModal() {
-    document.getElementById('qbModal')?.classList.add('open');
-    document.getElementById('qbName')?.focus();
-  }
-  function closeQbModal() {
-    document.getElementById('qbModal')?.classList.remove('open');
-  }
-  document.getElementById('qbModal')?.addEventListener('click', e => {
-    if (e.target.id === 'qbModal') closeQbModal();
-  });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeQbModal();
-  });
-  async function submitQb() {
-    const name = document.getElementById('qbName')?.value.trim();
-    const phone = document.getElementById('qbPhone')?.value.trim();
-    if (!name || !phone) { alert('Пожалуйста, заполните имя и телефон'); return; }
-    try {
-      await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_name: name, client_phone: phone, comments: document.getElementById('qbComment')?.value.trim() || '', event_type: 'other', quick_booking: true })
+    <script>
+      function openQbModal() {
+        document.getElementById('qbModal')?.classList.add('open');
+        document.getElementById('qbName')?.focus();
+      }
+      function closeQbModal() {
+        document.getElementById('qbModal')?.classList.remove('open');
+      }
+      document.getElementById('qbModal')?.addEventListener('click', e => {
+        if (e.target.id === 'qbModal') closeQbModal();
       });
-      document.getElementById('qbForm').style.display = 'none';
-      document.getElementById('qbSuccess').style.display = 'block';
-      setTimeout(closeQbModal, 3000);
-    } catch (e) { alert('Ошибка отправки. Попробуйте позже.'); }
-  }
-  </script>
-  <script src="/js/chat-widget.js" defer></script>
-</body>
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeQbModal();
+      });
+      async function submitQb() {
+        const name = document.getElementById('qbName')?.value.trim();
+        const phone = document.getElementById('qbPhone')?.value.trim();
+        if (!name || !phone) {
+          alert('Пожалуйста, заполните имя и телефон');
+          return;
+        }
+        try {
+          await fetch('/api/orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              client_name: name,
+              client_phone: phone,
+              comments: document.getElementById('qbComment')?.value.trim() || '',
+              event_type: 'other',
+              quick_booking: true,
+            }),
+          });
+          document.getElementById('qbForm').style.display = 'none';
+          document.getElementById('qbSuccess').style.display = 'block';
+          setTimeout(closeQbModal, 3000);
+        } catch (e) {
+          alert('Ошибка отправки. Попробуйте позже.');
+        }
+      }
+    </script>
+    <script src="/js/chat-widget.js" defer></script>
+  </body>
 </html>
