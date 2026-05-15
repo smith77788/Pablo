@@ -210,9 +210,41 @@ function downloadCSV(url) {
     .catch(() => toast('Ошибка экспорта', 'error'));
 }
 
+// ─── Currency formatter ───────────────────────────────
+function formatCurrency(n) {
+  if (n == null || n === '') return '—';
+  const num = parseInt(n) || 0;
+  return num.toLocaleString('ru-RU') + ' ₽';
+}
+
+// ─── Copy to clipboard ────────────────────────────────
+function copyToClipboard(text) {
+  navigator.clipboard?.writeText(text).then(() => {
+    toast('Скопировано: ' + text, 'success');
+  }).catch(() => {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.style.position = 'fixed';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    toast('Скопировано', 'success');
+  });
+}
+
+// ─── Debounce utility ─────────────────────────────────
+function debounce(fn, delay = 400) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), delay); };
+}
+
+const api = apiFetch;
+
 window._admin = {
-  apiFetch, apiFetchForm, toast, adminConfirm, logout,
+  apiFetch, apiFetchForm, api, toast, adminConfirm, logout,
   formatDate, formatDateTime, statusBadge, escapeHtml,
   STATUS_OPTIONS, STATUS_LABELS, CATEGORIES, EVENT_LABELS,
-  downloadCSV
+  downloadCSV, formatCurrency, copyToClipboard, debounce
 };
