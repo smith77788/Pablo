@@ -402,6 +402,104 @@ async function taskSessionCleanup() {
   }
 }
 
+// Таск 6: 1-го числа каждого месяца — персональный ежемесячный отчёт клиентам
+async function taskMonthlyClientReport() {
+  try {
+    const now  = new Date();
+    // Month label for the previous month
+    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const monthNames = ['января','февраля','марта','апреля','мая','июня',
+                        'июля','августа','сентября','октября','ноября','декабря'];
+    const monthLabel = monthNames[prevMonth.getMonth()];
+    const year       = prevMonth.getFullYear();
+    const monthStart = `${year}-${String(prevMonth.getMonth() + 1).padStart(2,'0')}-01`;
+    const monthEnd   = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}-01`;
+
+    // Active clients: at least 1 order in the last year
+    const clients = await dbAll(`
+      SELECT DISTINCT o.client_chat_id,
+        MAX(o.client_name) as client_name
+      FROM orders o
+      WHERE o.client_chat_id IS NOT NULL
+        AND CAST(o.client_chat_id AS INTEGER) > 0
+        AND o.created_at > datetime('now', '-1 year')
+      GROUP BY o.client_chat_id
+    `).catch(() => []);
+
+    console.log(`[Scheduler] Monthly report: ${clients.length} active clients`);
+    if (!clients.length) return;
+
+    const bot = getBot();
+    if (!bot) return;
+
+    for (const client of clients) {
+      try {
+        // Check notification prefs
+        const prefs = await dbGet('SELECT notify_promo FROM client_prefs WHERE chat_id=?',
+          [client.client_chat_id]).catch(() => null);
+        if (prefs && prefs.notify_promo === 0) continue;
+
+        // Orders last month
+        const monthOrders = await dbGet(
+          `SELECT COUNT(*) as cnt FROM orders
+           WHERE client_chat_id=? AND created_at >= ? AND created_at < ?`,
+          [client.client_chat_id, monthStart, monthEnd]
+        ).catch(() => null);
+
+        // Points earned last month
+        const monthPoints = await dbGet(
+          `SELECT COALESCE(SUM(points),0) as total FROM loyalty_transactions
+           WHERE chat_id=? AND points > 0 AND created_at >= ? AND created_at < ?`,
+          [client.client_chat_id, monthStart, monthEnd]
+        ).catch(() => null);
+
+        // Current level
+        const lp = await dbGet(
+          `SELECT total_earned FROM loyalty_points WHERE chat_id=?`,
+          [client.client_chat_id]
+        ).catch(() => null);
+
+        const totalEarned = lp?.total_earned || 0;
+        let levelLabel;
+        if      (totalEarned >= 5000) levelLabel = '💎 Платиновый';
+        else if (totalEarned >= 2000) levelLabel = '🥇 Золотой';
+        else if (totalEarned >= 500)  levelLabel = '🥈 Серебряный';
+        else                          levelLabel = '🥉 Бронзовый';
+
+        const ordCnt = monthOrders?.cnt || 0;
+        const pts    = monthPoints?.total || 0;
+        const name   = (client.client_name || '').split(' ')[0] || 'Здравствуйте';
+
+        const safeName  = escapeMarkdown(name);
+        const safeMonth = escapeMarkdown(monthLabel + ' ' + year);
+        const safeLevel = escapeMarkdown(levelLabel);
+
+        await bot.sendMessage(client.client_chat_id,
+          `📊 *Итоги ${safeMonth}*\n\n` +
+          `*${safeName}*, вот ваш личный итог за месяц\\:\n\n` +
+          `📋 Заявок оформлено: *${ordCnt}*\n` +
+          `💫 Накоплено баллов: *\\+${pts}*\n` +
+          `🏅 Уровень лояльности: *${safeLevel}*\n\n` +
+          `_Спасибо, что выбираете Nevesty Models\\!_`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [
+              [{ text: '💫 Мои баллы', callback_data: 'loyalty' }],
+              [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
+            ]}
+          }
+        );
+        await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit
+      } catch {} // Ignore blocked users
+    }
+
+    notify(`📊 Ежемесячные отчёты отправлены: ${clients.length} клиентов`);
+    console.log(`[Scheduler] Monthly reports sent: ${clients.length} clients`);
+  } catch (e) {
+    console.error('[Scheduler] monthly report error:', e.message);
+  }
+}
+
 // ─── Планировщик дополнительных задач (тик каждые 60 сек) ───────────────────
 
 // Каждые 6 часов — Factory health (с момента старта)
@@ -436,6 +534,13 @@ setInterval(() => {
   if (shouldRun('sessioncleanup', h, m, dow, 2, 0, -1)) {
     console.log('[Scheduler] Running session cleanup...');
     taskSessionCleanup();
+  }
+
+  // 1-го числа каждого месяца 10:00 — Monthly client reports
+  const dayOfMonth = now.getDate();
+  if (dayOfMonth === 1 && shouldRun('monthlyreport', h, m, dow, 10, 0, -1)) {
+    console.log('[Scheduler] Running monthly client reports...');
+    taskMonthlyClientReport();
   }
 
   // Каждые 6 часов — Factory health check

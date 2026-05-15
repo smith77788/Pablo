@@ -962,6 +962,11 @@ async function bkSubmit(chatId, data) {
     const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
     await clearSession(chatId);
 
+    // Grant "precise_choice" achievement if booking has a specific date set from the start
+    if (data.event_date) {
+      await grantAchievement(chatId, 'precise_choice').catch(()=>{});
+    }
+
     await safeSend(chatId,
       `🎉 *Заявка принята\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер свяжется с вами в течение 1 часа для подтверждения\\.\n\nСохраните номер — по нему можно проверить статус в любое время\\.`,
       {
@@ -2489,7 +2494,25 @@ async function doExportOrders(chatId, period) {
 
 // ─── Loyalty system ───────────────────────────────────────────────────────────
 
+const LOYALTY_LEVELS = [
+  { key: 'platinum', label: '💎 Платиновый', minEarned: 5000, discount: 15 },
+  { key: 'gold',     label: '🥇 Золотой',    minEarned: 2000, discount: 10 },
+  { key: 'silver',   label: '🥈 Серебряный', minEarned: 500,  discount: 5  },
+  { key: 'bronze',   label: '🥉 Бронзовый',  minEarned: 0,    discount: 0  },
+];
+
+function getLoyaltyLevel(totalEarned) {
+  for (const lvl of LOYALTY_LEVELS) {
+    if (totalEarned >= lvl.minEarned) return lvl;
+  }
+  return LOYALTY_LEVELS[LOYALTY_LEVELS.length - 1];
+}
+
 async function addLoyaltyPoints(chatId, points, type, description, orderId = null) {
+  // Get previous state before update
+  const prevLp = await get(`SELECT total_earned FROM loyalty_points WHERE chat_id=?`, [chatId]).catch(()=>null);
+  const prevLevel = prevLp ? getLoyaltyLevel(prevLp.total_earned) : null;
+
   await run(`INSERT INTO loyalty_points (chat_id, points, total_earned) VALUES (?,?,?)
     ON CONFLICT(chat_id) DO UPDATE SET
       points = points + excluded.points,
@@ -2498,6 +2521,162 @@ async function addLoyaltyPoints(chatId, points, type, description, orderId = nul
     [chatId, points, points]).catch(()=>{});
   await run(`INSERT INTO loyalty_transactions (chat_id, points, type, description, order_id) VALUES (?,?,?,?,?)`,
     [chatId, points, type, description, orderId]).catch(()=>{});
+
+  // Check for level-up notification
+  if (points > 0) {
+    const newLp = await get(`SELECT total_earned FROM loyalty_points WHERE chat_id=?`, [chatId]).catch(()=>null);
+    if (newLp) {
+      const newLevel = getLoyaltyLevel(newLp.total_earned);
+      if (prevLevel && newLevel.key !== prevLevel.key && newLevel.minEarned > prevLevel.minEarned) {
+        const discountText = newLevel.discount > 0 ? ` Теперь вам доступна скидка ${newLevel.discount}% на следующую заявку\\.` : '';
+        await safeSend(chatId,
+          `🎉 *Поздравляем\\!* Вы достигли уровня *${esc(newLevel.label)}*\\!${discountText}`,
+          { parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '💫 Мои баллы', callback_data: 'loyalty' }]] } }
+        ).catch(()=>{});
+      }
+    }
+  }
+}
+
+// ─── Achievements ─────────────────────────────────────────────────────────────
+
+const ACHIEVEMENTS_LIST = [
+  { key: 'first_order',    icon: '🥇', title: 'Первая заявка',      desc: 'Оформил первую успешную заявку' },
+  { key: 'loyal_client',   icon: '🔥', title: 'Постоянный клиент',  desc: '3+ завершённых заявки' },
+  { key: 'vip_client',     icon: '💎', title: 'VIP клиент',         desc: '10+ завершённых заявок' },
+  { key: 'first_review',   icon: '⭐', title: 'Критик',             desc: 'Оставил первый отзыв' },
+  { key: 'talkative',      icon: '💬', title: 'Общительный',        desc: 'Написал менеджеру более 5 раз' },
+  { key: 'precise_choice', icon: '🎯', title: 'Точный выбор',       desc: 'Забронировал без изменений даты' },
+  { key: 'traveler',       icon: '🌍', title: 'Путешественник',     desc: 'Заявки из 2+ разных городов' },
+];
+
+async function grantAchievement(chatId, achievementKey) {
+  try {
+    const result = await run(
+      `INSERT OR IGNORE INTO achievements (chat_id, achievement_key) VALUES (?,?)`,
+      [chatId, achievementKey]
+    );
+    if (result.changes > 0) {
+      const ach = ACHIEVEMENTS_LIST.find(a => a.key === achievementKey);
+      if (ach) {
+        await safeSend(chatId,
+          `🏆 *Новое достижение\\!*\n\n${esc(ach.icon)} *${esc(ach.title)}*\n_${esc(ach.desc)}_`,
+          { parse_mode: 'MarkdownV2' }
+        ).catch(()=>{});
+      }
+    }
+  } catch {}
+}
+
+async function checkAndGrantAchievements(chatId) {
+  try {
+    // First order achievement
+    const completedOrders = await get(
+      `SELECT COUNT(*) as cnt FROM orders WHERE client_chat_id=? AND status='completed'`,
+      [String(chatId)]
+    ).catch(()=>null);
+    const cnt = completedOrders?.cnt || 0;
+    if (cnt >= 1)  await grantAchievement(chatId, 'first_order');
+    if (cnt >= 3)  await grantAchievement(chatId, 'loyal_client');
+    if (cnt >= 10) await grantAchievement(chatId, 'vip_client');
+
+    // Traveler achievement — orders from 2+ different cities
+    const cities = await query(
+      `SELECT DISTINCT location FROM orders WHERE client_chat_id=? AND location IS NOT NULL AND location != ''`,
+      [String(chatId)]
+    ).catch(()=>[]);
+    if (cities.length >= 2) await grantAchievement(chatId, 'traveler');
+
+    // Talkative — 5+ messages sent to manager
+    const msgCount = await get(
+      `SELECT COUNT(*) as cnt FROM messages m
+       JOIN orders o ON o.id = m.order_id
+       WHERE o.client_chat_id=? AND m.sender_type='client'`,
+      [String(chatId)]
+    ).catch(()=>null);
+    if ((msgCount?.cnt || 0) >= 5) await grantAchievement(chatId, 'talkative');
+  } catch {}
+}
+
+async function showAchievements(chatId) {
+  const earned = await query(
+    `SELECT achievement_key, achieved_at FROM achievements WHERE chat_id=? ORDER BY achieved_at ASC`,
+    [chatId]
+  ).catch(()=>[]);
+
+  const earnedKeys = new Set(earned.map(a => a.achievement_key));
+  const earnedMap  = Object.fromEntries(earned.map(a => [a.achievement_key, a.achieved_at]));
+
+  let text = `🏆 *Мои достижения*\n\n`;
+  text += `Получено: *${earnedKeys.size}* из *${ACHIEVEMENTS_LIST.length}*\n\n`;
+
+  for (const ach of ACHIEVEMENTS_LIST) {
+    if (earnedKeys.has(ach.key)) {
+      const dt = earnedMap[ach.key]
+        ? new Date(earnedMap[ach.key]).toLocaleDateString('ru')
+        : '';
+      text += `${esc(ach.icon)} *${esc(ach.title)}* ✅\n_${esc(ach.desc)}_${dt ? `\n📅 ${esc(dt)}` : ''}\n\n`;
+    } else {
+      text += `🔒 *${esc(ach.title)}*\n_${esc(ach.desc)}_\n\n`;
+    }
+  }
+
+  return safeSend(chatId, text.trim(), {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '💫 Мои баллы', callback_data: 'loyalty' }],
+      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+    ]}
+  });
+}
+
+// ─── Loyalty Leaderboard ──────────────────────────────────────────────────────
+
+async function showLoyaltyLeaderboard(chatId) {
+  const top = await query(
+    `SELECT lp.chat_id, lp.points, lp.total_earned,
+            (SELECT o.client_name FROM orders o WHERE o.client_chat_id=CAST(lp.chat_id AS TEXT) ORDER BY o.created_at DESC LIMIT 1) as client_name
+     FROM loyalty_points lp
+     ORDER BY lp.points DESC LIMIT 10`
+  ).catch(()=>[]);
+
+  const myRankRow = await get(
+    `SELECT COUNT(*) as pos FROM loyalty_points WHERE points > (SELECT COALESCE(points,0) FROM loyalty_points WHERE chat_id=?)`,
+    [chatId]
+  ).catch(()=>null);
+  const myPos = (myRankRow?.pos ?? 0) + 1;
+  const myLp  = await get(`SELECT points FROM loyalty_points WHERE chat_id=?`, [chatId]).catch(()=>null);
+
+  function maskName(name) {
+    if (!name) return 'Клиент';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0][0] + '***';
+    return parts[0][0] + '***' + parts[parts.length - 1][0] + '\\.';
+  }
+
+  const medals = ['🥇', '🥈', '🥉'];
+  let text = `🏆 *Топ клиентов по баллам*\n\n`;
+
+  top.forEach((row, i) => {
+    const medal  = medals[i] || `${i + 1}\\.`;
+    const masked = esc(maskName(row.client_name));
+    const isMe   = String(row.chat_id) === String(chatId);
+    const meTag  = isMe ? ' \\(вы\\)' : '';
+    text += `${medal} ${masked}${meTag} — *${row.points} баллов*\n`;
+  });
+
+  text += `\n📌 Ваша позиция: *${myPos}*`;
+  if (myLp) text += ` — *${myLp.points} баллов*`;
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '💫 Мои баллы', callback_data: 'loyalty' }],
+      [{ text: '🏆 Мои достижения', callback_data: 'my_achievements' }],
+      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+    ]}
+  });
 }
 
 async function showLoyaltyProfile(chatId) {
@@ -2508,29 +2687,36 @@ async function showLoyaltyProfile(chatId) {
       reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] }
     });
   }
-  const level = lp.total_earned >= 5000 ? '💎 Платиновый'
-    : lp.total_earned >= 2000 ? '🥇 Золотой'
-    : lp.total_earned >= 500 ? '🥈 Серебряный'
-    : '🥉 Бронзовый';
+  const level = getLoyaltyLevel(lp.total_earned);
 
   const transactions = await query(`SELECT * FROM loyalty_transactions WHERE chat_id=? ORDER BY created_at DESC LIMIT 5`, [chatId]);
-  const txText = transactions.map(t => `${t.points > 0 ? '\\+' : ''}${t.points} — ${esc(t.description)}`).join('\n') || 'Нет операций';
+  const txText = transactions.map(t => `${t.points > 0 ? '\\+' : ''}${esc(String(t.points))} — ${esc(t.description)}`).join('\n') || 'Нет операций';
+
+  // Next level info
+  const nextLevelIndex = LOYALTY_LEVELS.findIndex(l => l.key === level.key) - 1;
+  const nextLevel = nextLevelIndex >= 0 ? LOYALTY_LEVELS[nextLevelIndex] : null;
+  const toNextLine = nextLevel
+    ? `До уровня *${esc(nextLevel.label)}*: *${nextLevel.minEarned - lp.total_earned} баллов*\n`
+    : ``;
 
   const text = [
     `💫 *Ваши бонусные баллы*`,
     ``,
-    `Уровень: *${esc(level)}*`,
+    `Уровень: *${esc(level.label)}*`,
     `Текущий баланс: *${lp.points} баллов*`,
     `Всего заработано: *${lp.total_earned} баллов*`,
+    toNextLine.trim(),
     ``,
     `*Последние операции:*`,
     txText
-  ].join('\n');
+  ].filter(l => l !== '').join('\n');
 
   return safeSend(chatId, text, {
     parse_mode: 'MarkdownV2',
     reply_markup: { inline_keyboard: [
-      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]
+      [{ text: '🏆 Мои достижения',  callback_data: 'my_achievements'     }],
+      [{ text: '🏆 Топ клиентов',    callback_data: 'loyalty_leaderboard' }],
+      [{ text: '🏠 Главное меню',    callback_data: 'main_menu'           }],
     ]}
   });
 }
@@ -2560,7 +2746,8 @@ async function showReferralProgram(chatId) {
       `👥 Приглашено друзей: *${refCount}*`,
       `💫 Ваш баланс: *${points.points} баллов*`,
       ``,
-      `_За каждого приглашённого друга вы получаете 50 баллов\\!_`
+      `_За каждого приглашённого друга вы получаете 500 баллов, а ваш друг \\— 200 баллов\\!_`,
+    `_Если реферал создаёт первую заявку \\— вам дополнительно 300 баллов\\._`
     ].join('\n');
 
     return safeSend(chatId, text, {
@@ -2707,6 +2894,29 @@ async function adminChangeStatus(chatId, orderId, newStatus) {
     // Award loyalty points on order completion
     if (newStatus === 'completed' && order?.client_chat_id) {
       await addLoyaltyPoints(order.client_chat_id, 100, 'order_complete', 'Завершена заявка #' + orderId, orderId);
+
+      // Referral first-order bonus: if this client was referred, give 300 extra points to referrer
+      const refRow = await get(
+        `SELECT referrer_chat_id FROM referrals WHERE referred_chat_id=?`,
+        [order.client_chat_id]
+      ).catch(()=>null);
+      if (refRow) {
+        // Only give first-order bonus once (check if referrer already got it for this client)
+        const alreadyGiven = await get(
+          `SELECT id FROM loyalty_transactions WHERE chat_id=? AND type='referral_first_order' AND description LIKE ?`,
+          [refRow.referrer_chat_id, `%${order.client_chat_id}%`]
+        ).catch(()=>null);
+        if (!alreadyGiven) {
+          await addLoyaltyPoints(refRow.referrer_chat_id, 300, 'referral_first_order',
+            `Реферал ${order.client_chat_id} создал первую заявку`).catch(()=>{});
+          await safeSend(refRow.referrer_chat_id,
+            `👥 Ваш реферал создал заявку\\! *\\+300 бонусов* зачислено\\.`,
+            { parse_mode: 'MarkdownV2' }).catch(()=>{});
+        }
+      }
+
+      // Check and grant achievements for this client
+      await checkAndGrantAchievements(order.client_chat_id).catch(()=>{});
     }
 
     return showAdminOrder(chatId, orderId);
@@ -2791,8 +3001,9 @@ function initBot(app) {
           const existing = await get(`SELECT id FROM referrals WHERE referred_chat_id=?`, [chatId]).catch(() => null);
           if (!existing) {
             await run(`INSERT INTO referrals (referrer_chat_id, referred_chat_id) VALUES (?,?)`, [referrerId, chatId]).catch(() => {});
-            await addLoyaltyPoints(referrerId, 50, 'referral', `Приглашён новый пользователь`).catch(() => {});
-            await bot.sendMessage(referrerId, `🎉 По вашей реферальной ссылке зарегистрировался новый пользователь\\! \\+50 баллов\\.`,
+            await addLoyaltyPoints(referrerId, 500, 'referral', `Приглашён новый пользователь`).catch(() => {});
+            await addLoyaltyPoints(chatId, 200, 'referral_welcome', `Приветственный бонус по реферальной ссылке`).catch(() => {});
+            await bot.sendMessage(referrerId, `👥 По вашей реферальной ссылке зарегистрировался новый пользователь\\! *\\+500 баллов* зачислено\\.`,
               { parse_mode: 'MarkdownV2' }).catch(() => {});
           }
         }
@@ -2954,8 +3165,10 @@ function initBot(app) {
     if (data === 'about_us')   return showAboutUs(chatId);
     if (data === 'pricing')    return showPricing(chatId);
     if (data === 'profile')    return showUserProfile(chatId, q.from.first_name);
-    if (data === 'loyalty')    return showLoyaltyProfile(chatId);
-    if (data === 'referral')   return showReferralProgram(chatId);
+    if (data === 'loyalty')              return showLoyaltyProfile(chatId);
+    if (data === 'my_achievements')      return showAchievements(chatId);
+    if (data === 'loyalty_leaderboard')  return showLoyaltyLeaderboard(chatId);
+    if (data === 'referral')             return showReferralProgram(chatId);
     if (data === 'calculator') return showPriceCalculator(chatId);
     if (data === 'noop')       return; // label-only buttons
     if (data === 'my_orders')  return showMyOrders(chatId);
@@ -4515,6 +4728,16 @@ function initBot(app) {
       await run('INSERT INTO reviews (client_name, rating, text, model_id, approved) VALUES (?,?,?,?,0)',
         [clientName, rating, text, null]).catch(e => console.error('[Bot] insert review:', e.message));
       await clearSession(chatId);
+
+      // Bonus points for good review (rating 4-5)
+      let reviewBonusMsg = '';
+      if (rating >= 4) {
+        await addLoyaltyPoints(chatId, 100, 'review', 'Бонус за отзыв').catch(()=>{});
+        reviewBonusMsg = '\n\n🎁 *\\+100 баллов* начислено за отзыв\\!';
+      }
+      // Grant "first_review" achievement
+      await grantAchievement(chatId, 'first_review').catch(()=>{});
+
       const adminIds2 = await getAdminChatIds();
       await Promise.allSettled(adminIds2.map(id => safeSend(id,
         `⭐ Новый отзыв от *${esc(clientName)}*\nОценка: ${'⭐'.repeat(rating)}\n\n${esc(text)}`,
@@ -4524,7 +4747,7 @@ function initBot(app) {
         }
       )));
       return safeSend(chatId,
-        '✅ Спасибо за отзыв\\!\n\nОн появится после модерации\\.', {
+        `✅ Спасибо за отзыв\\!\n\nОн появится после модерации\\.${reviewBonusMsg}`, {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
         }
@@ -4608,6 +4831,8 @@ function initBot(app) {
         }
       )));
       await clearSession(chatId);
+      // Check "talkative" achievement after sending
+      await checkAndGrantAchievements(chatId).catch(()=>{});
       return safeSend(chatId,
         '✅ Вопрос отправлен менеджеру\\. Мы ответим в ближайшее время\\!',
         {
@@ -4867,6 +5092,8 @@ async function showUserProfile(chatId, firstName) {
       reply_markup: { inline_keyboard: [
         ...recentBtns,
         [{ text: '📋 Все заявки',        callback_data: 'my_orders'             }],
+        [{ text: '🏆 Достижения',        callback_data: 'my_achievements'       },
+         { text: '💫 Баллы',             callback_data: 'loyalty'               }],
         [{ text: '✏️ Изменить контакты', callback_data: 'profile_edit_contacts' }],
         [{ text: '🔔 Уведомления',        callback_data: 'client_notif_settings' }],
         [{ text: '📝 Новая заявка',       callback_data: 'bk_start'             }],

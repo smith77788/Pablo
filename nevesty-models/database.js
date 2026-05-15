@@ -63,6 +63,7 @@ async function initDatabase() {
       [5, 'Add loyalty_points, loyalty_transactions, client_prefs'],
       [6, 'Add referrals, blocked_clients, ab_experiments, audit_log'],
       [7, 'Add UTM columns to orders, quick_bookings'],
+      [8, 'Add achievements table'],
     ];
     for (const [v, desc] of migrations) {
       await run('INSERT OR IGNORE INTO schema_versions (version, description) VALUES (?,?)', [v, desc]).catch(()=>{});
@@ -256,6 +257,16 @@ async function initDatabase() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`).catch(()=>{});
   await run(`CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_chat_id)`).catch(()=>{});
+
+  // Achievements system
+  await run(`CREATE TABLE IF NOT EXISTS achievements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    achievement_key TEXT NOT NULL,
+    achieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chat_id, achievement_key)
+  )`).catch(()=>{});
+  await run(`CREATE INDEX IF NOT EXISTS idx_achievements_chat ON achievements(chat_id)`).catch(()=>{});
 
   // Migrations — add status column to reviews if missing
   await run(`ALTER TABLE reviews ADD COLUMN status TEXT DEFAULT 'pending'`).catch(() => {});
