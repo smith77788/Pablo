@@ -320,7 +320,8 @@ const KB_MAIN_ADMIN = (badge, score) => {
       [{ text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' },
        { text: '🎯 AI Задачи',             callback_data: 'adm_factory_tasks'  }],
       [{ text: '👥 Клиенты',                callback_data: 'adm_clients'         },
-       { text: '📋 Журнал',                 callback_data: 'adm_audit_log'       }],
+       { text: '📋 Журнал',                 callback_data: 'adm_audit_log'       },
+       { text: '👥 Менеджеры',              callback_data: 'adm_managers'        }],
       ...(SITE_URL.startsWith('https://') ? [[
         { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } },
         { text: '🌐 Сайт', url: siteUrl('/', { utm_campaign: 'admin_menu' }) },
@@ -2975,6 +2976,81 @@ async function showAdminManagement(chatId) {
   });
 }
 
+// ─── Managers List & Stats ────────────────────────────────────────────────────
+
+async function showManagersList(chatId) {
+  if (!isAdmin(chatId)) return;
+  const admins = await query(
+    `SELECT a.id, a.username, a.telegram_id, a.role,
+            COUNT(o.id) as orders_count,
+            COUNT(CASE WHEN o.status = 'completed' THEN 1 END) as completed_count
+     FROM admins a
+     LEFT JOIN orders o ON o.manager_id = a.id
+     GROUP BY a.id
+     ORDER BY a.role, a.username`,
+    []
+  );
+
+  if (!admins.length) {
+    return safeSend(chatId, '👥 *Менеджеры*\n\nНет менеджеров в системе\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'admin_menu' }]] }
+    });
+  }
+
+  let text = '👥 *Список менеджеров:*\n\n';
+  const kb = [];
+
+  for (const a of admins) {
+    const roleLabel = a.role === 'superadmin' ? '👑' : a.role === 'manager' ? '👤' : '🔧';
+    text += `${roleLabel} *${esc(a.username)}*`;
+    if (a.telegram_id) text += ` \\(ID: ${esc(String(a.telegram_id))}\\)`;
+    text += `\n📋 Заявок: ${a.orders_count || 0}, завершено: ${a.completed_count || 0}\n\n`;
+    kb.push([{ text: `📊 Статистика: ${a.username}`, callback_data: `adm_mgr_stat_${a.id}` }]);
+  }
+
+  kb.push([{ text: '← Назад', callback_data: 'admin_menu' }]);
+
+  return safeSend(chatId, text.trim(), { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: kb } });
+}
+
+async function showManagerStats(chatId, managerId) {
+  if (!isAdmin(chatId)) return;
+  const manager = await get('SELECT id, username, telegram_id, role FROM admins WHERE id=?', [managerId]);
+  if (!manager) return safeSend(chatId, 'Менеджер не найден\\.', { parse_mode: 'MarkdownV2' });
+
+  const stats = await get(
+    `SELECT
+       COUNT(*) as total_orders,
+       COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+       COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled,
+       COUNT(CASE WHEN status IN ('new','confirmed') THEN 1 END) as active,
+       COALESCE(AVG(CASE WHEN status = 'completed' AND CAST(budget AS REAL) > 0 THEN CAST(budget AS REAL) END), 0) as avg_check,
+       COALESCE(SUM(CASE WHEN status = 'completed' THEN CAST(budget AS REAL) ELSE 0 END), 0) as total_revenue
+     FROM orders WHERE manager_id = ?`,
+    [managerId]
+  );
+
+  const roleLabel = manager.role === 'superadmin' ? '👑 Суперадмин' : manager.role === 'manager' ? '👤 Менеджер' : '🔧 Администратор';
+
+  let text = `📊 *Статистика менеджера: ${esc(manager.username)}*\n\n`;
+  text += `Роль: ${roleLabel}\n`;
+  if (manager.telegram_id) text += `Telegram ID: ${esc(String(manager.telegram_id))}\n`;
+  text += `\n📋 *Заявки:*\n`;
+  text += `• Всего: ${stats?.total_orders || 0}\n`;
+  text += `• Активных: ${stats?.active || 0}\n`;
+  text += `• Завершено: ${stats?.completed || 0}\n`;
+  text += `• Отменено: ${stats?.cancelled || 0}\n`;
+  if (stats?.total_revenue > 0) {
+    text += `\n💰 *Финансы:*\n`;
+    text += `• Общая выручка: ${esc(String(Math.round(stats.total_revenue)))} руб\\.\n`;
+    text += `• Средний чек: ${esc(String(Math.round(stats.avg_check)))} руб\\.\n`;
+  }
+
+  const kb = [[{ text: '← К списку', callback_data: 'adm_managers' }]];
+  return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: kb } });
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 async function showExportMenu(chatId) {
@@ -5044,6 +5120,14 @@ function initBot(app) {
     if (data === 'adm_admins')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminManagement(chatId); }
     if (data === 'adm_export')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showExportMenu(chatId); }
     if (data === 'adm_addmodel')  { if (!isAdmin(chatId)) return; return showAddModelStep(chatId, { _step: 'name' }); }
+
+    // ── Admin: managers list & stats
+    if (data === 'adm_managers') { if (!isAdmin(chatId)) return; return showManagersList(chatId); }
+    if (data.startsWith('adm_mgr_stat_')) {
+      if (!isAdmin(chatId)) return;
+      const managerId = parseInt(data.replace('adm_mgr_stat_', ''));
+      if (!isNaN(managerId)) return showManagerStats(chatId, managerId);
+    }
 
     // ── Admin: client management
     if (data === 'adm_clients') { if (!isAdmin(chatId)) return; return showAdminClients(chatId, 0); }
