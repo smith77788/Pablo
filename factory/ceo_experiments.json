@@ -1,0 +1,318 @@
+{
+  "active": [],
+  "results": [
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:53:33.688155"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:53:33.688280"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:53:33.689118"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:53:33.689255"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:53:33.690153"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.4,
+      "timestamp": "2026-05-15T15:53:33.690315"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.5,
+      "timestamp": "2026-05-15T15:53:33.691112"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:53:33.691371"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:53:33.719345"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:53:33.719576"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:53:33.728183"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "b_rate",
+      "value": 0.5,
+      "timestamp": "2026-05-15T15:53:33.728396"
+    },
+    {
+      "experiment_id": "exp_003",
+      "metric": "a_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:53:33.729620"
+    },
+    {
+      "experiment_id": "exp_003",
+      "metric": "b_rate",
+      "value": 0.15,
+      "timestamp": "2026-05-15T15:53:33.729866"
+    },
+    {
+      "experiment_id": "exp_004",
+      "metric": "a_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:53:33.730837"
+    },
+    {
+      "experiment_id": "exp_004",
+      "metric": "b_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:53:33.731034"
+    },
+    {
+      "experiment_id": "exp_005",
+      "metric": "b_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:53:33.731941"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:53:33.826454"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "b_rate",
+      "value": 0.35,
+      "timestamp": "2026-05-15T15:53:33.826681"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:08.860577"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:55:08.860901"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:08.861871"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:55:08.862092"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:08.867479"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "b_rate",
+      "value": 0.5,
+      "timestamp": "2026-05-15T15:55:08.867726"
+    },
+    {
+      "experiment_id": "exp_003",
+      "metric": "a_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:55:08.868568"
+    },
+    {
+      "experiment_id": "exp_003",
+      "metric": "b_rate",
+      "value": 0.15,
+      "timestamp": "2026-05-15T15:55:08.868839"
+    },
+    {
+      "experiment_id": "exp_004",
+      "metric": "a_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:55:08.869656"
+    },
+    {
+      "experiment_id": "exp_004",
+      "metric": "b_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:08.869884"
+    },
+    {
+      "experiment_id": "exp_005",
+      "metric": "b_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:55:08.870729"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:51.526210"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:55:51.526522"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:51.527621"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:55:51.527875"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:51.533005"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "b_rate",
+      "value": 0.5,
+      "timestamp": "2026-05-15T15:55:51.533311"
+    },
+    {
+      "experiment_id": "exp_003",
+      "metric": "a_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:55:51.534352"
+    },
+    {
+      "experiment_id": "exp_003",
+      "metric": "b_rate",
+      "value": 0.15,
+      "timestamp": "2026-05-15T15:55:51.534642"
+    },
+    {
+      "experiment_id": "exp_004",
+      "metric": "a_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:55:51.535688"
+    },
+    {
+      "experiment_id": "exp_004",
+      "metric": "b_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:51.535953"
+    },
+    {
+      "experiment_id": "exp_005",
+      "metric": "b_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:55:51.537166"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:58.368014"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:55:58.368344"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:58.369762"
+    },
+    {
+      "experiment_id": "exp_001",
+      "metric": "b_rate",
+      "value": 0.3,
+      "timestamp": "2026-05-15T15:55:58.370051"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "a_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:58.376333"
+    },
+    {
+      "experiment_id": "exp_002",
+      "metric": "b_rate",
+      "value": 0.5,
+      "timestamp": "2026-05-15T15:55:58.376703"
+    },
+    {
+      "experiment_id": "exp_003",
+      "metric": "a_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:55:58.377765"
+    },
+    {
+      "experiment_id": "exp_003",
+      "metric": "b_rate",
+      "value": 0.15,
+      "timestamp": "2026-05-15T15:55:58.378064"
+    },
+    {
+      "experiment_id": "exp_004",
+      "metric": "a_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:55:58.379068"
+    },
+    {
+      "experiment_id": "exp_004",
+      "metric": "b_rate",
+      "value": 0.2,
+      "timestamp": "2026-05-15T15:55:58.379384"
+    },
+    {
+      "experiment_id": "exp_005",
+      "metric": "b_rate",
+      "value": 0.1,
+      "timestamp": "2026-05-15T15:55:58.380434"
+    }
+  ],
+  "history": []
+}
