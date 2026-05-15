@@ -25,6 +25,19 @@ function validatePhone(p) { return typeof p === 'string' && /^[\d\s\+\(\)\-]{7,2
 function validateEmail(e) { return !e || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((e || '').trim()); }
 function validateDate(d) { return !d || (/^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))); }
 
+// ─── Input sanitization middleware ───────────────────────────────────────────
+// Strip null bytes and control chars from all string body inputs
+router.use((req, res, next) => {
+  if (req.body && typeof req.body === 'object') {
+    for (const [key, val] of Object.entries(req.body)) {
+      if (typeof val === 'string') {
+        req.body[key] = val.replace(/\x00/g, '').trim();
+      }
+    }
+  }
+  next();
+});
+
 // ─── File utilities ───────────────────────────────────────────────────────────
 function deleteFile(urlPath) {
   if (!urlPath || typeof urlPath !== 'string') return;

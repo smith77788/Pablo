@@ -27,14 +27,48 @@ try {
 // ─── Security headers ─────────────────────────────────────────────────────────
 try {
   const helmet = require('helmet');
-  app.use(helmet({ contentSecurityPolicy: false }));
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "cdn.tailwindcss.com", "cdnjs.cloudflare.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "cdnjs.cloudflare.com"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", "cdnjs.cloudflare.com"],
+      }
+    },
+    crossOriginEmbedderPolicy: false
+  }));
 } catch {}
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 try {
   const rateLimit = require('express-rate-limit');
-  app.use('/api/orders', rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { error: 'Слишком много запросов. Попробуйте позже.' } }));
-  app.use('/api/admin/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: 'Слишком много попыток входа.' } }));
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много запросов. Попробуйте позже.' }
+  });
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много попыток входа. Попробуйте через 15 минут.' }
+  });
+  const ordersLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много заявок. Попробуйте позже.' }
+  });
+  app.use('/api/', apiLimiter);
+  app.use('/api/admin/login', authLimiter);
+  app.use('/api/orders', ordersLimiter);
 } catch {}
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
@@ -82,12 +116,18 @@ async function buildHealthResponse() {
     if (row) factoryLastCycle = row.value;
   } catch (_) { /* table may not have this key yet */ }
 
+  const uptime = Math.floor(process.uptime());
   return {
     status: dbStatus === 'ok' ? 'ok' : 'degraded',
-    uptime: Math.floor(process.uptime()),
+    uptime,
+    uptimeHuman: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
     database: dbStatus,
     bot: botInstance ? 'connected' : 'not_initialized',
-    memory_mb: Math.round(mem.rss / 1024 / 1024),
+    memory: {
+      rss: Math.round(mem.rss / 1024 / 1024) + 'MB',
+      heapUsed: Math.round(mem.heapUsed / 1024 / 1024) + 'MB',
+    },
+    memory_mb: Math.round(mem.rss / 1024 / 1024), // legacy field kept for compatibility
     factory_last_cycle: factoryLastCycle,
     version: pkg.version,
     ts: new Date().toISOString(),
