@@ -50,6 +50,8 @@
 
     document.getElementById('cookie-accept').addEventListener('click', () => {
       setCookie(COOKIE_KEY, 'all', COOKIE_DURATION_DAYS);
+      // Also set localStorage key for GA/YM inline loaders that check it
+      try { localStorage.setItem('cookie_consent', 'accepted'); } catch(e) {}
       hideBanner(banner);
       // Notify analytics module if available
       window.NM?.analytics?.consent?.('all');
@@ -57,6 +59,7 @@
 
     document.getElementById('cookie-reject').addEventListener('click', () => {
       setCookie(COOKIE_KEY, 'necessary', COOKIE_DURATION_DAYS);
+      try { localStorage.setItem('cookie_consent', 'declined'); } catch(e) {}
       hideBanner(banner);
       window.NM?.analytics?.consent?.('necessary');
     });

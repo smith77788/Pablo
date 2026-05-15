@@ -365,12 +365,12 @@
 
       <!-- ══════════ LOGIN PANEL ══════════ -->
       <div class="cabinet-login" id="loginPanel">
-        <!-- Phone entry: direct lookup, no OTP -->
+        <!-- Step 1: Phone entry -->
         <div id="stepPhone">
           <div class="cabinet-login-icon">📋</div>
-          <h2>Мои заявки</h2>
-          <p>Введите номер телефона, указанный при оформлении заявки — мы покажем все ваши заявки.</p>
-          <label for="phoneInput" class="sr-only">Номер телефона</label>
+          <h2>Особистий кабінет</h2>
+          <p>Введіть номер телефону, вказаний при оформленні заявки — ми покажемо всі ваші заявки.</p>
+          <label for="phoneInput" class="sr-only">Номер телефону</label>
           <input
             type="tel"
             class="cabinet-phone-input"
@@ -378,16 +378,47 @@
             placeholder="+7 (999) 000-00-00"
             inputmode="tel"
             autocomplete="tel"
-            aria-label="Ваш номер телефона"
+            aria-label="Ваш номер телефону"
           />
-          <div class="cabinet-login-hint">Формат: +7 (XXX) XXX-XX-XX или 8XXXXXXXXXX</div>
+          <div class="cabinet-login-hint">Формат: +7 (XXX) XXX-XX-XX або 8XXXXXXXXXX</div>
           <button class="cabinet-login-btn" id="searchBtn" onclick="Cabinet.search()">
-            Найти заявки →
+            Знайти заявки →
           </button>
           <div class="cabinet-login-hint" style="margin-top:12px">
-            Нет заявок? <a href="/booking.html" style="color:var(--gold);text-decoration:none">Оформить первую →</a>
+            Немає заявок? <a href="/booking.html" style="color:var(--gold);text-decoration:none">Оформити першу →</a>
           </div>
         </div>
+
+        <!-- Step 2: OTP code verification -->
+        <div id="stepCode" style="display:none">
+          <div class="cabinet-login-icon">💬</div>
+          <h2>Підтвердіть номер</h2>
+          <p>Код надіслано у Telegram. Введіть його нижче щоб увійти.</p>
+          <label for="otpInput" class="sr-only">Код підтвердження</label>
+          <input
+            type="text"
+            class="cabinet-phone-input"
+            id="otpInput"
+            placeholder="000000"
+            maxlength="6"
+            pattern="\d{4,6}"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            aria-label="Код підтвердження"
+            style="letter-spacing:6px;font-size:1.4rem;text-align:center"
+          />
+          <div class="cabinet-login-hint" id="otpHint">Перевіряємо код…</div>
+          <button class="cabinet-login-btn" id="verifyBtn" onclick="Cabinet.verifyCode()" style="margin-top:14px">
+            Увійти
+          </button>
+          <button
+            onclick="Cabinet.backToPhone()"
+            style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:0.8rem;margin-top:10px;width:100%"
+          >
+            ← Змінити номер
+          </button>
+        </div>
+
         <div class="cabinet-login-error" id="loginError" role="alert"></div>
       </div>
 
@@ -423,6 +454,19 @@
 
         <!-- Orders container -->
         <div id="ordersContainer" role="list" aria-label="Список заявок" aria-live="polite" aria-relevant="additions text"></div>
+
+        <!-- ── Favorites section ── -->
+        <div id="favoritesSection" style="margin-top:40px;border-top:1px solid var(--border);padding-top:28px">
+          <h4 style="font-size:0.95rem;letter-spacing:2px;text-transform:uppercase;color:var(--white);margin-bottom:18px">
+            ❤️ Вибране
+          </h4>
+          <div id="favoritesContainer">
+            <div style="display:flex;align-items:center;gap:8px;padding:10px 0">
+              <div class="skel" style="width:40px;height:40px;border-radius:50%;flex-shrink:0"></div>
+              <div style="flex:1"><div class="skel skel-title" style="width:50%;margin-bottom:6px"></div><div class="skel skel-sub" style="width:30%"></div></div>
+            </div>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -1080,6 +1124,55 @@
 
     function stopPolling() {
       if (_pollingInterval) { clearInterval(_pollingInterval); _pollingInterval = null; }
+    }
+
+    // ── Favorites (from localStorage wishlist) ────────────────────
+    function loadFavorites() {
+      const container = document.getElementById('favoritesContainer');
+      if (!container) return;
+
+      let favs = [];
+      try { favs = JSON.parse(localStorage.getItem('wishlist') || '[]'); } catch (_e) {}
+
+      if (!favs.length) {
+        container.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;padding:8px 0">Вибраних моделей немає. <a href="/catalog.html" style="color:var(--gold);text-decoration:none">Переглянути каталог →</a></p>';
+        return;
+      }
+
+      // Fetch model details for each favourite
+      Promise.allSettled(favs.map(id =>
+        fetch('/api/models/' + id).then(r => r.ok ? r.json() : null)
+      )).then(results => {
+        const models = results.map(r => r.status === 'fulfilled' ? r.value : null).filter(Boolean);
+        if (!models.length) {
+          container.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;padding:8px 0">Вибраних моделей немає</p>';
+          return;
+        }
+        container.innerHTML = models.map(m => `
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+            ${m.photos && m.photos[0]
+              ? `<img src="${m.photos[0]}" alt="${m.name || ''}" loading="lazy"
+                      style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:1px solid var(--border);flex-shrink:0">`
+              : `<div style="width:44px;height:44px;border-radius:50%;background:var(--bg3);border:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--gold)">✦</div>`
+            }
+            <div style="flex:1;min-width:0">
+              <a href="/model.html?id=${m.id}"
+                 style="color:var(--white);text-decoration:none;font-size:0.9rem;font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                 onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--white)'">
+                ${m.name || 'Модель'}
+              </a>
+              ${m.city ? `<span style="font-size:0.75rem;color:var(--text-dim)">${m.city}</span>` : ''}
+            </div>
+            <a href="/booking.html?model=${m.id}" title="Забронювати"
+               style="font-size:0.78rem;color:var(--gold);border:1px solid rgba(201,169,110,0.4);padding:5px 10px;text-decoration:none;flex-shrink:0;transition:background 0.2s"
+               onmouseover="this.style.background='rgba(201,169,110,0.1)'" onmouseout="this.style.background='transparent'">
+              Бронювати
+            </a>
+          </div>
+        `).join('');
+      }).catch(() => {
+        container.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;padding:8px 0">Не вдалося завантажити вибране</p>';
+      });
     }
 
     // ── Init ──────────────────────────────────────────────────────
