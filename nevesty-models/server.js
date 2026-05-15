@@ -395,7 +395,9 @@ async function buildHealthResponse() {
   const memUsedMb = Math.round(mem.rss / 1024 / 1024 * 10) / 10;
   const heapUsedMb = Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10;
   const heapTotalMb = Math.round(mem.heapTotal / 1024 / 1024 * 10) / 10;
+  const externalMb = Math.round((mem.external || 0) / 1024 / 1024 * 10) / 10;
   const memAlertMb = parseInt(process.env.MEMORY_ALERT_MB || '500');
+  const cpuUsage = process.cpuUsage();
   let dbStatus = 'ok';
   let dbError = null;
   let dbSizeMb = null;
@@ -515,6 +517,7 @@ async function buildHealthResponse() {
       rss_mb: memUsedMb,
       heap_used_mb: heapUsedMb,
       heap_total_mb: heapTotalMb,
+      external_mb: externalMb,
       free_mb: freeMemMb,
       total_mb: totalMemMb,
       alert: memUsedMb > memAlertMb,
@@ -523,6 +526,12 @@ async function buildHealthResponse() {
       load_1m: Math.round(loadAvg[0] * 100) / 100,
       load_5m: Math.round(loadAvg[1] * 100) / 100,
       cores: os.cpus().length,
+      user_ms: Math.round(cpuUsage.user / 1000),
+      system_ms: Math.round(cpuUsage.system / 1000),
+    },
+    uptime: {
+      seconds: uptime,
+      formatted: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${uptime % 60}s`,
     },
     database: databaseInfo,
     stats: {
@@ -702,6 +711,20 @@ async function start() {
     console.log(`🔐 Admin panel     →  http://localhost:${PORT}/admin/login.html`);
     console.log(`   Login: ${process.env.ADMIN_USERNAME || 'admin'} / [password from ADMIN_PASSWORD env var]`);
     console.log(`❤  Health check   →  http://localhost:${PORT}/health\n`);
+
+    // ─── Startup Telegram notification ───────────────────────────────────────
+    if (process.env.BOT_TOKEN && process.env.ADMIN_TELEGRAM_IDS) {
+      const adminIds = process.env.ADMIN_TELEGRAM_IDS.split(',').filter(Boolean);
+      const startMsg = encodeURIComponent(`✅ Сервер запущен\nВремя: ${new Date().toLocaleString('ru-RU')}\nПорт: ${PORT}`);
+      adminIds.forEach(id => {
+        try {
+          require('https').get(
+            `https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage?chat_id=${id.trim()}&text=${startMsg}`,
+            () => {}
+          ).on('error', () => {});
+        } catch (_) {}
+      });
+    }
   });
 
   // ─── WebSocket для real-time обновлений заявок ────────────────────────────────

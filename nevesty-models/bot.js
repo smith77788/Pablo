@@ -33,7 +33,7 @@ let bot = null;
 const sessionTimers = new Map();
 
 const ACTIVE_BOOKING_STATES = new Set([
-  'bk_s1', 'bk_s2_event', 'bk_s2_date', 'bk_s2_dur', 'bk_s2_loc',
+  'bk_s1', 'bk_s1_add', 'bk_s2_event', 'bk_s2_date', 'bk_s2_dur', 'bk_s2_loc',
   'bk_s2_budget', 'bk_s2_comments', 'bk_s3_name', 'bk_s3_phone',
   'bk_s3_email', 'bk_s3_tg', 'bk_s4',
   'leave_review_text', 'bk_quick_name', 'bk_quick_phone',
@@ -989,7 +989,24 @@ async function showClientOrder(chatId, orderId) {
     if (o.event_date)   text += `Дата: ${esc(o.event_date)}\n`;
     if (o.event_duration) text += `Продолжительность: ${o.event_duration} ч\\.\n`;
     if (o.location)     text += `Место: ${esc(o.location)}\n`;
-    if (o.model_name)   text += `Модель: ${esc(o.model_name)}\n`;
+    // Show all models if multi-model booking
+    if (o.model_ids) {
+      try {
+        const ids = JSON.parse(o.model_ids);
+        if (Array.isArray(ids) && ids.length > 1) {
+          const modelRows = await query(
+            `SELECT id, name FROM models WHERE id IN (${ids.map(() => '?').join(',')})`, ids
+          );
+          const nameMap = Object.fromEntries(modelRows.map(r => [r.id, r.name]));
+          text += `Модели \\(${ids.length}\\):\n`;
+          ids.forEach((id, i) => { text += `  ${i+1}\\. ${esc(nameMap[id] || String(id))}\n`; });
+        } else if (o.model_name) {
+          text += `Модель: ${esc(o.model_name)}\n`;
+        }
+      } catch { if (o.model_name) text += `Модель: ${esc(o.model_name)}\n`; }
+    } else if (o.model_name) {
+      text += `Модель: ${esc(o.model_name)}\n`;
+    }
     if (o.budget)       text += `Бюджет: ${esc(o.budget)}\n`;
     if (msgs.length) {
       text += `\n💬 *Последние сообщения:*\n`;
@@ -1312,7 +1329,22 @@ async function bkStep3Telegram(chatId, data, tgUsername) {
 async function bkStep4Confirm(chatId, data) {
   await setSession(chatId, 'bk_s4', data);
   let text = stepHeader(4,'Подтвердите заявку');
-  text += `💃 Модель: *${data.model_name ? esc(data.model_name) : 'Менеджер подберёт'}*\n`;
+
+  // Show all selected models if multi-model booking
+  const modelIds = Array.isArray(data.model_ids) ? data.model_ids : [];
+  if (modelIds.length > 1) {
+    // Fetch names for any model_ids that don't have cached names yet
+    const modelNames = Array.isArray(data.model_names) ? data.model_names : [];
+    if (modelNames.length === modelIds.length) {
+      text += `💃 Модели \\(${modelIds.length}\\):\n`;
+      modelNames.forEach((name, i) => { text += `  ${i+1}\\. ${esc(name)}\n`; });
+    } else {
+      text += `💃 Модели: *${esc(modelIds.join(', '))}* \\(ID\\)\n`;
+    }
+  } else {
+    text += `💃 Модель: *${data.model_name ? esc(data.model_name) : 'Менеджер подберёт'}*\n`;
+  }
+
   text += `🎭 Мероприятие: *${esc(EVENT_TYPES[data.event_type]||data.event_type)}*\n`;
   if (data.event_date)     text += `📅 Дата: ${esc(data.event_date)}\n`;
   text += `⏱ Продолжительность: ${data.event_duration||4} ч\\.\n`;
@@ -1327,9 +1359,10 @@ async function bkStep4Confirm(chatId, data) {
   return safeSend(chatId, text, {
     parse_mode: 'MarkdownV2',
     reply_markup: { inline_keyboard: [
-      [{ text: '✅ Отправить заявку', callback_data: 'bk_submit'  }],
-      [{ text: '← Изменить',          callback_data: 'bk_start'   }],
-      [{ text: '❌ Отменить',          callback_data: 'bk_cancel'  }],
+      [{ text: '✅ Отправить заявку', callback_data: 'bk_submit'    }],
+      [{ text: '➕ Добавить модель',  callback_data: 'bk_add_model' }],
+      [{ text: '← Изменить',          callback_data: 'bk_start'    }],
+      [{ text: '❌ Отменить',          callback_data: 'bk_cancel'   }],
     ]}
   });
 }
@@ -1353,18 +1386,23 @@ async function bkSubmit(chatId, data) {
     }
 
     const orderNum = generateOrderNumber();
+    // Serialize model_ids if multiple models selected
+    const modelIdsJson = (Array.isArray(data.model_ids) && data.model_ids.length > 1)
+      ? JSON.stringify(data.model_ids)
+      : null;
     await run(
       `INSERT INTO orders
         (order_number,client_name,client_phone,client_email,client_telegram,
-         client_chat_id,model_id,event_type,event_date,event_duration,
+         client_chat_id,model_id,model_ids,event_type,event_date,event_duration,
          location,budget,comments,status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'new')`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new')`,
       [
         orderNum,
         data.client_name, data.client_phone,
         data.client_email||null, data.client_telegram||null,
         String(chatId),
         data.model_id||null,
+        modelIdsJson,
         data.event_type, data.event_date||null,
         parseInt(data.event_duration)||4,
         data.location||null, data.budget||null, data.comments||null,

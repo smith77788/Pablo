@@ -457,6 +457,22 @@ def run_phase_26_model_bios(db_path: str) -> dict:
         return {"status": "error", "detail": str(e)}
 
 
+def run_phase_27_faq_generator(db_path: str) -> dict:
+    """Phase 27: FAQ content generation and improvement suggestions."""
+    try:
+        from factory.agents.faq_generator import FAQGenerator
+        gen = FAQGenerator()
+        result = gen.run(db_path)
+        return {
+            'status': 'ok',
+            'existing_faq': result['existing_count'],
+            'suggestions': len(result['suggestions']),
+            'improved': result['improved_count'],
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 # Threshold for auto-apply: variant B must be at least 3% conversion to auto-apply
 SCALE_THRESHOLD_AUTO = 3.0
 
@@ -2414,6 +2430,16 @@ def run_cycle() -> dict:
         logger.info("[Phase26] Model bios result: %s", _phase26)
     except Exception as e:
         logger.error("Phase 26 Model Bios error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n❓ PHASE 27: FAQ GENERATOR")
+    # Phase 27: FAQ Generator
+    try:
+        phase27_result = run_phase_27_faq_generator("/home/user/Pablo/nevesty-models/data.db")
+        results["phases"]["faq_generator"] = phase27_result
+        summary_lines.append(f"Phase27 FAQ: {phase27_result.get('suggestions', 0)} new suggestions")
+    except Exception as e:
+        results["phases"]["faq_generator"] = {"status": "error", "error": str(e)}
 
     # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE

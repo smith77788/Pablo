@@ -1074,9 +1074,9 @@
     try {
       const csrfToken = await getCsrfToken();
 
-      // Use first model_id for backward compat with API, send model_ids as comma-separated too
-      const modelIdForApi = state.selected_models.length > 0 ? state.selected_models[0].id : (state.model_id || null);
-      const modelIdsStr   = state.model_ids.length > 1 ? state.model_ids.join(',') : null;
+      // Use first model_id for backward compat with API, send model_ids array for multi-model support
+      const modelIdForApi  = state.selected_models.length > 0 ? state.selected_models[0].id : (state.model_id || null);
+      const modelIdsForApi = state.model_ids.length > 1 ? state.model_ids : null;
 
       const body = {
         client_name:     state.client_name,
@@ -1084,6 +1084,7 @@
         client_email:    state.client_email    || null,
         client_telegram: state.client_telegram || null,
         model_id:        modelIdForApi,
+        model_ids:       modelIdsForApi,
         event_type:      state.event_type,
         event_date:      state.event_date       || null,
         event_duration:  +state.event_duration  || 4,
@@ -1091,12 +1092,6 @@
         budget:          state.budget           || null,
         comments:        state.comments         || null,
       };
-
-      // Include additional model IDs in comments if multiple selected
-      if (modelIdsStr) {
-        const modelNames = state.selected_models.map(m => m.name).join(', ');
-        body.comments = (body.comments ? body.comments + '\n\n' : '') + `[Выбранные модели: ${modelNames}]`;
-      }
 
       // Attach UTM parameters if available
       if (window.NM && NM.analytics) {

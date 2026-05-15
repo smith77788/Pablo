@@ -286,6 +286,9 @@ async function initDatabase() {
   // Migration — add review_requested timestamp to orders
   await run(`ALTER TABLE orders ADD COLUMN review_requested DATETIME DEFAULT NULL`).catch(() => {});
 
+  // Migration — add model_ids column for multi-model bookings (stores JSON array of model IDs)
+  await run(`ALTER TABLE orders ADD COLUMN model_ids TEXT DEFAULT NULL`).catch(() => {});
+
   // Migration — add reminder_sent_at for event reminders (v17)
   await run(`ALTER TABLE orders ADD COLUMN reminder_sent_at TEXT DEFAULT NULL`).catch(() => {});
 

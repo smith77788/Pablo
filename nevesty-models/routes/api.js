@@ -1701,7 +1701,7 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
     }
 
     const { client_name, client_phone, client_email, client_telegram, client_chat_id,
-            model_id, event_type, event_date, event_duration, location, budget, comments,
+            model_id, model_ids: rawModelIds, event_type, event_date, event_duration, location, budget, comments,
             utm_source, utm_medium, utm_campaign } = req.body;
 
     if (!sanitize(client_name, 100)) return res.status(400).json({ error: 'Укажите ваше имя' });
@@ -1713,13 +1713,33 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
     const duration = Math.min(Math.max(parseInt(event_duration, 10) || 4, 1), 48);
     const order_number = generateOrderNumber();
 
+    // Normalize model_ids: accept array, comma-separated string, or derive from model_id
+    let parsedModelIds = null;
+    if (Array.isArray(rawModelIds) && rawModelIds.length > 0) {
+      parsedModelIds = rawModelIds.map(Number).filter(n => n > 0);
+    } else if (typeof rawModelIds === 'string' && rawModelIds.trim()) {
+      parsedModelIds = rawModelIds.split(',').map(Number).filter(n => n > 0);
+    }
+    const primaryModelId = model_id ? (parseInt(model_id, 10) || null)
+      : (parsedModelIds && parsedModelIds.length > 0 ? parsedModelIds[0] : null);
+    // Ensure primary is included in model_ids if we have multiple
+    if (parsedModelIds && parsedModelIds.length > 1) {
+      if (primaryModelId && !parsedModelIds.includes(primaryModelId)) {
+        parsedModelIds.unshift(primaryModelId);
+      }
+    } else if (parsedModelIds && parsedModelIds.length <= 1) {
+      // Single model — don't store redundant model_ids
+      parsedModelIds = null;
+    }
+
     const s = {
       client_name: sanitize(client_name, 100),
       client_phone: client_phone.trim().slice(0, 20),
       client_email: sanitize(client_email, 100),
       client_telegram: sanitize(client_telegram, 64),
       client_chat_id: sanitize(client_chat_id, 32),
-      model_id: model_id ? (parseInt(model_id, 10) || null) : null,
+      model_id: primaryModelId,
+      model_ids: parsedModelIds ? JSON.stringify(parsedModelIds) : null,
       event_type,
       event_date: event_date || null,
       event_duration: duration,
@@ -1732,9 +1752,9 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
     };
 
     const result = await run(
-      `INSERT INTO orders (order_number,client_name,client_phone,client_email,client_telegram,client_chat_id,model_id,event_type,event_date,event_duration,location,budget,comments,utm_source,utm_medium,utm_campaign)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [order_number, s.client_name, s.client_phone, s.client_email, s.client_telegram, s.client_chat_id, s.model_id, s.event_type, s.event_date, s.event_duration, s.location, s.budget, s.comments, s.utm_source, s.utm_medium, s.utm_campaign]
+      `INSERT INTO orders (order_number,client_name,client_phone,client_email,client_telegram,client_chat_id,model_id,model_ids,event_type,event_date,event_duration,location,budget,comments,utm_source,utm_medium,utm_campaign)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [order_number, s.client_name, s.client_phone, s.client_email, s.client_telegram, s.client_chat_id, s.model_id, s.model_ids, s.event_type, s.event_date, s.event_duration, s.location, s.budget, s.comments, s.utm_source, s.utm_medium, s.utm_campaign]
     );
 
     if (botInstance) {
