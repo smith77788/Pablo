@@ -2609,10 +2609,25 @@ function initBot(app) {
     }
 
     // ── Admin models
+    // New paginated format: adm_models_p_{page}_{sort}_{archived}
+    if (data.startsWith('adm_models_p_')) {
+      if (!isAdmin(chatId)) return;
+      const parts = data.replace('adm_models_p_', '').split('_');
+      const page     = parseInt(parts[0]) || 0;
+      const sort     = parts[1] || 'name';
+      const archived = parts[2] === '1';
+      return showAdminModels(chatId, page, { sort, archived });
+    }
+    // Legacy format: adm_models_{page}
     if (data.startsWith('adm_models_')) {
       if (!isAdmin(chatId)) return;
       const page = parseInt(data.replace('adm_models_','')) || 0;
-      return showAdminModels(chatId, page);
+      return showAdminModels(chatId, page, {});
+    }
+    // adm_models (no suffix) — main menu
+    if (data === 'adm_models') {
+      if (!isAdmin(chatId)) return;
+      return showAdminModels(chatId, 0, {});
     }
     if (data.startsWith('adm_model_')) {
       if (!isAdmin(chatId)) return;
@@ -2633,6 +2648,49 @@ function initBot(app) {
       if (m) await run('UPDATE models SET featured=? WHERE id=?', [m.featured ? 0 : 1, id]);
       await bot.answerCallbackQuery(q.id, { text: m?.featured ? '⭐ Убрано из топа' : '⭐ Добавлено в топ' }).catch(()=>{});
       return showAdminModel(chatId, id);
+    }
+    // ── Archive / Restore model
+    if (data.startsWith('adm_archive_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_archive_', ''));
+      await run('UPDATE models SET archived=1, available=0 WHERE id=?', [id]);
+      await bot.answerCallbackQuery(q.id, { text: '📦 Модель перемещена в архив' }).catch(()=>{});
+      return showAdminModels(chatId, 0, {});
+    }
+    if (data.startsWith('adm_restore_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_restore_', ''));
+      await run('UPDATE models SET archived=0 WHERE id=?', [id]);
+      await bot.answerCallbackQuery(q.id, { text: '✅ Модель восстановлена из архива' }).catch(()=>{});
+      return showAdminModels(chatId, 0, { archived: true });
+    }
+    // ── Duplicate model
+    if (data.startsWith('adm_duplicate_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_duplicate_', ''));
+      const m  = await get('SELECT * FROM models WHERE id=?', [id]);
+      if (!m) return;
+      const { id: newId } = await run(
+        `INSERT INTO models (name, age, height, weight, bust, waist, hips, shoe_size, hair_color, eye_color,
+          bio, instagram, phone, category, city, featured, available, archived, photos)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,0,?)`,
+        [m.name + ' (копия)', m.age, m.height, m.weight, m.bust, m.waist, m.hips,
+         m.shoe_size, m.hair_color, m.eye_color, m.bio, m.instagram, m.phone,
+         m.category, m.city, m.photos]
+      );
+      await bot.answerCallbackQuery(q.id, { text: `✅ Создана копия: ID ${newId}` }).catch(()=>{});
+      return safeSend(chatId, `✅ Модель *${esc(m.name)}* скопирована\\.\nНовый ID: *${newId}*\n\nОтредактируйте детали новой карточки\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '✏️ Редактировать копию', callback_data: `adm_model_${newId}` }]] }
+      });
+    }
+    // ── Search model by name
+    if (data === 'adm_search_model') {
+      if (!isAdmin(chatId)) return;
+      await setSession(chatId, 'adm_search_model_input', {});
+      return safeSend(chatId, '🔍 Введите имя или часть имени модели:', {
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_models_p_0_name_0' }]] }
+      });
     }
 
     // ── Settings
@@ -3365,6 +3423,23 @@ function initBot(app) {
       // ── Admin search order input
       if (state === 'adm_search_order_input') {
         return searchAdminOrders(chatId, text);
+      }
+
+      // ── Admin search model input
+      if (state === 'adm_search_model_input') {
+        const q2 = text.trim();
+        await clearSession(chatId);
+        const results = await query(`SELECT * FROM models WHERE name LIKE ? AND archived=0 LIMIT 10`, [`%${q2}%`]);
+        if (!results.length) return safeSend(chatId, '❌ Модели не найдены\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '← Список моделей', callback_data: 'adm_models_p_0_name_0' }]] }
+        });
+        const keyboard2 = results.map(m => [{ text: `${m.featured?'⭐':''}${m.name} (${m.city||'город не указан'})`, callback_data: `adm_model_${m.id}` }]);
+        keyboard2.push([{ text: '← Список моделей', callback_data: 'adm_models_p_0_name_0' }]);
+        return safeSend(chatId, `🔍 Найдено ${results.length} моделей по запросу "*${esc(q2)}*":`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: keyboard2 }
+        });
       }
 
       // ── Order note input

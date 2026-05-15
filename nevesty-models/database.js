@@ -221,6 +221,16 @@ async function initDatabase() {
 
   await run(`CREATE INDEX IF NOT EXISTS idx_loyalty_chat ON loyalty_points(chat_id)`).catch(()=>{});
 
+  // Referral program
+  await run(`CREATE TABLE IF NOT EXISTS referrals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    referrer_chat_id INTEGER NOT NULL,
+    referred_chat_id INTEGER NOT NULL,
+    bonus_points INTEGER DEFAULT 50,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(()=>{});
+  await run(`CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_chat_id)`).catch(()=>{});
+
   // Migrations — add status column to reviews if missing
   await run(`ALTER TABLE reviews ADD COLUMN status TEXT DEFAULT 'pending'`).catch(() => {});
 
