@@ -24,6 +24,55 @@
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
   <link rel="dns-prefetch" href="https://www.googletagmanager.com">
   <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    .fav-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(0,0,0,0.6);
+      border: none;
+      color: #ccc;
+      font-size: 1.2rem;
+      cursor: pointer;
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      z-index: 10;
+    }
+    .fav-btn:hover { background: rgba(0,0,0,0.8); color: #e74c3c; }
+    .fav-btn.active { color: #e74c3c; }
+    #fav-counter {
+      display: inline-block;
+      background: #e74c3c;
+      color: #fff;
+      border-radius: 50%;
+      font-size: 0.7rem;
+      min-width: 18px;
+      height: 18px;
+      text-align: center;
+      line-height: 18px;
+      padding: 0 4px;
+      margin-left: 2px;
+    }
+    .btn-favorites {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      background: none;
+      border: 1px solid var(--border, rgba(255,255,255,0.1));
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-favorites:hover { color: #e74c3c; border-color: #e74c3c; }
+  </style>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -118,6 +167,9 @@
         <div style="margin-top:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
           <a href="/compare.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'">⚖️ Сравнить модели</a>
           <a href="/favorites.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'">❤️ Мои избранные</a>
+          <button onclick="showFavorites()" class="btn-favorites" aria-label="Показать избранные модели">
+            ❤ Обране <span id="fav-counter" style="display:none"></span>
+          </button>
         </div>
       </div>
       <div class="catalog-layout">

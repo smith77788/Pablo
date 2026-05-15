@@ -234,8 +234,54 @@
     const count = getFavs().length;
     const badge = document.querySelector('#fav-nav-badge');
     if (badge) badge.textContent = count > 0 ? count : '';
+    updateFavCounter();
   }
   window._updateFavBadge = _updateFavBadge;
+
+  function updateFavCounter() {
+    const count = getFavs().length;
+    const el = document.getElementById('fav-counter');
+    if (el) {
+      el.textContent = count > 0 ? count : '';
+      el.style.display = count > 0 ? 'inline' : 'none';
+    }
+  }
+
+  function showFavorites() {
+    const favs = getFavs();
+    if (favs.length === 0) {
+      alert('Ваш список обраних порожній. Натисніть ❤ на картці моделі, щоб додати.');
+      return;
+    }
+    const favIds = new Set(favs.map(f => (typeof f === 'object' ? f.id : f)));
+    const favModels = allModels.filter(m => favIds.has(m.id));
+    if (favModels.length === 0) {
+      alert(`У вас ${favs.length} обраних моделей. Зачекайте завантаження каталогу та спробуйте ще раз.`);
+      return;
+    }
+    // Store original rendered list
+    const originalModels = allModels.filter(() => true);
+    // Remove any existing back button
+    const existingBack = document.getElementById('fav-back-btn');
+    if (existingBack) existingBack.remove();
+    // Temporarily replace allModels and render
+    const savedAllModels = allModels;
+    allModels = favModels;
+    render();
+    allModels = savedAllModels;
+    // Add "back" button above the grid
+    const backBtn = document.createElement('button');
+    backBtn.id = 'fav-back-btn';
+    backBtn.className = 'btn-filter-reset';
+    backBtn.textContent = '← Показати всіх';
+    backBtn.style.cssText = 'margin: 0 auto 16px auto; display: block;';
+    backBtn.onclick = () => {
+      backBtn.remove();
+      render();
+    };
+    grid.parentNode.insertBefore(backBtn, grid);
+  }
+  window.showFavorites = showFavorites;
 
   // ── Render ───────────────────────────────────────────────────────────────────
   function render() {
@@ -444,6 +490,7 @@
 
   render();
   _updateFavBadge();
+  updateFavCounter();
 
   // Auto-open model when page loaded via /model/:id SSR route
   const autoOpenId = document.body.getAttribute('data-open-model');

@@ -256,6 +256,9 @@ function openModelModal(id) {
             <a href="/booking.html?model=${m.id}" class="btn-primary" style="padding:14px 32px;font-size:0.8rem;display:inline-flex;align-items:center;gap:8px">
               📋 Забронировать
             </a>
+            <button id="modal-fav-btn" onclick="window._toggleModalFav(${m.id})" class="btn-outline" style="padding:14px 24px;font-size:0.8rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+              ${(function() { try { const favs = JSON.parse(localStorage.getItem('nm_favorites') || '[]'); const isFavd = favs.some(f => (typeof f === 'object' ? f.id === m.id : f === m.id)); return isFavd ? '❤️ В избранном' : '🤍 В избранное'; } catch(e) { return '🤍 В избранное'; } })()}
+            </button>
             <button onclick="closeModal()" class="btn-outline" style="padding:14px 24px;font-size:0.8rem;cursor:pointer">
               Закрыть
             </button>
@@ -334,6 +337,27 @@ function closeModal() {
   document.body.style.overflow = '';
 }
 window.closeModal = closeModal;
+
+/* ─── Modal fav toggle ─────────────────────────────── */
+window._toggleModalFav = function(modelId) {
+  const FAV_KEY = 'nm_favorites';
+  let favs = [];
+  try { favs = JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch {}
+  const idx = favs.findIndex(f => (typeof f === 'object' ? f.id === modelId : f === modelId));
+  const btn = document.getElementById('modal-fav-btn');
+  if (idx === -1) {
+    if (favs.length >= 50) { alert('Максимум 50 в избранном'); return; }
+    favs.push(modelId);
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(favs)); } catch {}
+    if (btn) btn.innerHTML = '❤️ В избранном';
+  } else {
+    favs.splice(idx, 1);
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(favs)); } catch {}
+    if (btn) btn.innerHTML = '🤍 В избранное';
+  }
+  // Sync badge in catalog if available
+  if (typeof window._updateFavBadge === 'function') window._updateFavBadge();
+};
 
 /* ─── Counter animation ────────────────────────────── */
 function animateCounters() {
