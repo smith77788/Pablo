@@ -192,9 +192,10 @@ async function setSetting(key, value) {
 // ─── Admin Handlers module ────────────────────────────────────────────────────
 const _adminHandlers = require('./handlers/admin');
 _adminHandlers.init({ safeSend, isAdmin, esc });
-const showAdminStats  = _adminHandlers.showAdminStats;
-const showAdminModels = _adminHandlers.showAdminModels;
-const showAdminOrders = _adminHandlers.showAdminOrders;
+const showAdminStats        = _adminHandlers.showAdminStats;
+const showAdminModels       = _adminHandlers.showAdminModels;
+const showAdminOrders       = _adminHandlers.showAdminOrders;
+const showAdminOrdersToday  = _adminHandlers.showAdminOrdersToday;
 
 // ─── Keyboards ────────────────────────────────────────────────────────────────
 
@@ -2522,16 +2523,18 @@ async function doSendBroadcast(chatId) {
   // Notify admin that sending started
   await safeSend(chatId, `📤 Начинаю рассылку для *${recipients.length}* получателей\\.\\.\\.`, { parse_mode: 'MarkdownV2' }).catch(() => {});
 
+  const startTime = Date.now();
   let sent = 0, failed = 0;
   for (const cid of recipients) {
     const result = await _sendOneBroadcastMsg(cid, photoId, text);
     if (result === 'ok') sent++; else failed++;
     await new Promise(r => setTimeout(r, 10)); // 10ms delay between sends
   }
-  await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, segment: sd.broadcastSegment });
+  const durationSec = Math.round((Date.now() - startTime) / 1000);
+  await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, segment: sd.broadcastSegment, duration: durationSec });
   await clearSession(chatId);
   return safeSend(chatId,
-    `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*`,
+    `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*\n⏱ Время: *${durationSec}с*`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
@@ -4263,6 +4266,12 @@ function initBot(app) {
       return bkStep3Email(chatId, d);
     }
 
+    // ── Admin orders today filter
+    if (data === 'adm_orders_today') {
+      if (!isAdmin(chatId)) return;
+      return showAdminOrdersToday(chatId);
+    }
+
     // ── Admin orders list: adm_orders_{status}_{page}
     if (data.startsWith('adm_orders_')) {
       if (!isAdmin(chatId)) return;
@@ -4403,6 +4412,60 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const modelId = parseInt(data.replace('adm_model_stats_', ''));
       return showModelStats(chatId, modelId);
+    }
+
+    // ── Archive model (adm_model_archive_ prefix, must be before generic adm_model_ handler)
+    if (data.startsWith('adm_model_archive_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_model_archive_', ''));
+      await run('UPDATE models SET archived=1, available=0, updated_at=CURRENT_TIMESTAMP WHERE id=?', [modelId]);
+      await logAdminAction(chatId, 'archive_model', 'model', modelId);
+      await bot.answerCallbackQuery(q.id, { text: '📦 Модель перемещена в архив' }).catch(()=>{});
+      return safeSend(chatId, `✅ Модель перемещена в архив\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '↩️ Восстановить', callback_data: `adm_model_restore_${modelId}` },
+           { text: '← Назад',         callback_data: 'adm_models' }]
+        ]}
+      });
+    }
+
+    // ── Restore model (adm_model_restore_ prefix, must be before generic adm_model_ handler)
+    if (data.startsWith('adm_model_restore_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_model_restore_', ''));
+      await run('UPDATE models SET archived=0, updated_at=CURRENT_TIMESTAMP WHERE id=?', [modelId]);
+      await logAdminAction(chatId, 'restore_model', 'model', modelId);
+      await bot.answerCallbackQuery(q.id, { text: '✅ Модель восстановлена' }).catch(()=>{});
+      return safeSend(chatId, `✅ Модель восстановлена\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '← Список моделей', callback_data: 'adm_models' }]
+        ]}
+      });
+    }
+
+    // ── Duplicate model (adm_model_dup_ prefix, must be before generic adm_model_ handler)
+    if (data.startsWith('adm_model_dup_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_model_dup_', ''));
+      const orig = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(()=>null);
+      if (!orig) return;
+      const { id: newId } = await run(
+        `INSERT INTO models (name, age, height, weight, bust, waist, hips, shoe_size, hair_color, eye_color,
+          bio, instagram, phone, category, city, featured, available, archived, photos)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,0,?)`,
+        [orig.name + ' (копия)', orig.age, orig.height, orig.weight, orig.bust, orig.waist, orig.hips,
+         orig.shoe_size, orig.hair_color, orig.eye_color, orig.bio, orig.instagram, orig.phone,
+         orig.category, orig.city, orig.photos]
+      );
+      await bot.answerCallbackQuery(q.id, { text: `✅ Создана копия: ID ${newId}` }).catch(()=>{});
+      return safeSend(chatId, `✅ Модель скопирована\\. ID новой карточки: *${newId}*`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: `✏️ Редактировать копию`, callback_data: `adm_model_${newId}` }]
+        ]}
+      });
     }
 
     if (data.startsWith('adm_model_')) {

@@ -301,6 +301,7 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
     const filterRow2 = [
       { text: (activeFilter === 'cancelled') ? '❌ Отменённые ✓' : '❌ Отменённые', callback_data: 'adm_orders_cancelled_0' },
       { text: (activeFilter === 'completed') ? '🏁 Завершённые ✓' : '🏁 Завершённые', callback_data: 'adm_orders_completed_0' },
+      { text: '📅 Сегодня', callback_data: 'adm_orders_today' },
     ];
 
     return safeSend(chatId, text, {
@@ -318,4 +319,44 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
   } catch (e) { console.error('[Bot] showAdminOrders:', e.message); }
 }
 
-module.exports = { init, showAdminStats, showAdminModels, showAdminOrders };
+async function showAdminOrdersToday(chatId) {
+  try {
+    const orders = await query(
+      `SELECT o.*, m.name as model_name,
+        (SELECT COUNT(*) FROM order_notes WHERE order_id=o.id) as note_count
+       FROM orders o
+       LEFT JOIN models m ON o.model_id=m.id
+       WHERE DATE(o.created_at)=DATE('now','localtime')
+       ORDER BY o.created_at DESC LIMIT 20`
+    );
+
+    if (!orders.length) {
+      return safeSend(chatId, '📭 Сегодня заявок нет\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '← К заявкам', callback_data: 'adm_orders__0' }]] }
+      });
+    }
+
+    let text = `📅 *Заявки за сегодня* \\(${orders.length}\\)\n\n`;
+    const btns = orders.map(o => {
+      const icon = STATUS_LABELS[o.status]?.split(' ')[0] || '';
+      const noteBadge = o.note_count > 0 ? ` \\(📝 ${esc(String(o.note_count))}\\)` : '';
+      text += `${icon} *${esc(o.order_number)}* — ${esc(o.client_name)}${noteBadge}\n`;
+      const noteLabel = o.note_count > 0 ? ` (📝 ${o.note_count})` : '';
+      const row = [{ text: `${o.order_number}  ·  ${o.client_name}${noteLabel}`, callback_data: `adm_order_${o.id}` }];
+      if (o.status === 'new')       row.push({ text: '✅ Принять',   callback_data: `adm_quick_confirm_${o.id}` });
+      if (o.status === 'confirmed') row.push({ text: '🏁 Завершить', callback_data: `adm_quick_complete_${o.id}` });
+      return row;
+    });
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        ...btns,
+        [{ text: '← К заявкам', callback_data: 'adm_orders__0' }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showAdminOrdersToday:', e.message); }
+}
+
+module.exports = { init, showAdminStats, showAdminModels, showAdminOrders, showAdminOrdersToday };
