@@ -625,6 +625,14 @@
               <div class="model-gallery-grid" id="galleryGrid"></div>
             </div>
 
+            <!-- Availability calendar section -->
+            <div id="availabilitySection" style="margin-top:40px;margin-bottom:32px">
+              <span class="model-section-title">📅 Доступность</span>
+              <div id="availabilityContent" style="margin-top:12px">
+                <div style="color:var(--text-dim);font-size:0.9rem">Загрузка...</div>
+              </div>
+            </div>
+
             <!-- Reviews -->
             <div id="model-reviews" class="mt-8" style="margin-top:40px">
               <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">
@@ -1020,6 +1028,9 @@
           igLink.textContent = `✦ @${handle}`;
         }
 
+        // Load availability section
+        loadAvailabilitySection(m.id, m.busy_dates || []);
+
         // Show profile, hide skeleton
         hide('skeletonView');
         hide('errorView');
@@ -1027,6 +1038,34 @@
         // Re-sync fav/compare buttons now that model is rendered
         updateFavBtn();
         updateCompareBtn();
+      }
+
+      // ── Availability section ──────────────────────────────────────────────────
+      function loadAvailabilitySection(modelId, busyDates) {
+        const container = el('availabilityContent');
+        if (!container) return;
+        // Filter busy dates in next 30 days
+        const today = new Date();
+        const todayStr = today.toISOString().slice(0, 10);
+        const in30 = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const upcomingBusy = (busyDates || []).filter(d => d >= todayStr && d <= in30);
+        if (!upcomingBusy.length) {
+          container.innerHTML = `<div style="display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:8px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);font-size:0.9rem;color:#6ee7b7">
+            <span>✅</span> <span>Свободна в ближайшие 30 дней</span>
+          </div>`;
+        } else {
+          const fmt = d => {
+            try { return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }); }
+            catch { return d; }
+          };
+          const dateList = upcomingBusy.map(d =>
+            `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);font-size:0.8rem;color:#fca5a5">${fmt(d)}</span>`
+          ).join('');
+          container.innerHTML = `<div style="padding:10px 16px;border-radius:8px;background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2)">
+            <div style="font-size:0.8rem;color:#9ca3af;margin-bottom:8px">Занята в ближайшие 30 дней:</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">${dateList}</div>
+          </div>`;
+        }
       }
 
       // ── Related Models ────────────────────────────────────────────────────────

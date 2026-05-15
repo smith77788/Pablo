@@ -4,7 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Кабинет модели — Nevesty Models</title>
+  <meta name="description" content="Личный кабинет модели агентства Nevesty Models — просматривайте назначенные заявки и управляйте расписанием.">
   <meta name="robots" content="noindex">
+  <meta property="og:title" content="Кабинет модели — Nevesty Models">
+  <meta property="og:description" content="Личный кабинет модели агентства Nevesty Models. Просматривайте назначенные заявки.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
+  <meta property="og:url" content="https://nevesty-models.ru/model-cabinet.html">
+  <meta property="og:site_name" content="Nevesty Models">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Кабинет модели — Nevesty Models">
+  <meta name="twitter:description" content="Личный кабинет модели агентства Nevesty Models. Просматривайте назначенные заявки.">
+  <link rel="canonical" href="https://nevesty-models.ru/model-cabinet.html">
   <link rel="stylesheet" href="/css/main.css" />
 </head>
 <body>
@@ -50,7 +61,43 @@
           return;
         }
 
-        res.innerHTML = `
+        // Load upcoming busy dates for the model
+        const modelId = d.model?.id;
+        let busyDatesHtml = '';
+        if (modelId) {
+          try {
+            const today = new Date();
+            const todayStr = today.toISOString().slice(0, 10);
+            const nowMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+            const nextDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+            const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+            const [r1, r2] = await Promise.all([
+              fetch(`/api/models/${modelId}/availability?month=${nowMonth}`).then(x => x.json()),
+              fetch(`/api/models/${modelId}/availability?month=${nextMonth}`).then(x => x.json()),
+            ]);
+            const allBusy = [...(r1.busy_dates || []), ...(r2.busy_dates || [])].filter(dt => dt >= todayStr);
+            const fmt = dt => {
+              try { return new Date(dt + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }); }
+              catch { return dt; }
+            };
+            if (allBusy.length) {
+              const dateItems = allBusy.map(dt =>
+                `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);font-size:0.8rem;color:#fca5a5">${fmt(dt)}</span>`
+              ).join('');
+              busyDatesHtml = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px">
+                <div style="font-weight:600;margin-bottom:10px;font-size:0.9rem">📅 Мои занятые даты</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px">${dateItems}</div>
+              </div>`;
+            } else {
+              busyDatesHtml = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px">
+                <div style="font-weight:600;margin-bottom:6px;font-size:0.9rem">📅 Мои занятые даты</div>
+                <div style="font-size:0.85rem;color:var(--text-dim)">Нет занятых дат в ближайшие 2 месяца</div>
+              </div>`;
+            }
+          } catch { /* ignore availability errors */ }
+        }
+
+        res.innerHTML = busyDatesHtml + `
           <div style="margin-bottom:16px;font-size:0.9rem;color:var(--text-dim)">
             Найдено заявок: <strong>${d.total}</strong> для <strong>${d.model?.name || name}</strong>
           </div>

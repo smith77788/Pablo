@@ -846,8 +846,11 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
-/* ─── Busy Dates Modal ──────────────────────────────────────────────────────── */
+/* ─── Busy Dates Modal (calendar view) ──────────────────────────────────────── */
 let _bdModalModelId = null;
+let _bdCalYear = null;
+let _bdCalMonth = null; // 0-based
+let _bdBusyDatesSet = new Set(); // YYYY-MM-DD strings for current calendar view
 
 async function openBusyDatesModal(modelId, modelName) {
   _bdModalModelId = modelId;
@@ -855,7 +858,10 @@ async function openBusyDatesModal(modelId, modelName) {
   document.getElementById('busyDatesModal').classList.add('open');
   document.getElementById('bdModalDate').value = '';
   document.getElementById('bdModalReason').value = '';
-  await refreshBusyDatesModalList();
+  const now = new Date();
+  _bdCalYear = now.getFullYear();
+  _bdCalMonth = now.getMonth();
+  await refreshBusyDatesModalCalendar();
 }
 
 function closeBusyDatesModal() {
@@ -863,51 +869,103 @@ function closeBusyDatesModal() {
   _bdModalModelId = null;
 }
 
-async function refreshBusyDatesModalList() {
-  const listEl = document.getElementById('busyDatesModalList');
-  listEl.innerHTML = '<div style="color:#9ca3af;font-size:0.85rem">Загрузка…</div>';
+function calMonthStr(year, month0) {
+  return `${year}-${String(month0 + 1).padStart(2, '0')}`;
+}
+
+async function refreshBusyDatesModalCalendar() {
+  const calEl = document.getElementById('busyDatesCalendar');
+  calEl.innerHTML = '<div style="color:#9ca3af;font-size:0.85rem;text-align:center;padding:16px">Загрузка…</div>';
+  const monthStr = calMonthStr(_bdCalYear, _bdCalMonth);
   try {
-    const resp = await fetch(`/api/admin/models/${_bdModalModelId}/busy-dates`, { headers });
+    const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability?month=${monthStr}`, { headers });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const dates = await resp.json();
-    if (!dates.length) {
-      listEl.innerHTML = '<div style="color:#6b7280;font-size:0.85rem;padding:8px 0">Нет занятых дат</div>';
-      return;
-    }
-    const today = new Date().toISOString().slice(0, 10);
-    listEl.innerHTML = `
-      <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
-        <thead>
-          <tr style="color:#9ca3af;border-bottom:1px solid #1f2937">
-            <th style="text-align:left;padding:6px 8px">Дата</th>
-            <th style="text-align:left;padding:6px 8px">Причина</th>
-            <th style="text-align:left;padding:6px 8px">Статус</th>
-            <th style="padding:6px 8px"></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${dates.map(d => {
-            const isPast = d.busy_date < today;
-            return `<tr style="border-bottom:1px solid #111827;${isPast ? 'opacity:0.5' : ''}">
-              <td style="padding:7px 8px;color:${isPast ? '#6b7280' : '#f9fafb'};white-space:nowrap">${formatBusyDate(d.busy_date)}</td>
-              <td style="padding:7px 8px;color:#d1d5db">${escHtml(d.reason || '—')}</td>
-              <td style="padding:7px 8px">
-                <span style="font-size:0.75rem;padding:2px 8px;border-radius:99px;background:${isPast ? '#1f2937' : '#134e4a'};color:${isPast ? '#6b7280' : '#5eead4'}">
-                  ${isPast ? 'прошла' : 'занята'}
-                </span>
-              </td>
-              <td style="padding:7px 8px;text-align:right">
-                <button onclick="deleteBusyDateFromModal('${escHtml(d.busy_date)}')"
-                  style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:0.8rem;padding:2px 6px;border-radius:4px"
-                  title="Удалить">✕</button>
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
+    const data = await resp.json();
+    _bdBusyDatesSet = new Set(data.busy_dates || []);
+    renderBusyDatesCalendar(_bdCalYear, _bdCalMonth, _bdBusyDatesSet);
+    // Update month nav label
+    const label = new Date(_bdCalYear, _bdCalMonth, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+    document.getElementById('bdCalMonthLabel').textContent = label.charAt(0).toUpperCase() + label.slice(1);
   } catch (e) {
-    listEl.innerHTML = `<div style="color:#ef4444;font-size:0.85rem">Ошибка: ${escHtml(e.message)}</div>`;
+    calEl.innerHTML = `<div style="color:#ef4444;font-size:0.85rem">Ошибка: ${escHtml(e.message)}</div>`;
   }
+}
+
+function renderBusyDatesCalendar(year, month0, busySet) {
+  const calEl = document.getElementById('busyDatesCalendar');
+  const today = new Date().toISOString().slice(0, 10);
+  const firstDay = new Date(year, month0, 1);
+  const lastDate = new Date(year, month0 + 1, 0).getDate();
+  // Day of week for first day (0=Sun, make Monday first: shift)
+  let startDow = firstDay.getDay(); // 0=Sun..6=Sat
+  startDow = (startDow + 6) % 7; // Monday=0
+
+  const days = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  let html = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px">`;
+  for (const d of days) {
+    html += `<div style="text-align:center;font-size:0.68rem;color:#6b7280;font-weight:600;padding:3px 0">${d}</div>`;
+  }
+  html += '</div>';
+  html += `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">`;
+  // Empty cells before first day
+  for (let i = 0; i < startDow; i++) {
+    html += `<div></div>`;
+  }
+  for (let day = 1; day <= lastDate; day++) {
+    const dateStr = `${year}-${String(month0 + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const isBusy = busySet.has(dateStr);
+    const isPast = dateStr < today;
+    const isToday = dateStr === today;
+    let bg = isBusy ? (isPast ? '#7f1d1d' : '#ef4444') : (isPast ? '#111827' : '#1f2937');
+    let color = isBusy ? '#fff' : (isPast ? '#4b5563' : '#e5e7eb');
+    let border = isToday ? '1px solid #f59e0b' : '1px solid transparent';
+    let cursor = isPast ? 'default' : 'pointer';
+    let title = isBusy ? 'Нажмите — снять занятость' : 'Нажмите — отметить занятой';
+    if (isPast) title = '';
+    html += `<div onclick="${isPast ? '' : `toggleBusyDay('${dateStr}')`}"
+      style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:6px;background:${bg};color:${color};font-size:0.8rem;cursor:${cursor};border:${border};transition:background .15s;user-select:none"
+      title="${title}">${day}</div>`;
+  }
+  html += '</div>';
+  // Legend
+  html += `<div style="display:flex;gap:12px;margin-top:10px;font-size:0.72rem;color:#9ca3af">
+    <span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:12px;height:12px;background:#ef4444;border-radius:3px"></span>Занята</span>
+    <span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:12px;height:12px;background:#1f2937;border-radius:3px;border:1px solid #374151"></span>Свободна</span>
+  </div>`;
+  calEl.innerHTML = html;
+}
+
+async function toggleBusyDay(dateStr) {
+  if (!_bdModalModelId) return;
+  try {
+    if (_bdBusyDatesSet.has(dateStr)) {
+      // Remove busy
+      const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability/${dateStr}`, { method: 'DELETE', headers });
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); alert('Ошибка: ' + (e.error || resp.status)); return; }
+    } else {
+      // Mark busy
+      const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ date: dateStr, note: null }),
+      });
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); alert('Ошибка: ' + (e.error || resp.status)); return; }
+    }
+    await refreshBusyDatesModalCalendar();
+    // Refresh inline list in edit modal if open
+    if (_currentModelId === _bdModalModelId) loadBusyDates(_currentModelId);
+  } catch (e) { alert('Ошибка: ' + e.message); }
+}
+
+async function prevCalMonth() {
+  _bdCalMonth--;
+  if (_bdCalMonth < 0) { _bdCalMonth = 11; _bdCalYear--; }
+  await refreshBusyDatesModalCalendar();
+}
+
+async function nextCalMonth() {
+  _bdCalMonth++;
+  if (_bdCalMonth > 11) { _bdCalMonth = 0; _bdCalYear++; }
+  await refreshBusyDatesModalCalendar();
 }
 
 function formatBusyDate(dateStr) {
@@ -926,10 +984,10 @@ async function addBusyDateFromModal() {
     return;
   }
   try {
-    const resp = await fetch(`/api/admin/models/${_bdModalModelId}/busy-dates`, {
+    const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ busy_date: date, reason: reason || null }),
+      body: JSON.stringify({ date, note: reason || null }),
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
@@ -938,39 +996,56 @@ async function addBusyDateFromModal() {
     }
     document.getElementById('bdModalDate').value = '';
     document.getElementById('bdModalReason').value = '';
-    await refreshBusyDatesModalList();
+    // Navigate calendar to the month of the added date
+    const [yr, mo] = date.split('-').map(Number);
+    _bdCalYear = yr; _bdCalMonth = mo - 1;
+    await refreshBusyDatesModalCalendar();
+    if (_currentModelId === _bdModalModelId) loadBusyDates(_currentModelId);
   } catch (e) { alert('Ошибка: ' + e.message); }
 }
 
+// Legacy support — kept for inline edit modal busy dates list
+async function refreshBusyDatesModalList() {
+  await refreshBusyDatesModalCalendar();
+}
 async function deleteBusyDateFromModal(date) {
   if (!_bdModalModelId) return;
   try {
-    await fetch(`/api/admin/models/${_bdModalModelId}/busy-dates/${date}`, { method: 'DELETE', headers });
-    await refreshBusyDatesModalList();
+    await fetch(`/api/admin/models/${_bdModalModelId}/availability/${date}`, { method: 'DELETE', headers });
+    await refreshBusyDatesModalCalendar();
+    if (_currentModelId === _bdModalModelId) loadBusyDates(_currentModelId);
   } catch (e) { alert('Ошибка: ' + e.message); }
 }
 </script>
 
-<!-- Busy Dates Modal -->
+<!-- Busy Dates Modal (calendar) -->
 <div id="busyDatesModal" class="stats-modal-overlay">
   <div class="stats-modal-box">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #1f2937">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #1f2937">
       <div id="busyDatesModalTitle" style="font-size:1.1rem;font-weight:700;color:#f9fafb">📅 Занятость модели</div>
       <button onclick="closeBusyDatesModal()" style="background:none;border:none;color:#9ca3af;font-size:1.2rem;cursor:pointer;padding:4px 8px;border-radius:4px" onmouseover="this.style.color='#f9fafb'" onmouseout="this.style.color='#9ca3af'">✕</button>
     </div>
-    <!-- Existing busy dates list -->
-    <div id="busyDatesModalList" style="margin-bottom:20px;min-height:40px"></div>
-    <!-- Add new date -->
-    <div style="border-top:1px solid #1f2937;padding-top:16px">
-      <div style="font-size:0.85rem;font-weight:600;color:#d1d5db;margin-bottom:10px">Добавить занятую дату</div>
+    <!-- Month navigation -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <button onclick="prevCalMonth()" style="background:#1f2937;border:1px solid #374151;color:#d1d5db;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:0.9rem">←</button>
+      <span id="bdCalMonthLabel" style="color:#f9fafb;font-weight:600;font-size:0.95rem">…</span>
+      <button onclick="nextCalMonth()" style="background:#1f2937;border:1px solid #374151;color:#d1d5db;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:0.9rem">→</button>
+    </div>
+    <!-- Calendar grid -->
+    <div id="busyDatesCalendar" style="margin-bottom:16px;min-height:160px"></div>
+    <!-- Hint -->
+    <p style="font-size:0.72rem;color:#6b7280;margin-bottom:14px">Нажмите на день чтобы отметить/снять занятость. Прошедшие даты недоступны.</p>
+    <!-- Add new date by typing -->
+    <div style="border-top:1px solid #1f2937;padding-top:14px">
+      <div style="font-size:0.82rem;font-weight:600;color:#d1d5db;margin-bottom:10px">Добавить дату вручную</div>
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
         <div style="display:flex;flex-direction:column;gap:4px">
-          <label style="font-size:0.75rem;color:#9ca3af">Дата *</label>
+          <label style="font-size:0.72rem;color:#9ca3af">Дата *</label>
           <input type="date" id="bdModalDate"
             style="padding:8px 10px;border:1px solid #374151;border-radius:6px;background:#111827;color:#f9fafb;font-size:0.85rem;min-width:150px">
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:150px">
-          <label style="font-size:0.75rem;color:#9ca3af">Причина (необязательно)</label>
+          <label style="font-size:0.72rem;color:#9ca3af">Причина (необязательно)</label>
           <input type="text" id="bdModalReason" placeholder="Корпоратив, съёмка…"
             style="padding:8px 10px;border:1px solid #374151;border-radius:6px;background:#111827;color:#f9fafb;font-size:0.85rem;width:100%">
         </div>
