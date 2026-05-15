@@ -2196,6 +2196,10 @@ async function showAdminModel(chatId, modelId) {
       ? { text: '📤 Восстановить', callback_data: `adm_restore_${m.id}` }
       : { text: '📦 В архив', callback_data: `adm_archive_${m.id}` };
 
+    const linkBtn = m.telegram_chat_id
+      ? { text: '🔗 Telegram привязан', callback_data: `adm_unlink_model_${m.id}` }
+      : { text: '🔗 Привязать Telegram', callback_data: `adm_link_model_${m.id}` };
+
     const keyboard = {
       inline_keyboard: [
         [
@@ -2210,7 +2214,7 @@ async function showAdminModel(chatId, modelId) {
           { text: '📊 Статистика модели', callback_data: `adm_model_stats_${m.id}` },
           { text: '📅 Расписание', callback_data: `adm_model_cal_${m.id}` },
         ],
-        [archiveBtn],
+        [linkBtn, archiveBtn],
         [{ text: '← К моделям', callback_data: 'adm_models_p_0_name_0' }],
       ],
     };
@@ -6827,6 +6831,35 @@ function initBot(app) {
       await bot.answerCallbackQuery(q.id, { text: '✅ Модель восстановлена из архива' }).catch(() => {});
       return showAdminModels(chatId, 0, { archived: true });
     }
+    // ── Link / unlink model Telegram account (BLOC 12.3)
+    if (data.startsWith('adm_link_model_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_link_model_', ''));
+      const m = await get('SELECT id, name FROM models WHERE id=?', [modelId]).catch(() => null);
+      if (!m) return;
+      await bot.answerCallbackQuery(q.id, { text: '🔗 Сгенерирован токен привязки' }).catch(() => {});
+      const modelName = esc(m.name);
+      const modelId2 = m.id;
+      return safeSend(
+        chatId,
+        `🔗 *Привязка Telegram аккаунта для модели ${modelName}*\n\n` +
+          `Попросите модель написать боту следующую команду:\n\n` +
+          `\`/link_${modelId2}\`\n\n` +
+          `После этого её аккаунт будет привязан к профилю\.`,
+        { parse_mode: 'MarkdownV2' }
+      );
+    }
+    if (data.startsWith('adm_unlink_model_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_unlink_model_', ''));
+      const m = await get('SELECT id, name, telegram_chat_id FROM models WHERE id=?', [modelId]).catch(() => null);
+      if (!m) return;
+      await run('UPDATE models SET telegram_chat_id=NULL WHERE id=?', [modelId]).catch(() => {});
+      await logAdminAction(chatId, 'unlink_model_telegram', 'model', modelId).catch(() => {});
+      await bot.answerCallbackQuery(q.id, { text: '🔗 Привязка Telegram удалена' }).catch(() => {});
+      return showAdminModel(chatId, modelId);
+    }
+
     // ── Duplicate model
     if (data.startsWith('adm_duplicate_')) {
       if (!isAdmin(chatId)) return;
@@ -7555,6 +7588,11 @@ function initBot(app) {
     if (data.startsWith('my_orders_page_')) {
       const pg = parseInt(data.replace('my_orders_page_', '')) || 0;
       return showMyOrders(chatId, pg);
+    }
+    // ── Model cabinet pagination (БЛОК 12.3)
+    if (data.startsWith('model_cab_page_')) {
+      const pg = parseInt(data.replace('model_cab_page_', '')) || 0;
+      return _showModelCabinet(chatId, pg);
     }
     // ── Broadcast with photo: skip caption
     if (data === 'adm_broadcast_photo_nosend') {
