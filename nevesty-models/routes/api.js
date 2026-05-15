@@ -932,6 +932,7 @@ router.get('/models', async (req, res, next) => {
       height_max,
       age_min,
       age_max,
+      sort,
     } = req.query;
     // Support both naming conventions: min_height/max_height and height_min/height_max
     const _minH = min_height || height_min;
@@ -979,7 +980,20 @@ router.get('/models', async (req, res, next) => {
       sql += ' AND (name LIKE ? OR bio LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
     }
-    sql += ' ORDER BY available DESC, id DESC LIMIT 200';
+    const sortOrderMap = {
+      featured: 'featured DESC, available DESC, id DESC',
+      name: 'name ASC',
+      name_asc: 'name ASC',
+      newest: 'id DESC',
+      available: 'available DESC, id DESC',
+      height_desc: 'height DESC',
+      height_asc: 'height ASC',
+      age_asc: 'age ASC',
+      orders:
+        "(SELECT COUNT(*) FROM orders WHERE model_id=models.id AND status IN ('completed','confirmed')) DESC, available DESC, id DESC",
+    };
+    const orderBy = sortOrderMap[sort] || 'available DESC, id DESC';
+    sql += ` ORDER BY ${orderBy} LIMIT 200`;
     const models = await query(sql, params);
     const result = models.map(m => {
       const photos = JSON.parse(m.photos || '[]');

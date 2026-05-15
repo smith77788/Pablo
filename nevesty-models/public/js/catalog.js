@@ -512,6 +512,9 @@
       case 'age_asc':
         list = [...list].sort((a, b) => (a.age || 99) - (b.age || 99));
         break;
+      case 'orders':
+        list = [...list].sort((a, b) => (b.order_count || 0) - (a.order_count || 0));
+        break;
       default:
         break;
     }
