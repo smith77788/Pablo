@@ -185,6 +185,7 @@
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('crm')"       id="tab-crm">🔗 CRM</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('password')"   id="tab-password">🔑 Пароль</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('faq')"         id="tab-faq">❓ FAQ</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('broadcast')"   id="tab-broadcast">📢 Рассылка</button>
       </div>
 
       <!-- ═══ TAB: Профиль ═══════════════════════════════════════════════════ -->
@@ -1026,6 +1027,55 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre>
         </div>
       </div>
 
+      <!-- ─── Broadcast tab pane ────────────────────────────────── -->
+      <div class="tab-pane" id="pane-broadcast">
+        <div class="section-card">
+          <div class="section-card-header">
+            <div class="section-card-title">📢 Создать рассылку</div>
+          </div>
+          <div class="section-card-body padded" style="max-width:620px">
+            <div class="admin-form-group">
+              <label>Текст сообщения</label>
+              <textarea id="bc-text" rows="5" maxlength="4096" placeholder="Текст рассылки..." class="admin-input" style="resize:vertical"
+                oninput="document.getElementById('bc-char').textContent=this.value.length+'/4096'"></textarea>
+              <div class="char-count" id="bc-char">0/4096</div>
+            </div>
+            <div class="admin-form-group" style="margin-top:12px">
+              <label>Фото (URL, необязательно)</label>
+              <input type="url" id="bc-photo" class="admin-input" placeholder="https://..." />
+              <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Если указан URL — рассылка отправляется с изображением</div>
+            </div>
+            <div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap">
+              <div class="admin-form-group" style="flex:1;min-width:160px">
+                <label>Аудитория</label>
+                <select id="bc-segment" class="admin-input">
+                  <option value="all">Все клиенты</option>
+                  <option value="completed">Завершили заявку</option>
+                  <option value="active">Активные клиенты</option>
+                </select>
+              </div>
+              <div class="admin-form-group" style="flex:1;min-width:200px">
+                <label>Запланировать (пусто = немедленно)</label>
+                <input type="datetime-local" id="bc-schedule" class="admin-input" />
+              </div>
+            </div>
+            <div style="display:flex;gap:12px;margin-top:16px;align-items:center">
+              <button onclick="createBroadcast()" class="btn btn-md btn-gold">📢 Запустить рассылку</button>
+              <span id="bc-status" style="font-size:0.8rem;color:var(--text-muted)"></span>
+            </div>
+          </div>
+        </div>
+        <div class="section-card" style="margin-top:20px">
+          <div class="section-card-header">
+            <div class="section-card-title">📋 История рассылок</div>
+            <button onclick="loadBroadcasts()" style="background:none;border:none;color:var(--gold);cursor:pointer;font-size:0.8rem">🔄 Обновить</button>
+          </div>
+          <div class="section-card-body padded">
+            <div id="bc-list"><div style="color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px">Загрузка...</div></div>
+          </div>
+        </div>
+      </div>
+
       <!-- ─── Sticky global save bar ──────────────────────────── -->
       <div class="sticky bottom-0 bg-white border-t px-6 py-4" style="position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--border);padding:14px 0;margin-top:28px;display:flex;align-items:center;gap:16px;z-index:10;">
         <button id="save-btn" onclick="saveAll()"
@@ -1063,6 +1113,7 @@ function switchTab(name) {
   if (pane) pane.classList.add('active');
   if (name === 'email') loadEmailSettings();
   if (name === 'faq') loadFaqAdmin();
+  if (name === 'broadcast') loadBroadcasts();
 }
 
 /* ─── Character count ─────────────────────────────────────── */
@@ -1775,6 +1826,77 @@ loadSettings = async function() {
     });
   } catch {}
 };
+
+/* ─── Broadcast functions ─────────────────────────────────── */
+const BC_STATUS_LABELS = { pending:'⏳ Ожидает', sent:'✅ Отправлена', cancelled:'❌ Отменена', failed:'⚠️ Ошибка' };
+const BC_SEGMENT_LABELS = { all:'Все', completed:'Завершили заявку', active:'Активные' };
+
+async function loadBroadcasts() {
+  const el = document.getElementById('bc-list');
+  if (!el) return;
+  try {
+    const rows = await _admin.api('/admin/broadcasts?limit=30');
+    if (!rows.length) { el.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px;font-size:0.85rem">Рассылок ещё нет</div>'; return; }
+    el.innerHTML = rows.map(b => {
+      const st = BC_STATUS_LABELS[b.status] || b.status;
+      const seg = BC_SEGMENT_LABELS[b.segment] || b.segment;
+      const dt = b.scheduled_at ? new Date(b.scheduled_at).toLocaleString('ru') : '—';
+      const sent = b.sent_count ? `✉️ ${b.sent_count} доставлено` : '';
+      const errs = b.error_count ? `⚠️ ${b.error_count} ошибок` : '';
+      const cancelBtn = b.status === 'pending'
+        ? `<button onclick="cancelBroadcast(${b.id})" class="btn btn-sm btn-danger" style="margin-left:8px">❌ Отменить</button>`
+        : '';
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:0.75rem;color:var(--gold)">${st}</span>
+          <span style="font-size:0.72rem;color:var(--text-muted)">${seg} · ${dt}</span>
+          ${cancelBtn}
+        </div>
+        <div style="font-size:0.88rem;color:var(--text);white-space:pre-wrap;word-break:break-word;max-height:80px;overflow:hidden">${_admin.escapeHtml(b.text)}</div>
+        ${sent || errs ? `<div style="margin-top:6px;font-size:0.75rem;color:var(--text-muted)">${[sent,errs].filter(Boolean).join(' · ')}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) { el.innerHTML = `<div style="color:var(--error);font-size:0.85rem">Ошибка: ${_admin.escapeHtml(e.message)}</div>`; }
+}
+
+async function createBroadcast() {
+  const text = document.getElementById('bc-text').value.trim();
+  const photo = document.getElementById('bc-photo').value.trim();
+  const segment = document.getElementById('bc-segment').value;
+  const schedVal = document.getElementById('bc-schedule').value;
+  const statusEl = document.getElementById('bc-status');
+
+  if (!text) { _admin.toast('Введите текст рассылки', 'error'); return; }
+
+  const body = { text, segment };
+  if (photo) body.photo_url = photo;
+  if (schedVal) body.scheduled_at = new Date(schedVal).toISOString();
+
+  statusEl.textContent = 'Создаём...';
+  try {
+    const r = await _admin.api('/admin/broadcasts', { method: 'POST', body: JSON.stringify(body) });
+    const when = schedVal ? new Date(schedVal).toLocaleString('ru') : 'немедленно';
+    _admin.toast(`Рассылка запланирована (${when})`, 'success');
+    statusEl.textContent = '';
+    document.getElementById('bc-text').value = '';
+    document.getElementById('bc-photo').value = '';
+    document.getElementById('bc-schedule').value = '';
+    document.getElementById('bc-char').textContent = '0/4096';
+    loadBroadcasts();
+  } catch(e) {
+    statusEl.textContent = '';
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function cancelBroadcast(id) {
+  if (!confirm('Отменить эту рассылку?')) return;
+  try {
+    await _admin.api('/admin/broadcasts/' + id, { method: 'DELETE' });
+    _admin.toast('Рассылка отменена', 'success');
+    loadBroadcasts();
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
 
 /* ─── Init ────────────────────────────────────────────────── */
 loadSettings();

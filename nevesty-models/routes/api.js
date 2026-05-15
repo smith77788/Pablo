@@ -1194,11 +1194,51 @@ router.get('/admin/broadcasts', auth, async (req, res, next) => {
   try {
     const limit = Math.min(50, parseInt(req.query.limit) || 20);
     const rows = await query(
-      `SELECT id, text, segment, scheduled_at, status, sent_count, error_count, sent_at, created_at
+      `SELECT id, text, photo_url, segment, scheduled_at, status, sent_count, error_count, sent_at, created_at
        FROM scheduled_broadcasts ORDER BY created_at DESC LIMIT ?`,
       [limit]
     );
     res.json(rows);
+  } catch (e) { next(e); }
+});
+
+// POST /api/admin/broadcasts — create a new scheduled (or immediate) broadcast
+router.post('/admin/broadcasts', auth, async (req, res, next) => {
+  try {
+    const text = sanitize(req.body.text, 4096);
+    if (!text) return res.status(400).json({ error: 'Текст не может быть пустым' });
+
+    const segment = ['all', 'completed', 'active'].includes(req.body.segment) ? req.body.segment : 'all';
+    const photoUrl = req.body.photo_url ? sanitize(String(req.body.photo_url), 500) : null;
+
+    let scheduledAt;
+    if (req.body.scheduled_at) {
+      const d = new Date(req.body.scheduled_at);
+      if (isNaN(d.getTime()) || d < new Date()) return res.status(400).json({ error: 'Неверная дата или дата в прошлом' });
+      scheduledAt = d.toISOString();
+    } else {
+      scheduledAt = new Date().toISOString(); // immediate (scheduler picks it up on next tick)
+    }
+
+    const result = await run(
+      `INSERT INTO scheduled_broadcasts (text, photo_url, segment, scheduled_at, status, created_by)
+       VALUES (?, ?, ?, ?, 'pending', ?)`,
+      [text, photoUrl, segment, scheduledAt, req.admin.username]
+    );
+    res.json({ id: result.id, scheduled_at: scheduledAt });
+  } catch (e) { next(e); }
+});
+
+// DELETE /api/admin/broadcasts/:id — cancel a pending broadcast
+router.delete('/admin/broadcasts/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const row = await get('SELECT id, status FROM scheduled_broadcasts WHERE id=?', [id]);
+    if (!row) return res.status(404).json({ error: 'Рассылка не найдена' });
+    if (row.status !== 'pending') return res.status(400).json({ error: 'Можно отменить только ожидающую рассылку' });
+    await run("UPDATE scheduled_broadcasts SET status='cancelled' WHERE id=?", [id]);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 

@@ -411,6 +411,8 @@ async function initDatabase() {
   await run(`ALTER TABLE scheduled_broadcasts ADD COLUMN sent_count INTEGER DEFAULT 0`).catch(() => {});
   await run(`ALTER TABLE scheduled_broadcasts ADD COLUMN error_count INTEGER DEFAULT 0`).catch(() => {});
   await run(`ALTER TABLE scheduled_broadcasts ADD COLUMN sent_at TEXT`).catch(() => {});
+  // Broadcast photo support
+  await run(`ALTER TABLE scheduled_broadcasts ADD COLUMN photo_url TEXT`).catch(() => {});
 
   // Indexes for frequent queries
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
