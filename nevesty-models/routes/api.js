@@ -983,61 +983,72 @@ router.get('/models', async (req, res, next) => {
     const _maxH = max_height || height_max;
     const _minA = min_age || age_min;
     const _maxA = max_age || age_max;
-    let sql =
-      "SELECT id, name, age, height, city, category, available, featured, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos, (SELECT COUNT(*) FROM orders WHERE model_id=models.id AND status IN ('completed','confirmed')) as order_count FROM models WHERE archived=0";
+    // Build WHERE conditions (aliased to m.column for the CTE join query)
+    const whereClauses = ['m.archived=0'];
     const params = [];
     if (category && ALLOWED_CATEGORIES.includes(category)) {
-      sql += ' AND category = ?';
+      whereClauses.push('m.category = ?');
       params.push(category);
     }
     if (hair_color) {
-      sql += ' AND hair_color = ?';
+      whereClauses.push('m.hair_color = ?');
       params.push(hair_color);
     }
     if (_minH && !isNaN(+_minH)) {
-      sql += ' AND height >= ?';
+      whereClauses.push('m.height >= ?');
       params.push(+_minH);
     }
     if (_maxH && !isNaN(+_maxH)) {
-      sql += ' AND height <= ?';
+      whereClauses.push('m.height <= ?');
       params.push(+_maxH);
     }
     if (_minA && !isNaN(+_minA)) {
-      sql += ' AND age >= ?';
+      whereClauses.push('m.age >= ?');
       params.push(+_minA);
     }
     if (_maxA && !isNaN(+_maxA)) {
-      sql += ' AND age <= ?';
+      whereClauses.push('m.age <= ?');
       params.push(+_maxA);
     }
     if (city) {
-      sql += ' AND city = ?';
+      whereClauses.push('m.city = ?');
       params.push(city);
     }
-    if (available === '1') {
-      sql += ' AND available = 1';
-    }
-    if (available === '0') {
-      sql += ' AND available = 0';
-    }
+    if (available === '1') whereClauses.push('m.available = 1');
+    if (available === '0') whereClauses.push('m.available = 0');
     if (search) {
-      sql += ' AND (name LIKE ? OR bio LIKE ?)';
+      whereClauses.push('(m.name LIKE ? OR m.bio LIKE ?)');
       params.push(`%${search}%`, `%${search}%`);
     }
+
     const sortOrderMap = {
-      featured: 'featured DESC, available DESC, id DESC',
-      name: 'name ASC',
-      name_asc: 'name ASC',
-      newest: 'id DESC',
-      available: 'available DESC, id DESC',
-      height_desc: 'height DESC',
-      height_asc: 'height ASC',
-      age_asc: 'age ASC',
-      orders:
-        "(SELECT COUNT(*) FROM orders WHERE model_id=models.id AND status IN ('completed','confirmed')) DESC, available DESC, id DESC",
+      featured: 'm.featured DESC, m.available DESC, m.id DESC',
+      name: 'm.name ASC',
+      name_asc: 'm.name ASC',
+      newest: 'm.id DESC',
+      available: 'm.available DESC, m.id DESC',
+      height_desc: 'm.height DESC',
+      height_asc: 'm.height ASC',
+      age_asc: 'm.age ASC',
+      orders: 'order_count DESC, m.available DESC, m.id DESC',
     };
-    const orderBy = sortOrderMap[sort] || 'available DESC, id DESC';
-    sql += ` ORDER BY ${orderBy} LIMIT 200`;
+    const orderBy = sortOrderMap[sort] || 'm.available DESC, m.id DESC';
+
+    // CTE pre-aggregates order counts once (replaces two correlated subqueries)
+    const sql = `
+      WITH oc AS (
+        SELECT model_id, COUNT(*) as cnt
+        FROM orders WHERE status IN ('completed','confirmed')
+        GROUP BY model_id
+      )
+      SELECT m.id, m.name, m.age, m.height, m.city, m.category, m.available, m.featured,
+             m.photo_main, m.bio, m.instagram, m.hair_color, m.eye_color, m.weight,
+             m.bust, m.waist, m.hips, m.shoe_size, m.photos,
+             COALESCE(oc.cnt, 0) as order_count
+      FROM models m
+      LEFT JOIN oc ON oc.model_id = m.id
+      WHERE ${whereClauses.join(' AND ')}
+      ORDER BY ${orderBy} LIMIT 200`;
     const models = await query(sql, params);
     const result = models.map(m => {
       const photos = JSON.parse(m.photos || '[]');
