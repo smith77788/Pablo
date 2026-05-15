@@ -822,11 +822,14 @@
       if (!orders.length) {
         emptyEl.style.display = 'block';
         container.innerHTML   = '';
+        loadFavorites();
         return;
       }
 
       emptyEl.style.display = 'none';
       container.innerHTML = orders.map((o, i) => buildOrderCard(o, i)).join('');
+      // Load favourites whenever orders are rendered
+      loadFavorites();
     }
 
     // ── Toggle card expand ────────────────────────────────────────
@@ -1196,6 +1199,14 @@
         if (e.key === 'Enter') search();
       });
 
+      // Enter key support on OTP input
+      const otpEl = document.getElementById('otpInput');
+      if (otpEl) {
+        otpEl.addEventListener('keydown', e => {
+          if (e.key === 'Enter') verifyCode();
+        });
+      }
+
       // Close modal on backdrop click
       const reviewModalEl = document.getElementById('reviewModal');
       if (reviewModalEl) {
@@ -1214,7 +1225,7 @@
     }
 
     // Expose public API
-    window.Cabinet = { search, logout, toggleCard, openReview, closeReview, setStar, submitReview, startPolling, stopPolling };
+    window.Cabinet = { search, logout, toggleCard, openReview, closeReview, setStar, submitReview, startPolling, stopPolling, backToPhone, verifyCode, loadFavorites };
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', init);
