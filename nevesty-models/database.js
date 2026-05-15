@@ -261,6 +261,18 @@ async function initDatabase() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`).catch(() => {});
 
+  // Audit log — admin actions journal
+  await run(`CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_chat_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id INTEGER,
+    details TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(()=>{});
+  await run(`CREATE INDEX IF NOT EXISTS idx_audit_admin ON audit_log(admin_chat_id)`).catch(()=>{});
+
   // Favorites table — wishlist for Telegram bot users
   await run(`CREATE TABLE IF NOT EXISTS favorites (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

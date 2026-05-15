@@ -80,6 +80,15 @@ async function safePhoto(chatId, photo, opts = {}) {
   catch { return safeSend(chatId, opts.caption || '📷', { parse_mode: opts.parse_mode }); }
 }
 
+// ─── Audit log ────────────────────────────────────────────────────────────────
+
+async function logAdminAction(adminChatId, action, entityType = null, entityId = null, details = null) {
+  await run(
+    `INSERT INTO audit_log (admin_chat_id, action, entity_type, entity_id, details) VALUES (?,?,?,?,?)`,
+    [adminChatId, action, entityType, entityId, details ? JSON.stringify(details) : null]
+  ).catch(()=>{});
+}
+
 // ─── Session ──────────────────────────────────────────────────────────────────
 
 // ─── In-memory session cache (write-through to SQLite) ───────────────────────
@@ -184,6 +193,8 @@ function buildClientKeyboard() {
      { text: '❓ FAQ',                  callback_data: 'faq'                }],
     [{ text: '👤 Мой профиль',          callback_data: 'profile'            },
      { text: '💫 Баллы',               callback_data: 'loyalty'            }],
+    [{ text: '🎁 Реферал',             callback_data: 'referral'           },
+     { text: '🧮 Калькулятор',         callback_data: 'calculator'         }],
   ];
   if (SITE_URL.startsWith('https://')) {
     const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
@@ -506,8 +517,9 @@ async function showClientOrder(chatId, orderId) {
       'SELECT * FROM messages WHERE order_id=? ORDER BY created_at DESC LIMIT 3',
       [orderId]
     );
+    const timeline = await showOrderTimeline(o);
     let text = `📋 *Заявка ${esc(o.order_number)}*\n\n`;
-    text += `Статус: ${STATUS_LABELS[o.status]||o.status}\n`;
+    text += `*Статус заявки:*\n${timeline}\n\n`;
     text += `Мероприятие: *${esc(EVENT_TYPES[o.event_type]||o.event_type)}*\n`;
     if (o.event_date)   text += `Дата: ${esc(o.event_date)}\n`;
     if (o.event_duration) text += `Продолжительность: ${o.event_duration} ч\\.\n`;
@@ -1917,19 +1929,59 @@ async function showPhotoGalleryManager(chatId, modelId) {
   );
 }
 
+// ─── Audit log viewer ─────────────────────────────────────────────────────────
+
+async function showAuditLog(chatId, page = 0) {
+  if (!isAdmin(chatId)) return;
+  const logs = await query(`
+    SELECT al.*, a.username FROM audit_log al
+    LEFT JOIN admins a ON al.admin_chat_id = a.chat_id
+    ORDER BY al.created_at DESC LIMIT 10 OFFSET ?`, [page * 10]).catch(()=>[]);
+
+  if (!logs.length) return safeSend(chatId, '📋 Журнал действий пуст\\.', { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_panel' }]] } });
+
+  const actionLabels = {
+    'change_order_status': '🔄 Статус заявки',
+    'delete_model': '🗑 Удаление модели',
+    'update_setting': '⚙️ Настройки',
+    'broadcast': '📢 Рассылка',
+    'add_model': '➕ Добавление модели',
+    'archive_model': '📦 Архивация',
+    'toggle_availability': '🟢 Доступность модели',
+  };
+
+  const lines = logs.map(l => {
+    const dt = new Date(l.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const action = actionLabels[l.action] || esc(l.action);
+    const who = l.username ? ` \\(${esc(l.username)}\\)` : '';
+    return `• *${esc(dt)}*${who} — ${action}`;
+  });
+
+  await safeSend(chatId, `📋 *Журнал действий*\n\n${lines.join('\n')}`, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '← Назад', callback_data: 'adm_panel' }]
+    ]}
+  });
+}
+
 // ─── Broadcast ────────────────────────────────────────────────────────────────
 
 async function showBroadcast(chatId) {
   if (!isAdmin(chatId)) return;
-  const r = await get("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>({n:0}));
+  const clientCount = await get("SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>({cnt:0}));
+  const completedCount = await get("SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND status='completed'").catch(()=>({cnt:0}));
+
   return safeSend(chatId,
-    `📢 *Рассылка клиентам*\n\nКлиентов с заявками: *${r.n}*\n\nВыберите тип рассылки:\n\n📝 *Только текст* — обычное текстовое сообщение\n🖼 *Текст \\+ фото* — сначала загрузите фото, потом подпись`,
+    `📢 *Рассылка*\n\nВыберите аудиторию:`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
-        [{ text: '📝 Только текст',  callback_data: 'adm_broadcast_text'  },
-         { text: '🖼 Текст + фото',  callback_data: 'adm_broadcast_photo' }],
-        [{ text: '❌ Отмена',        callback_data: 'admin_menu'          }],
+        [{ text: `👥 Все клиенты (${clientCount?.cnt || 0})`, callback_data: 'adm_broadcast_all' }],
+        [{ text: `✅ Завершили заявку (${completedCount?.cnt || 0})`, callback_data: 'adm_broadcast_completed' }],
+        [{ text: '📤 Отправить',  callback_data: 'adm_broadcast_text'  },
+         { text: '📷 С фото',     callback_data: 'adm_broadcast_photo' }],
+        [{ text: '← Назад',        callback_data: 'admin_menu'          }],
       ]}
     }
   );
@@ -2161,6 +2213,134 @@ async function showLoyaltyProfile(chatId) {
   });
 }
 
+// ─── Referral Program ─────────────────────────────────────────────────────────
+
+async function showReferralProgram(chatId) {
+  try {
+    const refCode = String(chatId);
+    const botInfo = await bot.getMe();
+    const refLink = `https://t.me/${botInfo.username}?start=ref${refCode}`;
+
+    const refs = await query(`SELECT COUNT(*) as cnt FROM referrals WHERE referrer_chat_id=?`, [chatId])
+      .catch(() => [{ cnt: 0 }]);
+    const refCount = refs[0]?.cnt || 0;
+    const points = await get(`SELECT points FROM loyalty_points WHERE chat_id=?`, [chatId])
+      .catch(() => null) || { points: 0 };
+
+    const text = [
+      `🎁 *Реферальная программа*`,
+      ``,
+      `Приглашайте друзей и получайте бонусные баллы\\!`,
+      ``,
+      `*Ваша реферальная ссылка:*`,
+      `\`${esc(refLink)}\``,
+      ``,
+      `👥 Приглашено друзей: *${refCount}*`,
+      `💫 Ваш баланс: *${points.points} баллов*`,
+      ``,
+      `_За каждого приглашённого друга вы получаете 50 баллов\\!_`
+    ].join('\n');
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📋 Поделиться ссылкой', switch_inline_query: `Используй мою ссылку для записи модели: ${refLink}` }],
+        [{ text: '💫 Мои баллы', callback_data: 'loyalty' }],
+        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showReferralProgram:', e.message); }
+}
+
+// ─── Price Calculator ──────────────────────────────────────────────────────────
+
+async function showPriceCalculator(chatId, params = {}) {
+  const { models = 1, hours = 4, eventType = 'other' } = params;
+
+  const baseRates = {
+    wedding: 5000, corporate: 4000, fashion: 6000, commercial: 5000, other: 4000
+  };
+  const baseRate = baseRates[eventType] || 4000;
+  const total = baseRate * models * (hours / 4);
+
+  const eventLabels = {
+    wedding: 'Свадьба', corporate: 'Корпоратив', fashion: 'Показ мод',
+    commercial: 'Коммерческая съёмка', other: 'Другое'
+  };
+
+  const text = [
+    `🧮 *Калькулятор стоимости*`,
+    ``,
+    `📌 Тип события: *${esc(eventLabels[eventType] || eventType)}*`,
+    `👤 Моделей: *${models}*`,
+    `⏱ Часов: *${hours}*`,
+    ``,
+    `💰 *Примерная стоимость: от ${total.toLocaleString('ru-RU')} ₽*`,
+    ``,
+    `_Цена ориентировочная\\. Точная стоимость обсуждается с менеджером\\._`
+  ].join('\n');
+
+  const modelsButtons = [1, 2, 3, 5].map(n => ({
+    text: models === n ? `✓ ${n}` : String(n),
+    callback_data: `calc_models_${n}_${hours}_${eventType}`
+  }));
+  const hoursButtons = [4, 8, 12, 16].map(h => ({
+    text: hours === h ? `✓ ${h}ч` : `${h}ч`,
+    callback_data: `calc_hours_${models}_${h}_${eventType}`
+  }));
+  const typeEntries = Object.entries(eventLabels);
+  const typeButtons = typeEntries.slice(0, 3).map(([key, label]) => ({
+    text: eventType === key ? `✓ ${label}` : label,
+    callback_data: `calc_type_${models}_${hours}_${key}`
+  }));
+  const typeButtons2 = typeEntries.slice(3).map(([key, label]) => ({
+    text: eventType === key ? `✓ ${label}` : label,
+    callback_data: `calc_type_${models}_${hours}_${key}`
+  }));
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '👤 Кол-во моделей:', callback_data: 'noop' }],
+      modelsButtons,
+      [{ text: '⏱ Часов:', callback_data: 'noop' }],
+      hoursButtons,
+      [{ text: '📌 Тип события:', callback_data: 'noop' }],
+      typeButtons,
+      ...(typeButtons2.length ? [typeButtons2] : []),
+      [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
+      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]
+    ]}
+  });
+}
+
+// ─── Order Timeline ────────────────────────────────────────────────────────────
+
+async function showOrderTimeline(order) {
+  const statuses = ['new', 'reviewing', 'confirmed', 'in_progress', 'completed'];
+  const statusEmoji = {
+    new: '🆕', reviewing: '🔍', confirmed: '✅', in_progress: '🔄', completed: '🏁', cancelled: '❌'
+  };
+  const statusName = {
+    new: 'Новая', reviewing: 'На рассмотрении', confirmed: 'Подтверждена',
+    in_progress: 'В работе', completed: 'Завершена', cancelled: 'Отменена'
+  };
+
+  if (order.status === 'cancelled') {
+    return `❌ Заявка отменена`;
+  }
+
+  const currentIdx = statuses.indexOf(order.status);
+  const timelineLines = statuses.map((st, i) => {
+    const done = i <= currentIdx;
+    const current = i === currentIdx;
+    const prefix = done ? (current ? '➡️' : '✅') : '⬜';
+    return `${prefix} ${statusEmoji[st]} ${esc(statusName[st])}`;
+  });
+
+  return timelineLines.join('\n');
+}
+
 // ─── Admin order actions ──────────────────────────────────────────────────────
 
 async function adminChangeStatus(chatId, orderId, newStatus) {
@@ -2260,6 +2440,21 @@ function initBot(app) {
         const modelId = parseInt(modelMatch[1]);
         const m = await get('SELECT id FROM models WHERE id=? AND available=1', [modelId]).catch(()=>null);
         if (m) return showModel(chatId, modelId);
+      }
+      // Deep-link: /start ref{code} — referral link
+      const refMatch = ref.match(/^ref(\d+)$/);
+      if (refMatch) {
+        const referrerId = parseInt(refMatch[1]);
+        if (referrerId !== chatId) {
+          const existing = await get(`SELECT id FROM referrals WHERE referred_chat_id=?`, [chatId]).catch(() => null);
+          if (!existing) {
+            await run(`INSERT INTO referrals (referrer_chat_id, referred_chat_id) VALUES (?,?)`, [referrerId, chatId]).catch(() => {});
+            await addLoyaltyPoints(referrerId, 50, 'referral', `Приглашён новый пользователь`).catch(() => {});
+            await bot.sendMessage(referrerId, `🎉 По вашей реферальной ссылке зарегистрировался новый пользователь\\! \\+50 баллов\\.`,
+              { parse_mode: 'MarkdownV2' }).catch(() => {});
+          }
+        }
+        // Fall through to show main menu
       }
       // Deep-link: /start ORDER_NUMBER
       const order = await get('SELECT * FROM orders WHERE order_number=?', [ref]).catch(()=>null);
@@ -2383,6 +2578,9 @@ function initBot(app) {
     if (data === 'pricing')    return showPricing(chatId);
     if (data === 'profile')    return showUserProfile(chatId, q.from.first_name);
     if (data === 'loyalty')    return showLoyaltyProfile(chatId);
+    if (data === 'referral')   return showReferralProgram(chatId);
+    if (data === 'calculator') return showPriceCalculator(chatId);
+    if (data === 'noop')       return; // label-only buttons
     if (data === 'my_orders')  return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
     if (data === 'adm_stats')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminStats(chatId); }
@@ -2513,6 +2711,20 @@ function initBot(app) {
 
     // ── Прайс-лист
     if (data === 'pricing') return showPricing(chatId);
+
+    // ── Калькулятор цен: calc_models_N_H_TYPE | calc_hours_N_H_TYPE | calc_type_N_H_TYPE
+    if (data.startsWith('calc_')) {
+      const cm = data.match(/^calc_(models|hours|type)_(\d+)_(\d+)_(.+)$/);
+      if (cm) {
+        const [, , modelsStr, hoursStr, type] = cm;
+        const calcModels = parseInt(modelsStr);
+        const calcHours  = parseInt(hoursStr);
+        if (!isNaN(calcModels) && !isNaN(calcHours)) {
+          return showPriceCalculator(chatId, { models: calcModels, hours: calcHours, eventType: type });
+        }
+      }
+      return;
+    }
 
     // ── Фильтр по городу
     if (data.startsWith('cat_city_')) {
@@ -3909,8 +4121,17 @@ async function showUserProfile(chatId, firstName) {
       ? new Date(orders[0].created_at).toLocaleDateString('ru')
       : 'неизвестно';
 
+    const loyalty = await get(`SELECT * FROM loyalty_points WHERE chat_id=?`, [chatId]).catch(() => null);
+    const level = !loyalty ? '🥉 Бронзовый'
+      : loyalty.total_earned >= 5000 ? '💎 Платиновый'
+      : loyalty.total_earned >= 2000 ? '🥇 Золотой'
+      : loyalty.total_earned >= 500 ? '🥈 Серебряный'
+      : '🥉 Бронзовый';
+
     let text = `👤 *Мой профиль*\n\n`;
     text += `Имя: *${esc(firstName || lastOrderFull?.client_name || 'Гость')}*\n`;
+    text += `💫 Уровень: *${esc(level)}*\n`;
+    if (loyalty) text += `🎁 Баллов: *${loyalty.points}*\n`;
     if (lastOrderFull?.client_phone) text += `📞 Телефон: ${esc(lastOrderFull.client_phone)}\n`;
     if (lastOrderFull?.client_email) text += `📧 Email: ${esc(lastOrderFull.client_email)}\n`;
     text += `\n📋 *История заявок:*\n`;
