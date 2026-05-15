@@ -6343,7 +6343,9 @@ async function showPublicReviews(chatId, page) {
       const date  = r.created_at ? new Date(r.created_at).toLocaleDateString('ru') : '';
       text += `${page * perPage + i + 1}\\. *${esc(r.client_name)}* ${stars}`;
       if (date) text += ` \\(${esc(date)}\\)`;
-      text += `\n_${esc(r.text)}_\n\n`;
+      text += `\n_${esc(r.text)}_`;
+      if (r.admin_reply) text += `\n💬 _${esc(r.admin_reply)}_`;
+      text += '\n\n';
     });
 
     const nav = [];
