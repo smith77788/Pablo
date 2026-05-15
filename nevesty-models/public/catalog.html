@@ -1,636 +1,1229 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- Flash-prevention: apply theme class before first paint -->
-  <script>try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>
-  <title>Каталог моделей — Nevesty Models</title>
-  <meta name="description" content="Каталог профессиональных моделей агентства Nevesty Models. Более 200 fashion, commercial и event-моделей для фотосессий и мероприятий.">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://nevesty-models.ru/catalog.html">
-  <meta property="og:title" content="Каталог моделей — Nevesty Models">
-  <meta property="og:description" content="Выберите модель для вашего мероприятия. Фильтрация по городу, категории, параметрам.">
-  <meta property="og:image" content="https://nevesty-models.ru/img/og-catalog.svg">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Каталог моделей — Nevesty Models">
-  <meta name="twitter:description" content="Выберите модель для вашего мероприятия. Фильтрация по городу, категории, параметрам.">
-  <meta name="twitter:image" content="https://nevesty-models.ru/img/og-catalog.svg">
-  <meta name="twitter:site" content="@nevesty_models">
-  <meta name="theme-color" content="#080808">
-  <link rel="canonical" href="https://nevesty-models.ru/catalog.html">
-  <meta name="robots" content="index, follow">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
-  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
-  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
-  <link rel="preload" href="/css/main.css" as="style">
-  <link rel="stylesheet" href="/css/main.css" />
-  <style>
-    .fav-btn {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      background: rgba(0,0,0,0.6);
-      border: none;
-      color: #ccc;
-      font-size: 1.2rem;
-      cursor: pointer;
-      border-radius: 50%;
-      width: 36px;
-      height: 36px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-      z-index: 10;
-    }
-    .fav-btn:hover { background: rgba(0,0,0,0.8); color: #e74c3c; }
-    .fav-btn.active { color: #e74c3c; }
-    #fav-counter {
-      display: inline-block;
-      background: #e74c3c;
-      color: #fff;
-      border-radius: 50%;
-      font-size: 0.7rem;
-      min-width: 18px;
-      height: 18px;
-      text-align: center;
-      line-height: 18px;
-      padding: 0 4px;
-      margin-left: 2px;
-    }
-    .btn-favorites {
-      font-size: 0.78rem;
-      color: var(--text-dim);
-      background: none;
-      border: 1px solid var(--border, rgba(255,255,255,0.1));
-      padding: 5px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: color 0.2s, border-color 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .btn-favorites:hover { color: #e74c3c; border-color: #e74c3c; }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Flash-prevention: apply theme class before first paint -->
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light') {
+          document.documentElement.classList.add('light');
+        } else if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
+    <title>Каталог моделей — Nevesty Models</title>
+    <meta
+      name="description"
+      content="Каталог профессиональных моделей агентства Nevesty Models. Более 200 fashion, commercial и event-моделей для фотосессий и мероприятий."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://nevesty-models.ru/catalog.html" />
+    <meta property="og:title" content="Каталог моделей — Nevesty Models" />
+    <meta
+      property="og:description"
+      content="Выберите модель для вашего мероприятия. Фильтрация по городу, категории, параметрам."
+    />
+    <meta property="og:image" content="https://nevesty-models.ru/img/og-catalog.svg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Каталог моделей — Nevesty Models" />
+    <meta
+      name="twitter:description"
+      content="Выберите модель для вашего мероприятия. Фильтрация по городу, категории, параметрам."
+    />
+    <meta name="twitter:image" content="https://nevesty-models.ru/img/og-catalog.svg" />
+    <meta name="twitter:site" content="@nevesty_models" />
+    <meta name="theme-color" content="#080808" />
+    <link rel="canonical" href="https://nevesty-models.ru/catalog.html" />
+    <meta name="robots" content="index, follow" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.tailwindcss.com" />
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
+    <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
+    <link rel="preload" href="/css/main.css" as="style" />
+    <link rel="stylesheet" href="/css/main.css" />
+    <style>
+      .fav-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(0, 0, 0, 0.6);
+        border: none;
+        color: #ccc;
+        font-size: 1.2rem;
+        cursor: pointer;
+        border-radius: 50%;
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+        z-index: 10;
+      }
+      .fav-btn:hover {
+        background: rgba(0, 0, 0, 0.8);
+        color: #e74c3c;
+      }
+      .fav-btn.active {
+        color: #e74c3c;
+      }
+      #fav-counter {
+        display: inline-block;
+        background: #e74c3c;
+        color: #fff;
+        border-radius: 50%;
+        font-size: 0.7rem;
+        min-width: 18px;
+        height: 18px;
+        text-align: center;
+        line-height: 18px;
+        padding: 0 4px;
+        margin-left: 2px;
+      }
+      .btn-favorites {
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        background: none;
+        border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+        padding: 5px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition:
+          color 0.2s,
+          border-color 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .btn-favorites:hover {
+        color: #e74c3c;
+        border-color: #e74c3c;
+      }
 
-  /* ── Skeleton sub-elements ── */
-  .skeleton-img { height: 200px; margin-bottom: 12px; border-radius: 8px; }
-  .skeleton-title { height: 20px; width: 60%; margin-bottom: 8px; }
-  .skeleton-text.short { width: 40%; }
-  [data-theme="dark"] .skeleton,
-  html.dark .skeleton {
-    background: linear-gradient(90deg, #2a2a4a 25%, #3a3a5a 50%, #2a2a4a 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-  </style>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843' }
+      /* ── Skeleton sub-elements ── */
+      .skeleton-img {
+        height: 200px;
+        margin-bottom: 12px;
+        border-radius: 8px;
+      }
+      .skeleton-title {
+        height: 20px;
+        width: 60%;
+        margin-bottom: 8px;
+      }
+      .skeleton-text.short {
+        width: 40%;
+      }
+      [data-theme='dark'] .skeleton,
+      html.dark .skeleton {
+        background: linear-gradient(90deg, #2a2a4a 25%, #3a3a5a 50%, #2a2a4a 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+      }
+    </style>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              pink: {
+                50: '#fdf2f8',
+                100: '#fce7f3',
+                200: '#fbcfe8',
+                300: '#f9a8d4',
+                400: '#f472b6',
+                500: '#ec4899',
+                600: '#db2777',
+                700: '#be185d',
+                800: '#9d174d',
+                900: '#831843',
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+    <!-- Google Analytics 4 (loads only if consent given) -->
+    <script>
+      window._ga_id = ''; // loaded from API
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ga_measurement_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          window._ga_id = d.ga_measurement_id;
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+          function gtag() {
+            dataLayer.push(arguments);
+          }
+          window.gtag = gtag;
+          gtag('js', new Date());
+          gtag('config', d.ga_measurement_id, { send_page_view: true });
+          window._ga_ready = true;
+        })
+        .catch(() => {});
+    </script>
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          window.YM_ID = d.ym_counter_id;
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+    <!-- Analytics wrapper -->
+    <script src="/js/analytics.js"></script>
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+    <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links" role="list">
+          <a href="/catalog.html" style="color: var(--gold)">Модели</a>
+          <a href="/pricing.html">Цены</a>
+          <a href="/about.html">О нас</a>
+          <a href="/reviews.html">Отзывы</a>
+          <a href="/faq.html">FAQ</a>
+          <a href="/contact.html">Контакты</a>
+          <a
+            href="/favorites.html"
+            id="fav-nav-link"
+            aria-label="Избранное"
+            style="
+              display: inline-flex;
+              align-items: center;
+              gap: 4px;
+              font-size: 0.9rem;
+              text-decoration: none;
+              color: var(--text-muted);
+            "
+          >
+            <span aria-hidden="true">❤️</span> Избранное
+            <span
+              id="fav-nav-badge"
+              style="
+                background: red;
+                color: white;
+                border-radius: 50%;
+                padding: 0 5px;
+                font-size: 0.7rem;
+                min-width: 18px;
+                text-align: center;
+                display: inline-block;
+                line-height: 18px;
+              "
+            ></span>
+          </a>
+          <a
+            href="/compare.html"
+            id="nav-compare-link"
+            aria-label="Сравнение моделей"
+            style="display: none; font-size: 0.9rem; color: var(--gold)"
+            >⚖️ <span id="nav-compare-count">0</span></a
+          >
+          <a href="/cabinet.html" style="font-size: 0.9rem" aria-label="Мои заявки"
+            ><span aria-hidden="true">👤</span> Мои заявки</a
+          >
+          <button
+            onclick="DarkMode.toggle()"
+            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            aria-label="Переключить тему"
+            title="Dark/Light mode"
+            style="background: none; border: none; cursor: pointer; padding: 4px 8px"
+          >
+            <span class="dark-mode-icon" style="font-size: 1.1rem">🌙</span>
+          </button>
+          <a
+            id="whatsapp-btn"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            style="
+              display: none;
+              align-items: center;
+              gap: 6px;
+              background: #25d366;
+              color: #fff;
+              padding: 6px 14px;
+              border-radius: 8px;
+              font-size: 0.8rem;
+              font-weight: 600;
+              transition: background 0.2s;
+              text-decoration: none;
+            "
+            onmouseover="this.style.background = '#1da851'"
+            onmouseout="this.style.background = '#25D366'"
+          >
+            <svg style="width: 16px; height: 16px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+              <path
+                d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+              />
+            </svg>
+            <span>WhatsApp</span>
+          </a>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
+        </div>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </nav>
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/pricing.html">Цены</a>
+      <a href="/about.html">О нас</a>
+      <a href="/reviews.html">Отзывы</a>
+      <a href="/faq.html">FAQ</a>
+      <a href="/contact.html">Контакты</a>
+      <a href="/favorites.html"><span aria-hidden="true">❤️</span> Избранное</a>
+      <a href="/compare.html"><span aria-hidden="true">⚖️</span> Сравнение</a>
+      <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+      <button
+        onclick="DarkMode.toggle()"
+        aria-label="Переключить тему"
+        style="
+          background: none;
+          border: 1px solid var(--border);
+          color: var(--text-muted);
+          padding: 8px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 1rem;
+          margin-top: 8px;
+        "
+      >
+        <span class="dark-mode-icon">🌙</span> Тема
+      </button>
+    </nav>
+
+    <main class="catalog-page" id="main-content">
+      <div class="container">
+        <nav aria-label="breadcrumb" style="padding-top: 24px; margin-bottom: 8px">
+          <ol
+            class="breadcrumb"
+            style="
+              display: flex;
+              list-style: none;
+              padding: 0;
+              margin: 0;
+              gap: 8px;
+              font-size: 0.75rem;
+              color: var(--text-dim);
+            "
+          >
+            <li class="breadcrumb-item">
+              <a href="/" style="color: var(--text-muted); text-decoration: none">Главная</a>
+            </li>
+            <li style="color: var(--border)" aria-hidden="true">/</li>
+            <li class="breadcrumb-item active" aria-current="page" style="color: var(--gold)">Каталог моделей</li>
+          </ol>
+        </nav>
+        <div class="catalog-header">
+          <div
+            style="
+              font-size: 0.7rem;
+              letter-spacing: 3px;
+              text-transform: uppercase;
+              color: var(--gold);
+              margin-bottom: 12px;
+            "
+          >
+            Наши модели
+          </div>
+          <h1>Каталог моделей</h1>
+          <p style="color: var(--text-muted); margin-top: 8px">Найдите идеальную модель для вашего проекта</p>
+          <div style="margin-top: 12px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap">
+            <a
+              href="/compare.html"
+              style="font-size: 0.78rem; color: var(--text-dim); text-decoration: none; transition: color 0.2s"
+              onmouseover="this.style.color = 'var(--gold)'"
+              onmouseout="this.style.color = 'var(--text-dim)'"
+              ><span aria-hidden="true">⚖️</span> Сравнить модели</a
+            >
+            <a
+              href="/favorites.html"
+              style="font-size: 0.78rem; color: var(--text-dim); text-decoration: none; transition: color 0.2s"
+              onmouseover="this.style.color = 'var(--gold)'"
+              onmouseout="this.style.color = 'var(--text-dim)'"
+              ><span aria-hidden="true">❤️</span> Мои избранные</a
+            >
+            <button onclick="showFavorites()" class="btn-favorites" aria-label="Показать избранные модели">
+              ❤️ Избранное <span id="fav-counter" style="display: none"></span>
+            </button>
+            <button
+              onclick="openAiMatchModal()"
+              class="btn-favorites"
+              aria-label="AI подбор модели"
+              style="color: var(--gold); border-color: rgba(201, 169, 110, 0.4)"
+            >
+              🤖 AI Подбор
+            </button>
+            <button
+              id="shareLinkBtn"
+              onclick="copyShareLink()"
+              class="btn-favorites"
+              aria-label="Скопировать ссылку на текущий каталог с фильтрами"
+            >
+              🔗 Скопировать ссылку
+            </button>
+          </div>
+        </div>
+        <div class="catalog-layout">
+          <!-- FILTERS -->
+          <aside class="filters-panel" role="search" aria-label="Фильтры каталога">
+            <h3 style="display: flex; align-items: center; justify-content: space-between">
+              Фильтры
+              <span
+                id="activeFilterBadge"
+                style="
+                  display: none;
+                  background: var(--gold);
+                  color: #000;
+                  border-radius: 50%;
+                  font-size: 0.7rem;
+                  min-width: 20px;
+                  height: 20px;
+                  text-align: center;
+                  line-height: 20px;
+                  padding: 0 5px;
+                  font-family: 'Inter', sans-serif;
+                  font-weight: 700;
+                "
+                aria-label="Активных фильтров"
+              ></span>
+            </h3>
+            <div class="filter-group">
+              <label for="searchInput">Поиск</label>
+              <input
+                class="filter-search"
+                type="search"
+                id="searchInput"
+                placeholder="Имя модели..."
+                aria-label="Поиск моделей"
+                role="searchbox"
+              />
+            </div>
+            <div class="filter-group" role="group" aria-label="Категория">
+              <label>Категория</label>
+              <div class="filter-options" id="categoryFilters">
+                <span class="filter-tag active" data-value="" role="button" tabindex="0" aria-pressed="true">Все</span>
+                <span class="filter-tag" data-value="fashion" role="button" tabindex="0" aria-pressed="false"
+                  >Fashion</span
+                >
+                <span class="filter-tag" data-value="commercial" role="button" tabindex="0" aria-pressed="false"
+                  >Commercial</span
+                >
+                <span class="filter-tag" data-value="events" role="button" tabindex="0" aria-pressed="false"
+                  >Events</span
+                >
+              </div>
+            </div>
+            <div class="filter-group">
+              <label for="cityFilter">Город</label>
+              <select
+                id="cityFilter"
+                class="filter-search"
+                style="padding: 8px 14px; font-size: 0.85rem; cursor: pointer"
+                aria-label="Фильтр по городу"
+              >
+                <option value="">Все города</option>
+              </select>
+            </div>
+            <div class="filter-group" role="group" aria-label="Фильтр по возрасту">
+              <label>Возраст</label>
+              <div class="filter-options" id="ageFilters">
+                <span class="filter-tag active" data-min="" data-max="" role="button" tabindex="0" aria-pressed="true"
+                  >Любой</span
+                >
+                <span class="filter-tag" data-min="18" data-max="22" role="button" tabindex="0" aria-pressed="false"
+                  >18–22</span
+                >
+                <span class="filter-tag" data-min="23" data-max="27" role="button" tabindex="0" aria-pressed="false"
+                  >23–27</span
+                >
+                <span class="filter-tag" data-min="28" data-max="32" role="button" tabindex="0" aria-pressed="false"
+                  >28–32</span
+                >
+                <span class="filter-tag" data-min="33" data-max="" role="button" tabindex="0" aria-pressed="false"
+                  >33+</span
+                >
+              </div>
+              <div class="range-row" style="margin-top: 8px">
+                <input
+                  type="number"
+                  id="age-min"
+                  placeholder="от"
+                  min="18"
+                  max="50"
+                  class="admin-input"
+                  style="padding: 8px 10px"
+                  aria-label="Минимальный возраст"
+                />
+                <span aria-hidden="true">—</span>
+                <input
+                  type="number"
+                  id="age-max"
+                  placeholder="до"
+                  min="18"
+                  max="50"
+                  class="admin-input"
+                  style="padding: 8px 10px"
+                  aria-label="Максимальный возраст"
+                />
+              </div>
+            </div>
+            <div class="filter-group" role="group" aria-label="Фильтр по цвету волос">
+              <label>Цвет волос</label>
+              <div class="filter-options" id="hairFilters">
+                <span class="filter-tag active" data-value="" role="button" tabindex="0" aria-pressed="true">Все</span>
+                <span class="filter-tag" data-value="Блонд" role="button" tabindex="0" aria-pressed="false">Блонд</span>
+                <span class="filter-tag" data-value="Шатен" role="button" tabindex="0" aria-pressed="false">Шатен</span>
+                <span class="filter-tag" data-value="Брюнетка" role="button" tabindex="0" aria-pressed="false"
+                  >Брюнетка</span
+                >
+                <span class="filter-tag" data-value="Рыжая" role="button" tabindex="0" aria-pressed="false">Рыжая</span>
+              </div>
+            </div>
+            <div class="filter-group" role="group" aria-label="Фильтр по росту">
+              <label>Рост (см)</label>
+              <div class="filter-options" id="heightFilters" style="margin-bottom: 10px">
+                <span class="filter-tag active" data-hmin="" data-hmax="" role="button" tabindex="0" aria-pressed="true"
+                  >Любой</span
+                >
+                <span class="filter-tag" data-hmin="160" data-hmax="165" role="button" tabindex="0" aria-pressed="false"
+                  >160–165</span
+                >
+                <span class="filter-tag" data-hmin="166" data-hmax="170" role="button" tabindex="0" aria-pressed="false"
+                  >166–170</span
+                >
+                <span class="filter-tag" data-hmin="171" data-hmax="175" role="button" tabindex="0" aria-pressed="false"
+                  >171–175</span
+                >
+                <span class="filter-tag" data-hmin="176" data-hmax="180" role="button" tabindex="0" aria-pressed="false"
+                  >176–180</span
+                >
+                <span class="filter-tag" data-hmin="181" data-hmax="" role="button" tabindex="0" aria-pressed="false"
+                  >181+</span
+                >
+              </div>
+              <div class="range-row">
+                <input
+                  type="number"
+                  id="minHeight"
+                  placeholder="от"
+                  min="160"
+                  max="195"
+                  class="admin-input"
+                  style="padding: 8px 10px"
+                  aria-label="Минимальный рост"
+                />
+                <span aria-hidden="true">—</span>
+                <input
+                  type="number"
+                  id="maxHeight"
+                  placeholder="до"
+                  min="160"
+                  max="195"
+                  class="admin-input"
+                  style="padding: 8px 10px"
+                  aria-label="Максимальный рост"
+                />
+              </div>
+            </div>
+            <div class="filter-group">
+              <label class="filter-avail-label">
+                <input
+                  type="checkbox"
+                  id="availableOnly"
+                  style="
+                    accent-color: var(--gold);
+                    width: 15px;
+                    height: 15px;
+                    cursor: pointer;
+                    vertical-align: middle;
+                    margin-right: 6px;
+                  "
+                  aria-label="Показывать только свободных моделей"
+                />
+                Только свободные
+              </label>
+            </div>
+            <button class="btn-filter-reset" id="resetFilters" aria-label="Сбросить все фильтры">
+              Сбросить фильтры
+            </button>
+          </aside>
+
+          <!-- CATALOG -->
+          <div>
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 20px;
+                gap: 16px;
+                flex-wrap: wrap;
+              "
+            >
+              <div class="catalog-count" id="catalogCount" aria-live="polite" aria-atomic="true">Загрузка...</div>
+              <label for="sortSelect" class="sr-only">Сортировка</label>
+              <select
+                id="sortSelect"
+                class="filter-search"
+                style="width: auto; padding: 8px 14px; font-size: 0.8rem; cursor: pointer"
+                aria-label="Сортировка результатов"
+              >
+                <option value="default">По умолчанию</option>
+                <option value="featured">По рейтингу</option>
+                <option value="name_asc">По алфавиту</option>
+                <option value="newest">Новинки</option>
+                <option value="available">Сначала свободные</option>
+                <option value="height_desc">По росту ↓</option>
+                <option value="height_asc">По росту ↑</option>
+                <option value="age_asc">По возрасту (моложе)</option>
+              </select>
+            </div>
+            <!-- Skeleton loader -->
+            <div class="catalog-grid" id="catalogSkeleton" aria-hidden="true" aria-busy="true" aria-live="polite">
+              <div class="model-card-skeleton"></div>
+              <div class="model-card-skeleton"></div>
+              <div class="model-card-skeleton"></div>
+              <div class="model-card-skeleton"></div>
+              <div class="model-card-skeleton"></div>
+              <div class="model-card-skeleton"></div>
+            </div>
+            <div
+              class="catalog-grid"
+              id="catalogGrid"
+              role="list"
+              aria-live="polite"
+              aria-label="Результаты поиска"
+              style="display: none"
+            >
+              <!-- injected -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- AI MATCH MODAL -->
+    <div
+      id="aiMatchModal"
+      style="
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        z-index: 900;
+        align-items: center;
+        justify-content: center;
+      "
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="aiMatchTitle"
+    >
+      <div
+        style="
+          background: var(--bg1, #111);
+          border: 1px solid rgba(201, 169, 110, 0.3);
+          border-radius: 10px;
+          padding: 32px;
+          width: 100%;
+          max-width: 520px;
+          margin: 24px;
+          box-sizing: border-box;
+          max-height: 90vh;
+          overflow-y: auto;
+        "
+      >
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px">
+          <h2 id="aiMatchTitle" style="font-size: 1.1rem; font-weight: 700; color: var(--gold, #c9a96e); margin: 0">
+            🤖 AI Подбор модели
+          </h2>
+          <button
+            onclick="closeAiMatchModal()"
+            style="
+              background: none;
+              border: none;
+              color: var(--text-dim, #888);
+              font-size: 1.3rem;
+              cursor: pointer;
+              line-height: 1;
+            "
+            aria-label="Закрыть"
+          >
+            ✕
+          </button>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-muted, #aaa); margin-bottom: 16px; line-height: 1.5">
+          Опишите ваше мероприятие и требования к модели — AI подберёт лучших кандидатов из каталога.
+        </p>
+        <textarea
+          id="aiMatchDesc"
+          placeholder="Например: корпоратив на 100 человек, нужна модель для встречи гостей, стиль — элегантный, Москва, бюджет 25000₽..."
+          style="
+            width: 100%;
+            min-height: 110px;
+            background: var(--bg2, #1a1a1a);
+            border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+            color: var(--text, #f0f0f0);
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 0.85rem;
+            font-family: inherit;
+            resize: vertical;
+            box-sizing: border-box;
+            line-height: 1.5;
+          "
+          maxlength="500"
+          aria-label="Описание мероприятия"
+        ></textarea>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px">
+          <button
+            onclick="closeAiMatchModal()"
+            style="
+              padding: 10px 20px;
+              background: none;
+              border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+              color: var(--text-muted, #aaa);
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 0.8rem;
+            "
+          >
+            Отмена
+          </button>
+          <button
+            id="aiMatchBtn"
+            onclick="runAiMatchCatalog()"
+            style="
+              padding: 10px 24px;
+              background: var(--gold, #c9a96e);
+              color: #000;
+              border: none;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 0.8rem;
+              font-weight: 700;
+              letter-spacing: 0.5px;
+            "
+          >
+            Подобрать
+          </button>
+        </div>
+        <div id="aiMatchResults" style="margin-top: 20px"></div>
+      </div>
+    </div>
+
+    <!-- MODEL MODAL -->
+    <div
+      class="modal-overlay"
+      id="modelModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modalTitle"
+      tabindex="-1"
+    >
+      <div class="modal" id="modalContent">
+        <button class="modal-close" id="modalClose" aria-label="Закрыть">✕</button>
+        <div class="modal-inner" id="modalInner"></div>
+      </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Floating Compare Bar -->
+    <div
+      id="compareBar"
+      style="
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 500;
+        background: rgba(8, 8, 8, 0.97);
+        border-top: 1px solid var(--gold);
+        backdrop-filter: blur(12px);
+        padding: 14px 24px;
+        transition: transform 0.3s ease;
+      "
+    >
+      <div
+        style="
+          max-width: 1200px;
+          margin: 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          flex-wrap: wrap;
+        "
+      >
+        <div style="display: flex; align-items: center; gap: 12px">
+          <span style="font-size: 0.7rem; letter-spacing: 2px; text-transform: uppercase; color: var(--gold)"
+            >⚖️ Сравнение</span
+          >
+          <span id="compareBarCount" style="font-size: 0.85rem; color: var(--text-muted)">Выбрано 0 моделей</span>
+          <div id="compareBarAvatars" style="display: flex; gap: 6px"></div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center">
+          <a
+            id="compareBarLink"
+            href="/compare.html"
+            style="
+              padding: 10px 24px;
+              background: var(--gold);
+              color: var(--bg);
+              font-size: 0.75rem;
+              letter-spacing: 1.5px;
+              text-transform: uppercase;
+              font-weight: 600;
+              text-decoration: none;
+              transition: background 0.2s;
+            "
+            onmouseover="this.style.background = 'var(--gold-light)'"
+            onmouseout="this.style.background = 'var(--gold)'"
+          >
+            Сравнить
+          </a>
+          <button
+            onclick="clearCompare()"
+            style="
+              background: none;
+              border: 1px solid var(--border);
+              color: var(--text-muted);
+              padding: 10px 18px;
+              cursor: pointer;
+              font-size: 0.75rem;
+              letter-spacing: 1px;
+              text-transform: uppercase;
+              transition: all 0.2s;
+            "
+            onmouseover="this.style.borderColor = 'var(--text-muted)'"
+            onmouseout="this.style.borderColor = 'var(--border)'"
+            aria-label="Очистить список сравнения"
+          >
+            Очистить
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sticky Telegram Button -->
+    <div id="sticky-telegram" style="position: fixed; bottom: 84px; right: 24px; z-index: 401">
+      <a
+        href="https://t.me/nevesty_agency"
+        target="_blank"
+        rel="noopener"
+        style="
+          width: 52px;
+          height: 52px;
+          border-radius: 50%;
+          background: #229ed9;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+          text-decoration: none;
+          transition:
+            transform 0.2s,
+            box-shadow 0.2s;
+        "
+        title="Написать в Telegram"
+        aria-label="Написать в Telegram"
+        onmouseover="
+          this.style.transform = 'translateY(-2px)';
+          this.style.boxShadow = '0 6px 18px rgba(34,158,217,0.5)';
+        "
+        onmouseout="
+          this.style.transform = '';
+          this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+        "
+      >
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+          <path
+            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8l-1.72 8.13c-.13.59-.47.73-.95.46l-2.62-1.93-1.26 1.21c-.14.14-.26.26-.53.26l.19-2.69 4.9-4.42c.21-.19-.05-.29-.33-.1L7.5 14.3l-2.56-.8c-.56-.17-.57-.56.12-.83l10.01-3.86c.46-.17.86.11.57.99z"
+          />
+        </svg>
+      </a>
+    </div>
+
+    <!-- Floating WhatsApp Button -->
+    <div id="float-whatsapp" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 400">
+      <a
+        id="float-wa-link"
+        href="#"
+        target="_blank"
+        rel="noopener"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #25d366;
+          color: #fff;
+          padding: 14px 20px;
+          border-radius: 50px;
+          box-shadow: 0 4px 16px rgba(37, 211, 102, 0.4);
+          text-decoration: none;
+          font-size: 0.85rem;
+          font-weight: 600;
+          transition: all 0.2s;
+        "
+        onmouseover="
+          this.style.background = '#1da851';
+          this.style.boxShadow = '0 6px 20px rgba(37,211,102,0.5)';
+        "
+        onmouseout="
+          this.style.background = '#25D366';
+          this.style.boxShadow = '0 4px 16px rgba(37,211,102,0.4)';
+        "
+      >
+        <svg
+          style="width: 22px; height: 22px; flex-shrink: 0"
+          fill="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+          />
+        </svg>
+        Написать в WhatsApp
+      </a>
+    </div>
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          const wa = d.contacts_whatsapp;
+          if (wa) {
+            const waNum = wa.replace(/\D/g, '');
+            const waUrl = `https://wa.me/${waNum}`;
+            const btn = document.getElementById('whatsapp-btn');
+            if (btn) {
+              btn.href = waUrl;
+              btn.style.display = 'flex';
+            }
+            const floatEl = document.getElementById('float-whatsapp');
+            const floatLink = document.getElementById('float-wa-link');
+            if (floatEl && floatLink) {
+              floatLink.href = waUrl;
+              floatEl.style.display = 'block';
+            }
+          }
+        })
+        .catch(() => {});
+    </script>
+
+    <!-- Compare logic (exposed globally for catalog.js) -->
+    <script>
+      (function () {
+        const COMPARE_KEY = 'nm_compare';
+        const MAX_COMPARE = 3;
+
+        function getCompareIds() {
+          try {
+            return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]');
+          } catch {
+            return [];
           }
         }
-      }
-    }
-  </script>
-  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
-  <!-- Google Analytics 4 (loads only if consent given) -->
-  <script>
-    window._ga_id = ''; // loaded from API
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ga_measurement_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      window._ga_id = d.ga_measurement_id;
-      var s = document.createElement('script');
-      s.async = true;
-      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
-      document.head.appendChild(s);
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      window.gtag = gtag;
-      gtag('js', new Date());
-      gtag('config', d.ga_measurement_id, { 'send_page_view': true });
-      window._ga_ready = true;
-    }).catch(()=>{});
-  </script>
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      window.YM_ID = d.ym_counter_id;
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-  <!-- Analytics wrapper -->
-  <script src="/js/analytics.js"></script>
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links" role="list">
-        <a href="/catalog.html" style="color:var(--gold)">Модели</a>
-        <a href="/pricing.html">Цены</a>
-        <a href="/about.html">О нас</a>
-        <a href="/reviews.html">Отзывы</a>
-        <a href="/faq.html">FAQ</a>
-        <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" id="fav-nav-link" aria-label="Избранное" style="display:inline-flex;align-items:center;gap:4px;font-size:0.9rem;text-decoration:none;color:var(--text-muted)">
-          <span aria-hidden="true">❤️</span> Избранное
-          <span id="fav-nav-badge" style="background:red;color:white;border-radius:50%;padding:0 5px;font-size:0.7rem;min-width:18px;text-align:center;display:inline-block;line-height:18px"></span>
-        </a>
-        <a href="/compare.html" id="nav-compare-link" aria-label="Сравнение моделей" style="display:none;font-size:0.9rem;color:var(--gold)">⚖️ <span id="nav-compare-count">0</span></a>
-        <a href="/cabinet.html" style="font-size:0.9rem" aria-label="Мои заявки"><span aria-hidden="true">👤</span> Мои заявки</a>
-        <button onclick="DarkMode.toggle()"
-          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
-          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
-        </button>
-        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
-           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
-           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
-          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-          <span>WhatsApp</span>
-        </a>
-        <a href="/booking.html" class="btn-nav">Заказать</a>
-      </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
-    </div>
-  </nav>
-  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-    <a href="/catalog.html">Модели</a>
-    <a href="/pricing.html">Цены</a>
-    <a href="/about.html">О нас</a>
-    <a href="/reviews.html">Отзывы</a>
-    <a href="/faq.html">FAQ</a>
-    <a href="/contact.html">Контакты</a>
-    <a href="/favorites.html"><span aria-hidden="true">❤️</span> Избранное</a>
-    <a href="/compare.html"><span aria-hidden="true">⚖️</span> Сравнение</a>
-    <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
-    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
-  </nav>
-
-  <main class="catalog-page" id="main-content">
-    <div class="container">
-      <nav aria-label="breadcrumb" style="padding-top:24px;margin-bottom:8px">
-        <ol class="breadcrumb" style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
-          <li class="breadcrumb-item"><a href="/" style="color:var(--text-muted);text-decoration:none">Главная</a></li>
-          <li style="color:var(--border)" aria-hidden="true">/</li>
-          <li class="breadcrumb-item active" aria-current="page" style="color:var(--gold)">Каталог моделей</li>
-        </ol>
-      </nav>
-      <div class="catalog-header">
-        <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Наши модели</div>
-        <h1>Каталог моделей</h1>
-        <p style="color:var(--text-muted);margin-top:8px">Найдите идеальную модель для вашего проекта</p>
-        <div style="margin-top:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-          <a href="/compare.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'"><span aria-hidden="true">⚖️</span> Сравнить модели</a>
-          <a href="/favorites.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'"><span aria-hidden="true">❤️</span> Мои избранные</a>
-          <button onclick="showFavorites()" class="btn-favorites" aria-label="Показать избранные модели">
-            ❤️ Избранное <span id="fav-counter" style="display:none"></span>
-          </button>
-          <button onclick="openAiMatchModal()" class="btn-favorites" aria-label="AI подбор модели" style="color:var(--gold);border-color:rgba(201,169,110,0.4)">
-            🤖 AI Подбор
-          </button>
-          <button id="shareLinkBtn" onclick="copyShareLink()" class="btn-favorites" aria-label="Скопировать ссылку на текущий каталог с фильтрами">
-            🔗 Скопировать ссылку
-          </button>
-        </div>
-      </div>
-      <div class="catalog-layout">
-        <!-- FILTERS -->
-        <aside class="filters-panel" role="search" aria-label="Фильтры каталога">
-          <h3 style="display:flex;align-items:center;justify-content:space-between">
-            Фильтры
-            <span id="activeFilterBadge" style="display:none;background:var(--gold);color:#000;border-radius:50%;font-size:0.7rem;min-width:20px;height:20px;text-align:center;line-height:20px;padding:0 5px;font-family:'Inter',sans-serif;font-weight:700" aria-label="Активных фильтров"></span>
-          </h3>
-          <div class="filter-group">
-            <label for="searchInput">Поиск</label>
-            <input class="filter-search" type="search" id="searchInput" placeholder="Имя модели..." aria-label="Поиск моделей" role="searchbox" />
-          </div>
-          <div class="filter-group" role="group" aria-label="Категория">
-            <label>Категория</label>
-            <div class="filter-options" id="categoryFilters">
-              <span class="filter-tag active" data-value="" role="button" tabindex="0" aria-pressed="true">Все</span>
-              <span class="filter-tag" data-value="fashion" role="button" tabindex="0" aria-pressed="false">Fashion</span>
-              <span class="filter-tag" data-value="commercial" role="button" tabindex="0" aria-pressed="false">Commercial</span>
-              <span class="filter-tag" data-value="events" role="button" tabindex="0" aria-pressed="false">Events</span>
-            </div>
-          </div>
-          <div class="filter-group">
-            <label for="cityFilter">Город</label>
-            <select id="cityFilter" class="filter-search" style="padding:8px 14px;font-size:0.85rem;cursor:pointer" aria-label="Фильтр по городу">
-              <option value="">Все города</option>
-            </select>
-          </div>
-          <div class="filter-group" role="group" aria-label="Фильтр по возрасту">
-            <label>Возраст</label>
-            <div class="filter-options" id="ageFilters">
-              <span class="filter-tag active" data-min="" data-max="" role="button" tabindex="0" aria-pressed="true">Любой</span>
-              <span class="filter-tag" data-min="18" data-max="22" role="button" tabindex="0" aria-pressed="false">18–22</span>
-              <span class="filter-tag" data-min="23" data-max="27" role="button" tabindex="0" aria-pressed="false">23–27</span>
-              <span class="filter-tag" data-min="28" data-max="32" role="button" tabindex="0" aria-pressed="false">28–32</span>
-              <span class="filter-tag" data-min="33" data-max="" role="button" tabindex="0" aria-pressed="false">33+</span>
-            </div>
-            <div class="range-row" style="margin-top:8px">
-              <input type="number" id="age-min" placeholder="от" min="18" max="50" class="admin-input" style="padding:8px 10px;" aria-label="Минимальный возраст" />
-              <span aria-hidden="true">—</span>
-              <input type="number" id="age-max" placeholder="до" min="18" max="50" class="admin-input" style="padding:8px 10px;" aria-label="Максимальный возраст" />
-            </div>
-          </div>
-          <div class="filter-group" role="group" aria-label="Фильтр по цвету волос">
-            <label>Цвет волос</label>
-            <div class="filter-options" id="hairFilters">
-              <span class="filter-tag active" data-value="" role="button" tabindex="0" aria-pressed="true">Все</span>
-              <span class="filter-tag" data-value="Блонд" role="button" tabindex="0" aria-pressed="false">Блонд</span>
-              <span class="filter-tag" data-value="Шатен" role="button" tabindex="0" aria-pressed="false">Шатен</span>
-              <span class="filter-tag" data-value="Брюнетка" role="button" tabindex="0" aria-pressed="false">Брюнетка</span>
-              <span class="filter-tag" data-value="Рыжая" role="button" tabindex="0" aria-pressed="false">Рыжая</span>
-            </div>
-          </div>
-          <div class="filter-group" role="group" aria-label="Фильтр по росту">
-            <label>Рост (см)</label>
-            <div class="filter-options" id="heightFilters" style="margin-bottom:10px">
-              <span class="filter-tag active" data-hmin="" data-hmax="" role="button" tabindex="0" aria-pressed="true">Любой</span>
-              <span class="filter-tag" data-hmin="160" data-hmax="165" role="button" tabindex="0" aria-pressed="false">160–165</span>
-              <span class="filter-tag" data-hmin="166" data-hmax="170" role="button" tabindex="0" aria-pressed="false">166–170</span>
-              <span class="filter-tag" data-hmin="171" data-hmax="175" role="button" tabindex="0" aria-pressed="false">171–175</span>
-              <span class="filter-tag" data-hmin="176" data-hmax="180" role="button" tabindex="0" aria-pressed="false">176–180</span>
-              <span class="filter-tag" data-hmin="181" data-hmax="" role="button" tabindex="0" aria-pressed="false">181+</span>
-            </div>
-            <div class="range-row">
-              <input type="number" id="minHeight" placeholder="от" min="160" max="195" class="admin-input" style="padding:8px 10px;" aria-label="Минимальный рост" />
-              <span aria-hidden="true">—</span>
-              <input type="number" id="maxHeight" placeholder="до" min="160" max="195" class="admin-input" style="padding:8px 10px;" aria-label="Максимальный рост" />
-            </div>
-          </div>
-          <div class="filter-group">
-            <label class="filter-avail-label">
-              <input type="checkbox" id="availableOnly" style="accent-color:var(--gold);width:15px;height:15px;cursor:pointer;vertical-align:middle;margin-right:6px" aria-label="Показывать только свободных моделей" />
-              Только свободные
-            </label>
-          </div>
-          <button class="btn-filter-reset" id="resetFilters" aria-label="Сбросить все фильтры">Сбросить фильтры</button>
-        </aside>
-
-        <!-- CATALOG -->
-        <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:16px;flex-wrap:wrap">
-            <div class="catalog-count" id="catalogCount" aria-live="polite" aria-atomic="true">Загрузка...</div>
-            <label for="sortSelect" class="sr-only">Сортировка</label>
-            <select id="sortSelect" class="filter-search" style="width:auto;padding:8px 14px;font-size:0.8rem;cursor:pointer" aria-label="Сортировка результатов">
-              <option value="default">По умолчанию</option>
-              <option value="featured">По рейтингу</option>
-              <option value="name_asc">По алфавиту</option>
-              <option value="newest">Новинки</option>
-              <option value="available">Сначала свободные</option>
-              <option value="height_desc">По росту ↓</option>
-              <option value="height_asc">По росту ↑</option>
-              <option value="age_asc">По возрасту (моложе)</option>
-            </select>
-          </div>
-          <!-- Skeleton loader -->
-          <div class="catalog-grid" id="catalogSkeleton" aria-hidden="true" aria-busy="true" aria-live="polite">
-            <div class="model-card-skeleton"></div>
-            <div class="model-card-skeleton"></div>
-            <div class="model-card-skeleton"></div>
-            <div class="model-card-skeleton"></div>
-            <div class="model-card-skeleton"></div>
-            <div class="model-card-skeleton"></div>
-          </div>
-          <div class="catalog-grid" id="catalogGrid" role="list" aria-live="polite" aria-label="Результаты поиска" style="display:none">
-            <!-- injected -->
-          </div>
-        </div>
-      </div>
-    </div>
-  </main>
-
-  <!-- AI MATCH MODAL -->
-  <div id="aiMatchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:900;align-items:center;justify-content:center" role="dialog" aria-modal="true" aria-labelledby="aiMatchTitle">
-    <div style="background:var(--bg1,#111);border:1px solid rgba(201,169,110,0.3);border-radius:10px;padding:32px;width:100%;max-width:520px;margin:24px;box-sizing:border-box;max-height:90vh;overflow-y:auto">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-        <h2 id="aiMatchTitle" style="font-size:1.1rem;font-weight:700;color:var(--gold,#c9a96e);margin:0">🤖 AI Подбор модели</h2>
-        <button onclick="closeAiMatchModal()" style="background:none;border:none;color:var(--text-dim,#888);font-size:1.3rem;cursor:pointer;line-height:1" aria-label="Закрыть">✕</button>
-      </div>
-      <p style="font-size:0.85rem;color:var(--text-muted,#aaa);margin-bottom:16px;line-height:1.5">Опишите ваше мероприятие и требования к модели — AI подберёт лучших кандидатов из каталога.</p>
-      <textarea id="aiMatchDesc" placeholder="Например: корпоратив на 100 человек, нужна модель для встречи гостей, стиль — элегантный, Москва, бюджет 25000₽..." style="width:100%;min-height:110px;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));color:var(--text,#f0f0f0);border-radius:6px;padding:12px;font-size:0.85rem;font-family:inherit;resize:vertical;box-sizing:border-box;line-height:1.5" maxlength="500" aria-label="Описание мероприятия"></textarea>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px">
-        <button onclick="closeAiMatchModal()" style="padding:10px 20px;background:none;border:1px solid var(--border,rgba(255,255,255,0.1));color:var(--text-muted,#aaa);border-radius:6px;cursor:pointer;font-size:0.8rem">Отмена</button>
-        <button id="aiMatchBtn" onclick="runAiMatchCatalog()" style="padding:10px 24px;background:var(--gold,#c9a96e);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:700;letter-spacing:0.5px">Подобрать</button>
-      </div>
-      <div id="aiMatchResults" style="margin-top:20px"></div>
-    </div>
-  </div>
-
-  <!-- MODEL MODAL -->
-  <div class="modal-overlay" id="modelModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
-    <div class="modal" id="modalContent">
-      <button class="modal-close" id="modalClose" aria-label="Закрыть">✕</button>
-      <div class="modal-inner" id="modalInner"></div>
-    </div>
-  </div>
-
-  <div class="toast-container" id="toastContainer"></div>
-
-  <!-- Floating Compare Bar -->
-  <div id="compareBar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:500;background:rgba(8,8,8,0.97);border-top:1px solid var(--gold);backdrop-filter:blur(12px);padding:14px 24px;transition:transform 0.3s ease">
-    <div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
-      <div style="display:flex;align-items:center;gap:12px">
-        <span style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold)">⚖️ Сравнение</span>
-        <span id="compareBarCount" style="font-size:0.85rem;color:var(--text-muted)">Выбрано 0 моделей</span>
-        <div id="compareBarAvatars" style="display:flex;gap:6px"></div>
-      </div>
-      <div style="display:flex;gap:10px;align-items:center">
-        <a id="compareBarLink" href="/compare.html" style="padding:10px 24px;background:var(--gold);color:var(--bg);font-size:0.75rem;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;text-decoration:none;transition:background 0.2s"
-           onmouseover="this.style.background='var(--gold-light)'" onmouseout="this.style.background='var(--gold)'">
-          Сравнить
-        </a>
-        <button onclick="clearCompare()" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:10px 18px;cursor:pointer;font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;transition:all 0.2s" onmouseover="this.style.borderColor='var(--text-muted)'" onmouseout="this.style.borderColor='var(--border)'" aria-label="Очистить список сравнения">
-          Очистить
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Sticky Telegram Button -->
-  <div id="sticky-telegram" style="position:fixed;bottom:84px;right:24px;z-index:401">
-    <a href="https://t.me/nevesty_agency" target="_blank" rel="noopener"
-       style="width:52px;height:52px;border-radius:50%;background:#229ED9;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.3);text-decoration:none;transition:transform 0.2s,box-shadow 0.2s"
-       title="Написать в Telegram" aria-label="Написать в Telegram"
-       onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 18px rgba(34,158,217,0.5)'"
-       onmouseout="this.style.transform='';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.3)'">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="white" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8l-1.72 8.13c-.13.59-.47.73-.95.46l-2.62-1.93-1.26 1.21c-.14.14-.26.26-.53.26l.19-2.69 4.9-4.42c.21-.19-.05-.29-.33-.1L7.5 14.3l-2.56-.8c-.56-.17-.57-.56.12-.83l10.01-3.86c.46-.17.86.11.57.99z"/></svg>
-    </a>
-  </div>
-
-  <!-- Floating WhatsApp Button -->
-  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
-    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
-       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
-       onmouseover="this.style.background='#1da851';this.style.boxShadow='0 6px 20px rgba(37,211,102,0.5)'"
-       onmouseout="this.style.background='#25D366';this.style.boxShadow='0 4px 16px rgba(37,211,102,0.4)'">
-      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      Написать в WhatsApp
-    </a>
-  </div>
-  <script>
-  fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-    const wa = d.contacts_whatsapp;
-    if (wa) {
-      const waNum = wa.replace(/\D/g,'');
-      const waUrl = `https://wa.me/${waNum}`;
-      const btn = document.getElementById('whatsapp-btn');
-      if (btn) { btn.href = waUrl; btn.style.display = 'flex'; }
-      const floatEl = document.getElementById('float-whatsapp');
-      const floatLink = document.getElementById('float-wa-link');
-      if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
-    }
-  }).catch(()=>{});
-  </script>
-
-  <!-- Compare logic (exposed globally for catalog.js) -->
-  <script>
-  (function () {
-    const COMPARE_KEY = 'nm_compare';
-    const MAX_COMPARE = 3;
-
-    function getCompareIds() {
-      try { return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]'); } catch { return []; }
-    }
-    function saveCompareIds(ids) {
-      try { localStorage.setItem(COMPARE_KEY, JSON.stringify(ids)); } catch {}
-    }
-
-    function updateCompareBar() {
-      const ids = getCompareIds();
-      const bar = document.getElementById('compareBar');
-      const countEl = document.getElementById('compareBarCount');
-      const navLink = document.getElementById('nav-compare-link');
-      const navCount = document.getElementById('nav-compare-count');
-      const barLink = document.getElementById('compareBarLink');
-      const avatars = document.getElementById('compareBarAvatars');
-
-      const n = ids.length;
-
-      // Update nav link
-      if (navLink) {
-        navLink.style.display = n > 0 ? 'inline-flex' : 'none';
-        if (navCount) navCount.textContent = n;
-      }
-
-      if (n >= 2) {
-        if (bar) bar.style.display = '';
-        if (countEl) {
-          const txt = n === 1 ? '1 модель' : n === 2 ? '2 модели' : '3 модели';
-          countEl.textContent = `Выбрано ${txt}`;
+        function saveCompareIds(ids) {
+          try {
+            localStorage.setItem(COMPARE_KEY, JSON.stringify(ids));
+          } catch {}
         }
-        if (barLink) barLink.href = `/compare.html?ids=${ids.join(',')}`;
-        // update avatars
-        if (avatars) {
-          avatars.innerHTML = ids.map(id => {
-            const m = window._compareModelsCache && window._compareModelsCache[id];
-            if (!m) return `<div style="width:32px;height:40px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:var(--text-dim)">${id}</div>`;
-            if (m.photo_main) return `<img src="${m.photo_main}" alt="${m.name}" style="width:32px;height:40px;object-fit:cover;border:1px solid var(--gold)" loading="lazy" decoding="async">`;
-            return `<div style="width:32px;height:40px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:var(--text-dim)">${(m.name||'?')[0]}</div>`;
-          }).join('');
+
+        function updateCompareBar() {
+          const ids = getCompareIds();
+          const bar = document.getElementById('compareBar');
+          const countEl = document.getElementById('compareBarCount');
+          const navLink = document.getElementById('nav-compare-link');
+          const navCount = document.getElementById('nav-compare-count');
+          const barLink = document.getElementById('compareBarLink');
+          const avatars = document.getElementById('compareBarAvatars');
+
+          const n = ids.length;
+
+          // Update nav link
+          if (navLink) {
+            navLink.style.display = n > 0 ? 'inline-flex' : 'none';
+            if (navCount) navCount.textContent = n;
+          }
+
+          if (n >= 2) {
+            if (bar) bar.style.display = '';
+            if (countEl) {
+              const txt = n === 1 ? '1 модель' : n === 2 ? '2 модели' : '3 модели';
+              countEl.textContent = `Выбрано ${txt}`;
+            }
+            if (barLink) barLink.href = `/compare.html?ids=${ids.join(',')}`;
+            // update avatars
+            if (avatars) {
+              avatars.innerHTML = ids
+                .map(id => {
+                  const m = window._compareModelsCache && window._compareModelsCache[id];
+                  if (!m)
+                    return `<div style="width:32px;height:40px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:var(--text-dim)">${id}</div>`;
+                  if (m.photo_main)
+                    return `<img src="${m.photo_main}" alt="${m.name}" style="width:32px;height:40px;object-fit:cover;border:1px solid var(--gold)" loading="lazy" decoding="async">`;
+                  return `<div style="width:32px;height:40px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:var(--text-dim)">${(m.name || '?')[0]}</div>`;
+                })
+                .join('');
+            }
+          } else {
+            if (bar) bar.style.display = 'none';
+            if (avatars) avatars.innerHTML = '';
+          }
         }
-      } else {
-        if (bar) bar.style.display = 'none';
-        if (avatars) avatars.innerHTML = '';
-      }
-    }
 
-    window.toggleCompare = function (modelId, modelData) {
-      const ids = getCompareIds();
-      const idx = ids.indexOf(modelId);
+        window.toggleCompare = function (modelId, modelData) {
+          const ids = getCompareIds();
+          const idx = ids.indexOf(modelId);
 
-      // cache model data for avatar display
-      if (!window._compareModelsCache) window._compareModelsCache = {};
-      if (modelData) window._compareModelsCache[modelId] = modelData;
+          // cache model data for avatar display
+          if (!window._compareModelsCache) window._compareModelsCache = {};
+          if (modelData) window._compareModelsCache[modelId] = modelData;
 
-      if (idx === -1) {
-        if (ids.length >= MAX_COMPARE) {
-          showCompareToast(`Максимум ${MAX_COMPARE} модели для сравнения`);
-          return false;
+          if (idx === -1) {
+            if (ids.length >= MAX_COMPARE) {
+              showCompareToast(`Максимум ${MAX_COMPARE} модели для сравнения`);
+              return false;
+            }
+            ids.push(modelId);
+            saveCompareIds(ids);
+            updateCompareBar();
+            showCompareToast('Добавлено в сравнение ⚖️');
+            return true;
+          } else {
+            ids.splice(idx, 1);
+            saveCompareIds(ids);
+            updateCompareBar();
+            showCompareToast('Убрано из сравнения');
+            return false;
+          }
+        };
+
+        window.isInCompare = function (modelId) {
+          return getCompareIds().includes(modelId);
+        };
+
+        window.clearCompare = function () {
+          saveCompareIds([]);
+          updateCompareBar();
+          // refresh all compare buttons
+          document.querySelectorAll('.btn-compare-card').forEach(btn => {
+            btn.setAttribute('data-active', 'false');
+            btn.title = 'Добавить к сравнению';
+            btn.style.background = 'rgba(0,0,0,0.55)';
+            btn.style.color = 'var(--text-muted)';
+            btn.textContent = '⚖️';
+          });
+          showCompareToast('Сравнение очищено');
+        };
+
+        function showCompareToast(msg) {
+          const c = document.getElementById('toastContainer');
+          if (!c) return;
+          const t = document.createElement('div');
+          t.className = 'toast';
+          t.textContent = msg;
+          c.appendChild(t);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              t.classList.add('show');
+            });
+          });
+          setTimeout(() => {
+            t.classList.remove('show');
+            setTimeout(() => t.remove(), 350);
+          }, 2500);
         }
-        ids.push(modelId);
-        saveCompareIds(ids);
-        updateCompareBar();
-        showCompareToast('Добавлено в сравнение ⚖️');
-        return true;
-      } else {
-        ids.splice(idx, 1);
-        saveCompareIds(ids);
-        updateCompareBar();
-        showCompareToast('Убрано из сравнения');
-        return false;
+
+        // Init on load
+        document.addEventListener('DOMContentLoaded', updateCompareBar);
+        window._updateCompareBar = updateCompareBar;
+      })();
+    </script>
+
+    <script src="/js/main.js" defer></script>
+    <script src="/js/catalog.js" defer></script>
+    <script src="/js/telegram-webapp.js" defer></script>
+    <script src="/js/animations.js" defer></script>
+    <script src="/js/darkmode.js"></script>
+    <script>
+      // ── Skeleton loading helper (для дополнительных контейнеров) ──────────────
+      function showSkeletons(count) {
+        count = count || 6;
+        var container = document.getElementById('models-list') || document.querySelector('.models-grid');
+        if (!container) return;
+        container.innerHTML = Array(count)
+          .fill(0)
+          .map(function () {
+            return (
+              '<div class="model-card skeleton-card">' +
+              '<div class="skeleton skeleton-img"></div>' +
+              '<div class="skeleton skeleton-title"></div>' +
+              '<div class="skeleton skeleton-text"></div>' +
+              '<div class="skeleton skeleton-text short"></div>' +
+              '</div>'
+            );
+          })
+          .join('');
       }
-    };
+    </script>
 
-    window.isInCompare = function (modelId) {
-      return getCompareIds().includes(modelId);
-    };
-
-    window.clearCompare = function () {
-      saveCompareIds([]);
-      updateCompareBar();
-      // refresh all compare buttons
-      document.querySelectorAll('.btn-compare-card').forEach(btn => {
-        btn.setAttribute('data-active', 'false');
-        btn.title = 'Добавить к сравнению';
-        btn.style.background = 'rgba(0,0,0,0.55)';
-        btn.style.color = 'var(--text-muted)';
-        btn.textContent = '⚖️';
-      });
-      showCompareToast('Сравнение очищено');
-    };
-
-    function showCompareToast(msg) {
-      const c = document.getElementById('toastContainer');
-      if (!c) return;
-      const t = document.createElement('div');
-      t.className = 'toast';
-      t.textContent = msg;
-      c.appendChild(t);
-      requestAnimationFrame(() => { requestAnimationFrame(() => { t.classList.add('show'); }); });
-      setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 350); }, 2500);
-    }
-
-    // Init on load
-    document.addEventListener('DOMContentLoaded', updateCompareBar);
-    window._updateCompareBar = updateCompareBar;
-  })();
-  </script>
-
-  <script src="/js/main.js" defer></script>
-  <script src="/js/catalog.js" defer></script>
-  <script src="/js/telegram-webapp.js" defer></script>
-  <script src="/js/darkmode.js"></script>
-  <script>
-  // ── Skeleton loading helper (для дополнительных контейнеров) ──────────────
-  function showSkeletons(count) {
-    count = count || 6;
-    var container = document.getElementById('models-list') || document.querySelector('.models-grid');
-    if (!container) return;
-    container.innerHTML = Array(count).fill(0).map(function() {
-      return '<div class="model-card skeleton-card">' +
-        '<div class="skeleton skeleton-img"></div>' +
-        '<div class="skeleton skeleton-title"></div>' +
-        '<div class="skeleton skeleton-text"></div>' +
-        '<div class="skeleton skeleton-text short"></div>' +
-        '</div>';
-    }).join('');
-  }
-  </script>
-
-  <!-- AI Match logic -->
-  <script>
-  function copyShareLink() {
-    const button = document.getElementById('shareLinkBtn');
-    const url = window.location.href;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(() => {
-        button.textContent = '✓ Скопировано!';
-        setTimeout(() => { button.textContent = '🔗 Скопировать ссылку'; }, 2000);
-      }).catch(() => {
-        fallbackCopyLink(url, button);
-      });
-    } else {
-      fallbackCopyLink(url, button);
-    }
-  }
-  function fallbackCopyLink(url, button) {
-    const ta = document.createElement('textarea');
-    ta.value = url;
-    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    try {
-      document.execCommand('copy');
-      button.textContent = '✓ Скопировано!';
-      setTimeout(() => { button.textContent = '🔗 Скопировать ссылку'; }, 2000);
-    } catch (e) {
-      button.textContent = '❌ Не удалось';
-      setTimeout(() => { button.textContent = '🔗 Скопировать ссылку'; }, 2000);
-    }
-    document.body.removeChild(ta);
-  }
-
-  function openAiMatchModal() {
-    const modal = document.getElementById('aiMatchModal');
-    modal.style.display = 'flex';
-    document.getElementById('aiMatchResults').innerHTML = '';
-    setTimeout(() => document.getElementById('aiMatchDesc').focus(), 100);
-  }
-  function closeAiMatchModal() {
-    document.getElementById('aiMatchModal').style.display = 'none';
-  }
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && document.getElementById('aiMatchModal').style.display === 'flex') closeAiMatchModal();
-  });
-  document.getElementById('aiMatchModal').addEventListener('click', function(e) {
-    if (e.target === this) closeAiMatchModal();
-  });
-
-  async function runAiMatchCatalog() {
-    const desc = document.getElementById('aiMatchDesc').value.trim();
-    if (desc.length < 10) {
-      document.getElementById('aiMatchResults').innerHTML = '<p style="color:#e74c3c;font-size:0.82rem">Опишите подробнее (минимум 10 символов).</p>';
-      return;
-    }
-    const btn = document.getElementById('aiMatchBtn');
-    btn.disabled = true;
-    btn.textContent = '⏳ Подбираю...';
-    document.getElementById('aiMatchResults').innerHTML = '<p style="color:var(--text-muted,#aaa);font-size:0.82rem;text-align:center">AI анализирует запрос...</p>';
-
-    try {
-      const resp = await fetch('/api/client/ai-match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: desc })
-      });
-      const data = await resp.json();
-
-      if (!data.ok) throw new Error(data.error || 'Ошибка сервера');
-
-      const models = data.models || [];
-      const reason = data.reason || '';
-      const resultsEl = document.getElementById('aiMatchResults');
-
-      if (!models.length) {
-        resultsEl.innerHTML = '<p style="color:var(--text-muted,#aaa);font-size:0.85rem">Подходящих моделей не найдено. Попробуйте изменить описание.</p>';
-        return;
+    <!-- AI Match logic -->
+    <script>
+      function copyShareLink() {
+        const button = document.getElementById('shareLinkBtn');
+        const url = window.location.href;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard
+            .writeText(url)
+            .then(() => {
+              button.textContent = '✓ Скопировано!';
+              setTimeout(() => {
+                button.textContent = '🔗 Скопировать ссылку';
+              }, 2000);
+            })
+            .catch(() => {
+              fallbackCopyLink(url, button);
+            });
+        } else {
+          fallbackCopyLink(url, button);
+        }
+      }
+      function fallbackCopyLink(url, button) {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        try {
+          document.execCommand('copy');
+          button.textContent = '✓ Скопировано!';
+          setTimeout(() => {
+            button.textContent = '🔗 Скопировать ссылку';
+          }, 2000);
+        } catch (e) {
+          button.textContent = '❌ Не удалось';
+          setTimeout(() => {
+            button.textContent = '🔗 Скопировать ссылку';
+          }, 2000);
+        }
+        document.body.removeChild(ta);
       }
 
-      let html = '';
-      if (reason) html += `<p style="font-size:0.8rem;color:var(--gold,#c9a96e);margin-bottom:14px;line-height:1.5">💡 ${reason}</p>`;
-      html += '<div style="display:flex;flex-direction:column;gap:10px">';
-      models.forEach(m => {
-        const photo = m.photo_main ? `<img src="${m.photo_main}" alt="${m.name}" style="width:56px;height:70px;object-fit:cover;border-radius:4px;flex-shrink:0" loading="lazy" decoding="async">` : `<div style="width:56px;height:70px;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0">💃</div>`;
-        html += `<div style="display:flex;gap:14px;align-items:center;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:6px;padding:12px">
+      function openAiMatchModal() {
+        const modal = document.getElementById('aiMatchModal');
+        modal.style.display = 'flex';
+        document.getElementById('aiMatchResults').innerHTML = '';
+        setTimeout(() => document.getElementById('aiMatchDesc').focus(), 100);
+      }
+      function closeAiMatchModal() {
+        document.getElementById('aiMatchModal').style.display = 'none';
+      }
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && document.getElementById('aiMatchModal').style.display === 'flex') closeAiMatchModal();
+      });
+      document.getElementById('aiMatchModal').addEventListener('click', function (e) {
+        if (e.target === this) closeAiMatchModal();
+      });
+
+      async function runAiMatchCatalog() {
+        const desc = document.getElementById('aiMatchDesc').value.trim();
+        if (desc.length < 10) {
+          document.getElementById('aiMatchResults').innerHTML =
+            '<p style="color:#e74c3c;font-size:0.82rem">Опишите подробнее (минимум 10 символов).</p>';
+          return;
+        }
+        const btn = document.getElementById('aiMatchBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Подбираю...';
+        document.getElementById('aiMatchResults').innerHTML =
+          '<p style="color:var(--text-muted,#aaa);font-size:0.82rem;text-align:center">AI анализирует запрос...</p>';
+
+        try {
+          const resp = await fetch('/api/client/ai-match', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: desc }),
+          });
+          const data = await resp.json();
+
+          if (!data.ok) throw new Error(data.error || 'Ошибка сервера');
+
+          const models = data.models || [];
+          const reason = data.reason || '';
+          const resultsEl = document.getElementById('aiMatchResults');
+
+          if (!models.length) {
+            resultsEl.innerHTML =
+              '<p style="color:var(--text-muted,#aaa);font-size:0.85rem">Подходящих моделей не найдено. Попробуйте изменить описание.</p>';
+            return;
+          }
+
+          let html = '';
+          if (reason)
+            html += `<p style="font-size:0.8rem;color:var(--gold,#c9a96e);margin-bottom:14px;line-height:1.5">💡 ${reason}</p>`;
+          html += '<div style="display:flex;flex-direction:column;gap:10px">';
+          models.forEach(m => {
+            const photo = m.photo_main
+              ? `<img src="${m.photo_main}" alt="${m.name}" style="width:56px;height:70px;object-fit:cover;border-radius:4px;flex-shrink:0" loading="lazy" decoding="async">`
+              : `<div style="width:56px;height:70px;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0">💃</div>`;
+            html += `<div style="display:flex;gap:14px;align-items:center;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:6px;padding:12px">
           ${photo}
           <div style="flex:1;min-width:0">
             <div style="font-weight:600;font-size:0.9rem;color:var(--text,#f0f0f0)">${m.name}</div>
@@ -638,124 +1231,148 @@
           </div>
           <a href="/model.html?id=${m.id}" style="flex-shrink:0;padding:8px 14px;background:var(--gold,#c9a96e);color:#000;border-radius:4px;font-size:0.75rem;font-weight:700;text-decoration:none;white-space:nowrap">Смотреть</a>
         </div>`;
-      });
-      html += '</div>';
-      resultsEl.innerHTML = html;
-    } catch (e) {
-      document.getElementById('aiMatchResults').innerHTML = `<p style="color:#e74c3c;font-size:0.82rem">Ошибка: ${e.message}</p>`;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Подобрать';
-    }
-  }
-  </script>
-  <script type="application/ld+json">
-[
-  {
-    "@context": "https://schema.org",
-    "@type": "CollectionPage",
-    "name": "Каталог моделей — Nevesty Models",
-    "description": "Каталог профессиональных моделей агентства Nevesty Models. Fashion, commercial и event-модели.",
-    "url": "https://nevesty-models.ru/catalog.html",
-    "inLanguage": "ru-RU",
-    "dateModified": "2026-05-15",
-    "isPartOf": {
-      "@type": "WebSite",
-      "name": "Nevesty Models",
-      "url": "https://nevesty-models.ru"
-    },
-    "breadcrumb": {
-      "@type": "BreadcrumbList",
-      "itemListElement": [
+          });
+          html += '</div>';
+          resultsEl.innerHTML = html;
+        } catch (e) {
+          document.getElementById('aiMatchResults').innerHTML =
+            `<p style="color:#e74c3c;font-size:0.82rem">Ошибка: ${e.message}</p>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Подобрать';
+        }
+      }
+    </script>
+    <script type="application/ld+json">
+      [
         {
-          "@type": "ListItem",
-          "position": 1,
-          "name": "Главная",
-          "item": "https://nevesty-models.ru/"
+          "@context": "https://schema.org",
+          "@type": "CollectionPage",
+          "name": "Каталог моделей — Nevesty Models",
+          "description": "Каталог профессиональных моделей агентства Nevesty Models. Fashion, commercial и event-модели.",
+          "url": "https://nevesty-models.ru/catalog.html",
+          "inLanguage": "ru-RU",
+          "dateModified": "2026-05-15",
+          "isPartOf": {
+            "@type": "WebSite",
+            "name": "Nevesty Models",
+            "url": "https://nevesty-models.ru"
+          },
+          "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Главная",
+                "item": "https://nevesty-models.ru/"
+              },
+              {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Каталог моделей",
+                "item": "https://nevesty-models.ru/catalog.html"
+              }
+            ]
+          }
         },
         {
-          "@type": "ListItem",
-          "position": 2,
-          "name": "Каталог моделей",
-          "item": "https://nevesty-models.ru/catalog.html"
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "@id": "https://nevesty-models.ru/#organization",
+          "name": "Nevesty Models",
+          "url": "https://nevesty-models.ru",
+          "logo": "https://nevesty-models.ru/og-image.jpg",
+          "contactPoint": {
+            "@type": "ContactPoint",
+            "contactType": "customer service",
+            "availableLanguage": "Russian"
+          }
         }
       ]
-    }
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "@id": "https://nevesty-models.ru/#organization",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru",
-    "logo": "https://nevesty-models.ru/og-image.jpg",
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "contactType": "customer service",
-      "availableLanguage": "Russian"
-    }
-  }
-]
-</script>
-<script src="/js/cookie-consent.js" defer></script>
+    </script>
+    <script src="/js/cookie-consent.js" defer></script>
 
-  <!-- QUICK BOOKING POPUP MODAL -->
-  <div class="qb-modal" id="qbModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle">
-    <div class="qb-modal-box">
-      <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
-      <div id="qbForm">
-        <div class="qb-modal-title" id="qbModalTitle"><span aria-hidden="true">⚡</span> Быстрая заявка</div>
-        <div class="qb-modal-sub">Оставьте контакты — менеджер свяжется за 15 минут</div>
-        <label for="qbName" class="sr-only">Ваше имя</label>
-        <input class="qb-input" id="qbName" type="text" placeholder="Ваше имя" autocomplete="name" aria-required="true" />
-        <label for="qbPhone" class="sr-only">Телефон</label>
-        <input class="qb-input" id="qbPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" aria-required="true" />
-        <label for="qbComment" class="sr-only">Тип мероприятия</label>
-        <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
-        <button class="qb-btn" onclick="submitQb()">Отправить заявку →</button>
-      </div>
-      <div class="qb-success" id="qbSuccess">
-        <div class="qb-success-icon">✅</div>
-        <p>Заявка принята! Менеджер свяжется с вами в течение 15 минут.</p>
+    <!-- QUICK BOOKING POPUP MODAL -->
+    <div class="qb-modal" id="qbModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle">
+      <div class="qb-modal-box">
+        <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
+        <div id="qbForm">
+          <div class="qb-modal-title" id="qbModalTitle"><span aria-hidden="true">⚡</span> Быстрая заявка</div>
+          <div class="qb-modal-sub">Оставьте контакты — менеджер свяжется за 15 минут</div>
+          <label for="qbName" class="sr-only">Ваше имя</label>
+          <input
+            class="qb-input"
+            id="qbName"
+            type="text"
+            placeholder="Ваше имя"
+            autocomplete="name"
+            aria-required="true"
+          />
+          <label for="qbPhone" class="sr-only">Телефон</label>
+          <input
+            class="qb-input"
+            id="qbPhone"
+            type="tel"
+            placeholder="+7 999 123-45-67"
+            autocomplete="tel"
+            aria-required="true"
+          />
+          <label for="qbComment" class="sr-only">Тип мероприятия</label>
+          <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
+          <button class="qb-btn" onclick="submitQb()">Отправить заявку →</button>
+        </div>
+        <div class="qb-success" id="qbSuccess">
+          <div class="qb-success-icon">✅</div>
+          <p>Заявка принята! Менеджер свяжется с вами в течение 15 минут.</p>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- Floating CTA Button -->
-  <button class="floating-cta" onclick="openQbModal()" aria-label="Оставить заявку">
-    ⚡ Заявка
-  </button>
+    <!-- Floating CTA Button -->
+    <button class="floating-cta" onclick="openQbModal()" aria-label="Оставить заявку">⚡ Заявка</button>
 
-  <script>
-  function openQbModal() {
-    document.getElementById('qbModal')?.classList.add('open');
-    document.getElementById('qbName')?.focus();
-  }
-  function closeQbModal() {
-    document.getElementById('qbModal')?.classList.remove('open');
-  }
-  document.getElementById('qbModal')?.addEventListener('click', e => {
-    if (e.target.id === 'qbModal') closeQbModal();
-  });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeQbModal();
-  });
-  async function submitQb() {
-    const name = document.getElementById('qbName')?.value.trim();
-    const phone = document.getElementById('qbPhone')?.value.trim();
-    if (!name || !phone) { alert('Пожалуйста, заполните имя и телефон'); return; }
-    try {
-      await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_name: name, client_phone: phone, comments: document.getElementById('qbComment')?.value.trim() || '', event_type: 'other', quick_booking: true })
+    <script>
+      function openQbModal() {
+        document.getElementById('qbModal')?.classList.add('open');
+        document.getElementById('qbName')?.focus();
+      }
+      function closeQbModal() {
+        document.getElementById('qbModal')?.classList.remove('open');
+      }
+      document.getElementById('qbModal')?.addEventListener('click', e => {
+        if (e.target.id === 'qbModal') closeQbModal();
       });
-      document.getElementById('qbForm').style.display = 'none';
-      document.getElementById('qbSuccess').style.display = 'block';
-      setTimeout(closeQbModal, 3000);
-    } catch (e) { alert('Ошибка отправки. Попробуйте позже.'); }
-  }
-  </script>
-  <script src="/js/chat-widget.js" defer></script>
-</body>
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeQbModal();
+      });
+      async function submitQb() {
+        const name = document.getElementById('qbName')?.value.trim();
+        const phone = document.getElementById('qbPhone')?.value.trim();
+        if (!name || !phone) {
+          alert('Пожалуйста, заполните имя и телефон');
+          return;
+        }
+        try {
+          await fetch('/api/orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              client_name: name,
+              client_phone: phone,
+              comments: document.getElementById('qbComment')?.value.trim() || '',
+              event_type: 'other',
+              quick_booking: true,
+            }),
+          });
+          document.getElementById('qbForm').style.display = 'none';
+          document.getElementById('qbSuccess').style.display = 'block';
+          setTimeout(closeQbModal, 3000);
+        } catch (e) {
+          alert('Ошибка отправки. Попробуйте позже.');
+        }
+      }
+    </script>
+    <script src="/js/chat-widget.js" defer></script>
+  </body>
 </html>
