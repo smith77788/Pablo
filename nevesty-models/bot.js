@@ -2223,6 +2223,7 @@ function _bcSegmentLabel(segment) {
   if (segment === 'new')       return 'Новые (без заявок)';
   if (segment === 'active')    return 'Активные (30 дней)';
   if (segment && segment.startsWith('city:')) return `Город: ${segment.slice(5)}`;
+  if (segment && segment.startsWith('city_')) return `Город: ${segment.slice(5)}`;
   return 'Все клиенты';
 }
 
@@ -2243,10 +2244,15 @@ async function _getBroadcastClients(segment) {
       rows = await query(
         "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND created_at >= datetime('now', '-30 days')"
       ).catch(() => []);
-    } else if (segment && segment.startsWith('city:')) {
-      const city = segment.slice(5);
+    } else if (segment && (segment.startsWith('city:') || segment.startsWith('city_'))) {
+      const city = segment.startsWith('city:') ? segment.slice(5) : segment.slice(5);
       rows = await query(
-        "SELECT DISTINCT o.client_chat_id FROM orders o JOIN models m ON o.model_id=m.id WHERE m.city=? AND o.client_chat_id IS NOT NULL AND o.client_chat_id != ''",
+        `SELECT DISTINCT o.client_chat_id
+         FROM orders o
+         JOIN models m ON o.model_id = m.id
+         WHERE o.client_chat_id IS NOT NULL
+           AND o.client_chat_id != ''
+           AND m.city = ?`,
         [city]
       ).catch(() => []);
     } else if (segment === 'new') {
@@ -4210,6 +4216,20 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       return showAdminModels(chatId, 0, {});
     }
+    // ── Admin model calendar (must be before generic adm_model_ handler)
+    if (data.startsWith('adm_model_cal_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_model_cal_', ''));
+      return showAdminModelCalendar(chatId, modelId);
+    }
+
+    // ── Admin model stats (must be before generic adm_model_ handler)
+    if (data.startsWith('adm_model_stats_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_model_stats_', ''));
+      return showModelStats(chatId, modelId);
+    }
+
     if (data.startsWith('adm_model_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('adm_model_',''));
@@ -4376,20 +4396,6 @@ function initBot(app) {
           reply_markup: { inline_keyboard: [[{ text: '📅 Все рассылки', callback_data: 'adm_sched_bcast' }]] }
         }
       );
-    }
-
-    // ── Model stats
-    if (data.startsWith('adm_model_stats_')) {
-      if (!isAdmin(chatId)) return;
-      const modelId = parseInt(data.replace('adm_model_stats_', ''));
-      return showModelStats(chatId, modelId);
-    }
-
-    // ── Admin model calendar
-    if (data.startsWith('adm_model_cal_')) {
-      if (!isAdmin(chatId)) return;
-      const modelId = parseInt(data.replace('adm_model_cal_', ''));
-      return showAdminModelCalendar(chatId, modelId);
     }
 
     // ── Admin: add busy period (start state)
