@@ -1660,9 +1660,15 @@ async function showBroadcast(chatId) {
   if (!isAdmin(chatId)) return;
   const r = await get("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>({n:0}));
   return safeSend(chatId,
-    `📢 *Рассылка клиентам*\n\nКлиентов с заявками: *${r.n}*\n\nВведите сообщение для рассылки — оно будет отправлено всем клиентам, которые оформляли заявки через бота.\n\n⚠️ _Используйте аккуратно_`,
+    `📢 *Рассылка клиентам*\n\nКлиентов с заявками: *${r.n}*\n\nВыберите тип рассылки:\n\n📝 *Только текст* — обычное текстовое сообщение\n🖼 *Текст \\+ фото* — сначала загрузите фото, потом подпись`,
     {
-      reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] } }
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📝 Только текст',  callback_data: 'adm_broadcast_text'  },
+         { text: '🖼 Текст + фото',  callback_data: 'adm_broadcast_photo' }],
+        [{ text: '❌ Отмена',        callback_data: 'admin_menu'          }],
+      ]}
+    }
   );
 }
 
@@ -1683,6 +1689,83 @@ async function sendBroadcast(chatId, text) {
   return safeSend(chatId, `✅ *Рассылка завершена*\n\nОтправлено: ${sent}\nОшибок: ${failed}`, {
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
   });
+}
+
+async function sendBroadcastWithPhoto(chatId, photoFileId, caption) {
+  const clients = await query("SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>[]);
+  if (!clients.length) return safeSend(chatId, '❌ Нет клиентов для рассылки.', {
+    reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+  });
+  let sent = 0, failed = 0;
+  for (const c of clients) {
+    try {
+      await bot.sendPhoto(c.client_chat_id, photoFileId, {
+        caption: caption ? `📢 *Сообщение от Nevesty Models*\n\n${esc(caption)}` : '📢 *Nevesty Models*',
+        parse_mode: 'MarkdownV2',
+      });
+      sent++;
+    } catch { failed++; }
+    await new Promise(r => setTimeout(r, 60)); // rate limit
+  }
+  await clearSession(chatId);
+  return safeSend(chatId, `✅ *Рассылка с фото завершена*\n\nОтправлено: ${sent}\nОшибок: ${failed}`, {
+    reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+  });
+}
+
+// ─── Admin search orders ──────────────────────────────────────────────────────
+
+async function showAdminSearchOrder(chatId) {
+  if (!isAdmin(chatId)) return;
+  await setSession(chatId, 'adm_search_order_input', {});
+  return safeSend(chatId,
+    `🔍 *Поиск заявки*\n\nВведите номер заявки, имя клиента или телефон:`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_orders__0' }]] }
+    }
+  );
+}
+
+async function searchAdminOrders(chatId, query_text) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const q = query_text.trim();
+    const rows = await query(
+      `SELECT o.*,m.name as model_name FROM orders o
+       LEFT JOIN models m ON o.model_id=m.id
+       WHERE o.order_number LIKE ? OR o.client_name LIKE ? OR o.client_phone LIKE ?
+       ORDER BY o.created_at DESC LIMIT 10`,
+      [`%${q}%`, `%${q}%`, `%${q}%`]
+    );
+    await clearSession(chatId);
+    if (!rows.length) {
+      return safeSend(chatId,
+        `🔍 По запросу *«${esc(q)}»* заявок не найдено\\.`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '🔍 Искать снова', callback_data: 'adm_search_order' }],
+            [{ text: '← Заявки',        callback_data: 'adm_orders__0'    }],
+          ]}
+        }
+      );
+    }
+    let text = `🔍 *Результаты поиска «${esc(q)}»*\n\nНайдено: ${rows.length}\n\n`;
+    const btns = rows.map(o => {
+      const icon = STATUS_LABELS[o.status]?.split(' ')[0] || '';
+      text += `${icon} *${esc(o.order_number)}* — ${esc(o.client_name)}, ${esc(o.client_phone)}\n`;
+      return [{ text: `${o.order_number}  ·  ${o.client_name}`, callback_data: `adm_order_${o.id}` }];
+    });
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        ...btns,
+        [{ text: '🔍 Новый поиск', callback_data: 'adm_search_order' },
+         { text: '← Заявки',       callback_data: 'adm_orders__0'    }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] searchAdminOrders:', e.message); }
 }
 
 // ─── Admin management ─────────────────────────────────────────────────────────

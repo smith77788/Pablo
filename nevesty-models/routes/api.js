@@ -383,10 +383,26 @@ router.post('/orders', async (req, res, next) => {
 router.get('/orders/status/:order_number', async (req, res, next) => {
   try {
     const order = await get(
-      `SELECT o.order_number, o.status, o.event_type, o.event_date, o.client_name, m.name as model_name
+      `SELECT o.order_number, o.status, o.event_type, o.event_date, o.client_name, o.created_at, m.name as model_name
        FROM orders o LEFT JOIN models m ON o.model_id = m.id
        WHERE o.order_number = ?`,
       [req.params.order_number.toUpperCase()]
+    );
+    if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
+    res.json(order);
+  } catch (e) { next(e); }
+});
+
+// GET /api/orders/status?number=ORD-XXXX — public status check by query param
+router.get('/orders/status', async (req, res, next) => {
+  try {
+    const number = (req.query.number || '').trim().toUpperCase();
+    if (!number) return res.status(400).json({ error: 'Укажите номер заявки' });
+    const order = await get(
+      `SELECT o.order_number, o.status, o.event_type, o.event_date, o.client_name, o.created_at, m.name as model_name
+       FROM orders o LEFT JOIN models m ON o.model_id = m.id
+       WHERE o.order_number = ?`,
+      [number]
     );
     if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
     res.json(order);
