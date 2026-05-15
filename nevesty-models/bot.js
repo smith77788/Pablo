@@ -446,29 +446,18 @@ const REPLY_KB_CLIENT = {
 };
 
 async function buildClientKeyboard() {
-  const [
-    tgChannel,
-    calcEnabled,
-    wishlistEnabled,
-    quickBookingEnabled,
-    searchEnabled,
-    reviewsEnabled,
-    loyaltyEnabled,
-    referralEnabled,
-    faqEnabled,
-  ] = await Promise.all([
-    getSetting('tg_channel').catch(() => null),
-    getSetting('calc_enabled').catch(() => null),
-    getSetting('wishlist_enabled', '1').catch(() => '1'),
-    getSetting('quick_booking_enabled', '1').catch(() => '1'),
-    getSetting('search_enabled', '1').catch(() => '1'),
-    getSetting('reviews_enabled', '1').catch(() => '1'),
-    getSetting('loyalty_enabled').catch(() => '1'),
-    getSetting('referral_enabled').catch(() => '1'),
-    getSetting('faq_enabled').catch(() => '1'),
-  ]);
+  const [calcEnabled, wishlistEnabled, quickBookingEnabled, searchEnabled, reviewsEnabled, loyaltyEnabled, faqEnabled] =
+    await Promise.all([
+      getSetting('calc_enabled').catch(() => null),
+      getSetting('wishlist_enabled', '1').catch(() => '1'),
+      getSetting('quick_booking_enabled', '1').catch(() => '1'),
+      getSetting('search_enabled', '1').catch(() => '1'),
+      getSetting('reviews_enabled', '1').catch(() => '1'),
+      getSetting('loyalty_enabled').catch(() => '1'),
+      getSetting('faq_enabled').catch(() => '1'),
+    ]);
 
-  // Row 1: always
+  // Row 1: discovery
   const rows = [
     [
       { text: '💃 Каталог', callback_data: 'cat_cat__0' },
@@ -481,63 +470,37 @@ async function buildClientKeyboard() {
   if (quickBookingEnabled !== '0') bookingRow.push({ text: '⚡ Быстрая заявка', callback_data: 'bk_quick' });
   rows.push(bookingRow);
 
-  // Tech spec generator
-  rows.push([{ text: '📋 Тех. задание', callback_data: 'techspec_start' }]);
-
-  // Row 3: orders + profile
-  rows.push([
+  // Row 3: orders + profile + wishlist (wishlist gated)
+  const accountRow = [
     { text: STRINGS.btnMyOrders, callback_data: 'my_orders' },
     { text: '👤 Мой профиль', callback_data: 'profile' },
-  ]);
+  ];
+  if (wishlistEnabled !== '0') accountRow.push({ text: '❤️ Избранное', callback_data: 'fav_list_0' });
+  rows.push(accountRow);
 
-  // Row 4: wishlist + calculator (wishlist gated)
-  const favRow = [];
-  if (wishlistEnabled !== '0') favRow.push({ text: '❤️ Избранное', callback_data: 'fav_list_0' });
-  if (calcEnabled === '1') favRow.push({ text: '🧮 Калькулятор', callback_data: 'calculator' });
-  if (favRow.length) rows.push(favRow);
-
-  // Row 5: reviews + FAQ (both gated)
-  const reviewRow = [];
-  if (reviewsEnabled !== '0') reviewRow.push({ text: '⭐ Отзывы', callback_data: 'show_reviews' });
-  if (faqEnabled !== '0') reviewRow.push({ text: '❓ FAQ', callback_data: 'faq' });
-  if (reviewRow.length) rows.push(reviewRow);
-
-  // Row 6: loyalty + referral (both gated)
-  const loyaltyRow = [];
-  if (referralEnabled !== '0') loyaltyRow.push({ text: '🎁 Реферальная программа', callback_data: 'referral' });
-  if (loyaltyEnabled !== '0') loyaltyRow.push({ text: '💫 Баллы лояльности', callback_data: 'loyalty' });
-  if (loyaltyRow.length) rows.push(loyaltyRow);
-
-  // Row 7: category filters
-  rows.push([
-    { text: '👗 Fashion', callback_data: 'cat_filter_fashion' },
-    { text: '📷 Commercial', callback_data: 'cat_filter_commercial' },
-  ]);
-
-  // Row 8: search (gated)
+  // Row 4: search + AI + calculator (search and calc gated)
+  const searchRow = [];
   if (searchEnabled !== '0') {
-    rows.push([
-      { text: '🔍 Поиск по параметрам', callback_data: 'cat_search' },
-      { text: '📏 Поиск по росту', callback_data: 'search_height_input' },
-    ]);
-    rows.push([{ text: '🤖 AI подбор', callback_data: 'ai_match' }]);
+    searchRow.push({ text: '🔍 Поиск', callback_data: 'cat_search' });
+    searchRow.push({ text: '🤖 AI подбор', callback_data: 'ai_match' });
   }
+  if (calcEnabled === '1') searchRow.push({ text: '🧮 Калькулятор', callback_data: 'calculator' });
+  if (searchRow.length) rows.push(searchRow);
 
-  // Row 9: pricing + manager
+  // Row 5: reviews + FAQ + loyalty (all gated)
+  const infoRow = [];
+  if (reviewsEnabled !== '0') infoRow.push({ text: '⭐ Отзывы', callback_data: 'show_reviews' });
+  if (faqEnabled !== '0') infoRow.push({ text: '❓ FAQ', callback_data: 'faq' });
+  if (loyaltyEnabled !== '0') infoRow.push({ text: '💫 Лояльность', callback_data: 'loyalty' });
+  if (infoRow.length) rows.push(infoRow);
+
+  // Row 6: pricing + about + manager
   rows.push([
     { text: '💰 Прайс-лист', callback_data: 'pricing' },
-    { text: '💬 Написать менеджеру', callback_data: 'contact_mgr' },
-  ]);
-
-  // Row 10: about + contacts
-  rows.push([
     { text: 'ℹ️ О нас', callback_data: 'about_us' },
-    { text: '📞 Контакты', callback_data: 'contacts' },
+    { text: '💬 Менеджер', callback_data: 'contact_mgr' },
   ]);
 
-  if (tgChannel) {
-    rows.push([{ text: '📣 Наш канал', callback_data: 'tg_channel' }]);
-  }
   if (SITE_URL.startsWith('https://')) {
     const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
     rows.unshift([{ text: '📱 Открыть Mini App', web_app: { url: webappUrl } }]);
