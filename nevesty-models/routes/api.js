@@ -30,6 +30,7 @@ let aiMatchLimiter = (req, res, next) => next(); // fallback: no-op
 let bookingLimiter = (req, res, next) => next(); // fallback: no-op — 5/hour for /orders
 let wishlistLimiter = (req, res, next) => next(); // fallback: no-op — 60/15min for wishlist
 let publicSettingsLimiter = (req, res, next) => next(); // fallback: no-op — 60/min for /settings/public
+let catalogLimiter = (req, res, next) => next(); // fallback: no-op — 120/min for catalog
 try {
   const rateLimit = require('express-rate-limit');
   // Contact form: 3 requests per hour per IP
@@ -87,6 +88,14 @@ try {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Слишком много запросов. Попробуйте позже.' },
+  });
+  // Catalog: 120 req/min per IP — prevents cache-bypass scan attacks
+  catalogLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много запросов к каталогу. Попробуйте позже.' },
   });
 } catch {
   /* express-rate-limit not available */
@@ -331,7 +340,9 @@ router.get('/cities', async (req, res) => {
 async function issueTokenPair(admin) {
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) throw new Error('JWT_SECRET environment variable is not set');
-  const token = jwt.sign({ id: admin.id, username: admin.username, role: admin.role }, jwtSecret, { expiresIn: '15m' });
+  const token = jwt.sign({ id: admin.id, username: admin.username, role: admin.role, type: 'admin' }, jwtSecret, {
+    expiresIn: '15m',
+  });
   const refreshTokenRaw = crypto.randomBytes(48).toString('hex');
   const refreshHash = crypto.createHash('sha256').update(refreshTokenRaw).digest('hex');
   await run("INSERT INTO refresh_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))", [
@@ -448,19 +459,26 @@ router.post('/auth/refresh', authLimiter, async (req, res, next) => {
     const { refresh_token } = req.body;
     if (!refresh_token) return res.status(400).json({ error: 'refresh_token required' });
     const tokenHash = crypto.createHash('sha256').update(refresh_token).digest('hex');
-    const stored = await get(
-      'SELECT * FROM refresh_tokens WHERE token_hash=? AND revoked=0 AND expires_at > CURRENT_TIMESTAMP',
-      [tokenHash]
-    );
-    if (!stored) return res.status(401).json({ error: 'Invalid or expired refresh token' });
-    const admin = await get('SELECT id, username, role FROM admins WHERE id=?', [stored.admin_id]);
-    if (!admin) return res.status(401).json({ error: 'Admin not found' });
-    // Rotate atomically: revoke old token and insert new one in a single transaction
     const newRefresh = crypto.randomBytes(48).toString('hex');
     const newHash = crypto.createHash('sha256').update(newRefresh).digest('hex');
+    // Atomic rotation: SELECT inside transaction to eliminate race window
     await run('BEGIN');
+    let stored, admin;
     try {
-      await run('UPDATE refresh_tokens SET revoked=1 WHERE id=?', [stored.id]);
+      stored = await get(
+        'SELECT * FROM refresh_tokens WHERE token_hash=? AND revoked=0 AND expires_at > CURRENT_TIMESTAMP',
+        [tokenHash]
+      );
+      if (!stored) {
+        await run('ROLLBACK').catch(() => {});
+        return res.status(401).json({ error: 'Invalid or expired refresh token' });
+      }
+      admin = await get('SELECT id, username, role FROM admins WHERE id=?', [stored.admin_id]);
+      if (!admin) {
+        await run('ROLLBACK').catch(() => {});
+        return res.status(401).json({ error: 'Admin not found' });
+      }
+      await run('UPDATE refresh_tokens SET revoked=1 WHERE id=? AND revoked=0', [stored.id]);
       await run(
         "INSERT INTO refresh_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
         [newHash, admin.id]
@@ -482,7 +500,7 @@ router.post('/auth/refresh', authLimiter, async (req, res, next) => {
 });
 
 // ─── Auth: revoke (logout) ───────────────────────────────────────────────────
-router.post('/auth/logout', async (req, res, next) => {
+router.post('/auth/logout', authLimiter, async (req, res, next) => {
   try {
     const { refresh_token } = req.body;
     if (refresh_token) {
@@ -955,7 +973,7 @@ router.patch('/admin/notifications/:id/read', auth, async (req, res, next) => {
 });
 
 // ─── Models (public) — with 2-minute cache keyed on query params ──────────────
-router.get('/models', async (req, res, next) => {
+router.get('/models', catalogLimiter, async (req, res, next) => {
   try {
     // Build a stable cache key from sorted query params
     const qHash = crypto
@@ -1075,7 +1093,7 @@ router.get('/models', async (req, res, next) => {
 });
 
 // ─── Models search (public, extended filters) ─────────────────────────────────
-router.get('/models/search', async (req, res, next) => {
+router.get('/models/search', catalogLimiter, async (req, res, next) => {
   try {
     const { min_height, max_height, min_age, max_age, category, city, name, page = 0, limit = 12 } = req.query;
     const where = ['archived=0'];
