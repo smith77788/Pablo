@@ -101,6 +101,109 @@ class StrategicCore(FactoryAgent):
 
         return decisions, cycle_id
 
+    def synthesize_dept_reports(self, dept_results: dict) -> dict:
+        """Synthesize department reports into a strategic briefing and delegation plan."""
+        summary_parts = []
+        for dept, result in dept_results.items():
+            if isinstance(result, dict):
+                for role, data in result.items():
+                    if isinstance(data, dict) and 'result' in data:
+                        summary_parts.append(f"[{dept}/{role}]: {str(data['result'])[:200]}")
+                    elif isinstance(data, str):
+                        summary_parts.append(f"[{dept}/{role}]: {data[:200]}")
+            elif isinstance(result, str):
+                summary_parts.append(f"[{dept}]: {result[:200]}")
+
+        dept_summary = "\n".join(summary_parts[:20]) if summary_parts else "No department reports available"
+
+        recent_decisions = db.get_recent_decisions(5)
+        prev_decisions_str = ", ".join(d.get("decision_type", "") for d in recent_decisions) if recent_decisions else "none"
+
+        briefing = self.think_json(
+            "Ты CEO. Проанализируй отчёты всех департаментов и создай стратегическое резюме. Верни JSON:\n"
+            "{\n"
+            '  "key_insights": ["insight1", "insight2", "insight3"],\n'
+            '  "priority_issues": ["issue1", "issue2"],\n'
+            '  "next_cycle_focus": "название департамента который нужно усилить",\n'
+            '  "recommended_action": "конкретное действие на следующую неделю",\n'
+            '  "health_score": 0-100,\n'
+            '  "summary": "2-3 предложения с итогом"\n'
+            "}",
+            context={
+                "department_reports": dept_summary,
+                "previous_decisions": prev_decisions_str,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            max_tokens=800,
+        )
+
+        if not isinstance(briefing, dict):
+            briefing = {
+                "key_insights": [],
+                "priority_issues": [],
+                "next_cycle_focus": "marketing",
+                "recommended_action": "Continue current strategy",
+                "health_score": 70,
+                "summary": "CEO synthesis unavailable",
+            }
+
+        cycle_id = datetime.now(timezone.utc).isoformat()
+        db.save_ceo_decision(
+            cycle_id=cycle_id,
+            decision_text=briefing.get("summary", ""),
+            metadata=briefing,
+        )
+        logger.info("[CEO] Synthesis: health=%s focus=%s", briefing.get("health_score"), briefing.get("next_cycle_focus"))
+        return briefing
+
+    def generate_weekly_report(self) -> str:
+        """Generate a weekly summary report from recent decisions and metrics."""
+        recent_decisions = db.get_recent_decisions(20)
+        dec_types = {}
+        for d in recent_decisions:
+            t = d.get("decision_type", "other")
+            dec_types[t] = dec_types.get(t, 0) + 1
+
+        dec_summary = "\n".join(f"- {t}: {c} раз" for t, c in dec_types.items()) if dec_types else "Нет решений"
+
+        report = self.think(
+            "Ты CEO. Составь краткий недельный отчёт (5-8 пунктов).\n"
+            "Структура: что было сделано, ключевые метрики, проблемы, план на следующую неделю.\n"
+            "Отвечай на русском, деловой стиль, конкретно.",
+            context={"decisions_this_week": dec_summary},
+            max_tokens=500,
+        )
+        return report or "Weekly report unavailable"
+
+    def propose_ab_experiment(self, context: dict) -> dict:
+        """Propose a new A/B experiment based on current performance."""
+        experiment = self.think_json(
+            "Предложи конкретный A/B эксперимент для агентства моделей. Верни JSON:\n"
+            "{\n"
+            '  "name": "название эксперимента",\n'
+            '  "hypothesis": "гипотеза что проверяем",\n'
+            '  "variant_a": "контрольная версия",\n'
+            '  "variant_b": "тестируемая версия",\n'
+            '  "metric": "что измеряем (конверсия/CTR/retention)",\n'
+            '  "duration_days": 14,\n'
+            '  "expected_lift_pct": 15\n'
+            "}",
+            context=context,
+            max_tokens=400,
+        )
+        if not isinstance(experiment, dict):
+            experiment = {
+                "name": "Homepage CTA Test",
+                "hypothesis": "Изменение цвета кнопки увеличит CTR",
+                "variant_a": "Золотая кнопка 'Забронировать'",
+                "variant_b": "Белая кнопка 'Выбрать модель'",
+                "metric": "CTR на booking страницу",
+                "duration_days": 14,
+                "expected_lift_pct": 20,
+            }
+        logger.info("[CEO] Proposed experiment: %s", experiment.get("name"))
+        return experiment
+
     def evaluate_experiment(self, experiment: dict) -> str:
         """Evaluate a running experiment and decide scale/iterate/kill."""
         conv_a = experiment.get("conversion_a", 0)
