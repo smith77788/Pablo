@@ -5,13 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Профиль модели — Nevesty Models</title>
   <meta name="description" content="Подробный профиль модели агентства Nevesty Models. Параметры, портфолио, бронирование.">
-  <meta property="og:type" content="website">
+  <meta property="og:title" content="Профиль модели — Nevesty Models">
+  <meta property="og:description" content="Профессиональная модель агентства Nevesty Models. Параметры, портфолио и бронирование онлайн.">
+  <meta property="og:type" content="profile">
+  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
+  <meta property="og:url" content="https://nevesty-models.ru/model.html">
   <meta property="og:site_name" content="Nevesty Models">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#080808">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="/css/main.css" />
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
   <style>
     /* ─── MODEL PAGE LAYOUT ─────────────────────────── */
     .model-page {
@@ -472,6 +478,15 @@
 
       <!-- Profile body -->
       <div class="model-profile">
+        <nav aria-label="breadcrumb" style="padding-top:8px;margin-bottom:4px">
+          <ol class="breadcrumb" style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
+            <li class="breadcrumb-item"><a href="/" style="color:var(--text-muted);text-decoration:none">Главная</a></li>
+            <li style="color:var(--border)" aria-hidden="true">/</li>
+            <li class="breadcrumb-item"><a href="/catalog.html" style="color:var(--text-muted);text-decoration:none">Каталог</a></li>
+            <li style="color:var(--border)" aria-hidden="true">/</li>
+            <li class="breadcrumb-item active" id="breadcrumbModelName" aria-current="page" style="color:var(--gold)">Модель</li>
+          </ol>
+        </nav>
         <a href="/catalog.html" class="model-back">← Назад в каталог</a>
 
         <!-- Stats row -->
@@ -597,6 +612,32 @@
         document.title = `${model.name} — Nevesty Models`;
         const ogTitle = document.querySelector('meta[property="og:title"]');
         if (ogTitle) ogTitle.setAttribute('content', `${model.name} — Nevesty Models`);
+        const ogDesc = document.querySelector('meta[property="og:description"]');
+        if (ogDesc && model.bio) ogDesc.setAttribute('content', model.bio.substring(0, 160));
+        const ogUrl = document.querySelector('meta[property="og:url"]');
+        if (ogUrl) ogUrl.setAttribute('content', `https://nevesty-models.ru/model.html?id=${id}`);
+        const metaDesc = document.querySelector('meta[name="description"]');
+        if (metaDesc) metaDesc.setAttribute('content', `${model.name} — профессиональная модель агентства Nevesty Models. ${model.city ? 'Город: ' + model.city + '.' : ''} Бронирование онлайн.`);
+
+        // Person schema.org
+        const personSchema = {
+          "@context": "https://schema.org",
+          "@type": "Person",
+          "name": model.name,
+          "url": `https://nevesty-models.ru/model.html?id=${id}`,
+          "worksFor": {
+            "@type": "Organization",
+            "name": "Nevesty Models",
+            "url": "https://nevesty-models.ru"
+          }
+        };
+        if (model.city) personSchema.address = { "@type": "PostalAddress", "addressLocality": model.city };
+        if (model.photo_main) { personSchema.image = model.photo_main; const ogImg = document.querySelector('meta[property="og:image"]'); if (ogImg) ogImg.setAttribute('content', model.photo_main); }
+        if (model.instagram) personSchema.sameAs = [`https://instagram.com/${model.instagram.replace(/^@/,'')}`];
+        const schemaScript = document.createElement('script');
+        schemaScript.type = 'application/ld+json';
+        schemaScript.textContent = JSON.stringify(personSchema);
+        document.head.appendChild(schemaScript);
 
         renderModel(model);
       }
@@ -614,6 +655,10 @@
           heroEl.insertBefore(img, heroEl.firstChild);
           el('heroPlaceholder').style.display = 'none';
         }
+
+        // Breadcrumb
+        const breadcrumbName = el('breadcrumbModelName');
+        if (breadcrumbName) breadcrumbName.textContent = m.name;
 
         // Name & category overlay
         el('heroName').textContent = m.name;
