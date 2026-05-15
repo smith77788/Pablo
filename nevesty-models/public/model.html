@@ -1442,7 +1442,12 @@
             params.forEach(([label, val]) => {
               const item = document.createElement('div');
               item.className = 'model-param-item';
-              item.innerHTML = `<label>${label}</label><span>${val}</span>`;
+              const lbl = document.createElement('label');
+              lbl.textContent = label;
+              const spn = document.createElement('span');
+              spn.textContent = val;
+              item.appendChild(lbl);
+              item.appendChild(spn);
               paramsGrid.appendChild(item);
             });
           } else {

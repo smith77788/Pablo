@@ -45,28 +45,29 @@ function placeholderImg(name) {
 }
 
 function modelCard(m, onClick) {
+  const safeId = parseInt(m.id, 10) || 0;
   const availDot = m.available ? '<div class="model-avail"></div>' : '<div class="model-avail unavailable"></div>';
   return `
-    <div class="model-card" onclick="${onClick}(${m.id})" role="button" tabindex="0"
-         onkeydown="if(event.key==='Enter'||event.key===' '){${onClick}(${m.id})}">
+    <div class="model-card" onclick="${escHtml(onClick)}(${safeId})" role="button" tabindex="0"
+         onkeydown="if(event.key==='Enter'||event.key===' '){${escHtml(onClick)}(${safeId})}">
       ${availDot}
       <div class="model-card-img">
         ${
           m.photo_main
-            ? `<img data-src="${m.photo_main}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-               alt="${m.name}" class="lazy-img" decoding="async" />`
+            ? `<img data-src="${escHtml(m.photo_main)}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+               alt="${escHtml(m.name)}" class="lazy-img" decoding="async" />`
             : placeholderImg(m.name)
         }
         <div class="model-card-overlay">
-          <div class="model-card-tag">${CATEGORIES[m.category] || m.category}</div>
+          <div class="model-card-tag">${escHtml(CATEGORIES[m.category] || m.category)}</div>
           <div style="font-size:0.8rem;color:#ccc">
-            ${m.height}см · ${m.bust}/${m.waist}/${m.hips} · р.${m.shoe_size}
+            ${escHtml(m.height)}см · ${escHtml(m.bust)}/${escHtml(m.waist)}/${escHtml(m.hips)} · р.${escHtml(m.shoe_size)}
           </div>
         </div>
       </div>
       <div class="model-card-info">
-        <div class="model-card-name">${m.name}</div>
-        <div class="model-card-meta">${m.height} см · ${m.hair_color} · ${m.eye_color}</div>
+        <div class="model-card-name">${escHtml(m.name)}</div>
+        <div class="model-card-meta">${escHtml(m.height)} см · ${escHtml(m.hair_color)} · ${escHtml(m.eye_color)}</div>
       </div>
     </div>`;
 }
@@ -501,13 +502,13 @@ if (reviewsContainer) {
           return `
           <div class="testimonial-card" style="animation-delay:${i * 0.07}s">
             <div class="testimonial-stars">${starsHtml}</div>
-            <p class="testimonial-text">${r.text ? `«${r.text}»` : ''}</p>
+            <p class="testimonial-text">${r.text ? `«${escHtml(r.text)}»` : ''}</p>
             <div class="testimonial-author">
-              <div class="testimonial-avatar">${initials}</div>
+              <div class="testimonial-avatar">${escHtml(initials)}</div>
               <div>
-                <strong>${name}</strong>
-                ${r.model_name ? `<span>о модели ${r.model_name}</span>` : ''}
-                ${dateStr ? `<span style="display:block;font-size:0.72rem;color:var(--text-dim);margin-top:2px">${dateStr}</span>` : ''}
+                <strong>${escHtml(name)}</strong>
+                ${r.model_name ? `<span>о модели ${escHtml(r.model_name)}</span>` : ''}
+                ${dateStr ? `<span style="display:block;font-size:0.72rem;color:var(--text-dim);margin-top:2px">${escHtml(dateStr)}</span>` : ''}
               </div>
             </div>
           </div>`;
