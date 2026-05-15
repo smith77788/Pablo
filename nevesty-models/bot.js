@@ -3667,12 +3667,29 @@ async function showModelStats(chatId, modelId) {
   const m = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(() => null);
   if (!m) return safeSend(chatId, '❌ Модель не найдена.');
 
-  const [totalOrders, completedOrders, cancelledOrders, avgBudget, avgRating, topCities] = await Promise.all([
+  const [
+    totalOrders,
+    completedOrders,
+    cancelledOrders,
+    activeOrders,
+    revenue,
+    avgBudget,
+    avgRating,
+    topCities,
+    topEventTypes,
+  ] = await Promise.all([
     get('SELECT COUNT(*) as n FROM orders WHERE model_id=?', [modelId]).catch(() => ({ n: 0 })),
     get("SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status='completed'", [modelId]).catch(() => ({ n: 0 })),
     get("SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status='cancelled'", [modelId]).catch(() => ({ n: 0 })),
+    get("SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status NOT IN ('completed','cancelled')", [
+      modelId,
+    ]).catch(() => ({ n: 0 })),
     get(
-      "SELECT AVG(CAST(REPLACE(REPLACE(budget,' ',''),'₽','') AS REAL)) as avg FROM orders WHERE model_id=? AND budget IS NOT NULL AND budget != ''",
+      "SELECT SUM(CAST(REPLACE(REPLACE(REPLACE(budget,' ',''),'₽',''),',','.') AS REAL)) as total FROM orders WHERE model_id=? AND status='completed' AND budget IS NOT NULL AND budget != ''",
+      [modelId]
+    ).catch(() => ({ total: null })),
+    get(
+      "SELECT AVG(CAST(REPLACE(REPLACE(REPLACE(budget,' ',''),'₽',''),',','.') AS REAL)) as avg FROM orders WHERE model_id=? AND budget IS NOT NULL AND budget != ''",
       [modelId]
     ).catch(() => ({ avg: null })),
     get('SELECT AVG(rating) as avg, COUNT(*) as cnt FROM reviews WHERE model_id=? AND approved=1', [modelId]).catch(
@@ -3682,27 +3699,60 @@ async function showModelStats(chatId, modelId) {
       "SELECT location, COUNT(*) as cnt FROM orders WHERE model_id=? AND location IS NOT NULL AND location != '' GROUP BY location ORDER BY cnt DESC LIMIT 3",
       [modelId]
     ).catch(() => []),
+    query(
+      "SELECT event_type, COUNT(*) as cnt FROM orders WHERE model_id=? AND event_type IS NOT NULL AND event_type != '' GROUP BY event_type ORDER BY cnt DESC LIMIT 5",
+      [modelId]
+    ).catch(() => []),
   ]);
 
   let text = `📊 *Статистика модели*\n\n`;
   text += `💃 *${esc(m.name)}*\n`;
   if (m.city) text += `📍 ${esc(m.city)}\n`;
   text += `\n`;
-  text += `📋 Заявок всего: *${totalOrders?.n || 0}*\n`;
-  text += `✅ Завершено: *${completedOrders?.n || 0}*\n`;
-  text += `❌ Отменено: *${cancelledOrders?.n || 0}*\n`;
+
+  // Orders breakdown
+  text += `📋 *Заявки:*\n`;
+  text += `• Всего: *${totalOrders?.n || 0}*\n`;
+  text += `• Активных: *${activeOrders?.n || 0}*\n`;
+  text += `• Завершено: *${completedOrders?.n || 0}*\n`;
+  text += `• Отменено: *${cancelledOrders?.n || 0}*\n`;
+  text += `\n`;
+
+  // Revenue & budget
+  text += `💰 *Финансы:*\n`;
+  if (revenue?.total) {
+    text += `• Выручка \\(завершённые\\): *${esc(Math.round(revenue.total).toLocaleString('ru'))} ₽*\n`;
+  } else {
+    text += `• Выручка: нет данных\n`;
+  }
+  if (avgBudget?.avg) {
+    text += `• Средний бюджет: *${esc(Math.round(avgBudget.avg).toLocaleString('ru'))} ₽*\n`;
+  }
+  text += `\n`;
+
+  // Views & rating
   text += `👁 Просмотров: *${m.view_count || 0}*\n`;
-  if (avgBudget?.avg) text += `💰 Средний бюджет: *${esc(Math.round(avgBudget.avg).toLocaleString('ru'))} ₽*\n`;
   if (avgRating?.cnt > 0) {
-    const stars = '⭐'.repeat(Math.round(avgRating.avg));
-    text += `${stars} Рейтинг: *${esc(Number(avgRating.avg).toFixed(1))}* \\(${avgRating.cnt} отзывов\\)\n`;
+    const stars = '⭐'.repeat(Math.min(5, Math.round(avgRating.avg)));
+    text += `${stars} Рейтинг: *${esc(Number(avgRating.avg).toFixed(1))}* \\(${avgRating.cnt} отз\\.\\.\\)\n`;
   } else {
     text += `⭐ Отзывов пока нет\n`;
   }
+
+  // Top cities
   if (topCities.length) {
     text += `\n🏙 *Топ городов:*\n`;
     for (const c of topCities) {
       text += `• ${esc(c.location)} \\(${c.cnt}\\)\n`;
+    }
+  }
+
+  // Top event types
+  if (topEventTypes.length) {
+    text += `\n🎭 *Типы мероприятий:*\n`;
+    for (const e of topEventTypes) {
+      const label = EVENT_TYPES[e.event_type] || e.event_type;
+      text += `• ${esc(label)} \\(${e.cnt}\\)\n`;
     }
   }
 
