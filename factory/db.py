@@ -96,7 +96,14 @@ def init_db() -> None:
             status      TEXT DEFAULT 'pending',  -- pending, live, done, cancelled
             priority    INTEGER DEFAULT 5,
             created_at  TEXT NOT NULL,
-            executed_at TEXT
+            executed_at TEXT,
+            experiment_hypothesis TEXT,
+            metric_name  TEXT,
+            metric_baseline REAL,
+            metric_target   REAL,
+            metric_current  REAL,
+            evaluated_at    TEXT,
+            outcome     TEXT DEFAULT 'pending'   -- success, fail, pending, inconclusive
         );
 
         CREATE TABLE IF NOT EXISTS cycles (
@@ -116,6 +123,22 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_decisions_cycle ON decisions(cycle_id);
         CREATE INDEX IF NOT EXISTS idx_growth_status ON growth_actions(status);
         """)
+        conn.commit()
+
+        # Migrate existing growth_actions table — add experiment columns if missing
+        _existing = [r[1] for r in conn.execute("PRAGMA table_info(growth_actions)").fetchall()]
+        _new_cols = {
+            "experiment_hypothesis": "TEXT",
+            "metric_name":           "TEXT",
+            "metric_baseline":       "REAL",
+            "metric_target":         "REAL",
+            "metric_current":        "REAL",
+            "evaluated_at":          "TEXT",
+            "outcome":               "TEXT DEFAULT 'pending'",
+        }
+        for col, col_def in _new_cols.items():
+            if col not in _existing:
+                conn.execute(f"ALTER TABLE growth_actions ADD COLUMN {col} {col_def}")
         conn.commit()
 
 

@@ -95,6 +95,25 @@ def list_experiments(status: str | None = None):
     return db.fetch_all("SELECT * FROM experiments ORDER BY started_at DESC LIMIT 50")
 
 
+@app.get("/factory/experiments/tracked")
+def get_tracked_experiments():
+    """Return experiment results from growth_actions (metric-tracked experiments)."""
+    try:
+        rows = db.fetch_all(
+            """
+            SELECT id, action_type, channel, metric_name, metric_baseline,
+                   metric_target, metric_current, outcome, evaluated_at, created_at
+            FROM growth_actions
+            WHERE metric_name IS NOT NULL
+            ORDER BY created_at DESC LIMIT 50
+            """
+        )
+        return {"experiments": rows}
+    except Exception as e:
+        logger.error("get_tracked_experiments error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/factory/growth-actions")
 def list_growth_actions(status: str = "pending", limit: int = 20):
     return db.fetch_all(

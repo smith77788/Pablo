@@ -778,6 +778,28 @@ def run_cycle() -> dict:
         logger.error("Phase 14 content generation error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 15 — EXPERIMENT TRACKING: evaluate past experiments
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🔬 PHASE 15: EXPERIMENT TRACKING")
+    try:
+        from factory.agents.experiment_tracker import ExperimentTracker
+        tracker = ExperimentTracker()
+        exp_results = tracker.run()
+        results["phases"]["experiment_tracking"] = exp_results
+        if exp_results.get("evaluated", 0) > 0:
+            logger.info(
+                "[Phase15] Evaluated %d experiments: %d success, %d fail",
+                exp_results["evaluated"], exp_results["success"], exp_results["fail"],
+            )
+            summary_lines.append(
+                f"🔬 Experiments: evaluated={exp_results['evaluated']}, "
+                f"success={exp_results['success']}, fail={exp_results['fail']}"
+            )
+    except Exception as e:
+        results["phases"]["experiment_tracking"] = {"error": str(e)}
+        logger.error("Phase 15 experiment tracking error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 8 — CEO SYNTHESIS: синтез всех департаментов
     # ════════════════════════════════════════════════════════════════
     logger.info("\n🏆 CEO SYNTHESIS")
