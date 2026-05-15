@@ -325,6 +325,7 @@
       <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
       <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
       <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+      <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления <span class="nav-badge" id="notifNavBadge" style="display:none">0</span></a>
       <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
       <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
       <div class="nav-section-label">AI</div>
@@ -1193,6 +1194,11 @@ async function loadNotifications() {
     if (badge) {
       badge.textContent = count > 9 ? '9+' : count;
       badge.style.display = count > 0 ? 'flex' : 'none';
+    }
+    const navBadge = document.getElementById('notifNavBadge');
+    if (navBadge) {
+      navBadge.textContent = count > 9 ? '9+' : count;
+      navBadge.style.display = count > 0 ? '' : 'none';
     }
     renderNotifList();
   } catch { /* silently skip */ }
