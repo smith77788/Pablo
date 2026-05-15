@@ -77,7 +77,7 @@
 
       <!-- Loading state -->
       <div id="loadingState" aria-busy="true" aria-label="Загрузка избранных моделей" style="display:none">
-        <div class="catalog-grid">
+        <div class="catalog-grid" style="display:grid">
           <div class="model-card-skeleton"></div>
           <div class="model-card-skeleton"></div>
           <div class="model-card-skeleton"></div>
@@ -149,16 +149,43 @@
 ]
   </script>
 
+  <!-- Floating Compare Bar -->
+  <div id="favCompareBar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:500;background:rgba(8,8,8,0.97);border-top:1px solid var(--gold);backdrop-filter:blur(12px);padding:14px 24px;transition:transform 0.3s ease">
+    <div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold)">⚖️ Сравнение</span>
+        <span id="favCmpBarCount" style="font-size:0.85rem;color:var(--text-muted)">Выбрано 0 моделей</span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <a id="favCmpBarLink" href="/compare.html" style="padding:10px 24px;background:var(--gold);color:var(--bg);font-size:0.75rem;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;text-decoration:none;transition:background 0.2s"
+           onmouseover="this.style.background='var(--gold-light)'" onmouseout="this.style.background='var(--gold)'">
+          Сравнить
+        </a>
+        <button id="favCmpClearBtn" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:10px 18px;cursor:pointer;font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;transition:all 0.2s" onmouseover="this.style.borderColor='var(--text-muted)'" onmouseout="this.style.borderColor='var(--border)'">
+          Очистить
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
   (function () {
     const FAV_KEY = 'nm_favorites';
+    const COMPARE_KEY = 'nm_compare';
     const CAT_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
 
-    function getFavIds() {
+    // ── Storage helpers ───────────────────────────────────────────────────────
+    function getFavs() {
       try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; }
     }
-    function saveFavIds(ids) {
-      try { localStorage.setItem(FAV_KEY, JSON.stringify(ids)); } catch {}
+    function saveFavs(arr) {
+      try { localStorage.setItem(FAV_KEY, JSON.stringify(arr)); } catch {}
+    }
+    function getCompareIds() {
+      try { return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]'); } catch { return []; }
+    }
+    function saveCompareIds(ids) {
+      try { localStorage.setItem(COMPARE_KEY, JSON.stringify(ids)); } catch {}
     }
 
     function escHtml(s) {
@@ -176,6 +203,34 @@
       return 'моделей';
     }
 
+    // ── Compare bar ───────────────────────────────────────────────────────────
+    function updateCompareBar() {
+      const ids = getCompareIds();
+      const bar = document.getElementById('favCompareBar');
+      const countEl = document.getElementById('favCmpBarCount');
+      const barLink = document.getElementById('favCmpBarLink');
+      const n = ids.length;
+      if (n >= 2) {
+        if (bar) bar.style.display = '';
+        const txt = n === 1 ? '1 модель' : n === 2 ? '2 модели' : '3 модели';
+        if (countEl) countEl.textContent = `Выбрано ${txt}`;
+        if (barLink) barLink.href = `/compare.html?ids=${ids.join(',')}`;
+      } else {
+        if (bar) bar.style.display = 'none';
+      }
+    }
+
+    document.getElementById('favCmpClearBtn').addEventListener('click', () => {
+      saveCompareIds([]);
+      updateCompareBar();
+      // Reset compare button states on all cards
+      document.querySelectorAll('.fav-cmp-btn').forEach(btn => {
+        btn.setAttribute('data-active', 'false');
+        btn.innerHTML = '⚖️';
+        btn.style.background = 'rgba(0,0,0,0.55)';
+      });
+    });
+
     const favCountEl   = document.getElementById('favCount');
     const loadingEl    = document.getElementById('loadingState');
     const emptyEl      = document.getElementById('emptyState');
@@ -188,6 +243,7 @@
       const statusText = model.available ? 'Свободна' : 'Занята';
       const statusColor = model.available ? '#4caf50' : '#f44336';
       const measures = [model.bust, model.waist, model.hips].filter(Boolean).join('/');
+      const photoSrc = model.photo_main || model.photo || '';
 
       const article = document.createElement('article');
       article.className = 'model-card';
@@ -202,9 +258,9 @@
       article.innerHTML = `
         <div class="model-avail${model.available ? '' : ' unavailable'}" aria-hidden="true"></div>
         <div class="model-card-img" style="position:relative">
-          ${model.photo_main
-            ? `<img src="${escHtml(model.photo_main)}" alt="${escHtml(model.name)}" loading="lazy" />`
-            : `<div class="model-card-placeholder" aria-hidden="true">${escHtml(model.name[0])}</div>`}
+          ${photoSrc
+            ? `<img src="${escHtml(photoSrc)}" alt="${escHtml(model.name)}" loading="lazy" />`
+            : `<div class="model-card-placeholder" aria-hidden="true">${escHtml((model.name||'?')[0])}</div>`}
           <div class="model-card-overlay" aria-hidden="true">
             <div class="model-card-tag">${escHtml(catLabel)}</div>
             ${measures ? `<div style="font-size:0.78rem;color:#ccc;margin-top:4px">${escHtml(measures)}</div>` : ''}
@@ -237,20 +293,20 @@
           </div>
         </div>`;
 
-      // Remove from favorites button
+      // ── Remove from favorites button (❌ / ❤️) ─────────────────────────────
       const removeBtn = document.createElement('button');
       removeBtn.innerHTML = '❤️';
       removeBtn.title = 'Убрать из избранного';
       removeBtn.setAttribute('aria-label', 'Убрать из избранного');
       removeBtn.style.cssText = 'position:absolute;top:8px;right:8px;width:34px;height:34px;border:none;background:rgba(0,0,0,0.55);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;';
-      removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = 'rgba(0,0,0,0.8)'; });
+      removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = 'rgba(180,0,0,0.75)'; });
       removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'rgba(0,0,0,0.55)'; });
       removeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        const ids = getFavIds();
-        const idx = ids.indexOf(model.id);
-        if (idx !== -1) { ids.splice(idx, 1); saveFavIds(ids); }
+        const favs = getFavs();
+        const updated = favs.filter(f => f.id !== model.id);
+        saveFavs(updated);
         article.style.opacity = '0';
         article.style.transform = 'scale(0.95)';
         article.style.transition = 'all 0.25s';
@@ -260,42 +316,71 @@
         }, 250);
       });
 
+      // ── Compare button (⚖️) ────────────────────────────────────────────────
+      const cmpIds = getCompareIds();
+      const cmpActive = cmpIds.includes(model.id);
+      const cmpBtn = document.createElement('button');
+      cmpBtn.className = 'fav-cmp-btn';
+      cmpBtn.setAttribute('data-active', cmpActive ? 'true' : 'false');
+      cmpBtn.setAttribute('aria-label', cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению');
+      cmpBtn.title = cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению';
+      cmpBtn.innerHTML = '⚖️';
+      cmpBtn.style.cssText = `position:absolute;top:8px;left:8px;width:34px;height:34px;border:none;background:${cmpActive ? 'rgba(201,169,110,0.85)' : 'rgba(0,0,0,0.55)'};border-radius:50%;font-size:0.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;`;
+      cmpBtn.addEventListener('mouseenter', () => {
+        if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(201,169,110,0.4)';
+      });
+      cmpBtn.addEventListener('mouseleave', () => {
+        if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(0,0,0,0.55)';
+      });
+      cmpBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const ids = getCompareIds();
+        const idx = ids.indexOf(model.id);
+        if (idx === -1) {
+          if (ids.length >= 3) { alert('Максимум 3 модели для сравнения'); return; }
+          ids.push(model.id);
+          saveCompareIds(ids);
+          cmpBtn.setAttribute('data-active', 'true');
+          cmpBtn.style.background = 'rgba(201,169,110,0.85)';
+          cmpBtn.title = 'Убрать из сравнения';
+        } else {
+          ids.splice(idx, 1);
+          saveCompareIds(ids);
+          cmpBtn.setAttribute('data-active', 'false');
+          cmpBtn.style.background = 'rgba(0,0,0,0.55)';
+          cmpBtn.title = 'Добавить к сравнению';
+        }
+        updateCompareBar();
+      });
+
       const imgContainer = article.querySelector('.model-card-img');
-      if (imgContainer) imgContainer.appendChild(removeBtn);
+      if (imgContainer) {
+        imgContainer.appendChild(removeBtn);
+        imgContainer.appendChild(cmpBtn);
+      }
 
       return article;
     }
 
-    async function init() {
-      const ids = getFavIds();
+    function init() {
+      const favs = getFavs();
 
-      if (!ids.length) {
-        favCountEl.textContent = '0 моделей';
-        emptyEl.style.display = 'block';
-        return;
-      }
+      // Support both old format (array of IDs) and new format (array of objects)
+      // If stored as IDs only, we still need to display something — show empty state
+      const models = favs.filter(f => f && typeof f === 'object' && f.id);
 
-      loadingEl.style.display = 'block';
-      favCountEl.textContent = `${ids.length} ${plural(ids.length)}`;
-
-      // Fetch models in parallel
-      const results = await Promise.allSettled(
-        ids.map(id => fetch(`/api/models/${id}`).then(r => r.ok ? r.json() : null))
-      );
-
-      loadingEl.style.display = 'none';
-
-      const models = results
-        .map(r => r.status === 'fulfilled' ? r.value : null)
-        .filter(Boolean);
+      updateCompareBar();
 
       if (!models.length) {
-        // All IDs were invalid — clear storage
-        saveFavIds([]);
-        emptyEl.style.display = 'block';
         favCountEl.textContent = '0 моделей';
+        loadingEl.style.display = 'none';
+        emptyEl.style.display = 'block';
         return;
       }
+
+      loadingEl.style.display = 'none';
+      favCountEl.textContent = `${models.length} ${plural(models.length)}`;
 
       gridEl.style.display = '';
       bottomEl.style.display = 'flex';
@@ -323,7 +408,7 @@
       // Clear all button
       clearAllBtn.addEventListener('click', () => {
         if (!confirm('Очистить весь список избранного?')) return;
-        saveFavIds([]);
+        saveFavs([]);
         gridEl.innerHTML = '';
         currentModels = [];
         gridEl.style.display = 'none';

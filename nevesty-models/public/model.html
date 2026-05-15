@@ -751,6 +751,7 @@
       }
 
       function renderModel(m) {
+        _currentModel = m; // capture for toggleFavorite
         const heroEl = el('modelHero');
 
         // Hero photo
@@ -883,6 +884,9 @@
         hide('skeletonView');
         hide('errorView');
         el('profileView').style.display = 'block';
+        // Re-sync fav/compare buttons now that model is rendered
+        updateFavBtn();
+        updateCompareBtn();
       }
 
       // ── Related Models ────────────────────────────────────────────────────────
@@ -1014,26 +1018,41 @@
 
       // ── Favorites (wishlist) ───────────────────────────────────────────────────
       const FAV_KEY = 'nm_favorites';
-      function getFavIds() {
+      // Store current loaded model for use in toggleFavorite
+      let _currentModel = null;
+
+      function getFavs() {
         try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; }
       }
-      function saveFavIds(ids) {
-        try { localStorage.setItem(FAV_KEY, JSON.stringify(ids)); } catch {}
+      function saveFavs(arr) {
+        try { localStorage.setItem(FAV_KEY, JSON.stringify(arr)); } catch {}
       }
       window.toggleFavorite = function() {
         const id = parseInt(getParam('id'), 10);
         if (!id) return;
-        const ids = getFavIds();
-        const idx = ids.indexOf(id);
+        const favs = getFavs();
+        const idx = favs.findIndex(f => (typeof f === 'object' ? f.id === id : f === id));
         const btn = document.getElementById('favBtn');
         if (idx === -1) {
-          ids.push(id);
-          saveFavIds(ids);
-          if (btn) { btn.textContent = '💔 Убрать из избранного'; btn.style.color = '#e07070'; }
+          // Store full model object so favorites.html can display without extra API calls
+          const modelData = _currentModel ? {
+            id: _currentModel.id,
+            name: _currentModel.name,
+            city: _currentModel.city || '',
+            category: _currentModel.category || '',
+            photo: _currentModel.photo_main || '',
+            photo_main: _currentModel.photo_main || '',
+            height: _currentModel.height || 0,
+            age: _currentModel.age || 0,
+            available: !!_currentModel.available
+          } : { id };
+          favs.push(modelData);
+          saveFavs(favs);
+          if (btn) { btn.innerHTML = '<span aria-hidden="true">💔</span> Убрать из избранного'; btn.style.color = '#e07070'; btn.style.borderColor = '#e07070'; }
         } else {
-          ids.splice(idx, 1);
-          saveFavIds(ids);
-          if (btn) { btn.textContent = '❤️ В избранное'; btn.style.color = ''; }
+          favs.splice(idx, 1);
+          saveFavs(favs);
+          if (btn) { btn.innerHTML = '<span aria-hidden="true">❤️</span> В избранное'; btn.style.color = ''; btn.style.borderColor = ''; }
         }
       };
       function updateFavBtn() {
@@ -1041,12 +1060,16 @@
         if (!id) return;
         const btn = document.getElementById('favBtn');
         if (!btn) return;
-        const ids = getFavIds();
-        if (ids.includes(id)) {
-          btn.textContent = '💔 Убрать из избранного';
+        const favs = getFavs();
+        const inFav = favs.some(f => (typeof f === 'object' ? f.id === id : f === id));
+        if (inFav) {
+          btn.innerHTML = '<span aria-hidden="true">💔</span> Убрать из избранного';
           btn.style.color = '#e07070';
+          btn.style.borderColor = '#e07070';
         } else {
-          btn.textContent = '❤️ В избранное';
+          btn.innerHTML = '<span aria-hidden="true">❤️</span> В избранное';
+          btn.style.color = '';
+          btn.style.borderColor = '';
         }
       }
 

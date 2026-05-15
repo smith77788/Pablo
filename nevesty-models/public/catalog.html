@@ -68,7 +68,10 @@
         <a href="/about.html">О нас</a>
         <a href="/faq.html">FAQ</a>
         <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
+        <a href="/favorites.html" id="fav-nav-link" aria-label="Избранное" style="display:inline-flex;align-items:center;gap:4px;font-size:0.9rem;text-decoration:none;color:var(--text-muted)">
+          <span aria-hidden="true">❤️</span> Избранное
+          <span id="fav-nav-badge" style="background:red;color:white;border-radius:50%;padding:0 5px;font-size:0.7rem;min-width:18px;text-align:center;display:inline-block;line-height:18px"></span>
+        </a>
         <a href="/compare.html" id="nav-compare-link" aria-label="Сравнение моделей" style="display:none;font-size:0.9rem;color:var(--gold)">⚖️ <span id="nav-compare-count">0</span></a>
         <a href="/cabinet.html" style="font-size:0.9rem" aria-label="Мои заявки"><span aria-hidden="true">👤</span> Мои заявки</a>
         <button onclick="DarkMode.toggle()"
@@ -113,8 +116,9 @@
         <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Наши модели</div>
         <h1>Каталог моделей</h1>
         <p style="color:var(--text-muted);margin-top:8px">Найдите идеальную модель для вашего проекта</p>
-        <div style="margin-top:12px">
+        <div style="margin-top:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
           <a href="/compare.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'">⚖️ Сравнить модели</a>
+          <a href="/favorites.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'">❤️ Мои избранные</a>
         </div>
       </div>
       <div class="catalog-layout">

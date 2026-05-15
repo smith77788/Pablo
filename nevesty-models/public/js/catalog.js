@@ -174,13 +174,22 @@
 
   // ── Favorites helpers ─────────────────────────────────────────────────────────
   const FAV_KEY = 'nm_favorites';
-  function getFavIds() {
+  function getFavs() {
     try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; }
   }
-  function saveFavIds(ids) {
-    try { localStorage.setItem(FAV_KEY, JSON.stringify(ids)); } catch {}
+  function saveFavs(arr) {
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(arr)); } catch {}
   }
-  function isFav(id) { return getFavIds().includes(id); }
+  function isFav(id) {
+    const favs = getFavs();
+    return favs.some(f => (typeof f === 'object' ? f.id === id : f === id));
+  }
+  function _updateFavBadge() {
+    const count = getFavs().length;
+    const badge = document.querySelector('#fav-nav-badge');
+    if (badge) badge.textContent = count > 0 ? count : '';
+  }
+  window._updateFavBadge = _updateFavBadge;
 
   // ── Render ───────────────────────────────────────────────────────────────────
   function render() {
@@ -292,21 +301,24 @@
       favBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        const ids = getFavIds();
-        const idx = ids.indexOf(m.id);
+        const favs = getFavs();
+        const idx = favs.findIndex(f => (typeof f === 'object' ? f.id === m.id : f === m.id));
         if (idx === -1) {
-          ids.push(m.id);
-          saveFavIds(ids);
+          if (favs.length >= 50) { alert('Максимум 50 в избранном'); return; }
+          // Store full model object for offline display in favorites.html
+          favs.push({ id: m.id, name: m.name, city: m.city || '', category: m.category || '', photo: m.photo_main || '', photo_main: m.photo_main || '', height: m.height || 0, age: m.age || 0, available: !!m.available });
+          saveFavs(favs);
           favBtn.innerHTML = '❤️';
           favBtn.title = 'Убрать из избранного';
           favBtn.setAttribute('aria-label', 'Убрать из избранного');
         } else {
-          ids.splice(idx, 1);
-          saveFavIds(ids);
+          favs.splice(idx, 1);
+          saveFavs(favs);
           favBtn.innerHTML = '🤍';
           favBtn.title = 'В избранное';
           favBtn.setAttribute('aria-label', 'В избранное');
         }
+        _updateFavBadge();
       });
 
       // Compare button — positioned top-left on image
@@ -383,4 +395,5 @@
   });
 
   render();
+  _updateFavBadge();
 })();
