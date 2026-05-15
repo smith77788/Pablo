@@ -454,6 +454,10 @@
             <div class="cf-success-icon">✦</div>
             <h3>Сообщение отправлено!</h3>
             <p>Мы ответим в течение часа в рабочее время</p>
+            <div id="cf-order-link" style="display:none;margin-top:24px">
+              <p style="color:var(--text-muted);margin-bottom:16px;font-size:0.9rem">Хотите сразу оформить заявку?</p>
+              <a href="/booking.html" class="btn-primary" style="display:inline-block;padding:14px 32px;font-size:0.88rem">Оформить заказ</a>
+            </div>
           </div>
         </div>
 
@@ -508,8 +512,11 @@
   <script src="/js/darkmode.js"></script>
   <script src="/js/analytics.js" defer></script>
   <script>
-  // Load contact info from public settings API
-  fetch('/api/settings/public').then(r => r.json()).then(d => {
+  // Load contact info from public settings API + bot config
+  Promise.all([
+    fetch('/api/settings/public').then(r => r.json()).catch(() => ({})),
+    fetch('/api/config').then(r => r.json()).catch(() => ({}))
+  ]).then(([d, cfg]) => {
     const list = document.getElementById('contact-info-list');
     const items = [];
 
@@ -531,26 +538,31 @@
         </div>
       </div>`);
     }
-    if (d.contacts_instagram) {
+    // Support both contacts_instagram and contacts_insta aliases
+    const insta = d.contacts_instagram || d.contacts_insta;
+    if (insta) {
+      const handle = insta.replace(/^@/, '');
       items.push(`<div class="contact-info-item">
         <div class="contact-icon-box">📸</div>
         <div>
           <div class="contact-info-label">Instagram</div>
-          <div class="contact-info-value"><a href="https://instagram.com/${d.contacts_instagram}" target="_blank">@${d.contacts_instagram}</a></div>
+          <div class="contact-info-value"><a href="https://instagram.com/${handle}" target="_blank">@${handle}</a></div>
         </div>
       </div>`);
     }
-    if (d.contacts_address) {
+    // Support both contacts_address and contacts_addr aliases
+    const addr = d.contacts_address || d.contacts_addr;
+    if (addr) {
       items.push(`<div class="contact-info-item">
         <div class="contact-icon-box">📍</div>
         <div>
           <div class="contact-info-label">Адрес</div>
-          <div class="contact-info-value">${d.contacts_address}</div>
+          <div class="contact-info-value">${addr}</div>
         </div>
       </div>`);
-      document.getElementById('agency-address').textContent = d.contacts_address;
+      document.getElementById('agency-address').textContent = addr;
       const mapLink = document.getElementById('map-link');
-      if (mapLink) mapLink.href = `https://yandex.ru/maps/?text=${encodeURIComponent(d.contacts_address)}`;
+      if (mapLink) mapLink.href = `https://yandex.ru/maps/?text=${encodeURIComponent(addr)}`;
     } else {
       document.getElementById('agency-address').textContent = 'Адрес уточняйте у менеджера';
     }
@@ -566,6 +578,9 @@
       // Also set navbar button
       const navWa = document.getElementById('whatsapp-btn');
       if (navWa) { navWa.href = `https://wa.me/${waNum}`; navWa.style.display = 'flex'; }
+      // Set floating button
+      const floatWa = document.getElementById('float-wa-link');
+      if (floatWa) { floatWa.href = `https://wa.me/${waNum}`; document.getElementById('float-whatsapp').style.display = 'block'; }
     }
 
     // Hours
@@ -576,17 +591,38 @@
       else if (hoursTextEl) hoursTextEl.textContent = d.manager_hours;
     }
 
-    // Telegram channel link from settings
+    // Telegram: prefer tg_channel from settings, fallback to bot_username from config
     const tgBtn = document.getElementById('tg-contact-btn');
     if (tgBtn) {
-      if (d.tg_channel) {
-        const tgHandle = d.tg_channel.replace(/^@/, '');
+      const tgChannel = d.tg_channel || d.telegram_channel_id;
+      const botUsername = cfg.bot_username;
+      if (tgChannel) {
+        const tgHandle = tgChannel.replace(/^@/, '');
         tgBtn.href = `https://t.me/${tgHandle}`;
-        tgBtn.style.display = 'flex';
-      } else {
-        // keep default bot link visible
-        tgBtn.style.display = 'flex';
+      } else if (botUsername) {
+        tgBtn.href = `https://t.me/${botUsername}`;
       }
+      // always show the button
+      tgBtn.style.display = 'flex';
+    }
+
+    // Update Schema.org LocalBusiness markup dynamically
+    const schemaEl = document.querySelector('script[type="application/ld+json"]');
+    if (schemaEl) {
+      try {
+        const schemas = JSON.parse(schemaEl.textContent);
+        const lb = schemas.find(s => s['@type'] === 'LocalBusiness');
+        if (lb) {
+          if (d.contacts_phone) lb.telephone = d.contacts_phone;
+          if (d.contacts_email) lb.email = d.contacts_email;
+          if (d.site_url) { lb.url = d.site_url; lb['@id'] = d.site_url; }
+          if (d.manager_hours) {
+            lb.openingHours = d.manager_hours;
+            lb.openingHoursSpecification = undefined;
+          }
+          schemaEl.textContent = JSON.stringify(schemas, null, 2);
+        }
+      } catch (_) {}
     }
   }).catch(() => {
     // On error keep Telegram button visible with default link
@@ -648,19 +684,28 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, phone, message })
       });
-      if (!resp.ok) throw new Error('server_error');
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        const errMsg = data.error || 'Ошибка отправки. Попробуйте позже.';
+        throw new Error(errMsg);
+      }
 
       document.getElementById('contact-form').style.display = 'none';
       const successEl = document.getElementById('cf-success');
       successEl.style.display = 'block';
-      successEl.querySelector('p').textContent = 'Ваше сообщение отправлено! Менеджер свяжется в течение часа.';
+      // Show server message or fallback
+      const serverMsg = data.message || 'Сообщение отправлено! Мы свяжемся в течение рабочего дня.';
+      successEl.querySelector('p').textContent = serverMsg;
+      // Offer to submit an order
+      const orderLinkEl = document.getElementById('cf-order-link');
+      if (orderLinkEl) orderLinkEl.style.display = 'block';
 
       if (window.NM && NM.analytics) NM.analytics.event('contact_form_submitted');
-    } catch {
+    } catch (ex) {
       btn.disabled = false;
       btn.textContent = 'Отправить сообщение';
       btn.style.opacity = '';
-      err.textContent = 'Ошибка отправки. Попробуйте позже или напишите нам напрямую.';
+      err.textContent = ex.message || 'Ошибка отправки. Попробуйте позже или напишите нам напрямую.';
       err.style.display = 'block';
     }
   }

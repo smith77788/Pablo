@@ -3753,40 +3753,24 @@ function initBot(app) {
   // ── /cancel ────────────────────────────────────────────────────────────────
   bot.onText(/\/cancel/, async (msg) => {
     const chatId = msg.chat.id;
-    // Get the current state BEFORE clearing so we can give contextual feedback
-    const cancelSession = await getSession(chatId);
-    const cancelState   = cancelSession?.state || 'idle';
+    // Clear session timeout if any booking flow was active
+    clearTimeout(sessionTimers.get(chatId));
+    sessionTimers.delete(chatId);
+    // Clear any active state/flow
     await clearSession(chatId);
 
-    // Choose a contextual cancellation message based on what was being done
-    let cancelMsg;
-    if (cancelState.startsWith('bk_model') || cancelState === 'bk_s1') {
-      cancelMsg = '✅ Бронирование отменено\\. Возвращаю в каталог\\.';
-    } else if (cancelState.startsWith('bk_')) {
-      cancelMsg = '✅ Бронирование отменено\\.';
-    } else if (cancelState === 'msg_to_manager') {
-      cancelMsg = '✅ Сообщение менеджеру отменено\\.';
-    } else if (cancelState.startsWith('leave_review')) {
-      cancelMsg = '✅ Написание отзыва отменено\\.';
-    } else if (cancelState.startsWith('profile_edit')) {
-      cancelMsg = '✅ Редактирование профиля отменено\\.';
-    } else if (cancelState.startsWith('adm_')) {
-      cancelMsg = '✅ Действие отменено\\.';
-    } else {
-      cancelMsg = '✅ Действие отменено\\.';
-    }
-
-    const menuBtn = { reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] } };
+    await safeSend(chatId,
+      '❌ Действие отменено\\. Возвращаю вас в главное меню\\.',
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+      }
+    );
 
     if (isAdmin(chatId)) {
-      return safeSend(chatId, cancelMsg, { parse_mode: 'MarkdownV2', ...menuBtn });
+      return showAdminMenu(chatId, msg.from.first_name);
     }
-    const clientKb = await buildClientKeyboard();
-    await safeSend(chatId, cancelMsg, { parse_mode: 'MarkdownV2', ...menuBtn });
-    return safeSend(chatId, '↩️ *Повертаємось до головного меню\\.*\n\n_Оберіть дію нижче або скористайтесь кнопками клавіатури\\._', {
-      parse_mode: 'MarkdownV2',
-      reply_markup: clientKb,
-    });
+    return showMainMenu(chatId, msg.from.first_name);
   });
 
   // ── /status ────────────────────────────────────────────────────────────────
@@ -3797,21 +3781,25 @@ function initBot(app) {
   // ── /help ──────────────────────────────────────────────────────────────────
   bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id;
+    // Get manager contact from settings for client help text
+    const managerContact = await getSetting('manager_contact').catch(() => null)
+      || await getSetting('contacts_phone').catch(() => null)
+      || '@manager';
+    const managerLine = managerContact
+      ? `\n\nПо вопросам: ${esc(managerContact)}`
+      : '';
     const text = isAdmin(chatId)
       ? `📖 *Команды администратора:*\n\n/start — главное меню\n/cancel — отменить действие\n/help — помощь\n\nДля управления ботом используйте меню 👆`
-      : `📖 *Доступні команди:*\n\n` +
-        `/start — Головне меню\n` +
-        `/catalog — Каталог моделей\n` +
-        `/booking — Оформити заявку\n` +
-        `/myorders — Мої заявки\n` +
-        `/wishlist — Вибране\n` +
-        `/faq — Часті запитання\n` +
-        `/profile — Мій профіль\n` +
-        `/achievements — Мої досягнення\n` +
-        `/referral — Реферальна програма\n` +
-        `/cancel — Скасувати поточну дію\n` +
-        `/help — Ця довідка\n\n` +
-        `_Якщо щось не працює — натисніть «💬 Менеджер» в меню\\._`;
+      : `📖 *Справка по боту Nevesty Models*\n\nОсновные команды:\n` +
+        `/start — главное меню\n` +
+        `/catalog — каталог моделей\n` +
+        `/wishlist — избранные модели\n` +
+        `/booking — создать заявку\n` +
+        `/orders — мои заявки\n` +
+        `/profile — мой профиль\n` +
+        `/cancel — отменить текущее действие\n` +
+        `/help — эта справка` +
+        managerLine;
     return safeSend(chatId, text, { parse_mode: 'MarkdownV2' });
   });
 
