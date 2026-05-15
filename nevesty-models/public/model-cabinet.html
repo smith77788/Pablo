@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Кабинет модели — Nevesty Models</title>
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+    </div>
+  </nav>
+
+  <main style="min-height:100vh;padding:120px 24px 80px">
+    <div style="max-width:600px;margin:0 auto">
+      <h1 style="font-size:1.8rem;margin-bottom:8px">Кабинет модели</h1>
+      <p style="color:var(--text-dim);margin-bottom:32px">Введите ваше имя для просмотра назначенных заявок</p>
+
+      <div style="display:flex;gap:12px;margin-bottom:32px">
+        <input id="modelNameInput" type="text" class="form-input" placeholder="Ваше имя..." style="flex:1" />
+        <button onclick="searchOrders()" class="btn-primary" style="white-space:nowrap">Найти заявки</button>
+      </div>
+
+      <div id="results"></div>
+    </div>
+  </main>
+
+  <script>
+    const STATUS_LABELS = {
+      new: '🆕 Новая', confirmed: '✅ Подтверждена', in_progress: '⚙️ В работе',
+      completed: '🎉 Завершена', cancelled: '❌ Отменена', reviewing: '👀 На рассмотрении'
+    };
+
+    async function searchOrders() {
+      const name = document.getElementById('modelNameInput').value.trim();
+      if (!name) return;
+
+      const res = document.getElementById('results');
+      res.innerHTML = '<p style="color:var(--text-dim)">Поиск...</p>';
+
+      try {
+        const r = await fetch(`/api/models/my-orders?name=${encodeURIComponent(name)}`);
+        const d = await r.json();
+
+        if (!d.orders || !d.orders.length) {
+          res.innerHTML = `<p style="color:var(--text-dim)">${d.message || 'Заявки не найдены'}</p>`;
+          return;
+        }
+
+        res.innerHTML = `
+          <div style="margin-bottom:16px;font-size:0.9rem;color:var(--text-dim)">
+            Найдено заявок: <strong>${d.total}</strong> для <strong>${d.model?.name || name}</strong>
+          </div>
+          ${d.orders.map(o => `
+            <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <strong>#${o.order_number || o.id}</strong>
+                <span style="font-size:0.8rem">${STATUS_LABELS[o.status] || o.status}</span>
+              </div>
+              <div style="font-size:0.85rem;color:var(--text-dim)">
+                ${o.event_type ? '🎭 ' + o.event_type : ''}
+                ${o.event_date ? ' · 📅 ' + new Date(o.event_date).toLocaleDateString('ru') : ''}
+              </div>
+            </div>`).join('')}`;
+      } catch {
+        res.innerHTML = '<p style="color:crimson">Ошибка загрузки. Попробуйте позже.</p>';
+      }
+    }
+
+    document.getElementById('modelNameInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') searchOrders();
+    });
+  </script>
+</body>
+</html>

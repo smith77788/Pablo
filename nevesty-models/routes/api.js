@@ -900,6 +900,41 @@ router.get('/recommend', async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
+// GET /api/models/my-orders?name=X&phone=Y — model views their orders
+router.get('/models/my-orders', async (req, res) => {
+  try {
+    const { name } = req.query;
+    if (!name || name.trim().length < 2) {
+      return res.json({ orders: [], message: 'Введите ваше имя' });
+    }
+
+    // Find model by name (case-insensitive)
+    const model = await get(
+      `SELECT id, name FROM models WHERE LOWER(name) LIKE LOWER(?) AND archived=0 LIMIT 1`,
+      [`%${name.trim()}%`]
+    );
+
+    if (!model) {
+      return res.json({ orders: [], message: 'Модель не найдена' });
+    }
+
+    // Get orders for this model
+    const orders = await query(
+      `SELECT id, order_number, client_name, event_type, event_date, status, budget, created_at
+       FROM orders WHERE model_id=? ORDER BY created_at DESC LIMIT 20`,
+      [model.id]
+    );
+
+    res.json({
+      model: { id: model.id, name: model.name },
+      orders,
+      total: orders.length
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.get('/models/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
