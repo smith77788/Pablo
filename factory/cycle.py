@@ -529,6 +529,38 @@ def get_revenue_trend(data_db) -> list:
         return []
 
 
+def _notify_admins_telegram(briefing: dict, decisions: list, cycle_id: str) -> None:
+    """Send factory cycle summary to all Telegram admins via notify.js."""
+    import os
+    import subprocess
+
+    health = briefing.get('health_score', '?')
+    focus = briefing.get('next_cycle_focus') or briefing.get('ceo_department_focus', '?')
+    summary = briefing.get('summary', '')[:200]
+    actions = len([d for d in decisions if d.get('type') in ('grow', 'create_mvp', 'scale')])
+
+    msg = (
+        f"🏭 Factory цикл завершён\n"
+        f"📊 Health: {health}/100 | Focus: {focus}\n"
+        f"📋 Решений: {len(decisions)} | Активных action: {actions}\n"
+        f"💡 {summary}"
+    )
+
+    notify_script = os.path.join(os.path.dirname(__file__), '..', 'nevesty-models', 'tools', 'notify.js')
+    notify_script = os.path.abspath(notify_script)
+
+    if os.path.exists(notify_script):
+        try:
+            subprocess.run(
+                ['node', notify_script, '--from', 'AI Factory', msg],
+                cwd=os.path.dirname(notify_script),
+                timeout=10,
+                capture_output=True
+            )
+        except Exception:
+            pass  # Don't fail the cycle on notification error
+
+
 def run_cycle() -> dict:
     """Один полный цикл AI-офиса. Возвращает сводку."""
     cycle_start = time.time()
@@ -1831,6 +1863,9 @@ def run_cycle() -> dict:
     logger.info("✅ CYCLE DONE: %.1fs | Score=%s%%", elapsed, results["health_score"])
     notify(tg_report)
     _save_cycle_to_history(results)
+
+    # Send summary via notify.js (uses bot token from .env, consistent with other notifications)
+    _notify_admins_telegram(results, decisions, cycle_id)
 
     # Notify admin via bot after cycle completes (supplementary direct API call)
     try:

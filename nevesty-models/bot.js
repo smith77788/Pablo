@@ -3652,6 +3652,20 @@ function initBot(app) {
     { command: 'cancel',     description: '❌ Отменить действие' },
   ]).catch(e => console.warn('[Bot] setMyCommands:', e.message));
 
+  // ── Factory health check at startup ────────────────────────────────────────
+  setTimeout(async () => {
+    try {
+      const resp = await fetch('http://localhost:5500/api/health');
+      const health = await resp.json();
+      if (health.factory && health.factory.status !== 'ok') {
+        const admins = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+        for (const adminId of admins) {
+          await safeSend(adminId, '⚠️ *Factory health warning*: ' + esc(health.factory.message || 'Unknown'), { parse_mode: 'MarkdownV2' });
+        }
+      }
+    } catch (e) { /* factory may not be running — ignore */ }
+  }, 5000);
+
   // ── /start ─────────────────────────────────────────────────────────────────
   bot.onText(/\/start(.*)/, async (msg, match) => {
     const chatId    = msg.chat.id;
@@ -5326,6 +5340,7 @@ function initBot(app) {
       const page = parseInt(data.replace('adm_factory_growth_', '')) || 0;
       return showFactoryGrowth(chatId, page);
     }
+    if (data === 'adm_factory_actions')   { if (!isAdmin(chatId)) return; return showFactoryGrowthActions(chatId); }
     if (data === 'adm_factory_exp')       { if (!isAdmin(chatId)) return; return showFactoryExperiments(chatId); }
     if (data === 'adm_factory_decisions') { if (!isAdmin(chatId)) return; return showFactoryDecisions(chatId); }
     if (data === 'adm_factory_tasks')     { if (!isAdmin(chatId)) return; return showFactoryTasks(chatId, 0); }
@@ -7241,7 +7256,8 @@ async function showFactoryPanel(chatId) {
          { text: '📋 Решения CEO',   callback_data: 'adm_factory_decisions' }],
         [{ text: '🎯 AI Задачи',     callback_data: 'adm_factory_tasks' },
          { text: '🧪 A/B Тесты',    callback_data: 'adm_experiments' }],
-        [{ text: '📢 Контент в канал', callback_data: 'adm_factory_content' }],
+        [{ text: '📋 Growth Actions', callback_data: 'adm_factory_actions' },
+         { text: '📢 Контент в канал', callback_data: 'adm_factory_content' }],
         [{ text: '← Меню', callback_data: 'admin_menu' }],
       ]}
     });
@@ -7295,6 +7311,40 @@ async function showFactoryGrowth(chatId, page = 0) {
       [{ text: '← Factory', callback_data: 'adm_factory' }],
     ].filter(r => r.length) }
   });
+}
+
+async function showFactoryGrowthActions(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const { existsSync } = require('fs');
+    if (!existsSync(FACTORY_DB_PATH)) {
+      return safeSend(chatId, '🏭 Factory не запущена\\.', { parse_mode: 'MarkdownV2' });
+    }
+    const rows = await factoryDbAll(
+      `SELECT action_type, description, status, priority, created_at
+       FROM growth_actions
+       WHERE status='pending'
+       ORDER BY priority DESC, created_at DESC
+       LIMIT 5`,
+      []
+    );
+    if (!rows || !rows.length) {
+      return safeSend(chatId, '🏭 *Нет активных Growth Actions*\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_factory' }]] }
+      });
+    }
+    let text = '🏭 *Growth Actions \\(pending\\)*\n\n';
+    rows.forEach((r, i) => {
+      text += `${i + 1}\\. ${esc(r.action_type)} — ${esc((r.description || '').slice(0, 80))}\n`;
+    });
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_factory' }]] }
+    });
+  } catch (e) {
+    console.error('[Bot] showFactoryGrowthActions:', e.message);
+  }
 }
 
 async function showFactoryDecisions(chatId) {
