@@ -788,12 +788,18 @@ router.get('/models/:id', async (req, res, next) => {
     const m = await get('SELECT * FROM models WHERE id = ?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
     const photos = JSON.parse(m.photos || '[]');
+    // Include upcoming busy dates for public display
+    const busyDates = await query(
+      `SELECT busy_date FROM model_busy_dates WHERE model_id=? AND busy_date >= date('now') ORDER BY busy_date`,
+      [id]
+    ).catch(() => []);
     res.json({
       ...m,
       photos,
       // Thumbnail paths derived from full paths — available for list views
       photo_thumb: deriveThumbUrl(m.photo_main),
       photos_thumbs: photos.map(deriveThumbUrl),
+      busy_dates: busyDates.map(r => r.busy_date),
     });
     // Increment view count asynchronously after response is sent
     run('UPDATE models SET view_count = COALESCE(view_count, 0) + 1 WHERE id=?', [id]).catch(() => {});

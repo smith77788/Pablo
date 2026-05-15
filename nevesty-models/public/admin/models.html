@@ -679,13 +679,154 @@ function closeStatsModal() {
 document.addEventListener('click', function(e) {
   const overlay = document.getElementById('modelStatsModal');
   if (e.target === overlay) closeStatsModal();
+  const bdOverlay = document.getElementById('busyDatesModal');
+  if (e.target === bdOverlay) closeBusyDatesModal();
 });
 
 // Close on Escape
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') closeStatsModal();
+  if (e.key === 'Escape') {
+    closeStatsModal();
+    closeBusyDatesModal();
+  }
 });
+
+/* ─── Busy Dates Modal ──────────────────────────────────────────────────────── */
+let _bdModalModelId = null;
+
+async function openBusyDatesModal(modelId, modelName) {
+  _bdModalModelId = modelId;
+  document.getElementById('busyDatesModalTitle').textContent = `📅 Занятость: ${modelName}`;
+  document.getElementById('busyDatesModal').classList.add('open');
+  document.getElementById('bdModalDate').value = '';
+  document.getElementById('bdModalReason').value = '';
+  await refreshBusyDatesModalList();
+}
+
+function closeBusyDatesModal() {
+  document.getElementById('busyDatesModal').classList.remove('open');
+  _bdModalModelId = null;
+}
+
+async function refreshBusyDatesModalList() {
+  const listEl = document.getElementById('busyDatesModalList');
+  listEl.innerHTML = '<div style="color:#9ca3af;font-size:0.85rem">Загрузка…</div>';
+  try {
+    const resp = await fetch(`/api/admin/models/${_bdModalModelId}/busy-dates`, { headers });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const dates = await resp.json();
+    if (!dates.length) {
+      listEl.innerHTML = '<div style="color:#6b7280;font-size:0.85rem;padding:8px 0">Нет занятых дат</div>';
+      return;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    listEl.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+        <thead>
+          <tr style="color:#9ca3af;border-bottom:1px solid #1f2937">
+            <th style="text-align:left;padding:6px 8px">Дата</th>
+            <th style="text-align:left;padding:6px 8px">Причина</th>
+            <th style="text-align:left;padding:6px 8px">Статус</th>
+            <th style="padding:6px 8px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dates.map(d => {
+            const isPast = d.busy_date < today;
+            return `<tr style="border-bottom:1px solid #111827;${isPast ? 'opacity:0.5' : ''}">
+              <td style="padding:7px 8px;color:${isPast ? '#6b7280' : '#f9fafb'};white-space:nowrap">${formatBusyDate(d.busy_date)}</td>
+              <td style="padding:7px 8px;color:#d1d5db">${escHtml(d.reason || '—')}</td>
+              <td style="padding:7px 8px">
+                <span style="font-size:0.75rem;padding:2px 8px;border-radius:99px;background:${isPast ? '#1f2937' : '#134e4a'};color:${isPast ? '#6b7280' : '#5eead4'}">
+                  ${isPast ? 'прошла' : 'занята'}
+                </span>
+              </td>
+              <td style="padding:7px 8px;text-align:right">
+                <button onclick="deleteBusyDateFromModal('${escHtml(d.busy_date)}')"
+                  style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:0.8rem;padding:2px 6px;border-radius:4px"
+                  title="Удалить">✕</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    listEl.innerHTML = `<div style="color:#ef4444;font-size:0.85rem">Ошибка: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function formatBusyDate(dateStr) {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  } catch { return dateStr; }
+}
+
+async function addBusyDateFromModal() {
+  const date = document.getElementById('bdModalDate').value;
+  const reason = document.getElementById('bdModalReason').value.trim();
+  if (!date || !_bdModalModelId) {
+    alert('Укажите дату');
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/admin/models/${_bdModalModelId}/busy-dates`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ busy_date: date, reason: reason || null }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert('Ошибка: ' + (err.error || resp.status));
+      return;
+    }
+    document.getElementById('bdModalDate').value = '';
+    document.getElementById('bdModalReason').value = '';
+    await refreshBusyDatesModalList();
+  } catch (e) { alert('Ошибка: ' + e.message); }
+}
+
+async function deleteBusyDateFromModal(date) {
+  if (!_bdModalModelId) return;
+  try {
+    await fetch(`/api/admin/models/${_bdModalModelId}/busy-dates/${date}`, { method: 'DELETE', headers });
+    await refreshBusyDatesModalList();
+  } catch (e) { alert('Ошибка: ' + e.message); }
+}
 </script>
+
+<!-- Busy Dates Modal -->
+<div id="busyDatesModal" class="stats-modal-overlay">
+  <div class="stats-modal-box">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #1f2937">
+      <div id="busyDatesModalTitle" style="font-size:1.1rem;font-weight:700;color:#f9fafb">📅 Занятость модели</div>
+      <button onclick="closeBusyDatesModal()" style="background:none;border:none;color:#9ca3af;font-size:1.2rem;cursor:pointer;padding:4px 8px;border-radius:4px" onmouseover="this.style.color='#f9fafb'" onmouseout="this.style.color='#9ca3af'">✕</button>
+    </div>
+    <!-- Existing busy dates list -->
+    <div id="busyDatesModalList" style="margin-bottom:20px;min-height:40px"></div>
+    <!-- Add new date -->
+    <div style="border-top:1px solid #1f2937;padding-top:16px">
+      <div style="font-size:0.85rem;font-weight:600;color:#d1d5db;margin-bottom:10px">Добавить занятую дату</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:0.75rem;color:#9ca3af">Дата *</label>
+          <input type="date" id="bdModalDate"
+            style="padding:8px 10px;border:1px solid #374151;border-radius:6px;background:#111827;color:#f9fafb;font-size:0.85rem;min-width:150px">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:150px">
+          <label style="font-size:0.75rem;color:#9ca3af">Причина (необязательно)</label>
+          <input type="text" id="bdModalReason" placeholder="Корпоратив, съёмка…"
+            style="padding:8px 10px;border:1px solid #374151;border-radius:6px;background:#111827;color:#f9fafb;font-size:0.85rem;width:100%">
+        </div>
+        <button onclick="addBusyDateFromModal()"
+          style="padding:8px 16px;background:#0d9488;color:#fff;border:none;border-radius:6px;font-size:0.85rem;cursor:pointer;white-space:nowrap;font-weight:500">
+          + Добавить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Model Stats Modal -->
 <div id="modelStatsModal" class="stats-modal-overlay">

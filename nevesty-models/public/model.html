@@ -630,6 +630,10 @@
             <div class="model-cta-card">
               <div class="model-cta-title" id="ctaName"></div>
               <p class="model-cta-hint">Забронируйте модель для вашего мероприятия — менеджер свяжется с вами в течение 1 часа.</p>
+              <!-- Upcoming busy dates notice -->
+              <div id="busyDatesNotice" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:8px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);font-size:0.8rem;color:#fca5a5;line-height:1.5">
+                <span style="font-weight:600">📅 Занята:</span> <span id="busyDatesText"></span>
+              </div>
               <a class="btn-book" id="bookBtn" href="/booking.html">
                 📋 Забронировать
               </a>
@@ -896,6 +900,23 @@
         // CTA sidebar
         el('ctaName').textContent = m.name;
         el('bookBtn').href = `/booking.html?model=${m.id}&model_id=${m.id}&model_name=${encodeURIComponent(m.name)}`;
+
+        // Upcoming busy dates notice
+        if (Array.isArray(m.busy_dates) && m.busy_dates.length) {
+          const fmt = d => {
+            try {
+              return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+            } catch { return d; }
+          };
+          const notice = el('busyDatesNotice');
+          const text = el('busyDatesText');
+          if (notice && text) {
+            // Show up to 3 upcoming dates
+            const shown = m.busy_dates.slice(0, 3).map(fmt);
+            text.textContent = shown.join(', ') + (m.busy_dates.length > 3 ? ` и ещё ${m.busy_dates.length - 3}` : '');
+            notice.style.display = 'block';
+          }
+        }
         // Quick booking pre-fill button
         const quickBookBtn = el('book-btn-quick');
         if (quickBookBtn) {
