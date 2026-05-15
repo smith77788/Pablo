@@ -2518,6 +2518,21 @@ async function showQuickReplies(chatId, clientChatId) {
 
 // ─── All order notes (paginated) ──────────────────────────────────────────────
 
+// Format date for note display: "15 мая 14:30"
+function formatNoteDate(dateStr) {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleString('ru', {
+      timeZone: 'Europe/Moscow',
+      day: 'numeric',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).replace(' г.', '');
+  } catch { return dateStr; }
+}
+
 async function showAllOrderNotes(chatId, orderId, page = 0) {
   if (!isAdmin(chatId)) return;
   const LIMIT = 5;
@@ -2528,22 +2543,32 @@ async function showAllOrderNotes(chatId, orderId, page = 0) {
   ]);
   if (!order) return safeSend(chatId, RU.ORDER_NOT_FOUND);
 
-  let text = `📝 *Все заметки*\nЗаявка *${esc(order.order_number)}*\n\n`;
+  const totalCount = total?.n || 0;
+  let text = `📝 *Все заметки*\nЗаявка *${esc(order.order_number)}* \\(${esc(String(totalCount))} шт\\.\\)\n\n`;
+  const keyboard = [];
+
   if (!notes.length) {
     text += '_Заметок пока нет_';
   } else {
     for (const n of notes) {
-      const dt = n.created_at ? new Date(n.created_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
-      text += `_${esc(dt)}_\n${esc(n.admin_note)}\n\n`;
+      const dt = formatNoteDate(n.created_at);
+      const noteNum = page * LIMIT + notes.indexOf(n) + 1;
+      text += `*${esc(String(noteNum))}\\.* _${esc(dt)}_\n${esc(n.admin_note)}\n\n`;
+      // Delete button per note
+      keyboard.push([
+        { text: `🗑 Удалить заметку #${noteNum}`, callback_data: `adm_note_del_${n.id}_${orderId}_${page}` }
+      ]);
     }
   }
 
   const nav = [];
   if (page > 0) nav.push({ text: '◀ Назад', callback_data: `adm_notes_${orderId}_${page - 1}` });
-  if ((page + 1) * LIMIT < (total?.n || 0)) nav.push({ text: 'Вперёд ▶', callback_data: `adm_notes_${orderId}_${page + 1}` });
-  const keyboard = [];
+  if ((page + 1) * LIMIT < totalCount) nav.push({ text: 'Вперёд ▶', callback_data: `adm_notes_${orderId}_${page + 1}` });
   if (nav.length) keyboard.push(nav);
-  keyboard.push([{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]);
+  keyboard.push([
+    { text: '📝 Добавить заметку', callback_data: `adm_note_${orderId}` },
+    { text: '← К заявке',         callback_data: `adm_order_${orderId}` },
+  ]);
 
   return safeSend(chatId, text, {
     parse_mode: 'MarkdownV2',

@@ -279,6 +279,8 @@ async function initDatabase() {
 
   // Migration — add admin_reply column to reviews
   await run(`ALTER TABLE reviews ADD COLUMN admin_reply TEXT`).catch(() => {});
+  // Migration — add reply_at timestamp for admin replies
+  await run(`ALTER TABLE reviews ADD COLUMN reply_at TEXT`).catch(() => {});
 
   // Migration — add review_requested timestamp to orders
   await run(`ALTER TABLE orders ADD COLUMN review_requested DATETIME DEFAULT NULL`).catch(() => {});

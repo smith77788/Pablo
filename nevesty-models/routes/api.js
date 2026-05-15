@@ -1931,12 +1931,17 @@ router.get('/admin/reviews', auth, async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
     const offset = (page - 1) * limit;
-    const approved = req.query.approved; // '0', '1', or undefined (all)
+    // Support both ?approved=0/1 and ?filter=pending/approved/all
+    let approvedVal = req.query.approved; // '0', '1', or undefined
+    if (!approvedVal && req.query.filter) {
+      if (req.query.filter === 'pending') approvedVal = '0';
+      else if (req.query.filter === 'approved') approvedVal = '1';
+    }
     let where = '1=1';
     const params = [];
-    if (approved === '0' || approved === '1') {
+    if (approvedVal === '0' || approvedVal === '1') {
       where += ' AND r.approved = ?';
-      params.push(parseInt(approved));
+      params.push(parseInt(approvedVal));
     }
     const [totalRow, reviews] = await Promise.all([
       get(`SELECT COUNT(*) as n FROM reviews r WHERE ${where}`, params),
@@ -1965,6 +1970,35 @@ router.put('/admin/reviews/:id/approve', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// PATCH /admin/reviews/:id — update approved status
+router.patch('/admin/reviews/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const review = await get('SELECT id FROM reviews WHERE id = ?', [id]);
+    if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
+    const { approved } = req.body;
+    if (approved !== 0 && approved !== 1) return res.status(400).json({ error: 'approved must be 0 or 1' });
+    await run('UPDATE reviews SET approved = ? WHERE id = ?', [approved, id]);
+    await logAudit(req, 'update_approved', 'review', id, { approved });
+    res.json({ ok: true, approved });
+  } catch (e) { next(e); }
+});
+
+// POST /admin/reviews/bulk-approve — approve multiple reviews at once
+router.post('/admin/reviews/bulk-approve', auth, async (req, res, next) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids required' });
+    const validIds = ids.map(Number).filter(n => Number.isInteger(n) && n > 0);
+    if (!validIds.length) return res.status(400).json({ error: 'No valid IDs' });
+    const phs = validIds.map(() => '?').join(',');
+    const result = await run(`UPDATE reviews SET approved=1 WHERE id IN (${phs}) AND approved=0`, validIds);
+    await logAudit(req, 'bulk_approve', 'review', null, { ids: validIds, updated: result.changes });
+    res.json({ ok: true, updated: result.changes });
+  } catch (e) { next(e); }
+});
+
 // PATCH /admin/reviews/:id/reply — save admin reply to review
 router.patch('/admin/reviews/:id/reply', auth, async (req, res, next) => {
   try {
@@ -1972,7 +2006,8 @@ router.patch('/admin/reviews/:id/reply', auth, async (req, res, next) => {
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
     const { reply } = req.body;
     if (typeof reply !== 'string') return res.status(400).json({ error: 'reply must be string' });
-    await run('UPDATE reviews SET admin_reply = ? WHERE id = ?', [reply.slice(0, 1000) || null, id]);
+    const replyText = reply.slice(0, 1000) || null;
+    await run('UPDATE reviews SET admin_reply = ?, reply_at = CASE WHEN ? IS NOT NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id = ?', [replyText, replyText, id]);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

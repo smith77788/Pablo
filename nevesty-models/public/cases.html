@@ -20,6 +20,7 @@
   <link rel="apple-touch-icon" href="/icons/icon-192.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preload" href="/css/main.css" as="style">
   <link rel="stylesheet" href="/css/main.css" />
   <style>
     .page-hero {
@@ -402,25 +403,144 @@
   </script>
 
   <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "CollectionPage",
-    "name": "Кейсы модельного агентства Nevesty Models",
-    "description": "Портфолио реализованных проектов: fashion-показы, корпоративы, рекламные съёмки",
-    "url": "https://nevesty-models.ru/cases.html",
-    "isPartOf": {
-      "@type": "WebSite",
-      "name": "Nevesty Models",
-      "url": "https://nevesty-models.ru"
+  [
+    {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      "name": "Кейсы модельного агентства Nevesty Models",
+      "description": "Портфолио реализованных проектов: fashion-показы, корпоративы, рекламные съёмки",
+      "url": "https://nevesty-models.ru/cases.html",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "Nevesty Models",
+        "url": "https://nevesty-models.ru"
+      },
+      "breadcrumb": {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
+          {"@type": "ListItem", "position": 2, "name": "Кейсы", "item": "https://nevesty-models.ru/cases.html"}
+        ]
+      }
     },
-    "breadcrumb": {
-      "@type": "BreadcrumbList",
+    {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      "name": "Реализованные проекты Nevesty Models",
+      "url": "https://nevesty-models.ru/cases.html",
+      "numberOfItems": 9,
       "itemListElement": [
-        {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
-        {"@type": "ListItem", "position": 2, "name": "Кейсы", "item": "https://nevesty-models.ru/cases.html"}
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "item": {
+            "@type": "CreativeWork",
+            "name": "Moscow Fashion Week 2025",
+            "description": "Предоставили 12 моделей для показа молодого российского дизайнера. Подготовка к показу заняла 3 дня — кастинг, примерки, репетиции.",
+            "locationCreated": {"@type": "Place", "name": "Москва"},
+            "genre": "Fashion",
+            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "item": {
+            "@type": "CreativeWork",
+            "name": "Рекламная кампания LIMÉ",
+            "description": "Комплексная съёмка лукбука для крупного российского бренда одежды. 3 дня съёмок, 5 моделей, 200+ образов для каталога сезона.",
+            "locationCreated": {"@type": "Place", "name": "Санкт-Петербург"},
+            "genre": "Коммерческая съёмка",
+            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "item": {
+            "@type": "CreativeWork",
+            "name": "Юбилей Сбербанка — 500 гостей",
+            "description": "Хостес и промо-модели на торжественном вечере крупного банка. Встреча гостей, навигация по площадке, сопровождение VIP-персон.",
+            "locationCreated": {"@type": "Place", "name": "Москва"},
+            "genre": "Корпоратив",
+            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 4,
+          "item": {
+            "@type": "CreativeWork",
+            "name": "Свадебный лукбук для салона",
+            "description": "Съёмка коллекции свадебных платьев для московского салона. Студийная и уличная локации, 3 образа на каждой модели.",
+            "locationCreated": {"@type": "Place", "name": "Москва"},
+            "genre": "Фотосессия",
+            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 5,
+          "item": {
+            "@type": "CreativeWork",
+            "name": "Показ в ЦУМ — новая коллекция",
+            "description": "Еженедельные показы новых коллекций международных брендов. Постоянное партнёрство — 6 моделей каждую неделю на протяжении сезона.",
+            "locationCreated": {"@type": "Place", "name": "Москва"},
+            "genre": "Fashion",
+            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 6,
+          "item": {
+            "@type": "CreativeWork",
+            "name": "ТВ-ролик для фармацевтики",
+            "description": "Актриса-модель для рекламного ролика крупного фармацевтического бренда. Кастинг из 40 кандидатов, финальная съёмка заняла 1 день.",
+            "locationCreated": {"@type": "Place", "name": "Москва"},
+            "genre": "Видеопроизводство",
+            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 7,
+          "item": {
+            "@type": "CreativeWork",
+            "name": "Промо-акция Samsung в ТРЦ",
+            "description": "Промоутеры и модели для презентации новой линейки телефонов. 10 точек по Москве, 15 промоутеров, 2 недели активного промо.",
+            "locationCreated": {"@type": "Place", "name": "Москва"},
+            "genre": "Промо",
+            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 8,
+          "item": {
+            "@type": "CreativeWork",
+            "name": "Портфолио для beauty-бренда",
+            "description": "Имиджевая фотосессия для отечественного бренда косметики. Минималистичный стиль, акцент на продукт. Результат — серия из 50 фото.",
+            "locationCreated": {"@type": "Place", "name": "Екатеринбург"},
+            "genre": "Фотосессия",
+            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 9,
+          "item": {
+            "@type": "CreativeWork",
+            "name": "Стенд на выставке INTERCHARM",
+            "description": "Хостес и демонстраторы продукции на крупнейшей beauty-выставке России. Профессиональное знание продукта, работа с иностранными гостями.",
+            "locationCreated": {"@type": "Place", "name": "Москва, Крокус Экспо"},
+            "genre": "B2B Мероприятие",
+            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          }
+        }
       ]
     }
-  }
+  ]
   </script>
 </body>
 </html>
