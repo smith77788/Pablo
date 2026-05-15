@@ -682,7 +682,7 @@ async function showCatalog(chatId, cat, page, filter) {
   } catch (e) { console.error('[Bot] showCatalog:', e.message); }
 }
 
-async function showModel(chatId, modelId) {
+async function showModel(chatId, modelId, backBtn = null) {
   try {
     const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
     if (!m) return safeSend(chatId, '❌ Модель не найдена\\.', {
@@ -789,10 +789,10 @@ async function showModel(chatId, modelId) {
     if (wishlistEnabled !== '0') row2.push({ text: favText, callback_data: favCb });
     row2.push({ text: '⭐ Отзывы', callback_data: `reviews_model_${m.id}` });
     if (row2.length) keyboardRows.push(row2);
-    // Row 3: All photos + Back to catalog
+    // Row 3: All photos + Back (catalog or search results)
     keyboardRows.push([
       { text: '🌐 Профиль на сайте', url: profileUrl },
-      { text: '← Назад в каталог', callback_data: 'cat_cat__0' },
+      backBtn || { text: '← Назад в каталог', callback_data: 'cat_cat__0' },
     ]);
     // Row 4: Contact manager (if available)
     if (contactBtn.length) keyboardRows.push(contactBtn);
@@ -5970,7 +5970,7 @@ function initBot(app) {
     // View model from search results
     if (data.startsWith('srch_view_')) {
       const modelId = parseInt(data.replace('srch_view_', ''));
-      return showModel(chatId, modelId);
+      return showModel(chatId, modelId, { text: '← Назад к поиску', callback_data: 'search_go' });
     }
 
     // Legacy cat_search_* callbacks (keep for backward compatibility)
@@ -8416,8 +8416,9 @@ async function showSearchResults(chatId, filters, page = 0) {
       reply_markup: { inline_keyboard: [
         ...modelBtns,
         nav,
-        [{ text: '🔍 Новый поиск', callback_data: 'cat_search' }],
-        [{ text: '🏠 Меню',        callback_data: 'main_menu'  }],
+        [{ text: '← Изменить поиск', callback_data: 'cat_search' },
+         { text: '✖️ Сбросить',      callback_data: 'srch_reset' }],
+        [{ text: '🏠 Меню',          callback_data: 'main_menu'  }],
       ]}
     });
   } catch (e) { console.error('[Bot] showSearchResults:', e.message); }
@@ -8463,7 +8464,8 @@ async function showSearchResultsV2(chatId, page) {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [
             [{ text: '✖️ Сбросить фильтры', callback_data: 'search_reset' }],
-            [{ text: '← Назад', callback_data: 'cat_search' }],
+            [{ text: '← Изменить поиск',    callback_data: 'cat_search' }],
+            [{ text: '🏠 Меню',             callback_data: 'main_menu' }],
           ]}
         }
       );
@@ -8506,7 +8508,9 @@ async function showSearchResultsV2(chatId, page) {
       reply_markup: { inline_keyboard: [
         ...modelBtns,
         ...(totalPages > 1 ? [nav] : []),
-        [{ text: '← Назад', callback_data: 'cat_search' }],
+        [{ text: '← Изменить поиск', callback_data: 'cat_search' },
+         { text: '✖️ Сбросить',      callback_data: 'search_reset' }],
+        [{ text: '🏠 Меню',          callback_data: 'main_menu' }],
       ]}
     });
   } catch (e) { console.error('[Bot] showSearchResultsV2:', e.message); }
