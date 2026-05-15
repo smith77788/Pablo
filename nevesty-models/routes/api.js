@@ -3323,7 +3323,7 @@ router.post('/admin/factory-experiments/:id/scale', auth, async (req, res, next)
 // GET /api/admin/factory/actions — growth_actions from factory.db
 router.get('/admin/factory/actions', auth, async (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 20), 100);
     const Database = require('better-sqlite3');
     const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
     let actions = [];
@@ -3343,7 +3343,7 @@ router.get('/admin/factory/actions', auth, async (req, res, next) => {
 // GET /api/admin/factory/decisions — decisions from factory.db
 router.get('/admin/factory/decisions', auth, async (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 10), 50);
     const Database = require('better-sqlite3');
     const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
     let decisions = [];
@@ -3367,7 +3367,7 @@ router.get('/admin/factory/decisions', auth, async (req, res, next) => {
 // GET /api/admin/factory/experiments — experiments from factory.db
 router.get('/admin/factory/experiments', auth, async (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 10), 50);
     const Database = require('better-sqlite3');
     const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
     let experiments = [];
@@ -3419,6 +3419,10 @@ router.post('/admin/crm/sync/:provider', auth, async (req, res, next) => {
 router.post('/webhooks/crm/:provider', async (req, res, next) => {
   try {
     const { provider } = req.params;
+    const validProviders = ['amocrm', 'bitrix24'];
+    if (!validProviders.includes(provider)) {
+      return res.status(400).json({ error: 'Invalid provider' });
+    }
     const payload = req.body;
 
     console.log(`[CRM Webhook] ${provider}:`, JSON.stringify(payload).substring(0, 200));
