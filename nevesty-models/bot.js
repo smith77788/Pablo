@@ -190,6 +190,8 @@ const KB_MAIN_ADMIN = (badge, score) => {
        { text: '📡 Фид агентов',            callback_data: 'agent_feed_0'   }],
       [{ text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    },
        { text: '💬 Обсуждения',            callback_data: 'adm_discussions'}],
+      [{ text: '🏭 AI Factory',             callback_data: 'adm_factory'    },
+       { text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' }],
       ...(SITE_URL.startsWith('https://') ? [[
         { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } },
         { text: '🌐 Сайт', url: SITE_URL },
@@ -1978,6 +1980,44 @@ function initBot(app) {
       return showPhotoGalleryManager(chatId, modelId);
     }
 
+    // ── AI Factory
+    if (data === 'adm_factory') { if (!isAdmin(chatId)) return; return showFactoryPanel(chatId); }
+    if (data === 'adm_factory_growth') { if (!isAdmin(chatId)) return; return showFactoryGrowth(chatId, 0); }
+    if (data.startsWith('adm_factory_growth_')) {
+      if (!isAdmin(chatId)) return;
+      const page = parseInt(data.replace('adm_factory_growth_', '')) || 0;
+      return showFactoryGrowth(chatId, page);
+    }
+    if (data === 'adm_factory_exp')       { if (!isAdmin(chatId)) return; return showFactoryExperiments(chatId); }
+    if (data === 'adm_factory_decisions') { if (!isAdmin(chatId)) return; return showFactoryDecisions(chatId); }
+    if (data.startsWith('adm_factory_done_')) {
+      if (!isAdmin(chatId)) return;
+      const actionId = parseInt(data.replace('adm_factory_done_', ''));
+      await new Promise(resolve => {
+        const sqlite3 = require('sqlite3').verbose();
+        const fdb = new sqlite3.Database(FACTORY_DB_PATH, sqlite3.OPEN_READWRITE, err => {
+          if (err) return resolve();
+          fdb.run("UPDATE growth_actions SET status='done', updated_at=datetime('now') WHERE id=?", [actionId], () => { fdb.close(); resolve(); });
+        });
+      });
+      return safeSend(chatId, '✅ Отмечено как выполнено.', {
+        reply_markup: { inline_keyboard: [[{ text: '← Growth Actions', callback_data: 'adm_factory_growth' }]] }
+      });
+    }
+    if (data === 'adm_factory_run') {
+      if (!isAdmin(chatId)) return;
+      await safeSend(chatId, '🔄 Запускаю цикл AI Factory...\n\nРезультат придёт через 1-2 минуты.', {
+        reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
+      });
+      const { spawn } = require('child_process');
+      const proc = spawn('python3', ['-c',
+        'import sys; sys.path.insert(0,"/home/user/Pablo"); from factory.cycle import run_cycle; run_cycle()'
+      ], { cwd: '/home/user/Pablo', detached: true, stdio: ['ignore','ignore','pipe'] });
+      proc.stderr.on('data', d => console.error('[Factory]', d.toString().trim()));
+      proc.unref();
+      return;
+    }
+
     // ── Agent feed
     if (data.startsWith('agent_feed_')) {
       if (!isAdmin(chatId)) return;
@@ -2423,6 +2463,161 @@ async function showUserProfile(chatId, firstName) {
       ]}
     });
   } catch (e) { console.error('[Bot] showUserProfile:', e.message); }
+}
+
+// ─── AI Factory Panel ─────────────────────────────────────────────────────────
+
+const FACTORY_DB_PATH = require('path').join(__dirname, '..', 'factory', 'factory.db');
+
+function factoryDbGet(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    const sqlite3 = require('sqlite3').verbose();
+    const fdb = new sqlite3.Database(FACTORY_DB_PATH, sqlite3.OPEN_READONLY, err => {
+      if (err) return resolve(null);
+      fdb.get(sql, params, (e, row) => { fdb.close(); e ? resolve(null) : resolve(row || null); });
+    });
+  });
+}
+
+function factoryDbAll(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    const sqlite3 = require('sqlite3').verbose();
+    const fdb = new sqlite3.Database(FACTORY_DB_PATH, sqlite3.OPEN_READONLY, err => {
+      if (err) return resolve([]);
+      fdb.all(sql, params, (e, rows) => { fdb.close(); e ? resolve([]) : resolve(rows || []); });
+    });
+  });
+}
+
+async function showFactoryPanel(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const [lastCycle, lastDecision, pendingCount, runningExp] = await Promise.all([
+      factoryDbGet('SELECT * FROM cycles ORDER BY started_at DESC LIMIT 1'),
+      factoryDbGet("SELECT * FROM decisions ORDER BY created_at DESC LIMIT 1"),
+      factoryDbGet("SELECT COUNT(*) as n FROM growth_actions WHERE status='pending'"),
+      factoryDbGet("SELECT COUNT(*) as n FROM experiments WHERE status='running'"),
+    ]);
+
+    const score = lastCycle?.health_score ?? '—';
+    const icon = score >= 70 ? '💚' : score >= 50 ? '🟡' : '🔴';
+    const elapsed = lastCycle ? `${lastCycle.duration_s || '?'}с` : 'нет данных';
+    const cycleTime = lastCycle?.finished_at
+      ? new Date(lastCycle.finished_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
+      : '—';
+
+    const decisionLine = lastDecision
+      ? `\n🧠 Решение CEO: ${lastDecision.decision_type} — ${(lastDecision.rationale || '').slice(0, 80)}`
+      : '';
+
+    const text =
+      `🏭 AI Startup Factory\n\n` +
+      `${icon} Health Score: ${score}%\n` +
+      `🕐 Последний цикл: ${cycleTime} (${elapsed})\n` +
+      `💡 Действий в очереди: ${pendingCount?.n ?? 0}\n` +
+      `🧪 Экспериментов активных: ${runningExp?.n ?? 0}` +
+      decisionLine;
+
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: '🔄 Запустить цикл', callback_data: 'adm_factory_run' },
+         { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' }],
+        [{ text: '🧪 Эксперименты',  callback_data: 'adm_factory_exp' },
+         { text: '📋 Решения CEO',   callback_data: 'adm_factory_decisions' }],
+        [{ text: '← Меню', callback_data: 'admin_menu' }],
+      ]}
+    });
+  } catch (e) {
+    console.error('[Factory] showFactoryPanel:', e.message);
+    return safeSend(chatId, '🏭 AI Factory ещё не запущен.\n\nЗапустите: `pm2 start nevesty-factory`', {
+      reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+    });
+  }
+}
+
+async function showFactoryGrowth(chatId, page = 0) {
+  if (!isAdmin(chatId)) return;
+  const LIMIT = 8;
+  const offset = page * LIMIT;
+  const [actions, totalRow] = await Promise.all([
+    factoryDbAll(
+      "SELECT * FROM growth_actions WHERE status='pending' ORDER BY priority DESC, created_at DESC LIMIT ? OFFSET ?",
+      [LIMIT, offset]
+    ),
+    factoryDbGet("SELECT COUNT(*) as n FROM growth_actions WHERE status='pending'"),
+  ]);
+
+  const total = totalRow?.n ?? 0;
+  if (!actions.length) {
+    return safeSend(chatId, '💡 Нет pending growth actions.\n\nЗапустите цикл Factory чтобы сгенерировать новые.', {
+      reply_markup: { inline_keyboard: [
+        [{ text: '🔄 Запустить цикл', callback_data: 'adm_factory_run' }],
+        [{ text: '← Factory', callback_data: 'adm_factory' }],
+      ]}
+    });
+  }
+
+  for (const a of actions) {
+    const channelIcon = { telegram: '📱', instagram: '📸', tiktok: '🎵', seo: '🔍', email: '📧', direct: '📞' }[a.channel] || '💡';
+    const text = `${channelIcon} [${a.channel}/${a.action_type}] приоритет ${a.priority}\n\n${(a.content || '').slice(0, 600)}`;
+    await safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [[
+        { text: '✅ Выполнено', callback_data: `adm_factory_done_${a.id}` },
+      ]]}
+    });
+  }
+
+  const nav = [];
+  if (page > 0) nav.push({ text: '◀ Назад', callback_data: `adm_factory_growth_${page - 1}` });
+  if (offset + LIMIT < total) nav.push({ text: 'Ещё ▶', callback_data: `adm_factory_growth_${page + 1}` });
+
+  return safeSend(chatId, `Показано ${offset + 1}–${Math.min(offset + LIMIT, total)} из ${total}`, {
+    reply_markup: { inline_keyboard: [
+      nav.length ? nav : [],
+      [{ text: '← Factory', callback_data: 'adm_factory' }],
+    ].filter(r => r.length) }
+  });
+}
+
+async function showFactoryDecisions(chatId) {
+  if (!isAdmin(chatId)) return;
+  const decisions = await factoryDbAll(
+    'SELECT * FROM decisions ORDER BY created_at DESC LIMIT 10'
+  );
+  if (!decisions.length) {
+    return safeSend(chatId, 'Нет решений CEO.', {
+      reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
+    });
+  }
+  const icons = { create_mvp:'📦', scale:'🚀', kill:'💀', iterate:'🔧', grow:'📣', experiment:'🧪', optimize:'⚙️', monitor:'👁' };
+  const lines = decisions.map(d =>
+    `${icons[d.decision_type] || '•'} ${d.decision_type} — ${(d.rationale || '').slice(0, 80)}`
+  );
+  return safeSend(chatId, `📋 Решения CEO (последние 10)\n\n${lines.join('\n')}`, {
+    reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
+  });
+}
+
+async function showFactoryExperiments(chatId) {
+  if (!isAdmin(chatId)) return;
+  const exps = await factoryDbAll(
+    "SELECT * FROM experiments ORDER BY started_at DESC LIMIT 8"
+  );
+  if (!exps.length) {
+    return safeSend(chatId, 'Нет экспериментов.', {
+      reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
+    });
+  }
+  const statusIcon = { running:'🔵', concluded:'✅' };
+  const resultIcon = { scale:'🚀', kill:'💀', iterate:'🔧' };
+  const lines = exps.map(e =>
+    `${statusIcon[e.status] || '•'} ${e.name}\n` +
+    `   A=${e.conversion_a ?? '—'}% / B=${e.conversion_b ?? '—'}%` +
+    (e.result ? ` → ${resultIcon[e.result] || ''} ${e.result}` : '')
+  );
+  return safeSend(chatId, `🧪 Эксперименты\n\n${lines.join('\n\n')}`, {
+    reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
+  });
 }
 
 // ─── Admin Reviews ────────────────────────────────────────────────────────────

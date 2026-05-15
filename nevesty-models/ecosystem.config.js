@@ -33,5 +33,23 @@ module.exports = {
       out_file: 'logs/scheduler-out.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
     },
+    {
+      name: 'nevesty-factory',
+      script: 'factory_main.py',
+      interpreter: 'python3',
+      cwd: '/home/user/Pablo',
+      autorestart: true,
+      max_restarts: 5,
+      restart_delay: 30000,
+      max_memory_restart: '384M',
+      kill_timeout: 30000,
+      env: {
+        PYTHONPATH: '/home/user/Pablo',
+        FACTORY_CYCLE_HOURS: '6',
+      },
+      error_file: '/home/user/Pablo/logs/factory-error.log',
+      out_file: '/home/user/Pablo/logs/factory-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
   ],
 };
