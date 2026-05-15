@@ -120,3 +120,15 @@ def list_cycles(limit: int = 20):
 @app.get("/factory/decisions")
 def list_decisions(limit: int = 20):
     return db.fetch_all("SELECT * FROM decisions ORDER BY created_at DESC LIMIT ?", (limit,))
+
+
+@app.get("/factory/content")
+def get_content():
+    """Get latest content generation results."""
+    try:
+        from factory.agents.content_generator import ContentGenerator
+        gen = ContentGenerator()
+        result = gen.run()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

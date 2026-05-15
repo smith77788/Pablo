@@ -746,6 +746,38 @@ def run_cycle() -> dict:
         logger.error("Phase 13 Customer Success agents error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 14 — CONTENT GENERATION: Telegram posts & model bios
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n✍️ PHASE 14: CONTENT GENERATION")
+    try:
+        from factory.agents.content_generator import ContentGenerator
+        content_gen = ContentGenerator()
+        content_result = content_gen.run()
+
+        posts_count = len(content_result.get("generated_posts", []))
+        if posts_count > 0:
+            summary_lines.append(f"✍️ Контент: {posts_count} поста сгенерировано")
+            # Save generated posts to factory DB as growth actions
+            for post in content_result.get("generated_posts", []):
+                if post.get("text"):
+                    db.insert("growth_actions", {
+                        "product_id": nevesty_id,
+                        "action_type": "Telegram пост: " + post.get("post_type", "general"),
+                        "channel": "telegram",
+                        "content": post.get("text", "")[:500],
+                        "status": "pending",
+                        "priority": 5,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+        results["phases"]["content_generation"] = {
+            "posts_generated": posts_count,
+            "weekly_plan_days": len(content_result.get("weekly_plan", [])),
+        }
+        logger.info("[Phase14] Content: posts=%d, plan_days=%d", posts_count, len(content_result.get("weekly_plan", [])))
+    except Exception as e:
+        logger.error("Phase 14 content generation error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 8 — CEO SYNTHESIS: синтез всех департаментов
     # ════════════════════════════════════════════════════════════════
     logger.info("\n🏆 CEO SYNTHESIS")
