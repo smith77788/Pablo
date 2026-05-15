@@ -166,6 +166,11 @@
       color: var(--gold);
       font-weight: 600;
     }
+    .cmp-value-cell.highlight-green {
+      color: #4caf50;
+      font-weight: 600;
+      background: rgba(76,175,80,0.08);
+    }
     .cmp-value-em {
       color: var(--text-dim);
       font-style: italic;
@@ -332,6 +337,65 @@
       color: var(--gold);
     }
 
+    /* ── best-seller badge ── */
+    .cmp-badge-bestseller {
+      display: inline-block;
+      background: var(--gold);
+      color: var(--bg);
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      margin-top: 4px;
+    }
+
+    /* ── similarity score bar ── */
+    .cmp-score-cell {
+      padding: 14px 14px 16px;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+    }
+    .cmp-score-label {
+      font-size: 0.68rem;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .cmp-score-text {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .cmp-score-bar-wrap {
+      height: 6px;
+      background: var(--bg3);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .cmp-score-bar-fill {
+      height: 100%;
+      background: var(--gold);
+      border-radius: 3px;
+      transition: width 0.6s ease;
+    }
+
+    /* ── back-to-catalog top link ── */
+    .cmp-back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      letter-spacing: 1px;
+      text-decoration: none;
+      text-transform: uppercase;
+      transition: color var(--transition);
+      margin-bottom: 20px;
+    }
+    .cmp-back-link:hover { color: var(--gold); }
+
     /* ── toolbar (share / print / clear) ── */
     .compare-toolbar {
       display: flex;
@@ -374,13 +438,18 @@
       .compare-page { padding: 20px 0; }
       .compare-toolbar { display: none !important; }
       .cmp-remove-btn { display: none !important; }
+      .cmp-back-link { display: none !important; }
       .cmp-book-cell .cmp-btn-fav,
+      .cmp-book-cell .cmp-btn-book,
       .cmp-book-cell .cmp-btn-profile { display: none !important; }
       .compare-table-wrap { overflow: visible; }
       .compare-table { min-width: unset; }
       body { background: #fff !important; color: #111 !important; }
-      .cmp-value-cell, .cmp-name-cell, .cmp-row-label { color: #111 !important; background: #fff !important; }
+      .cmp-value-cell, .cmp-name-cell, .cmp-row-label, .cmp-score-cell { color: #111 !important; background: #fff !important; }
       .cmp-value-cell.highlight { color: #b8860b !important; }
+      .cmp-value-cell.highlight-green { color: #388e3c !important; background: #f1f8e9 !important; }
+      .cmp-score-bar-wrap { border: 1px solid #ccc; }
+      .cmp-score-bar-fill { background: #b8860b !important; }
       .compare-empty-state, #emptyState, #loadingState { display: none !important; }
     }
 
@@ -458,6 +527,13 @@
           <li style="color:var(--gold)" aria-current="page">Сравнение</li>
         </ol>
       </nav>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:8px">
+        <a href="/catalog.html" class="cmp-back-link no-print">← Назад в каталог</a>
+        <button class="cmp-tool-btn no-print" onclick="window.print()" title="Распечатать сравнение" style="margin:0">
+          🖨️ Распечатать
+        </button>
+      </div>
 
       <div class="compare-header">
         <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">⚖️ Сравнение</div>
@@ -703,12 +779,22 @@
 
     function buildNameRow(models) {
       const labelCell = `<td class="col-label"></td>`;
+
+      // Determine best-seller: model with highest order_count (only if > 0 and unique max)
+      const orderCounts = models.map(m => m ? (parseInt(m.order_count) || 0) : -1);
+      const maxOrders = Math.max(...orderCounts);
+      const bestSellerId = maxOrders > 0 && orderCounts.filter(c => c === maxOrders).length === 1
+        ? models[orderCounts.indexOf(maxOrders)]?.id
+        : null;
+
       const cells = models.map(m => {
         if (!m) return `<td class="col-model" style="background:var(--bg2);border-bottom:1px solid var(--border)"></td>`;
         const cat = CAT_LABELS[m.category] || m.category || '';
+        const isBestSeller = bestSellerId !== null && m.id === bestSellerId;
         return `<td class="col-model cmp-name-cell">
           <div class="cmp-model-name">${escHtml(m.name)}</div>
           ${cat ? `<div class="cmp-category">${escHtml(cat)}</div>` : ''}
+          ${isBestSeller ? `<div class="cmp-badge-bestseller" title="${maxOrders} заказов">⭐ Лидер заказов</div>` : ''}
         </td>`;
       });
       for (let i = models.length; i < MAX_COMPARE; i++) {
@@ -733,6 +819,9 @@
         }
       }
 
+      // highlightClass: 'highlight' (gold) or 'highlight-green' (green)
+      const hClass = opts.highlightClass || 'highlight';
+
       // difference detection: do loaded values differ?
       const uniqueVals = new Set(loadedValues.map(v => String(v)));
       const hasDiff = loadedValues.length > 1 && uniqueVals.size > 1;
@@ -742,7 +831,7 @@
         const isHighlight = !empty && best !== null && parseFloat(v) === best;
         const isDiff = hasDiff && !empty;
         let cls = 'col-model cmp-value-cell';
-        if (isHighlight) cls += ' highlight';
+        if (isHighlight) cls += ` ${hClass}`;
         else if (isDiff) cls += ' diff';
         return `<td class="${cls}">
           ${empty ? `<span class="cmp-value-em">—</span>` : escHtml(String(v))}
@@ -808,8 +897,8 @@
         if (!m) return `<td class="col-model cmp-book-cell"></td>`;
         const inFav = favs.includes(m.id);
         return `<td class="col-model cmp-book-cell">
-          <a class="cmp-btn-book" href="/booking.html?model_id=${m.id}&model_name=${encodeURIComponent(m.name)}">
-            📋 Забронировать
+          <a class="cmp-btn-book" href="/booking.html?model_id=${m.id}&model_name=${encodeURIComponent(m.name)}" title="Заказать ${escHtml(m.name)}">
+            Заказать
           </a>
           <button class="cmp-btn-fav no-print${inFav ? ' in-fav' : ''}" data-id="${m.id}" onclick="toggleFav(${m.id})">
             ${inFav ? '❤️ В избранном' : '🤍 В избранное'}
@@ -832,6 +921,47 @@
       </tr>`;
     }
 
+    /* ─── Similarity / completeness score row ─── */
+    // Parameters tracked: height, age, weight, city, category, available, rating, bust/waist/hips, hair_color, eye_color, shoe_size, bio
+    const SCORE_PARAMS = [
+      m => m.height,
+      m => m.age,
+      m => m.weight,
+      m => m.city,
+      m => m.category,
+      m => m.available != null,
+      m => m.rating,
+      m => m.bust || m.waist || m.hips,
+      m => m.hair_color,
+      m => m.eye_color,
+      m => m.shoe_size,
+      m => m.bio,
+    ];
+    const SCORE_TOTAL = SCORE_PARAMS.length;
+
+    function buildScoreRow(models) {
+      const labelCell = `<td class="col-label cmp-row-label">Профиль</td>`;
+      const cells = models.map(m => {
+        if (!m) return `<td class="col-model cmp-score-cell"></td>`;
+        const filled = SCORE_PARAMS.filter(fn => {
+          const v = fn(m);
+          return v !== null && v !== undefined && v !== '' && v !== false;
+        }).length;
+        const pct = Math.round((filled / SCORE_TOTAL) * 100);
+        return `<td class="col-model cmp-score-cell">
+          <div class="cmp-score-label">Заполненность</div>
+          <div class="cmp-score-text">${filled} из ${SCORE_TOTAL} параметров</div>
+          <div class="cmp-score-bar-wrap">
+            <div class="cmp-score-bar-fill" style="width:${pct}%" title="${pct}%"></div>
+          </div>
+        </td>`;
+      });
+      for (let i = models.length; i < MAX_COMPARE; i++) {
+        cells.push(`<td class="col-model cmp-score-cell"></td>`);
+      }
+      return `<tr>${labelCell}${cells.join('')}</tr>`;
+    }
+
     function renderTable(models) {
       const tbody = document.getElementById('compareBody');
       let html = '';
@@ -841,8 +971,8 @@
 
       html += buildDividerRow('Параметры');
 
-      html += buildParamRow('Рост',      models, m => m.height   ? `${m.height} см`    : null, { highlightMax: true });
-      html += buildParamRow('Возраст',   models, m => m.age      ? `${m.age} лет`       : null, { highlightMin: true });
+      html += buildParamRow('Рост',      models, m => m.height   ? `${m.height} см`    : null, { highlightMax: true, highlightClass: 'highlight-green' });
+      html += buildParamRow('Возраст',   models, m => m.age      ? `${m.age} лет`       : null, { highlightMin: true, highlightClass: 'highlight-green' });
       html += buildParamRow('Вес',       models, m => m.weight   ? `${m.weight} кг`     : null);
       html += buildParamRow('Город',     models, m => m.city     || null);
       html += buildParamRow('Категория', models, m => CAT_LABELS[m.category] || m.category || null);
@@ -859,6 +989,9 @@
 
       html += buildDividerRow('Действия');
       html += buildBookRow(models);
+
+      html += buildDividerRow('Профиль');
+      html += buildScoreRow(models);
 
       tbody.innerHTML = html;
     }
