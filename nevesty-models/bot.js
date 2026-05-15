@@ -5813,9 +5813,7 @@ function initBot(app) {
     // Clear any active state/flow
     await clearSession(chatId);
 
-    const cancelText = hadActiveState
-      ? '❌ Действие отменено\\. Возвращаю вас в главное меню\\.'
-      : 'ℹ️ Активного действия нет\\. Вы уже в главном меню\\.';
+    const cancelText = hadActiveState ? STRINGS.cancelActionDone : STRINGS.cancelActionNone;
 
     await safeSend(chatId, cancelText, {
       parse_mode: 'MarkdownV2',
@@ -7943,7 +7941,10 @@ function initBot(app) {
     if (data.startsWith('rev_reply_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_reply_', ''));
-      if (!id) return bot.answerCallbackQuery(q.id, { text: 'Ошибка' }).catch(() => {});
+      if (!id)
+        return bot
+          .answerCallbackQuery(q.id, { text: '⚠️ Не удалось загрузить отзыв. Попробуйте ещё раз.' })
+          .catch(() => {});
       await bot.answerCallbackQuery(q.id).catch(() => {});
       // Fetch review text for context
       const rev = await get(
@@ -9599,7 +9600,7 @@ function initBot(app) {
         const username = d.new_mgr_username || '';
         if (!username) {
           await clearSession(chatId);
-          return safeSend(chatId, '❌ Ошибка сессии. Начните сначала.', {
+          return safeSend(chatId, '❌ Данные сессии утеряны. Начните добавление менеджера заново.', {
             reply_markup: { inline_keyboard: [[{ text: '← Менеджеры', callback_data: 'adm_managers' }]] },
           });
         }
@@ -11369,7 +11370,8 @@ async function showFactoryTasks(chatId, page) {
     });
   } catch (e) {
     console.error('[Bot] showFactoryTasks:', e.message);
-    return safeSend(chatId, 'Ошибка загрузки AI-задач.', {
+    return safeSend(chatId, STRINGS.errorAITasksLoad, {
+      parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] },
     });
   }
