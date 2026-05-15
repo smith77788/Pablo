@@ -15,7 +15,10 @@
     "check": "node --check bot.js && node --check server.js && node --check routes/api.js",
     "test": "jest --forceExit",
     "test:watch": "jest --watch --forceExit",
-    "prepare": "husky"
+    "prepare": "husky",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "backup": "bash scripts/backup.sh"
   },
   "jest": {
     "testEnvironment": "node",

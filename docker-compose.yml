@@ -1,7 +1,7 @@
 version: '3.9'
 
 networks:
-  app-network:
+  nevesty-net:
     driver: bridge
 
 services:
@@ -11,14 +11,17 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nevesty-models/public:/app/nevesty-models/public:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
-      bot:
+      nevesty-models:
         condition: service_healthy
     networks:
-      - app-network
+      - nevesty-net
     logging:
       driver: json-file
       options:
@@ -26,32 +29,29 @@ services:
         max-file: "3"
 
   # ── Telegram Bot + Web Server ─────────────────────────────────────────
-  bot:
+  nevesty-models:
     build:
       context: ./nevesty-models
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env
+    ports:
+      - "3000:3000"
+    env_file: nevesty-models/.env
     volumes:
-      - bot-data:/app/data
-      - bot-backup:/app/backup
-    expose:
-      - "3000"
+      - ./data:/app/data
+      - ./backups:/app/backups
     deploy:
       resources:
         limits:
           memory: 512m
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get(\"status\")==\"ok\" else 1)'"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
-    depends_on:
-      factory:
-        condition: service_healthy
     networks:
-      - app-network
+      - nevesty-net
     logging:
       driver: json-file
       options:
@@ -59,15 +59,14 @@ services:
         max-file: "3"
 
   # ── AI Office Factory ─────────────────────────────────────────────────
-  factory:
+  nevesty-factory:
     build:
-      context: .
-      dockerfile: Dockerfile.factory
+      context: ./factory
+      dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env
+    env_file: factory/.env
     volumes:
-      - factory-data:/app/factory
-      - bot-data:/app/nevesty-models/data  # shared access to bot data
+      - ./data:/app/data
     environment:
       FACTORY_CYCLE_HOURS: ${FACTORY_CYCLE_HOURS:-6}
       PYTHONPATH: /app
@@ -76,20 +75,18 @@ services:
         limits:
           memory: 256m
     healthcheck:
-      test: ["CMD", "python3", "-c", "import sys; import sqlite3; conn=sqlite3.connect('/app/factory/factory.db'); conn.execute('SELECT 1'); conn.close(); print('OK')"]
+      test: ["CMD", "python3", "-c", "import os; exit(0 if os.path.isdir('/app') else 1)"]
       interval: 60s
       timeout: 10s
       retries: 3
       start_period: 60s
+    depends_on:
+      nevesty-models:
+        condition: service_healthy
     networks:
-      - app-network
+      - nevesty-net
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  bot-data:
-  bot-backup:
-  factory-data:

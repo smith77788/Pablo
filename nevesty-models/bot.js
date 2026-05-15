@@ -2459,10 +2459,13 @@ async function previewBroadcast(chatId) {
   return safeSend(chatId, '─────\n📤 Отправить рассылку?', {
     reply_markup: { inline_keyboard: [
       [
-        { text: '✅ Отправить',      callback_data: 'adm_bc_confirm'        },
-        { text: '✏️ Изменить текст', callback_data: 'adm_bc_edit'           },
+        { text: '✅ Отправить сейчас', callback_data: 'adm_bc_confirm'        },
+        { text: '🕐 Запланировать',    callback_data: 'adm_bc_schedule'       },
       ],
-      [{ text: '❌ Отменить',        callback_data: 'adm_bc_cancel_preview' }],
+      [
+        { text: '✏️ Изменить',         callback_data: 'adm_bc_edit'           },
+        { text: '❌ Отмена',            callback_data: 'adm_bc_cancel_preview' },
+      ],
     ]}
   });
 }
@@ -2576,7 +2579,8 @@ async function showScheduledBroadcasts(chatId) {
 
   const keyboard = [];
   for (const b of broadcasts.filter(b => b.status === 'pending')) {
-    keyboard.push([{ text: `❌ Отменить #${b.id} (${new Date(b.scheduled_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})`, callback_data: `sched_bcast_cancel_${b.id}` }]);
+    const dtShort = b.scheduled_at ? new Date(b.scheduled_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+    keyboard.push([{ text: `❌ Отменить #${b.id} (${dtShort})`, callback_data: `adm_bc_cancel_${b.id}` }]);
   }
   keyboard.push([{ text: '➕ Создать рассылку', callback_data: 'adm_new_sched_bcast' }]);
   keyboard.push([{ text: '← Назад', callback_data: 'admin_menu' }]);
@@ -4755,6 +4759,35 @@ function initBot(app) {
       await bot.answerCallbackQuery(q.id, { text: '❌ Рассылка отменена' }).catch(() => {});
       return showBroadcast(chatId);
     }
+    // ── Broadcast: schedule from preview
+    if (data === 'adm_bc_schedule') {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      await setSession(chatId, 'broadcast_schedule_time', { ...sd });
+      return safeSend(chatId,
+        `🕐 *Запланировать рассылку*\n\nВведите дату и время в формате:\n\`ДД\\.ММ\\.ГГГГ ЧЧ:ММ\`\n\nПример: \`20\\.05\\.2026 14:00\``,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_bc_cancel_preview' }]] }
+        }
+      );
+    }
+    // ── Broadcast: view scheduled list
+    if (data === 'adm_bc_scheduled') {
+      if (!isAdmin(chatId)) return;
+      return showScheduledBroadcasts(chatId);
+    }
+    // ── Broadcast: cancel scheduled by ID (adm_bc_cancel_ID)
+    if (data.startsWith('adm_bc_cancel_') && data !== 'adm_bc_cancel_preview') {
+      if (!isAdmin(chatId)) return;
+      const bcId = parseInt(data.replace('adm_bc_cancel_', ''));
+      if (bcId > 0) {
+        await run("UPDATE scheduled_broadcasts SET status='cancelled' WHERE id=? AND status='pending'", [bcId]).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: '❌ Рассылка отменена' }).catch(() => {});
+        return showScheduledBroadcasts(chatId);
+      }
+    }
     // ── Broadcast segment selection (legacy — kept for back-compat)
     if (data === 'adm_broadcast_all') {
       if (!isAdmin(chatId)) return;
@@ -5520,6 +5553,74 @@ function initBot(app) {
       return showSearchResults(chatId, f, page2);
     }
 
+    // ── Advanced search v2 — new-format callbacks (search_h_*, search_a_*, search_cat_*, search_city_*, etc.)
+
+    // Height filter: search_h_160 → 160-165, search_h_166 → 166-170, etc.
+    if (data.startsWith('search_h_')) {
+      const key = data.replace('search_h_', '');
+      const heightMap = { '160': [160,165], '166': [166,170], '171': [171,175], '176': [176,180], '181': [181,220] };
+      const range = heightMap[key];
+      if (range) {
+        const f = getSearchFilters(chatId);
+        if (f.height_min === range[0] && f.height_max === range[1]) {
+          delete f.height_min; delete f.height_max;
+        } else {
+          f.height_min = range[0]; f.height_max = range[1];
+        }
+      }
+      return showSearchMenu(chatId);
+    }
+
+    // Age filter: search_a_18 → 18-22, search_a_23 → 23-27, etc.
+    if (data.startsWith('search_a_')) {
+      const key = data.replace('search_a_', '');
+      const ageMap = { '18': [18,22], '23': [23,27], '28': [28,32], '33': [33,99] };
+      const range = ageMap[key];
+      if (range) {
+        const f = getSearchFilters(chatId);
+        if (f.age_min === range[0] && f.age_max === range[1]) {
+          delete f.age_min; delete f.age_max;
+        } else {
+          f.age_min = range[0]; f.age_max = range[1];
+        }
+      }
+      return showSearchMenu(chatId);
+    }
+
+    // Category filter: search_cat_fashion, search_cat_commercial, search_cat_events
+    if (data.startsWith('search_cat_')) {
+      const cat = data.replace('search_cat_', '');
+      const f = getSearchFilters(chatId);
+      f.category = (f.category === cat) ? null : cat;
+      return showSearchMenu(chatId);
+    }
+
+    // City filter: search_city_CITY (URL-decoded)
+    if (data.startsWith('search_city_')) {
+      const rawCity = data.replace('search_city_', '');
+      const city = decodeURIComponent(rawCity);
+      const f = getSearchFilters(chatId);
+      f.city = (f.city === city) ? null : city;
+      return showSearchMenu(chatId);
+    }
+
+    // Reset all filters
+    if (data === 'search_reset') {
+      searchFilters.set(String(chatId), {});
+      return showSearchMenu(chatId);
+    }
+
+    // Run search with current filters
+    if (data === 'search_go') {
+      return showSearchResultsV2(chatId, 0);
+    }
+
+    // Pagination: search_page_N
+    if (data.startsWith('search_page_')) {
+      const pageNum = parseInt(data.replace('search_page_', '')) || 0;
+      return showSearchResultsV2(chatId, pageNum);
+    }
+
     // ── Отзывы (публичные)
     if (data === 'show_reviews' || data === 'cat_rev') return showPublicReviews(chatId, 0);
     if (data.startsWith('show_reviews_')) {
@@ -5609,13 +5710,13 @@ function initBot(app) {
     if (data === 'profile_edit_contacts') return startEditProfile(chatId);
     if (data === 'profile_edit_name') {
       await setSession(chatId, 'profile_edit_name', {});
-      return safeSend(chatId, '👤 Введіть нове ім\'я:', {
-        reply_markup: { inline_keyboard: [[{ text: '❌ Скасувати', callback_data: 'profile' }]] }
+      return safeSend(chatId, '✏️ Введите ваше имя:', {
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'profile' }]] }
       });
     }
     if (data === 'profile_edit_phone') {
       await setSession(chatId, 'profile_edit_phone', {});
-      return safeSend(chatId, '📞 Введите новый номер телефона:', {
+      return safeSend(chatId, '📱 Введите номер телефона:', {
         reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'profile' }]] }
       });
     }
@@ -6018,6 +6119,45 @@ function initBot(app) {
         );
       }
 
+      // ── Broadcast: schedule time input (from preview → 🕐 Запланировать)
+      if (state === 'broadcast_schedule_time') {
+        // Accept DD.MM.YYYY HH:MM format
+        const m2 = text.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})$/);
+        if (!m2) {
+          return safeSend(chatId,
+            '❌ Неверный формат\\. Введите дату как `ДД\\.ММ\\.ГГГГ ЧЧ:ММ` \\(например `20\\.05\\.2026 14:00`\\):',
+            { parse_mode: 'MarkdownV2' }
+          );
+        }
+        const scheduledAt = new Date(`${m2[3]}-${m2[2]}-${m2[1]}T${m2[4]}:${m2[5]}:00`);
+        if (isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) {
+          return safeSend(chatId,
+            '❌ Дата должна быть в будущем\\. Введите корректную дату и время:',
+            { parse_mode: 'MarkdownV2' }
+          );
+        }
+        const scheduledAtStr = `${m2[3]}-${m2[2]}-${m2[1]} ${m2[4]}:${m2[5]}:00`;
+        const segment  = d.broadcastSegment || 'all';
+        const bcText   = d.broadcastText    || '';
+        const photoUrl = d.broadcastPhotoId || null;
+        await run(
+          `INSERT INTO scheduled_broadcasts (text, scheduled_at, photo_url, segment, status) VALUES (?,?,?,?,'pending')`,
+          [bcText, scheduledAtStr, photoUrl, segment]
+        ).catch(() => {});
+        await clearSession(chatId);
+        const displayDt = `${m2[1]}.${m2[2]}.${m2[3]} ${m2[4]}:${m2[5]}`;
+        return safeSend(chatId,
+          `✅ *Рассылка запланирована на ${esc(displayDt)}*\n\nСегмент: *${esc(_bcSegmentLabel(segment))}*`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [
+              [{ text: '📅 Запланированные рассылки', callback_data: 'adm_bc_scheduled' }],
+              [{ text: '← Меню',                      callback_data: 'admin_menu'        }],
+            ]}
+          }
+        );
+      }
+
       // ── Broadcast text
       if (state === 'adm_broadcast_msg') {
         return sendBroadcast(chatId, text);
@@ -6313,51 +6453,49 @@ function initBot(app) {
     // ── Edit profile name
     if (state === 'profile_edit_name') {
       if (!text || text.trim().length < 2) {
-        return safeSend(chatId, '❌ Введіть ім\'я (мінімум 2 символи):');
+        return safeSend(chatId, '❌ Введите ваше имя (минимум 2 символа):');
       }
-      if (text.trim().length > 100) {
-        return safeSend(chatId, '❌ Ім\'я занадто довге \\(максимум 100 символів\\):', { parse_mode: 'MarkdownV2' });
+      if (text.trim().length > 50) {
+        return safeSend(chatId, '❌ Имя слишком длинное (максимум 50 символов):');
       }
-      const newName = text.trim().slice(0, 100);
+      const newName = text.trim().slice(0, 50);
       await run(
-        `UPDATE orders SET client_name=? WHERE client_chat_id=? AND id=(SELECT MAX(id) FROM orders WHERE client_chat_id=?)`,
-        [newName, String(chatId), String(chatId)]
+        `INSERT INTO client_prefs (chat_id, name) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET name=excluded.name, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, newName]
       ).catch(() => {});
       await clearSession(chatId);
-      return safeSend(chatId, `✅ Ім'я оновлено: *${esc(newName)}*`, {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '👤 Мій профіль', callback_data: 'profile' }]] }
-      });
+      await safeSend(chatId, `✅ Имя обновлено: *${esc(newName)}*`, { parse_mode: 'MarkdownV2' });
+      return showUserProfile(chatId, newName);
     }
 
     // ── Edit profile phone
     if (state === 'profile_edit_phone') {
-      if (!/^[\d\s+\-()]{7,20}$/.test(text)) {
-        return safeSend(chatId, '❌ Введите корректный номер телефона:');
+      if (!text || !/^[\d\s+\-()]{7,20}$/.test(text.trim())) {
+        return safeSend(chatId, '❌ Введите корректный номер телефона (7-20 символов):');
       }
-      await run('UPDATE orders SET client_phone=? WHERE client_chat_id=?', [text, String(chatId)]).catch(()=>{});
+      const newPhone = text.trim().slice(0, 20);
+      await run(
+        `INSERT INTO client_prefs (chat_id, phone) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET phone=excluded.phone, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, newPhone]
+      ).catch(() => {});
       await clearSession(chatId);
-      return safeSend(chatId, `✅ Телефон обновлён: *${esc(text)}*`, {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '👤 Мой профиль', callback_data: 'profile' }]] }
-      });
+      await safeSend(chatId, `✅ Телефон обновлён: *${esc(newPhone)}*`, { parse_mode: 'MarkdownV2' });
+      return showUserProfile(chatId);
     }
 
     // ── Edit profile email
     if (state === 'profile_edit_email') {
-      if (!text || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim())) {
+      if (!text || !text.trim().includes('@')) {
         return safeSend(chatId, '❌ Введите корректный email (например: name@example.com):');
       }
       const newEmail = text.trim().slice(0, 200);
       await run(
-        `UPDATE orders SET client_email=? WHERE client_chat_id=? AND id=(SELECT MAX(id) FROM orders WHERE client_chat_id=?)`,
-        [newEmail, String(chatId), String(chatId)]
+        `INSERT INTO client_prefs (chat_id, email) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET email=excluded.email, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, newEmail]
       ).catch(() => {});
       await clearSession(chatId);
-      return safeSend(chatId, `✅ Email обновлён: *${esc(newEmail)}*`, {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '👤 Мой профиль', callback_data: 'profile' }]] }
-      });
+      await safeSend(chatId, `✅ Email обновлён: *${esc(newEmail)}*`, { parse_mode: 'MarkdownV2' });
+      return showUserProfile(chatId);
     }
 
     // ── Status check
@@ -6739,7 +6877,7 @@ async function showFaq(chatId) {
 
 async function showUserProfile(chatId, firstName) {
   try {
-    const [orders, lastOrderFull] = await Promise.all([
+    const [orders, lastOrderFull, prefs] = await Promise.all([
       query(
         `SELECT o.id, o.status, o.created_at, o.order_number FROM orders o
          WHERE o.client_chat_id = ?
@@ -6750,19 +6888,36 @@ async function showUserProfile(chatId, firstName) {
         `SELECT client_name, client_phone, client_email FROM orders WHERE client_chat_id=? ORDER BY created_at DESC LIMIT 1`,
         [String(chatId)]
       ).catch(()=>null),
+      get(`SELECT * FROM client_prefs WHERE chat_id=?`, [chatId]).catch(()=>null),
     ]);
 
+    // Resolve name/phone/email: client_prefs takes priority, fallback to last order
+    const displayName  = prefs?.name  || lastOrderFull?.client_name  || firstName || 'Гость';
+    const displayPhone = prefs?.phone || lastOrderFull?.client_phone || null;
+    const displayEmail = prefs?.email || lastOrderFull?.client_email || null;
+
+    const profileEditButtons = [
+      [{ text: '✏️ Изменить имя',    callback_data: 'profile_edit_name'     },
+       { text: '📱 Изменить телефон',callback_data: 'profile_edit_phone'    }],
+      [{ text: '📧 Изменить email',  callback_data: 'profile_edit_email'    }],
+      [{ text: '🔔 Уведомления',     callback_data: 'client_notif_settings' }],
+      [{ text: '⚙️ Настройки',      callback_data: 'client_settings'       }],
+    ];
+
     if (!orders.length) {
-      return safeSend(chatId,
-        `👤 *Мой профиль*\n\nИмя: *${esc(firstName || 'Гость')}*\n\nУ вас пока нет заявок\\. Оформите первую прямо сейчас\\!`,
-        {
-          parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [
-            [{ text: '📝 Оформить заявку', callback_data: 'bk_start'  }],
-            [{ text: '🏠 Главное меню',    callback_data: 'main_menu' }],
-          ]}
-        }
-      );
+      let emptyText = `👤 *Мой профиль*\n\n`;
+      emptyText += `Имя: *${esc(displayName)}*\n`;
+      emptyText += `📱 Телефон: ${displayPhone ? esc(displayPhone) : '_\\(не указан\\)_'}\n`;
+      emptyText += `📧 Email: ${displayEmail ? esc(displayEmail) : '_\\(не указан\\)_'}\n`;
+      emptyText += `\nУ вас пока нет заявок\\. Оформите первую прямо сейчас\\!`;
+      return safeSend(chatId, emptyText, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          ...profileEditButtons,
+          [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }],
+          [{ text: '← Назад',            callback_data: 'main_menu'}],
+        ]}
+      });
     }
 
     // Count by status
@@ -6770,6 +6925,12 @@ async function showUserProfile(chatId, firstName) {
     for (const o of orders) {
       counts[o.status] = (counts[o.status] || 0) + 1;
     }
+
+    // Stats
+    const activeStatuses = new Set(['new','reviewing','confirmed','in_progress']);
+    const activeOrders    = orders.filter(o => activeStatuses.has(o.status)).length;
+    const completedOrders = counts['completed'] || 0;
+    const totalOrders     = orders.length;
 
     const firstDate = orders[orders.length - 1]?.created_at
       ? new Date(orders[orders.length - 1].created_at).toLocaleDateString('ru')
@@ -6798,7 +6959,9 @@ async function showUserProfile(chatId, firstName) {
     const pointsBalance = loyalty?.points || 0;
 
     let text = `👤 *Мой профиль*\n\n`;
-    text += `Имя: *${esc(firstName || lastOrderFull?.client_name || 'Гость')}*\n`;
+    text += `Имя: *${esc(displayName)}*\n`;
+    text += `📱 Телефон: ${displayPhone ? esc(displayPhone) : '_\\(не указан\\)_'}\n`;
+    text += `📧 Email: ${displayEmail ? esc(displayEmail) : '_\\(не указан\\)_'}\n`;
     text += `💫 Уровень: *${esc(level)}*\n`;
     if (loyalty) {
       if (nextLevelThreshold) {
@@ -6808,10 +6971,10 @@ async function showUserProfile(chatId, firstName) {
         text += `💎 Баллы: *${pointsBalance}* \\(максимальный уровень\\)\n`;
       }
     }
-    if (lastOrderFull?.client_phone) text += `📞 Телефон: ${esc(lastOrderFull.client_phone)}\n`;
-    if (lastOrderFull?.client_email) text += `📧 Email: ${esc(lastOrderFull.client_email)}\n`;
-    text += `\n📋 *История заявок:*\n`;
-    text += `Всего: ${orders.length}\n`;
+    text += `\n📊 *Статистика заявок:*\n`;
+    text += `Активных: ${activeOrders}\n`;
+    text += `Завершённых: ${completedOrders}\n`;
+    text += `Всего: ${totalOrders}\n`;
     text += `Первая: ${esc(firstDate)}\n`;
     text += `Последняя: ${esc(lastDate)}\n\n`;
 
@@ -6847,12 +7010,9 @@ async function showUserProfile(chatId, firstName) {
         [{ text: '🏆 Достижения',        callback_data: 'my_achievements'       },
          { text: '💫 Баллы',             callback_data: 'loyalty'               }],
         [{ text: '📤 Пригласить друга',  callback_data: 'referral'              }],
-        [{ text: '✏️ Изменить имя',     callback_data: 'profile_edit_name'     },
-         { text: '✏️ Изменить телефон', callback_data: 'profile_edit_phone'    }],
-        [{ text: '✏️ Изменить email',   callback_data: 'profile_edit_email'    }],
-        [{ text: '🔔 Уведомления',       callback_data: 'client_notif_settings' }],
+        ...profileEditButtons,
         [{ text: '📝 Новая заявка',      callback_data: 'bk_start'             }],
-        [{ text: '🏠 Главное меню',      callback_data: 'main_menu'            }],
+        [{ text: '← Назад',              callback_data: 'main_menu'            }],
       ]}
     });
   } catch (e) { console.error('[Bot] showUserProfile:', e.message); }
@@ -7543,20 +7703,19 @@ async function showSearchMenu(chatId) {
   try {
     const f = getSearchFilters(chatId);
 
-    // Height ranges definition
+    // Height ranges definition (task spec: 160-165, 166-170, 171-175, 176-180, 181+)
     const heightRanges = [
-      { key: '155_160', label: '155–160 см', min: 155, max: 160 },
-      { key: '161_165', label: '161–165 см', min: 161, max: 165 },
-      { key: '166_170', label: '166–170 см', min: 166, max: 170 },
-      { key: '171_175', label: '171–175 см', min: 171, max: 175 },
-      { key: '176_180', label: '176–180 см', min: 176, max: 180 },
-      { key: '181_999', label: '181+ см',    min: 181, max: 999 },
+      { key: '160', label: '🔹 160–165', min: 160, max: 165, cb: 'search_h_160' },
+      { key: '166', label: '🔹 166–170', min: 166, max: 170, cb: 'search_h_166' },
+      { key: '171', label: '🔹 171–175', min: 171, max: 175, cb: 'search_h_171' },
+      { key: '176', label: '🔹 176–180', min: 176, max: 180, cb: 'search_h_176' },
+      { key: '181', label: '🔹 181+',    min: 181, max: 220, cb: 'search_h_181' },
     ];
     const ageRanges = [
-      { key: '18_22', label: '18–22 года', min: 18, max: 22 },
-      { key: '23_27', label: '23–27 лет',  min: 23, max: 27 },
-      { key: '28_32', label: '28–32 лет',  min: 28, max: 32 },
-      { key: '33_99', label: '33+ лет',    min: 33, max: 99 },
+      { key: '18', label: '🔸 18–22', min: 18, max: 22, cb: 'search_a_18' },
+      { key: '23', label: '🔸 23–27', min: 23, max: 27, cb: 'search_a_23' },
+      { key: '28', label: '🔸 28–32', min: 28, max: 32, cb: 'search_a_28' },
+      { key: '33', label: '🔸 33+',   min: 33, max: 99, cb: 'search_a_33' },
     ];
 
     // Height buttons (2 per row)
@@ -7564,7 +7723,7 @@ async function showSearchMenu(chatId) {
     for (let i = 0; i < heightRanges.length; i += 2) {
       const row = heightRanges.slice(i, i + 2).map(r => {
         const active = f.height_min === r.min && f.height_max === r.max;
-        return { text: (active ? '✅ ' : '📏 ') + r.label, callback_data: `srch_h_${r.key}` };
+        return { text: (active ? '✅ ' : '') + r.label, callback_data: r.cb };
       });
       heightBtns.push(row);
     }
@@ -7574,34 +7733,39 @@ async function showSearchMenu(chatId) {
     for (let i = 0; i < ageRanges.length; i += 2) {
       const row = ageRanges.slice(i, i + 2).map(r => {
         const active = f.age_min === r.min && f.age_max === r.max;
-        return { text: (active ? '✅ ' : '🎂 ') + r.label, callback_data: `srch_a_${r.key}` };
+        return { text: (active ? '✅ ' : '') + r.label, callback_data: r.cb };
       });
       ageBtns.push(row);
     }
 
     // Category buttons
     const catDefs = [
-      { key: 'fashion',    label: '👗 Fashion'    },
-      { key: 'commercial', label: '📷 Commercial' },
-      { key: 'events',     label: '🎉 Events'     },
+      { key: 'fashion',    label: '👗 Fashion',    cb: 'search_cat_fashion'    },
+      { key: 'commercial', label: '📸 Commercial', cb: 'search_cat_commercial' },
+      { key: 'events',     label: '🎭 Events',     cb: 'search_cat_events'     },
     ];
     const catBtns = catDefs.map(c => {
       const active = f.category === c.key;
-      return { text: (active ? '✅ ' : '') + c.label, callback_data: `srch_c_${c.key}` };
+      return { text: (active ? '✅ ' : '') + c.label, callback_data: c.cb };
     });
 
-    // City buttons — query DISTINCT cities from available models (up to 8)
+    // City buttons — query DISTINCT cities from available models, fallback to getSetting('cities_list')
     let cities = [];
     try {
       const cityRows = await query(
         "SELECT DISTINCT city FROM models WHERE available=1 AND city IS NOT NULL AND city != '' ORDER BY city"
       );
       cities = cityRows.map(r => r.city).filter(Boolean).slice(0, 8);
+      if (!cities.length) {
+        const citiesSetting = await getSetting('cities_list').catch(() => '');
+        const fallback = (citiesSetting || 'Москва,Санкт-Петербург,Екатеринбург').split(',').map(c => c.trim()).filter(Boolean);
+        cities = fallback.slice(0, 8);
+      }
     } catch (e) { console.error('[Bot] showSearchMenu cities:', e.message); }
 
     const cityBtns = cities.map(city => {
       const active = f.city === city;
-      return { text: (active ? '✅ ' : '🏙 ') + city, callback_data: `srch_city_${city}` };
+      return { text: (active ? '✅ ' : '🏙 ') + city, callback_data: 'search_city_' + encodeURIComponent(city) };
     });
 
     // Count matching models for the current filters
@@ -7653,10 +7817,10 @@ async function showSearchMenu(chatId) {
       ...(cityBtns.length ? [cityBtns.slice(0, 4)] : []),
       ...(cityBtns.length > 4 ? [cityBtns.slice(4)] : []),
       [
-        ...(hasFilters ? [{ text: '✖️ Сбросить', callback_data: 'srch_reset' }] : []),
-        { text: findLabel, callback_data: 'srch_go' },
+        ...(hasFilters ? [{ text: '✖️ Сбросить фильтры', callback_data: 'search_reset' }] : []),
+        { text: findLabel, callback_data: 'search_go' },
       ],
-      [{ text: '← Меню', callback_data: 'main_menu' }],
+      [{ text: '← Назад', callback_data: 'cat_catalog' }],
     ];
 
     return safeSend(chatId,
@@ -7747,6 +7911,95 @@ async function showSearchResults(chatId, filters, page = 0) {
       ]}
     });
   } catch (e) { console.error('[Bot] showSearchResults:', e.message); }
+}
+
+
+// Advanced search v2 reads filters from searchFilters Map
+
+async function showSearchResultsV2(chatId, page) {
+  try {
+    page = parseInt(page) || 0;
+    const perPage = 5;
+    const filters = getSearchFilters(chatId);
+
+    const conditions = ['available=1'];
+    const params = [];
+    if (filters.height_min != null && filters.height_max != null) {
+      conditions.push('height BETWEEN ? AND ?');
+      params.push(filters.height_min, filters.height_max);
+    }
+    if (filters.age_min != null && filters.age_max != null) {
+      conditions.push('age BETWEEN ? AND ?');
+      params.push(filters.age_min, filters.age_max);
+    }
+    if (filters.category) {
+      conditions.push('category = ?');
+      params.push(filters.category);
+    }
+    if (filters.city) {
+      conditions.push('LOWER(city) LIKE LOWER(?)');
+      params.push(filters.city);
+    }
+
+    const where = conditions.join(' AND ');
+    const countRow = await get(`SELECT COUNT(*) as cnt FROM models WHERE ${where}`, params);
+    const total = countRow?.cnt || 0;
+    const totalPages = Math.ceil(total / perPage) || 1;
+
+    if (!total) {
+      return safeSend(chatId,
+        '🔍 *Поиск моделей*\n\nПо вашим критериям моделей не найдено\\. Попробуйте расширить фильтры\\.',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '✖️ Сбросить фильтры', callback_data: 'search_reset' }],
+            [{ text: '← Назад', callback_data: 'cat_search' }],
+          ]}
+        }
+      );
+    }
+
+    const models = await query(
+      `SELECT id, name, age, height, city, category FROM models WHERE ${where} ORDER BY featured DESC, name ASC LIMIT ? OFFSET ?`,
+      [...params, perPage, page * perPage]
+    );
+
+    let text = `🔍 *Результаты поиска*\n\nНайдено: *${total}* ${ru_plural(total, 'модель', 'модели', 'моделей')}`;
+    if (totalPages > 1) text += ` \\(стр\\. ${esc(String(page + 1))}/${esc(String(totalPages))}\\)`;
+    text += '\n\n';
+
+    models.forEach((m, i) => {
+      text += `${page * perPage + i + 1}\\. *${esc(m.name)}*`;
+      const parts = [];
+      if (m.city)     parts.push(esc(m.city));
+      if (m.height)   parts.push(`${m.height} см`);
+      if (m.age)      parts.push(`${m.age} лет`);
+      if (m.category) parts.push(esc(m.category));
+      if (parts.length) text += ` — ${parts.join(' · ')}`;
+      text += '\n';
+    });
+
+    const modelBtns = models.map(m => {
+      const label = '👁 ' + m.name +
+        (m.city ? ' · ' + m.city : '') +
+        (m.height ? ' · ' + m.height + 'см' : '');
+      return [{ text: label, callback_data: 'srch_view_' + m.id }];
+    });
+
+    const nav = [];
+    if (page > 0)                     nav.push({ text: '◀️ Пред', callback_data: 'search_page_' + (page - 1) });
+    nav.push({ text: (page + 1) + '/' + totalPages, callback_data: 'srch_noop' });
+    if ((page + 1) * perPage < total) nav.push({ text: 'След ▶️', callback_data: 'search_page_' + (page + 1) });
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        ...modelBtns,
+        ...(totalPages > 1 ? [nav] : []),
+        [{ text: '← Назад', callback_data: 'cat_search' }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showSearchResultsV2:', e.message); }
 }
 
 // ─── AI підбір моделей ────────────────────────────────────────────────────────

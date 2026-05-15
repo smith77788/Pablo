@@ -475,7 +475,10 @@
         <a href="/reviews.html">Отзывы</a>
         <a href="/pricing.html">Цены</a>
         <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
+        <a href="/favorites.html" aria-label="Избранное" style="font-size:0.9rem;display:inline-flex;align-items:center;gap:4px;color:var(--text-muted)">
+          <span aria-hidden="true">❤️</span>
+          <span id="fav-nav-badge" style="background:red;color:white;border-radius:50%;padding:0 5px;font-size:0.7rem;min-width:18px;text-align:center;display:inline-block;line-height:18px"></span>
+        </a>
         <button onclick="DarkMode.toggle()"
           class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
           aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
@@ -621,10 +624,18 @@
 
             <!-- Reviews -->
             <div id="model-reviews" class="mt-8" style="margin-top:40px">
-              <span class="model-section-title">Отзывы о работе с моделью</span>
+              <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+                <span class="model-section-title" style="margin-bottom:0">Отзывы о работе с моделью</span>
+                <div id="reviews-avg" style="display:none;align-items:center;gap:6px;background:rgba(201,169,110,0.08);border:1px solid rgba(201,169,110,0.2);border-radius:20px;padding:4px 12px">
+                  <span id="reviews-avg-stars" style="color:var(--gold);font-size:1rem"></span>
+                  <span id="reviews-avg-val" style="color:var(--gold);font-weight:700;font-size:0.9rem"></span>
+                  <span id="reviews-avg-count" style="color:var(--text-dim);font-size:0.8rem"></span>
+                </div>
+              </div>
               <div id="reviews-list" style="display:flex;flex-direction:column;gap:16px">
                 <div style="color:var(--text-dim);font-size:0.9rem">Загрузка отзывов...</div>
               </div>
+              <div id="reviews-pagination" style="margin-top:16px;text-align:center"></div>
             </div>
           </div>
 
@@ -787,6 +798,8 @@
         loadModelReviews(model.id);
         loadRelatedModels(model);
         if (window.NM?.analytics) NM.analytics.viewModel(model.id, model.name);
+        // Track model view (fire and forget)
+        fetch(`/api/models/${model.id}/view`, { method: 'POST' });
       }
 
       function renderModel(m) {
@@ -1029,17 +1042,44 @@
       function escHtml(s) {
         return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       }
-      async function loadModelReviews(modelId) {
+      let _reviewsPage = 1;
+      let _reviewsModelId = null;
+      const REVIEWS_PER_PAGE = 5;
+
+      async function loadModelReviews(modelId, page) {
+        _reviewsModelId = modelId;
+        page = page || 1;
+        _reviewsPage = page;
         try {
-          const resp = await fetch(`/api/reviews?model_id=${modelId}&limit=5`);
+          const resp = await fetch(`/api/reviews?model_id=${modelId}&page=${page}&limit=${REVIEWS_PER_PAGE}`);
           const data = await resp.json();
           const container = el('reviews-list');
           if (!container) return;
+          // Support both old array response and new paginated response
           const reviews = Array.isArray(data) ? data : (data.reviews || []);
-          if (!reviews.length) {
+          const total = data.total || reviews.length;
+          const pages = data.pages || 1;
+
+          if (!reviews.length && page === 1) {
             container.innerHTML = '<p style="color:var(--text-dim);font-size:0.9rem">Пока нет отзывов</p>';
+            el('reviews-avg') && (el('reviews-avg').style.display = 'none');
+            el('reviews-pagination') && (el('reviews-pagination').innerHTML = '');
             return;
           }
+
+          // Show avg rating header
+          const rated = reviews.filter(r => r.rating > 0);
+          if (rated.length > 0 && page === 1) {
+            const avg = rated.reduce((s, r) => s + r.rating, 0) / rated.length;
+            const avgEl = el('reviews-avg');
+            if (avgEl) {
+              avgEl.style.display = 'flex';
+              el('reviews-avg-stars').textContent = '★'.repeat(Math.round(avg)) + '☆'.repeat(5 - Math.round(avg));
+              el('reviews-avg-val').textContent = avg.toFixed(1);
+              el('reviews-avg-count').textContent = `(${total} отзыв${total === 1 ? '' : total < 5 ? 'а' : 'ов'})`;
+            }
+          }
+
           container.innerHTML = reviews.map(r => `
             <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px">
               <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
@@ -1051,12 +1091,28 @@
                   <div style="font-size:0.85rem;color:var(--gold)">${'★'.repeat(r.rating || 5)}${'☆'.repeat(5-(r.rating||5))}</div>
                 </div>
               </div>
-              <p style="color:var(--text-muted);font-size:0.9rem;line-height:1.7;margin:0">${escHtml(r.text || '')}</p>
-              ${r.created_at ? `<div style="font-size:0.75rem;color:var(--text-dim);margin-top:10px">${new Date(r.created_at).toLocaleDateString('ru-RU')}</div>` : ''}
+              ${r.text ? `<p style="color:var(--text-muted);font-size:0.9rem;line-height:1.7;margin:0 0 10px">${escHtml(r.text)}</p>` : ''}
+              ${r.created_at ? `<div style="font-size:0.75rem;color:var(--text-dim);margin-bottom:${r.admin_reply ? '12px' : '0'}">${new Date(r.created_at).toLocaleDateString('ru-RU')}</div>` : ''}
+              ${r.admin_reply ? `
+              <div style="margin-top:10px;padding:10px 14px;background:rgba(201,169,110,0.06);border-left:3px solid var(--gold);border-radius:0 6px 6px 0">
+                <div style="font-size:0.72rem;color:var(--gold);font-weight:600;margin-bottom:4px">💬 Ответ агентства${r.reply_at ? ' · ' + new Date(r.reply_at).toLocaleDateString('ru-RU') : ''}:</div>
+                <div style="font-size:0.85rem;color:var(--text-muted);line-height:1.6">${escHtml(r.admin_reply)}</div>
+              </div>` : ''}
             </div>
           `).join('');
+
+          // Pagination
+          const pag = el('reviews-pagination');
+          if (pag) {
+            let pagHtml = '';
+            if (page > 1) pagHtml += `<button onclick="loadModelReviews(${modelId},${page-1})" style="padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;border-radius:6px;cursor:pointer;margin-right:6px">← Назад</button>`;
+            if (page < pages) pagHtml += `<button onclick="loadModelReviews(${modelId},${page+1})" style="padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;border-radius:6px;cursor:pointer">Ещё отзывы →</button>`;
+            if (pages > 1) pagHtml += `<span style="font-size:0.75rem;color:var(--text-dim);margin-left:8px">${page} / ${pages}</span>`;
+            pag.innerHTML = pagHtml;
+          }
         } catch (e) { /* silent fail */ }
       }
+      window.loadModelReviews = loadModelReviews;
 
       // ── Social sharing ────────────────────────────────────────────────────────
       window.shareModel = function(platform) {

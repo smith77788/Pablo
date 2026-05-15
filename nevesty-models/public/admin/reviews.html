@@ -653,6 +653,13 @@
         document.getElementById('sidebar').classList.toggle('open');
       });
       await Promise.all([loadStats(), loadReviews()]);
+      // Auto-refresh every 30s when on pending tab
+      setInterval(() => {
+        if (currentFilter === '0') {
+          loadReviews();
+          loadStats();
+        }
+      }, 30000);
     });
   </script>
 </body>

@@ -1201,6 +1201,122 @@ router.post('/admin/models/:id/generate-description', auth, async (req, res, nex
   } catch (e) { next(e); }
 });
 
+// ─── Model stats (admin) ──────────────────────────────────────────────
+// GET /admin/models/:id/stats — aggregated stats for a single model
+router.get('/admin/models/:id/stats', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const m = await get('SELECT id, name, view_count FROM models WHERE id=?', [id]);
+    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
+
+    const [ordersRow, ratingRow] = await Promise.all([
+      get(
+        `SELECT
+           COUNT(*) as total_orders,
+           SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed_orders,
+           SUM(CASE WHEN status NOT IN ('completed','cancelled') THEN 1 ELSE 0 END) as active_orders,
+           SUM(CASE WHEN status='completed' AND budget IS NOT NULL AND budget != '' THEN CAST(budget AS REAL) ELSE 0 END) as revenue_total
+         FROM orders WHERE model_id=?`,
+        [id]
+      ),
+      get(
+        `SELECT ROUND(AVG(rating), 2) as avg_rating, COUNT(*) as review_count
+         FROM reviews WHERE model_id=? AND approved=1`,
+        [id]
+      ),
+    ]);
+
+    res.json({
+      total_orders:     ordersRow?.total_orders     || 0,
+      completed_orders: ordersRow?.completed_orders || 0,
+      active_orders:    ordersRow?.active_orders    || 0,
+      avg_rating:       ratingRow?.avg_rating       || null,
+      review_count:     ratingRow?.review_count     || 0,
+      view_count:       m.view_count                || 0,
+      revenue_total:    ordersRow?.revenue_total    || 0,
+    });
+  } catch (e) { next(e); }
+});
+
+// GET /admin/analytics/model-stats/:id — alias used by admin UI
+router.get('/admin/analytics/model-stats/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const m = await get('SELECT * FROM models WHERE id=?', [id]);
+    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
+
+    const [ordersAgg, ratingAgg, monthlyRows, ratingDist] = await Promise.all([
+      get(
+        `SELECT
+           COUNT(*) as total,
+           SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+           SUM(CASE WHEN status NOT IN ('completed','cancelled') THEN 1 ELSE 0 END) as active,
+           ROUND(AVG(CASE WHEN budget IS NOT NULL AND budget != '' AND CAST(budget AS REAL) > 0 THEN CAST(budget AS REAL) END), 0) as avg_budget
+         FROM orders WHERE model_id=?`,
+        [id]
+      ),
+      get(
+        `SELECT ROUND(AVG(rating), 2) as avg_rating, COUNT(*) as total
+         FROM reviews WHERE model_id=? AND approved=1`,
+        [id]
+      ),
+      query(
+        `SELECT strftime('%Y-%m-01', created_at) as month, COUNT(*) as count
+         FROM orders WHERE model_id=?
+         GROUP BY strftime('%Y-%m', created_at)
+         ORDER BY month ASC
+         LIMIT 12`,
+        [id]
+      ),
+      query(
+        `SELECT rating, COUNT(*) as cnt FROM reviews WHERE model_id=? AND approved=1 GROUP BY rating`,
+        [id]
+      ),
+    ]);
+
+    const distribution = {};
+    for (const r of ratingDist) distribution[r.rating] = r.cnt;
+
+    res.json({
+      model: { id: m.id, name: m.name, category: m.category, city: m.city, view_count: m.view_count || 0 },
+      orders: {
+        total:      ordersAgg?.total      || 0,
+        completed:  ordersAgg?.completed  || 0,
+        active:     ordersAgg?.active     || 0,
+        avg_budget: ordersAgg?.avg_budget || null,
+      },
+      reviews: {
+        avg_rating:   ratingAgg?.avg_rating || null,
+        total:        ratingAgg?.total      || 0,
+        distribution,
+      },
+      monthly_orders: monthlyRows,
+    });
+  } catch (e) { next(e); }
+});
+
+// ─── Public model view tracking ────────────────────────────────────────────────
+// In-memory rate limit store: "ip:modelId" -> last-seen timestamp
+const _viewRateLimits = new Map();
+
+// POST /models/:id/view — increment view_count (public, rate-limited to 1/hour per IP per model)
+router.post('/models/:id/view', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const key = `${ip}:${id}`;
+  const now = Date.now();
+  const last = _viewRateLimits.get(key) || 0;
+  if (now - last < 60 * 60 * 1000) {
+    return res.status(429).json({ ok: false, reason: 'rate_limited' });
+  }
+  _viewRateLimits.set(key, now);
+  run('UPDATE models SET view_count = COALESCE(view_count, 0) + 1 WHERE id=?', [id]).catch(() => {});
+  res.json({ ok: true });
+});
+
 // Public: check model availability for a date
 router.get('/models/:id/availability', async (req, res, next) => {
   try {
@@ -1993,18 +2109,57 @@ router.put('/settings', auth, async (req, res, next) => {
 // ─── Reviews (public) ─────────────────────────────────────────────────────────
 router.get('/reviews', async (req, res, next) => {
   try {
+    const usePagination = req.query.page !== undefined;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
     const model_id = req.query.model_id ? parseInt(req.query.model_id) : null;
-    let sql = 'SELECT r.id, r.client_name, r.rating, r.text, r.model_id, r.created_at, m.name as model_name FROM reviews r LEFT JOIN models m ON r.model_id = m.id WHERE r.approved = 1';
+    let where = 'r.approved = 1';
     const params = [];
     if (model_id && Number.isInteger(model_id) && model_id > 0) {
-      sql += ' AND r.model_id = ?';
+      where += ' AND r.model_id = ?';
       params.push(model_id);
     }
-    sql += ' ORDER BY r.created_at DESC LIMIT ?';
-    params.push(limit);
-    const reviews = await query(sql, params);
+    if (usePagination) {
+      const [totalRow, reviews] = await Promise.all([
+        get(`SELECT COUNT(*) as n FROM reviews r WHERE ${where}`, [...params]),
+        query(
+          `SELECT r.id, r.client_name, r.rating, r.text, r.model_id, r.created_at,
+                  r.admin_reply, r.reply_at, m.name as model_name
+           FROM reviews r LEFT JOIN models m ON r.model_id = m.id
+           WHERE ${where} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+          [...params, limit, offset]
+        )
+      ]);
+      return res.json({ reviews, total: totalRow.n, page, pages: Math.ceil(totalRow.n / limit), limit });
+    }
+    // Legacy: return plain array (backward-compat)
+    const reviews = await query(
+      `SELECT r.id, r.client_name, r.rating, r.text, r.model_id, r.created_at,
+              r.admin_reply, r.reply_at, m.name as model_name
+       FROM reviews r LEFT JOIN models m ON r.model_id = m.id
+       WHERE ${where} ORDER BY r.created_at DESC LIMIT ?`,
+      [...params, limit]
+    );
     res.json(reviews);
+  } catch (e) { next(e); }
+});
+
+// ─── Reviews recent (public, for homepage) ────────────────────────────────────
+router.get('/reviews/recent', async (req, res, next) => {
+  try {
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 5));
+    const rows = await query(
+      `SELECT r.id, r.rating, r.text, r.client_name, r.created_at,
+              r.admin_reply, r.reply_at, m.name as model_name
+       FROM reviews r
+       LEFT JOIN models m ON m.id = r.model_id
+       WHERE r.approved = 1
+       ORDER BY r.created_at DESC
+       LIMIT ?`,
+      [limit]
+    );
+    res.json(rows);
   } catch (e) { next(e); }
 });
 
@@ -2097,6 +2252,32 @@ router.post('/admin/reviews/bulk-approve', auth, async (req, res, next) => {
     const result = await run(`UPDATE reviews SET approved=1 WHERE id IN (${phs}) AND approved=0`, validIds);
     await logAudit(req, 'bulk_approve', 'review', null, { ids: validIds, updated: result.changes });
     res.json({ ok: true, updated: result.changes });
+  } catch (e) { next(e); }
+});
+
+// PATCH /admin/reviews/:id/approve — explicitly approve a review
+router.patch('/admin/reviews/:id/approve', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const review = await get('SELECT id FROM reviews WHERE id = ?', [id]);
+    if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
+    await run('UPDATE reviews SET approved = 1 WHERE id = ?', [id]);
+    await logAudit(req, 'approve', 'review', id, { approved: 1 });
+    res.json({ ok: true, approved: 1 });
+  } catch (e) { next(e); }
+});
+
+// PATCH /admin/reviews/:id/reject — reject (unpublish) a review
+router.patch('/admin/reviews/:id/reject', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const review = await get('SELECT id FROM reviews WHERE id = ?', [id]);
+    if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
+    await run('UPDATE reviews SET approved = 0 WHERE id = ?', [id]);
+    await logAudit(req, 'reject', 'review', id, { approved: 0 });
+    res.json({ ok: true, approved: 0 });
   } catch (e) { next(e); }
 });
 
