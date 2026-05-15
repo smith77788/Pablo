@@ -11,3 +11,5 @@ data/
 *.sqlite
 .DS_Store
 nevesty-models.zip
+factory.log
+logs/
