@@ -157,6 +157,155 @@ async function runCycle() {
   }
 }
 
+// ─── Вспомогательные задачи (cron-like, проверка каждую минуту) ──────────────
+
+const { execSync } = require('child_process');
+const fs           = require('fs');
+const NOTIFY_PATH  = '/home/user/Pablo/nevesty-models/tools/notify.js';
+const NOTIFY_CWD   = '/home/user/Pablo/nevesty-models';
+const FACTORY_DB   = '/home/user/Pablo/factory/factory.db';
+
+function notify(msg) {
+  try {
+    const safe = msg.replace(/"/g, '\\"').replace(/\n/g, '\\n');
+    execSync(`node ${NOTIFY_PATH} --from "Scheduler" "${safe}"`, { cwd: NOTIFY_CWD, timeout: 15000 });
+  } catch (e) {
+    console.error('[Scheduler] notify error:', e.message);
+  }
+}
+
+// Хранит метки последнего запуска по ключу, чтобы не дублировать в рамках суток
+const _lastRun = {};
+
+function shouldRun(key, nowH, nowM, nowDow, targetH, targetM, targetDow /* -1 = every day */) {
+  if (nowH !== targetH || nowM !== targetM) return false;
+  if (targetDow !== -1 && nowDow !== targetDow) return false;
+  const today = new Date().toISOString().slice(0, 10);
+  if (_lastRun[key] === today) return false;
+  _lastRun[key] = today;
+  return true;
+}
+
+// Таск 1: Еженедельно (воскресенье 03:00) — VACUUM + ANALYZE БД
+async function taskWeeklyVacuum() {
+  try {
+    await dbRun('VACUUM');
+    await dbRun('ANALYZE');
+    console.log('[Scheduler] DB VACUUM + ANALYZE completed');
+  } catch (e) {
+    console.error('[Scheduler] VACUUM error:', e.message);
+  }
+}
+
+// Таск 2: Каждые 6 часов — проверка AI Factory
+function taskFactoryHealthCheck() {
+  if (!fs.existsSync(FACTORY_DB)) return;
+  const sqlite3 = require('sqlite3').verbose();
+  const fdb = new sqlite3.Database(FACTORY_DB, sqlite3.OPEN_READONLY);
+  fdb.get("SELECT MAX(started_at) as last FROM cycles WHERE status='completed'", [], (err, row) => {
+    fdb.close();
+    if (err || !row?.last) return;
+    const hoursSince = (Date.now() - new Date(row.last).getTime()) / 3600000;
+    if (hoursSince > 12) {
+      notify(`⚠️ AI Factory не запускался ${Math.round(hoursSince)} часов! Последний цикл: ${row.last}`);
+    }
+  });
+}
+
+// Таск 3: Понедельник 10:00 — re-engagement клиентов
+async function taskReEngagement() {
+  try {
+    const clients = await dbAll(`
+      SELECT DISTINCT client_chat_id, client_name,
+        MAX(created_at) as last_order
+      FROM orders
+      WHERE status='completed'
+        AND client_chat_id IS NOT NULL
+        AND client_chat_id != ''
+      GROUP BY client_chat_id
+      HAVING datetime(last_order) < datetime('now', '-60 days')
+      LIMIT 20
+    `);
+    console.log(`[Scheduler] Re-engagement: ${clients.length} clients eligible`);
+  } catch (e) {
+    console.error('[Scheduler] re-engagement error:', e.message);
+  }
+}
+
+// Таск 4: Ежедневно 09:00 — утренний отчёт
+async function taskDailyReport() {
+  try {
+    const today        = new Date().toISOString().split('T')[0];
+    const todayOrders  = await dbGet('SELECT COUNT(*) as cnt FROM orders WHERE date(created_at)=?', [today]);
+    const activeOrders = await dbGet("SELECT COUNT(*) as cnt FROM orders WHERE status IN ('new','reviewing','confirmed','in_progress')");
+    const pendingRevs  = await dbGet('SELECT COUNT(*) as cnt FROM reviews WHERE approved=0');
+    const msg =
+      `📊 Утренний отчёт\n\n` +
+      `Заявок сегодня: ${todayOrders?.cnt || 0}\n` +
+      `Активных заявок: ${activeOrders?.cnt || 0}\n` +
+      `Отзывов на модерации: ${pendingRevs?.cnt || 0}`;
+    notify(msg);
+  } catch (e) {
+    console.error('[Scheduler] daily report error:', e.message);
+  }
+}
+
+// Таск 5: Ежедневно 02:00 — очистка устаревших сессий
+async function taskSessionCleanup() {
+  try {
+    const result = await dbRun(
+      `DELETE FROM telegram_sessions WHERE updated_at < datetime('now', '-7 days') AND state='idle'`
+    );
+    console.log(`[Scheduler] Cleaned ${result?.changes ?? 0} stale sessions`);
+  } catch (e) {
+    console.error('[Scheduler] session cleanup error:', e.message);
+  }
+}
+
+// ─── Планировщик дополнительных задач (тик каждые 60 сек) ───────────────────
+
+// Каждые 6 часов — Factory health (с момента старта)
+let _lastFactoryCheck = 0;
+const FACTORY_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+setInterval(() => {
+  const now  = new Date();
+  const h    = now.getHours();
+  const m    = now.getMinutes();
+  const dow  = now.getDay(); // 0=Sun,1=Mon,...
+
+  // Воскресенье 03:00 — VACUUM
+  if (shouldRun('vacuum', h, m, dow, 3, 0, 0)) {
+    console.log('[Scheduler] Running weekly VACUUM...');
+    taskWeeklyVacuum();
+  }
+
+  // Понедельник 10:00 — Re-engagement
+  if (shouldRun('reengagement', h, m, dow, 10, 0, 1)) {
+    console.log('[Scheduler] Running re-engagement...');
+    taskReEngagement();
+  }
+
+  // Ежедневно 09:00 — Daily report
+  if (shouldRun('dailyreport', h, m, dow, 9, 0, -1)) {
+    console.log('[Scheduler] Sending daily report...');
+    taskDailyReport();
+  }
+
+  // Ежедневно 02:00 — Session cleanup
+  if (shouldRun('sessioncleanup', h, m, dow, 2, 0, -1)) {
+    console.log('[Scheduler] Running session cleanup...');
+    taskSessionCleanup();
+  }
+
+  // Каждые 6 часов — Factory health check
+  if (Date.now() - _lastFactoryCheck >= FACTORY_CHECK_INTERVAL_MS) {
+    _lastFactoryCheck = Date.now();
+    console.log('[Scheduler] Running factory health check...');
+    taskFactoryHealthCheck();
+  }
+}, 60 * 1000); // каждую минуту
+
 // ─── Запуск ──────────────────────────────────────────────────────────────────
 
 console.log('🧬 Living Organism Scheduler запущен (28 агентов, каждые 15 мин)');
