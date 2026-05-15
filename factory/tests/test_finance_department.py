@@ -474,3 +474,79 @@ class TestBudgetPlanner:
         actual  = {"marketing": 10_000, "new_expense": 3_000}
         result = planner.evaluate_budget_variance(planned, actual)
         assert "new_expense" in result["variances"]
+
+
+# ──────────────────────────────────────────────────────────────
+# FinanceDepartment facade
+# ──────────────────────────────────────────────────────────────
+
+from factory.agents.finance_department import FinanceDepartment
+
+
+@pytest.fixture
+def dept() -> FinanceDepartment:
+    return FinanceDepartment()
+
+
+class TestFinanceDepartment:
+    """Integration tests for the FinanceDepartment facade."""
+
+    def test_run_analysis_returns_required_keys(self, dept):
+        result = dept.run_analysis({'revenue_history': [10_000, 12_000, 14_000], 'costs': {}})
+        assert 'revenue_forecast_3m' in result
+        assert 'trend' in result
+        assert 'confidence' in result
+        assert 'cost_analysis' in result
+        assert 'budget_plan' in result
+
+    def test_run_analysis_forecast_is_list_of_three(self, dept):
+        result = dept.run_analysis({'revenue_history': [10_000, 12_000, 14_000], 'costs': {}})
+        assert isinstance(result['revenue_forecast_3m'], list)
+        assert len(result['revenue_forecast_3m']) == 3
+
+    def test_run_analysis_empty_history(self, dept):
+        result = dept.run_analysis({'revenue_history': [], 'costs': {}})
+        assert result['revenue_forecast_3m'] == [0.0, 0.0, 0.0]
+
+    def test_run_analysis_single_month_history(self, dept):
+        result = dept.run_analysis({'revenue_history': [50_000], 'costs': {}})
+        assert isinstance(result['revenue_forecast_3m'], list)
+        assert len(result['revenue_forecast_3m']) == 3
+
+    def test_run_analysis_with_costs(self, dept):
+        costs = {'marketing': 2_000, 'operations': 3_000}
+        result = dept.run_analysis({'revenue_history': [20_000, 22_000], 'costs': costs})
+        assert 'cost_analysis' in result
+
+    def test_run_analysis_accepts_dict_revenue_history(self, dept):
+        history = [{'revenue': 10_000}, {'revenue': 12_000}, {'revenue': 14_000}]
+        result = dept.run_analysis({'revenue_history': history, 'costs': {}})
+        assert isinstance(result['revenue_forecast_3m'], list)
+
+    def test_run_analysis_accepts_mixed_float_revenue_history(self, dept):
+        result = dept.run_analysis({'revenue_history': [10_000.0, 15_000.0], 'costs': {}})
+        assert 'trend' in result
+
+    def test_run_analysis_trend_is_string(self, dept):
+        result = dept.run_analysis({'revenue_history': [10_000, 12_000, 14_000], 'costs': {}})
+        assert isinstance(result['trend'], str)
+
+    def test_run_analysis_confidence_is_string(self, dept):
+        result = dept.run_analysis({'revenue_history': [10_000, 12_000, 14_000], 'costs': {}})
+        assert isinstance(result['confidence'], str)
+
+    def test_run_analysis_no_errors_on_zero_costs(self, dept):
+        result = dept.run_analysis({'revenue_history': [100_000], 'costs': {}})
+        assert result is not None
+
+    def test_run_analysis_missing_keys_uses_defaults(self, dept):
+        """run_analysis should work with an empty data dict."""
+        result = dept.run_analysis({})
+        assert 'revenue_forecast_3m' in result
+        assert result['revenue_forecast_3m'] == [0.0, 0.0, 0.0]
+
+    def test_facade_exposes_individual_agents(self, dept):
+        assert hasattr(dept, 'forecaster')
+        assert hasattr(dept, 'optimizer')
+        assert hasattr(dept, 'pricing')
+        assert hasattr(dept, 'planner')

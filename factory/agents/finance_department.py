@@ -477,8 +477,7 @@ class FinanceDepartment:
 
         cost_analysis = self.optimizer.analyze_cost_structure(
             expenses=costs,
-            revenue=current_revenue,
-        ) if current_revenue > 0 else {'suggestions': [], 'breakdown': {}}
+        ) if costs else {'suggestions': [], 'breakdown': {}}
 
         budget = self.planner.create_monthly_budget(
             revenue_forecast=current_revenue,
