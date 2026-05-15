@@ -3,7 +3,9 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 let compression;
-try { compression = require('compression'); } catch {}
+try {
+  compression = require('compression');
+} catch {}
 const { initDatabase, get: dbGet, closeDatabase } = require('./database');
 const { initBot } = require('./bot');
 const apiRouter = require('./routes/api');
@@ -58,22 +60,30 @@ if (LOG_JSON) {
 // ─── Security headers ─────────────────────────────────────────────────────────
 try {
   const helmet = require('helmet');
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://www.googletagmanager.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
-        fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
-        imgSrc: ["'self'", "data:", "https:", "blob:"],
-        connectSrc: ["'self'", "ws:", "wss:", "https://www.google-analytics.com"],
-        frameSrc: ["'none'"],
-        objectSrc: ["'none'"],
-      }
-    },
-    crossOriginEmbedderPolicy: false,
-    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  }));
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            'https://www.googletagmanager.com',
+            'https://cdn.jsdelivr.net',
+            'https://cdnjs.cloudflare.com',
+          ],
+          styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com'],
+          fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com'],
+          imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
+          connectSrc: ["'self'", 'ws:', 'wss:', 'https://www.google-analytics.com'],
+          frameSrc: ["'none'"],
+          objectSrc: ["'none'"],
+        },
+      },
+      crossOriginEmbedderPolicy: false,
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    })
+  );
   app.use(helmet.noSniff());
   app.use(helmet.hidePoweredBy());
   app.use(helmet.frameguard({ action: 'sameorigin' }));
@@ -106,7 +116,8 @@ try {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later.' },
-    skip: (req) => req.path.startsWith('/api/health') || (req.path.startsWith('/api/admin/') && !!req.headers.authorization),
+    skip: req =>
+      req.path.startsWith('/api/health') || (req.path.startsWith('/api/admin/') && !!req.headers.authorization),
   });
 
   // Auth endpoints — strict (5 per 15 minutes per IP)
@@ -115,7 +126,7 @@ try {
     max: 5,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many auth attempts, please try again in 15 minutes.' }
+    message: { error: 'Too many auth attempts, please try again in 15 minutes.' },
   });
 
   // Orders/booking endpoints (20 per minute)
@@ -124,7 +135,7 @@ try {
     max: 20,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many requests, please try again later.' }
+    message: { error: 'Too many requests, please try again later.' },
   });
 
   // Upload endpoints (10 per minute)
@@ -133,7 +144,7 @@ try {
     max: 10,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many uploads, please try again later.' }
+    message: { error: 'Too many uploads, please try again later.' },
   });
 
   app.use('/api/', globalApiLimiter);
@@ -148,16 +159,16 @@ try {
 // Strip null bytes, dangerous unicode, and XSS payloads from all incoming string fields
 app.use((req, res, next) => {
   if (req.body && typeof req.body === 'object') {
-    const sanitize = (v) => {
+    const sanitize = v => {
       if (typeof v !== 'string') return v;
       return v
-        .replace(/\0/g, '')                                                           // null bytes
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')          // <script> blocks
-        .replace(/javascript\s*:/gi, '')                                              // javascript: URIs
-        .replace(/on\w+\s*=/gi, '')                                                   // inline event handlers (onclick=, etc.)
+        .replace(/\0/g, '') // null bytes
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // <script> blocks
+        .replace(/javascript\s*:/gi, '') // javascript: URIs
+        .replace(/on\w+\s*=/gi, '') // inline event handlers (onclick=, etc.)
         .slice(0, 10000);
     };
-    const walk = (obj) => {
+    const walk = obj => {
       if (Array.isArray(obj)) return obj.map(walk);
       if (obj && typeof obj === 'object') {
         return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, walk(v)]));
@@ -181,24 +192,36 @@ app.use('/api/contact', (req, res, next) => {
 });
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-app.use(cors(ALLOWED_ORIGINS.length ? {
-  origin: ALLOWED_ORIGINS,
-  credentials: true
-} : {}));
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+app.use(
+  cors(
+    ALLOWED_ORIGINS.length
+      ? {
+          origin: ALLOWED_ORIGINS,
+          credentials: true,
+        }
+      : {}
+  )
+);
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // ─── Compression ──────────────────────────────────────────────────────────────
-if (compression) app.use(compression({
-  level: 6,          // balanced speed/ratio (default is 6, but explicit is clearer)
-  threshold: 1024,   // only compress responses > 1 KB
-  filter: (req, res) => {
-    if (req.headers['x-no-compression']) return false;
-    return compression.filter(req, res);
-  },
-}));
+if (compression)
+  app.use(
+    compression({
+      level: 6, // balanced speed/ratio (default is 6, but explicit is clearer)
+      threshold: 1024, // only compress responses > 1 KB
+      filter: (req, res) => {
+        if (req.headers['x-no-compression']) return false;
+        return compression.filter(req, res);
+      },
+    })
+  );
 
 // ─── Response-time header (useful for monitoring / APM) ───────────────────────
 app.use((req, res, next) => {
@@ -206,7 +229,9 @@ app.use((req, res, next) => {
   res.on('finish', () => {
     const ms = Number(process.hrtime.bigint() - start) / 1e6;
     // header may already be sent for streamed responses — ignore the throw
-    try { res.setHeader('X-Response-Time', `${ms.toFixed(2)}ms`); } catch (_) {}
+    try {
+      res.setHeader('X-Response-Time', `${ms.toFixed(2)}ms`);
+    } catch (_) {}
   });
   next();
 });
@@ -215,16 +240,22 @@ app.use((req, res, next) => {
 app.get('/sitemap.xml', async (req, res) => {
   try {
     const { query: dbQuery } = require('./database');
-    const models = await dbQuery('SELECT id, name, updated_at FROM models WHERE available=1 AND archived=0 ORDER BY updated_at DESC');
+    const models = await dbQuery(
+      'SELECT id, name, created_at FROM models WHERE available=1 AND archived=0 ORDER BY created_at DESC'
+    );
     const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
 
-    const modelUrls = models.map(m => `
+    const modelUrls = models
+      .map(
+        m => `
   <url>
     <loc>${baseUrl}/model/${m.id}</loc>
-    <lastmod>${m.updated_at ? m.updated_at.split('T')[0] : new Date().toISOString().split('T')[0]}</lastmod>
+    <lastmod>${m.created_at ? m.created_at.split('T')[0] : new Date().toISOString().split('T')[0]}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
-  </url>`).join('');
+  </url>`
+      )
+      .join('');
 
     const today = new Date().toISOString().split('T')[0];
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -324,13 +355,13 @@ app.get('/model/:id', async (req, res) => {
   <!-- Schema.org BreadcrumbList -->
   <script type="application/ld+json">
   ${JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "itemListElement": [
-      { "@type": "ListItem", "position": 1, "name": "Главная", "item": siteUrl },
-      { "@type": "ListItem", "position": 2, "name": "Каталог моделей", "item": `${siteUrl}/catalog.html` },
-      { "@type": "ListItem", "position": 3, "name": model.name || 'Модель', "item": canonicalUrl }
-    ]
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Главная', item: siteUrl },
+      { '@type': 'ListItem', position: 2, name: 'Каталог моделей', item: `${siteUrl}/catalog.html` },
+      { '@type': 'ListItem', position: 3, name: model.name || 'Модель', item: canonicalUrl },
+    ],
   })}
   <\/script>`;
 
@@ -379,31 +410,36 @@ app.get('/og-image/:modelId', async (req, res) => {
 });
 
 // ─── Static files ─────────────────────────────────────────────────────────────
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
-  maxAge: '7d',
-  etag: true,
-  setHeaders: (res, _path) => {
-    // Images served from /uploads — 1 week cache
-    res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-  }
-}));
-app.use(express.static(path.join(__dirname, 'public'), {
-  maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
-  etag: true,
-  lastModified: true,
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.html')) {
-      // HTML: always revalidate
-      res.setHeader('Cache-Control', 'no-cache');
-    } else if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
-      // JS/CSS: 7 day cache (files are versioned or change infrequently)
-      res.setHeader('Cache-Control', 'public, max-age=604800');
-    } else if (/\.(png|jpe?g|gif|svg|webp|ico|avif)$/i.test(filePath)) {
-      // Images: 1 week cache
-      res.setHeader('Cache-Control', 'public, max-age=604800');
-    }
-  }
-}));
+app.use(
+  '/uploads',
+  express.static(path.join(__dirname, 'uploads'), {
+    maxAge: '7d',
+    etag: true,
+    setHeaders: (res, _path) => {
+      // Images served from /uploads — 1 week cache
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    },
+  })
+);
+app.use(
+  express.static(path.join(__dirname, 'public'), {
+    maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
+    etag: true,
+    lastModified: true,
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.html')) {
+        // HTML: always revalidate
+        res.setHeader('Cache-Control', 'no-cache');
+      } else if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
+        // JS/CSS: 7 day cache (files are versioned or change infrequently)
+        res.setHeader('Cache-Control', 'public, max-age=604800');
+      } else if (/\.(png|jpe?g|gif|svg|webp|ico|avif)$/i.test(filePath)) {
+        // Images: 1 week cache
+        res.setHeader('Cache-Control', 'public, max-age=604800');
+      }
+    },
+  })
+);
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 app.use('/api', apiRouter);
@@ -414,14 +450,14 @@ async function buildHealthResponse() {
   const os = require('os');
   const pkg = require('./package.json');
   const mem = process.memoryUsage();
-  const memMb = Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10;
+  const memMb = Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10;
   const loadAvg = os.loadavg();
   const freeMemMb = Math.round(os.freemem() / 1024 / 1024);
   const totalMemMb = Math.round(os.totalmem() / 1024 / 1024);
-  const memUsedMb = Math.round(mem.rss / 1024 / 1024 * 10) / 10;
-  const heapUsedMb = Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10;
-  const heapTotalMb = Math.round(mem.heapTotal / 1024 / 1024 * 10) / 10;
-  const externalMb = Math.round((mem.external || 0) / 1024 / 1024 * 10) / 10;
+  const memUsedMb = Math.round((mem.rss / 1024 / 1024) * 10) / 10;
+  const heapUsedMb = Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10;
+  const heapTotalMb = Math.round((mem.heapTotal / 1024 / 1024) * 10) / 10;
+  const externalMb = Math.round(((mem.external || 0) / 1024 / 1024) * 10) / 10;
   const memAlertMb = parseInt(process.env.MEMORY_ALERT_MB || '500');
   const cpuUsage = process.cpuUsage();
   let dbStatus = 'ok';
@@ -463,7 +499,7 @@ async function buildHealthResponse() {
     // DB size calculation
     const pageCount = pageCountRow?.page_count || 0;
     const pageSize = pageSizeRow?.page_size || 4096;
-    dbSizeMb = Math.round(pageCount * pageSize / 1024 / 1024 * 10) / 10;
+    dbSizeMb = Math.round(((pageCount * pageSize) / 1024 / 1024) * 10) / 10;
 
     // Orders by status for metrics endpoint
     const statusRows = await Promise.all([
@@ -524,17 +560,21 @@ async function buildHealthResponse() {
 
     if (factoryLastCycle) {
       const lastRunDate = new Date(factoryLastCycle);
-      factoryHoursSince = Math.round((Date.now() - lastRunDate.getTime()) / (1000 * 60 * 60) * 10) / 10;
+      factoryHoursSince = Math.round(((Date.now() - lastRunDate.getTime()) / (1000 * 60 * 60)) * 10) / 10;
       factoryStale = factoryHoursSince > 12;
     }
-  } catch (_) { /* table may not have this key yet */ }
+  } catch (_) {
+    /* table may not have this key yet */
+  }
 
   let factoryStatus = 'unknown';
   try {
     const { execSync } = require('child_process');
     const out = execSync('python3 /home/user/Pablo/factory_main.py --status 2>/dev/null', { timeout: 5000 }).toString();
     factoryStatus = out.includes('Last cycle:') ? 'ok' : 'no_cycles';
-  } catch (_) { factoryStatus = 'unavailable'; }
+  } catch (_) {
+    factoryStatus = 'unavailable';
+  }
 
   // Cache stats
   let cacheStats = {};
@@ -548,9 +588,10 @@ async function buildHealthResponse() {
   const overallStatus = dbStatus === 'ok' ? 'ok' : 'degraded';
 
   // Build database sub-object
-  const databaseInfo = dbStatus === 'ok'
-    ? { status: 'ok', latency_ms: dbLatencyMs, wal: walStatus, size_mb: dbSizeMb }
-    : { status: 'error', latency_ms: null, error: dbError };
+  const databaseInfo =
+    dbStatus === 'ok'
+      ? { status: 'ok', latency_ms: dbLatencyMs, wal: walStatus, size_mb: dbSizeMb }
+      : { status: 'error', latency_ms: null, error: dbError };
 
   return {
     status: overallStatus,
@@ -596,16 +637,26 @@ async function buildHealthResponse() {
       users: usersCount,
     },
     components: {
-      database: dbStatus === 'ok'
-        ? { status: 'ok', latency_ms: dbLatencyMs }
-        : { status: 'error', latency_ms: null, error: dbError },
+      database:
+        dbStatus === 'ok'
+          ? { status: 'ok', latency_ms: dbLatencyMs }
+          : { status: 'error', latency_ms: null, error: dbError },
       bot: botInstance
         ? { status: 'ok', polling: true }
-        : (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'your_bot_token_from_botfather' && process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here')
+        : process.env.TELEGRAM_BOT_TOKEN &&
+            process.env.TELEGRAM_BOT_TOKEN !== 'your_bot_token_from_botfather' &&
+            process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here'
           ? { status: 'configured_not_started', polling: false }
           : { status: 'disabled', polling: false },
       factory: {
-        status: factoryLastCycle === null ? 'never_run' : factoryStale ? 'stale' : factoryStatus === 'unavailable' ? 'unavailable' : 'ok',
+        status:
+          factoryLastCycle === null
+            ? 'never_run'
+            : factoryStale
+              ? 'stale'
+              : factoryStatus === 'unavailable'
+                ? 'unavailable'
+                : 'ok',
         lastRun: factoryLastCycle,
         staleSinceHours: factoryStale ? factoryHoursSince : 0,
       },
@@ -637,7 +688,9 @@ async function buildHealthResponse() {
     // Legacy scalar fields kept for compatibility
     bot: botInstance
       ? 'connected'
-      : (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'your_bot_token_from_botfather' && process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here')
+      : process.env.TELEGRAM_BOT_TOKEN &&
+          process.env.TELEGRAM_BOT_TOKEN !== 'your_bot_token_from_botfather' &&
+          process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here'
         ? 'configured'
         : 'disabled',
     memory_mb: memUsedMb,
@@ -715,7 +768,7 @@ app.get('/api/metrics', async (req, res) => {
       '',
       '# HELP nevesty_db_size_mb SQLite database file size in MB',
       '# TYPE nevesty_db_size_mb gauge',
-      `nevesty_db_size_mb ${(health.database && health.database.size_mb != null) ? health.database.size_mb : 0}`,
+      `nevesty_db_size_mb ${health.database && health.database.size_mb != null ? health.database.size_mb : 0}`,
       '',
       '# HELP nevesty_status Overall service status (1=ok, 0=degraded)',
       '# TYPE nevesty_status gauge',
@@ -775,7 +828,7 @@ async function start() {
   scheduler.init({
     db: { run: require('./database').run },
     bot: botInstance?.instance,
-    adminIds: process.env.ADMIN_TELEGRAM_IDS || ''
+    adminIds: process.env.ADMIN_TELEGRAM_IDS || '',
   });
   scheduler.start();
 
@@ -788,13 +841,17 @@ async function start() {
     // ─── Startup Telegram notification ───────────────────────────────────────
     if (process.env.BOT_TOKEN && process.env.ADMIN_TELEGRAM_IDS) {
       const adminIds = process.env.ADMIN_TELEGRAM_IDS.split(',').filter(Boolean);
-      const startMsg = encodeURIComponent(`✅ Сервер запущен\nВремя: ${new Date().toLocaleString('ru-RU')}\nПорт: ${PORT}`);
+      const startMsg = encodeURIComponent(
+        `✅ Сервер запущен\nВремя: ${new Date().toLocaleString('ru-RU')}\nПорт: ${PORT}`
+      );
       adminIds.forEach(id => {
         try {
-          require('https').get(
-            `https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage?chat_id=${id.trim()}&text=${startMsg}`,
-            () => {}
-          ).on('error', () => {});
+          require('https')
+            .get(
+              `https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage?chat_id=${id.trim()}&text=${startMsg}`,
+              () => {}
+            )
+            .on('error', () => {});
         } catch (_) {}
       });
     }
@@ -824,12 +881,18 @@ async function start() {
     if (ws._orderIds) {
       for (const id of ws._orderIds) {
         const set = wsByOrder.get(id);
-        if (set) { set.delete(ws); if (!set.size) wsByOrder.delete(id); }
+        if (set) {
+          set.delete(ws);
+          if (!set.size) wsByOrder.delete(id);
+        }
       }
     }
     if (ws._phone) {
       const set = wsByPhone.get(ws._phone);
-      if (set) { set.delete(ws); if (!set.size) wsByPhone.delete(ws._phone); }
+      if (set) {
+        set.delete(ws);
+        if (!set.size) wsByPhone.delete(ws._phone);
+      }
     }
   }
 
@@ -837,21 +900,33 @@ async function start() {
     const msg = JSON.stringify({ type: 'order_update', order_id: orderId, status });
     // Notify by orderId
     const byId = wsByOrder.get(orderId);
-    if (byId) byId.forEach(ws => { try { if (ws.readyState === ws.OPEN) ws.send(msg); } catch (_) {} });
+    if (byId)
+      byId.forEach(ws => {
+        try {
+          if (ws.readyState === ws.OPEN) ws.send(msg);
+        } catch (_) {}
+      });
     // Notify by phone (cabinet)
     if (phone) {
       const byPhone = wsByPhone.get(phone);
-      if (byPhone) byPhone.forEach(ws => { try { if (ws.readyState === ws.OPEN) ws.send(msg); } catch (_) {} });
+      if (byPhone)
+        byPhone.forEach(ws => {
+          try {
+            if (ws.readyState === ws.OPEN) ws.send(msg);
+          } catch (_) {}
+        });
     }
   }
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', ws => {
     ws.isAlive = true;
-    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
     ws.on('close', () => wsCleanup(ws));
     ws.on('error', () => wsCleanup(ws));
 
-    ws.on('message', async (rawMsg) => {
+    ws.on('message', async rawMsg => {
       try {
         const msg = JSON.parse(rawMsg);
         if (msg.type === 'subscribe') {
@@ -884,7 +959,10 @@ async function start() {
   // Heartbeat — ping every 30s, terminate dead connections
   const wsPingInterval = setInterval(() => {
     wss.clients.forEach(ws => {
-      if (!ws.isAlive) { wsCleanup(ws); return ws.terminate(); }
+      if (!ws.isAlive) {
+        wsCleanup(ws);
+        return ws.terminate();
+      }
       ws.isAlive = false;
       ws.ping();
     });
@@ -893,54 +971,73 @@ async function start() {
   wss.on('close', () => clearInterval(wsPingInterval));
 
   // ─── Memory alert (every 5 minutes) ──────────────────────────────────────────
-  const memAlertInterval = setInterval(async () => {
-    try {
-      const memMb = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
-      if (memMb > 500) {
-        const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').filter(Boolean);
-        for (const id of adminIds) {
-          botInstance?.instance?.sendMessage(id, `⚠️ Внимание: потребление памяти ${memMb} MB`).catch(() => {});
+  const memAlertInterval = setInterval(
+    async () => {
+      try {
+        const memMb = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+        if (memMb > 500) {
+          const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').filter(Boolean);
+          for (const id of adminIds) {
+            botInstance?.instance?.sendMessage(id, `⚠️ Внимание: потребление памяти ${memMb} MB`).catch(() => {});
+          }
         }
-      }
-    } catch (_) {}
-  }, 5 * 60 * 1000);
+      } catch (_) {}
+    },
+    5 * 60 * 1000
+  );
 
   // ─── Factory health check (every 30 minutes) ──────────────────────────────────
-  const factoryCheckInterval = setInterval(async () => {
-    try {
-      const { get: dbGetLocal } = require('./database');
-      const row = await dbGetLocal("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'");
-      if (!row?.value) return;
-      const lastCycleMs = new Date(row.value).getTime();
-      const hoursAgo = (Date.now() - lastCycleMs) / (1000 * 60 * 60);
-      if (hoursAgo >= 12) {
-        const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').filter(Boolean);
-        const h = Math.round(hoursAgo);
-        for (const id of adminIds) {
-          botInstance?.instance?.sendMessage(id,
-            `⚠️ AI Factory не запускался ${h} ч. Последний цикл: ${row.value.slice(0, 16).replace('T', ' ')}`
-          ).catch(() => {});
+  const factoryCheckInterval = setInterval(
+    async () => {
+      try {
+        const { get: dbGetLocal } = require('./database');
+        const row = await dbGetLocal("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'");
+        if (!row?.value) return;
+        const lastCycleMs = new Date(row.value).getTime();
+        const hoursAgo = (Date.now() - lastCycleMs) / (1000 * 60 * 60);
+        if (hoursAgo >= 12) {
+          const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').filter(Boolean);
+          const h = Math.round(hoursAgo);
+          for (const id of adminIds) {
+            botInstance?.instance
+              ?.sendMessage(
+                id,
+                `⚠️ AI Factory не запускался ${h} ч. Последний цикл: ${row.value.slice(0, 16).replace('T', ' ')}`
+              )
+              .catch(() => {});
+          }
         }
-      }
-    } catch (_) {}
-  }, 30 * 60 * 1000);
+      } catch (_) {}
+    },
+    30 * 60 * 1000
+  );
 
   // Attach to app so api routes can use it
   app.set('wsServer', { notifyOrderUpdate });
   console.log('🔌 WebSocket server attached to HTTP server');
 
   // ─── Graceful shutdown ───────────────────────────────────────────────────
-  const shutdown = async (signal) => {
+  const shutdown = async signal => {
     console.log(`\n${signal} received — shutting down gracefully…`);
-    const forceTimer = setTimeout(() => { console.error('Forced shutdown after timeout.'); process.exit(1); }, 10000);
+    const forceTimer = setTimeout(() => {
+      console.error('Forced shutdown after timeout.');
+      process.exit(1);
+    }, 10000);
     try {
       if (botInstance?.instance?.stopPolling) {
-        try { await botInstance.instance.stopPolling({ cancel: true }); console.log('Bot polling stopped.'); } catch (e) { console.warn('stopPolling:', e.message); }
+        try {
+          await botInstance.instance.stopPolling({ cancel: true });
+          console.log('Bot polling stopped.');
+        } catch (e) {
+          console.warn('stopPolling:', e.message);
+        }
       }
       clearInterval(wsPingInterval);
       clearInterval(memAlertInterval);
       clearInterval(factoryCheckInterval);
-      try { require('./services/scheduler').stop(); } catch (_) {}
+      try {
+        require('./services/scheduler').stop();
+      } catch (_) {}
       await new Promise(resolve => wss.close(resolve));
       console.log('WebSocket server closed.');
       await new Promise(resolve => server.close(resolve));
@@ -956,7 +1053,7 @@ async function start() {
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('uncaughtException', (err) => {
+  process.on('uncaughtException', err => {
     console.error('[CRITICAL] Uncaught exception:', err);
     // Attempt to notify admin via Telegram before crashing
     try {
@@ -964,12 +1061,17 @@ async function start() {
         `node ${require('path').join(__dirname, 'tools/notify.js')} --from "Server" "🚨 КРИТИЧНА ПОМИЛКА: ${(err.message || String(err)).replace(/['"]/g, '').substring(0, 100)}"`,
         { timeout: 5000 }
       );
-    } catch (_) { /* best-effort, never block the crash */ }
+    } catch (_) {
+      /* best-effort, never block the crash */
+    }
     process.exit(1);
   });
-  process.on('unhandledRejection', (reason) => {
+  process.on('unhandledRejection', reason => {
     console.error('[ERROR] Unhandled rejection:', reason);
   });
 }
 
-start().catch(err => { console.error('Startup error:', err); process.exit(1); });
+start().catch(err => {
+  console.error('Startup error:', err);
+  process.exit(1);
+});

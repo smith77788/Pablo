@@ -1380,6 +1380,7 @@ router.post('/admin/models/json', auth, async (req, res, next) => {
       ]
     );
     cache.delByPrefix('catalog:'); // invalidate catalog cache
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ id: result.id, success: true });
   } catch (e) {
     res.status(500).json({ error: 'DB error' });
@@ -1409,6 +1410,7 @@ router.put('/admin/models/:id/json', auth, async (req, res, next) => {
       ]
     );
     cache.delByPrefix('catalog:'); // invalidate catalog cache
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: 'DB error' });
@@ -1446,6 +1448,7 @@ router.patch('/admin/models/:id', auth, async (req, res, next) => {
     params.push(id);
     await run(`UPDATE models SET ${updates.join(',')} WHERE id=?`, params);
     cache.delByPrefix('catalog:'); // invalidate catalog cache
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: 'DB error' });
@@ -1462,6 +1465,7 @@ router.patch('/admin/models/:id/archive', auth, async (req, res, next) => {
     await run('UPDATE models SET archived=1, available=0 WHERE id=?', [id]);
     cache.delByPrefix('catalog:');
     await logAudit(req, 'archive', 'model', id, { name: m.name });
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -1478,6 +1482,7 @@ router.patch('/admin/models/:id/restore', auth, async (req, res, next) => {
     await run('UPDATE models SET archived=0 WHERE id=?', [id]);
     cache.delByPrefix('catalog:');
     await logAudit(req, 'restore', 'model', id, { name: m.name });
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -1494,6 +1499,7 @@ router.post('/admin/models/:id/archive', auth, async (req, res, next) => {
     await run('UPDATE models SET archived=1, available=0 WHERE id=?', [id]);
     cache.delByPrefix('catalog:');
     await logAudit(req, 'archive', 'model', id, { name: m.name });
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ success: true });
   } catch (e) {
     next(e);
@@ -1509,6 +1515,7 @@ router.post('/admin/models/:id/restore', auth, async (req, res, next) => {
     await run('UPDATE models SET archived=0 WHERE id=?', [id]);
     cache.delByPrefix('catalog:');
     await logAudit(req, 'restore', 'model', id, { name: m.name });
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ success: true });
   } catch (e) {
     next(e);
@@ -1576,6 +1583,7 @@ router.post(
       );
       cache.delByPrefix('catalog:'); // invalidate catalog cache
       await logAudit(req, 'create', 'model', result.id, { name: sanitize(name, 100) });
+      generateSitemap().catch(e => console.error('[Sitemap]', e.message));
       res.json({ id: result.id });
     } catch (e) {
       next(e);
@@ -1649,6 +1657,7 @@ router.put(
         ]
       );
       cache.delByPrefix('catalog:'); // invalidate catalog cache
+      generateSitemap().catch(e => console.error('[Sitemap]', e.message));
       res.json({ ok: true });
     } catch (e) {
       next(e);
@@ -1673,6 +1682,7 @@ router.delete('/admin/models/:id', auth, async (req, res, next) => {
     await run('DELETE FROM models WHERE id = ?', [id]);
     cache.delByPrefix('catalog:'); // invalidate catalog cache
     await logAudit(req, 'delete', 'model', id, { name: m.name });
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -6810,17 +6820,67 @@ router.post('/chat/ask', chatLimiter, async (req, res) => {
   }
 });
 
+// ─── SEO: Generate static sitemap.xml ────────────────────────────────────────
+async function generateSitemap() {
+  const models = await query(
+    'SELECT id, name, created_at FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id'
+  );
+  const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
+  const today = new Date().toISOString().split('T')[0];
+
+  const staticPages = [
+    { path: '/', priority: '1.0', freq: 'daily' },
+    { path: '/catalog.html', priority: '0.9', freq: 'daily' },
+    { path: '/booking.html', priority: '0.9', freq: 'weekly' },
+    { path: '/about.html', priority: '0.7', freq: 'monthly' },
+    { path: '/reviews.html', priority: '0.7', freq: 'weekly' },
+    { path: '/faq.html', priority: '0.6', freq: 'monthly' },
+    { path: '/contact.html', priority: '0.6', freq: 'monthly' },
+    { path: '/pricing.html', priority: '0.7', freq: 'weekly' },
+    { path: '/cases.html', priority: '0.7', freq: 'monthly' },
+    { path: '/search.html', priority: '0.6', freq: 'weekly' },
+  ];
+
+  const staticUrls = staticPages
+    .map(
+      p =>
+        `  <url>\n    <loc>${baseUrl}${p.path}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${p.freq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`
+    )
+    .join('\n');
+
+  const modelUrls = models
+    .map(m => {
+      const lastmod = m.created_at ? m.created_at.split('T')[0] : today;
+      return `  <url>\n    <loc>${baseUrl}/model/${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
+    })
+    .join('\n');
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${staticUrls}\n${modelUrls}\n</urlset>`;
+
+  fs.writeFileSync(path.join(__dirname, '../public/sitemap.xml'), xml);
+}
+
+// ─── SEO: Manual sitemap regeneration endpoint (admin) ───────────────────────
+router.get('/api/admin/sitemap/regenerate', auth, async (req, res, next) => {
+  try {
+    await generateSitemap();
+    res.json({ ok: true, message: 'Sitemap regenerated successfully' });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── SEO: Dynamic sitemap for model pages ──────────────────────────────────────
 router.get('/sitemap-models.xml', async (req, res, next) => {
   try {
     const models = await query(
-      'SELECT id, name, updated_at FROM models WHERE available=1 AND archived=0 ORDER BY updated_at DESC'
+      'SELECT id, name, created_at FROM models WHERE available=1 AND archived=0 ORDER BY created_at DESC'
     );
     const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
     for (const m of models) {
-      const lastmod = m.updated_at
-        ? m.updated_at.split('T')[0] || m.updated_at.slice(0, 10)
+      const lastmod = m.created_at
+        ? m.created_at.split('T')[0] || m.created_at.slice(0, 10)
         : new Date().toISOString().slice(0, 10);
       xml += `  <url>\n    <loc>${baseUrl}/model/${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
     }
