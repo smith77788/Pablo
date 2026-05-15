@@ -1155,10 +1155,14 @@
       buildSummary();
     }
 
-    // GA4: checkout_progress when completing a step
+    // GA4: checkout_progress + booking_step when completing a step
     const completedStep = state.step;
     if (window.gtag && completedStep >= 2) {
       gtag('event', 'checkout_progress', { checkout_step: completedStep });
+    }
+    // booking_step event (БЛОК 9.3 spec)
+    if (typeof trackEvent === 'function') {
+      trackEvent('booking_step', { step: completedStep, model_id: state.model_id || null });
     }
     // Yandex: step-specific goals
     if (window.ym && window.YM_ID) {
@@ -1417,9 +1421,17 @@
 
       const orderNum = result.order_number;
 
-      // GA4: purchase event (booking complete)
+      // GA4: purchase event (booking complete) — БЛОК 9.3 spec
       const budgetNum = parseFloat((state.budget || '').replace(/[^\d.]/g, '')) || 0;
-      if (window.gtag) {
+      if (typeof trackEvent === 'function') {
+        trackEvent('purchase', {
+          transaction_id: orderNum,
+          currency: 'RUB',
+          value: budgetNum,
+          event_type: state.event_type,
+          ...(typeof getUtmParams === 'function' ? getUtmParams() : {}),
+        });
+      } else if (window.gtag) {
         gtag('event', 'purchase', {
           transaction_id: orderNum,
           value: budgetNum,
@@ -1427,8 +1439,10 @@
           event_type: state.event_type,
         });
       }
-      // Yandex: booking_complete goal
-      if (window.ym && window.YM_ID) {
+      // Yandex: booking_complete goal — БЛОК 9.3 spec
+      if (typeof trackYm === 'function') {
+        trackYm('booking_completed');
+      } else if (window.ym && window.YM_ID) {
         ym(window.YM_ID, 'reachGoal', 'booking_complete', {
           order_number: orderNum,
           event_type: state.event_type,

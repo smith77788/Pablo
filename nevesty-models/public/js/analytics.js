@@ -172,3 +172,36 @@ document.addEventListener('cookieConsentAccepted', _loadAnalyticsScripts);
 window.nmTrack = function (event, params) {
   if (window.NM && NM.analytics) NM.analytics.event(event, params || {});
 };
+
+// ─── БЛОК 9.3 spec shorthands ─────────────────────────────────────────────
+
+// window.trackEvent — thin GA4 wrapper (also fires YM reachGoal)
+window.trackEvent = function (name, params) {
+  if (window.NM && NM.analytics) {
+    NM.analytics.event(name, params || {});
+  } else {
+    // Fallback when NM.analytics not yet ready
+    try {
+      if (typeof gtag === 'function') gtag('event', name, params || {});
+    } catch {}
+  }
+};
+
+// window.trackYm — Yandex.Metrica goal shorthand
+window.trackYm = function (goal, params) {
+  try {
+    if (typeof ym === 'function' && window.YM_ID) {
+      ym(window.YM_ID, 'reachGoal', goal, params || {});
+    }
+  } catch {}
+};
+
+// window.getUtmParams — returns saved UTM object from sessionStorage
+window.getUtmParams = function () {
+  if (window.NM && NM.analytics) return NM.analytics.getSavedUTM();
+  try {
+    return JSON.parse(sessionStorage.getItem('utm') || '{}');
+  } catch {
+    return {};
+  }
+};
