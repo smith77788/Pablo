@@ -1057,21 +1057,100 @@ def get_revenue_trend(data_db) -> list:
 
 
 def _notify_admins_telegram(briefing: dict, decisions: list, cycle_id: str) -> None:
-    """Send factory cycle summary to all Telegram admins via notify.js."""
+    """Send enriched factory cycle summary to all Telegram admins via notify.js."""
     import os
     import subprocess
 
     health = briefing.get('health_score', '?')
-    focus = briefing.get('next_cycle_focus') or briefing.get('ceo_department_focus', '?')
-    summary = briefing.get('summary', '')[:200]
-    actions = len([d for d in decisions if d.get('type') in ('grow', 'create_mvp', 'scale')])
+    focus = briefing.get('next_cycle_focus') or briefing.get('ceo_department_focus', '')
+    elapsed = briefing.get('elapsed_s') or briefing.get('duration_seconds', 0)
+    icon = '💚' if isinstance(health, (int, float)) and health >= 70 else '🟡' if isinstance(health, (int, float)) and health >= 50 else '🔴'
 
-    msg = (
-        f"🏭 Factory цикл завершён\n"
-        f"📊 Health: {health}/100 | Focus: {focus}\n"
-        f"📋 Решений: {len(decisions)} | Активных action: {actions}\n"
-        f"💡 {summary}"
-    )
+    active_actions = len([d for d in decisions if d.get('type') in ('grow', 'create_mvp', 'scale')])
+    phases = briefing.get('phases', {})
+
+    # ── Business metrics ──────────────────────────────────────────────────────
+    nm = briefing.get('nevesty_models', {})
+    metric_parts = []
+    if nm.get('orders_7d') is not None:
+        growth = nm.get('orders_growth_pct', 0)
+        arrow = '↑' if growth >= 0 else '↓'
+        metric_parts.append(f"📋 Заявок 7д: {nm['orders_7d']} ({arrow}{abs(growth):.0f}%)")
+    if nm.get('revenue_30d'):
+        metric_parts.append(f"💰 Выручка 30д: {nm['revenue_30d']:,} ₽")
+    if nm.get('repeat_client_rate_pct') is not None:
+        metric_parts.append(f"🔁 Повторные: {nm['repeat_client_rate_pct']}%")
+    if nm.get('reviews_avg_rating'):
+        metric_parts.append(f"⭐ Рейтинг: {nm['reviews_avg_rating']}/5")
+
+    # ── Phase highlights ──────────────────────────────────────────────────────
+    highlights = []
+
+    # Channel content posts generated
+    cc = phases.get('channel_content', {})
+    posts_generated = cc.get('posts_generated') or len(cc.get('posts', []))
+    if posts_generated:
+        highlights.append(f"📱 Постов для канала: {posts_generated}")
+
+    # Growth actions from CEO synthesis
+    ceo = phases.get('ceo_synthesis', {})
+    growth_actions = ceo.get('growth_actions', [])
+    if growth_actions:
+        top_action = growth_actions[0].get('action', '') if isinstance(growth_actions[0], dict) else str(growth_actions[0])
+        highlights.append(f"💡 {len(growth_actions)} growth actions | топ: {top_action[:80]}")
+
+    # Experiments
+    exp = phases.get('experiment_tracking', {})
+    if exp.get('active_checked'):
+        highlights.append(f"🧪 Экспериментов отслежено: {exp['active_checked']}")
+    exp_sys = phases.get('experiment_system', {})
+    if isinstance(exp_sys, dict) and exp_sys.get('total'):
+        highlights.append(f"🧪 Эксп. системы: {exp_sys['total']}")
+
+    # Content dept
+    content = phases.get('content_dept', {})
+    if content.get('models_updated'):
+        highlights.append(f"✍️ Описаний моделей: {content['models_updated']}")
+
+    # Ideas
+    ideas = phases.get('ideas', {})
+    if ideas.get('new'):
+        highlights.append(f"🔬 Новых идей: {ideas['new']}")
+
+    # AB experiments
+    ab = phases.get('ab_experiments', {})
+    if ab.get('generated'):
+        highlights.append(f"🔀 A/B гипотез: {ab['generated']}")
+
+    # Social media
+    sm = phases.get('social_media', {})
+    if isinstance(sm, dict):
+        sm_target = sm.get('analytics', {}).get('weekly_post_target')
+        if sm_target:
+            highlights.append(f"📸 Соц.сети: цель {sm_target} постов/нед")
+
+    # CEO weekly report
+    if briefing.get('weekly_ceo_summary'):
+        highlights.append(f"📰 CEO отчёт: {briefing['weekly_ceo_summary'][:100]}…")
+
+    # ── Assemble message ──────────────────────────────────────────────────────
+    lines = [f'{icon} <b>AI Factory — цикл завершён</b>']
+    lines.append(f'📊 Health: {health}/100 | ⏱ {elapsed}с')
+    if focus:
+        lines.append(f'🎯 Фокус: {focus}')
+    lines.append(f'📋 Решений: {len(decisions)} | Активных: {active_actions}')
+
+    if metric_parts:
+        lines.append('')
+        lines.append('<b>Бизнес-метрики:</b>')
+        lines.extend(metric_parts)
+
+    if highlights:
+        lines.append('')
+        lines.append('<b>Результаты фаз:</b>')
+        lines.extend([f'• {h}' for h in highlights[:8]])  # cap at 8 to avoid TG limit
+
+    msg = '\n'.join(lines)
 
     notify_script = os.path.join(os.path.dirname(__file__), '..', 'nevesty-models', 'tools', 'notify.js')
     notify_script = os.path.abspath(notify_script)
@@ -1081,7 +1160,7 @@ def _notify_admins_telegram(briefing: dict, decisions: list, cycle_id: str) -> N
             subprocess.run(
                 ['node', notify_script, '--from', 'AI Factory', msg],
                 cwd=os.path.dirname(notify_script),
-                timeout=10,
+                timeout=15,
                 capture_output=True
             )
         except Exception:
