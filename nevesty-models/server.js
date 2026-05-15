@@ -309,6 +309,16 @@ async function start() {
   botInstance = initBot(app);
   if (botInstance) apiRouter.setBot(botInstance);
 
+  // ─── Task scheduler ───────────────────────────────────────────────────────────
+  const scheduler = require('./services/scheduler');
+  const { get: dbGetSched } = require('./database');
+  scheduler.init({
+    db: { run: require('./database').run },
+    bot: botInstance?.instance,
+    adminIds: process.env.ADMIN_TELEGRAM_IDS || ''
+  });
+  scheduler.start();
+
   const server = app.listen(PORT, () => {
     console.log(`\n🌐 Nevesty Models  →  http://localhost:${PORT}`);
     console.log(`🔐 Admin panel     →  http://localhost:${PORT}/admin/login.html`);
@@ -456,6 +466,7 @@ async function start() {
       clearInterval(wsPingInterval);
       clearInterval(memAlertInterval);
       clearInterval(factoryCheckInterval);
+      try { require('./services/scheduler').stop(); } catch (_) {}
       await new Promise(resolve => wss.close(resolve));
       console.log('WebSocket server closed.');
       await new Promise(resolve => server.close(resolve));
