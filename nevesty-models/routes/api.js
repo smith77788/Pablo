@@ -418,10 +418,15 @@ router.post('/auth/verify-totp', authLimiter, async (req, res, next) => {
     });
 
     if (!valid) {
-      // Atomically increment then re-read; delete token immediately when limit reached
-      await run('UPDATE totp_temp_tokens SET attempts=attempts+1 WHERE id=?', [stored.id]);
-      const updated = await get('SELECT attempts FROM totp_temp_tokens WHERE id=?', [stored.id]).catch(() => null);
-      if (!updated || updated.attempts >= 3) {
+      // Atomic increment: only succeeds if attempts is still below the limit,
+      // preventing two concurrent wrong-code requests from both bypassing the check
+      const upd = await run('UPDATE totp_temp_tokens SET attempts=attempts+1 WHERE id=? AND attempts < 3', [stored.id]);
+      if (!upd.changes) {
+        await run('DELETE FROM totp_temp_tokens WHERE id=?', [stored.id]).catch(() => {});
+        return res.status(401).json({ error: 'Превышено количество попыток. Войдите заново.' });
+      }
+      const newAttempts = stored.attempts + 1;
+      if (newAttempts >= 3) {
         await run('DELETE FROM totp_temp_tokens WHERE id=?', [stored.id]).catch(() => {});
         return res.status(401).json({ error: 'Превышено количество попыток. Войдите заново.' });
       }
@@ -1360,25 +1365,33 @@ router.get('/admin/models', auth, async (req, res, next) => {
     };
     const orderBy = sortMap[sort] || 'name ASC';
 
-    const where = [];
+    const wherePlain = [];
+    const whereAliased = [];
     const params = [];
     if (archived !== undefined) {
-      where.push('archived=?');
+      wherePlain.push('archived=?');
+      whereAliased.push('m.archived=?');
       params.push(parseInt(archived));
     }
     if (search) {
-      where.push('name LIKE ?');
+      wherePlain.push('name LIKE ?');
+      whereAliased.push('m.name LIKE ?');
       params.push(`%${search}%`);
     }
-    const whereStr = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const whereStr = wherePlain.length ? `WHERE ${wherePlain.join(' AND ')}` : '';
+    const whereM = whereAliased.length ? `WHERE ${whereAliased.join(' AND ')}` : '';
 
     const total = (await get(`SELECT COUNT(*) as cnt FROM models ${whereStr}`, params))?.cnt || 0;
+    // Aggregated JOIN instead of 3 correlated subqueries per row (N+1 → single-pass)
     const models = await query(
-      `SELECT *,
-         (SELECT COUNT(*) FROM orders WHERE model_id=models.id) as order_count,
-         (SELECT COUNT(*) FROM reviews WHERE model_id=models.id AND approved=1) as reviews_count,
-         (SELECT ROUND(AVG(rating),1) FROM reviews WHERE model_id=models.id AND approved=1) as avg_rating
-       FROM models ${whereStr} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      `SELECT m.*,
+              COALESCE(o.order_count, 0) as order_count,
+              COALESCE(r.reviews_count, 0) as reviews_count,
+              r.avg_rating
+       FROM models m
+       LEFT JOIN (SELECT model_id, COUNT(*) as order_count FROM orders GROUP BY model_id) o ON o.model_id = m.id
+       LEFT JOIN (SELECT model_id, COUNT(*) as reviews_count, ROUND(AVG(rating),1) as avg_rating FROM reviews WHERE approved=1 GROUP BY model_id) r ON r.model_id = m.id
+       ${whereM} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
       [...params, parseInt(limit), offset]
     );
 
@@ -4612,13 +4625,15 @@ router.get('/stats/extended', auth, async (req, res, next) => {
 // ─── Export endpoints ─────────────────────────────────────────────────────────
 router.get('/export/orders', auth, async (req, res, next) => {
   try {
-    const orders = await query(`
-      SELECT o.id, o.client_name, o.client_phone, o.event_type,
-             o.event_date, o.status, o.created_at,
-             m.name as model_name
-      FROM orders o LEFT JOIN models m ON o.model_id = m.id
-      ORDER BY o.created_at DESC
-    `);
+    const maxRows = Math.min(parseInt(req.query.limit) || 10000, 50000);
+    const orders = await query(
+      `SELECT o.id, o.client_name, o.client_phone, o.event_type,
+              o.event_date, o.status, o.created_at,
+              m.name as model_name
+       FROM orders o LEFT JOIN models m ON o.model_id = m.id
+       ORDER BY o.created_at DESC LIMIT ?`,
+      [maxRows]
+    );
 
     const headers = ['ID', 'Клиент', 'Телефон', 'Тип события', 'Дата мероприятия', 'Статус', 'Дата заявки', 'Модель'];
     const rows = orders.map(o => [

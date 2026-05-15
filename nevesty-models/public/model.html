@@ -529,14 +529,19 @@
         }
       }
 
+      #related-models {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+      }
       @media (max-width: 900px) {
         #related-models {
-          grid-template-columns: repeat(3, 1fr) !important;
+          grid-template-columns: repeat(3, 1fr);
         }
       }
       @media (max-width: 640px) {
         #related-models {
-          grid-template-columns: repeat(2, 1fr) !important;
+          grid-template-columns: repeat(2, 1fr);
         }
         .model-hero {
           height: 50vh;
@@ -684,7 +689,7 @@
           <a href="/catalog.html" class="model-back">← Назад в каталог</a>
           <div class="model-error">
             <div class="model-error-icon">✦</div>
-            <h2 id="errorTitle">Модель не найдена</h2>
+            <h1 id="errorTitle">Модель не найдена</h1>
             <p id="errorMsg">Возможно, профиль был удалён или указан неверный ID.</p>
             <a href="/catalog.html" class="btn-primary">Вернуться в каталог</a>
           </div>
@@ -1005,7 +1010,7 @@
           >
             💃 Похожие модели
           </h2>
-          <div id="related-models" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px">
+          <div id="related-models">
             <!-- Loaded dynamically -->
           </div>
         </div>
