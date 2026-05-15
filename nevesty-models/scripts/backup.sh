@@ -1,33 +1,48 @@
 #!/bin/bash
-# Database backup script — run via cron or manually
+# SQLite backup script for Nevesty Models
+# Runs every 6 hours via scheduler.js; keeps last 28 backups (7 days × 4/day)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$(dirname "$SCRIPT_DIR")"
-BACKUP_DIR="${BACKUP_DIR:-$APP_DIR/backups}"
-DB_PATH="$APP_DIR/data.db"
+DB_PATH="${DB_PATH:-$APP_DIR/data.db}"
 FACTORY_DB="$APP_DIR/../factory/factory.db"
-MAX_BACKUPS="${MAX_BACKUPS:-14}"  # keep 2 weeks
+BACKUP_DIR="${BACKUP_DIR:-$APP_DIR/backups}"
+MAX_BACKUPS="${MAX_BACKUPS:-28}"  # 7 days × 4 backups/day
 
 mkdir -p "$BACKUP_DIR"
 
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+TIMESTAMP=$(date +%Y-%m-%d_%H-%M)
 
-# Backup main DB
+# Backup main application DB
 if [ -f "$DB_PATH" ]; then
-  sqlite3 "$DB_PATH" ".backup '$BACKUP_DIR/data_${TIMESTAMP}.db'"
-  echo "[backup] data.db → data_${TIMESTAMP}.db"
+  DEST="$BACKUP_DIR/nevesty_${TIMESTAMP}.db"
+  if command -v sqlite3 &>/dev/null; then
+    sqlite3 "$DB_PATH" ".backup '$DEST'"
+  else
+    cp "$DB_PATH" "$DEST"
+  fi
+  echo "[backup] data.db → nevesty_${TIMESTAMP}.db"
 fi
 
-# Backup factory DB
+# Backup factory DB (if present)
 if [ -f "$FACTORY_DB" ]; then
-  sqlite3 "$FACTORY_DB" ".backup '$BACKUP_DIR/factory_${TIMESTAMP}.db'"
+  FACTORY_DEST="$BACKUP_DIR/factory_${TIMESTAMP}.db"
+  if command -v sqlite3 &>/dev/null; then
+    sqlite3 "$FACTORY_DB" ".backup '$FACTORY_DEST'"
+  else
+    cp "$FACTORY_DB" "$FACTORY_DEST"
+  fi
   echo "[backup] factory.db → factory_${TIMESTAMP}.db"
 fi
 
-# Remove old backups (keep MAX_BACKUPS most recent per type)
-for prefix in data factory; do
-  ls -t "$BACKUP_DIR/${prefix}_"*.db 2>/dev/null | tail -n +$((MAX_BACKUPS + 1)) | xargs -r rm --
+# Keep only last MAX_BACKUPS of each type
+for prefix in nevesty factory; do
+  mapfile -t old_backups < <(ls -t "$BACKUP_DIR/${prefix}_"*.db 2>/dev/null | tail -n +$((MAX_BACKUPS + 1)))
+  if [ ${#old_backups[@]} -gt 0 ]; then
+    rm -- "${old_backups[@]}"
+    echo "[backup] Removed ${#old_backups[@]} old ${prefix} backup(s)"
+  fi
 done
 
 echo "[backup] Done. Backups in $BACKUP_DIR"

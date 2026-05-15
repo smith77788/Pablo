@@ -207,6 +207,17 @@ function runBackup() {
   });
 }
 
+function runVacuumScript() {
+  const script = path.join(__dirname, '../scripts/vacuum-db.sh');
+  execFile('bash', [script], { timeout: 120000 }, (err, stdout) => {
+    if (err) {
+      console.error('[scheduler] Vacuum script error:', err.message);
+    } else {
+      console.log('[scheduler] Vacuum script done:', stdout.trim().split('\n').pop());
+    }
+  });
+}
+
 function _scheduleOnce(fn, delayMs, name) {
   const timer = setTimeout(() => {
     fn();
@@ -263,8 +274,11 @@ function scheduleEveryMinutes(fn, name, intervalMinutes) {
 }
 
 function start() {
-  scheduleDaily(runBackup, 'DB backup', 1, 0);
+  // DB backup every 6 hours (keeps last 28 = 7 days of backups)
+  scheduleEvery(runBackup, 'DB backup (every 6h)', 6);
   scheduleWeekly(runVacuum, 'SQLite VACUUM + WAL TRUNCATE', 0, 3, 0); // Sunday 03:00
+  // Also run vacuum via shell script weekly (Sunday 03:30) for additional WAL cleanup
+  scheduleWeekly(runVacuumScript, 'SQLite VACUUM shell script', 0, 3, 30); // Sunday 03:30
   scheduleEvery(runWalCheckpoint, 'WAL checkpoint (PASSIVE)', 6);
   scheduleDaily(sendEventReminders, 'Event reminders', 9, 0);
   scheduleEvery(checkFactoryStaleness, 'Factory staleness check', 6);
@@ -272,7 +286,7 @@ function start() {
   scheduleEveryMinutes(checkFactoryStaleness, 'Factory staleness check (30min)', 30);
   // Bot watchdog: check bot polling every 5 minutes
   scheduleEveryMinutes(checkBotHealth, 'Bot watchdog', 5);
-  console.log('[scheduler] Started: backup (daily 01:00), VACUUM (Sunday 03:00), WAL checkpoint (every 6h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min)');
+  console.log('[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (every 6h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min)');
 }
 
 function stop() {
