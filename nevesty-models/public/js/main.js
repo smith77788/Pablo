@@ -1,6 +1,16 @@
 /* ─── Shared utilities ─────────────────────────────── */
 const API = '/api';
 
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function apiFetch(path, opts = {}) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json', ...opts.headers },
@@ -259,22 +269,22 @@ function openModelModal(id) {
         </div>
         <div class="modal-info">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px">
-            <h2 id="modalTitle" style="margin:0">${m.name}</h2>
+            <h2 id="modalTitle" style="margin:0">${escHtml(m.name)}</h2>
             ${availBadge}
           </div>
-          <span class="modal-cat">${CATEGORIES[m.category] || m.category}</span>
+          <span class="modal-cat">${escHtml(CATEGORIES[m.category] || m.category)}</span>
           <div class="modal-params">
-            ${m.age ? `<div class="modal-param"><label>Возраст</label><span>${m.age} лет</span></div>` : ''}
-            ${m.height ? `<div class="modal-param"><label>Рост</label><span>${m.height} см</span></div>` : ''}
-            ${m.bust && m.waist && m.hips ? `<div class="modal-param"><label>Параметры</label><span>${m.bust}/${m.waist}/${m.hips}</span></div>` : ''}
-            ${m.shoe_size ? `<div class="modal-param"><label>Размер обуви</label><span>${m.shoe_size}</span></div>` : ''}
-            ${m.hair_color ? `<div class="modal-param"><label>Цвет волос</label><span>${m.hair_color}</span></div>` : ''}
-            ${m.eye_color ? `<div class="modal-param"><label>Цвет глаз</label><span>${m.eye_color}</span></div>` : ''}
-            ${m.city ? `<div class="modal-param"><label>Город</label><span>${m.city}</span></div>` : ''}
-            ${m.experience ? `<div class="modal-param"><label>Опыт</label><span>${m.experience}</span></div>` : ''}
+            ${m.age ? `<div class="modal-param"><label>Возраст</label><span>${escHtml(m.age)} лет</span></div>` : ''}
+            ${m.height ? `<div class="modal-param"><label>Рост</label><span>${escHtml(m.height)} см</span></div>` : ''}
+            ${m.bust && m.waist && m.hips ? `<div class="modal-param"><label>Параметры</label><span>${escHtml(m.bust)}/${escHtml(m.waist)}/${escHtml(m.hips)}</span></div>` : ''}
+            ${m.shoe_size ? `<div class="modal-param"><label>Размер обуви</label><span>${escHtml(m.shoe_size)}</span></div>` : ''}
+            ${m.hair_color ? `<div class="modal-param"><label>Цвет волос</label><span>${escHtml(m.hair_color)}</span></div>` : ''}
+            ${m.eye_color ? `<div class="modal-param"><label>Цвет глаз</label><span>${escHtml(m.eye_color)}</span></div>` : ''}
+            ${m.city ? `<div class="modal-param"><label>Город</label><span>${escHtml(m.city)}</span></div>` : ''}
+            ${m.experience ? `<div class="modal-param"><label>Опыт</label><span>${escHtml(m.experience)}</span></div>` : ''}
           </div>
-          ${m.bio ? `<div class="modal-bio"><p>${m.bio}</p></div>` : ''}
-          ${m.instagram ? `<div class="modal-insta">📸 <a href="https://instagram.com/${m.instagram.replace('@', '')}" target="_blank" rel="noopener" style="color:var(--gold)">${m.instagram}</a></div>` : ''}
+          ${m.bio ? `<div class="modal-bio"><p>${escHtml(m.bio)}</p></div>` : ''}
+          ${m.instagram ? `<div class="modal-insta">📸 <a href="https://instagram.com/${encodeURIComponent(m.instagram.replace('@', ''))}" target="_blank" rel="noopener" style="color:var(--gold)">${escHtml(m.instagram)}</a></div>` : ''}
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:24px">
             <a href="/booking.html?model=${m.id}" class="btn-primary" style="padding:14px 32px;font-size:0.8rem;display:inline-flex;align-items:center;gap:8px"
                onclick="if(window.NM?.analytics) NM.analytics.startBooking(${m.id}, '${m.category || ''}')">

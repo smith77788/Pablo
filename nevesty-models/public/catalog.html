@@ -142,27 +142,29 @@
       }
     </style>
     <script>
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            colors: {
-              pink: {
-                50: '#fdf2f8',
-                100: '#fce7f3',
-                200: '#fbcfe8',
-                300: '#f9a8d4',
-                400: '#f472b6',
-                500: '#ec4899',
-                600: '#db2777',
-                700: '#be185d',
-                800: '#9d174d',
-                900: '#831843',
+      if (typeof tailwind !== 'undefined') {
+        tailwind.config = {
+          darkMode: 'class',
+          theme: {
+            extend: {
+              colors: {
+                pink: {
+                  50: '#fdf2f8',
+                  100: '#fce7f3',
+                  200: '#fbcfe8',
+                  300: '#f9a8d4',
+                  400: '#f472b6',
+                  500: '#ec4899',
+                  600: '#db2777',
+                  700: '#be185d',
+                  800: '#9d174d',
+                  900: '#831843',
+                },
               },
             },
           },
-        },
-      };
+        };
+      }
     </script>
     <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <!-- Google Analytics 4 (loads only if consent given) -->
@@ -1225,37 +1227,58 @@
             return;
           }
 
+          const esc =
+            typeof escHtml === 'function'
+              ? escHtml
+              : s =>
+                  String(s ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
           let html = '<div style="display:flex;flex-direction:column;gap:12px">';
           models.forEach((m, idx) => {
+            const safeId = parseInt(m.id, 10) || 0;
             const photo = m.photo_main
-              ? `<img src="${m.photo_main}" alt="${m.name}" style="width:60px;height:75px;object-fit:cover;border-radius:4px;flex-shrink:0" loading="lazy" decoding="async">`
+              ? `<img src="${esc(m.photo_main)}" alt="${esc(m.name)}" style="width:60px;height:75px;object-fit:cover;border-radius:4px;flex-shrink:0" loading="lazy" decoding="async">`
               : `<div style="width:60px;height:75px;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0">💃</div>`;
             const params = [
-              m.age ? m.age + ' лет' : '',
-              m.height ? m.height + ' см' : '',
-              m.city || '',
-              m.category || '',
+              m.age ? esc(m.age) + ' лет' : '',
+              m.height ? esc(m.height) + ' см' : '',
+              m.city ? esc(m.city) : '',
+              m.category ? esc(m.category) : '',
             ]
               .filter(Boolean)
               .join(' · ');
             const reason = m.ai_reason
-              ? `<div style="font-size:0.75rem;color:var(--gold,#c9a96e);margin-top:5px;line-height:1.4">💡 ${m.ai_reason}</div>`
+              ? `<div style="font-size:0.75rem;color:var(--gold,#c9a96e);margin-top:5px;line-height:1.4">💡 ${esc(m.ai_reason)}</div>`
               : '';
             html += `<div style="display:flex;gap:14px;align-items:flex-start;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:6px;padding:12px">
           ${photo}
           <div style="flex:1;min-width:0">
-            <div style="font-weight:600;font-size:0.9rem;color:var(--text,#f0f0f0)">${idx + 1}. ${m.name}</div>
+            <div style="font-weight:600;font-size:0.9rem;color:var(--text,#f0f0f0)">${idx + 1}. ${esc(m.name)}</div>
             <div style="font-size:0.78rem;color:var(--text-muted,#aaa);margin-top:2px">${params}</div>
             ${reason}
           </div>
-          <a href="/model.html?id=${m.id}" style="flex-shrink:0;padding:8px 14px;background:var(--gold,#c9a96e);color:#000;border-radius:4px;font-size:0.75rem;font-weight:700;text-decoration:none;white-space:nowrap;margin-top:2px">Смотреть</a>
+          <a href="/model.html?id=${safeId}" style="flex-shrink:0;padding:8px 14px;background:var(--gold,#c9a96e);color:#000;border-radius:4px;font-size:0.75rem;font-weight:700;text-decoration:none;white-space:nowrap;margin-top:2px">Смотреть</a>
         </div>`;
           });
           html += '</div>';
           resultsEl.innerHTML = html;
         } catch (e) {
+          const esc2 =
+            typeof escHtml === 'function'
+              ? escHtml
+              : s =>
+                  String(s ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
           document.getElementById('aiMatchResults').innerHTML =
-            `<p style="color:#e74c3c;font-size:0.82rem">Ошибка: ${e.message}</p>`;
+            `<p style="color:#e74c3c;font-size:0.82rem">Ошибка: ${esc2(e.message)}</p>`;
         } finally {
           btn.disabled = false;
           btn.textContent = 'Подобрать';
