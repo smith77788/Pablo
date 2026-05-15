@@ -327,10 +327,13 @@
       <div id="qbForm">
         <div class="qb-modal-title" id="qbModalTitle">⚡ Быстрая заявка</div>
         <div class="qb-modal-sub">Оставьте контакты — менеджер свяжется за 15 минут</div>
-        <input class="qb-input" id="qbName" type="text" placeholder="Ваше имя" autocomplete="name" />
-        <input class="qb-input" id="qbPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" />
+        <label for="qbName" class="sr-only">Ваше имя</label>
+        <input class="qb-input" id="qbName" type="text" placeholder="Ваше имя" autocomplete="name" aria-required="true" />
+        <label for="qbPhone" class="sr-only">Телефон</label>
+        <input class="qb-input" id="qbPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" aria-required="true" />
+        <label for="qbComment" class="sr-only">Тип мероприятия</label>
         <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
-        <button class="qb-btn" onclick="submitQb()">Отправить заявку →</button>
+        <button class="qb-btn" onclick="submitQb()" aria-label="Отправить быструю заявку">Отправить заявку →</button>
       </div>
       <div class="qb-success" id="qbSuccess">
         <div class="qb-success-icon">✅</div>
