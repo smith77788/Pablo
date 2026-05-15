@@ -55,6 +55,8 @@
       hideBanner(banner);
       // Notify analytics module if available
       window.NM?.analytics?.consent?.('all');
+      // Dispatch event so analytics scripts can init without page reload
+      try { document.dispatchEvent(new CustomEvent('cookieConsentAccepted')); } catch(e) {}
     });
 
     document.getElementById('cookie-reject').addEventListener('click', () => {

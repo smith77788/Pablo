@@ -263,7 +263,8 @@ function openModelModal(id) {
           ${m.bio ? `<div class="modal-bio"><p>${m.bio}</p></div>` : ''}
           ${m.instagram ? `<div class="modal-insta">📸 <a href="https://instagram.com/${m.instagram.replace('@','')}" target="_blank" rel="noopener" style="color:var(--gold)">${m.instagram}</a></div>` : ''}
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:24px">
-            <a href="/booking.html?model=${m.id}" class="btn-primary" style="padding:14px 32px;font-size:0.8rem;display:inline-flex;align-items:center;gap:8px">
+            <a href="/booking.html?model=${m.id}" class="btn-primary" style="padding:14px 32px;font-size:0.8rem;display:inline-flex;align-items:center;gap:8px"
+               onclick="if(window.NM?.analytics) NM.analytics.startBooking(${m.id}, '${m.category || ''}')">
               📋 Забронировать
             </a>
             <button id="modal-fav-btn" onclick="window._toggleModalFav(${m.id})" class="btn-outline" style="padding:14px 24px;font-size:0.8rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px">

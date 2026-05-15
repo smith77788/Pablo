@@ -691,11 +691,13 @@
               <div id="busyDatesNotice" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:8px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);font-size:0.8rem;color:#fca5a5;line-height:1.5">
                 <span style="font-weight:600">📅 Занята:</span> <span id="busyDatesText"></span>
               </div>
-              <a class="btn-book" id="bookBtn" href="/booking.html">
+              <a class="btn-book" id="bookBtn" href="/booking.html"
+                 onclick="if(window.NM?.analytics && window._currentModel) NM.analytics.startBooking(window._currentModel.id, window._currentModel.category || '')">
                 📋 Забронировать
               </a>
               <a id="book-btn-quick" href="/booking.html"
-                 class="btn-book" style="display:none;margin-top:8px;background:transparent;border:1px solid var(--gold);color:var(--gold)">
+                 class="btn-book" style="display:none;margin-top:8px;background:transparent;border:1px solid var(--gold);color:var(--gold)"
+                 onclick="if(window.NM?.analytics && window._currentModel) NM.analytics.startBooking(window._currentModel.id, window._currentModel.category || '')">
                 <i class="fas fa-calendar-check" style="margin-right:6px"></i>
                 Быстрое бронирование
               </a>
@@ -915,6 +917,7 @@
 
       function renderModel(m) {
         _currentModel = m; // capture for toggleFavorite
+        window._currentModel = m; // expose for analytics onclick handlers
         const heroEl = el('modelHero');
 
         // Hero photo

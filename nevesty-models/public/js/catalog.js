@@ -628,18 +628,17 @@
       .replace(/'/g, '&#39;');
   }
 
-  // Analytics: model_view on card click
+  // Analytics: booking_start when "Подробнее" link is clicked (leads to booking flow)
+  // model_view is already fired inside openModelModal() in main.js
   grid.addEventListener('click', function(e) {
-    const card = e.target.closest('.model-card[onclick]');
-    if (!card) return;
-    const match = card.getAttribute('onclick').match(/openModelModal\((\d+)\)/);
+    const bookLink = e.target.closest('.btn-book-model');
+    if (!bookLink) return;
+    // Extract model id from the href, e.g. /model.html?id=42
+    const href = bookLink.getAttribute('href') || '';
+    const match = href.match(/[?&]id=(\d+)/);
     if (!match) return;
     const modelId = match[1];
-    const nameEl = card.querySelector('.model-card-name');
-    const modelName = nameEl ? nameEl.textContent : '';
-    if (window.NM && NM.analytics) {
-      NM.analytics.event('model_view', { model_id: modelId, model_name: modelName });
-    }
+    if (window.NM?.analytics) NM.analytics.startBooking(modelId, '');
   });
 
   // ── Global API (for external scripts and share-link button) ──────────────────
