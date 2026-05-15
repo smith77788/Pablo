@@ -413,6 +413,81 @@
       line-height: 1.65;
     }
 
+    /* ─── TESTIMONIALS ──────────────────────────────── */
+    .testimonials-section {
+      padding: 80px 0;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+    }
+    .testimonials-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 48px;
+    }
+    @media (max-width: 768px) {
+      .testimonials-grid { grid-template-columns: 1fr; }
+    }
+    .testimonial-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 28px;
+      border-radius: var(--radius);
+      transition: border-color var(--transition);
+    }
+    .testimonial-card:hover { border-color: rgba(201,169,110,0.4); }
+    .testimonial-stars {
+      color: var(--gold);
+      font-size: 1rem;
+      margin-bottom: 12px;
+      letter-spacing: 2px;
+    }
+    .testimonial-text {
+      color: var(--text-muted);
+      font-size: 0.87rem;
+      line-height: 1.7;
+      margin-bottom: 16px;
+      font-style: italic;
+    }
+    .testimonial-author {
+      font-size: 0.75rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+    .testimonial-model {
+      font-size: 0.75rem;
+      color: var(--gold);
+      margin-top: 4px;
+    }
+    .testimonials-skeleton {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    @media (max-width: 768px) {
+      .testimonials-skeleton { grid-template-columns: 1fr; }
+    }
+    .skeleton-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 28px;
+      border-radius: var(--radius);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .skeleton-line {
+      height: 12px;
+      background: var(--bg3);
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .skeleton-line.short { width: 60%; }
+    .skeleton-line.medium { width: 85%; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
     /* ─── CTA ────────────────────────────────────────── */
     .about-cta {
       padding: 80px 0 100px;
@@ -687,6 +762,29 @@
           <div class="team-role">Кастинг-директор</div>
           <p class="team-bio">Профессиональный фотограф и стилист. Отвечает за отбор, обучение и подготовку моделей к съёмкам.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TESTIMONIALS -->
+  <section class="testimonials-section" aria-labelledby="testimonials-heading">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-tag">Отзывы клиентов</div>
+        <h2 id="testimonials-heading">Что говорят о нас</h2>
+        <div class="gold-line"></div>
+        <p>Мнения реальных клиентов о работе с нашим агентством</p>
+      </div>
+      <div id="testimonials-container">
+        <!-- Skeleton loading -->
+        <div class="testimonials-skeleton">
+          <div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>
+          <div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>
+          <div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:40px">
+        <a href="/reviews.html" class="btn-outline">Все отзывы</a>
       </div>
     </div>
   </section>

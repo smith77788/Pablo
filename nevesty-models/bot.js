@@ -44,14 +44,15 @@ function resetSessionTimer(chatId) {
       const sess = await getSession(chatId);
       const state = sess?.state;
       if (state && ACTIVE_BOOKING_STATES.has(state)) {
+        await clearSession(chatId);
         await safeSend(chatId,
-          '⏰ *Сесія завершилась через неактивність\\.*\n\nВи не завершили оформлення заявки\\. Хочете продовжити або почати заново?',
+          '⏰ *Время сессии истекло\\. Бронирование отменено\\.*\n\nХотите начать заново?',
           {
             parse_mode: 'MarkdownV2',
             reply_markup: {
               inline_keyboard: [
-                [{ text: '▶ Продовжити',    callback_data: 'session_continue' }],
-                [{ text: '🔄 Почати заново', callback_data: 'session_restart'  }],
+                [{ text: '🔄 Начать заново', callback_data: 'bk_start'   }],
+                [{ text: '← Меню',           callback_data: 'main_menu'  }],
               ]
             }
           }
@@ -1084,7 +1085,7 @@ async function bkStep2Date(chatId, data) {
   resetSessionTimer(chatId);
   return safeSend(chatId,
     stepHeader(2,'Детали мероприятия') +
-    `✅ Тип: *${esc(EVENT_TYPES[data.event_type]||data.event_type)}*\n\nВведите дату мероприятия:\n_Пример: 25\\.06\\.2025_`,
+    `✅ Тип: *${esc(EVENT_TYPES[data.event_type]||data.event_type)}*\n\nВведите дату мероприятия:\n💡 Формат: ДД\\.ММ\\.ГГГГ, например: 25\\.12\\.2025`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] }
@@ -1133,7 +1134,7 @@ async function bkStep2Budget(chatId, data) {
   await setSession(chatId, 'bk_s2_budget', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(2,'Детали мероприятия') + 'Укажите бюджет \\(необязательно\\):\n_Пример: 50 000 руб\\. или от 30 000_',
+    stepHeader(2,'Детали мероприятия') + 'Укажите бюджет \\(необязательно\\):\n💡 Укажите бюджет в рублях, например: 150000',
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
@@ -1165,7 +1166,7 @@ async function bkStep3Name(chatId, data) {
   await setSession(chatId, 'bk_s3_name', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\nВведите ваше имя и фамилию:\n_Пример: Мария Иванова_\n\n_/cancel — отменить_`,
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\nВведите ваше имя и фамилию:\n💡 Например: Алексей Смирнов`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] }
@@ -1178,7 +1179,7 @@ async function bkStep3Phone(chatId, data) {
   await setSession(chatId, 'bk_s3_phone', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(2, 4))}_\n\nВведите номер телефона:\n_Пример: \\+7\\(999\\)123\\-45\\-67_`,
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(2, 4))}_\n\nВведите номер телефона:\n💡 Формат: \\+7 999 123\\-45\\-67`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
@@ -1194,7 +1195,7 @@ async function bkStep3Email(chatId, data) {
   await setSession(chatId, 'bk_s3_email', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(3, 4))}_\n\nВведите email \\(необязательно\\):`,
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(3, 4))}_\n\nВведите email \\(необязательно\\):\n💡 Например: client@mail\\.ru`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
