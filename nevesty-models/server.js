@@ -20,10 +20,39 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
-try {
-  const morgan = require('morgan');
-  app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
-} catch {}
+const LOG_JSON = process.env.NODE_ENV === 'production' || process.env.LOG_JSON === '1';
+
+if (LOG_JSON) {
+  // JSON structured logs for production
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      if (req.path === '/api/health' || req.path === '/health') return; // Skip health checks
+      const log = {
+        ts: new Date().toISOString(),
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        ms: Date.now() - start,
+        ip: req.ip || req.connection.remoteAddress,
+        ua: req.get('user-agent')?.slice(0, 80),
+      };
+      if (res.statusCode >= 400) {
+        log.level = 'warn';
+      } else {
+        log.level = 'info';
+      }
+      console.log(JSON.stringify(log));
+    });
+    next();
+  });
+} else {
+  // Development: use morgan
+  try {
+    const morgan = require('morgan');
+    app.use(morgan('dev'));
+  } catch {}
+}
 
 // ─── Security headers ─────────────────────────────────────────────────────────
 try {
@@ -275,6 +304,7 @@ async function buildHealthResponse() {
   let activeOrders = 0;
   let modelsCount = 0;
 
+  let walStatus = null;
   try {
     await dbGet('SELECT 1 as ok');
     // Fetch DB metrics in parallel
@@ -289,6 +319,18 @@ async function buildHealthResponse() {
     modelsCount = modelsRow?.n || 0;
   } catch (e) {
     dbStatus = 'error: ' + e.message;
+  }
+
+  try {
+    // WAL checkpoint in passive mode (doesn't block reads/writes)
+    const walRow = await dbGet('PRAGMA wal_checkpoint(PASSIVE)');
+    walStatus = {
+      mode: 'WAL',
+      total_pages: walRow ? walRow.log : 0,
+      moved_pages: walRow ? walRow.ckpt : 0,
+    };
+  } catch (e) {
+    walStatus = { error: e.message };
   }
 
   try {
@@ -333,7 +375,7 @@ async function buildHealthResponse() {
       load_5m: Math.round(loadAvg[1] * 100) / 100,
       cores: os.cpus().length,
     },
-    db: { status: dbStatus },
+    db: { status: dbStatus, wal: walStatus },
     components: {
       database: dbStatus,
       bot: botInstance ? 'ok' : 'not_initialized',

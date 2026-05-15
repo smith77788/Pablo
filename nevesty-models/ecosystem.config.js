@@ -13,9 +13,10 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
       },
-      error_file: 'logs/pm2-error.log',
-      out_file: 'logs/pm2-out.log',
-      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      merge_logs: true,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      out_file: '/var/log/nevesty/out.log',
+      error_file: '/var/log/nevesty/error.log',
     },
     {
       name: 'nevesty-scheduler',
