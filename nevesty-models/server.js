@@ -69,6 +69,7 @@ try {
   app.use('/api/', apiLimiter);
   app.use('/api/admin/login', authLimiter);
   app.use('/api/orders', ordersLimiter);
+  app.use('/api/quick-booking', ordersLimiter); // same 20/15m limit for quick bookings
 } catch {}
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
@@ -260,7 +261,7 @@ async function start() {
   const server = app.listen(PORT, () => {
     console.log(`\n🌐 Nevesty Models  →  http://localhost:${PORT}`);
     console.log(`🔐 Admin panel     →  http://localhost:${PORT}/admin/login.html`);
-    console.log(`   Login: ${process.env.ADMIN_USERNAME || 'admin'} / ${process.env.ADMIN_PASSWORD || 'admin123'}`);
+    console.log(`   Login: ${process.env.ADMIN_USERNAME || 'admin'} / [password from ADMIN_PASSWORD env var]`);
     console.log(`❤  Health check   →  http://localhost:${PORT}/health\n`);
   });
 

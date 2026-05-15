@@ -149,8 +149,8 @@ router.put('/admin/me', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ─── Agent logs feed — for dashboard ─────────────────────────────────────────
-router.get('/agent-logs', async (req, res) => {
+// ─── Agent logs feed — auth-protected (was public, now requires JWT) ──────────
+router.get('/agent-logs', auth, async (req, res, next) => {
   try {
     const limit = Math.min(100, parseInt(req.query.limit) || 50);
     const logs = await query(
@@ -159,7 +159,7 @@ router.get('/agent-logs', async (req, res) => {
     );
     res.json(logs);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    next(e);
   }
 });
 
@@ -597,6 +597,7 @@ router.put('/admin/models/:id', auth, upload.fields([{ name: 'photo_main', maxCo
       `UPDATE models SET name=?,age=?,height=?,weight=?,bust=?,waist=?,hips=?,shoe_size=?,hair_color=?,eye_color=?,bio=?,photo_main=?,photos=?,instagram=?,category=?,available=? WHERE id=?`,
       [sanitize(name, 100), +age || null, +height || null, +weight || null, +bust || null, +waist || null, +hips || null, sanitize(shoe_size, 10), sanitize(hair_color, 50), sanitize(eye_color, 50), sanitize(bio, 2000), photo_main, JSON.stringify(photos), sanitize(instagram, 100), category || existing.category, available === '1' ? 1 : 0, id]
     );
+    cache.delByPrefix('catalog:'); // invalidate catalog cache
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -612,6 +613,7 @@ router.delete('/admin/models/:id', auth, async (req, res, next) => {
     const photos = JSON.parse(m.photos || '[]');
     photos.forEach(p => deleteFile(p));
     await run('DELETE FROM models WHERE id = ?', [id]);
+    cache.delByPrefix('catalog:'); // invalidate catalog cache
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -974,7 +976,7 @@ router.delete('/admin/managers/:id', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// GET /api/settings/public — public read-only settings (no auth required)
+// GET /api/settings/public — public read-only settings (no auth required, cached 5 min)
 router.get('/settings/public', async (req, res) => {
   try {
     const SAFE_KEYS = [
@@ -982,6 +984,10 @@ router.get('/settings/public', async (req, res) => {
       'contacts_whatsapp', 'about', 'greeting', 'agency_name', 'tagline',
       'catalog_per_page', 'site_url', 'manager_hours'
     ];
+    const cacheKey = 'settings:public';
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) return res.json(cached);
+
     const placeholders = SAFE_KEYS.map(() => '?').join(',');
     const rows = await query(
       `SELECT key, value FROM bot_settings WHERE key IN (${placeholders})`,
@@ -989,6 +995,7 @@ router.get('/settings/public', async (req, res) => {
     );
     const settings = {};
     rows.forEach(r => { settings[r.key] = r.value; });
+    cache.set(cacheKey, settings);
     res.json(settings);
   } catch (e) {
     res.status(500).json({ error: 'Settings unavailable' });
@@ -1053,6 +1060,7 @@ router.put('/settings', auth, async (req, res, next) => {
       if (!ALLOWED_KEYS.includes(key)) continue;
       const v = String(value ?? '').trim().slice(0, 2000);
       await run('INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', [key, v]);
+      cache.del(`setting:${key}`); // invalidate setting cache entry
     }
     res.json({ ok: true });
   } catch(e) { next(e); }
@@ -1437,6 +1445,18 @@ router.post('/admin/db-vacuum', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Cache stats & control (admin) ────────────────────────────────────────────
+// GET  /api/admin/cache/stats  → hit/miss/keys count
+// DELETE /api/admin/cache      → clear entire in-memory cache
+router.get('/admin/cache/stats', auth, (req, res) => {
+  res.json(cache.stats());
+});
+
+router.delete('/admin/cache', auth, (req, res) => {
+  cache.clear();
+  res.json({ ok: true, message: 'Cache cleared' });
+});
+
 // ─── Analytics: KPI ──────────────────────────────────────────────────────────
 router.get('/admin/analytics/kpi', auth, async (req, res, next) => {
   try {
@@ -1680,6 +1700,76 @@ router.post('/client/review', clientRateLimit, async (req, res, next) => {
     }
 
     res.json({ ok: true, id: result.id });
+  } catch (e) { next(e); }
+});
+
+// ─── Contact form ─────────────────────────────────────────────────────────────
+// POST /api/contact — {name, phone, message, email?}
+// Rate limit: 3 requests per hour per IP
+router.post('/contact', contactRateLimit, async (req, res, next) => {
+  try {
+    const { name, phone, message, email } = req.body;
+    if (!sanitize(name, 100)) return res.status(400).json({ error: 'Укажите ваше имя' });
+    if (!phone || !validatePhone(phone)) return res.status(400).json({ error: 'Укажите корректный номер телефона' });
+    if (email && !validateEmail(email)) return res.status(400).json({ error: 'Некорректный email' });
+    if (!sanitize(message, 2000)) return res.status(400).json({ error: 'Укажите сообщение' });
+
+    const order_number = generateOrderNumber();
+    const s = {
+      client_name:  sanitize(name, 100),
+      client_phone: phone.trim().slice(0, 20),
+      client_email: sanitize(email, 100),
+      comments:     sanitize(message, 2000),
+    };
+
+    const result = await run(
+      `INSERT INTO orders (order_number, client_name, client_phone, client_email, event_type, comments, utm_source)
+       VALUES (?, ?, ?, ?, 'other', ?, 'contact_form')`,
+      [order_number, s.client_name, s.client_phone, s.client_email, s.comments]
+    );
+
+    const formData = { name: s.client_name, phone: s.client_phone, email: s.client_email, message: s.comments };
+
+    if (botInstance) {
+      const orderForBot = { id: result.id, order_number, ...s, event_type: 'other', utm_source: 'contact_form' };
+      botInstance.notifyNewOrder(orderForBot).catch(e => console.error('Bot notify contact form:', e.message));
+    }
+
+    const adminEmails = mailer.getAdminEmails();
+    for (const adminEmail of adminEmails) {
+      mailer.sendContactFormEmail(adminEmail, formData).catch(e => console.error('[mailer] contact form error:', e.message));
+    }
+
+    res.json({ ok: true, order_number, id: result.id });
+  } catch (e) { next(e); }
+});
+
+// ─── Email test endpoints (admin) ─────────────────────────────────────────────
+router.get('/admin/email/test', auth, async (req, res, next) => {
+  try {
+    const configured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+    res.json({
+      configured,
+      smtp_host: process.env.SMTP_HOST || null,
+      smtp_port: process.env.SMTP_PORT || '587',
+      smtp_user: process.env.SMTP_USER ? process.env.SMTP_USER.replace(/(.{2})(.*)(@.*)/, '***') : null,
+      smtp_from: process.env.SMTP_FROM || null,
+      admin_emails: mailer.getAdminEmails().map(e => e.replace(/(.{2})(.*)(@.*)/, '***')),
+    });
+  } catch (e) { next(e); }
+});
+
+router.post('/admin/email/test', auth, async (req, res, next) => {
+  try {
+    const admin = await get('SELECT email FROM admins WHERE id = ?', [req.admin.id]);
+    const toEmail = req.body.email || admin?.email;
+    if (!toEmail) return res.status(400).json({ error: 'Укажите email или добавьте email в профиль' });
+    const result = await mailer.sendTestEmail(toEmail);
+    if (result.ok) {
+      res.json({ ok: true, message: `Тестовое письмо отправлено на ${toEmail}` });
+    } else {
+      res.status(500).json({ ok: false, error: result.error || 'Ошибка отправки' });
+    }
   } catch (e) { next(e); }
 });
 
