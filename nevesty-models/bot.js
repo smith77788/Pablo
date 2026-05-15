@@ -889,7 +889,10 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
     const btns = orders.map(o => {
       const icon = STATUS_LABELS[o.status]?.split(' ')[0]||'';
       text += `${icon} *${o.order_number}* — ${esc(o.client_name)}\n`;
-      return [{ text: `${o.order_number}  ·  ${o.client_name}`, callback_data: `adm_order_${o.id}` }];
+      const row = [{ text: `${o.order_number}  ·  ${o.client_name}`, callback_data: `adm_order_${o.id}` }];
+      if (o.status === 'new')       row.push({ text: '✅ Принять',   callback_data: `adm_quick_confirm_${o.id}` });
+      if (o.status === 'confirmed') row.push({ text: '🏁 Завершить', callback_data: `adm_quick_complete_${o.id}` });
+      return row;
     });
 
     const nav = [];
@@ -912,6 +915,7 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
         filterRow2,
         ...btns,
         ...(nav.length ? [nav] : []),
+        [{ text: '📦 Все новые → В работу', callback_data: 'adm_bulk_new_to_review' }],
         [{ text: '🔍 Найти заявку', callback_data: 'adm_search_order' },
          { text: '← Меню',         callback_data: 'admin_menu'        }],
       ]}
@@ -922,14 +926,23 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
 async function showAdminOrder(chatId, orderId) {
   try {
     const o = await get(
-      'SELECT o.*,m.name as model_name FROM orders o LEFT JOIN models m ON o.model_id=m.id WHERE o.id=?',
+      `SELECT o.*,m.name as model_name,a.username as manager_name
+       FROM orders o
+       LEFT JOIN models m ON o.model_id=m.id
+       LEFT JOIN admins a ON o.manager_id=a.id
+       WHERE o.id=?`,
       [orderId]
     );
     if (!o) return safeSend(chatId, '❌ Заявка не найдена.');
 
-    const msgs = await query('SELECT * FROM messages WHERE order_id=? ORDER BY created_at DESC LIMIT 3', [orderId]);
+    const [msgs, notes] = await Promise.all([
+      query('SELECT * FROM messages WHERE order_id=? ORDER BY created_at DESC LIMIT 3', [orderId]),
+      query('SELECT * FROM order_notes WHERE order_id=? ORDER BY created_at DESC LIMIT 3', [orderId]),
+    ]);
 
-    let text = `📋 *${esc(o.order_number)}*\nСтатус: ${esc(STATUS_LABELS[o.status]||o.status)}\n\n`;
+    let text = `📋 *${esc(o.order_number)}*\nСтатус: ${esc(STATUS_LABELS[o.status]||o.status)}\n`;
+    if (o.manager_name) text += `👤 Менеджер: *${esc(o.manager_name)}*\n`;
+    text += `\n`;
     text += `👤 ${esc(o.client_name)}\n📞 ${esc(o.client_phone)}\n`;
     if (o.client_email)    text += `📧 ${esc(o.client_email)}\n`;
     if (o.client_telegram) text += `💬 @${esc(o.client_telegram.replace('@',''))}\n`;
@@ -947,6 +960,13 @@ async function showAdminOrder(chatId, orderId) {
         text += `${who} ${esc(m.content)}\n`;
       });
     }
+    if (notes.length) {
+      text += `\n📝 Заметки:\n`;
+      [...notes].reverse().forEach(n => {
+        const dt = n.created_at ? new Date(n.created_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+        text += `_${esc(dt)}_ ${esc(n.admin_note)}\n`;
+      });
+    }
 
     const actions = [];
     if (!['confirmed','completed','cancelled'].includes(o.status))
@@ -961,6 +981,10 @@ async function showAdminOrder(chatId, orderId) {
     keyboard.push([
       { text: '💬 Написать клиенту', callback_data: `adm_contact_${orderId}` },
       { text: '🏁 Завершить',        callback_data: `adm_complete_${orderId}` },
+    ]);
+    keyboard.push([
+      { text: '👤 Назначить менеджера', callback_data: `adm_assign_mgr_${orderId}` },
+      { text: '📝 Добавить заметку',    callback_data: `adm_note_${orderId}` },
     ]);
     keyboard.push([{ text: '🕐 История статусов', callback_data: `adm_order_history_${orderId}` }]);
     keyboard.push([{ text: '← К заявкам', callback_data: 'adm_orders__0' }]);
@@ -1138,7 +1162,22 @@ async function showAdminModel(chatId, modelId) {
   try {
     const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
     if (!m) return safeSend(chatId, '❌ Модель не найдена.');
-    const cnt = (await get('SELECT COUNT(*) as n FROM orders WHERE model_id=?', [modelId])).n;
+
+    // Full order stats
+    const [stats] = await query(`
+      SELECT
+        COUNT(*) as total_orders,
+        SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled,
+        AVG(CASE WHEN status='completed' THEN 1.0 ELSE NULL END) * 100 as success_rate
+      FROM orders WHERE model_id=?
+    `, [modelId]);
+
+    const total      = stats?.total_orders || 0;
+    const completed  = stats?.completed || 0;
+    const cancelled  = stats?.cancelled || 0;
+    const successRate = Math.round(stats?.success_rate || 0);
+    const viewCount  = m.view_count || 0;
 
     let text = `💃 *${esc(m.name)}*\n\n`;
     if (m.age)        text += `🎂 Возраст: ${m.age} лет\n`;
@@ -1150,8 +1189,9 @@ async function showAdminModel(chatId, modelId) {
     if (m.eye_color)  text += `👁 Глаза: ${esc(m.eye_color)}\n`;
     if (m.instagram)  text += `📸 @${esc(m.instagram)}\n`;
     text += `🏷 Категория: ${esc(MODEL_CATEGORIES[m.category]||m.category)}\n`;
-    text += `📋 Заявок: ${cnt}\n`;
     text += `Статус: ${m.available ? '🟢 Доступна' : '🔴 Недоступна'}\n`;
+    text += `\n📊 Заказов: ${total} \\| ✅ Завершено: ${completed} \\| ❌ Отменено: ${cancelled}\n`;
+    text += `📈 Успешность: ${successRate}%  👁 Просмотров: ${viewCount}\n`;
     if (m.bio) text += `\n_${esc(m.bio)}_`;
 
     const keyboard = { inline_keyboard: [
@@ -1638,6 +1678,7 @@ async function showModelEditMenu(chatId, modelId) {
       [{ text: '📞 Телефон',    callback_data: `adm_ef_${modelId}_phone`      },
        { text: '🏙 Город',      callback_data: `adm_ef_${modelId}_city`       }],
       [{ text: '📝 Описание',   callback_data: `adm_ef_${modelId}_bio`        }],
+      [{ text: '🤖 AI описание', callback_data: `adm_ai_bio_${modelId}`        }],
       [{ text: '📷 Галерея фото', callback_data: `adm_gallery_${modelId}`      }],
       [{ text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${modelId}` },
        { text: m.featured ? '⭐ Убрать из топа' : '⭐ В топ', callback_data: `adm_featured_${modelId}` }],
@@ -1808,26 +1849,62 @@ async function showAdminManagement(chatId) {
 
 async function exportOrders(chatId) {
   if (!isAdmin(chatId)) return;
+  return safeSend(chatId,
+    `📤 *Экспорт заявок*\n\nВыберите период:`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📅 За сегодня',  callback_data: 'adm_export_today' },
+         { text: '📅 За неделю',   callback_data: 'adm_export_week'  }],
+        [{ text: '📅 За месяц',    callback_data: 'adm_export_month' },
+         { text: '📋 Все заявки',  callback_data: 'adm_export_all'   }],
+        [{ text: '← Меню', callback_data: 'admin_menu' }],
+      ]}
+    }
+  );
+}
+
+async function doExportOrders(chatId, period) {
+  if (!isAdmin(chatId)) return;
   try {
+    let dateFilter = '';
+    let periodLabel = 'Все';
+    if (period === 'today') {
+      dateFilter = `AND date(o.created_at) = date('now')`;
+      periodLabel = 'Сегодня';
+    } else if (period === 'week') {
+      dateFilter = `AND o.created_at >= datetime('now', '-7 days')`;
+      periodLabel = 'За неделю';
+    } else if (period === 'month') {
+      dateFilter = `AND o.created_at >= datetime('now', '-30 days')`;
+      periodLabel = 'За месяц';
+    }
+
     const orders = await query(
       `SELECT o.order_number,o.client_name,o.client_phone,o.client_email,o.client_telegram,
               o.event_type,o.event_date,o.event_duration,o.location,o.budget,o.comments,
-              o.status,o.created_at,m.name as model_name
-       FROM orders o LEFT JOIN models m ON o.model_id=m.id
+              o.status,o.created_at,o.manager_id,
+              m.name as model_name,
+              (SELECT admin_note FROM order_notes WHERE order_id=o.id ORDER BY created_at ASC LIMIT 1) as first_note
+       FROM orders o
+       LEFT JOIN models m ON o.model_id=m.id
+       WHERE 1=1 ${dateFilter}
        ORDER BY o.created_at DESC`
     );
-    const header = ['Номер','Клиент','Телефон','Email','Telegram','Тип события','Дата','Длит(ч)','Место','Бюджет','Комментарий','Статус','Создан','Модель'];
+    const header = ['Номер','Клиент','Телефон','Email','Telegram','Тип события','Дата','Длит(ч)','Место','Бюджет','Комментарий','Статус','Создан','Модель','ID менеджера','Первая заметка'];
     const rows = orders.map(o => [
       o.order_number, o.client_name, o.client_phone, o.client_email||'', o.client_telegram||'',
       o.event_type, o.event_date||'', o.event_duration||'', o.location||'', o.budget||'',
       (o.comments||'').replace(/"/g,'""'), o.status,
-      new Date(o.created_at).toLocaleString('ru'), o.model_name||''
+      new Date(o.created_at).toLocaleString('ru'), o.model_name||'',
+      o.manager_id||'',
+      (o.first_note||'').replace(/"/g,'""'),
     ].map(v => `"${v}"`).join(','));
     const csv = [header.join(','), ...rows].join('\n');
     const buf = Buffer.from('﻿' + csv, 'utf8'); // BOM для Excel
     await bot.sendDocument(chatId, buf, {
-      caption: `📤 Экспорт заявок — ${orders.length} записей\n${new Date().toLocaleString('ru')}`,
-    }, { filename: `orders_${Date.now()}.csv`, contentType: 'text/csv' });
+      caption: `📤 Экспорт заявок (${periodLabel}) — ${orders.length} записей\n${new Date().toLocaleString('ru')}`,
+    }, { filename: `orders_${period}_${Date.now()}.csv`, contentType: 'text/csv' });
   } catch (e) { return safeSend(chatId, `❌ Ошибка экспорта: ${e.message}`); }
 }
 

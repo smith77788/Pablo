@@ -102,6 +102,82 @@
     /* ─── Recent orders compact table ──────────────── */
     .recent-compact td { padding:9px 12px; font-size:0.82rem; }
     .recent-compact tr:hover { background:rgba(255,255,255,0.03); cursor:pointer; }
+
+    /* ─── Extra KPI cards row ───────────────────────── */
+    .kpi-row2 {
+      display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px;
+    }
+    .kpi-card {
+      background:var(--bg2); border:1px solid var(--border); border-radius:4px;
+      padding:18px 20px; display:flex; flex-direction:column; gap:6px;
+      position:relative; overflow:hidden;
+    }
+    .kpi-card-label { font-size:0.72rem; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-muted); }
+    .kpi-card-value { font-size:2rem; font-weight:600; color:var(--text); line-height:1; }
+    .kpi-card-value.gold { color:var(--gold); }
+    .kpi-card-icon { position:absolute; right:16px; top:50%; transform:translateY(-50%); font-size:2rem; opacity:0.13; }
+    @keyframes kpiHighlight { 0%{background:rgba(201,169,110,0.18)} 100%{background:transparent} }
+    .kpi-card.updated { animation:kpiHighlight 1s ease-out forwards; }
+
+    /* ─── 30-day SVG chart ──────────────────────────── */
+    .chart30-wrap { position:relative; width:100%; }
+    .chart30-svg { width:100%; height:160px; display:block; overflow:visible; }
+    .chart30-tooltip {
+      position:absolute; background:var(--bg3); border:1px solid var(--border2);
+      padding:6px 10px; font-size:0.75rem; color:var(--text); border-radius:3px;
+      pointer-events:none; display:none; white-space:nowrap; z-index:10;
+    }
+    .chart30-x-labels {
+      display:flex; justify-content:space-between; padding:0 4px;
+      font-size:0.6rem; color:var(--text-dim); margin-top:4px;
+    }
+
+    /* ─── Notification bell ─────────────────────────── */
+    .notif-bell-wrap { position:relative; display:inline-flex; }
+    .notif-bell-btn {
+      background:none; border:1px solid var(--border); color:var(--text-muted);
+      width:36px; height:36px; border-radius:3px; font-size:1rem;
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer; transition:all 0.2s; position:relative;
+    }
+    .notif-bell-btn:hover { border-color:var(--gold); color:var(--gold); }
+    .notif-bell-badge {
+      position:absolute; top:-6px; right:-6px;
+      background:var(--error); color:#fff; font-size:0.6rem; font-weight:700;
+      width:18px; height:18px; border-radius:50%; display:flex;
+      align-items:center; justify-content:center; display:none;
+      border:2px solid var(--bg);
+    }
+    .notif-popup {
+      position:absolute; top:calc(100% + 8px); right:0; width:340px;
+      background:var(--bg2); border:1px solid var(--border2); border-radius:4px;
+      box-shadow:0 8px 32px rgba(0,0,0,0.5); z-index:200; display:none;
+    }
+    .notif-popup.open { display:block; }
+    .notif-popup-header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 16px; border-bottom:1px solid var(--border);
+      font-size:0.8rem; font-weight:600; color:var(--text);
+    }
+    .notif-popup-header a {
+      font-size:0.7rem; color:var(--text-dim); font-weight:400;
+      cursor:pointer; text-decoration:underline;
+    }
+    .notif-popup-header a:hover { color:var(--gold); }
+    .notif-item {
+      display:flex; align-items:flex-start; gap:10px;
+      padding:10px 16px; border-bottom:1px solid var(--border);
+      text-decoration:none; transition:background 0.15s;
+    }
+    .notif-item:last-child { border-bottom:none; }
+    .notif-item:hover { background:rgba(255,255,255,0.03); }
+    .notif-item.unread { background:rgba(201,169,110,0.05); }
+    .notif-item-icon { font-size:1rem; flex-shrink:0; margin-top:1px; }
+    .notif-item-body { flex:1; min-width:0; }
+    .notif-item-title { font-size:0.78rem; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .notif-item-text { font-size:0.72rem; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .notif-item-time { font-size:0.65rem; color:var(--text-dim); white-space:nowrap; }
+    .notif-empty { padding:24px 16px; text-align:center; color:var(--text-dim); font-size:0.85rem; }
   </style>
 </head>
 <body>
@@ -143,12 +219,50 @@
           <span class="badge-dot"></span>
           <span id="newOrdersPillText">Новых заявок: 0</span>
         </a>
+        <!-- 🔔 Notification bell -->
+        <div class="notif-bell-wrap" id="notifBellWrap">
+          <button class="notif-bell-btn" id="notifBellBtn" onclick="toggleNotifPopup()" title="Уведомления">
+            🔔
+            <span class="notif-bell-badge" id="notifBadge">0</span>
+          </button>
+          <div class="notif-popup" id="notifPopup">
+            <div class="notif-popup-header">
+              <span>Уведомления</span>
+              <a onclick="markAllNotifRead()">Отметить все прочитанными</a>
+            </div>
+            <div id="notifList"><div class="notif-empty">Загрузка...</div></div>
+          </div>
+        </div>
         <button class="topbar-btn" id="refreshBtn" onclick="loadDashboard()">↺ Обновить</button>
         <a href="/admin/orders.html#new" class="topbar-btn primary">+ Заявка</a>
       </div>
     </header>
 
     <div class="page-content">
+
+      <!-- ══════════════════ STAT CARDS ROW 2 (Today / Active / Completed / New Clients) ══════════════════ -->
+      <div class="kpi-row2" id="kpiRow2">
+        <div class="kpi-card">
+          <div class="kpi-card-label">Заявок сегодня</div>
+          <div class="kpi-card-value gold" id="k_today">—</div>
+          <div class="kpi-card-icon">📅</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-card-label">Активных</div>
+          <div class="kpi-card-value" id="k_active">—</div>
+          <div class="kpi-card-icon">▶️</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-card-label">Завершённых</div>
+          <div class="kpi-card-value" id="k_completed">—</div>
+          <div class="kpi-card-icon">🏁</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-card-label">Новых клиентов (30д)</div>
+          <div class="kpi-card-value" id="k_new_clients">—</div>
+          <div class="kpi-card-icon">👤</div>
+        </div>
+      </div>
 
       <!-- ══════════════════ KPI CARDS ══════════════════ -->
       <div class="stat-cards" id="kpiCards">
@@ -206,6 +320,30 @@
               <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════ ROW 2b: 30-DAY CHART ══════════════════ -->
+      <div class="section-card" style="margin-bottom:24px">
+        <div class="section-card-header">
+          <div class="section-card-title">📈 Заявки за 30 дней</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:0.72rem;color:var(--text-dim)" id="chart30Total"></span>
+            <select id="chart30Period" onchange="loadChart30()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:3px 8px;outline:none">
+              <option value="7">7 дней</option>
+              <option value="30" selected>30 дней</option>
+              <option value="90">90 дней</option>
+            </select>
+          </div>
+        </div>
+        <div class="section-card-body padded">
+          <div class="chart30-wrap">
+            <svg class="chart30-svg" id="chart30Svg" viewBox="0 0 800 160" preserveAspectRatio="none">
+              <text x="400" y="80" text-anchor="middle" fill="#555" font-size="14">Загрузка...</text>
+            </svg>
+            <div class="chart30-tooltip" id="chart30Tooltip"></div>
+          </div>
+          <div class="chart30-x-labels" id="chart30XLabels"></div>
         </div>
       </div>
 
@@ -453,14 +591,212 @@ async function loadDashboard() {
   }
 }
 
+/* ─── Extended KPI cards (Task 1) ────────────────────── */
+async function loadKpiCards() {
+  try {
+    const d = await _admin.apiFetch('/admin/stats/extended2');
+    function setKpi(id, val) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (el.textContent !== String(val)) {
+        el.textContent = val;
+        el.closest('.kpi-card')?.classList.remove('updated');
+        void el.closest('.kpi-card')?.offsetWidth;
+        el.closest('.kpi-card')?.classList.add('updated');
+      }
+    }
+    setKpi('k_today',       d.today_orders);
+    setKpi('k_active',      d.active_orders);
+    setKpi('k_completed',   d.completed_orders);
+    setKpi('k_new_clients', d.new_clients_30d);
+  } catch { /* silently skip */ }
+}
+
+/* ─── 30-day SVG chart (Task 3) ──────────────────────── */
+async function loadChart30() {
+  const days = parseInt(document.getElementById('chart30Period').value) || 30;
+  try {
+    const data = await _admin.apiFetch(`/admin/orders-chart?days=${days}`);
+    renderChart30(data.days, data.total);
+    document.getElementById('chart30Total').textContent = `${data.total} заявок`;
+  } catch {
+    document.getElementById('chart30Total').textContent = '';
+  }
+}
+
+function renderChart30(days, total) {
+  const svg   = document.getElementById('chart30Svg');
+  const xLabels = document.getElementById('chart30XLabels');
+  const tooltip = document.getElementById('chart30Tooltip');
+  if (!svg || !days.length) return;
+
+  const W = 800, H = 140, PAD_L = 0, PAD_R = 0, PAD_T = 10, PAD_B = 20;
+  const maxVal = Math.max(...days.map(d => d.count), 1);
+  const n = days.length;
+  const stepX = (W - PAD_L - PAD_R) / Math.max(n - 1, 1);
+  const scaleY = v => PAD_T + (H - PAD_T - PAD_B) * (1 - v / maxVal);
+
+  // Build points
+  const pts = days.map((d, i) => ({
+    x: PAD_L + i * stepX,
+    y: scaleY(d.count),
+    count: d.count,
+    label: d.label,
+    day: d.day,
+  }));
+
+  // Area fill path
+  const ptsStr = pts.map(p => `${p.x},${p.y}`).join(' ');
+  const areaPath = `M${pts[0].x},${H - PAD_B} L${ptsStr} L${pts[pts.length-1].x},${H - PAD_B} Z`;
+
+  // Line path
+  const linePath = `M${pts.map(p => `${p.x},${p.y}`).join(' L')}`;
+
+  // Y grid lines
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const y = scaleY(maxVal * f);
+    const v = Math.round(maxVal * f);
+    return `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="#1e1e1e" stroke-width="1"/>
+            <text x="4" y="${y - 3}" fill="#444" font-size="9">${v}</text>`;
+  }).join('');
+
+  // Circles + invisible hit targets
+  const circles = pts.map((p, i) => `
+    <circle cx="${p.x}" cy="${p.y}" r="3" fill="${p.count > 0 ? '#c9a96e' : '#1e1e1e'}" stroke="#c9a96e" stroke-width="1.5" class="chart30-dot" data-i="${i}"/>
+    <rect x="${p.x - stepX/2}" y="${PAD_T}" width="${stepX}" height="${H - PAD_T - PAD_B}" fill="transparent"
+      onmouseenter="showChart30Tip(${i},${p.x},${p.y},event)" onmouseleave="hideChart30Tip()" style="cursor:crosshair"/>
+  `).join('');
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="chart30Grad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#c9a96e" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="#c9a96e" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${gridLines}
+    <path d="${areaPath}" fill="url(#chart30Grad)"/>
+    <path d="${linePath}" fill="none" stroke="#c9a96e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${circles}
+  `;
+
+  // Store pts globally for tooltip
+  svg._pts = pts;
+
+  // X labels — show ~6 evenly spread
+  const step = Math.max(1, Math.floor(n / 6));
+  const labelItems = days.filter((_, i) => i === 0 || i === n - 1 || i % step === 0).map(d => d.label);
+  xLabels.innerHTML = labelItems.map(l => `<span>${l}</span>`).join('');
+}
+
+let _chart30TipTimer;
+function showChart30Tip(i, x, y, e) {
+  const svg = document.getElementById('chart30Svg');
+  const tip = document.getElementById('chart30Tooltip');
+  const pt  = (svg._pts || [])[i];
+  if (!pt) return;
+  tip.textContent = `${pt.label}: ${pt.count} заявок`;
+  const rect = svg.getBoundingClientRect();
+  const svgW = rect.width;
+  // map svg x (0..800) to actual pixel
+  const px = (pt.x / 800) * svgW;
+  const pyRatio = (pt.y / 140);
+  const tipLeft = Math.min(px + 8, svgW - 120);
+  tip.style.left = tipLeft + 'px';
+  tip.style.top  = (pyRatio * rect.height - 32) + 'px';
+  tip.style.display = 'block';
+}
+function hideChart30Tip() {
+  const tip = document.getElementById('chart30Tooltip');
+  if (tip) tip.style.display = 'none';
+}
+
+/* ─── Notifications center (Task 2) ─────────────────── */
+let _notifData = [];
+
+async function loadNotifications() {
+  try {
+    const data = await _admin.apiFetch('/admin/notifications');
+    _notifData = data.notifications || [];
+    const count = data.unread_count || 0;
+    const badge = document.getElementById('notifBadge');
+    if (badge) {
+      badge.textContent = count > 9 ? '9+' : count;
+      badge.style.display = count > 0 ? 'flex' : 'none';
+    }
+    renderNotifList();
+  } catch { /* silently skip */ }
+}
+
+function renderNotifList() {
+  const list = document.getElementById('notifList');
+  if (!list) return;
+  if (!_notifData.length) {
+    list.innerHTML = '<div class="notif-empty">Уведомлений нет</div>';
+    return;
+  }
+  const ICONS = { new_order: '📋', pending_review: '⭐', unread_message: '💬' };
+  list.innerHTML = _notifData.map(n => `
+    <a class="notif-item${n.read ? '' : ' unread'}" href="${n.link}" onclick="markNotifRead('${n.id}')">
+      <div class="notif-item-icon">${ICONS[n.type] || '🔔'}</div>
+      <div class="notif-item-body">
+        <div class="notif-item-title">${_admin.escapeHtml(n.title)}</div>
+        <div class="notif-item-text">${_admin.escapeHtml(n.text)}</div>
+      </div>
+      <div class="notif-item-time">${_admin.formatDateTime(n.created_at)}</div>
+    </a>`).join('');
+}
+
+function toggleNotifPopup() {
+  const popup = document.getElementById('notifPopup');
+  if (!popup) return;
+  const isOpen = popup.classList.toggle('open');
+  if (isOpen) loadNotifications();
+}
+
+async function markNotifRead(id) {
+  try {
+    await _admin.apiFetch('/admin/notifications/read', {
+      method: 'POST', body: JSON.stringify({ ids: [id] })
+    });
+    const n = _notifData.find(x => x.id === id);
+    if (n) n.read = true;
+    loadNotifications();
+  } catch { /* ignore */ }
+}
+
+async function markAllNotifRead() {
+  try {
+    await _admin.apiFetch('/admin/notifications/read', {
+      method: 'POST', body: JSON.stringify({ ids: _notifData.map(n => n.id) })
+    });
+    _notifData.forEach(n => n.read = true);
+    loadNotifications();
+  } catch { /* ignore */ }
+}
+
+// Close popup on outside click
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('notifBellWrap');
+  const popup = document.getElementById('notifPopup');
+  if (wrap && popup && !wrap.contains(e.target)) popup.classList.remove('open');
+});
+
 /* ─── Init ───────────────────────────────────────────── */
 loadDashboard();
 loadAgentFeed();
+loadKpiCards();
+loadChart30();
+loadNotifications();
 
 // Auto-refresh every 30 seconds
 setInterval(loadDashboard, 30000);
 // Refresh agent feed every 60 seconds
 setInterval(loadAgentFeed, 60000);
+// Refresh KPI cards every 60 seconds
+setInterval(loadKpiCards, 60000);
+// Refresh notifications every 60 seconds
+setInterval(loadNotifications, 60000);
 </script>
 </body>
 </html>

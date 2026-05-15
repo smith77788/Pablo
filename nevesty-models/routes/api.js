@@ -204,6 +204,121 @@ router.get('/admin/stats', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Admin stats (extended: today, completed, new_clients, pending_reviews) ───
+router.get('/admin/stats/extended2', auth, async (req, res, next) => {
+  try {
+    const [todayOrders, activeOrders, completedOrders, newClients, pendingReviews] = await Promise.all([
+      get("SELECT COUNT(*) as n FROM orders WHERE date(created_at) = date('now')"),
+      get("SELECT COUNT(*) as n FROM orders WHERE status IN ('reviewing','confirmed','in_progress')"),
+      get("SELECT COUNT(*) as n FROM orders WHERE status = 'completed'"),
+      get("SELECT COUNT(*) as n FROM orders WHERE created_at >= date('now', '-30 days')"),
+      get("SELECT COUNT(*) as n FROM reviews WHERE approved = 0"),
+    ]);
+    res.json({
+      today_orders: todayOrders.n,
+      active_orders: activeOrders.n,
+      completed_orders: completedOrders.n,
+      new_clients_30d: newClients.n,
+      pending_reviews: pendingReviews.n,
+    });
+  } catch (e) { next(e); }
+});
+
+// ─── Orders chart — daily counts for N days ───────────────────────────────────
+router.get('/admin/orders-chart', auth, async (req, res, next) => {
+  try {
+    const days = Math.min(90, Math.max(7, parseInt(req.query.days) || 30));
+    const rows = await query(
+      `SELECT date(created_at) as day, COUNT(*) as count
+       FROM orders
+       WHERE created_at >= date('now', '-${days - 1} days')
+       GROUP BY date(created_at)
+       ORDER BY day ASC`
+    );
+    const countMap = {};
+    rows.forEach(r => { countMap[r.day] = r.count; });
+    const result = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+      result.push({ day: key, label, count: countMap[key] || 0 });
+    }
+    res.json({ days: result, total: rows.reduce((s, r) => s + r.count, 0) });
+  } catch (e) { next(e); }
+});
+
+// ─── Notifications center ──────────────────────────────────────────────────────
+// GET  /api/admin/notifications          → list (new orders, pending reviews, unread messages)
+// POST /api/admin/notifications/read     → mark items as read (stores in-memory per session)
+const _notifReadSet = new Set(); // lightweight: reset on restart
+
+router.get('/admin/notifications', auth, async (req, res, next) => {
+  try {
+    const [newOrders, pendingReviews, unreadOrders] = await Promise.all([
+      query(
+        `SELECT id, order_number, client_name, created_at FROM orders WHERE status='new' ORDER BY created_at DESC LIMIT 10`
+      ),
+      query(
+        `SELECT id, client_name, rating, text, created_at FROM reviews WHERE approved=0 ORDER BY created_at DESC LIMIT 5`
+      ),
+      query(
+        `SELECT DISTINCT o.id, o.order_number, o.client_name, o.created_at
+         FROM orders o
+         WHERE o.status NOT IN ('completed','cancelled')
+         AND EXISTS (
+           SELECT 1 FROM messages m WHERE m.order_id = o.id AND m.sender_type = 'client'
+           AND NOT EXISTS (
+             SELECT 1 FROM messages m2 WHERE m2.order_id = o.id AND m2.sender_type = 'admin' AND m2.created_at > m.created_at
+           )
+         )
+         ORDER BY o.created_at DESC LIMIT 5`
+      ),
+    ]);
+    const notifications = [];
+    newOrders.forEach(o => notifications.push({
+      id: `order_new_${o.id}`,
+      type: 'new_order',
+      title: `Новая заявка: ${o.order_number}`,
+      text: o.client_name,
+      link: `/admin/orders.html?id=${o.id}`,
+      created_at: o.created_at,
+      read: _notifReadSet.has(`order_new_${o.id}`),
+    }));
+    pendingReviews.forEach(r => notifications.push({
+      id: `review_${r.id}`,
+      type: 'pending_review',
+      title: `Отзыв на модерации`,
+      text: `${r.client_name} — ${'★'.repeat(r.rating)}`,
+      link: `/admin/settings.html#reviews`,
+      created_at: r.created_at,
+      read: _notifReadSet.has(`review_${r.id}`),
+    }));
+    unreadOrders.forEach(o => notifications.push({
+      id: `msg_${o.id}`,
+      type: 'unread_message',
+      title: `Непрочитанное сообщение`,
+      text: `Заявка ${o.order_number} — ${o.client_name}`,
+      link: `/admin/orders.html?id=${o.id}`,
+      created_at: o.created_at,
+      read: _notifReadSet.has(`msg_${o.id}`),
+    }));
+    notifications.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const unreadCount = notifications.filter(n => !n.read).length;
+    res.json({ notifications: notifications.slice(0, 10), unread_count: unreadCount });
+  } catch (e) { next(e); }
+});
+
+router.post('/admin/notifications/read', auth, async (req, res, next) => {
+  try {
+    const { ids } = req.body;
+    if (Array.isArray(ids)) ids.forEach(id => _notifReadSet.add(id));
+    else _notifReadSet.add('__all__');
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // ─── Models (public) ──────────────────────────────────────────────────────────
 router.get('/models', async (req, res, next) => {
   try {

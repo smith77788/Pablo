@@ -75,6 +75,72 @@ def _load_dept(name: str):
     return None
 
 
+def _send_ceo_memo_to_telegram(memo_text: str, health_score: int, growth_actions: list) -> None:
+    """Отправляет CEO Memo в Telegram всем администраторам."""
+    try:
+        import os
+        import requests  # type: ignore
+        bot_token = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+        admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "")
+        if not bot_token or not admin_ids_str:
+            return
+
+        admin_ids = [i.strip() for i in admin_ids_str.split(",") if i.strip()]
+
+        score_emoji = "🟢" if health_score >= 70 else "🟡" if health_score >= 40 else "🔴"
+        top_actions = "\n".join([f"• {a.get('action', '')}" for a in growth_actions[:3]])
+
+        text = (
+            f"🏭 AI Factory — Еженедельный отчёт CEO\n\n"
+            f"{score_emoji} Здоровье бизнеса: {health_score}/100\n\n"
+            f"📋 Топ-3 приоритета:\n{top_actions}\n\n"
+            f"💡 CEO Memo:\n{memo_text[:500]}"
+        )
+
+        for admin_id in admin_ids:
+            requests.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={"chat_id": admin_id, "text": text},
+                timeout=10,
+            )
+    except Exception as e:
+        logger.error("Failed to send CEO memo to Telegram: %s", e)
+
+
+def _sync_growth_actions_to_bot_db(growth_actions: list, bot_db_path: str) -> None:
+    """Копирует growth actions из factory.db в bot БД для отображения в боте."""
+    import os
+    import sqlite3 as _sqlite3
+
+    if not os.path.exists(bot_db_path):
+        return
+    try:
+        conn = _sqlite3.connect(bot_db_path)
+        conn.execute("""CREATE TABLE IF NOT EXISTS factory_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL,
+            priority INTEGER DEFAULT 5,
+            department TEXT,
+            expected_impact TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
+        for action in growth_actions:
+            conn.execute(
+                "INSERT INTO factory_tasks (action, priority, department, expected_impact) VALUES (?,?,?,?)",
+                [
+                    action.get("action", ""),
+                    action.get("priority", 5),
+                    action.get("department", ""),
+                    action.get("expected_impact", ""),
+                ],
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error("Failed to sync growth actions: %s", e)
+
+
 def run_cycle() -> dict:
     """Один полный цикл AI-офиса. Возвращает сводку."""
     cycle_start = time.time()
@@ -465,7 +531,8 @@ def run_cycle() -> dict:
 
             summary_lines.append(f"🏆 CEO Health Score: {ceo_synthesis.get('health_score', '—')}%")
             summary_lines.append(f"🎯 CEO Фокус: {weekly_focus[:80] if weekly_focus else '—'}")
-            actions_count = len(ceo_synthesis.get("growth_actions", []))
+            growth_actions_list = ceo_synthesis.get("growth_actions", [])
+            actions_count = len(growth_actions_list)
             summary_lines.append(f"📋 CEO Growth Actions: {actions_count}")
             logger.info(
                 "[CEOSynthesis] health=%s, focus=%s, actions=%s",
@@ -473,6 +540,12 @@ def run_cycle() -> dict:
                 weekly_focus[:60] if weekly_focus else "—",
                 actions_count,
             )
+
+            # Sync growth actions to bot DB and send CEO memo to Telegram
+            final_health = ceo_synthesis.get("health_score", results["health_score"])
+            bot_db = "/home/user/Pablo/nevesty-models/data.db"
+            _sync_growth_actions_to_bot_db(growth_actions_list, bot_db)
+            _send_ceo_memo_to_telegram(memo_text, final_health, growth_actions_list)
     except Exception as e:
         logger.error("CEO Synthesis phase error: %s", e)
 
