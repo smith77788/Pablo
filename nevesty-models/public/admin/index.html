@@ -302,6 +302,21 @@
           <div class="stat-card-value gold" id="s_unread">—</div>
           <div class="stat-card-icon">💬</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Выручка (30 дней)</div>
+          <div class="stat-card-value gold" id="s_revenue30">—</div>
+          <div class="stat-card-icon">💰</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Постоянных клиентов</div>
+          <div class="stat-card-value" id="s_repeat">—</div>
+          <div class="stat-card-icon">🔁</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Среднее время сделки</div>
+          <div class="stat-card-value" id="s_deal_days">—</div>
+          <div class="stat-card-icon">📅</div>
+        </div>
       </div>
 
       <!-- ══════════════════ ROW 2: STATUS CHART + 7-DAY CHART ══════════════════ -->
@@ -620,6 +635,9 @@ async function loadKpiCards() {
     setKpi('k_completed',   d.completed_orders);
     setKpi('k_new_clients', d.new_clients_30d);
     if (d.pending_reviews !== undefined) setKpi('k_pending_reviews', d.pending_reviews);
+    if (d.revenue_30d) setVal('s_revenue30', (d.revenue_30d / 1000).toFixed(0) + ' тыс ₽');
+    setVal('s_repeat', d.repeat_clients || 0);
+    setVal('s_deal_days', d.avg_deal_days ? d.avg_deal_days + ' дн' : '—');
   } catch { /* silently skip */ }
   // Load pending reviews separately if not in extended stats
   try {

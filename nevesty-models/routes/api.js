@@ -278,12 +278,22 @@ router.get('/admin/stats', auth, async (req, res, next) => {
 // ─── Admin stats (extended: today, completed, new_clients, pending_reviews) ───
 router.get('/admin/stats/extended2', auth, async (req, res, next) => {
   try {
-    const [todayOrders, activeOrders, completedOrders, newClients, pendingReviews] = await Promise.all([
+    const [todayOrders, activeOrders, completedOrders, newClients, pendingReviews, revenueRow, repeatRow, avgDealRow] = await Promise.all([
       get("SELECT COUNT(*) as n FROM orders WHERE date(created_at) = date('now')"),
       get("SELECT COUNT(*) as n FROM orders WHERE status IN ('reviewing','confirmed','in_progress')"),
       get("SELECT COUNT(*) as n FROM orders WHERE status = 'completed'"),
       get("SELECT COUNT(*) as n FROM orders WHERE created_at >= date('now', '-30 days')"),
       get("SELECT COUNT(*) as n FROM reviews WHERE approved = 0"),
+      get(`SELECT COALESCE(SUM(CAST(REPLACE(REPLACE(budget,'₽',''),' ','') AS INTEGER)), 0) as total
+          FROM orders WHERE status IN ('confirmed','in_progress','completed')
+          AND budget IS NOT NULL AND budget != ''
+          AND created_at >= date('now', '-30 days')`),
+      get(`SELECT COUNT(*) as n FROM (
+            SELECT client_phone FROM orders WHERE client_phone IS NOT NULL
+            GROUP BY client_phone HAVING COUNT(*) >= 2
+          )`),
+      get(`SELECT ROUND(AVG(CAST(julianday(updated_at) - julianday(created_at) AS REAL)), 1) as days
+          FROM orders WHERE status='completed'`),
     ]);
     res.json({
       today_orders: todayOrders.n,
@@ -291,6 +301,9 @@ router.get('/admin/stats/extended2', auth, async (req, res, next) => {
       completed_orders: completedOrders.n,
       new_clients_30d: newClients.n,
       pending_reviews: pendingReviews.n,
+      revenue_30d: revenueRow.total,
+      repeat_clients: repeatRow.n,
+      avg_deal_days: avgDealRow.days || 0,
     });
   } catch (e) { next(e); }
 });
