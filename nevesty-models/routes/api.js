@@ -1479,7 +1479,11 @@ router.get('/admin/orders/:id/history', auth, async (req, res, next) => {
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const history = await query(
-      'SELECT * FROM order_status_history WHERE order_id=? ORDER BY changed_at DESC',
+      `SELECT osh.*, a.username as admin_username
+       FROM order_status_history osh
+       LEFT JOIN admins a ON osh.changed_by = CAST(a.id AS TEXT)
+       WHERE osh.order_id = ?
+       ORDER BY osh.created_at ASC`,
       [id]
     );
     res.json(history);
@@ -2045,9 +2049,30 @@ router.delete('/admin/reviews/:id', auth, async (req, res, next) => {
 // ─── Admin audit log ─────────────────────────────────────────────────────────
 router.get('/admin/audit-log', auth, async (req, res, next) => {
   try {
-    const limit = Math.min(200, parseInt(req.query.limit) || 50);
-    const rows = await query('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?', [limit]);
-    res.json(rows);
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const adminFilter = req.query.admin ? sanitize(req.query.admin, 100) : null;
+    const action = req.query.action ? sanitize(req.query.action, 50) : null;
+
+    let sql = `SELECT al.* FROM audit_log al WHERE 1=1`;
+    const params = [];
+    if (adminFilter) { sql += ` AND (al.admin_username LIKE ? OR al.admin_chat_id = ?)`; params.push('%' + adminFilter + '%', adminFilter); }
+    if (action) { sql += ` AND al.action = ?`; params.push(action); }
+    sql += ` ORDER BY al.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = await query(sql, params);
+
+    let countSql = `SELECT COUNT(*) as n FROM audit_log WHERE 1=1`;
+    const countParams = [];
+    if (adminFilter) { countSql += ` AND (admin_username LIKE ? OR admin_chat_id = ?)`; countParams.push('%' + adminFilter + '%', adminFilter); }
+    if (action) { countSql += ` AND action = ?`; countParams.push(action); }
+    const total = await get(countSql, countParams);
+
+    // Also return distinct actions for frontend filter dropdowns
+    const actions = await query(`SELECT DISTINCT action FROM audit_log WHERE action IS NOT NULL ORDER BY action`, []);
+
+    res.json({ rows, total: total?.n || 0, actions: actions.map(a => a.action) });
   } catch(e) { next(e); }
 });
 

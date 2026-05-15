@@ -190,6 +190,9 @@
           <button onclick="showFavorites()" class="btn-favorites" aria-label="Показать избранные модели">
             ❤ Обране <span id="fav-counter" style="display:none"></span>
           </button>
+          <button onclick="openAiMatchModal()" class="btn-favorites" aria-label="AI подбор модели" style="color:var(--gold);border-color:rgba(201,169,110,0.4)">
+            🤖 AI Подбор
+          </button>
         </div>
       </div>
       <div class="catalog-layout">
@@ -289,6 +292,23 @@
       </div>
     </div>
   </main>
+
+  <!-- AI MATCH MODAL -->
+  <div id="aiMatchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:900;align-items:center;justify-content:center" role="dialog" aria-modal="true" aria-labelledby="aiMatchTitle">
+    <div style="background:var(--bg1,#111);border:1px solid rgba(201,169,110,0.3);border-radius:10px;padding:32px;width:100%;max-width:520px;margin:24px;box-sizing:border-box;max-height:90vh;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+        <h2 id="aiMatchTitle" style="font-size:1.1rem;font-weight:700;color:var(--gold,#c9a96e);margin:0">🤖 AI Подбор модели</h2>
+        <button onclick="closeAiMatchModal()" style="background:none;border:none;color:var(--text-dim,#888);font-size:1.3rem;cursor:pointer;line-height:1" aria-label="Закрыть">✕</button>
+      </div>
+      <p style="font-size:0.85rem;color:var(--text-muted,#aaa);margin-bottom:16px;line-height:1.5">Опишите ваше мероприятие и требования к модели — AI подберёт лучших кандидатов из каталога.</p>
+      <textarea id="aiMatchDesc" placeholder="Например: корпоратив на 100 человек, нужна модель для встречи гостей, стиль — элегантный, Москва, бюджет 25000₽..." style="width:100%;min-height:110px;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));color:var(--text,#f0f0f0);border-radius:6px;padding:12px;font-size:0.85rem;font-family:inherit;resize:vertical;box-sizing:border-box;line-height:1.5" maxlength="500" aria-label="Описание мероприятия"></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px">
+        <button onclick="closeAiMatchModal()" style="padding:10px 20px;background:none;border:1px solid var(--border,rgba(255,255,255,0.1));color:var(--text-muted,#aaa);border-radius:6px;cursor:pointer;font-size:0.8rem">Отмена</button>
+        <button id="aiMatchBtn" onclick="runAiMatchCatalog()" style="padding:10px 24px;background:var(--gold,#c9a96e);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:700;letter-spacing:0.5px">Подобрать</button>
+      </div>
+      <div id="aiMatchResults" style="margin-top:20px"></div>
+    </div>
+  </div>
 
   <!-- MODEL MODAL -->
   <div class="modal-overlay" id="modelModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
@@ -463,6 +483,79 @@
   <script src="/js/catalog.js" defer></script>
   <script src="/js/telegram-webapp.js" defer></script>
   <script src="/js/darkmode.js"></script>
+
+  <!-- AI Match logic -->
+  <script>
+  function openAiMatchModal() {
+    const modal = document.getElementById('aiMatchModal');
+    modal.style.display = 'flex';
+    document.getElementById('aiMatchResults').innerHTML = '';
+    setTimeout(() => document.getElementById('aiMatchDesc').focus(), 100);
+  }
+  function closeAiMatchModal() {
+    document.getElementById('aiMatchModal').style.display = 'none';
+  }
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('aiMatchModal').style.display === 'flex') closeAiMatchModal();
+  });
+  document.getElementById('aiMatchModal').addEventListener('click', function(e) {
+    if (e.target === this) closeAiMatchModal();
+  });
+
+  async function runAiMatchCatalog() {
+    const desc = document.getElementById('aiMatchDesc').value.trim();
+    if (desc.length < 10) {
+      document.getElementById('aiMatchResults').innerHTML = '<p style="color:#e74c3c;font-size:0.82rem">Опишите подробнее (минимум 10 символов).</p>';
+      return;
+    }
+    const btn = document.getElementById('aiMatchBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Подбираю...';
+    document.getElementById('aiMatchResults').innerHTML = '<p style="color:var(--text-muted,#aaa);font-size:0.82rem;text-align:center">AI анализирует запрос...</p>';
+
+    try {
+      const resp = await fetch('/api/client/ai-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: desc })
+      });
+      const data = await resp.json();
+
+      if (!data.ok) throw new Error(data.error || 'Ошибка сервера');
+
+      const models = data.models || [];
+      const reason = data.reason || '';
+      const resultsEl = document.getElementById('aiMatchResults');
+
+      if (!models.length) {
+        resultsEl.innerHTML = '<p style="color:var(--text-muted,#aaa);font-size:0.85rem">Подходящих моделей не найдено. Попробуйте изменить описание.</p>';
+        return;
+      }
+
+      let html = '';
+      if (reason) html += `<p style="font-size:0.8rem;color:var(--gold,#c9a96e);margin-bottom:14px;line-height:1.5">💡 ${reason}</p>`;
+      html += '<div style="display:flex;flex-direction:column;gap:10px">';
+      models.forEach(m => {
+        const photo = m.photo_main ? `<img src="${m.photo_main}" alt="${m.name}" style="width:56px;height:70px;object-fit:cover;border-radius:4px;flex-shrink:0" loading="lazy">` : `<div style="width:56px;height:70px;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0">💃</div>`;
+        html += `<div style="display:flex;gap:14px;align-items:center;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:6px;padding:12px">
+          ${photo}
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:0.9rem;color:var(--text,#f0f0f0)">${m.name}</div>
+            <div style="font-size:0.78rem;color:var(--text-muted,#aaa);margin-top:3px">${m.age ? m.age + ' лет' : ''}${m.height ? ', ' + m.height + ' см' : ''}${m.city ? ', ' + m.city : ''}${m.category ? ' · ' + m.category : ''}</div>
+          </div>
+          <a href="/model.html?id=${m.id}" style="flex-shrink:0;padding:8px 14px;background:var(--gold,#c9a96e);color:#000;border-radius:4px;font-size:0.75rem;font-weight:700;text-decoration:none;white-space:nowrap">Смотреть</a>
+        </div>`;
+      });
+      html += '</div>';
+      resultsEl.innerHTML = html;
+    } catch (e) {
+      document.getElementById('aiMatchResults').innerHTML = `<p style="color:#e74c3c;font-size:0.82rem">Ошибка: ${e.message}</p>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Подобрать';
+    }
+  }
+  </script>
   <script type="application/ld+json">
 [
   {

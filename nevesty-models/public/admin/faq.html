@@ -110,6 +110,23 @@
 
     <div class="page-content">
 
+      <!-- AI FAQ Generation -->
+      <div class="section-card" style="margin-bottom:24px">
+        <div class="section-card-header">
+          <div class="section-card-title">🤖 AI Генерация FAQ</div>
+        </div>
+        <div class="section-card-body">
+          <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:14px">Введите тему — AI создаст 3 вопроса и ответа, которые можно сразу добавить в FAQ.</p>
+          <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+            <input type="text" id="aiTopic" placeholder="Например: цены, бронирование, работа моделей..." maxlength="200"
+              style="flex:1;min-width:200px;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:10px 12px;font-size:0.85rem;font-family:inherit"
+              onkeydown="if(event.key==='Enter')generateFaqAi()">
+            <button onclick="generateFaqAi()" id="aiFaqBtn" class="btn btn-md btn-primary">🤖 AI Генерация</button>
+          </div>
+          <div id="aiGeneratedItems" style="margin-top:16px"></div>
+        </div>
+      </div>
+
       <div class="section-card" style="margin-bottom:24px">
         <div class="section-card-header">
           <div class="section-card-title">Список вопросов и ответов</div>
@@ -317,6 +334,72 @@ document.addEventListener('keydown', e => {
 });
 
 loadFaq();
+
+// ─── AI FAQ Generation ────────────────────────────────────────────────────────
+async function generateFaqAi() {
+  const topic = document.getElementById('aiTopic').value.trim();
+  if (!topic) { _admin.toast('Введите тему для генерации', 'warning'); return; }
+
+  const btn = document.getElementById('aiFaqBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Генерирую...';
+  document.getElementById('aiGeneratedItems').innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem">AI создаёт вопросы и ответы...</p>';
+
+  try {
+    const data = await _admin.apiFetch('/admin/faq/generate', {
+      method: 'POST',
+      body: JSON.stringify({ topic })
+    });
+
+    if (!data.ok) throw new Error(data.error || 'Ошибка AI');
+
+    const items = data.items || [];
+    const container = document.getElementById('aiGeneratedItems');
+
+    if (!items.length) {
+      container.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem">AI не вернул результатов. Попробуйте другую тему.</p>';
+      return;
+    }
+
+    container.innerHTML = items.map((item, i) => `
+      <div id="ai-item-${i}" style="background:var(--bg2);border:1px solid rgba(201,169,110,0.2);border-radius:6px;padding:16px;margin-bottom:10px">
+        <div style="font-weight:600;color:var(--text);font-size:0.9rem;margin-bottom:8px">${_admin.escapeHtml(item.question)}</div>
+        <div style="font-size:0.82rem;color:var(--text-muted);line-height:1.6;margin-bottom:12px">${_admin.escapeHtml(item.answer || '').replace(/\n/g, '<br>')}</div>
+        <button class="btn btn-sm btn-primary" onclick="addAiFaqItem(${i})" id="ai-add-btn-${i}">+ Добавить в FAQ</button>
+      </div>`).join('');
+
+    // Store items for adding
+    window._aiFaqItems = items;
+
+  } catch (e) {
+    document.getElementById('aiGeneratedItems').innerHTML = `<p style="color:#e74c3c;font-size:0.85rem">Ошибка: ${e.message}</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🤖 AI Генерация';
+  }
+}
+
+async function addAiFaqItem(index) {
+  const items = window._aiFaqItems || [];
+  const item = items[index];
+  if (!item) return;
+
+  const addBtn = document.getElementById(`ai-add-btn-${index}`);
+  if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Добавляю...'; }
+
+  try {
+    await _admin.apiFetch('/admin/faq', {
+      method: 'POST',
+      body: JSON.stringify({ question: item.question, answer: item.answer, sort_order: 0 })
+    });
+    _admin.toast('Вопрос добавлен в FAQ', 'success');
+    if (addBtn) { addBtn.textContent = '✅ Добавлено'; addBtn.style.background = 'var(--success,#27ae60)'; }
+    loadFaq();
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+    if (addBtn) { addBtn.disabled = false; addBtn.textContent = '+ Добавить в FAQ'; }
+  }
+}
 </script>
 </body>
 </html>
