@@ -21,6 +21,7 @@ const { ALLOWED_EVENT_TYPES, ALLOWED_CATEGORIES, VALID_STATUSES } = require('../
 let contactRateLimit = (req, res, next) => next(); // fallback: no-op
 let strictLimiter   = (req, res, next) => next(); // fallback: no-op
 let authLimiter     = (req, res, next) => next(); // fallback: no-op
+let aiMatchLimiter  = (req, res, next) => next(); // fallback: no-op
 try {
   const rateLimit = require('express-rate-limit');
   // Contact form: 3 requests per hour per IP
@@ -46,6 +47,14 @@ try {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Слишком много попыток входа' },
+  });
+  // AI match: 10 requests per hour per IP (public endpoint using paid API)
+  aiMatchLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много запросов. Попробуйте через час.' },
   });
 } catch { /* express-rate-limit not available */ }
 
@@ -1380,6 +1389,10 @@ router.get('/admin/orders', auth, async (req, res, next) => {
     }
     if (from && validateDate(from)) { where += ' AND date(o.created_at) >= ?'; params.push(from); }
     if (to   && validateDate(to))   { where += ' AND date(o.created_at) <= ?'; params.push(to); }
+    const period = req.query.period;
+    if (period === 'today')  { where += " AND date(o.created_at) = date('now')"; }
+    else if (period === 'week')  { where += " AND o.created_at >= date('now', '-7 days')"; }
+    else if (period === 'month') { where += " AND o.created_at >= date('now', '-30 days')"; }
     const [totalRow, orders] = await Promise.all([
       get(`SELECT COUNT(*) as n FROM orders o WHERE ${where}`, params),
       query(`SELECT o.*, m.name as model_name, a.username as manager_name
@@ -2089,6 +2102,23 @@ router.get('/admin/orders/:id/messages', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Recent client messages (admin) ──────────────────────────────────────────
+router.get('/admin/messages/recent', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
+    const rows = await query(`
+      SELECT m.id, m.order_id, m.content, m.created_at, m.sender_type,
+             o.order_number, o.client_name, o.client_chat_id
+      FROM messages m
+      JOIN orders o ON m.order_id = o.id
+      WHERE m.sender_type = 'client'
+      ORDER BY m.created_at DESC
+      LIMIT ?
+    `, [limit]);
+    res.json({ ok: true, messages: rows });
+  } catch (e) { next(e); }
+});
+
 // ─── Order detail (admin, with model join) ───────────────────────────────────
 router.get('/admin/orders/:id/detail', auth, async (req, res, next) => {
   try {
@@ -2687,6 +2717,7 @@ router.get('/admin/factory-monthly', auth, (req, res, next) => {
 
 // ─── Factory CEO decisions (reads factory.db decisions table) ─────────────────
 router.get('/admin/factory-ceo-decisions', auth, (req, res, next) => {
+  if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
   try {
     const Database = require('better-sqlite3');
     const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
@@ -2710,6 +2741,7 @@ router.get('/admin/factory-ceo-decisions', auth, (req, res, next) => {
 
 // ─── Factory health metrics (cycles summary) ──────────────────────────────────
 router.get('/admin/factory-health', auth, (req, res, next) => {
+  if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
   try {
     const Database = require('better-sqlite3');
     const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
@@ -3604,6 +3636,7 @@ router.delete('/admin/faq/:id', auth, async (req, res, next) => {
 router.post('/admin/faq/generate', auth, async (req, res) => {
   const { topic } = req.body;
   if (!topic) return res.json({ ok: false, error: 'topic required' });
+  if (typeof topic !== 'string' || topic.length > 200) return res.json({ ok: false, error: 'topic must be a string under 200 characters' });
 
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
   if (!ANTHROPIC_API_KEY) return res.json({ ok: false, error: 'ANTHROPIC_API_KEY not set' });
@@ -3639,9 +3672,10 @@ router.post('/admin/faq/generate', auth, async (req, res) => {
 
 // ─── AI: model matching by description (client) ───────────────────────────────
 // POST /api/client/ai-match — match models to a natural language description
-router.post('/client/ai-match', async (req, res) => {
+router.post('/client/ai-match', aiMatchLimiter, async (req, res) => {
   const { description } = req.body;
   if (!description || description.length < 10) return res.json({ ok: false, error: 'Describe your request in more detail' });
+  if (description.length > 500) return res.json({ ok: false, error: 'Description too long (max 500 characters)' });
 
   let models = [];
   try {

@@ -132,6 +132,115 @@
       font-size:0.6rem; color:var(--text-dim); margin-top:4px;
     }
 
+    /* ─── Quick Actions Grid ────────────────────────── */
+    .quick-actions {
+      display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px;
+    }
+    .qa-btn {
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:6px; padding:18px 12px; background:var(--bg2); border:1px solid var(--border);
+      border-radius:4px; text-decoration:none; color:var(--text);
+      transition:all 0.2s; cursor:pointer; position:relative; overflow:hidden;
+      min-height:90px;
+    }
+    .qa-btn:hover { border-color:var(--gold); background:rgba(201,169,110,0.07); transform:translateY(-1px); }
+    .qa-btn-new { border-color:rgba(59,130,246,0.4); background:rgba(59,130,246,0.06); }
+    .qa-btn-new:hover { border-color:#3b82f6; background:rgba(59,130,246,0.12); }
+    .qa-icon { font-size:1.6rem; line-height:1; }
+    .qa-count {
+      position:absolute; top:10px; right:12px;
+      background:#3b82f6; color:#fff; font-size:0.72rem; font-weight:700;
+      min-width:20px; height:20px; border-radius:10px; padding:0 5px;
+      display:flex; align-items:center; justify-content:center;
+      display:none;
+    }
+    .qa-count.visible { display:flex; }
+    .qa-label { font-size:0.78rem; color:var(--text-muted); text-align:center; font-weight:500; }
+
+    /* ─── Today activity card ───────────────────────── */
+    .today-card {
+      background:var(--bg2); border:1px solid var(--border); border-radius:4px;
+      padding:0; overflow:hidden; margin-bottom:24px;
+    }
+    .today-card-header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:14px 20px; border-bottom:1px solid var(--border);
+      font-size:0.78rem; font-weight:600; color:var(--text);
+    }
+    .today-stats {
+      display:grid; grid-template-columns:repeat(4,1fr);
+    }
+    .today-stat {
+      padding:16px 20px; border-right:1px solid var(--border);
+      display:flex; flex-direction:column; gap:4px;
+    }
+    .today-stat:last-child { border-right:none; }
+    .today-stat-label { font-size:0.68rem; letter-spacing:1.2px; text-transform:uppercase; color:var(--text-dim); }
+    .today-stat-value { font-size:1.6rem; font-weight:600; color:var(--gold); line-height:1; }
+    .today-orders-list { padding:0 0 0 0; }
+    .today-order-item {
+      display:flex; align-items:center; gap:12px; padding:10px 20px;
+      border-top:1px solid var(--border); text-decoration:none; color:var(--text);
+      transition:background 0.15s; font-size:0.82rem;
+    }
+    .today-order-item:hover { background:rgba(255,255,255,0.03); }
+    .today-order-num { color:var(--gold); font-weight:600; min-width:100px; }
+    .today-order-client { flex:1; color:var(--text); }
+    .today-order-time { color:var(--text-dim); font-size:0.72rem; white-space:nowrap; }
+
+    /* ─── Bot status indicator ──────────────────────── */
+    .bot-status-bar {
+      display:flex; align-items:center; gap:10px; padding:10px 16px;
+      background:var(--bg2); border:1px solid var(--border); border-radius:4px;
+      font-size:0.82rem; margin-bottom:24px;
+    }
+    .bot-status-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .bot-status-dot.online { background:#10b981; box-shadow:0 0 6px rgba(16,185,129,0.6); animation:botPulse 2s infinite; }
+    .bot-status-dot.warn   { background:#f59e0b; box-shadow:0 0 6px rgba(245,158,11,0.5); }
+    .bot-status-dot.offline { background:#ef4444; }
+    @keyframes botPulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+    .bot-status-label { font-weight:600; }
+    .bot-status-label.online { color:#10b981; }
+    .bot-status-label.warn   { color:#f59e0b; }
+    .bot-status-label.offline { color:#ef4444; }
+    .bot-status-uptime { color:var(--text-dim); font-size:0.75rem; margin-left:4px; }
+    .bot-status-spacer { flex:1; }
+
+    /* ─── Revenue sparkline (7-day) ─────────────────── */
+    .revenue-sparkline {
+      display:flex; align-items:flex-end; gap:4px; height:56px;
+    }
+    .rev-bar-wrap { display:flex; flex-direction:column; align-items:center; flex:1; gap:2px; }
+    .rev-bar-fill { width:100%; border-radius:2px 2px 0 0; background:#c9a96e; opacity:0.6; min-height:2px; transition:height 0.5s ease; }
+    .rev-bar-fill.today { opacity:1; background:#e8c980; }
+    .rev-bar-label { font-size:0.58rem; color:var(--text-dim); white-space:nowrap; }
+
+    /* ─── Recent client messages ─────────────────────── */
+    .msg-item {
+      display:flex; align-items:flex-start; gap:12px;
+      padding:12px 16px; border-bottom:1px solid var(--border);
+      font-size:0.82rem;
+    }
+    .msg-item:last-child { border-bottom:none; }
+    .msg-avatar {
+      width:32px; height:32px; border-radius:50%; background:var(--gold);
+      color:#1a1a1a; font-weight:700; font-size:0.78rem;
+      display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    }
+    .msg-body { flex:1; min-width:0; }
+    .msg-client { font-weight:600; color:var(--text); }
+    .msg-order { font-size:0.7rem; color:var(--text-dim); margin-bottom:2px; }
+    .msg-text { color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .msg-meta { display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex-shrink:0; }
+    .msg-time { font-size:0.68rem; color:var(--text-dim); white-space:nowrap; }
+    .msg-reply-btn {
+      font-size:0.7rem; padding:3px 10px; background:none;
+      border:1px solid var(--border); color:var(--text-muted);
+      border-radius:3px; cursor:pointer; text-decoration:none;
+      transition:all 0.15s; white-space:nowrap;
+    }
+    .msg-reply-btn:hover { border-color:var(--gold); color:var(--gold); }
+
     /* ─── Notification bell ─────────────────────────── */
     .notif-bell-wrap { position:relative; display:inline-flex; }
     .notif-bell-btn {
@@ -248,6 +357,63 @@
 
     <div class="page-content">
 
+      <!-- ══════════════════ BOT STATUS BAR ══════════════════ -->
+      <div class="bot-status-bar" id="botStatusBar">
+        <div class="bot-status-dot" id="botStatusDot"></div>
+        <span class="bot-status-label" id="botStatusLabel">Проверка...</span>
+        <span class="bot-status-uptime" id="botStatusUptime"></span>
+        <div class="bot-status-spacer"></div>
+        <a href="/admin/settings.html" class="btn btn-sm btn-ghost" style="font-size:0.72rem">Настройки бота →</a>
+      </div>
+
+      <!-- ══════════════════ QUICK ACTIONS ══════════════════ -->
+      <div class="quick-actions">
+        <a href="/admin/orders.html?status=new" class="qa-btn qa-btn-new">
+          <span class="qa-icon">🆕</span>
+          <span class="qa-count" id="qa-new-count">0</span>
+          <span class="qa-label">Новые заявки</span>
+        </a>
+        <a href="/admin/models.html#add" class="qa-btn">
+          <span class="qa-icon">💃</span>
+          <span class="qa-label">Добавить модель</span>
+        </a>
+        <a href="/admin/broadcasts.html" class="qa-btn">
+          <span class="qa-icon">📢</span>
+          <span class="qa-label">Рассылка</span>
+        </a>
+        <a href="/admin/factory.html" class="qa-btn">
+          <span class="qa-icon">🤖</span>
+          <span class="qa-label">AI Factory</span>
+        </a>
+      </div>
+
+      <!-- ══════════════════ TODAY ACTIVITY CARD ══════════════════ -->
+      <div class="today-card" id="todayCard">
+        <div class="today-card-header">
+          <span>📅 Сегодня</span>
+          <span id="todayDateLabel" style="color:var(--text-dim);font-weight:400;font-size:0.72rem"></span>
+        </div>
+        <div class="today-stats">
+          <div class="today-stat">
+            <div class="today-stat-label">Заявок</div>
+            <div class="today-stat-value" id="today-orders-count">—</div>
+          </div>
+          <div class="today-stat">
+            <div class="today-stat-label">Новых клиентов</div>
+            <div class="today-stat-value" style="color:var(--text)" id="today-clients-count">—</div>
+          </div>
+          <div class="today-stat">
+            <div class="today-stat-label">Сообщений</div>
+            <div class="today-stat-value" style="color:var(--text)" id="today-messages-count">—</div>
+          </div>
+          <div class="today-stat">
+            <div class="today-stat-label">Выручка</div>
+            <div class="today-stat-value" style="color:#10b981;font-size:1.2rem" id="today-revenue">—</div>
+          </div>
+        </div>
+        <div class="today-orders-list" id="todayOrdersList"></div>
+      </div>
+
       <!-- ══════════════════ STAT CARDS ROW 2 (Today / Active / Completed / New Clients) ══════════════════ -->
       <div class="kpi-row2" id="kpiRow2">
         <div class="kpi-card">
@@ -348,15 +514,28 @@
           </div>
         </div>
 
-        <!-- 7-day mini bar chart -->
-        <div class="section-card">
-          <div class="section-card-header">
-            <div class="section-card-title">📅 Заявки за 7 дней</div>
-            <div style="font-size:0.72rem;color:var(--text-dim)" id="chart7dTotal"></div>
+        <!-- 7-day mini bar chart + revenue sparkline -->
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="section-card">
+            <div class="section-card-header">
+              <div class="section-card-title">📅 Заявки за 7 дней</div>
+              <div style="font-size:0.72rem;color:var(--text-dim)" id="chart7dTotal"></div>
+            </div>
+            <div class="section-card-body padded">
+              <div class="mini-chart" id="miniChart">
+                <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+              </div>
+            </div>
           </div>
-          <div class="section-card-body padded">
-            <div class="mini-chart" id="miniChart">
-              <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+          <div class="section-card">
+            <div class="section-card-header">
+              <div class="section-card-title">💰 Выручка за 7 дней</div>
+              <div style="font-size:0.72rem;color:var(--gold);font-weight:600" id="rev7dTotal">—</div>
+            </div>
+            <div class="section-card-body padded">
+              <div class="revenue-sparkline" id="revenueSparkline">
+                <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+              </div>
             </div>
           </div>
         </div>
@@ -428,6 +607,17 @@
               <a href="/admin/orders.html" onclick="setTimeout(()=>_admin.downloadCSV('/admin/orders/export?'),100);return false;" class="btn btn-md btn-ghost" style="justify-content:flex-start">📥 Экспорт CSV</a>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════ RECENT CLIENT MESSAGES ══════════════════ -->
+      <div class="section-card" style="margin-bottom:24px">
+        <div class="section-card-header">
+          <div class="section-card-title">💬 Последние сообщения клиентов</div>
+          <button class="btn btn-sm btn-ghost" onclick="loadRecentMessages()">↺</button>
+        </div>
+        <div class="section-card-body" id="recentMessagesList">
+          <div style="padding:20px;text-align:center;color:var(--text-dim)">Загрузка...</div>
         </div>
       </div>
 
@@ -613,7 +803,7 @@ async function loadDashboard() {
     setVal('s_models', `${stats.available_models}/${stats.total_models}`);
     setVal('s_unread', stats.unread_messages || 0);
 
-    // 🔔 New orders badge pill
+    // 🔔 New orders badge pill + quick-action badge
     const pill     = document.getElementById('newOrdersPill');
     const pillText = document.getElementById('newOrdersPillText');
     if (stats.new_orders > 0) {
@@ -622,6 +812,7 @@ async function loadDashboard() {
     } else {
       pill.style.display = 'none';
     }
+    updateQaBadge(stats.new_orders || 0);
 
     // Unread link
     if (stats.unread_messages > 0) {
@@ -910,6 +1101,203 @@ async function loadQuickBookings() {
   }
 }
 
+/* ─── Bot status indicator ───────────────────────────── */
+async function loadBotStatus() {
+  const dot   = document.getElementById('botStatusDot');
+  const label = document.getElementById('botStatusLabel');
+  const uptime = document.getElementById('botStatusUptime');
+  try {
+    const data = await fetch('/api/health').then(r => r.json());
+    const status = data.status;
+    const bot    = data.components?.bot || data.bot || '';
+    const uptimeSec = data.uptime_seconds || data.uptime || 0;
+    const hours  = Math.floor(uptimeSec / 3600);
+    const mins   = Math.floor((uptimeSec % 3600) / 60);
+    const uptimeStr = uptimeSec ? `Работает ${hours} ч ${String(mins).padStart(2,'0')} мин` : '';
+
+    if (status === 'ok' && (bot === 'ok' || bot === 'connected')) {
+      dot.className   = 'bot-status-dot online';
+      label.className = 'bot-status-label online';
+      label.textContent = '✅ Бот онлайн';
+    } else if (status === 'degraded') {
+      dot.className   = 'bot-status-dot warn';
+      label.className = 'bot-status-label warn';
+      label.textContent = '⚠️ Проблемы';
+    } else {
+      dot.className   = 'bot-status-dot offline';
+      label.className = 'bot-status-label offline';
+      label.textContent = '❌ Офлайн';
+    }
+    if (uptime) uptime.textContent = uptimeStr;
+  } catch {
+    if (dot)   dot.className   = 'bot-status-dot offline';
+    if (label) { label.className = 'bot-status-label offline'; label.textContent = '❌ Офлайн'; }
+  }
+}
+
+/* ─── Today's activity card ──────────────────────────── */
+async function loadTodayActivity() {
+  try {
+    // Today's orders
+    const today = new Date().toISOString().slice(0, 10);
+    document.getElementById('todayDateLabel').textContent = new Date().toLocaleDateString('ru-RU', { weekday:'long', day:'numeric', month:'long' });
+
+    const data = await _admin.apiFetch(`/admin/orders?period=today&limit=3&page=1`)
+      .catch(() => _admin.apiFetch('/admin/orders?limit=3&page=1'));
+
+    // Try period filter via date params
+    const todayData = await _admin.apiFetch(`/admin/orders?date_from=${today}&date_to=${today}&limit=3&page=1`).catch(() => null);
+    const orders = todayData?.orders || [];
+    const totalToday = todayData?.total ?? 0;
+
+    document.getElementById('today-orders-count').textContent = totalToday;
+
+    // Revenue from today's confirmed/completed orders
+    let todayRevenue = 0;
+    try {
+      const revData = await _admin.apiFetch(`/admin/analytics/revenue?months=1`);
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      // We show monthly total as approximation since daily isn't available
+      const monthRow = (revData.months || revData.data || []).find(r => r.month === currentMonth);
+      if (monthRow && monthRow.revenue) {
+        // Show monthly revenue as context
+        document.getElementById('today-revenue').textContent =
+          monthRow.revenue >= 1000
+            ? (monthRow.revenue / 1000).toFixed(0) + 'к ₽/мес'
+            : Math.round(monthRow.revenue) + ' ₽/мес';
+      } else {
+        document.getElementById('today-revenue').textContent = '—';
+      }
+    } catch { document.getElementById('today-revenue').textContent = '—'; }
+
+    // Messages today
+    try {
+      const msgData = await _admin.apiFetch('/admin/messages/recent?limit=20');
+      const todayMsgs = (msgData.messages || []).filter(m => m.created_at && m.created_at.slice(0,10) === today);
+      document.getElementById('today-messages-count').textContent = todayMsgs.length;
+    } catch { document.getElementById('today-messages-count').textContent = '—'; }
+
+    // New clients today (from today's orders with unique clients)
+    const uniqueClients = new Set(orders.map(o => o.client_phone || o.client_chat_id)).size;
+    document.getElementById('today-clients-count').textContent = uniqueClients;
+
+    // Recent 3 orders
+    const listEl = document.getElementById('todayOrdersList');
+    if (!orders.length) {
+      listEl.innerHTML = '<div style="padding:14px 20px;color:var(--text-dim);font-size:0.82rem">Заявок сегодня пока нет</div>';
+    } else {
+      const STATUS = { new:'🆕', reviewing:'🔍', confirmed:'✅', in_progress:'▶️', completed:'🏁', cancelled:'❌' };
+      listEl.innerHTML = orders.map(o => {
+        const t = new Date(o.created_at).toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' });
+        return `<a href="/admin/orders.html?id=${o.id}" class="today-order-item">
+          <span style="font-size:1rem">${STATUS[o.status] || '📋'}</span>
+          <span class="today-order-num">${_admin.escapeHtml(o.order_number || '')}</span>
+          <span class="today-order-client">${_admin.escapeHtml(o.client_name || '—')}</span>
+          <span class="today-order-time">${t}</span>
+        </a>`;
+      }).join('');
+    }
+  } catch (e) {
+    console.warn('loadTodayActivity error:', e.message);
+  }
+}
+
+/* ─── Revenue 7-day sparkline ────────────────────────── */
+async function loadRevenueSparkline() {
+  const el = document.getElementById('revenueSparkline');
+  const totEl = document.getElementById('rev7dTotal');
+  try {
+    const data = await _admin.apiFetch('/admin/analytics/revenue?months=1');
+    const months = data.months || data.data || [];
+
+    // Build last 7 days from order data (use daily stats from main stats)
+    const mainStats = await _admin.apiFetch('/admin/stats').catch(() => null);
+    const daily7d = mainStats?.daily_7d || [];
+
+    if (!daily7d.length) {
+      // Fallback: show monthly revenue if no daily data
+      const totalRev = months.reduce((s, m) => s + (m.revenue || 0), 0);
+      if (totEl) totEl.textContent = totalRev ? (totalRev / 1000).toFixed(0) + 'к ₽' : '—';
+      if (el) el.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">Нет данных</div>';
+      return;
+    }
+
+    // Since we only have order counts per day (not revenue per day),
+    // estimate daily revenue = daily orders × avg revenue per completed order
+    const monthRevenue = months.reduce((s, m) => s + (m.revenue || 0), 0);
+    const monthOrders  = months.reduce((s, m) => s + (m.order_count || 0), 0);
+    const avgPerOrder  = monthOrders > 0 ? monthRevenue / monthOrders : 0;
+
+    const bars = daily7d.map(d => ({ ...d, rev: d.count * avgPerOrder }));
+    const maxRev = Math.max(...bars.map(b => b.rev), 1);
+    const totalRev = bars.reduce((s, b) => s + b.rev, 0);
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (totEl) {
+      totEl.textContent = totalRev >= 1000
+        ? (totalRev / 1000).toFixed(0) + 'к ₽ (оценка)'
+        : Math.round(totalRev) + ' ₽ (оценка)';
+    }
+
+    if (el) {
+      el.innerHTML = bars.map(b => {
+        const pct = Math.round((b.rev / maxRev) * 100);
+        const isToday = b.day === today;
+        return `<div class="rev-bar-wrap">
+          <div class="rev-bar-fill${isToday ? ' today' : ''}" style="height:${Math.max(pct, 2)}%"></div>
+          <div class="rev-bar-label">${b.label}</div>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) {
+    if (el) el.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">Нет данных</div>';
+  }
+}
+
+/* ─── Recent client messages ─────────────────────────── */
+async function loadRecentMessages() {
+  const el = document.getElementById('recentMessagesList');
+  try {
+    const data = await _admin.apiFetch('/admin/messages/recent?limit=5');
+    const msgs = data.messages || [];
+    if (!msgs.length) {
+      el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Сообщений нет</div>';
+      return;
+    }
+    el.innerHTML = msgs.map(m => {
+      const initial = (m.client_name || 'C').charAt(0).toUpperCase();
+      const time = _admin.formatDateTime(m.created_at);
+      const text = (m.content || '').slice(0, 80) + (m.content?.length > 80 ? '…' : '');
+      return `<div class="msg-item">
+        <div class="msg-avatar">${_admin.escapeHtml(initial)}</div>
+        <div class="msg-body">
+          <div class="msg-client">${_admin.escapeHtml(m.client_name || '—')}</div>
+          <div class="msg-order">${_admin.escapeHtml(m.order_number || '')}</div>
+          <div class="msg-text">${_admin.escapeHtml(text)}</div>
+        </div>
+        <div class="msg-meta">
+          <span class="msg-time">${time}</span>
+          <a href="/admin/orders.html?id=${m.order_id}" class="msg-reply-btn">Ответить →</a>
+        </div>
+      </div>`;
+    }).join('');
+  } catch {
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Ошибка загрузки</div>';
+  }
+}
+
+/* ─── Sync new-orders count to quick-actions badge ───── */
+function updateQaBadge(count) {
+  const el = document.getElementById('qa-new-count');
+  if (!el) return;
+  if (count > 0) {
+    el.textContent = count > 99 ? '99+' : count;
+    el.classList.add('visible');
+  } else {
+    el.classList.remove('visible');
+  }
+}
+
 /* ─── Init ───────────────────────────────────────────── */
 loadDashboard();
 loadActivityFeed();
@@ -918,6 +1306,10 @@ loadKpiCards();
 loadChart30();
 loadNotifications();
 loadQuickBookings();
+loadBotStatus();
+loadTodayActivity();
+loadRevenueSparkline();
+loadRecentMessages();
 
 // Auto-refresh every 30 seconds
 setInterval(loadDashboard, 30000);
@@ -929,6 +1321,10 @@ setInterval(loadAgentFeed, 60000);
 setInterval(loadKpiCards, 60000);
 // Refresh notifications every 60 seconds
 setInterval(loadNotifications, 60000);
+// Refresh new widgets every 2 minutes
+setInterval(loadBotStatus, 60000);
+setInterval(loadTodayActivity, 120000);
+setInterval(loadRecentMessages, 120000);
 </script>
 </body>
 </html>
