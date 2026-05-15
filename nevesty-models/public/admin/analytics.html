@@ -95,6 +95,11 @@
         <div class="kpi-value" id="kpi-pending">—</div>
         <div class="kpi-label">На рассмотрении</div>
       </div>
+      <div class="kpi-card" style="--kpi-color:#10b981">
+        <div class="kpi-icon">💰</div>
+        <div class="kpi-value" id="kpi-avg-budget" style="font-size:1.35rem">—</div>
+        <div class="kpi-label">Середній чек</div>
+      </div>
     </div>
 
     <!-- Orders Bar Chart -->
@@ -220,6 +225,10 @@
             <span class="text-sm text-gray-600 dark:text-gray-400">💬 Всего отзывов</span>
             <span id="ext-reviews" class="font-bold text-green-600">—</span>
           </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-gray-600 dark:text-gray-400">💰 Середній чек</span>
+            <span id="ext-avg-budget" class="font-bold text-emerald-600">—</span>
+          </div>
         </div>
       </div>
     </div>
@@ -321,6 +330,16 @@ async function loadExtended() {
     document.getElementById('ext-rating').textContent =
       ext.avg_rating != null ? `${ext.avg_rating} / 5 ⭐` : '—';
     document.getElementById('ext-reviews').textContent = ext.reviews_count ?? '—';
+
+    // Avg budget
+    if (ext.avg_budget != null) {
+      const formatted = new Intl.NumberFormat('uk-UA', { style: 'currency', currency: 'UAH', maximumFractionDigits: 0 }).format(ext.avg_budget);
+      document.getElementById('kpi-avg-budget').textContent = formatted;
+      document.getElementById('ext-avg-budget').textContent = formatted;
+    } else {
+      document.getElementById('kpi-avg-budget').textContent = '—';
+      document.getElementById('ext-avg-budget').textContent = '—';
+    }
   } catch(e) { console.error('Extended analytics error:', e); }
 }
 

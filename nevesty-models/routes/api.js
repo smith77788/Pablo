@@ -2280,6 +2280,16 @@ router.get('/admin/analytics/extended', auth, async (req, res, next) => {
     // Rating average from approved reviews
     const ratingRow = await get(`SELECT AVG(rating) as avg_rating, COUNT(*) as cnt FROM reviews WHERE approved=1`);
 
+    // Average budget (mid-range estimate) from confirmed/completed/in_progress orders
+    const avgBudgetRow = await get(
+      `SELECT ROUND(AVG(CAST(budget AS REAL)), 0) as avg
+       FROM orders
+       WHERE status IN ('confirmed','completed','in_progress')
+         AND budget IS NOT NULL AND budget != '' AND CAST(budget AS REAL) > 0
+         AND created_at >= ?`,
+      [since]
+    );
+
     res.json({
       top_cities: topCities,
       repeat_rate: repeatRate,
@@ -2288,6 +2298,7 @@ router.get('/admin/analytics/extended', auth, async (req, res, next) => {
       avg_cycle_days: avgCycleDays,
       avg_rating: ratingRow?.avg_rating ? Math.round(ratingRow.avg_rating * 10) / 10 : null,
       reviews_count: ratingRow?.cnt || 0,
+      avg_budget: avgBudgetRow?.avg ? Math.round(avgBudgetRow.avg) : null,
     });
   } catch (e) { next(e); }
 });
