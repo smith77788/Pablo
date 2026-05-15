@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
@@ -315,6 +316,55 @@ def _load_last_cycle_from_history() -> dict:
     except Exception as e:
         logger.warning("Failed to load prev cycle: %s", e)
         return {}
+
+
+def get_monthly_metrics(data_db) -> dict:
+    """Get order metrics for current month from data.db."""
+    import datetime as _dt
+    try:
+        month_start = _dt.date.today().replace(day=1).isoformat()
+        row = data_db.execute("""
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status='new' THEN 1 ELSE 0 END) as new_orders
+            FROM orders
+            WHERE created_at >= ?
+        """, (month_start,)).fetchone()
+        return dict(row) if row else {}
+    except Exception:
+        return {}
+
+
+def get_top_models(data_db, limit: int = 5) -> list:
+    """Get top models by orders this month."""
+    import datetime as _dt
+    try:
+        month_start = _dt.date.today().replace(day=1).isoformat()
+        rows = data_db.execute("""
+            SELECT m.name, COUNT(o.id) as order_count
+            FROM orders o
+            JOIN models m ON o.model_id = m.id
+            WHERE o.created_at >= ?
+            GROUP BY m.id ORDER BY order_count DESC LIMIT ?
+        """, (month_start, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def get_revenue_trend(data_db) -> list:
+    """Get last 3 months order counts for trend."""
+    try:
+        rows = data_db.execute("""
+            SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as cnt
+            FROM orders
+            WHERE created_at >= date('now', '-3 months')
+            GROUP BY month ORDER BY month
+        """).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
 
 
 def run_cycle() -> dict:
@@ -1123,6 +1173,94 @@ def run_cycle() -> dict:
         logger.info("[Phase9] IDEAS dept: features=%s, gamif=%s", feature_count, len(ideas_result["gamification"]))
     except Exception as e:
         logger.error("IDEAS dept phase error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 16 — MONTHLY CEO REPORT (runs on day 1-3 of month if not yet generated)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n📅 PHASE 16: MONTHLY CEO REPORT")
+    try:
+        import datetime as _dt
+        import sqlite3 as _sqlite3
+
+        _today = _dt.date.today()
+        _current_month = _today.strftime('%Y-%m')
+
+        # Check if monthly report already exists for this month
+        _existing_monthly = db.fetch_one(
+            "SELECT id FROM monthly_reports WHERE month = ?", (_current_month,)
+        )
+
+        _should_run_monthly = (_today.day == 1) or (_existing_monthly is None and _today.day <= 3)
+
+        if _should_run_monthly and _existing_monthly is None:
+            # Open data.db for metric helpers
+            _bot_db_path = "/home/user/Pablo/nevesty-models/data.db"
+            _data_conn = None
+            if os.path.exists(_bot_db_path):
+                _data_conn = _sqlite3.connect(_bot_db_path)
+                _data_conn.row_factory = _sqlite3.Row
+
+            _monthly_data = {
+                'month': _current_month,
+                'orders': get_monthly_metrics(_data_conn) if _data_conn else {},
+                'top_models': get_top_models(_data_conn) if _data_conn else [],
+                'revenue_trend': get_revenue_trend(_data_conn) if _data_conn else [],
+            }
+            if _data_conn:
+                _data_conn.close()
+
+            # Use the CEOSynthesisAgent that was created above (reuse if available)
+            class _MonthlyCEOAgent(FactoryAgent):
+                department = "ceo"
+                role = "ceo_monthly"
+                name = "ceo_monthly"
+                system_prompt = (
+                    "Ты — CEO агентства моделей Nevesty Models. "
+                    "Генерируешь ежемесячный стратегический отчёт на основе данных за месяц. "
+                    "Анализируй итоги месяца: заявки, конверсию, выручку, топ-моделей. "
+                    "Давай стратегические приоритеты на следующий месяц. "
+                    "Пиши структурированно, на русском языке."
+                )
+
+            _monthly_ceo = _MonthlyCEOAgent()
+
+            _monthly_prompt = (
+                f"Генерируй ежемесячный CEO-отчёт за {_current_month}.\n"
+                f"Данные: {json.dumps(_monthly_data, ensure_ascii=False, default=str)}\n\n"
+                f"Включи:\n"
+                f"1) Итоги месяца (заявки, конверсия, выручка)\n"
+                f"2) Топ-3 инсайта\n"
+                f"3) Стратегические приоритеты на следующий месяц\n"
+                f"4) Что сработало хорошо\n"
+                f"5) Что нужно улучшить"
+            )
+
+            _monthly_report = _monthly_ceo.think(_monthly_prompt, context=_monthly_data)
+
+            db.execute(
+                "INSERT INTO monthly_reports (month, report_json) VALUES (?, ?)",
+                (_current_month, json.dumps(
+                    {'report': _monthly_report, **_monthly_data},
+                    ensure_ascii=False, default=str
+                ))
+            )
+
+            results["phases"]["monthly_report"] = {
+                "month": _current_month,
+                "generated": True,
+                "orders_total": _monthly_data.get("orders", {}).get("total", 0),
+                "top_models_count": len(_monthly_data.get("top_models", [])),
+            }
+            summary_lines.append(f"📅 Monthly CEO Report сгенерирован за {_current_month}")
+            logger.info("[Phase16] Monthly CEO report generated for %s", _current_month)
+        elif _existing_monthly:
+            logger.info("[Phase16] Monthly report for %s already exists — skipping", _current_month)
+            results["phases"]["monthly_report"] = {"month": _current_month, "generated": False, "reason": "already_exists"}
+        else:
+            logger.info("[Phase16] Skipping monthly report (day=%s)", _today.day)
+            results["phases"]["monthly_report"] = {"month": _current_month, "generated": False, "reason": "not_due"}
+    except Exception as e:
+        logger.error("Phase 16 monthly CEO report error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE

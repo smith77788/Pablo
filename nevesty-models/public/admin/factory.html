@@ -125,6 +125,16 @@
         </div>
       </div>
 
+      <!-- Monthly CEO Report -->
+      <div class="section-card" style="margin-bottom:24px" id="monthly-report-card">
+        <div class="section-card-header">
+          <div class="section-card-title">📅 Ежемесячный отчёт CEO</div>
+        </div>
+        <div class="section-card-body padded" id="monthly-report-container">
+          <div style="color:var(--text-dim)">Загрузка...</div>
+        </div>
+      </div>
+
       <!-- Factory Tasks -->
       <div class="section-card">
         <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -231,6 +241,8 @@ async function loadData() {
     document.getElementById('tasks-list').innerHTML =
       '<div style="padding:24px;color:var(--error)">Ошибка загрузки задач: ' + _admin.escapeHtml(e.message) + '</div>';
   }
+
+  loadMonthlyReport();
 }
 
 function renderTasks() {
@@ -367,6 +379,49 @@ async function publishPost(id) {
   }
 }
 
+async function loadMonthlyReport() {
+  const el = document.getElementById('monthly-report-container');
+  try {
+    const data = await _admin.apiFetch('/admin/factory-monthly');
+    if (!data || !data.report_json) {
+      el.innerHTML = '<p style="color:var(--text-muted)">Отчёт за текущий месяц ещё не сгенерирован. Запустите цикл Factory в первые 3 дня месяца.</p>';
+      return;
+    }
+    const d = typeof data.data === 'string' ? JSON.parse(data.data) : (data.data || {});
+    const report = d.report || 'нет данных';
+    const orders = d.orders || {};
+    const topModels = d.top_models || [];
+    const trend = d.revenue_trend || [];
+
+    const topModelsHtml = topModels.length
+      ? topModels.map((m, i) => `<span style="margin-right:12px">${i+1}. <strong>${_admin.escapeHtml(m.name||'')}</strong> (${m.order_count} заявок)</span>`).join('')
+      : '<span style="color:var(--text-dim)">нет данных</span>';
+
+    const trendHtml = trend.length
+      ? trend.map(t => `<span style="margin-right:12px">${_admin.escapeHtml(t.month||'')}: <strong>${t.cnt}</strong></span>`).join('')
+      : '<span style="color:var(--text-dim)">нет данных</span>';
+
+    el.innerHTML = `
+      <div style="margin-bottom:12px">
+        <strong style="color:var(--gold)">Месяц: ${_admin.escapeHtml(data.month||'')}</strong>
+        <span style="font-size:0.78rem;color:var(--text-dim);margin-left:12px">Сгенерирован: ${(data.created_at||'').slice(0,16).replace('T',' ')}</span>
+      </div>
+      <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
+        <div><span style="color:var(--text-muted);font-size:0.82rem">Заявок за месяц:</span> <strong>${orders.total||0}</strong></div>
+        <div><span style="color:var(--text-muted);font-size:0.82rem">Выполнено:</span> <strong>${orders.completed||0}</strong></div>
+        <div><span style="color:var(--text-muted);font-size:0.82rem">Новых:</span> <strong>${orders.new_orders||0}</strong></div>
+      </div>
+      <div style="margin-bottom:8px;font-size:0.82rem"><span style="color:var(--text-muted)">Топ-моделей:</span> ${topModelsHtml}</div>
+      <div style="margin-bottom:16px;font-size:0.82rem"><span style="color:var(--text-muted)">Тренд (3 мес.):</span> ${trendHtml}</div>
+      <div style="background:rgba(201,169,110,0.06);border:1px solid var(--border);border-radius:8px;padding:16px">
+        <div style="font-size:0.82rem;font-weight:600;color:var(--gold);margin-bottom:8px">CEO Отчёт:</div>
+        <pre style="white-space:pre-wrap;font-size:0.84rem;color:var(--text-muted);line-height:1.7;margin:0;font-family:inherit">${_admin.escapeHtml(report)}</pre>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
+  }
+}
+
 async function loadExperiments() {
   const body = document.getElementById('exp-results-body');
   try {
@@ -400,6 +455,7 @@ loadData();
 loadContent();
 loadExperiments();
 setInterval(loadData, 30000);
+setInterval(loadMonthlyReport, 300000); // refresh monthly report every 5 min
 </script>
 </body>
 </html>

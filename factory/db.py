@@ -118,6 +118,13 @@ def init_db() -> None:
             finished_at TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS monthly_reports (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            month       TEXT NOT NULL,  -- 'YYYY-MM'
+            report_json TEXT NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_metrics_product ON metrics(product_id, metric_name);
         CREATE INDEX IF NOT EXISTS idx_metrics_recorded ON metrics(recorded_at);
         CREATE INDEX IF NOT EXISTS idx_decisions_cycle ON decisions(cycle_id);

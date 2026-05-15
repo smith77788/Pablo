@@ -1805,6 +1805,22 @@ router.post('/admin/factory-content/:id/publish', auth, async (req, res, next) =
   } catch(e) { next(e); }
 });
 
+// ─── Factory monthly CEO report ───────────────────────────────────────────────
+router.get('/admin/factory-monthly', auth, (req, res, next) => {
+  try {
+    const Database = require('better-sqlite3');
+    const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
+    if (!fs.existsSync(factoryDbPath)) return res.json({ report: null });
+    const fdb = new Database(factoryDbPath, { readonly: true });
+    const row = fdb.prepare('SELECT * FROM monthly_reports ORDER BY created_at DESC LIMIT 1').get();
+    fdb.close();
+    if (!row) return res.json({ report: null });
+    let data = {};
+    try { data = JSON.parse(row.report_json || '{}'); } catch {}
+    res.json({ ...row, data });
+  } catch (e) { next(e); }
+});
+
 // ─── DB stats endpoint ────────────────────────────────────────────────────────
 router.get('/admin/db-stats', auth, async (req, res, next) => {
   try {
