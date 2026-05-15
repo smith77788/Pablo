@@ -176,7 +176,37 @@
             <option value="cancelled">Отменённые</option>
           </select>
           <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
-          <button class="btn-export" onclick="exportCSV()" title="Экспорт текущей выборки в CSV">⬇ CSV</button>
+          <button class="btn-export" onclick="toggleExportPanel()" title="Экспорт в CSV">📥 CSV ▾</button>
+        </div>
+
+        <!-- Export panel (hidden by default) -->
+        <div id="exportPanel" style="display:none;padding:12px 24px;background:rgba(201,169,110,0.06);border-bottom:1px solid rgba(201,169,110,0.2);">
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+            <span style="font-size:0.75rem;color:var(--gold);font-weight:600;letter-spacing:1px;text-transform:uppercase">📥 Экспорт CSV</span>
+            <div style="display:flex;align-items:center;gap:6px">
+              <label style="font-size:0.72rem;color:var(--text-muted)">Период:</label>
+              <select id="exportPeriod" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:4px 8px;outline:none">
+                <option value="">Все</option>
+                <option value="today">Сегодня</option>
+                <option value="week">Неделя</option>
+                <option value="month">Месяц</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <label style="font-size:0.72rem;color:var(--text-muted)">Статус:</label>
+              <select id="exportStatus" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:4px 8px;outline:none">
+                <option value="">Все статусы</option>
+                <option value="new">Новые</option>
+                <option value="reviewing">На рассмотрении</option>
+                <option value="confirmed">Подтверждённые</option>
+                <option value="in_progress">В процессе</option>
+                <option value="completed">Только завершённые</option>
+                <option value="cancelled">Отменённые</option>
+              </select>
+            </div>
+            <button class="btn btn-sm btn-ghost" onclick="exportCSVWithFilters()" style="border-color:var(--gold);color:var(--gold)">⬇ Скачать CSV</button>
+            <button class="btn btn-sm btn-ghost" onclick="toggleExportPanel()" style="margin-left:auto">✕</button>
+          </div>
         </div>
 
         <!-- Bulk action bar (hidden until rows are checked) -->
@@ -373,7 +403,7 @@ function renderTable(orders) {
       <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${colorBadge(o.status)}</td>
       <td onclick="event.stopPropagation()">
-        <select class="inline-status-select" data-order-id="${o.id}"
+        <select class="inline-status-select" data-order-id="${o.id}" data-prev="${o.status}"
           onchange="quickStatusChange(${o.id}, this.value, this)">
           ${statusOpts}
         </select>
@@ -493,25 +523,34 @@ async function bulkAction(action) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   EXPORT CSV
+   EXPORT CSV — with period/status filters (Task 5)
 ═══════════════════════════════════════════════════════ */
+function toggleExportPanel() {
+  const panel = document.getElementById('exportPanel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
 function exportCSV() {
+  // Quick export using current list filters
   const status = document.getElementById('statusFilter').value;
   const search = document.getElementById('searchInput').value.trim();
   const params = new URLSearchParams();
   if (status) params.set('status', status);
   if (search) params.set('search', search);
-  const token = localStorage.getItem('admin_token');
-  // trigger browser download
-  const url = `/api/admin/orders/export?${params}`;
-  const a = document.createElement('a');
-  a.href = url;
-  // Pass auth via header is impossible for plain <a>, so use fetch + blob
-  _admin.apiFetch('/admin/orders/export?' + params, { parseJSON: false })
-    .catch(() => {
-      // fallback: open URL directly (works if server accepts query-param token)
-      window.open(url + (params.toString() ? '&' : '?') + 'token=' + encodeURIComponent(token), '_blank');
-    });
+  _admin.downloadCSV('/admin/orders/export?' + params);
+}
+
+function exportCSVWithFilters() {
+  const period  = document.getElementById('exportPeriod').value;
+  const status  = document.getElementById('exportStatus').value;
+  const search  = document.getElementById('searchInput').value.trim();
+  const params  = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (search)  params.set('search', search);
+  if (period)  params.set('period', period);
+  _admin.downloadCSV('/admin/orders/export?' + params);
+  document.getElementById('exportPanel').style.display = 'none';
+  _admin.toast('Экспорт начат...', 'info');
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -728,25 +767,40 @@ function setStatusFilter(status) {
    QUICK INLINE STATUS CHANGE
 ═══════════════════════════════════════════════════════ */
 async function quickStatusChange(orderId, newStatus, selectEl) {
+  const prevStatus = selectEl.getAttribute('data-prev') || selectEl.dataset.prev;
+  const newLabel   = _admin.STATUS_LABELS[newStatus] || newStatus;
+  // Store previous value for rollback
+  if (!selectEl.dataset.prev) selectEl.dataset.prev = prevStatus || newStatus;
+
+  const ok = confirm(`Изменить статус заявки на «${newLabel}»?`);
+  if (!ok) {
+    // Revert select to previous value
+    selectEl.value = prevStatus || newStatus;
+    return;
+  }
+  // Update stored previous
+  selectEl.dataset.prev = newStatus;
+
   try {
     await _admin.apiFetch(`/admin/orders/${orderId}`, {
       method: 'PUT',
       body: JSON.stringify({ status: newStatus })
     });
-    _admin.toast(`Статус изменён: ${_admin.STATUS_LABELS[newStatus] || newStatus}`, 'success');
-    // Update the badge in the same row
+    _admin.toast(`Статус изменён: ${newLabel}`, 'success');
+    // Update the color badge in the same row
     const row = selectEl.closest('tr');
     if (row) {
       const badgeCell = row.querySelector('.sbadge');
       if (badgeCell) {
         badgeCell.className = `sbadge sbadge-${newStatus}`;
-        badgeCell.textContent = _admin.STATUS_LABELS[newStatus] || newStatus;
+        badgeCell.textContent = newLabel;
       }
     }
   } catch (e) {
     _admin.toast('Ошибка: ' + e.message, 'error');
-    // Revert select
-    selectEl.value = selectEl.getAttribute('data-original') || newStatus;
+    // Revert select to previous value
+    selectEl.value = prevStatus || newStatus;
+    selectEl.dataset.prev = prevStatus || newStatus;
   }
 }
 

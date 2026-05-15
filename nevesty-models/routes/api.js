@@ -609,10 +609,13 @@ router.get('/admin/orders', auth, async (req, res, next) => {
 
 router.get('/admin/orders/export', auth, async (req, res, next) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, period } = req.query;
     let where = '1=1'; const params = [];
     if (status && ALLOWED_STATUSES.includes(status)) { where += ' AND o.status = ?'; params.push(status); }
     if (search) { where += ' AND (o.client_name LIKE ? OR o.order_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    if (period === 'today')  { where += " AND date(o.created_at) = date('now')"; }
+    if (period === 'week')   { where += " AND o.created_at >= date('now', '-7 days')"; }
+    if (period === 'month')  { where += " AND o.created_at >= date('now', '-30 days')"; }
     const orders = await query(
       `SELECT o.order_number, o.client_name, o.client_phone, o.client_email, o.client_telegram,
               o.event_type, o.event_date, o.event_duration, o.location, o.budget, o.comments,
