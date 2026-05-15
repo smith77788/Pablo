@@ -68,6 +68,11 @@
           <div class="stat-card-value" id="done-count">—</div>
           <div class="stat-card-icon">✅</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Высокий приоритет</div>
+          <div class="stat-card-value" id="high-count" style="color:var(--error)">—</div>
+          <div class="stat-card-icon">🔴</div>
+        </div>
       </div>
 
       <!-- CEO Memo -->
@@ -82,10 +87,43 @@
         </div>
       </div>
 
+      <!-- Experiment Proposal -->
+      <div class="section-card" style="margin-bottom:24px" id="experiment-card" style="display:none">
+        <div class="section-card-header">
+          <div class="section-card-title">🧪 Предложение А/Б эксперимента</div>
+        </div>
+        <div class="section-card-body padded" id="experiment-content" style="font-size:0.88rem;line-height:1.7;color:var(--text-muted)">
+          Данные загружаются...
+        </div>
+      </div>
+
       <!-- Factory Tasks -->
       <div class="section-card">
-        <div class="section-card-header">
+        <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
           <div class="section-card-title">🎯 AI Growth Tasks</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="filter-status" onchange="renderTasks()" class="admin-input" style="padding:4px 10px;font-size:0.8rem;height:auto;width:auto">
+              <option value="">Все статусы</option>
+              <option value="pending">Ожидают</option>
+              <option value="done">Выполнены</option>
+              <option value="skipped">Пропущены</option>
+            </select>
+            <select id="filter-dept" onchange="renderTasks()" class="admin-input" style="padding:4px 10px;font-size:0.8rem;height:auto;width:auto">
+              <option value="">Все отделы</option>
+              <option value="marketing">Marketing</option>
+              <option value="product">Product</option>
+              <option value="sales">Sales</option>
+              <option value="customer_success">Customer Success</option>
+              <option value="analytics">Analytics</option>
+              <option value="operations">Operations</option>
+            </select>
+            <select id="filter-priority" onchange="renderTasks()" class="admin-input" style="padding:4px 10px;font-size:0.8rem;height:auto;width:auto">
+              <option value="">Все приоритеты</option>
+              <option value="high">Высокий</option>
+              <option value="medium">Средний</option>
+              <option value="low">Низкий</option>
+            </select>
+          </div>
         </div>
         <div id="tasks-list" class="section-card-body">
           <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
@@ -99,85 +137,122 @@
 <div class="toast-container" id="toastContainer"></div>
 <script src="/js/admin.js"></script>
 <script>
+let _allTasks = [];
+
 async function loadData() {
   try {
-    // Load settings for CEO memo
     const settingsResp = await _admin.apiFetch('/admin/settings');
     let memo = 'CEO memo пока не доступен. Запустите цикл Factory.';
+    let experiment = null;
     if (Array.isArray(settingsResp)) {
       const memoSetting = settingsResp.find(s => s.key === 'ceo_memo');
-      if (memoSetting && memoSetting.value) memo = memoSetting.value;
-    } else if (settingsResp && settingsResp.ceo_memo) {
-      memo = settingsResp.ceo_memo;
+      if (memoSetting?.value) memo = memoSetting.value;
+      const expSetting = settingsResp.find(s => s.key === 'ceo_experiment');
+      if (expSetting?.value) { try { experiment = JSON.parse(expSetting.value); } catch {} }
+    } else if (settingsResp) {
+      if (settingsResp.ceo_memo) memo = settingsResp.ceo_memo;
+      if (settingsResp.ceo_experiment) { try { experiment = JSON.parse(settingsResp.ceo_experiment); } catch {} }
     }
     document.getElementById('ceo-memo').textContent = memo;
+
+    // Show experiment proposal
+    if (experiment) {
+      const expCard = document.getElementById('experiment-card');
+      const expContent = document.getElementById('experiment-content');
+      if (expCard && expContent) {
+        expCard.style.display = 'block';
+        expContent.innerHTML = `
+          <div style="margin-bottom:8px"><strong style="color:var(--gold)">Гипотеза:</strong> ${_admin.escapeHtml(experiment.hypothesis || experiment.description || '')}</div>
+          <div><strong style="color:var(--gold)">Метрика успеха:</strong> ${_admin.escapeHtml(experiment.success_metric || experiment.metric || '')}</div>`;
+      }
+    }
   } catch (e) {
     document.getElementById('ceo-memo').textContent = 'CEO memo недоступен.';
   }
 
   try {
-    // Load factory tasks
     const { tasks = [], stats = {} } = await _admin.apiFetch('/admin/factory-tasks');
+    _allTasks = tasks;
 
     const pending = stats.pending != null ? stats.pending : tasks.filter(t => t.status === 'pending').length;
     const done    = stats.done    != null ? stats.done    : tasks.filter(t => t.status === 'done').length;
+    const highPri = tasks.filter(t => t.priority === 'high' && t.status === 'pending').length;
 
     document.getElementById('tasks-count').textContent = pending;
     document.getElementById('done-count').textContent  = done;
+    document.getElementById('high-count').textContent  = highPri;
 
     if (stats.last_cycle) {
-      document.getElementById('last-cycle').textContent = _admin.formatDateTime
-        ? _admin.formatDateTime(stats.last_cycle)
-        : stats.last_cycle;
+      const dt = new Date(stats.last_cycle);
+      document.getElementById('last-cycle').textContent = isNaN(dt) ? stats.last_cycle
+        : dt.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
     }
 
-    const container = document.getElementById('tasks-list');
-    if (!tasks.length) {
-      container.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Задач нет. Запустите цикл Factory.</div>';
-      return;
-    }
-
-    const priorityColor = { high: 'var(--error)', medium: '#f59e0b', low: 'var(--success)' };
-    const priorityLabel = { high: '🔴 Высокий', medium: '🟡 Средний', low: '🟢 Низкий' };
-    const statusLabel   = { done: '✅ Выполнено', skipped: '⏭️ Пропущено', pending: '⏳ Ожидает' };
-
-    container.innerHTML = `<table class="data-table">
-      <thead>
-        <tr>
-          <th>Приоритет</th>
-          <th>Задача</th>
-          <th>Ожидаемый эффект</th>
-          <th>Отдел</th>
-          <th>Статус</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${tasks.map(task => `
-          <tr>
-            <td>
-              <span style="font-size:0.75rem;font-weight:600;color:${priorityColor[task.priority] || 'var(--text-muted)'}">
-                ${priorityLabel[task.priority] || task.priority || '—'}
-              </span>
-            </td>
-            <td style="font-weight:500">${_admin.escapeHtml(task.action || '')}</td>
-            <td style="font-size:0.82rem;color:var(--text-muted)">${_admin.escapeHtml(task.expected_impact || '—')}</td>
-            <td style="font-size:0.8rem;color:var(--text-dim)">${_admin.escapeHtml(task.department || '—')}</td>
-            <td style="font-size:0.8rem">${statusLabel[task.status] || task.status}</td>
-            <td>
-              ${task.status === 'pending' ? `
-                <button onclick="markTaskDone(${task.id})"
-                  class="btn btn-sm btn-ghost" style="border-color:var(--success);color:var(--success)">
-                  Выполнено
-                </button>` : ''}
-            </td>
-          </tr>`).join('')}
-      </tbody>
-    </table>`;
+    renderTasks();
   } catch (e) {
     document.getElementById('tasks-list').innerHTML =
       '<div style="padding:24px;color:var(--error)">Ошибка загрузки задач: ' + _admin.escapeHtml(e.message) + '</div>';
   }
+}
+
+function renderTasks() {
+  const filterStatus   = document.getElementById('filter-status')?.value || '';
+  const filterDept     = document.getElementById('filter-dept')?.value   || '';
+  const filterPriority = document.getElementById('filter-priority')?.value || '';
+
+  const filtered = _allTasks.filter(t => {
+    if (filterStatus   && t.status     !== filterStatus)   return false;
+    if (filterDept     && t.department !== filterDept)     return false;
+    if (filterPriority && t.priority   !== filterPriority) return false;
+    return true;
+  });
+
+  const container = document.getElementById('tasks-list');
+  if (!filtered.length) {
+    container.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет задач по выбранным фильтрам. ' +
+      (_allTasks.length ? '' : 'Запустите цикл Factory.') + '</div>';
+    return;
+  }
+
+  const priorityColor = { high: 'var(--error)', medium: '#f59e0b', low: 'var(--success)' };
+  const priorityLabel = { high: '🔴 Высокий', medium: '🟡 Средний', low: '🟢 Низкий' };
+  const statusLabel   = { done: '✅ Выполнено', skipped: '⏭️ Пропущено', pending: '⏳ Ожидает' };
+  const deptLabel = { marketing: 'Marketing', product: 'Product', sales: 'Sales',
+    customer_success: 'CX', analytics: 'Analytics', operations: 'Ops', tech: 'Tech', hr: 'HR' };
+
+  container.innerHTML = `<table class="data-table">
+    <thead>
+      <tr>
+        <th>Приоритет</th>
+        <th>Задача</th>
+        <th>Ожидаемый эффект</th>
+        <th>Отдел</th>
+        <th>Статус</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      ${filtered.map(task => `
+        <tr>
+          <td>
+            <span style="font-size:0.75rem;font-weight:600;color:${priorityColor[task.priority] || 'var(--text-muted)'}">
+              ${priorityLabel[task.priority] || task.priority || '—'}
+            </span>
+          </td>
+          <td style="font-weight:500">${_admin.escapeHtml(task.action || '')}</td>
+          <td style="font-size:0.82rem;color:var(--text-muted)">${_admin.escapeHtml(task.expected_impact || '—')}</td>
+          <td style="font-size:0.8rem;color:var(--text-dim)">${_admin.escapeHtml(deptLabel[task.department] || task.department || '—')}</td>
+          <td style="font-size:0.8rem">${statusLabel[task.status] || task.status}</td>
+          <td>
+            ${task.status === 'pending' ? `
+              <button onclick="markTaskDone(${task.id})"
+                class="btn btn-sm btn-ghost" style="border-color:var(--success);color:var(--success)">
+                Выполнено
+              </button>` : ''}
+          </td>
+        </tr>`).join('')}
+    </tbody>
+  </table>`;
 }
 
 async function markTaskDone(taskId) {
