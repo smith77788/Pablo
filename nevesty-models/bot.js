@@ -767,8 +767,6 @@ async function bkSubmit(chatId, data) {
 
 // ─── Admin screens ────────────────────────────────────────────────────────────
 
-const VALID_STATUSES = ['new','reviewing','confirmed','in_progress','completed','cancelled'];
-
 async function showAdminOrders(chatId, statusFilter, page = 0) {
   try {
     const safe = VALID_STATUSES.includes(statusFilter) ? statusFilter : null;
