@@ -547,12 +547,20 @@
               <a id="statusPageLink" href="/order-status.html" class="btn-outline" style="font-size:0.75rem;padding:10px 20px">🔍 Проверить статус заявки</a>
               <a id="cabinetLink" href="/cabinet.html" class="btn-outline" style="font-size:0.75rem;padding:10px 20px">👤 Все мои заявки</a>
             </div>
+            <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+              <button id="bookAnotherBtn" class="btn-outline" style="font-size:0.75rem;padding:10px 20px;cursor:pointer">
+                ✦ Забронировать ещё модель
+              </button>
+              <button id="shareBookingBtn" class="btn-outline" style="font-size:0.75rem;padding:10px 20px;cursor:pointer;display:none" aria-label="Поделиться заявкой">
+                🔗 Поделиться
+              </button>
+            </div>
             <div id="cabinetPhoneHint" style="display:none;margin-top:12px;font-size:0.78rem;color:var(--text-dim)">
               Для просмотра всех заявок — <a id="cabinetPhoneLink" href="/cabinet.html" style="color:var(--gold);text-decoration:none">откройте личный кабинет →</a>
             </div>
 
             <p class="success-redirect-note">
-              Автоматический переход на главную через <span id="redirectCountdown">5</span> сек…
+              Автоматический переход на главную через <span id="redirectCountdown">10</span> сек…
             </p>
           </div>
         </div>
