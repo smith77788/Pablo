@@ -449,6 +449,8 @@
     } else {
       // Select
       state.selected_models.push({ id, name, photo });
+      // БЛОК 9.3: model_selected event
+      if (typeof trackEvent === 'function') trackEvent('model_selected', { model_id: id, model_name: name || '' });
     }
 
     // Sync legacy model_id/name/photo to first selected (for backward compat)
@@ -1057,6 +1059,8 @@
       if (!state._step1AnalyticsFired) {
         if (window.gtag) gtag('event', 'begin_checkout', { event_type: state.event_type });
         if (window.ym && window.YM_ID) ym(window.YM_ID, 'reachGoal', 'booking_start', { event_type: state.event_type });
+        // БЛОК 9.3: booking_started event
+        if (typeof trackEvent === 'function') trackEvent('booking_started', { step: 1, event_type: state.event_type });
       }
     }
 
@@ -1163,6 +1167,8 @@
     // booking_step event (БЛОК 9.3 spec)
     if (typeof trackEvent === 'function') {
       trackEvent('booking_step', { step: completedStep, model_id: state.model_id || null });
+      // БЛОК 9.3: booking_step_complete — fired when user advances past a step
+      trackEvent('booking_step_complete', { step: completedStep, model_count: state.selected_models.length });
     }
     // Yandex: step-specific goals
     if (window.ym && window.YM_ID) {
@@ -1249,6 +1255,9 @@
           if (window.ym && window.YM_ID) {
             ym(window.YM_ID, 'reachGoal', 'booking_start', { event_type: state.event_type });
           }
+          // БЛОК 9.3: booking_started event
+          if (typeof trackEvent === 'function')
+            trackEvent('booking_started', { step: 1, event_type: state.event_type });
           state._step1AnalyticsFired = true;
           goToStep(2);
         }
@@ -1417,6 +1426,10 @@
           model_count: state.selected_models.length,
           ...NM.analytics.getSavedUTM(),
         });
+      }
+      // БЛОК 9.3: trackEvent shorthand for booking_submitted
+      if (typeof trackEvent === 'function') {
+        trackEvent('booking_submitted', { model_count: state.selected_models.length, event_type: state.event_type });
       }
 
       const orderNum = result.order_number;

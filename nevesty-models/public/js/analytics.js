@@ -205,3 +205,60 @@ window.getUtmParams = function () {
     return {};
   }
 };
+
+// window.trackConversion — fire purchase/order_completed events for both GA4 and YM
+window.trackConversion = function (orderId, value) {
+  trackEvent('purchase', { transaction_id: orderId, value: value || 0, currency: 'RUB' });
+  trackYm('order_completed', { order_id: orderId });
+};
+
+// ─── UTM re-attachment: append saved UTMs as query params to bot/booking links ──
+// Runs once on DOMContentLoaded — attaches UTMs to all bot deep-links and /booking.html hrefs
+document.addEventListener('DOMContentLoaded', function () {
+  function appendUtmToLink(a) {
+    try {
+      const utm = window.getUtmParams ? window.getUtmParams() : {};
+      if (!utm || !utm.source) return; // no UTM data to attach
+      const url = new URL(a.href, window.location.origin);
+      // Only append to same-origin booking links and t.me deep-links
+      const isSameOrigin = url.origin === window.location.origin;
+      const isTgDeepLink = url.hostname === 't.me';
+      if (!isSameOrigin && !isTgDeepLink) return;
+      if (isSameOrigin && !url.pathname.includes('/booking')) return;
+      // Don't double-append
+      if (url.searchParams.has('utm_source')) return;
+      if (utm.source) url.searchParams.set('utm_source', utm.source);
+      if (utm.medium) url.searchParams.set('utm_medium', utm.medium);
+      if (utm.campaign) url.searchParams.set('utm_campaign', utm.campaign);
+      if (utm.content) url.searchParams.set('utm_content', utm.content);
+      if (utm.term) url.searchParams.set('utm_term', utm.term);
+      a.href = url.toString();
+    } catch (_) {}
+  }
+
+  // Attach UTMs to booking and bot links present at page load
+  document.querySelectorAll('a[href]').forEach(function (a) {
+    const href = a.getAttribute('href') || '';
+    if (href.includes('/booking') || href.includes('t.me/')) {
+      appendUtmToLink(a);
+    }
+  });
+
+  // Also handle dynamically injected links via MutationObserver
+  if (window.MutationObserver) {
+    var observer = new MutationObserver(function (mutations) {
+      mutations.forEach(function (m) {
+        m.addedNodes.forEach(function (node) {
+          if (node.nodeType !== 1) return;
+          var links =
+            node.tagName === 'A' ? [node] : Array.from(node.querySelectorAll ? node.querySelectorAll('a[href]') : []);
+          links.forEach(function (a) {
+            var href = a.getAttribute('href') || '';
+            if (href.includes('/booking') || href.includes('t.me/')) appendUtmToLink(a);
+          });
+        });
+      });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+});

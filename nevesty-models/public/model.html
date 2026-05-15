@@ -1340,6 +1340,14 @@
           loadModelReviews(model.id);
           loadRelatedModels(model);
           if (window.NM?.analytics) NM.analytics.viewModel(model.id, model.name);
+          // БЛОК 9.3: model_page_view event
+          if (typeof trackEvent === 'function') {
+            trackEvent('model_page_view', {
+              model_id: model.id,
+              model_name: model.name,
+              category: model.category || '',
+            });
+          }
           // Track model view (fire and forget)
           fetch(`/api/models/${model.id}/view`, { method: 'POST' });
 
@@ -1516,6 +1524,16 @@
             const handle = m.instagram.replace(/^@/, '');
             igLink.href = `https://instagram.com/${handle}`;
             igLink.textContent = `✦ @${handle}`;
+            // БЛОК 9.3: instagram_click tracking
+            igLink.addEventListener(
+              'click',
+              function () {
+                if (typeof trackEvent === 'function')
+                  trackEvent('instagram_click', { model_id: m.id, model_name: m.name });
+                if (window.NM?.analytics) NM.analytics.event('instagram_click', { model_id: m.id, model_name: m.name });
+              },
+              { once: false }
+            );
           }
 
           // Load availability section

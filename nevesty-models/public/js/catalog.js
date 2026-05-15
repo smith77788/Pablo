@@ -234,10 +234,14 @@
   bindTagGroup('categoryFilters', el => {
     filters.category = el.dataset.value;
     if (window.NM?.analytics) NM.analytics.filterCatalog('category', el.dataset.value);
+    if (typeof trackEvent === 'function')
+      trackEvent('filter_change', { filter_type: 'category', filter_value: el.dataset.value });
   });
   bindTagGroup('hairFilters', el => {
     filters.hair = el.dataset.value;
     if (window.NM?.analytics) NM.analytics.filterCatalog('hair', el.dataset.value);
+    if (typeof trackEvent === 'function')
+      trackEvent('filter_change', { filter_type: 'hair', filter_value: el.dataset.value });
   });
   bindTagGroup('ageFilters', el => {
     filters.ageMin = el.dataset.min || '';
@@ -245,7 +249,9 @@
     // Clear numeric age inputs when a tag is selected
     if (ageMinEl) ageMinEl.value = '';
     if (ageMaxEl) ageMaxEl.value = '';
-    if (window.NM?.analytics) NM.analytics.filterCatalog('age', `${el.dataset.min || ''}–${el.dataset.max || ''}`);
+    const ageVal = `${el.dataset.min || ''}–${el.dataset.max || ''}`;
+    if (window.NM?.analytics) NM.analytics.filterCatalog('age', ageVal);
+    if (typeof trackEvent === 'function') trackEvent('filter_change', { filter_type: 'age', filter_value: ageVal });
   });
   bindTagGroup('heightFilters', el => {
     filters.minHeight = el.dataset.hmin || '';
@@ -253,23 +259,32 @@
     // Sync numeric height inputs
     if (minHeightEl) minHeightEl.value = filters.minHeight;
     if (maxHeightEl) maxHeightEl.value = filters.maxHeight;
-    if (window.NM?.analytics) NM.analytics.filterCatalog('height', `${el.dataset.hmin || ''}–${el.dataset.hmax || ''}`);
+    const heightVal = `${el.dataset.hmin || ''}–${el.dataset.hmax || ''}`;
+    if (window.NM?.analytics) NM.analytics.filterCatalog('height', heightVal);
+    if (typeof trackEvent === 'function')
+      trackEvent('filter_change', { filter_type: 'height', filter_value: heightVal });
   });
 
   // ── City, availability, sort ─────────────────────────────────────────────────
   citySelect?.addEventListener('change', () => {
     filters.city = citySelect.value;
     if (window.NM?.analytics) NM.analytics.filterCatalog('city', citySelect.value);
+    if (typeof trackEvent === 'function')
+      trackEvent('filter_change', { filter_type: 'city', filter_value: citySelect.value });
     render();
   });
   availCheckbox?.addEventListener('change', () => {
     filters.availableOnly = availCheckbox.checked;
     if (window.NM?.analytics) NM.analytics.filterCatalog('available', String(availCheckbox.checked));
+    if (typeof trackEvent === 'function')
+      trackEvent('filter_change', { filter_type: 'available', filter_value: String(availCheckbox.checked) });
     render();
   });
   sortEl?.addEventListener('change', () => {
     filters.sort = sortEl.value;
     if (window.NM?.analytics) NM.analytics.filterCatalog('sort', sortEl.value);
+    if (typeof trackEvent === 'function')
+      trackEvent('filter_change', { filter_type: 'sort', filter_value: sortEl.value });
     render();
   });
 
@@ -581,6 +596,10 @@
             item_list_name: 'catalog',
           });
         }
+        // БЛОК 9.3: model_view event
+        if (typeof trackEvent === 'function') {
+          trackEvent('model_view', { model_id: m.id, model_name: m.name });
+        }
         openModelModal(m.id);
       });
       article.addEventListener('keydown', e => {
@@ -685,6 +704,9 @@
           favBtn.style.background = 'rgba(180,0,0,0.7)';
           favBtn.title = 'Убрать из избранного';
           favBtn.setAttribute('aria-label', 'Убрать из избранного');
+          // БЛОК 9.3: add_to_favorites event
+          if (typeof trackEvent === 'function') trackEvent('add_to_favorites', { model_id: m.id, model_name: m.name });
+          if (window.NM?.analytics) NM.analytics.addToFavorites(m.id, m.name);
           if (typeof toast === 'function') toast(`${m.name} добавлена в избранное ❤️`);
         } else {
           favs.splice(idx, 1);
@@ -800,6 +822,13 @@
     if (!match) return;
     const modelId = match[1];
     if (window.NM?.analytics) NM.analytics.startBooking(modelId, '');
+    // БЛОК 9.3: begin_checkout via trackEvent shorthand
+    if (typeof trackEvent === 'function') {
+      // Attempt to get model name from the rendered data
+      const card = bookLink.closest('[data-model-id]');
+      const modelName = card ? card.dataset.modelName || '' : '';
+      trackEvent('begin_checkout', { model_id: modelId, model_name: modelName });
+    }
   });
 
   // ── Global API (for external scripts and share-link button) ──────────────────
