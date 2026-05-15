@@ -671,6 +671,11 @@
   }
 
   /* ─── Validation helpers ──────────────────────────── */
+  function clearBudgetEstimate() {
+    const hint = document.getElementById('budget-estimate-hint');
+    if (hint) hint.style.display = 'none';
+  }
+
   function clearErrors() {
     document.querySelectorAll('.field-error-msg').forEach(el => el.remove());
     document.querySelectorAll('.form-control[data-error]').forEach(el => {
@@ -782,6 +787,21 @@
       if (durEl) durEl.value = state.event_duration || '4';
       const budgetEl2 = document.getElementById('budget');
       if (budgetEl2) budgetEl2.value = state.budget || '';
+      // Show budget estimate hint if budget field is empty
+      if (budgetEl2 && !budgetEl2.value && state.event_type) {
+        const modelCount = (state.selected_models || []).length || 1;
+        const duration = state.event_duration || 4;
+        apiFetch(`/budget-estimate?event_type=${encodeURIComponent(state.event_type)}&model_count=${modelCount}&duration_hours=${duration}`)
+          .then(d => {
+            const hint = document.getElementById('budget-estimate-hint');
+            const txt = document.getElementById('budget-estimate-text');
+            if (hint && txt && d && d.budget) {
+              const fmt = n => new Intl.NumberFormat('ru-RU').format(n);
+              txt.textContent = `💡 Оценка бюджета: от ${fmt(d.budget.min)} до ${fmt(d.budget.max)} ₽ (рекомендуем ${fmt(d.budget.recommended)} ₽)`;
+              hint.style.display = 'block';
+            }
+          }).catch(() => {});
+      }
       const locEl = document.getElementById('location');
       if (locEl) locEl.value = state.location || '';
       const comm = document.getElementById('comments');

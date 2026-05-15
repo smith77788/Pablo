@@ -480,7 +480,11 @@
 
           <div class="form-group">
             <label for="budget">Бюджет <span style="color:var(--text-dim);font-size:0.65rem;text-transform:none;letter-spacing:0">(необязательно)</span></label>
-            <input type="text" class="form-control" id="budget" placeholder="₽ (необязательно)" />
+            <input type="text" class="form-control" id="budget" placeholder="₽ (необязательно)"
+              oninput="clearBudgetEstimate()" />
+            <div id="budget-estimate-hint" style="display:none;margin-top:8px;padding:10px 14px;background:rgba(212,175,55,0.08);border-left:3px solid var(--gold);border-radius:6px;font-size:0.85rem;color:var(--text-dim)">
+              <span id="budget-estimate-text"></span>
+            </div>
           </div>
 
           <div class="form-group">

@@ -356,6 +356,93 @@
       <div id="ltv-empty" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
     </div>
 
+    <!-- Model Performance Table -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h3 class="font-semibold text-gray-800 dark:text-white">🏆 Топ моделей — детальная таблица</h3>
+        <span class="text-xs text-gray-400 dark:text-gray-500">за выбранный период</span>
+      </div>
+      <div id="models-table-skeleton" class="animate-pulse space-y-2">
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/4"></div>
+      </div>
+      <div id="models-table-wrap" style="display:none" class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left border-b dark:border-gray-700">
+              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">#</th>
+              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Модель</th>
+              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Заявок</th>
+              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Завершено</th>
+              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Ср. бюджет</th>
+              <th class="py-2 font-medium text-gray-600 dark:text-gray-400 text-center">Действие</th>
+            </tr>
+          </thead>
+          <tbody id="models-table-rows"></tbody>
+        </table>
+      </div>
+      <div id="models-table-empty" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
+    </div>
+
+    <!-- CSS Conversion Funnel -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+      <div class="flex items-center justify-between mb-5 flex-wrap gap-2">
+        <h3 class="font-semibold text-gray-800 dark:text-white">🎯 Воронка конверсии (% от первого этапа)</h3>
+        <span id="css-funnel-conv-rate" class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-semibold" style="display:none"></span>
+      </div>
+      <div id="css-funnel-skeleton" class="animate-pulse space-y-3">
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-4/5"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/5"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-2/5"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-1/4"></div>
+      </div>
+      <div id="css-funnel-wrap" style="display:none" class="space-y-2"></div>
+      <div id="css-funnel-empty" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
+    </div>
+
+    <!-- Time-of-Day Heatmap -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h3 class="font-semibold text-gray-800 dark:text-white">🕐 Активность по часам</h3>
+        <span class="text-xs text-gray-400 dark:text-gray-500">за последние 90 дней</span>
+      </div>
+      <div id="hourly-skeleton" class="animate-pulse">
+        <div class="grid grid-cols-12 gap-1 h-16">
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+        </div>
+      </div>
+      <div id="hourly-grid" style="display:none">
+        <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:4px;margin-bottom:6px;" id="hourly-bars"></div>
+        <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:4px;" id="hourly-labels"></div>
+        <div class="flex items-center gap-2 mt-3">
+          <span class="text-xs text-gray-400 dark:text-gray-500">Мало</span>
+          <div class="flex gap-1">
+            <div class="w-4 h-4 rounded" style="background:#e5e7eb"></div>
+            <div class="w-4 h-4 rounded" style="background:#fce7f3"></div>
+            <div class="w-4 h-4 rounded" style="background:#f9a8d4"></div>
+            <div class="w-4 h-4 rounded" style="background:#ec4899"></div>
+            <div class="w-4 h-4 rounded" style="background:#9d174d"></div>
+          </div>
+          <span class="text-xs text-gray-400 dark:text-gray-500">Много</span>
+          <span class="ml-auto text-xs text-gray-400 dark:text-gray-500" id="hourly-peak-label"></span>
+        </div>
+      </div>
+      <div id="hourly-empty" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
+    </div>
+
   </div><!-- /max-w-7xl -->
 
 <script>
@@ -484,6 +571,19 @@ async function loadAll() {
     if (cv) { cv.classList.add('hidden'); }
     if (er) { er.classList.add('hidden'); }
   });
+  // Reset models table and CSS funnel
+  const mtSk = document.getElementById('models-table-skeleton');
+  const mtWr = document.getElementById('models-table-wrap');
+  const mtEm = document.getElementById('models-table-empty');
+  if (mtSk) mtSk.style.display = '';
+  if (mtWr) mtWr.style.display = 'none';
+  if (mtEm) mtEm.style.display = 'none';
+  const cfSk = document.getElementById('css-funnel-skeleton');
+  const cfWr = document.getElementById('css-funnel-wrap');
+  const cfEm = document.getElementById('css-funnel-empty');
+  if (cfSk) cfSk.style.display = '';
+  if (cfWr) cfWr.style.display = 'none';
+  if (cfEm) cfEm.style.display = 'none';
 
   const [stats, basicStats, chart, funnel, topModels, eventTypes, sources, revenueBar, repeatClients] = await Promise.all([
     safeJson(fetch(`/api/admin/analytics/kpi?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
@@ -528,6 +628,12 @@ async function loadAll() {
 
   // ── Top models: horizontal bar ─────────────────────────────────────────────
   renderModelsChart(topModels.models || []);
+
+  // ── Top models: detailed table ────────────────────────────────────────────
+  renderModelsTable(topModels.models || []);
+
+  // ── CSS Conversion Funnel ─────────────────────────────────────────────────
+  renderCssFunnel(funnel.stages || [], funnel);
 
   // ── Sources: doughnut ─────────────────────────────────────────────────────
   renderSourcesChart(sources.sources || []);
@@ -1026,11 +1132,139 @@ function renderRepeatClientsChart(data) {
   });
 }
 
+// ── Model performance table ───────────────────────────────────────────────────
+function renderModelsTable(models) {
+  const sk   = document.getElementById('models-table-skeleton');
+  const wrap = document.getElementById('models-table-wrap');
+  const empty= document.getElementById('models-table-empty');
+  if (sk)   sk.style.display   = 'none';
+  if (!models || !models.length) { if (empty) empty.style.display = ''; return; }
+  const top = models.slice(0, 10);
+  const tbody = document.getElementById('models-table-rows');
+  tbody.innerHTML = top.map((m, i) => {
+    const avgBudget = m.avg_budget > 0
+      ? new Intl.NumberFormat('uk-UA', { style:'currency', currency:'UAH', maximumFractionDigits:0 }).format(m.avg_budget)
+      : '—';
+    const convPct = m.orders > 0 ? Math.round((m.completed / m.orders) * 100) : 0;
+    const convColor = convPct >= 70 ? 'text-green-600' : convPct >= 40 ? 'text-yellow-600' : 'text-red-500';
+    return `<tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
+      <td class="py-2 pr-3 text-gray-400 dark:text-gray-500 font-medium">${i + 1}</td>
+      <td class="py-2 pr-3">
+        <div class="font-medium text-gray-900 dark:text-white">${escHtml(m.name || '—')}</div>
+        ${m.city ? `<div class="text-xs text-gray-400">${escHtml(m.city)}</div>` : ''}
+      </td>
+      <td class="py-2 pr-3 text-right font-semibold text-gray-800 dark:text-gray-200">${m.orders || 0}</td>
+      <td class="py-2 pr-3 text-right">
+        <span class="${convColor} font-semibold">${m.completed || 0}</span>
+        <span class="text-xs text-gray-400 ml-1">(${convPct}%)</span>
+      </td>
+      <td class="py-2 pr-3 text-right text-emerald-600 dark:text-emerald-400 font-medium">${avgBudget}</td>
+      <td class="py-2 text-center">
+        <a href="/admin/models.html?id=${m.id}" target="_blank"
+           class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-pink-200 dark:border-pink-800 text-pink-600 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition-colors">
+          <i class="fas fa-eye text-xs"></i> View
+        </a>
+      </td>
+    </tr>`;
+  }).join('');
+  if (wrap) wrap.style.display = '';
+}
+
+// ── CSS Conversion Funnel ─────────────────────────────────────────────────────
+function renderCssFunnel(stages, meta) {
+  const sk    = document.getElementById('css-funnel-skeleton');
+  const wrap  = document.getElementById('css-funnel-wrap');
+  const empty = document.getElementById('css-funnel-empty');
+  const badge = document.getElementById('css-funnel-conv-rate');
+  if (sk) sk.style.display = 'none';
+  const filteredStages = (stages || []).filter(s => s.status !== 'views');
+  if (!filteredStages.length) { if (empty) empty.style.display = ''; return; }
+
+  if (badge && meta?.conversion_rate != null) {
+    badge.textContent = `Конверсия: ${meta.conversion_rate}%`;
+    badge.style.display = '';
+  }
+
+  const maxCount = Math.max(1, ...filteredStages.map(s => s.count));
+  const stageColors = {
+    new:        { bar: 'from-blue-500 to-blue-400',   text: 'text-blue-700 dark:text-blue-300',   bg: 'bg-blue-50 dark:bg-blue-900/20' },
+    reviewing:  { bar: 'from-yellow-500 to-yellow-400', text: 'text-yellow-700 dark:text-yellow-300', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
+    confirmed:  { bar: 'from-emerald-500 to-green-400', text: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+    in_progress:{ bar: 'from-orange-500 to-orange-400', text: 'text-orange-700 dark:text-orange-300', bg: 'bg-orange-50 dark:bg-orange-900/20' },
+    completed:  { bar: 'from-green-600 to-green-500',  text: 'text-green-700 dark:text-green-300',  bg: 'bg-green-50 dark:bg-green-900/20' },
+  };
+  const defaultColors = { bar: 'from-pink-500 to-pink-400', text: 'text-pink-700 dark:text-pink-300', bg: 'bg-pink-50 dark:bg-pink-900/20' };
+
+  wrap.innerHTML = filteredStages.map((s, i) => {
+    const pct = maxCount > 0 ? Math.round((s.count / maxCount) * 100) : 0;
+    const pctFromFirst = i === 0 ? 100 : (filteredStages[0].count > 0 ? Math.round((s.count / filteredStages[0].count) * 100) : 0);
+    const colors = stageColors[s.status] || defaultColors;
+    return `<div class="rounded-lg px-4 py-3 ${colors.bg} flex items-center gap-3">
+      <div class="w-48 shrink-0">
+        <div class="text-sm font-medium text-gray-800 dark:text-gray-200 mb-1">${escHtml(s.label || s.status)}</div>
+        <div class="h-2 bg-white/50 dark:bg-gray-700/50 rounded-full overflow-hidden">
+          <div class="h-full rounded-full bg-gradient-to-r ${colors.bar} transition-all duration-700" style="width:${pct}%"></div>
+        </div>
+      </div>
+      <div class="flex-1 text-right">
+        <span class="text-lg font-bold ${colors.text}">${s.count}</span>
+        <span class="text-xs text-gray-500 dark:text-gray-400 ml-1">заявок</span>
+      </div>
+      <div class="w-16 text-right">
+        <span class="text-sm font-semibold ${colors.text}">${pctFromFirst}%</span>
+      </div>
+    </div>`;
+  }).join('');
+  if (wrap) wrap.style.display = '';
+}
+
+// ── Time-of-day hourly heatmap ────────────────────────────────────────────────
+async function loadHourlyHeatmap() {
+  try {
+    const data = await fetch(`/api/admin/analytics/hourly?days=90`, { headers: h }).then(r => r.json());
+    const hours = data.hours || [];
+    const maxCnt = Math.max(1, ...hours.map(h => h.cnt));
+
+    const barsEl   = document.getElementById('hourly-bars');
+    const labelsEl = document.getElementById('hourly-labels');
+    const peakEl   = document.getElementById('hourly-peak-label');
+
+    const colors = ['#e5e7eb','#fce7f3','#f9a8d4','#ec4899','#9d174d'];
+
+    barsEl.innerHTML = hours.map(({ hour, cnt }) => {
+      const intensity = cnt === 0 ? 0 : Math.min(4, Math.ceil((cnt / maxCnt) * 4));
+      const bg = colors[intensity];
+      const heightPct = cnt === 0 ? 20 : Math.max(20, Math.round((cnt / maxCnt) * 100));
+      return `<div title="${hour}:00 — ${cnt} заявок" style="display:flex;align-items:flex-end;height:60px;cursor:default;">
+        <div style="width:100%;height:${heightPct}%;background:${bg};border-radius:4px 4px 0 0;min-height:4px;transition:height 0.3s;"></div>
+      </div>`;
+    }).join('');
+
+    labelsEl.innerHTML = hours.map(({ hour }) => {
+      const show = hour % 3 === 0 ? `${hour}h` : '';
+      return `<div style="text-align:center;font-size:9px;color:#9ca3af;">${show}</div>`;
+    }).join('');
+
+    // Peak hour label
+    const peakHour = hours.reduce((best, h) => h.cnt > best.cnt ? h : best, hours[0] || { hour: 0, cnt: 0 });
+    if (peakEl && peakHour.cnt > 0) {
+      peakEl.textContent = `Пик: ${peakHour.hour}:00 (${peakHour.cnt} зак.)`;
+    }
+
+    document.getElementById('hourly-skeleton').style.display = 'none';
+    document.getElementById('hourly-grid').style.display = '';
+  } catch (e) {
+    document.getElementById('hourly-skeleton').style.display = 'none';
+    document.getElementById('hourly-empty').style.display = '';
+  }
+}
+
 loadAll();
 loadMonthly();
 loadRevenueTrend();
 loadHeatmap();
 loadClientLtv();
+loadHourlyHeatmap();
 setInterval(loadAll, 60000);
 
 // ── Revenue Trend ─────────────────────────────────────────────────────────────
