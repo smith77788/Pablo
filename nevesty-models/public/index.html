@@ -845,6 +845,17 @@ if (document.getElementById('reviews-container')) loadReviewsPage(1);
     ⚡ Заявка
   </button>
 
+  <!-- Sticky Telegram Button -->
+  <div id="sticky-telegram" style="position:fixed;bottom:84px;right:24px;z-index:401">
+    <a href="https://t.me/nevesty_agency" target="_blank" rel="noopener"
+       style="width:52px;height:52px;border-radius:50%;background:#229ED9;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.3);text-decoration:none;transition:transform 0.2s,box-shadow 0.2s"
+       title="Написать в Telegram"
+       onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 18px rgba(34,158,217,0.5)'"
+       onmouseout="this.style.transform='';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.3)'">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="white" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8l-1.72 8.13c-.13.59-.47.73-.95.46l-2.62-1.93-1.26 1.21c-.14.14-.26.26-.53.26l.19-2.69 4.9-4.42c.21-.19-.05-.29-.33-.1L7.5 14.3l-2.56-.8c-.56-.17-.57-.56.12-.83l10.01-3.86c.46-.17.86.11.57.99z"/></svg>
+    </a>
+  </div>
+
   <!-- Floating WhatsApp Button -->
   <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
     <a id="float-wa-link" href="#" target="_blank" rel="noopener"
@@ -949,6 +960,16 @@ if (document.getElementById('reviews-container')) loadReviewsPage(1);
     html.dark h1, html.dark h2, html.dark h3, html.dark h4 { color: #f9fafb; }
     html.dark p { color: #d1d5db; }
     html.dark input, html.dark textarea, html.dark select { background-color: #374151; border-color: #4b5563; color: #f9fafb; }
+
+    /* Skeleton sub-elements */
+    .skeleton-img { height: 200px; margin-bottom: 12px; border-radius: 8px; }
+    .skeleton-title { height: 20px; width: 60%; margin-bottom: 8px; }
+    .skeleton-text.short { width: 40%; }
+    html.dark .skeleton {
+      background: linear-gradient(90deg, #2a2a4a 25%, #3a3a5a 50%, #2a2a4a 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+    }
   </style>
 
   <!-- Cookie Banner (gold-accented, GDPR) -->

@@ -642,8 +642,9 @@ async function showCatalog(chatId, cat, page, filter) {
 
     // Sort row
     const sortRow = [
-      { text: (sortPref === 'featured' ? '✅ ' : '') + '⭐ Сначала топ', callback_data: 'cat_sort_featured' },
-      { text: (sortPref === 'alpha'    ? '✅ ' : '') + '🔤 По алфавиту', callback_data: 'cat_sort_alpha'    },
+      { text: (sortPref === 'featured'                    ? '✅ ' : '') + '⭐ Топ',      callback_data: 'cat_sort_featured' },
+      { text: (sortPref === 'newest' || sortPref === 'date' ? '✅ ' : '') + '🆕 Нові',   callback_data: 'cat_sort_newest'   },
+      { text: (sortPref === 'alpha'  || sortPref === 'name' ? '✅ ' : '') + '🔤 А-Я',   callback_data: 'cat_sort_alpha'    },
     ];
 
     // Dynamic city buttons from settings, fallback to DB distinct cities
@@ -725,6 +726,11 @@ async function showCatalog(chatId, cat, page, filter) {
       { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
     );
   } catch (e) { console.error('[Bot] showCatalog:', e.message); }
+}
+
+// Alias: showCatalogFiltered — filter by category (БЛОК 2.7)
+async function _showCatalogFiltered(chatId, page, category) {
+  return showCatalog(chatId, category || '', page || 0, { category: category || '' });
 }
 
 async function showModel(chatId, modelId, backBtn = null) {
@@ -6315,6 +6321,10 @@ function initBot(app) {
     // ── Сортировка каталога
     if (data === 'cat_sort_featured') {
       catalogSortPrefs.set(String(chatId), 'featured');
+      return showCatalog(chatId, '', 0);
+    }
+    if (data === 'cat_sort_newest') {
+      catalogSortPrefs.set(String(chatId), 'newest');
       return showCatalog(chatId, '', 0);
     }
     if (data === 'cat_sort_alpha') {
