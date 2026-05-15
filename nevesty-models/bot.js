@@ -325,9 +325,10 @@ const KB_MAIN_ADMIN = (badge, score) => {
 
 async function showMainMenu(chatId, name) {
   await clearSession(chatId);
-  const [greeting, menuText, clientKb] = await Promise.all([
+  const [greeting, menuText, welcomePhoto, clientKb] = await Promise.all([
     getSetting('greeting').catch(() => null),
     getSetting('main_menu_text').catch(() => null),
+    getSetting('welcome_photo_url').catch(() => null),
     buildClientKeyboard(),
   ]);
   // Сначала показываем persistent ReplyKeyboard
@@ -335,15 +336,26 @@ async function showMainMenu(chatId, name) {
     `💎 Nevesty Models — меню активировано`,
     { reply_markup: REPLY_KB_CLIENT }
   );
+  let greetingText;
   if (greeting) {
-    const rawGreeting = greeting.replace('{name}', name || 'гость');
-    return safeSend(chatId, esc(rawGreeting), { parse_mode: 'MarkdownV2', reply_markup: clientKb });
+    greetingText = esc(greeting.replace('{name}', name || 'гость'));
+  } else {
+    const menuLabel = menuText || 'Выберите действие:';
+    greetingText = `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\n${esc(menuLabel)}`;
   }
-  const greetingText = menuText || 'Выберите действие:';
-  return safeSend(chatId,
-    `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\n${esc(greetingText)}`,
-    { parse_mode: 'MarkdownV2', reply_markup: clientKb }
-  );
+  // If welcome photo is configured and looks like a URL, send as photo with caption
+  if (welcomePhoto && typeof welcomePhoto === 'string' && welcomePhoto.startsWith('http')) {
+    try {
+      return await bot.sendPhoto(chatId, welcomePhoto, {
+        caption: greetingText,
+        parse_mode: 'MarkdownV2',
+        reply_markup: clientKb,
+      });
+    } catch (e) {
+      console.warn('[Bot] welcome_photo_url failed, falling back to text:', e.message);
+    }
+  }
+  return safeSend(chatId, greetingText, { parse_mode: 'MarkdownV2', reply_markup: clientKb });
 }
 
 // ─── Admin: Client Management ─────────────────────────────────────────────────
@@ -479,11 +491,15 @@ async function showCatalog(chatId, cat, page, filter) {
     if (!cat) cat = filter.category || '';
     page = page || 0;
 
-    // Per-user sort preference
+    // Per-user sort preference + global catalog_sort setting
     const sortPref = catalogSortPrefs.get(String(chatId)) || 'featured';
-    const orderClause = sortPref === 'alpha'
+    const globalSort = await getSetting('catalog_sort').catch(() => 'featured');
+    const effectiveSort = (sortPref && sortPref !== 'featured') ? sortPref : (globalSort || 'featured');
+    const orderClause = effectiveSort === 'alpha'
       ? 'ORDER BY name ASC'
-      : 'ORDER BY featured DESC, id ASC';
+      : effectiveSort === 'date'
+        ? 'ORDER BY id DESC'
+        : 'ORDER BY featured DESC, id DESC';
 
     // Build WHERE clause
     const conditions = ['available=1', "COALESCE(archived,0)=0"];
@@ -500,7 +516,8 @@ async function showCatalog(chatId, cat, page, filter) {
       });
     }
 
-    const perPage = parseInt(await getSetting('catalog_per_page') || '5');
+    const _rawPerPage = parseInt(await getSetting('catalog_per_page').catch(() => '6')) || 6;
+    const perPage = Math.min(12, Math.max(3, _rawPerPage));
     const total   = models.length;
     const slice   = models.slice(page * perPage, page * perPage + perPage);
 
@@ -1116,6 +1133,22 @@ async function bkStep4Confirm(chatId, data) {
 
 async function bkSubmit(chatId, data) {
   try {
+    // Check active orders limit
+    const maxActive = parseInt(await getSetting('client_max_active_orders').catch(() => '10')) || 10;
+    const activeCountRow = await get(
+      "SELECT COUNT(*) as cnt FROM orders WHERE client_chat_id=? AND status NOT IN ('completed','cancelled')",
+      [String(chatId)]
+    ).catch(() => ({ cnt: 0 }));
+    if ((activeCountRow?.cnt || 0) >= maxActive) {
+      return safeSend(chatId, '⚠️ *Превышен лимит активных заявок*\\.\nПожалуйста, дождитесь завершения текущих заявок\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📋 Мои заявки', callback_data: 'my_orders'  }],
+          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+        ]}
+      });
+    }
+
     const orderNum = generateOrderNumber();
     await run(
       `INSERT INTO orders
@@ -3269,10 +3302,6 @@ function initBot(app) {
 
     if (isAdmin(chatId)) return showAdminMenu(chatId, firstName);
     await showMainMenu(chatId, firstName);
-    const welcomePhoto = await getSetting('welcome_photo_url').catch(() => null);
-    if (welcomePhoto) {
-      await safePhoto(chatId, welcomePhoto, { caption: 'Nevesty Models' }).catch(() => {});
-    }
 
     // Welcome follow-up for new clients (no orders yet)
     const hasOrders = await get('SELECT id FROM orders WHERE client_chat_id=? LIMIT 1', [String(chatId)]).catch(() => null);
@@ -4072,6 +4101,11 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       await bot.answerCallbackQuery(q.id, { text: '🆕 Новые клиенты' }).catch(() => {});
       return _askBroadcastText(chatId, 'new');
+    }
+    if (data === 'adm_bc_seg_active') {
+      if (!isAdmin(chatId)) return;
+      await bot.answerCallbackQuery(q.id, { text: '🕐 Активные (30 дней)' }).catch(() => {});
+      return _askBroadcastText(chatId, 'active');
     }
     // ── Broadcast: city chosen
     if (data.startsWith('adm_bc_city_')) {
