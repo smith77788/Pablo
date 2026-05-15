@@ -599,6 +599,16 @@ def run_phase_27_faq_generator(db_path: str) -> dict:
         return {'status': 'error', 'error': str(e)}
 
 
+def run_phase_28_experiments(history_path: str | None = None) -> dict:
+    """Phase 28: A/B Experiment System."""
+    try:
+        from factory.agents.experiment_system import HeuristicExperimentSystem
+        system = HeuristicExperimentSystem(history_path=history_path)
+        return system.run_cycle()
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 def run_phase_finance(db_path: str) -> dict:
     """Finance Department heuristic analysis — revenue forecast, cost analysis, budget plan."""
     try:
@@ -2592,6 +2602,16 @@ def run_cycle() -> dict:
         summary_lines.append(f"Phase27 FAQ: {phase27_result.get('suggestions', 0)} new suggestions")
     except Exception as e:
         results["phases"]["faq_generator"] = {"status": "error", "error": str(e)}
+
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🧪 PHASE 28: A/B EXPERIMENT SYSTEM")
+    # Phase 28: A/B Experiment System
+    try:
+        phase28_result = run_phase_28_experiments()
+        results["phases"]["experiment_system"] = phase28_result
+        summary_lines.append(f"Phase28 Experiments: {phase28_result.get('active_count', 0)} active, {phase28_result.get('proposed_count', 0)} proposed")
+    except Exception as e:
+        results["phases"]["experiment_system"] = {"status": "error", "error": str(e)}
 
     # ════════════════════════════════════════════════════════════════
     # PHASE 5.3 (БЛОК 5.3) — CEO WEEKLY + MONTHLY REPORTS (heuristic)

@@ -282,3 +282,188 @@ class ExperimentSystem(FactoryAgent):
         """Update conversion rate for an experiment variant."""
         field = "conversion_a" if variant == "a" else "conversion_b"
         db.execute(f"UPDATE experiments SET {field}=? WHERE id=?", (conversion, experiment_id))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PHASE 28: Heuristic A/B Experiment System (no DB required)
+# ══════════════════════════════════════════════════════════════════════════════
+
+import json as _json
+import os as _os
+from datetime import datetime as _datetime, timedelta as _timedelta
+from typing import Any
+
+
+EXPERIMENT_TEMPLATES = [
+    {
+        'id': 'catalog_sort_featured_first',
+        'name': 'Сортировка каталога: featured первыми',
+        'hypothesis': 'Показ топ-моделей первыми увеличит конверсию на 10%',
+        'metric': 'booking_conversion',
+        'variants': ['control', 'featured_first'],
+        'duration_days': 14,
+    },
+    {
+        'id': 'quick_booking_button',
+        'name': 'Кнопка быстрой заявки в главном меню',
+        'hypothesis': 'Быстрая заявка увеличит кол-во заявок на 20%',
+        'metric': 'orders_count',
+        'variants': ['control', 'quick_button'],
+        'duration_days': 7,
+    },
+    {
+        'id': 'discount_banner',
+        'name': 'Баннер скидки 10% на первый заказ',
+        'hypothesis': 'Скидка для новых клиентов увеличит конверсию на 15%',
+        'metric': 'new_client_orders',
+        'variants': ['control', 'discount_10'],
+        'duration_days': 21,
+    },
+    {
+        'id': 'review_prompt_after_booking',
+        'name': 'Запрос отзыва сразу после завершения',
+        'hypothesis': 'Ранний запрос отзыва увеличит кол-во отзывов на 30%',
+        'metric': 'reviews_count',
+        'variants': ['control', 'early_prompt'],
+        'duration_days': 14,
+    },
+    {
+        'id': 'photo_watermark',
+        'name': 'Водяной знак на фото модели',
+        'hypothesis': 'Водяной знак повысит доверие и снизит отказы на 5%',
+        'metric': 'bounce_rate',
+        'variants': ['control', 'watermark'],
+        'duration_days': 21,
+    },
+]
+
+
+class HeuristicExperimentSystem:
+    """Proposes, runs, and evaluates A/B experiments heuristically (no DB required)."""
+
+    def __init__(self, history_path: str | None = None) -> None:
+        self.history_path = history_path or '/tmp/experiment_history.json'
+        self._history: list[dict] = self._load_history()
+
+    def _load_history(self) -> list[dict]:
+        if _os.path.exists(self.history_path):
+            try:
+                with open(self.history_path) as f:
+                    return _json.load(f)
+            except Exception:
+                pass
+        return []
+
+    def _save_history(self) -> None:
+        try:
+            dir_path = _os.path.dirname(self.history_path)
+            if dir_path:
+                _os.makedirs(dir_path, exist_ok=True)
+            with open(self.history_path, 'w') as f:
+                _json.dump(self._history[-50:], f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def propose_experiments(self) -> list[dict[str, Any]]:
+        """Return experiments not yet run or completed."""
+        run_ids = {h['experiment_id'] for h in self._history if h.get('status') in ('running', 'completed')}
+        return [e for e in EXPERIMENT_TEMPLATES if e['id'] not in run_ids]
+
+    def start_experiment(self, experiment_id: str) -> dict[str, Any]:
+        """Start an experiment by ID."""
+        tmpl = next((e for e in EXPERIMENT_TEMPLATES if e['id'] == experiment_id), None)
+        if not tmpl:
+            return {'status': 'error', 'error': f'Unknown experiment: {experiment_id}'}
+
+        record = {
+            'experiment_id': experiment_id,
+            'name': tmpl['name'],
+            'hypothesis': tmpl['hypothesis'],
+            'metric': tmpl['metric'],
+            'variants': tmpl['variants'],
+            'status': 'running',
+            'started_at': _datetime.utcnow().isoformat(),
+            'ends_at': (_datetime.utcnow() + _timedelta(days=tmpl['duration_days'])).isoformat(),
+            'results': {},
+        }
+        self._history.append(record)
+        self._save_history()
+        return {'status': 'started', 'experiment': record}
+
+    def evaluate_experiment(self, experiment_id: str, metrics: dict[str, float]) -> dict[str, Any]:
+        """Evaluate results of a running experiment."""
+        record = next((h for h in self._history if h['experiment_id'] == experiment_id), None)
+        if not record:
+            return {'status': 'error', 'error': 'Experiment not found'}
+
+        control = metrics.get('control', 0)
+        variant = metrics.get(record['variants'][-1], 0)
+
+        if control <= 0:
+            improvement = 0.0
+        else:
+            improvement = round((variant - control) / control * 100, 1)
+
+        winner = 'variant' if improvement > 5 else 'control' if improvement < -2 else 'inconclusive'
+
+        record['results'] = {
+            'control': control,
+            'variant': variant,
+            'improvement_pct': improvement,
+            'winner': winner,
+        }
+        record['status'] = 'completed'
+        self._save_history()
+
+        return {'status': 'evaluated', 'winner': winner, 'improvement_pct': improvement}
+
+    def get_active_experiments(self) -> list[dict]:
+        return [h for h in self._history if h.get('status') == 'running']
+
+    def get_completed_experiments(self) -> list[dict]:
+        return [h for h in self._history if h.get('status') == 'completed']
+
+    def generate_report(self) -> str:
+        """Generate a human-readable experiment report."""
+        active = self.get_active_experiments()
+        completed = self.get_completed_experiments()
+        proposed = self.propose_experiments()
+
+        lines = ['🧪 ОТЧЁТ ПО ЭКСПЕРИМЕНТАМ', '']
+
+        if active:
+            lines.append(f'🔄 Активных: {len(active)}')
+            for e in active:
+                lines.append(f'  • {e["name"]} (до {e["ends_at"][:10]})')
+
+        if completed:
+            lines.append(f'\n✅ Завершённых: {len(completed)}')
+            for e in completed:
+                r = e.get('results', {})
+                lines.append(f'  • {e["name"]}: {r.get("winner", "?")} ({r.get("improvement_pct", 0):+.1f}%)')
+
+        if proposed:
+            lines.append(f'\n💡 Предложено к запуску: {len(proposed)}')
+            for e in proposed[:3]:
+                lines.append(f'  • {e["name"]}')
+
+        return '\n'.join(lines)
+
+    def run_cycle(self) -> dict[str, Any]:
+        """Run one cycle: auto-propose and start one new experiment if none active."""
+        active = self.get_active_experiments()
+        proposed = self.propose_experiments()
+        started = None
+
+        if not active and proposed:
+            result = self.start_experiment(proposed[0]['id'])
+            started = result.get('experiment', {}).get('name')
+
+        return {
+            'status': 'ok',
+            'active_count': len(self.get_active_experiments()),
+            'completed_count': len(self.get_completed_experiments()),
+            'proposed_count': len(proposed),
+            'started_experiment': started,
+            'report': self.generate_report(),
+        }
