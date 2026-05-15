@@ -319,6 +319,17 @@
         </div>
       </div>
 
+      <!-- ══════════════════ RECENT ACTIVITY FEED ══════════════════ -->
+      <div class="section-card" style="margin-bottom:24px">
+        <div class="section-card-header">
+          <div class="section-card-title">🕐 Нещодавня активність</div>
+          <a href="/admin/orders.html" class="btn btn-sm btn-ghost">Всі заявки →</a>
+        </div>
+        <div class="section-card-body" id="activity-feed" style="min-height:80px">
+          <div style="padding:20px;text-align:center;color:var(--text-dim)">Завантаження...</div>
+        </div>
+      </div>
+
       <!-- ══════════════════ ROW 2: STATUS CHART + 7-DAY CHART ══════════════════ -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
 
@@ -542,6 +553,37 @@ async function loadAgentFeed() {
       </div>`).join('');
   } catch {
     el.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Лог недоступен</div>';
+  }
+}
+
+/* ─── Recent activity feed ───────────────────────────── */
+async function loadActivityFeed() {
+  try {
+    const data = await _admin.apiFetch('/admin/orders?limit=8&page=1');
+    const feed = document.getElementById('activity-feed');
+    if (!data || !data.orders || !data.orders.length) {
+      feed.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Заявок ще немає</div>';
+      return;
+    }
+    const STATUS = { new:'🆕', reviewing:'🔍', confirmed:'✅', in_progress:'▶️', completed:'🏁', cancelled:'❌' };
+    const STATUS_COLOR = { new:'var(--gold)', reviewing:'#8899aa', confirmed:'var(--success)', in_progress:'#4fc3f7', completed:'#80cbc4', cancelled:'var(--error)' };
+    feed.innerHTML = data.orders.map(o => {
+      const d = new Date(o.created_at || o.updated_at).toLocaleDateString('ru-RU', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+      return `<div style="display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer" onclick="location.href='/admin/orders.html?id=${o.id}'">
+        <span style="font-size:1.2rem">${STATUS[o.status] || '📋'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_admin.escapeHtml(o.client_name || '—')}</div>
+          <div style="font-size:0.75rem;color:var(--text-dim)">${_admin.escapeHtml(o.order_number || '')} · ${_admin.escapeHtml(o.event_type || '')}</div>
+        </div>
+        <div style="text-align:right;white-space:nowrap">
+          <div style="font-size:0.75rem;color:${STATUS_COLOR[o.status] || 'var(--text-muted)'}">${_admin.STATUS_LABELS[o.status] || o.status}</div>
+          <div style="font-size:0.72rem;color:var(--text-dim)">${d}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch {
+    const feed = document.getElementById('activity-feed');
+    if (feed) feed.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Помилка завантаження</div>';
   }
 }
 
@@ -828,6 +870,7 @@ document.addEventListener('click', e => {
 
 /* ─── Init ───────────────────────────────────────────── */
 loadDashboard();
+loadActivityFeed();
 loadAgentFeed();
 loadKpiCards();
 loadChart30();
@@ -835,6 +878,8 @@ loadNotifications();
 
 // Auto-refresh every 30 seconds
 setInterval(loadDashboard, 30000);
+// Refresh activity feed every 60 seconds
+setInterval(loadActivityFeed, 60000);
 // Refresh agent feed every 60 seconds
 setInterval(loadAgentFeed, 60000);
 // Refresh KPI cards every 60 seconds
