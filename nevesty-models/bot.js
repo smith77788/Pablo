@@ -317,7 +317,7 @@ const REPLY_KB_CLIENT = {
     [{ text: '⭐ Топ-модели' }, { text: '💃 Каталог' }],
     [{ text: '📝 Подать заявку' }, { text: '⚡ Быстрая заявка' }],
     [{ text: '❤️ Избранное' }, { text: '💬 Менеджер' }],
-    [{ text: '📋 Мои заявки' }, { text: '🔍 Статус заявки' }],
+    [{ text: '📋 Мои заявки' }, { text: '🔍 Статус заявки' }, { text: '👤 Профиль' }],
     [{ text: '💰 Прайс' }, { text: '📞 Контакты' }, { text: '❓ FAQ' }],
   ],
   resize_keyboard: true,
@@ -7871,7 +7871,8 @@ async function showUserProfile(chatId, firstName) {
   try {
     const [orders, lastOrderFull, prefs] = await Promise.all([
       query(
-        `SELECT o.id, o.status, o.created_at, o.order_number FROM orders o
+        `SELECT o.id, o.status, o.created_at, o.order_number, m.name AS model_name FROM orders o
+         LEFT JOIN models m ON m.id = o.model_id
          WHERE o.client_chat_id = ?
          ORDER BY o.created_at DESC LIMIT 50`,
         [String(chatId)]
@@ -7920,9 +7921,10 @@ async function showUserProfile(chatId, firstName) {
     }
 
     // Stats
-    const activeStatuses = new Set(['new','reviewing','confirmed','in_progress']);
+    const activeStatuses  = new Set(['new','reviewing','confirmed','in_progress']);
     const activeOrders    = orders.filter(o => activeStatuses.has(o.status)).length;
     const completedOrders = counts['completed'] || 0;
+    const cancelledOrders = counts['cancelled'] || 0;
     const totalOrders     = orders.length;
 
     const firstDate = orders[orders.length - 1]?.created_at
@@ -7968,6 +7970,7 @@ async function showUserProfile(chatId, firstName) {
     text += `\n📊 *Статистика заявок:*\n`;
     text += `Активных: ${activeOrders}\n`;
     text += `Завершённых: ${completedOrders}\n`;
+    if (cancelledOrders) text += `Отменённых: ${cancelledOrders}\n`;
     text += `Всего: ${totalOrders}\n`;
     text += `Первая: ${esc(firstDate)}\n`;
     text += `Последняя: ${esc(lastDate)}\n\n`;
@@ -7977,6 +7980,17 @@ async function showUserProfile(chatId, firstName) {
       if (counts[st]) {
         const label = STATUS_LABELS[st] || st;
         text += `  ${label}: ${counts[st]}\n`;
+      }
+    }
+
+    // Last 3 orders summary in text
+    const recent3 = orders.slice(0, 3);
+    if (recent3.length) {
+      text += `\n📋 *Последние заявки:*\n`;
+      for (const o of recent3) {
+        const modelPart = o.model_name ? ` — ${esc(o.model_name)}` : '';
+        const stLabel = STATUS_LABELS[o.status] || esc(o.status);
+        text += `• ${esc(o.order_number)}${modelPart} \\[${stLabel}\\]\n`;
       }
     }
 
@@ -7990,9 +8004,11 @@ async function showUserProfile(chatId, firstName) {
       text += earned.map(a => `${esc(a.icon)} ${esc(a.title)}`).join('  ') + '\n';
     }
 
-    // Last 3 orders for quick access
+    // Last 3 orders for quick access (buttons)
     const recentBtns = orders.slice(0, 3).map(o => [{
-      text: `${o.order_number}  ${STATUS_LABELS[o.status]||o.status}`,
+      text: o.model_name
+        ? `${o.order_number} · ${o.model_name}  ${STATUS_LABELS[o.status]||o.status}`
+        : `${o.order_number}  ${STATUS_LABELS[o.status]||o.status}`,
       callback_data: `client_order_${o.id}`
     }]);
 
