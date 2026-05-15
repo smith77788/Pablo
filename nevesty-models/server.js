@@ -413,6 +413,8 @@ async function buildHealthResponse() {
   let dbSizeMb = null;
   let walStatus = null;
   let factoryLastCycle = null;
+  let factoryHoursSince = null;
+  let factoryStale = false;
   let ordersToday = 0;
   let activeOrders = 0;
   let totalOrders = 0;
@@ -486,7 +488,12 @@ async function buildHealthResponse() {
 
   try {
     const row = await dbGet("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'");
-    if (row) factoryLastCycle = row.value;
+    if (row?.value) {
+      factoryLastCycle = row.value;
+      const lastRunDate = new Date(factoryLastCycle);
+      factoryHoursSince = Math.round((Date.now() - lastRunDate.getTime()) / (1000 * 60 * 60) * 10) / 10;
+      factoryStale = factoryHoursSince > 12;
+    }
   } catch (_) { /* table may not have this key yet */ }
 
   let factoryStatus = 'unknown';
@@ -565,6 +572,12 @@ async function buildHealthResponse() {
       factory: factoryStatus,
       factory_last_cycle: factoryLastCycle,
       cache: cacheStats,
+    },
+    factory: {
+      last_run: factoryLastCycle,
+      hours_since_run: factoryHoursSince,
+      stale: factoryStale,
+      status: factoryLastCycle === null ? 'never_run' : factoryStale ? 'stale' : 'ok',
     },
     metrics: {
       memory_mb: memMb,

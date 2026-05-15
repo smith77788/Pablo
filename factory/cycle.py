@@ -2738,4 +2738,24 @@ def run_cycle() -> dict:
     except Exception:
         pass
 
+    # ─── Record last-run timestamp in bot_settings for monitoring ────────────
+    try:
+        import sqlite3 as _sqlite3_lr
+        import os as _os_lr
+        _bot_db_lr = _os_lr.path.abspath(
+            _os_lr.path.join(_os_lr.path.dirname(__file__), '..', 'nevesty-models', 'nevesty.db')
+        )
+        if _os_lr.path.exists(_bot_db_lr):
+            _conn_lr = _sqlite3_lr.connect(_bot_db_lr)
+            _ts_lr = datetime.now(timezone.utc).isoformat()
+            _conn_lr.execute(
+                "INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES ('factory_last_cycle', ?, CURRENT_TIMESTAMP)",
+                [_ts_lr]
+            )
+            _conn_lr.commit()
+            _conn_lr.close()
+            logger.info("[LastRun] factory_last_cycle written to bot_settings: %s", _ts_lr)
+    except Exception as _e_lr:
+        logger.warning("[LastRun] Failed to write factory_last_cycle: %s", _e_lr)
+
     return results

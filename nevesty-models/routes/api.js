@@ -3998,6 +3998,26 @@ router.get('/admin/factory/experiments', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/admin/factory/status — factory run status (last_run, staleness) (БЛОК 6.2)
+router.get('/admin/factory/status', auth, async (req, res, next) => {
+  try {
+    const row = await get("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'", []);
+    const lastRun = row?.value || null;
+    const hoursSince = lastRun
+      ? Math.round((Date.now() - new Date(lastRun).getTime()) / (1000 * 60 * 60) * 10) / 10
+      : null;
+    const stale = hoursSince !== null ? hoursSince > 12 : null;
+    const status = hoursSince === null ? 'never_run' : hoursSince > 12 ? 'stale' : 'ok';
+
+    res.json({
+      last_run: lastRun,
+      hours_since_run: hoursSince,
+      stale,
+      status,
+    });
+  } catch (e) { next(e); }
+});
+
 // ── CRM Integration Webhooks (БЛОК 10.3) ──────────────────────────────────────
 
 // POST /api/admin/crm/sync/:provider — push order to CRM (stub, real integration via .env)

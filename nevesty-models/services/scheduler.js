@@ -105,6 +105,25 @@ async function sendEventReminders() {
   }
 }
 
+async function checkFactoryStaleness() {
+  try {
+    const { get } = require('../database');
+    const row = await get("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'", []);
+    if (!row?.value) return;
+    const lastRun = new Date(row.value);
+    const hoursSince = (Date.now() - lastRun.getTime()) / (1000 * 60 * 60);
+    if (hoursSince > 12) {
+      const h = Math.round(hoursSince);
+      const lastStr = row.value.slice(0, 16).replace('T', ' ');
+      const msg = `⚠️ Factory Alert: последний цикл был ${h}ч назад (${lastStr}). Проверьте factory/cycle.py`;
+      console.warn(`[scheduler] ${msg}`);
+      _notify(msg);
+    }
+  } catch (e) {
+    console.error('[scheduler] checkFactoryStaleness error:', e.message);
+  }
+}
+
 async function runVacuum() {
   try {
     const { run } = require('../database');
@@ -185,7 +204,8 @@ function start() {
   scheduleWeekly(runVacuum, 'SQLite VACUUM + WAL TRUNCATE', 0, 3, 0); // Sunday 03:00
   scheduleEvery(runWalCheckpoint, 'WAL checkpoint (PASSIVE)', 6);
   scheduleDaily(sendEventReminders, 'Event reminders', 9, 0);
-  console.log('[scheduler] Started: backup (daily 01:00), VACUUM (Sunday 03:00), WAL checkpoint (every 6h), event reminders (daily 09:00)');
+  scheduleEvery(checkFactoryStaleness, 'Factory staleness check', 6);
+  console.log('[scheduler] Started: backup (daily 01:00), VACUUM (Sunday 03:00), WAL checkpoint (every 6h), event reminders (daily 09:00), factory staleness check (every 6h)');
 }
 
 function stop() {
