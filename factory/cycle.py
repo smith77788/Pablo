@@ -53,6 +53,15 @@ def _load_dept(name: str):
         elif name == "tech":
             from factory.agents.tech_dept import TechDepartment
             return TechDepartment()
+        elif name == "sales":
+            from factory.agents.sales_dept import SalesDepartment
+            return SalesDepartment()
+        elif name == "creative":
+            from factory.agents.creative_dept import CreativeDepartment
+            return CreativeDepartment()
+        elif name == "customer_success":
+            from factory.agents.customer_success_dept import CustomerSuccessDepartment
+            return CustomerSuccessDepartment()
     except Exception as e:
         logger.warning("Dept %s unavailable: %s", name, e)
     return None
@@ -267,6 +276,65 @@ def run_cycle() -> dict:
             summary_lines.append(f"🛠️ Tech: {', '.join(tech_result.get('roles_used', []))}")
     except Exception as e:
         logger.error("Tech dept phase error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 6 — SALES + CREATIVE + CUSTOMER SUCCESS DEPARTMENTS
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n💼 SALES + CREATIVE + CUSTOMER SUCCESS DEPTS")
+
+    # Sales Department
+    try:
+        sales = _load_dept("sales")
+        if sales:
+            sales_focus = next(iter(decisions), {}).get("focus", "lead qualification pricing")
+            sales_result = sales.execute_task(
+                sales_focus,
+                {"insights": insights, "metrics": all_metrics},
+            )
+            logger.info("[Phase6] Sales: roles_used=%s", sales_result.get("roles_used", []))
+            results["phases"]["sales"] = {
+                "roles_used": sales_result.get("roles_used", []),
+                "timestamp": sales_result.get("timestamp"),
+            }
+            summary_lines.append(f"💼 Sales: {', '.join(sales_result.get('roles_used', []))}")
+    except Exception as e:
+        logger.error("Sales dept phase error: %s", e)
+
+    # Creative Department
+    try:
+        creative = _load_dept("creative")
+        if creative:
+            creative_focus = next(iter(decisions), {}).get("focus", "content storytelling brand")
+            creative_result = creative.execute_task(
+                creative_focus,
+                {"insights": insights, "metrics": all_metrics},
+            )
+            logger.info("[Phase6] Creative: roles_used=%s", creative_result.get("roles_used", []))
+            results["phases"]["creative"] = {
+                "roles_used": creative_result.get("roles_used", []),
+                "timestamp": creative_result.get("timestamp"),
+            }
+            summary_lines.append(f"🎨 Creative: {', '.join(creative_result.get('roles_used', []))}")
+    except Exception as e:
+        logger.error("Creative dept phase error: %s", e)
+
+    # Customer Success Department
+    try:
+        cs = _load_dept("customer_success")
+        if cs:
+            cs_focus = next(iter(decisions), {}).get("focus", "retention onboarding upsell")
+            cs_result = cs.execute_task(
+                cs_focus,
+                {"insights": insights, "metrics": all_metrics},
+            )
+            logger.info("[Phase6] CustomerSuccess: roles_used=%s", cs_result.get("roles_used", []))
+            results["phases"]["customer_success"] = {
+                "roles_used": cs_result.get("roles_used", []),
+                "timestamp": cs_result.get("timestamp"),
+            }
+            summary_lines.append(f"🤝 CustomerSuccess: {', '.join(cs_result.get('roles_used', []))}")
+    except Exception as e:
+        logger.error("Customer Success dept phase error: %s", e)
 
     results["new_actions"] = total_new_actions
     results["phases"]["departments"] = {

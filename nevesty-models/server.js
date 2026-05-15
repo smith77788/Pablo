@@ -65,10 +65,49 @@ app.use(express.static(path.join(__dirname, 'public'), {
 app.use('/api', apiRouter);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
-app.get('/health', async (req, res) => {
+async function buildHealthResponse() {
+  const pkg = require('./package.json');
+  const mem = process.memoryUsage();
+  let dbStatus = 'ok';
+  let factoryLastCycle = null;
+
   try {
     await dbGet('SELECT 1 as ok');
-    res.json({ status: 'ok', uptime: process.uptime(), ts: new Date().toISOString() });
+  } catch (e) {
+    dbStatus = 'error: ' + e.message;
+  }
+
+  try {
+    const row = await dbGet("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'");
+    if (row) factoryLastCycle = row.value;
+  } catch (_) { /* table may not have this key yet */ }
+
+  return {
+    status: dbStatus === 'ok' ? 'ok' : 'degraded',
+    uptime: Math.floor(process.uptime()),
+    database: dbStatus,
+    bot: botInstance ? 'connected' : 'not_initialized',
+    memory_mb: Math.round(mem.rss / 1024 / 1024),
+    factory_last_cycle: factoryLastCycle,
+    version: pkg.version,
+    ts: new Date().toISOString(),
+  };
+}
+
+app.get('/health', async (req, res) => {
+  try {
+    const health = await buildHealthResponse();
+    res.status(health.status === 'ok' ? 200 : 503).json(health);
+  } catch (e) {
+    res.status(503).json({ status: 'down', error: e.message });
+  }
+});
+
+// /api/health — same payload, referenced by Docker healthcheck
+app.get('/api/health', async (req, res) => {
+  try {
+    const health = await buildHealthResponse();
+    res.status(health.status === 'ok' ? 200 : 503).json(health);
   } catch (e) {
     res.status(503).json({ status: 'down', error: e.message });
   }

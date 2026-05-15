@@ -1,7 +1,31 @@
 version: '3.9'
 
+networks:
+  app-network:
+    driver: bridge
+
 services:
-  # ── Telegram Bot + Web Server ─────────────────────────────────────
+  # ── Nginx reverse proxy ───────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nevesty-models/public:/app/nevesty-models/public:ro
+    depends_on:
+      bot:
+        condition: service_healthy
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Telegram Bot + Web Server ─────────────────────────────────────────
   bot:
     build:
       context: ./nevesty-models
@@ -10,17 +34,26 @@ services:
     env_file: .env
     volumes:
       - bot-data:/app/data
-    ports:
-      - "${PORT:-3000}:3000"
+    expose:
+      - "3000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
     depends_on:
-      - factory
+      factory:
+        condition: service_healthy
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # ── AI Office Factory ─────────────────────────────────────────────
+  # ── AI Office Factory ─────────────────────────────────────────────────
   factory:
     build:
       context: .
@@ -29,10 +62,23 @@ services:
     env_file: .env
     volumes:
       - factory-data:/app/factory
-      - bot-data:/app/nevesty-models/data  # общий доступ к данным бота
+      - bot-data:/app/nevesty-models/data  # shared access to bot data
     environment:
       FACTORY_CYCLE_HOURS: ${FACTORY_CYCLE_HOURS:-6}
       PYTHONPATH: /app
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os; exit(0 if os.path.exists('/app/factory') else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   bot-data:

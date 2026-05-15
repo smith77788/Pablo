@@ -408,15 +408,17 @@ function ru_plural(n, one, few, many) {
 
 // ── My orders ─────────────────────────────────────────────────────────────────
 
-async function showMyOrders(chatId) {
+async function showMyOrders(chatId, page = 0) {
   try {
-    const orders = await query(
-      `SELECT o.*,m.name as model_name FROM orders o
-       LEFT JOIN models m ON o.model_id=m.id
-       WHERE o.client_chat_id=? ORDER BY o.created_at DESC LIMIT 10`,
+    page = parseInt(page) || 0;
+    const PER_PAGE = 5;
+    const totalRow = await get(
+      'SELECT COUNT(*) as n FROM orders WHERE client_chat_id=?',
       [String(chatId)]
-    );
-    if (!orders.length) {
+    ).catch(() => ({ n: 0 }));
+    const total = totalRow.n;
+
+    if (!total) {
       return safeSend(chatId,
         '📭 *Ваши заявки*\n\nУ вас пока нет заявок\\. Оформите первую прямо сейчас\\!',
         {
@@ -428,17 +430,40 @@ async function showMyOrders(chatId) {
         }
       );
     }
-    let text = '📋 *Ваши заявки:*\n\n';
-    const btns = orders.map(o => {
+
+    const orders = await query(
+      `SELECT o.*,m.name as model_name FROM orders o
+       LEFT JOIN models m ON o.model_id=m.id
+       WHERE o.client_chat_id=? ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
+      [String(chatId), PER_PAGE, page * PER_PAGE]
+    );
+
+    let text = `📋 *Ваши заявки* \\(${total}\\):\n\n`;
+    const btns = [];
+    for (const o of orders) {
       text += `${STATUS_LABELS[o.status]||o.status} *${esc(o.order_number)}*\n`;
       text += `${esc(EVENT_TYPES[o.event_type]||o.event_type)}`;
       if (o.event_date) text += ` · ${esc(o.event_date)}`;
       text += '\n\n';
-      return [{ text: `${o.order_number}  ${STATUS_LABELS[o.status]||o.status}`, callback_data: `client_order_${o.id}` }];
-    });
+      const row = [{ text: `${o.order_number}  ${STATUS_LABELS[o.status]||o.status}`, callback_data: `client_order_${o.id}` }];
+      if (o.status === 'completed' || o.status === 'cancelled') {
+        row.push({ text: '🔁', callback_data: `repeat_order_${o.id}` });
+      }
+      btns.push(row);
+    }
+
+    const nav = [];
+    if (page > 0)                         nav.push({ text: '◀️', callback_data: `my_orders_page_${page - 1}` });
+    if ((page + 1) * PER_PAGE < total)    nav.push({ text: '▶️', callback_data: `my_orders_page_${page + 1}` });
+
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [...btns, [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+      reply_markup: { inline_keyboard: [
+        ...btns,
+        ...(nav.length ? [nav] : []),
+        [{ text: '📝 Новая заявка', callback_data: 'bk_start'   }],
+        [{ text: '🏠 Главное меню', callback_data: 'main_menu'  }],
+      ]}
     });
   } catch (e) { console.error('[Bot] showMyOrders:', e.message); }
 }
@@ -852,20 +877,26 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
     if (page > 0)           nav.push({ text: '◀️', callback_data: `adm_orders_${filterKey}_${page-1}` });
     if ((page+1)*8 < total.n) nav.push({ text: '▶️', callback_data: `adm_orders_${filterKey}_${page+1}` });
 
-    const filterRow = [
-      { text: 'Все',   callback_data: 'adm_orders__0' },
-      { text: '🆕 Нов', callback_data: 'adm_orders_new_0' },
-      { text: '✅ Подт', callback_data: 'adm_orders_confirmed_0' },
-      { text: '🏁 Гот', callback_data: 'adm_orders_completed_0' },
+    const activeFilter = safe || '';
+    const filterRow1 = [
+      { text: (activeFilter === '') ? '📋 Все ✓' : '📋 Все',             callback_data: 'adm_orders__0'         },
+      { text: (activeFilter === 'new') ? '🆕 Новые ✓' : '🆕 Новые',       callback_data: 'adm_orders_new_0'      },
+      { text: (activeFilter === 'confirmed') ? '✅ Подтвержд. ✓' : '✅ Подтвержд.', callback_data: 'adm_orders_confirmed_0' },
+    ];
+    const filterRow2 = [
+      { text: (activeFilter === 'cancelled') ? '❌ Отменённые ✓' : '❌ Отменённые', callback_data: 'adm_orders_cancelled_0' },
+      { text: (activeFilter === 'completed') ? '🏁 Завершённые ✓' : '🏁 Завершённые', callback_data: 'adm_orders_completed_0' },
     ];
 
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
+        filterRow1,
+        filterRow2,
         ...btns,
         ...(nav.length ? [nav] : []),
-        filterRow,
-        [{ text: '← Меню', callback_data: 'admin_menu' }],
+        [{ text: '🔍 Найти заявку', callback_data: 'adm_search_order' },
+         { text: '← Меню',         callback_data: 'admin_menu'        }],
       ]}
     });
   } catch (e) { console.error('[Bot] showAdminOrders:', e.message); }
@@ -914,31 +945,78 @@ async function showAdminOrder(chatId, orderId) {
       { text: '💬 Написать клиенту', callback_data: `adm_contact_${orderId}` },
       { text: '🏁 Завершить',        callback_data: `adm_complete_${orderId}` },
     ]);
+    keyboard.push([{ text: '🕐 История статусов', callback_data: `adm_order_history_${orderId}` }]);
     keyboard.push([{ text: '← К заявкам', callback_data: 'adm_orders__0' }]);
 
     return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } });
   } catch (e) { console.error('[Bot] showAdminOrder:', e.message); }
 }
 
-async function showAdminStats(chatId) {
+async function showOrderStatusHistory(chatId, orderId) {
+  if (!isAdmin(chatId)) return;
   try {
-    const [total,newO,rev,conf,ip,done,canc,models] = await Promise.all([
+    const [order, history] = await Promise.all([
+      get('SELECT order_number FROM orders WHERE id=?', [orderId]),
+      query('SELECT * FROM order_status_history WHERE order_id=? ORDER BY created_at ASC', [orderId]),
+    ]);
+    if (!order) return safeSend(chatId, '❌ Заявка не найдена.');
+
+    let text = `*🕐 История статусов*\n*Заявка ${esc(order.order_number)}*\n\n`;
+    if (!history.length) {
+      text += '_Изменений статуса не зафиксировано_';
+    } else {
+      for (const h of history) {
+        const dt = h.created_at ? new Date(h.created_at).toLocaleString('ru', { timeZone: 'Europe/Moscow' }) : '—';
+        const oldLbl = esc(STATUS_LABELS[h.old_status] || h.old_status || '—');
+        const newLbl = esc(STATUS_LABELS[h.new_status] || h.new_status || '—');
+        text += `📌 ${esc(dt)}\n  ${oldLbl} → *${newLbl}*\n`;
+      }
+    }
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '← К заявке', callback_data: `adm_order_${orderId}` }],
+        [{ text: '← К заявкам', callback_data: 'adm_orders__0' }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showOrderStatusHistory:', e.message); }
+}
+
+async function showAdminStats(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const [
+      total, todayR, weekR, monthR,
+      active,
+      done, canc,
+      newClients,
+    ] = await Promise.all([
       get('SELECT COUNT(*) as n FROM orders'),
-      get("SELECT COUNT(*) as n FROM orders WHERE status='new'"),
-      get("SELECT COUNT(*) as n FROM orders WHERE status='reviewing'"),
-      get("SELECT COUNT(*) as n FROM orders WHERE status='confirmed'"),
-      get("SELECT COUNT(*) as n FROM orders WHERE status='in_progress'"),
+      get("SELECT COUNT(*) as n FROM orders WHERE date(created_at) = date('now')"),
+      get("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-7 days')"),
+      get("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-30 days')"),
+      get("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','reviewing','confirmed','in_progress')"),
       get("SELECT COUNT(*) as n FROM orders WHERE status='completed'"),
       get("SELECT COUNT(*) as n FROM orders WHERE status='cancelled'"),
-      get('SELECT COUNT(*) as n FROM models WHERE available=1'),
+      get("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE created_at >= datetime('now','-30 days') AND client_chat_id IS NOT NULL"),
     ]);
 
-    // Revenue estimate: confirmed + completed orders × avg price 15000₽
-    const paidOrders = (conf.n || 0) + (done.n || 0);
-    const AVG_PRICE = 15000;
-    const revenueEst = paidOrders * AVG_PRICE;
+    // Conversion: completed / (total - cancelled) * 100
+    const denominator = (total.n || 0) - (canc.n || 0);
+    const conversion = denominator > 0 ? Math.round((done.n / denominator) * 100) : 0;
 
-    // Top 3 most popular models
+    // Average budget
+    let avgBudget = null;
+    try {
+      const budgetRow = await get(
+        `SELECT AVG(CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','') AS REAL)) as avg
+         FROM orders WHERE budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`
+      );
+      if (budgetRow && budgetRow.avg) avgBudget = Math.round(budgetRow.avg);
+    } catch {}
+
+    // Top-3 models by order count
     let topModels = [];
     try {
       topModels = await query(
@@ -951,46 +1029,30 @@ async function showAdminStats(chatId) {
       );
     } catch {}
 
-    // Peak booking days of week
-    let peakDays = [];
-    try {
-      peakDays = await query(
-        `SELECT strftime('%w', created_at) as dow, COUNT(*) as cnt
-         FROM orders
-         GROUP BY dow
-         ORDER BY cnt DESC
-         LIMIT 3`
-      );
-    } catch {}
-    const DAY_NAMES = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    const medals = ['🥇','🥈','🥉'];
 
-    let text = `📊 Статистика Nevesty Models\n\n`;
-    text += `Всего заявок: ${total.n}\n`;
-    text += `Новых: ${newO.n}\n`;
-    text += `На рассмотрении: ${rev.n}\n`;
-    text += `Подтверждено: ${conf.n}\n`;
-    text += `В работе: ${ip.n}\n`;
-    text += `Завершено: ${done.n}\n`;
-    text += `Отклонено: ${canc.n}\n\n`;
-    text += `Доступно моделей: ${models.n}\n\n`;
-    text += `Оценка выручки (подтв. + завершённые × 15 000 руб.): ~${revenueEst.toLocaleString('ru')} руб.\n`;
+    let text = `*📊 Статистика Nevesty Models*\n\n`;
+    text += `*📅 Заявки:*\n`;
+    text += `  Сегодня: *${esc(String(todayR.n))}*\n`;
+    text += `  За неделю: *${esc(String(weekR.n))}*\n`;
+    text += `  За месяц: *${esc(String(monthR.n))}*\n`;
+    text += `  Всего: *${esc(String(total.n))}*\n\n`;
+    text += `*🔥 Активных прямо сейчас:* ${esc(String(active.n))}\n`;
+    text += `*✅ Завершено:* ${esc(String(done.n))}\n`;
+    text += `*❌ Отклонено:* ${esc(String(canc.n))}\n\n`;
+    text += `*📈 Конверсия:* ${esc(String(conversion))}%\n`;
+    if (avgBudget) text += `*💰 Средний бюджет:* ${esc(String(avgBudget.toLocaleString('ru')))} руб\\.\n`;
+    text += `*🆕 Новые клиенты \\(30 дней\\):* ${esc(String(newClients.n))}\n`;
 
     if (topModels.length) {
-      text += `\nТоп моделей по заявкам:\n`;
+      text += `\n*🏆 Топ\\-3 модели по заявкам:*\n`;
       topModels.forEach((m, i) => {
-        text += `  ${i + 1}. ${m.name} — ${m.cnt} заявок\n`;
-      });
-    }
-
-    if (peakDays.length) {
-      text += `\nПиковые дни бронирований:\n`;
-      peakDays.forEach(d => {
-        const dayName = DAY_NAMES[parseInt(d.dow)] || d.dow;
-        text += `  ${dayName} — ${d.cnt} заявок\n`;
+        text += `  ${medals[i] || (i+1+'.')} ${esc(m.name)} — ${esc(String(m.cnt))} заявок\n`;
       });
     }
 
     return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         [{ text: '📋 Все заявки', callback_data: 'adm_orders__0' }],
         [{ text: '← Меню',        callback_data: 'admin_menu'    }],
@@ -1673,20 +1735,29 @@ async function exportOrders(chatId) {
 
 async function adminChangeStatus(chatId, orderId, newStatus) {
   try {
-    const immutable = ['completed','cancelled'];
-    if (newStatus === 'confirmed')   {
-      const r = await run("UPDATE orders SET status='confirmed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('confirmed','cancelled','completed')",[orderId]);
-      if (r.changes === 0) return safeSend(chatId,'⚠️ Заявка уже обработана.');
+    // Read old status before updating
+    const oldOrder = await get('SELECT status FROM orders WHERE id=?', [orderId]);
+    const oldStatus = oldOrder?.status || null;
+
+    let result;
+    if (newStatus === 'confirmed') {
+      result = await run("UPDATE orders SET status='confirmed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('confirmed','cancelled','completed')",[orderId]);
     } else if (newStatus === 'reviewing') {
-      const r = await run("UPDATE orders SET status='reviewing',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('confirmed','cancelled','completed')",[orderId]);
-      if (r.changes === 0) return safeSend(chatId,'⚠️ Заявка уже обработана.');
+      result = await run("UPDATE orders SET status='reviewing',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('confirmed','cancelled','completed')",[orderId]);
     } else if (newStatus === 'cancelled') {
-      const r = await run("UPDATE orders SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','cancelled')",[orderId]);
-      if (r.changes === 0) return safeSend(chatId,'⚠️ Заявка уже обработана.');
+      result = await run("UPDATE orders SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','cancelled')",[orderId]);
     } else if (newStatus === 'completed') {
-      const r = await run("UPDATE orders SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status!='cancelled'",[orderId]);
-      if (r.changes === 0) return safeSend(chatId,'⚠️ Заявка уже обработана.');
+      result = await run("UPDATE orders SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status!='cancelled'",[orderId]);
     }
+
+    if (!result || result.changes === 0) return safeSend(chatId,'⚠️ Заявка уже обработана.');
+
+    // Log status change to history
+    await run(
+      'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by) VALUES (?,?,?,?)',
+      [orderId, oldStatus, newStatus, String(chatId)]
+    ).catch(e => console.warn('[Bot] history log:', e.message));
+
     const order = await get('SELECT * FROM orders WHERE id=?', [orderId]);
     if (order?.client_chat_id) notifyStatusChange(order.client_chat_id, order.order_number, newStatus);
     return showAdminOrder(chatId, orderId);
@@ -2072,6 +2143,13 @@ function initBot(app) {
       return showAdminOrders(chatId, status, page);
     }
 
+    // ── Admin order status history
+    if (data.startsWith('adm_order_history_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_order_history_',''));
+      return showOrderStatusHistory(chatId, id);
+    }
+
     // ── Admin order detail
     if (data.startsWith('adm_order_')) {
       if (!isAdmin(chatId)) return;
@@ -2160,18 +2238,46 @@ function initBot(app) {
     if (data === 'adm_search_on')    { if (!isAdmin(chatId)) return; await setSetting('search_enabled','1');   return showAdminSettings(chatId,'bot'); }
     if (data === 'adm_search_off')   { if (!isAdmin(chatId)) return; await setSetting('search_enabled','0');   return showAdminSettings(chatId,'bot'); }
     if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; await setSession(chatId, 'adm_broadcast_msg', {}); return showBroadcast(chatId); }
-    if (data === 'adm_reviews')   { if (!isAdmin(chatId)) return; return showAdminReviews(chatId); }
+    if (data === 'adm_reviews')          { if (!isAdmin(chatId)) return; return showAdminReviews(chatId); }
+    if (data === 'adm_reviews_pending')  { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'pending'); }
+    if (data === 'adm_reviews_approved') { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'approved'); }
     if (data.startsWith('rev_approve_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_approve_', ''));
-      await run('UPDATE reviews SET approved=1 WHERE id=?', [id]).catch(()=>{});
-      return safeSend(chatId, `Отзыв #${id} одобрен.`);
+      await run('UPDATE reviews SET approved=1, status=NULL WHERE id=?', [id]).catch(()=>{});
+      // Notify client if linked to an order
+      try {
+        const rev = await get('SELECT * FROM reviews WHERE id=?', [id]);
+        if (rev && rev.order_id) {
+          const ord = await get('SELECT client_chat_id FROM orders WHERE id=?', [rev.order_id]).catch(()=>null);
+          if (ord?.client_chat_id) {
+            await safeSend(ord.client_chat_id, `✅ Ваш отзыв одобрен и опубликован\\. Спасибо\\!`, { parse_mode: 'MarkdownV2' }).catch(()=>{});
+          }
+        }
+      } catch {}
+      return safeSend(chatId, `✅ Отзыв #${id} одобрен.`);
+    }
+    if (data.startsWith('rev_reject_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('rev_reject_', ''));
+      await run("UPDATE reviews SET approved=0, status='rejected' WHERE id=?", [id]).catch(()=>{});
+      // Notify client if linked to an order
+      try {
+        const rev = await get('SELECT * FROM reviews WHERE id=?', [id]);
+        if (rev && rev.order_id) {
+          const ord = await get('SELECT client_chat_id FROM orders WHERE id=?', [rev.order_id]).catch(()=>null);
+          if (ord?.client_chat_id) {
+            await safeSend(ord.client_chat_id, `ℹ️ Ваш отзыв был отклонён модератором\\.`, { parse_mode: 'MarkdownV2' }).catch(()=>{});
+          }
+        }
+      } catch {}
+      return safeSend(chatId, `❌ Отзыв #${id} отклонён.`);
     }
     if (data.startsWith('rev_delete_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_delete_', ''));
       await run('DELETE FROM reviews WHERE id=?', [id]).catch(()=>{});
-      return safeSend(chatId, `Отзыв #${id} удалён.`);
+      return safeSend(chatId, `🗑 Отзыв #${id} удалён.`);
     }
     if (data === 'adm_admins')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminManagement(chatId); }
     if (data === 'adm_export')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return exportOrders(chatId); }
@@ -3230,26 +3336,64 @@ async function showFactoryExperiments(chatId) {
 async function showAdminReviews(chatId) {
   if (!isAdmin(chatId)) return;
   try {
-    const reviews = await query('SELECT * FROM reviews WHERE approved=0 ORDER BY created_at DESC').catch(()=>[]);
-    if (!reviews.length) {
-      return safeSend(chatId, 'Нет отзывов на модерации.', {
-        reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
-      });
-    }
-    for (const r of reviews) {
-      const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 1)));
-      const text = `Отзыв #${r.id}\nИмя: ${r.client_name}\nОценка: ${stars}\n\n${r.text}`;
-      await safeSend(chatId, text, {
-        reply_markup: { inline_keyboard: [[
-          { text: '✅ Одобрить', callback_data: `rev_approve_${r.id}` },
-          { text: '❌ Удалить',  callback_data: `rev_delete_${r.id}`  },
-        ]]}
-      });
-    }
-    return safeSend(chatId, `Всего на модерации: ${reviews.length}`, {
-      reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+    const [pendingCount, approvedCount] = await Promise.all([
+      get("SELECT COUNT(*) as n FROM reviews WHERE approved=0 AND (status IS NULL OR status != 'rejected')"),
+      get("SELECT COUNT(*) as n FROM reviews WHERE approved=1"),
+    ]);
+    const text = `*⭐ Управление отзывами*\n\nОжидают одобрения: *${esc(String(pendingCount.n))}*\nОдобрено: *${esc(String(approvedCount.n))}*`;
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [
+          { text: `⏳ Ожидают (${pendingCount.n})`,  callback_data: 'adm_reviews_pending'  },
+          { text: `✅ Одобрены (${approvedCount.n})`, callback_data: 'adm_reviews_approved' },
+        ],
+        [{ text: '← Меню', callback_data: 'admin_menu' }],
+      ]}
     });
   } catch (e) { console.error('[Bot] showAdminReviews:', e.message); }
+}
+
+async function showAdminReviewsList(chatId, filter) {
+  if (!isAdmin(chatId)) return;
+  try {
+    let reviews;
+    if (filter === 'pending') {
+      reviews = await query("SELECT * FROM reviews WHERE approved=0 AND (status IS NULL OR status != 'rejected') ORDER BY created_at DESC").catch(()=>[]);
+    } else {
+      reviews = await query("SELECT * FROM reviews WHERE approved=1 ORDER BY created_at DESC").catch(()=>[]);
+    }
+
+    if (!reviews.length) {
+      const label = filter === 'pending' ? 'ожидающих одобрения' : 'одобренных';
+      return safeSend(chatId, `Нет ${label} отзывов.`, {
+        reply_markup: { inline_keyboard: [[{ text: '← К отзывам', callback_data: 'adm_reviews' }]] }
+      });
+    }
+
+    for (const r of reviews) {
+      const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 1)));
+      const preview = r.text ? r.text.slice(0, 100) + (r.text.length > 100 ? '…' : '') : '';
+      const msgText = `*Отзыв \\#${esc(String(r.id))}*\n👤 ${esc(r.client_name)}\n${stars}\n\n${esc(preview)}`;
+      const btns = [];
+      if (filter === 'pending') {
+        btns.push({ text: '✅ Одобрить', callback_data: `rev_approve_${r.id}` });
+        btns.push({ text: '❌ Отклонить', callback_data: `rev_reject_${r.id}` });
+      } else {
+        btns.push({ text: '🗑 Удалить',  callback_data: `rev_delete_${r.id}` });
+        btns.push({ text: '❌ Отклонить', callback_data: `rev_reject_${r.id}` });
+      }
+      await safeSend(chatId, msgText, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [btns] }
+      });
+    }
+
+    const label = filter === 'pending' ? 'ожидают одобрения' : 'одобрено';
+    return safeSend(chatId, `Всего ${label}: ${reviews.length}`, {
+      reply_markup: { inline_keyboard: [[{ text: '← К отзывам', callback_data: 'adm_reviews' }]] }
+    });
+  } catch (e) { console.error('[Bot] showAdminReviewsList:', e.message); }
 }
 
 // ─── Топ-модели ───────────────────────────────────────────────────────────────
