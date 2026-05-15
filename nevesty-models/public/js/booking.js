@@ -3,21 +3,60 @@
   let BOT_USERNAME = '';
   fetch('/api/config').then(r => r.json()).then(cfg => { BOT_USERNAME = cfg.bot_username || ''; }).catch(() => {});
 
+  const DRAFT_KEY = 'nm_booking_draft';
+
+  /* ─── Persist / restore draft from sessionStorage ─── */
+  function saveDraft() {
+    try {
+      const draft = {
+        step: state.step,
+        model_id: state.model_id,
+        model_name: state.model_name,
+        model_photo: state.model_photo,
+        event_type: state.event_type,
+        event_date: state.event_date,
+        event_duration: state.event_duration,
+        location: state.location,
+        budget: state.budget,
+        comments: state.comments,
+        client_name: state.client_name,
+        client_phone: state.client_phone,
+        client_email: state.client_email,
+        client_telegram: state.client_telegram,
+      };
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch {}
+  }
+
+  function loadDraft() {
+    try {
+      const raw = sessionStorage.getItem(DRAFT_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch { return null; }
+  }
+
+  function clearDraft() {
+    try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
+  }
+
+  const _draft = loadDraft();
+
   const state = {
     step: 1,
-    model_id: null,
-    model_name: null,
-    model_photo: null,
-    event_type: '',
-    event_date: '',
-    event_duration: '4',
-    location: '',
-    budget: '',
-    comments: '',
-    client_name: '',
-    client_phone: '',
-    client_email: '',
-    client_telegram: '',
+    model_id: _draft?.model_id ?? null,
+    model_name: _draft?.model_name ?? null,
+    model_photo: _draft?.model_photo ?? null,
+    event_type: _draft?.event_type ?? '',
+    event_date: _draft?.event_date ?? '',
+    event_duration: _draft?.event_duration ?? '4',
+    location: _draft?.location ?? '',
+    budget: _draft?.budget ?? '',
+    comments: _draft?.comments ?? '',
+    client_name: _draft?.client_name ?? '',
+    client_phone: _draft?.client_phone ?? '',
+    client_email: _draft?.client_email ?? '',
+    client_telegram: _draft?.client_telegram ?? '',
   };
 
   const EVENT_LABELS = {
@@ -143,6 +182,40 @@
     });
   }
 
+  /* ─── Auto-save on input for step 2 & 3 fields ─────── */
+  (function attachAutoSave() {
+    const step2Fields = ['event_date', 'event_duration', 'location', 'budget', 'comments'];
+    const step3Fields = ['client_name', 'client_phone', 'client_email', 'client_telegram'];
+    let saveTimer;
+    function debouncedSave() {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        // Capture current visible field values into state before saving
+        if (state.step === 2) {
+          const sc = document.querySelector('.service-option-card.selected');
+          if (sc) state.event_type = sc.dataset.value;
+          state.event_date = document.getElementById('event_date')?.value || state.event_date;
+          state.event_duration = document.getElementById('event_duration')?.value || state.event_duration;
+          state.location = document.getElementById('location')?.value ?? state.location;
+          state.budget = document.getElementById('budget')?.value ?? state.budget;
+          state.comments = document.getElementById('comments')?.value ?? state.comments;
+        }
+        if (state.step === 3) {
+          state.client_name = document.getElementById('client_name')?.value.trim() || state.client_name;
+          state.client_phone = document.getElementById('client_phone')?.value.trim() || state.client_phone;
+          state.client_email = document.getElementById('client_email')?.value.trim() || state.client_email;
+          state.client_telegram = (document.getElementById('client_telegram')?.value.trim() || '').replace(/^@/, '') || state.client_telegram;
+        }
+        saveDraft();
+      }, 600);
+    }
+    [...step2Fields, ...step3Fields].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', debouncedSave);
+      if (el && el.tagName === 'SELECT') el.addEventListener('change', debouncedSave);
+    });
+  })();
+
   /* ─── Load models for selector ───────────────────── */
   apiFetch('/models?available=1').then(models => {
     const grid = document.getElementById('modelSelectGrid');
@@ -165,11 +238,105 @@
         <div class="model-select-check" aria-hidden="true">✓</div>
       </div>`).join('');
 
-    /* After grid is populated, handle URL model param */
+    /* After grid is populated, handle URL model param then restore draft */
     initFromUrlParams();
+    restoreModelFromDraft();
   }).catch(() => {
     initFromUrlParams();
+    restoreModelFromDraft();
   });
+
+  /* ─── Restore model selection from draft (if no URL param) ─ */
+  function restoreModelFromDraft() {
+    if (!_draft) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('model')) return; // URL param takes priority
+
+    if (_draft.model_id) {
+      const card = document.getElementById(`mc_${_draft.model_id}`);
+      if (card) {
+        card.classList.add('selected');
+        document.getElementById('noModelOption')?.classList.remove('selected');
+      }
+    }
+
+    // Navigate to saved step (use plain show, no animation on restore)
+    const savedStep = _draft.step && _draft.step > 1 ? _draft.step : 1;
+    if (savedStep > 1) {
+      // Show draft restore banner briefly
+      showDraftBanner(savedStep);
+    }
+  }
+
+  /* ─── Draft restore banner ──────────────────────────── */
+  function showDraftBanner(savedStep) {
+    const wrap = document.querySelector('.booking-form-wrap');
+    if (!wrap) return;
+    const banner = document.createElement('div');
+    banner.id = 'draftBanner';
+    banner.style.cssText = [
+      'background:rgba(201,169,110,0.1)',
+      'border:1px solid var(--gold)',
+      'padding:12px 20px',
+      'margin-bottom:16px',
+      'font-size:0.82rem',
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'gap:12px',
+      'color:var(--text-muted)',
+    ].join(';');
+    banner.innerHTML = `
+      <span>📋 Найден незаполненный черновик. <strong style="color:var(--gold)">Продолжить с шага ${savedStep}?</strong></span>
+      <span style="display:flex;gap:8px;flex-shrink:0">
+        <button id="draftResume" style="background:var(--gold);color:var(--bg);border:none;padding:6px 14px;font-size:0.78rem;cursor:pointer;font-family:inherit;">Продолжить</button>
+        <button id="draftDiscard" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:6px 14px;font-size:0.78rem;cursor:pointer;font-family:inherit;">Начать заново</button>
+      </span>`;
+    wrap.insertBefore(banner, wrap.firstChild);
+
+    document.getElementById('draftResume').addEventListener('click', () => {
+      banner.remove();
+      goToStepInstant(savedStep);
+    });
+    document.getElementById('draftDiscard').addEventListener('click', () => {
+      clearDraft();
+      // Reset state
+      Object.assign(state, {
+        model_id: null, model_name: null, model_photo: null,
+        event_type: '', event_date: '', event_duration: '4',
+        location: '', budget: '', comments: '',
+        client_name: '', client_phone: '', client_email: '', client_telegram: '',
+      });
+      banner.remove();
+      goToStepInstant(1);
+    });
+  }
+
+  /* ─── Navigate to step without animation (for restore) ─ */
+  function goToStepInstant(n) {
+    document.querySelectorAll('.booking-section').forEach(s => s.classList.remove('active', 'slide-out', 'slide-in-back', 'slide-out-back'));
+    document.getElementById(`step${n}`)?.classList.add('active');
+    document.querySelectorAll('.booking-step').forEach(s => {
+      const sn = +s.dataset.step;
+      s.classList.remove('active', 'done');
+      if (sn < n) s.classList.add('done');
+      else if (sn === n) s.classList.add('active');
+    });
+    const pct = Math.min(((n - 1) / 3) * 100, 100);
+    const progressFill = document.getElementById('progressFill');
+    if (progressFill) {
+      progressFill.style.width = pct + '%';
+      const bar = progressFill.parentElement;
+      if (bar) bar.setAttribute('aria-valuenow', Math.round(pct));
+    }
+    for (let i = 1; i <= 3; i++) {
+      const line = document.getElementById(`line${i}`);
+      if (line) line.classList.toggle('done', i < n);
+    }
+    state.step = n;
+    restoreStep(n);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   /* ─── Parse URL params & pre-select model ─────────── */
   function initFromUrlParams() {
@@ -210,6 +377,7 @@
     state.model_id = id;
     state.model_name = name || null;
     state.model_photo = photo || null;
+    saveDraft();
     document.querySelectorAll('.model-select-card').forEach(c => c.classList.remove('selected'));
     document.getElementById('noModelOption')?.classList.remove('selected');
     const card = document.getElementById('prefilledModelCard');
@@ -321,6 +489,7 @@
       state.location = document.getElementById('location').value;
       state.budget = document.getElementById('budget').value;
       state.comments = document.getElementById('comments').value;
+      saveDraft();
     }
 
     if (state.step === 3) {
@@ -349,32 +518,68 @@
       state.client_phone = phone;
       state.client_email = email;
       state.client_telegram = document.getElementById('client_telegram').value.trim().replace(/^@/, '');
+      saveDraft();
       buildSummary();
     }
 
     goToStep(state.step + 1);
   }
 
-  function prevStep() { goToStep(state.step - 1); }
+  function prevStep() { goToStep(state.step - 1, true); }
 
-  function goToStep(n) {
-    document.getElementById(`step${state.step}`)?.classList.remove('active');
+  function goToStep(n, isBack = false) {
+    const currentEl = document.getElementById(`step${state.step}`);
+    const nextEl = document.getElementById(`step${n}`);
+
+    // Animate outgoing step
+    if (currentEl && currentEl !== nextEl) {
+      const outClass = isBack ? 'slide-out-back' : 'slide-out';
+      currentEl.classList.add(outClass);
+      currentEl.addEventListener('animationend', () => {
+        currentEl.classList.remove('active', 'slide-out', 'slide-out-back');
+      }, { once: true });
+    }
+
+    // Update step indicators
     document.querySelectorAll('.booking-step').forEach(s => {
       const sn = +s.dataset.step;
       s.classList.remove('active', 'done');
       if (sn < n) s.classList.add('done');
       else if (sn === n) s.classList.add('active');
     });
+
     // Update progress bar fill
     const pct = Math.min(((n - 1) / 3) * 100, 100);
     const progressFill = document.getElementById('progressFill');
-    if (progressFill) progressFill.style.width = pct + '%';
+    if (progressFill) {
+      progressFill.style.width = pct + '%';
+      // Update ARIA attribute
+      const bar = progressFill.parentElement;
+      if (bar) bar.setAttribute('aria-valuenow', Math.round(pct));
+    }
     for (let i = 1; i <= 3; i++) {
       const line = document.getElementById(`line${i}`);
       if (line) line.classList.toggle('done', i < n);
     }
+
     state.step = n;
-    document.getElementById(`step${n}`)?.classList.add('active');
+    saveDraft();
+
+    // Animate incoming step after short delay to avoid overlap
+    if (nextEl) {
+      const inClass = isBack ? 'slide-in-back' : 'active';
+      // If going back, use different class; if forward, just add active
+      if (isBack) {
+        nextEl.classList.add('slide-in-back');
+        nextEl.addEventListener('animationend', () => {
+          nextEl.classList.remove('slide-in-back');
+          nextEl.classList.add('active');
+        }, { once: true });
+      } else {
+        nextEl.classList.add('active');
+      }
+    }
+
     restoreStep(n);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -387,6 +592,7 @@
       c.setAttribute('aria-checked', isThis ? 'true' : 'false');
     });
     state.event_type = value;
+    saveDraft();
     // Clear any service error
     document.querySelectorAll('#serviceOptions .field-error-msg').forEach(n => n.remove());
   }
@@ -472,6 +678,9 @@
         method: 'POST',
         body: JSON.stringify(body)
       });
+
+      // Clear saved draft on successful submission
+      clearDraft();
 
       // Analytics: track booking conversion
       if (window.NM && NM.analytics) {

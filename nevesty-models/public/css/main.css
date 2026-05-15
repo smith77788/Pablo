@@ -430,8 +430,40 @@ img { display: block; max-width: 100%; }
 .booking-section {
   background: var(--bg3); border: 1px solid var(--border); padding: 40px;
   display: none;
+  opacity: 0;
+  transform: translateX(32px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
 }
-.booking-section.active { display: block; }
+.booking-section.active {
+  display: block;
+  animation: stepSlideIn 0.35s ease forwards;
+}
+.booking-section.slide-out {
+  animation: stepSlideOut 0.25s ease forwards;
+}
+.booking-section.slide-out-back {
+  animation: stepSlideOutBack 0.25s ease forwards;
+}
+.booking-section.slide-in-back {
+  display: block;
+  animation: stepSlideInBack 0.35s ease forwards;
+}
+@keyframes stepSlideIn {
+  from { opacity: 0; transform: translateX(32px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes stepSlideOut {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-32px); }
+}
+@keyframes stepSlideInBack {
+  from { opacity: 0; transform: translateX(-32px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes stepSlideOutBack {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(32px); }
+}
 .booking-section h3 { font-size: 1.5rem; color: var(--white); margin-bottom: 8px; }
 .booking-section p.hint { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 32px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
