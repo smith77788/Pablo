@@ -914,6 +914,20 @@
                   <div class="field-note">Это сообщение клиент получит сразу после подачи заявки</div>
                 </div>
 
+                <div class="admin-form-group" style="margin-top: 20px">
+                  <label>Текст страницы «Спасибо»</label>
+                  <textarea
+                    class="admin-input"
+                    id="booking_thanks_text"
+                    rows="3"
+                    style="resize: vertical"
+                    placeholder="Спасибо за заявку! Наш менеджер свяжется с вами в течение 24 часов."
+                  ></textarea>
+                  <div class="field-note">
+                    Текст отображается на странице подтверждения после успешного бронирования
+                  </div>
+                </div>
+
                 <div class="sticky-save-bar">
                   <button class="btn btn-md btn-gold" id="btnSaveBooking" onclick="saveBooking(this)">
                     Сохранить настройки бронирования
@@ -1363,6 +1377,52 @@
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
+
+                <div class="settings-divider" style="margin-top: 20px">Дополнительные ключи уведомлений</div>
+
+                <div class="toggle-row">
+                  <div class="toggle-row-info">
+                    <div class="toggle-row-title">Новая заявка (notif_new_order)</div>
+                    <div class="toggle-row-desc">Альтернативный ключ: уведомление при поступлении новой заявки</div>
+                  </div>
+                  <label class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      id="notif_new_order"
+                      onchange="saveSetting('notif_new_order', this.checked ? '1' : '0')"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="toggle-row">
+                  <div class="toggle-row-info">
+                    <div class="toggle-row-title">Новый отзыв (notif_new_review)</div>
+                    <div class="toggle-row-desc">Альтернативный ключ: уведомление при поступлении нового отзыва</div>
+                  </div>
+                  <label class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      id="notif_new_review"
+                      onchange="saveSetting('notif_new_review', this.checked ? '1' : '0')"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="toggle-row">
+                  <div class="toggle-row-info">
+                    <div class="toggle-row-title">Новое сообщение (notif_new_message)</div>
+                    <div class="toggle-row-desc">Альтернативный ключ: уведомление при новом сообщении от клиента</div>
+                  </div>
+                  <label class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      id="notif_new_message"
+                      onchange="saveSetting('notif_new_message', this.checked ? '1' : '0')"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+
                 <div class="sticky-save-bar">
                   <button class="btn btn-md btn-gold" id="btnSaveNotif" onclick="saveNotif(this)">Сохранить</button>
                 </div>
@@ -2121,6 +2181,16 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre
                   🔄 Обновить статистику
                 </button>
 
+                <div style="margin-bottom: 20px">
+                  <a
+                    href="/admin/social.html"
+                    class="btn btn-sm btn-ghost"
+                    style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none"
+                  >
+                    📋 Перейти к очереди публикаций соцсетей
+                  </a>
+                </div>
+
                 <div class="sticky-save-bar">
                   <button class="btn btn-md btn-gold" id="btnSaveInstagram" onclick="saveInstagram(this)">
                     Сохранить настройки Instagram
@@ -2474,6 +2544,9 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre
             'calc_enabled',
             'reviews_auto_approve',
             'instagram_enabled',
+            'notif_new_order',
+            'notif_new_review',
+            'notif_new_message',
           ];
           toggleFields.forEach(key => {
             const el = document.getElementById(key);
@@ -2579,6 +2652,9 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre
           'faq_enabled',
           'calc_enabled',
           'reviews_auto_approve',
+          'notif_new_order',
+          'notif_new_review',
+          'notif_new_message',
         ];
 
         const body = {};
@@ -2746,6 +2822,7 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre
               booking_require_email: document.getElementById('booking_require_email').checked ? '1' : '0',
               booking_min_budget: document.getElementById('booking_min_budget').value,
               booking_confirm_msg: document.getElementById('booking_confirm_msg').value,
+              booking_thanks_text: document.getElementById('booking_thanks_text')?.value || '',
             }),
           });
           _admin.toast('Настройки бронирования сохранены', 'success');
@@ -2924,6 +3001,9 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre
               sms_enabled: document.getElementById('sms_enabled').checked ? '1' : '0',
               notifications_reviews: document.getElementById('notifications_reviews')?.checked ? '1' : '0',
               notifications_messages: document.getElementById('notifications_messages')?.checked ? '1' : '0',
+              notif_new_order: document.getElementById('notif_new_order')?.checked ? '1' : '0',
+              notif_new_review: document.getElementById('notif_new_review')?.checked ? '1' : '0',
+              notif_new_message: document.getElementById('notif_new_message')?.checked ? '1' : '0',
             }),
           });
           _admin.toast('Настройки уведомлений сохранены', 'success');
