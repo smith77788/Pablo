@@ -5504,13 +5504,16 @@ router.get('/admin/db-stats', auth, async (req, res, next) => {
       FROM sqlite_master sm WHERE type='table' AND name NOT LIKE 'sqlite_%'
       ORDER BY name`);
 
-    const tableCounts = await Promise.all(
-      tables.map(async t => ({
-        name: t.name,
-        count: (await get(`SELECT COUNT(*) as cnt FROM "${t.name}"`))?.cnt || 0,
-        indexes: t.index_count,
-      }))
-    );
+    // Single UNION ALL query instead of N separate COUNT(*) calls
+    let tableCounts = [];
+    if (tables.length) {
+      const unionSql = tables
+        .map(t => `SELECT '${t.name.replace(/'/g, "''")}' as tbl, COUNT(*) as cnt FROM "${t.name.replace(/"/g, '""')}"`)
+        .join(' UNION ALL ');
+      const countRows = await query(unionSql);
+      const countMap = Object.fromEntries(countRows.map(r => [r.tbl, r.cnt]));
+      tableCounts = tables.map(t => ({ name: t.name, count: countMap[t.name] || 0, indexes: t.index_count }));
+    }
 
     const walInfo = await get('PRAGMA wal_checkpoint(PASSIVE)');
     const dbSize = await get(`SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()`);
