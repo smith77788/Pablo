@@ -10941,7 +10941,7 @@ async function showSearchMenu(chatId) {
       [{ text: '← Назад', callback_data: 'cat_cat__0' }],
     ];
 
-    return safeSend(chatId, `🔍 *Поиск моделей*${summaryLine}`, {
+    return safeSend(chatId, `_🏠 Главная › 🔍 Поиск_\n\n🔍 *Поиск моделей*${summaryLine}`, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: keyboard },
     });
