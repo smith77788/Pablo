@@ -182,7 +182,11 @@ function verifyWebhookSignature(rawBody, signature) {
   const secret = process.env.INSTAGRAM_APP_SECRET || '';
   if (!secret) return false;
   const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  const a = Buffer.from(typeof signature === 'string' ? signature : '');
+  const b = Buffer.from(expected);
+  // timingSafeEqual throws if lengths differ — return false instead
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 module.exports = {

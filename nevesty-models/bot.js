@@ -9899,7 +9899,12 @@ function initBot(app) {
       };
       if (settingStates[state]) {
         const [key, okMsg] = settingStates[state];
-        await setSetting(key, text);
+        if (key === 'instagram_account_id' && !/^\d+$/.test(text.trim())) {
+          return safeSend(chatId, '❌ Account ID должен быть числовым (только цифры). Попробуйте ещё раз:', {
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings' }]] },
+          });
+        }
+        await setSetting(key, key === 'instagram_account_id' ? text.trim() : text);
         await logAdminAction(chatId, 'update_setting', 'setting', null, { key });
         await clearSession(chatId);
         return safeSend(chatId, `✅ ${okMsg}`, {
