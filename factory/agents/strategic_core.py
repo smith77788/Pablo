@@ -1,7 +1,9 @@
 """🧠 Strategic AI Core — CEO Brain: принимает стратегические решения."""
 from __future__ import annotations
+import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from factory.agents.base import FactoryAgent
 from factory import db
@@ -174,24 +176,32 @@ class StrategicCore(FactoryAgent):
         )
         return report or "Weekly report unavailable"
 
-    def generate_weekly_report(self, metrics: dict | None = None) -> dict:
-        """Generate a strategic weekly report dict with headline, highlights, concerns.
+    def generate_weekly_report(
+        self,
+        metrics: dict[str, Any] | None = None,
+        decisions: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Генерирует еженедельный отчёт для руководства.
 
         Args:
             metrics: KPI dict with keys like orders_week, revenue_month,
                      conversion_rate, clients_new_month, avg_rating.
+                     Also accepts keys: orders, revenue, new_clients, conversion.
                      If None, falls back to an empty metrics dict.
+            decisions: List of recent decision dicts (up to 5 used in report).
+                       If None, falls back to an empty list.
         Returns:
-            dict with keys: week, headline, highlights, concerns,
-                            focus_next_week, key_metric_trend
+            dict with keys: summary, key_wins, concerns, next_week_focus,
+                            kpi_snapshot (and legacy keys: week, headline, etc.)
         """
-        import json
         if metrics is None:
             metrics = {}
+        if decisions is None:
+            decisions = []
 
         week_str = datetime.now(timezone.utc).strftime('%Y-W%U')
 
-        # Check if already generated this week
+        # Check if already generated this week (deduplication)
         try:
             existing = db.fetch_one(
                 "SELECT id FROM ceo_decisions WHERE cycle_id = ?",
@@ -202,29 +212,65 @@ class StrategicCore(FactoryAgent):
         except Exception:
             pass
 
-        prompt = (
+        # Build CEO-style prompt (spec format) using think_json
+        spec_prompt = f"""
+Ты — CEO модельного агентства. Подготовь краткий недельный отчёт.
+
+Метрики недели: {json.dumps(metrics, ensure_ascii=False)}
+Принятые решения: {json.dumps(decisions[:5], ensure_ascii=False)}
+
+Верни JSON:
+{{
+  "summary": "...",
+  "key_wins": ["...", "..."],
+  "concerns": ["...", "..."],
+  "next_week_focus": "...",
+  "kpi_snapshot": {{
+    "orders": 0, "revenue": 0, "new_clients": 0, "conversion": 0.0
+  }}
+}}
+"""
+        try:
+            result = self.think_json(spec_prompt)
+        except Exception as _spec_err:
+            logger.warning("[CEO] generate_weekly_report spec path error: %s", _spec_err)
+            result = {}
+        if isinstance(result, dict) and ("summary" in result or "kpi_snapshot" in result):
+            # Populate legacy fields for backward compatibility
+            result.setdefault("week", week_str)
+            result.setdefault("headline", result.get("summary", ""))
+            result.setdefault("highlights", result.get("key_wins", []))
+            result.setdefault("focus_next_week", result.get("next_week_focus", ""))
+            result.setdefault("key_metric_trend", "stable")
+            logger.info("[CEO] Weekly report (spec): summary=%s", str(result.get("summary", ""))[:60])
+            return result
+
+        # Legacy fallback: text-based prompt with regex extraction
+        import re
+        legacy_prompt = (
             f"Создай еженедельный стратегический отчёт для модельного агентства Nevesty Models.\n\n"
             f"Метрики за неделю:\n"
-            f"- Заявок: {metrics.get('orders_week', 0)}\n"
-            f"- Выручка: {metrics.get('revenue_month', 0)} руб.\n"
-            f"- Конверсия: {metrics.get('conversion_rate', 0)}%\n"
-            f"- Новых клиентов: {metrics.get('clients_new_month', 0)}\n"
+            f"- Заявок: {metrics.get('orders_week', metrics.get('orders', 0))}\n"
+            f"- Выручка: {metrics.get('revenue_month', metrics.get('revenue', 0))} руб.\n"
+            f"- Конверсия: {metrics.get('conversion_rate', metrics.get('conversion', 0))}%\n"
+            f"- Новых клиентов: {metrics.get('clients_new_month', metrics.get('new_clients', 0))}\n"
             f"- Средний рейтинг: {metrics.get('avg_rating', 0)}\n\n"
             f'Верни JSON:\n{{"week": "{week_str}",\n'
+            f'  "summary": "Одна строка резюме недели",\n'
             f'  "headline": "Одна строка резюме недели",\n'
+            f'  "key_wins": ["достижение 1", "достижение 2"],\n'
             f'  "highlights": ["достижение 1", "достижение 2"],\n'
             f'  "concerns": ["проблема 1"],\n'
+            f'  "next_week_focus": "главный приоритет",\n'
             f'  "focus_next_week": "главный приоритет",\n'
+            f'  "kpi_snapshot": {{"orders": 0, "revenue": 0, "new_clients": 0, "conversion": 0.0}},\n'
             f'  "key_metric_trend": "positive|negative|stable"}}'
         )
-
         try:
-            result = self.think(prompt, max_tokens=600)
-            import re
-            m = re.search(r'\{.*\}', result, re.DOTALL)
+            raw = self.think(legacy_prompt, max_tokens=700)
+            m = re.search(r'\{.*\}', raw, re.DOTALL)
             if m:
                 report = json.loads(m.group())
-                # Save to ceo_decisions for deduplication
                 try:
                     db.execute(
                         "INSERT INTO ceo_decisions "
@@ -241,10 +287,14 @@ class StrategicCore(FactoryAgent):
 
         return {
             "week": week_str,
+            "summary": "Стабильная работа агентства",
             "headline": "Стабильная работа агентства",
+            "key_wins": ["Заявки поступают", "Клиенты довольны"],
             "highlights": ["Заявки поступают", "Клиенты довольны"],
             "concerns": [],
+            "next_week_focus": "Увеличить количество заявок",
             "focus_next_week": "Увеличить количество заявок",
+            "kpi_snapshot": {"orders": 0, "revenue": 0, "new_clients": 0, "conversion": 0.0},
             "key_metric_trend": "stable",
         }
 
@@ -320,8 +370,53 @@ class StrategicCore(FactoryAgent):
             },
         ]
 
-    def generate_monthly_report(self) -> dict:
-        """Generate a monthly strategic report with KPIs and roadmap."""
+    def generate_monthly_report(
+        self,
+        weekly_data: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Генерирует ежемесячный отчёт.
+
+        Args:
+            weekly_data: List of weekly report dicts (up to 4 used).
+                         If None, falls back to DB-based aggregation.
+        Returns:
+            dict with keys: month_summary, growth_vs_prev_month,
+                            top_achievements, strategic_priorities,
+                            quarterly_outlook (and legacy keys).
+        """
+        # New spec-format path when weekly_data is provided
+        if weekly_data is not None:
+            spec_prompt = f"""
+Ты — CEO модельного агентства. Обобщи месяц по {len(weekly_data)} недельным отчётам.
+
+Данные: {json.dumps(weekly_data[:4], ensure_ascii=False)}
+
+Верни JSON:
+{{
+  "month_summary": "...",
+  "growth_vs_prev_month": 0.0,
+  "top_achievements": ["..."],
+  "strategic_priorities": ["..."],
+  "quarterly_outlook": "..."
+}}
+"""
+            try:
+                result = self.think_json(spec_prompt)
+            except Exception as _monthly_spec_err:
+                logger.warning("[CEO] generate_monthly_report spec path error: %s", _monthly_spec_err)
+                result = {}
+            if isinstance(result, dict) and ("month_summary" in result or "quarterly_outlook" in result):
+                # Populate legacy fields
+                result.setdefault("period", datetime.now(timezone.utc).strftime("%B %Y"))
+                result.setdefault("executive_summary", result.get("month_summary", ""))
+                result.setdefault("achievements", result.get("top_achievements", []))
+                result.setdefault("health_trend", "stable")
+                logger.info("[CEO] Monthly report (spec): %s", str(result.get("month_summary", ""))[:60])
+                return result
+            # Fall through to legacy path on failure
+            logger.warning("[CEO] generate_monthly_report spec path returned unexpected: %s", type(result))
+
+        # Legacy DB-based path
         recent_decisions = db.get_recent_decisions(50)
         dec_types: dict[str, int] = {}
         for d in recent_decisions:
@@ -331,16 +426,21 @@ class StrategicCore(FactoryAgent):
         active_products = db.get_active_products()
         running_experiments = db.get_running_experiments()
 
-        report = self.think_json(
+        report: dict[str, Any] = self.think_json(
             "Ты CEO. Составь ежемесячный стратегический отчёт. Верни JSON:\n"
             "{\n"
             '  "period": "Месяц ГГГГ",\n'
             '  "executive_summary": "2-3 предложения итога месяца",\n'
+            '  "month_summary": "2-3 предложения итога месяца",\n'
             '  "kpis": {"total_decisions": N, "experiments_run": N, "active_products": N},\n'
             '  "achievements": ["достижение 1", "достижение 2", "достижение 3"],\n'
+            '  "top_achievements": ["достижение 1", "достижение 2", "достижение 3"],\n'
             '  "challenges": ["проблема 1", "проблема 2"],\n'
             '  "next_month_goals": ["цель 1", "цель 2", "цель 3"],\n'
+            '  "strategic_priorities": ["приоритет 1", "приоритет 2"],\n'
             '  "strategic_direction": "куда движемся в следующем месяце",\n'
+            '  "quarterly_outlook": "прогноз на квартал",\n'
+            '  "growth_vs_prev_month": 0.0,\n'
             '  "health_trend": "improving|stable|declining"\n'
             "}",
             context={
@@ -349,25 +449,35 @@ class StrategicCore(FactoryAgent):
                 "running_experiments": len(running_experiments),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
-            max_tokens=700,
+            max_tokens=800,
         )
 
         if not isinstance(report, dict):
             report = {
                 "period": datetime.now(timezone.utc).strftime("%B %Y"),
                 "executive_summary": "Monthly report unavailable",
-                "kpis": {"total_decisions": len(recent_decisions), "experiments_run": len(running_experiments), "active_products": len(active_products)},
+                "month_summary": "Monthly report unavailable",
+                "kpis": {
+                    "total_decisions": len(recent_decisions),
+                    "experiments_run": len(running_experiments),
+                    "active_products": len(active_products),
+                },
                 "achievements": [],
+                "top_achievements": [],
                 "challenges": [],
                 "next_month_goals": [],
+                "strategic_priorities": [],
                 "strategic_direction": "Continue current strategy",
+                "quarterly_outlook": "",
+                "growth_vs_prev_month": 0.0,
                 "health_trend": "stable",
             }
 
         cycle_id = f"monthly_{datetime.now(timezone.utc).strftime('%Y_%m')}"
+        _decision_text: str = str(report.get("executive_summary") or report.get("month_summary") or "")
         db.save_ceo_decision(  # type: ignore[call-arg]
             cycle_id=cycle_id,
-            decision_text=report.get("executive_summary", ""),
+            decision_text=_decision_text,
             metadata={"type": "monthly_report", **report},
         )
         logger.info("[CEO] Monthly report: trend=%s direction=%s", report.get("health_trend"), report.get("strategic_direction", "")[:40])
@@ -428,6 +538,67 @@ class StrategicCore(FactoryAgent):
             }
         logger.info("[CEO] Proposed experiment: %s", experiment.get("name"))
         return experiment
+
+    def propose_ab_experiments(self, current_metrics: dict[str, Any]) -> dict[str, Any]:
+        """Предлагает A/B эксперименты для оптимизации.
+
+        Args:
+            current_metrics: Current KPI metrics dict.
+        Returns:
+            dict with key 'experiments': list of experiment dicts, each with
+            name, hypothesis, control, variant, metric, expected_lift, duration_days.
+        """
+        prompt = f"""
+На основе метрик агентства предложи 2-3 A/B эксперимента.
+Метрики: {json.dumps(current_metrics, ensure_ascii=False)}
+
+Верни JSON:
+{{
+  "experiments": [
+    {{
+      "name": "...",
+      "hypothesis": "...",
+      "control": "...",
+      "variant": "...",
+      "metric": "...",
+      "expected_lift": "...",
+      "duration_days": 7
+    }}
+  ]
+}}
+"""
+        try:
+            result = self.think_json(prompt)
+        except Exception as _ab_err:
+            logger.warning("[CEO] propose_ab_experiments error: %s", _ab_err)
+            result = {}
+        if isinstance(result, dict) and "experiments" in result:
+            logger.info("[CEO] propose_ab_experiments: %d proposals", len(result.get("experiments", [])))
+            return result
+
+        logger.warning("[CEO] propose_ab_experiments fallback")
+        return {
+            "experiments": [
+                {
+                    "name": "CTA Button Color Test",
+                    "hypothesis": "Изменение цвета кнопки увеличит конверсию",
+                    "control": "Золотая кнопка",
+                    "variant": "Белая кнопка с тёмным текстом",
+                    "metric": "conversion_rate",
+                    "expected_lift": "+8%",
+                    "duration_days": 7,
+                },
+                {
+                    "name": "Price Display Test",
+                    "hypothesis": "Показ цены в карточке модели увеличит средний чек",
+                    "control": "Без цены",
+                    "variant": "Цена 'от X руб.'",
+                    "metric": "avg_check",
+                    "expected_lift": "+5%",
+                    "duration_days": 14,
+                },
+            ]
+        }
 
     def generate_weekly_summary(self, db_path: str, dept_results: list) -> dict:
         """CEO synthesizes department results and DB metrics into weekly strategy.

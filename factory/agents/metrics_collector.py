@@ -1,4 +1,5 @@
 """Metrics collector: reads real data from Nevesty Models SQLite database."""
+from __future__ import annotations
 
 import os
 import sqlite3
@@ -232,4 +233,53 @@ class MetricsCollector:
             'bot_users_total': 0,
             'top_models': [],
             'collected_at': datetime.utcnow().isoformat(),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MetricsCollectorAgent — FactoryAgent wrapper around MetricsCollector
+# БЛОК 5.7: reads real business metrics and produces AI analysis via think_json
+# ─────────────────────────────────────────────────────────────────────────────
+from factory.agents.base import FactoryAgent  # noqa: E402
+
+
+class MetricsCollectorAgent(FactoryAgent):
+    """Собирает и анализирует бизнес-метрики из БД."""
+
+    role = "MetricsCollector"
+    department = "analytics"
+    system_prompt = "You are a business analytics assistant for a modeling agency."
+
+    def collect_metrics(self, db_path: str) -> Dict[str, Any]:
+        """Читает ключевые метрики из SQLite БД используя MetricsCollector."""
+        collector = MetricsCollector.__new__(MetricsCollector)
+        # Override db_path instead of relying on env-based discovery
+        collector.db_path = Path(db_path) if db_path else None
+        return collector.collect_all()
+
+    def run(self, db_path: str | None = None) -> Dict[str, Any]:
+        if not db_path:
+            return {"role": self.role, "metrics": {}, "note": "no db_path"}
+
+        metrics = self.collect_metrics(db_path)
+
+        prompt = f"""
+Ты — аналитик агентства моделей. Проанализируй метрики и дай краткие инсайты.
+
+Метрики: {json.dumps(metrics, ensure_ascii=False, default=str)}
+
+Верни JSON:
+{{
+  "health_score": 0-100,
+  "top_insight": "...",
+  "warnings": ["..."],
+  "recommendations": ["...", "..."]
+}}
+"""
+        analysis = self.think_json(prompt)
+
+        return {
+            "role": self.role,
+            "metrics": metrics,
+            "analysis": analysis,
         }

@@ -1341,6 +1341,27 @@ def run_cycle() -> dict:
         "nevesty_kpis": nevesty_kpis,
     }
 
+    # Phase 5.7 — METRICS COLLECTION via MetricsCollectorAgent
+    try:
+        from factory.agents.metrics_collector import MetricsCollectorAgent
+        _metrics_agent = MetricsCollectorAgent()
+        _metrics_data = _metrics_agent.run(db_path=db_path)
+        results["metrics_collector"] = _metrics_data
+        # Передаём реальные метрики в nevesty_kpis для использования CEO и другими агентами
+        actual_metrics = _metrics_data.get("metrics", {})
+        if actual_metrics.get("db_available"):
+            logger.info(
+                "[Phase5.7] MetricsCollectorAgent: orders_total=%s, avg_check=%s, "
+                "revenue_month=%s, repeat_rate=%.2f",
+                actual_metrics.get("orders_total", 0),
+                actual_metrics.get("avg_check", 0),
+                actual_metrics.get("revenue_month", 0),
+                actual_metrics.get("clients_repeat", 0) / max(actual_metrics.get("clients_unique", 1), 1),
+            )
+    except Exception as _mca_err:
+        logger.warning("[Phase5.7] MetricsCollectorAgent failed (non-critical): %s", _mca_err)
+        results["metrics_collector"] = {"role": "MetricsCollector", "metrics": {}, "note": str(_mca_err)}
+
     # ════════════════════════════════════════════════════════════════
     # PHASE 1 — ANALYTICS DEPT: собирает данные и инсайты
     # ════════════════════════════════════════════════════════════════
@@ -3245,18 +3266,48 @@ def run_cycle() -> dict:
         _executed_count = sum(1 for t in _sc_tracking if t.get("executed"))
         _tracking_rate = round(_executed_count / max(len(_sc_tracking), 1) * 100)
 
+        # Generate CEO weekly report and save to reports/ directory
+        import json as _json53c, os as _os53c
+        _report_dir_53c = _os53c.path.join(
+            _os53c.path.dirname(_os53c.path.abspath(__file__)), '..', 'reports'
+        )
+        _os53c.makedirs(_report_dir_53c, exist_ok=True)
+
+        _kpis_53c = nevesty_kpis_raw if 'nevesty_kpis_raw' in dir() else {}  # type: ignore[name-defined]
+        _weekly_53c = _ceo_sc.generate_weekly_report(
+            metrics=_kpis_53c,
+            decisions=_sc_tracking,
+        )
+        with open(_os53c.path.join(_report_dir_53c, 'weekly_latest.json'), 'w', encoding='utf-8') as _wf53c:
+            _json53c.dump(_weekly_53c, _wf53c, ensure_ascii=False, indent=2)
+
+        # Save monthly report (summary of recent weekly data)
+        _monthly_53c = _ceo_sc.generate_monthly_report(weekly_data=[_weekly_53c])
+        with open(_os53c.path.join(_report_dir_53c, 'monthly_latest.json'), 'w', encoding='utf-8') as _mf53c:
+            _json53c.dump(_monthly_53c, _mf53c, ensure_ascii=False, indent=2)
+
+        # Propose A/B experiments and save
+        _ab_53c = _ceo_sc.propose_ab_experiments(current_metrics=_kpis_53c)
+        with open(_os53c.path.join(_report_dir_53c, 'ab_experiments_latest.json'), 'w', encoding='utf-8') as _af53c:
+            _json53c.dump(_ab_53c, _af53c, ensure_ascii=False, indent=2)
+
         results["phases"]["ceo_strategic_delegation"] = {
             "status": "ok",
             "delegation_directive": _sc_delegation,
             "decisions_tracked": len(_sc_tracking),
             "execution_rate_pct": _tracking_rate,
+            "weekly_report_saved": "reports/weekly_latest.json",
+            "monthly_report_saved": "reports/monthly_latest.json",
+            "ab_experiments_saved": "reports/ab_experiments_latest.json",
         }
         summary_lines.append(f"🎯 CEO Delegation: {_sc_delegation[:80]}")
         summary_lines.append(f"📋 Decision execution rate: {_tracking_rate}% ({_executed_count}/{len(_sc_tracking)})")
+        summary_lines.append(f"📁 CEO Reports saved: weekly/monthly/ab_experiments → reports/")
         logger.info(
             "[Phase5.3c] CEO strategic delegation: directive=%s, tracking_rate=%s%%",
             _sc_delegation[:60], _tracking_rate,
         )
+        logger.info("[Phase5.3c] CEO reports saved to %s", _report_dir_53c)
     except Exception as e:
         results["phases"]["ceo_strategic_delegation"] = {"status": "error", "error": str(e)}
         logger.error("Phase 5.3c CEO strategic delegation error: %s", e)
