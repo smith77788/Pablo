@@ -310,6 +310,10 @@ async function loadModels() {
                 class="${m.archived ? 'text-green-500 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'} text-sm px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700">
                 <i class="fas fa-${m.archived ? 'undo' : 'archive'}"></i>
               </button>
+              <button onclick="showModelStats(${m.id})" title="Статистика"
+                class="text-purple-500 hover:text-purple-700 text-sm px-2 py-1 rounded hover:bg-purple-50 dark:hover:bg-purple-900/20">
+                📊
+              </button>
             </div>
           </td>
         </tr>`;
@@ -555,6 +559,150 @@ async function saveModel(e) {
 }
 
 loadModels();
+
+/* ─── Model Stats Modal ─────────────────────────────── */
+async function showModelStats(id) {
+  const overlay = document.getElementById('modelStatsModal');
+  const content = document.getElementById('statsModalContent');
+  const title   = document.getElementById('statsModalTitle');
+  overlay.classList.add('open');
+  content.innerHTML = '<div style="text-align:center;padding:32px;color:#9ca3af">Загрузка...</div>';
+  title.textContent = 'Статистика модели';
+
+  try {
+    const resp = await fetch(`/api/admin/analytics/model-stats/${id}`, { headers });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const m = data.model || {};
+    const ord = data.orders || {};
+    const rev = data.reviews || {};
+    const monthly = data.monthly_orders || [];
+
+    title.textContent = `Статистика: ${escHtml(m.name || '—')}`;
+
+    // KPI cards
+    const avgBudget = ord.avg_budget ? Math.round(ord.avg_budget).toLocaleString('ru') + ' ₽' : '—';
+    const avgRating = rev.avg_rating ? Number(rev.avg_rating).toFixed(1) + ' ⭐' : '—';
+    const kpiCards = `
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px">
+        ${kpiCard('Всего заявок', ord.total || 0, '#6366f1')}
+        ${kpiCard('Выполнено', ord.completed || 0, '#22c55e')}
+        ${kpiCard('Средний бюджет', avgBudget, '#f59e0b')}
+        ${kpiCard('Рейтинг', avgRating, '#ec4899')}
+      </div>`;
+
+    // Monthly trend bar chart (pure CSS)
+    let trendHtml = '';
+    if (monthly.length) {
+      const maxVal = Math.max(...monthly.map(r => r.count || 0), 1);
+      trendHtml = `
+        <div style="margin-bottom:20px">
+          <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#9ca3af;margin-bottom:10px;letter-spacing:.05em">Тренд заявок (по месяцам)</div>
+          <div style="display:flex;align-items:flex-end;gap:4px;height:80px;padding:0 2px">
+            ${monthly.map(r => {
+              const pct = Math.round(((r.count || 0) / maxVal) * 100);
+              const label = (r.month || '').slice(0, 7);
+              return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px" title="${label}: ${r.count}">
+                <div style="width:100%;background:#6366f1;border-radius:3px 3px 0 0;height:${pct}%;min-height:${r.count?3:0}px;transition:height .3s"></div>
+                <div style="font-size:0.55rem;color:#6b7280;writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg)">${label.slice(5)}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+    }
+
+    // Reviews distribution
+    let distHtml = '';
+    const dist = rev.distribution || {};
+    if (rev.total > 0) {
+      const maxDist = Math.max(...[1,2,3,4,5].map(s => dist[s] || 0), 1);
+      distHtml = `
+        <div style="margin-bottom:20px">
+          <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#9ca3af;margin-bottom:10px;letter-spacing:.05em">Распределение отзывов (${rev.total} шт.)</div>
+          ${[5,4,3,2,1].map(star => {
+            const cnt = dist[star] || 0;
+            const pct = Math.round((cnt / maxDist) * 100);
+            return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span style="font-size:0.75rem;color:#9ca3af;width:20px;text-align:right">${star}★</span>
+              <div style="flex:1;background:#1f2937;border-radius:4px;height:12px;overflow:hidden">
+                <div style="width:${pct}%;height:100%;background:#f59e0b;border-radius:4px;transition:width .3s"></div>
+              </div>
+              <span style="font-size:0.75rem;color:#9ca3af;width:20px">${cnt}</span>
+            </div>`;
+          }).join('')}
+        </div>`;
+    }
+
+    // Link to orders
+    const linkBtn = `<a href="/admin/orders.html?model_id=${id}"
+      style="display:inline-block;padding:8px 16px;background:#ec4899;color:#fff;border-radius:6px;text-decoration:none;font-size:0.85rem;font-weight:500">
+      Перейти к заявкам этой модели →
+    </a>`;
+
+    content.innerHTML = kpiCards + trendHtml + distHtml + `<div style="text-align:right">${linkBtn}</div>`;
+  } catch(e) {
+    content.innerHTML = `<div style="color:#ef4444;padding:16px">Ошибка загрузки статистики: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function kpiCard(label, value, color) {
+  return `<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:16px;text-align:center">
+    <div style="font-size:1.5rem;font-weight:700;color:${color}">${value}</div>
+    <div style="font-size:0.75rem;color:#9ca3af;margin-top:4px">${label}</div>
+  </div>`;
+}
+
+function closeStatsModal() {
+  document.getElementById('modelStatsModal').classList.remove('open');
+}
+
+// Close on outside click
+document.addEventListener('click', function(e) {
+  const overlay = document.getElementById('modelStatsModal');
+  if (e.target === overlay) closeStatsModal();
+});
+
+// Close on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeStatsModal();
+});
 </script>
+
+<!-- Model Stats Modal -->
+<div id="modelStatsModal" class="stats-modal-overlay">
+  <div class="stats-modal-box">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #1f2937">
+      <div id="statsModalTitle" style="font-size:1.1rem;font-weight:700;color:#f9fafb">Статистика модели</div>
+      <button onclick="closeStatsModal()" style="background:none;border:none;color:#9ca3af;font-size:1.2rem;cursor:pointer;padding:4px 8px;border-radius:4px" onmouseover="this.style.color='#f9fafb'" onmouseout="this.style.color='#9ca3af'">✕</button>
+    </div>
+    <div id="statsModalContent">Загрузка...</div>
+  </div>
+</div>
+
+<style>
+.stats-modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.stats-modal-overlay.open {
+  display: flex;
+}
+.stats-modal-box {
+  background: #030712;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 28px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+</style>
 </body>
 </html>
