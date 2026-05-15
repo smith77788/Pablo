@@ -383,10 +383,10 @@
                 <div class="contact-btn-sub">Быстрый ответ за 5 минут</div>
               </div>
             </a>
-            <a href="https://t.me/verdiktnikbot" target="_blank" rel="noopener" class="contact-btn-tg">
+            <a id="tg-contact-btn" href="https://t.me/verdiktnikbot" target="_blank" rel="noopener" class="contact-btn-tg">
               <span class="contact-btn-icon">✈</span>
               <div>
-                <div class="contact-btn-title">Telegram бот</div>
+                <div class="contact-btn-title">Telegram</div>
                 <div class="contact-btn-sub">Каталог и бронирование онлайн</div>
               </div>
             </a>
@@ -395,31 +395,39 @@
           <!-- Hours -->
           <div class="hours-box">
             <h3>Часы работы</h3>
-            <p id="manager-hours-text">Ежедневно 9:00 – 21:00</p>
+            <p id="manager-hours-text"><span id="manager-hours">Ежедневно 9:00 – 21:00</span></p>
           </div>
 
           <!-- Map placeholder -->
           <div class="map-placeholder" id="map-block">
             <div class="map-placeholder-icon">📍</div>
-            <div id="agency-address">Адрес офиса загружается...</div>
+            <div id="agency-address" style="color:var(--text-muted);font-size:0.85rem;margin-bottom:8px">Адрес офиса загружается...</div>
+            <a id="map-link" href="https://yandex.ru/maps/?text=Nevesty+Models" target="_blank" rel="noopener"
+               style="display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border:1px solid rgba(201,169,110,0.4);border-radius:6px;color:var(--gold);font-size:0.8rem;text-decoration:none;transition:background 0.2s"
+               onmouseover="this.style.background='rgba(201,169,110,0.08)'" onmouseout="this.style.background='transparent'">
+              📍 Показать на карте
+            </a>
           </div>
         </div>
 
         <!-- RIGHT: Contact Form -->
         <div class="contact-form-box">
           <h2>Задать вопрос</h2>
-          <form id="contact-form" onsubmit="sendContactForm(event)">
+          <form id="contact-form" onsubmit="sendContactForm(event)" novalidate>
             <div class="form-field">
               <label for="cf-name">Ваше имя *</label>
-              <input type="text" id="cf-name" required aria-required="true" autocomplete="name" placeholder="Как к вам обращаться?">
+              <input type="text" id="cf-name" required aria-required="true" autocomplete="name" placeholder="Как к вам обращаться?" aria-describedby="cf-name-err">
+              <span id="cf-name-err" role="alert" style="display:none;color:#f44336;font-size:0.78rem;margin-top:4px"></span>
             </div>
             <div class="form-field">
               <label for="cf-phone">Телефон *</label>
-              <input type="tel" id="cf-phone" required aria-required="true" autocomplete="tel" inputmode="tel" placeholder="+7 (999) 123-45-67">
+              <input type="tel" id="cf-phone" required aria-required="true" autocomplete="tel" inputmode="tel" placeholder="+7 (999) 123-45-67" aria-describedby="cf-phone-err">
+              <span id="cf-phone-err" role="alert" style="display:none;color:#f44336;font-size:0.78rem;margin-top:4px"></span>
             </div>
             <div class="form-field">
               <label for="cf-message">Сообщение *</label>
-              <textarea id="cf-message" required aria-required="true" rows="5" placeholder="Опишите ваш вопрос или запрос..."></textarea>
+              <textarea id="cf-message" required aria-required="true" rows="5" placeholder="Опишите ваш вопрос или запрос..." aria-describedby="cf-message-err"></textarea>
+              <span id="cf-message-err" role="alert" style="display:none;color:#f44336;font-size:0.78rem;margin-top:4px"></span>
             </div>
             <div id="cf-error" role="alert" style="display:none;color:#f44336;font-size:0.8rem;margin-bottom:12px"></div>
             <button type="submit" id="cf-submit" class="btn-primary" style="width:100%;font-size:0.88rem;padding:16px;">
@@ -525,6 +533,8 @@
         </div>
       </div>`);
       document.getElementById('agency-address').textContent = d.contacts_address;
+      const mapLink = document.getElementById('map-link');
+      if (mapLink) mapLink.href = `https://yandex.ru/maps/?text=${encodeURIComponent(d.contacts_address)}`;
     } else {
       document.getElementById('agency-address').textContent = 'Адрес уточняйте у менеджера';
     }
@@ -544,9 +554,42 @@
 
     // Hours
     if (d.manager_hours) {
-      document.getElementById('manager-hours-text').textContent = d.manager_hours;
+      const hoursEl = document.getElementById('manager-hours');
+      const hoursTextEl = document.getElementById('manager-hours-text');
+      if (hoursEl) hoursEl.textContent = d.manager_hours;
+      else if (hoursTextEl) hoursTextEl.textContent = d.manager_hours;
     }
-  }).catch(() => {});
+
+    // Telegram channel link from settings
+    const tgBtn = document.getElementById('tg-contact-btn');
+    if (tgBtn) {
+      if (d.tg_channel) {
+        const tgHandle = d.tg_channel.replace(/^@/, '');
+        tgBtn.href = `https://t.me/${tgHandle}`;
+        tgBtn.style.display = 'flex';
+      } else {
+        // keep default bot link visible
+        tgBtn.style.display = 'flex';
+      }
+    }
+  }).catch(() => {
+    // On error keep Telegram button visible with default link
+    const tgBtn = document.getElementById('tg-contact-btn');
+    if (tgBtn) tgBtn.style.display = 'flex';
+  });
+
+  function showFieldError(fieldId, errId, msg) {
+    const field = document.getElementById(fieldId);
+    const errEl = document.getElementById(errId);
+    if (field) field.style.borderColor = '#f44336';
+    if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
+  }
+  function clearFieldError(fieldId, errId) {
+    const field = document.getElementById(fieldId);
+    const errEl = document.getElementById(errId);
+    if (field) field.style.borderColor = '';
+    if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+  }
 
   // Contact form submit
   async function sendContactForm(e) {
@@ -555,44 +598,52 @@
     const err = document.getElementById('cf-error');
     err.style.display = 'none';
 
+    // Clear previous per-field errors
+    ['cf-name','cf-phone','cf-message'].forEach((id, i) => {
+      clearFieldError(id, id + '-err');
+    });
+
     const name    = document.getElementById('cf-name').value.trim();
     const phone   = document.getElementById('cf-phone').value.trim();
     const message = document.getElementById('cf-message').value.trim();
 
+    let valid = true;
     if (!name || name.length < 2) {
-      err.textContent = 'Введите ваше имя'; err.style.display = 'block'; return;
+      showFieldError('cf-name', 'cf-name-err', 'Введите ваше имя (минимум 2 символа)');
+      valid = false;
     }
     if (!phone || phone.replace(/\D/g, '').length < 7) {
-      err.textContent = 'Введите корректный номер телефона'; err.style.display = 'block'; return;
+      showFieldError('cf-phone', 'cf-phone-err', 'Введите корректный номер телефона');
+      valid = false;
     }
-    if (!message || message.length < 5) {
-      err.textContent = 'Напишите сообщение'; err.style.display = 'block'; return;
+    if (!message || message.length < 10) {
+      showFieldError('cf-message', 'cf-message-err', 'Сообщение должно содержать не менее 10 символов');
+      valid = false;
     }
+    if (!valid) return;
 
     btn.disabled = true;
     btn.textContent = 'Отправка...';
+    btn.style.opacity = '0.7';
 
     try {
-      const resp = await fetch('/api/orders', {
+      const resp = await fetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          client_name:  name,
-          client_phone: phone,
-          description:  message,
-          event_type:   'other',
-          source:       'contact_form'
-        })
+        body: JSON.stringify({ name, phone, message })
       });
       if (!resp.ok) throw new Error('server_error');
 
       document.getElementById('contact-form').style.display = 'none';
-      document.getElementById('cf-success').style.display = 'block';
+      const successEl = document.getElementById('cf-success');
+      successEl.style.display = 'block';
+      successEl.querySelector('p').textContent = 'Ваше сообщение отправлено! Менеджер свяжется в течение часа.';
 
       if (window.NM && NM.analytics) NM.analytics.event('contact_form_submitted');
     } catch {
       btn.disabled = false;
       btn.textContent = 'Отправить сообщение';
+      btn.style.opacity = '';
       err.textContent = 'Ошибка отправки. Попробуйте позже или напишите нам напрямую.';
       err.style.display = 'block';
     }

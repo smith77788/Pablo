@@ -564,10 +564,14 @@
   <script src="/js/darkmode.js"></script>
   <script src="/js/analytics.js" defer></script>
   <script>
-  // Load about text from API
+  // Load about text and contact info from API
   fetch('/api/settings/public').then(r => r.json()).then(d => {
     if (d.about_text) {
-      document.getElementById('about-text-main').textContent = d.about_text;
+      // Support both element ids: about-text-main (primary) and about-text (alias)
+      const mainEl = document.getElementById('about-text-main');
+      const aliasEl = document.getElementById('about-text');
+      if (mainEl) mainEl.textContent = d.about_text;
+      if (aliasEl) aliasEl.textContent = d.about_text;
     }
     if (d.contacts_whatsapp) {
       const waNum = d.contacts_whatsapp.replace(/\D/g, '');
