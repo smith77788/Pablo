@@ -1148,6 +1148,9 @@ async function showAdminOrder(chatId, orderId) {
         text += `_${esc(dt)}_ ${esc(n.admin_note)}\n`;
       });
     }
+    if (o.internal_note) {
+      text += `\n📝 *Заметка:* ${esc(o.internal_note)}`;
+    }
 
     const actions = [];
     if (!['confirmed','completed','cancelled'].includes(o.status))
@@ -1170,6 +1173,9 @@ async function showAdminOrder(chatId, orderId) {
     keyboard.push([
       { text: '📋 Все заметки',         callback_data: `adm_notes_${orderId}_0` },
       { text: '🕐 История статусов',    callback_data: `adm_order_history_${orderId}` },
+    ]);
+    keyboard.push([
+      { text: '📝 Заметка', callback_data: `adm_order_note_${orderId}` },
     ]);
     // Quick replies button — shown when order has a client chat ID
     if (o.client_chat_id) {
@@ -2257,7 +2263,9 @@ async function showScheduledBroadcasts(chatId) {
       const dt = b.scheduled_at ? new Date(b.scheduled_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
       const statusEmoji = b.status === 'sent' ? '✅' : b.status === 'cancelled' ? '❌' : '⏳';
       const segLabel = b.segment === 'completed' ? 'Завершившие' : b.segment === 'active' ? 'Активные' : 'Все';
-      text += `${statusEmoji} *${esc(dt)}* \\[${esc(segLabel)}\\]\n${esc(String(b.text || '').slice(0, 60))}${(b.text || '').length > 60 ? '…' : ''}\n\n`;
+      const stats = b.sent_count ? ` ✅${b.sent_count}` : '';
+      const errStats = b.error_count ? ` ❌${b.error_count}` : '';
+      text += `${statusEmoji} *${esc(dt)}* \\[${esc(segLabel)}\\]${esc(stats)}${esc(errStats)}\n${esc(String(b.text || '').slice(0, 60))}${(b.text || '').length > 60 ? '…' : ''}\n\n`;
     }
   }
 
@@ -3612,6 +3620,28 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('adm_order_history_',''));
       return showOrderStatusHistory(chatId, id);
+    }
+
+    // ── Admin order internal note — delete
+    if (data.startsWith('adm_order_note_del_')) {
+      if (!isAdmin(chatId)) return;
+      const orderId = parseInt(data.replace('adm_order_note_del_', ''));
+      await run('UPDATE orders SET internal_note=NULL WHERE id=?', [orderId]);
+      await bot.answerCallbackQuery(q.id, { text: '✅ Заметка удалена' });
+      return showAdminOrder(chatId, orderId);
+    }
+
+    // ── Admin order internal note — edit prompt
+    if (data.startsWith('adm_order_note_')) {
+      if (!isAdmin(chatId)) return;
+      const orderId = parseInt(data.replace('adm_order_note_', ''));
+      const order = await get('SELECT * FROM orders WHERE id=?', [orderId]);
+      if (!order) return bot.answerCallbackQuery(q.id, { text: 'Заявка не найдена' });
+      await setSession(chatId, 'adm_note_order_id', { orderId });
+      return safeSend(chatId, `📝 *Внутренняя заметка для заявки \\#${esc(order.order_number || String(orderId))}*\n\nТекущая: ${order.internal_note ? esc(order.internal_note) : '_нет_'}\n\nВведите новую заметку \\(до 1000 символов\\) или /cancel:`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '🗑 Удалить заметку', callback_data: `adm_order_note_del_${orderId}` }]] }
+      });
     }
 
     // ── Admin order detail
@@ -5026,6 +5056,19 @@ function initBot(app) {
         await run('INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)', [orderId, text]);
         await clearSession(chatId);
         return safeSend(chatId, `✅ Заметка добавлена\\.`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] }
+        });
+      }
+
+      // ── Internal note for order (adm_order_note_ flow)
+      if (state === 'adm_note_order_id') {
+        const orderId = d?.orderId;
+        if (!orderId) { await clearSession(chatId); return; }
+        const trimmed = text.slice(0, 1000);
+        await run('UPDATE orders SET internal_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [trimmed, orderId]);
+        await clearSession(chatId);
+        return safeSend(chatId, `✅ *Заметка сохранена\\!*\n\n${esc(trimmed)}`, {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] }
         });
