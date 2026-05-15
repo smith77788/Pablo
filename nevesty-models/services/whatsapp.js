@@ -128,6 +128,36 @@ async function sendBookingConfirmationWA(order) {
 }
 
 /**
+ * Notify client about order status change (flat-arg signature for routes/api.js).
+ * @param {string} phone       — client phone (any format)
+ * @param {string} orderNum    — order number string, e.g. 'NM-0042'
+ * @param {string} status      — machine status key, e.g. 'confirmed'
+ * @param {string} statusLabel — human-readable status label
+ */
+async function notifyOrderStatus(phone, orderNum, status, statusLabel) {
+  if (!phone) return { sent: false, reason: 'no_phone' };
+  const text =
+    `Nevesty Models: статус вашей заявки #${orderNum} изменён.\n` +
+    `Новый статус: ${statusLabel || status}\n` +
+    `Для уточнений пишите менеджеру.`;
+  return sendText(phone, text);
+}
+
+/**
+ * Notify client that the order has been confirmed by a manager.
+ * @param {string} phone       — client phone (any format)
+ * @param {string} orderNum    — order number string
+ * @param {string} managerName — manager display name
+ */
+async function notifyOrderConfirmed(phone, orderNum, managerName) {
+  if (!phone) return { sent: false, reason: 'no_phone' };
+  const text =
+    `✅ Nevesty Models: заявка #${orderNum} подтверждена!\n` +
+    `Менеджер ${managerName || 'Менеджер'} свяжется с вами для уточнения деталей.`;
+  return sendText(phone, text);
+}
+
+/**
  * Verify webhook from Meta (GET request with hub.challenge).
  * Returns the hub.challenge value if token matches, null otherwise.
  */
@@ -145,6 +175,8 @@ module.exports = {
   sendTemplate,
   sendOrderStatusWA,
   sendBookingConfirmationWA,
+  notifyOrderStatus,
+  notifyOrderConfirmed,
   verifyWebhook,
   isConfigured: _isConfigured,
 };

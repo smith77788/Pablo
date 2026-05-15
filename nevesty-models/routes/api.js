@@ -15,7 +15,7 @@ const auth = require('../middleware/auth');
 const mailer = require('../services/mailer');
 const payment = require('../services/payment');
 const { cache, TTL_CATALOG } = require('../services/cache');
-const { ALLOWED_EVENT_TYPES, ALLOWED_CATEGORIES, VALID_STATUSES } = require('../utils/constants');
+const { ALLOWED_EVENT_TYPES, ALLOWED_CATEGORIES, VALID_STATUSES, STATUS_LABELS } = require('../utils/constants');
 
 // ─── Rate limiters ────────────────────────────────────────────────────────────
 let contactRateLimit = (req, res, next) => next(); // fallback: no-op
@@ -3433,6 +3433,17 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
         }
       } catch {}
     }
+    // ─── WhatsApp notification on status change ───────────────────────────────
+    if (order.client_phone && status !== order.prev_status) {
+      try {
+        const whatsapp = require('../services/whatsapp');
+        const statusLabel = STATUS_LABELS[status] || status;
+        whatsapp.notifyOrderStatus(order.client_phone, order.order_number, status, statusLabel)
+          .catch(e => console.error('[WhatsApp] status notify failed:', e.message));
+      } catch (e) {
+        console.error('[WhatsApp] require error:', e.message);
+      }
+    }
     // ─── WebSocket real-time notification ────────────────────────────────────
     if (status !== order.prev_status) {
       const wsServer = req.app.get('wsServer');
@@ -4084,24 +4095,68 @@ router.get('/admin/factory/experiments', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// GET /api/admin/factory/status — factory run status (last_run, staleness) (БЛОК 6.2)
+// GET /api/admin/factory/status — Factory intelligence for admin panel (БЛОК 5.6)
 router.get('/admin/factory/status', auth, async (req, res, next) => {
   try {
-    const row = await get("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'", []);
-    const lastRun = row?.value || null;
-    const hoursSince = lastRun
-      ? Math.round((Date.now() - new Date(lastRun).getTime()) / (1000 * 60 * 60) * 10) / 10
-      : null;
-    const stale = hoursSince !== null ? hoursSince > 12 : null;
-    const status = hoursSince === null ? 'never_run' : hoursSince > 12 ? 'stale' : 'ok';
+    const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
 
-    res.json({
-      last_run: lastRun,
-      hours_since_run: hoursSince,
-      stale,
-      status,
-    });
-  } catch (e) { next(e); }
+    // Check if factory.db exists
+    if (!fs.existsSync(factoryDbPath)) {
+      return res.json({
+        available: false,
+        message: 'Factory not connected. Run factory cycle to generate data.',
+      });
+    }
+
+    const Database = require('better-sqlite3');
+    const fdb = new Database(factoryDbPath, { readonly: true });
+
+    try {
+      // Get latest cycle
+      const cycle = fdb.prepare('SELECT * FROM cycles ORDER BY created_at DESC LIMIT 1').get();
+
+      // Get recent growth actions (pending, highest priority first)
+      const actions = fdb.prepare(
+        "SELECT * FROM growth_actions WHERE status='pending' ORDER BY priority DESC, created_at DESC LIMIT 10"
+      ).all();
+
+      // Get recent CEO decisions
+      const decisions = fdb.prepare(
+        'SELECT * FROM ceo_decisions ORDER BY created_at DESC LIMIT 5'
+      ).all();
+
+      // Get active experiments
+      const experiments = fdb.prepare(
+        "SELECT * FROM experiments WHERE status='active' ORDER BY created_at DESC LIMIT 5"
+      ).all();
+
+      // Get latest factory report
+      let report = null;
+      try {
+        const reportRow = fdb.prepare(
+          'SELECT * FROM factory_reports ORDER BY created_at DESC LIMIT 1'
+        ).get();
+        if (reportRow) {
+          report = JSON.parse(reportRow.content || '{}');
+        }
+      } catch (_) { /* table may not exist yet */ }
+
+      res.json({
+        available: true,
+        lastRun: cycle?.created_at || null,
+        healthScore: cycle?.health_score || null,
+        elapsedSeconds: cycle?.elapsed_s || null,
+        pendingActions: actions || [],
+        recentDecisions: decisions || [],
+        activeExperiments: experiments || [],
+        latestReport: report,
+      });
+    } finally {
+      fdb.close();
+    }
+  } catch (e) {
+    res.json({ available: false, error: e.message });
+  }
 });
 
 // ── CRM Integration Webhooks (БЛОК 10.3) ──────────────────────────────────────

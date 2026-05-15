@@ -552,6 +552,20 @@
         </div>
       </div>
 
+      <!-- ══════════════════ AI FACTORY INTELLIGENCE ══════════════════ -->
+      <div class="section-card" style="margin-bottom:24px" id="factory-panel">
+        <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between">
+          <div class="section-card-title">🤖 AI Factory <span id="factory-status-badge" style="display:inline-block;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:20px;margin-left:8px;white-space:nowrap"></span></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm btn-ghost" onclick="loadFactoryStatus()">↺</button>
+            <a href="/admin/factory.html" class="btn btn-sm btn-ghost">Открыть →</a>
+          </div>
+        </div>
+        <div class="section-card-body padded" id="factory-body">
+          <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+        </div>
+      </div>
+
       <!-- ══════════════════ RECENT ACTIVITY FEED ══════════════════ -->
       <div class="section-card" style="margin-bottom:24px">
         <div class="section-card-header">
@@ -1483,6 +1497,85 @@ function updateQaBadge(count) {
   }
 }
 
+/* ─── Factory AI Intelligence widget (БЛОК 5.6) ─────── */
+async function loadFactoryStatus() {
+  const body = document.getElementById('factory-body');
+  const badge = document.getElementById('factory-status-badge');
+  try {
+    const data = await _admin.apiFetch('/admin/factory/status');
+
+    if (!data.available) {
+      if (body) body.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem">${_admin.escapeHtml(data.message || 'Factory недоступна')}</p>`;
+      if (badge) { badge.style.background = 'rgba(120,120,120,0.15)'; badge.style.color = 'var(--text-muted)'; badge.textContent = 'офлайн'; }
+      return;
+    }
+
+    // Update badge
+    const score = data.healthScore != null ? parseInt(data.healthScore) : null;
+    if (badge) {
+      if (score == null) {
+        badge.style.background = 'rgba(120,120,120,0.15)'; badge.style.color = 'var(--text-muted)'; badge.textContent = '—';
+      } else if (score >= 70) {
+        badge.style.background = 'rgba(16,185,129,0.15)'; badge.style.color = '#10b981'; badge.textContent = score + '%';
+      } else if (score >= 50) {
+        badge.style.background = 'rgba(245,158,11,0.15)'; badge.style.color = '#f59e0b'; badge.textContent = score + '%';
+      } else {
+        badge.style.background = 'rgba(239,68,68,0.15)'; badge.style.color = '#ef4444'; badge.textContent = score + '%';
+      }
+    }
+
+    const lastRun = data.lastRun ? new Date(data.lastRun).toLocaleString('ru-RU') : 'никогда';
+    let html = `<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px">
+      <div><span style="color:var(--text-muted);font-size:0.8rem">Последний запуск:</span> <strong style="color:var(--text);font-size:0.85rem">${_admin.escapeHtml(lastRun)}</strong></div>
+      <div><span style="color:var(--text-muted);font-size:0.8rem">Health Score:</span> <strong style="color:var(--text);font-size:0.85rem">${score != null ? score + '%' : '—'}</strong></div>
+    </div>`;
+
+    if (data.pendingActions && data.pendingActions.length > 0) {
+      html += '<div style="font-size:0.8rem;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">📋 Growth Tasks (pending)</div>';
+      html += '<ul style="margin:0 0 14px;padding-left:18px;list-style:disc">';
+      data.pendingActions.slice(0, 5).forEach(a => {
+        const pri = (a.priority || 'medium').toLowerCase();
+        const priColor = pri === 'high' ? 'var(--error)' : pri === 'low' ? 'var(--success)' : '#f59e0b';
+        html += `<li style="margin-bottom:5px;font-size:0.83rem;color:var(--text-muted)">
+          <span style="color:${priColor};font-weight:700;font-size:0.72rem;text-transform:uppercase">[${_admin.escapeHtml(pri)}]</span>
+          ${_admin.escapeHtml(a.action || a.title || '')}
+        </li>`;
+      });
+      if (data.pendingActions.length > 5) {
+        html += `<li style="font-size:0.78rem;color:var(--text-dim)">…ещё ${data.pendingActions.length - 5} задач — <a href="/admin/factory.html" style="color:var(--gold)">смотреть все</a></li>`;
+      }
+      html += '</ul>';
+    }
+
+    if (data.recentDecisions && data.recentDecisions.length > 0) {
+      html += '<div style="font-size:0.8rem;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">🧠 CEO Decisions</div>';
+      html += '<ul style="margin:0 0 14px;padding-left:18px;list-style:disc">';
+      data.recentDecisions.slice(0, 3).forEach(d => {
+        const text = (d.decision || d.content || d.rationale || '').slice(0, 180);
+        html += `<li style="margin-bottom:5px;font-size:0.83rem;color:var(--text-muted)">${_admin.escapeHtml(text)}${text.length === 180 ? '…' : ''}</li>`;
+      });
+      html += '</ul>';
+    }
+
+    if (data.activeExperiments && data.activeExperiments.length > 0) {
+      html += '<div style="font-size:0.8rem;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">🧪 Active Experiments</div>';
+      html += '<ul style="margin:0 0 4px;padding-left:18px;list-style:disc">';
+      data.activeExperiments.slice(0, 3).forEach(e => {
+        html += `<li style="margin-bottom:5px;font-size:0.83rem;color:var(--text-muted)">${_admin.escapeHtml(e.name || e.title || '')}</li>`;
+      });
+      html += '</ul>';
+    }
+
+    if (!data.pendingActions?.length && !data.recentDecisions?.length && !data.activeExperiments?.length) {
+      html += '<p style="color:var(--text-dim);font-size:0.82rem">Данных пока нет. <a href="/admin/factory.html" style="color:var(--gold)">Запустить цикл Factory →</a></p>';
+    }
+
+    if (body) body.innerHTML = html;
+  } catch (e) {
+    if (body) body.innerHTML = '<p style="color:var(--text-dim);font-size:0.85rem">Ошибка загрузки Factory</p>';
+  }
+}
+
 /* ─── Init ───────────────────────────────────────────── */
 loadDashboard();
 loadActivityFeed();
@@ -1495,6 +1588,7 @@ loadBotStatus();
 loadTodayActivity();
 loadRevenueSparkline();
 loadRecentMessages();
+loadFactoryStatus();
 
 // Auto-refresh every 30 seconds
 setInterval(loadDashboard, 30000);
@@ -1510,6 +1604,8 @@ setInterval(loadNotifications, 60000);
 setInterval(loadBotStatus, 60000);
 setInterval(loadTodayActivity, 120000);
 setInterval(loadRecentMessages, 120000);
+// Refresh Factory status every 5 minutes
+setInterval(loadFactoryStatus, 300000);
 </script>
 </body>
 </html>
