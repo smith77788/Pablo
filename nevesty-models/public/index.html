@@ -704,6 +704,13 @@ fetch('/api/settings/public').then(r => r.json()).then(d => {
 })();
 </script>
 
+  <!-- PWA Install Banner -->
+  <div id="install-banner" style="display:none; position:fixed; bottom:70px; left:16px; right:16px; background:var(--bg2); border:1px solid var(--gold); padding:12px 16px; border-radius:8px; z-index:1000; align-items:center; gap:12px; box-shadow:0 4px 20px rgba(0,0,0,0.4);" role="dialog" aria-label="Установить приложение">
+    <span style="flex:1; font-size:0.875rem; color:var(--text)">📱 Установить приложение Nevesty Models</span>
+    <button id="install-btn" style="background:var(--gold); color:#000; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; white-space:nowrap; font-size:0.85rem;">Установить</button>
+    <button onclick="document.getElementById('install-banner').style.display='none'" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem; padding:0 4px; line-height:1;" aria-label="Закрыть">✕</button>
+  </div>
+
   <!-- Floating WhatsApp Button -->
   <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
     <a id="float-wa-link" href="#" target="_blank" rel="noopener"

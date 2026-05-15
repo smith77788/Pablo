@@ -569,3 +569,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* ─── Init lazy images for any pre-rendered cards ─── */
 initLazyImages();
+
+/* ─── PWA Install Prompt ────────────────────────── */
+(function initInstallPrompt() {
+  let deferredPrompt = null;
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+
+    // Show install banner after 30 seconds
+    setTimeout(() => {
+      const banner = document.getElementById('install-banner');
+      if (banner) banner.style.display = 'flex';
+    }, 30000);
+  });
+
+  // Install button click
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('#install-btn');
+    if (!btn || !deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      document.getElementById('install-banner')?.remove();
+    }
+    deferredPrompt = null;
+  });
+
+  // Hide banner when app is installed
+  window.addEventListener('appinstalled', () => {
+    document.getElementById('install-banner')?.remove();
+    deferredPrompt = null;
+  });
+})();

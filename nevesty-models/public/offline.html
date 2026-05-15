@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Нет подключения — Nevesty Models</title>
   <meta name="theme-color" content="#080808">
+  <link rel="manifest" href="/manifest.json">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -169,6 +170,9 @@
   </div>
 
   <script>
+    // Auto-reload when connection is restored
+    window.addEventListener('online', () => location.reload());
+
     (function () {
       try {
         const raw = localStorage.getItem('nm_recent_pages');
