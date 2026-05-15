@@ -1,8 +1,12 @@
 """Content Department — generates SEO descriptions and content for models."""
 from __future__ import annotations
+import os
 import sqlite3
 import json
+from datetime import datetime, timedelta
 from typing import Optional
+
+from factory.agents.base import FactoryAgent
 
 
 def _db_path() -> str:
@@ -122,6 +126,91 @@ class FAQContentAgent:
         return results
 
 
+class WeeklySummaryAgent(FactoryAgent):
+    """Generates weekly business summary and sends to admin via bot webhook."""
+
+    department = "content"
+    role = "weekly_summary"
+
+    def generate_summary(self, db_path: str = None) -> dict:
+        """Generate a weekly performance summary from the database."""
+        summary = {
+            "period": f"{(datetime.now() - timedelta(days=7)).strftime('%d.%m')} – {datetime.now().strftime('%d.%m.%Y')}",
+            "orders_week": 0,
+            "revenue_week": 0,
+            "new_clients": 0,
+            "top_model": None,
+            "conversion": 0,
+        }
+
+        try:
+            actual_db = db_path or os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "nevesty-models", "data.db"
+            )
+            if not os.path.exists(actual_db):
+                return summary
+
+            conn = sqlite3.connect(actual_db)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+
+            # Orders this week
+            c.execute("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now', '-7 days')")
+            row = c.fetchone()
+            summary["orders_week"] = row["n"] if row else 0
+
+            # Revenue this week (completed orders)
+            c.execute("""SELECT SUM(CAST(REPLACE(REPLACE(budget,'₽',''),' ','') AS INTEGER)) as s
+                         FROM orders WHERE status='completed' AND created_at >= datetime('now', '-7 days')
+                         AND budget IS NOT NULL AND budget GLOB '[0-9]*'""")
+            row = c.fetchone()
+            summary["revenue_week"] = int(row["s"] or 0) if row else 0
+
+            # New clients this week
+            c.execute("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE created_at >= datetime('now', '-7 days')")
+            row = c.fetchone()
+            summary["new_clients"] = row["n"] if row else 0
+
+            # Top model by orders this week
+            c.execute("""SELECT m.name, COUNT(*) as cnt FROM orders o
+                         JOIN models m ON o.model_id = m.id
+                         WHERE o.created_at >= datetime('now', '-7 days')
+                         GROUP BY o.model_id ORDER BY cnt DESC LIMIT 1""")
+            row = c.fetchone()
+            if row:
+                summary["top_model"] = f"{row['name']} ({row['cnt']} заказов)"
+
+            # Conversion
+            c.execute("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','pending') AND created_at >= datetime('now', '-7 days')")
+            row = c.fetchone()
+            total_new = row["n"] if row else 0
+            c.execute("SELECT COUNT(*) as n FROM orders WHERE status='confirmed' AND created_at >= datetime('now', '-7 days')")
+            row = c.fetchone()
+            confirmed = row["n"] if row else 0
+            summary["conversion"] = round(confirmed / total_new * 100) if total_new > 0 else 0
+
+            conn.close()
+        except Exception as e:
+            summary["error"] = str(e)
+
+        return summary
+
+    def format_telegram_message(self, summary: dict) -> str:
+        lines = [
+            f"📊 *Недельный отчёт Factory*",
+            f"_Период: {summary['period']}_",
+            "",
+            f"📋 Заявок за неделю: *{summary['orders_week']}*",
+            f"💰 Выручка: *{summary['revenue_week']:,} ₽*".replace(",", " "),
+            f"👤 Новых клиентов: *{summary['new_clients']}*",
+            f"🔄 Конверсия: *{summary['conversion']}%*",
+        ]
+        if summary.get("top_model"):
+            lines.append(f"⭐ Топ-модель: *{summary['top_model']}*")
+        return "\n".join(lines)
+
+
 class ContentDepartment:
     def __init__(self):
         self.description_agent = ModelDescriptionAgent()
@@ -138,5 +227,11 @@ class ContentDepartment:
         # Populate FAQ if empty
         faq_results = self.faq_agent.populate_faq_if_empty()
         results['faq'] = faq_results
+
+        # On Mondays, generate weekly summary
+        if datetime.now().weekday() == 0:  # Monday
+            weekly_agent = WeeklySummaryAgent()
+            weekly_data = weekly_agent.generate_summary()
+            results["weekly_summary"] = weekly_data
 
         return results
