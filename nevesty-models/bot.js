@@ -4558,18 +4558,26 @@ function initBot(app) {
 
     // ── Settings
     if (data === 'adm_settings')  { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminSettings(chatId, 'main'); }
-    // Подразделы настроек
+    // Підрозділи налаштувань
     if (data === 'adm_settings_contacts') { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'contacts'); }
     if (data === 'adm_settings_notifs')   { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'notifs');   }
+    if (data === 'adm_settings_notif')    { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'notifs');   } // alias (singular)
     if (data === 'adm_settings_catalog')  { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'catalog');  }
     if (data === 'adm_settings_booking')  { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'booking');  }
     if (data === 'adm_settings_reviews')  { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'reviews');  }
     if (data === 'adm_settings_cities')   { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'cities');   }
     if (data === 'adm_settings_bot')      { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'bot');      }
     if (data === 'adm_settings_limits')   { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'limits');   }
-    // Toggle настройки каталога
+    // Toggle налаштування каталогу
     if (data === 'adm_catalog_sort_date')     { if (!isAdmin(chatId)) return; await setSetting('catalog_sort','date');     return showAdminSettings(chatId,'catalog'); }
     if (data === 'adm_catalog_sort_featured') { if (!isAdmin(chatId)) return; await setSetting('catalog_sort','featured'); return showAdminSettings(chatId,'catalog'); }
+    if (data === 'adm_catalog_sort_toggle')   {
+      if (!isAdmin(chatId)) return;
+      const cur = await getSetting('catalog_sort') || 'featured';
+      const next = cur === 'alpha' || cur === 'name' ? 'featured' : cur === 'featured' ? 'date' : 'alpha';
+      await setSetting('catalog_sort', next);
+      return showAdminSettings(chatId, 'catalog');
+    }
     if (data === 'adm_catalog_city_on')       { if (!isAdmin(chatId)) return; await setSetting('catalog_show_city','1');   return showAdminSettings(chatId,'catalog'); }
     if (data === 'adm_catalog_city_off')      { if (!isAdmin(chatId)) return; await setSetting('catalog_show_city','0');   return showAdminSettings(chatId,'catalog'); }
     if (data === 'adm_catalog_badge_on')      { if (!isAdmin(chatId)) return; await setSetting('catalog_show_featured_badge','1'); return showAdminSettings(chatId,'catalog'); }
@@ -5214,6 +5222,7 @@ function initBot(app) {
       'adm_set_phone':              '📞 Введите новый *номер телефона* агентства:',
       'adm_set_email':              '📧 Введите новый *email* агентства:',
       'adm_set_insta':              '📸 Введите новый *Instagram* (без @):',
+      'adm_set_instagram':          '📸 Введите новый *Instagram* (без @):',
       'adm_set_addr':               '📍 Введите новый *адрес* агентства:',
       'adm_set_pricing':            '💰 Введите новый *прайс-лист* (можно несколько строк):',
       'adm_set_whatsapp':           '📱 Введите *WhatsApp* номер (с кодом страны, например +79001234567):',
@@ -5246,6 +5255,25 @@ function initBot(app) {
     // ── Notifications toggle
     if (data.startsWith('adm_notif_')) {
       if (!isAdmin(chatId)) return;
+      // Full-match aliases for longer key names (e.g. adm_notif_order_on, adm_notif_status_on)
+      const fullMatchMap = {
+        'adm_notif_order_on':    ['notif_new_order',           '1'],
+        'adm_notif_order_off':   ['notif_new_order',           '0'],
+        'adm_notif_status_on':   ['notif_status',              '1'],
+        'adm_notif_status_off':  ['notif_status',              '0'],
+        'adm_notif_review_on':   ['notif_new_review',          '1'],
+        'adm_notif_review_off':  ['notif_new_review',          '0'],
+        'adm_notif_msg_on':      ['notif_new_message',         '1'],
+        'adm_notif_msg_off':     ['notif_new_message',         '0'],
+        'adm_notif_sms_on':      ['sms_notifications_enabled', '1'],
+        'adm_notif_sms_off':     ['sms_notifications_enabled', '0'],
+      };
+      if (fullMatchMap[data]) {
+        const [settingKey, val] = fullMatchMap[data];
+        await setSetting(settingKey, val);
+        return showAdminSettings(chatId, 'notifs');
+      }
+      // Fallback: short-key pattern (adm_notif_new_on, adm_notif_st_on, etc.)
       const [, , key, onoff] = data.split('_');
       const settingKeyMap = {
         new:    'notif_new_order',
@@ -6142,6 +6170,7 @@ function initBot(app) {
         'adm_set_phone':              ['contacts_phone',               '📞 Телефон обновлён!'],
         'adm_set_email':              ['contacts_email',               '📧 Email обновлён!'],
         'adm_set_insta':              ['contacts_insta',               '📸 Instagram обновлён!'],
+        'adm_set_instagram':          ['contacts_instagram',           '📸 Instagram обновлён!'],
         'adm_set_addr':               ['contacts_addr',                '📍 Адрес обновлён!'],
         'adm_set_pricing':            ['pricing',                      '💰 Прайс-лист обновлён!'],
         'adm_set_whatsapp':           ['contacts_whatsapp',            '📱 WhatsApp обновлён!'],
