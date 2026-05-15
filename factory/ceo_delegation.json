@@ -4,182 +4,6 @@
     {
       "focus_department": "sales",
       "reason": "Конверсия критически низкая — фокус на продажах",
-      "cycle": "2026-05-15T15:53:33.740132",
-      "kpis_snapshot": {
-        "conversion_rate": 0,
-        "orders_total": 0,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve follow-up messages",
-        "Reduce response time",
-        "Add pricing info"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "sales",
-      "reason": "Конверсия критически низкая — фокус на продажах",
-      "cycle": "2026-05-15T15:53:33.740947",
-      "kpis_snapshot": {
-        "conversion_rate": 0,
-        "orders_total": 0,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve follow-up messages",
-        "Reduce response time",
-        "Add pricing info"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "sales",
-      "reason": "Конверсия критически низкая — фокус на продажах",
-      "cycle": "2026-05-15T15:53:33.741970",
-      "kpis_snapshot": {
-        "conversion_rate": 0.1,
-        "orders_total": 50,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve follow-up messages",
-        "Reduce response time",
-        "Add pricing info"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "marketing",
-      "reason": "Мало заявок — нужно усилить маркетинг",
-      "cycle": "2026-05-15T15:53:33.742844",
-      "kpis_snapshot": {
-        "conversion_rate": 0.5,
-        "orders_total": 5,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Post to Telegram channel",
-        "Update model descriptions",
-        "SEO improvements"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "product",
-      "reason": "Бизнес стабилен — фокус на росте через product",
-      "cycle": "2026-05-15T15:53:33.743713",
-      "kpis_snapshot": {
-        "conversion_rate": 0.7,
-        "orders_total": 100,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve booking UX",
-        "Add wishlist feature",
-        "Better search"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "sales",
-      "reason": "Конверсия критически низкая — фокус на продажах",
-      "cycle": "2026-05-15T15:53:33.744907",
-      "kpis_snapshot": {
-        "conversion_rate": 0,
-        "orders_total": 0,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve follow-up messages",
-        "Reduce response time",
-        "Add pricing info"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "sales",
-      "reason": "Конверсия критически низкая — фокус на продажах",
-      "cycle": "2026-05-15T15:53:33.745954",
-      "kpis_snapshot": {
-        "conversion_rate": 0,
-        "orders_total": 0,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve follow-up messages",
-        "Reduce response time",
-        "Add pricing info"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "sales",
-      "reason": "Конверсия критически низкая — фокус на продажах",
-      "cycle": "2026-05-15T15:53:33.754678",
-      "kpis_snapshot": {
-        "conversion_rate": 0,
-        "orders_total": 0,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve follow-up messages",
-        "Reduce response time",
-        "Add pricing info"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "sales",
-      "reason": "Конверсия критически низкая — фокус на продажах",
-      "cycle": "2026-05-15T15:53:33.755035",
-      "kpis_snapshot": {
-        "conversion_rate": 0,
-        "orders_total": 0,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve follow-up messages",
-        "Reduce response time",
-        "Add pricing info"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "sales",
-      "reason": "Конверсия критически низкая — фокус на продажах",
-      "cycle": "2026-05-15T15:53:33.763369",
-      "kpis_snapshot": {
-        "conversion_rate": 0,
-        "orders_total": 0,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve follow-up messages",
-        "Reduce response time",
-        "Add pricing info"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "sales",
-      "reason": "Конверсия критически низкая — фокус на продажах",
-      "cycle": "2026-05-15T15:53:33.772512",
-      "kpis_snapshot": {
-        "conversion_rate": 0.1,
-        "orders_total": 50,
-        "health_score": 50
-      },
-      "priority_tasks": [
-        "Improve follow-up messages",
-        "Reduce response time",
-        "Add pricing info"
-      ],
-      "outcome": null
-    },
-    {
-      "focus_department": "sales",
-      "reason": "Конверсия критически низкая — фокус на продажах",
       "cycle": "2026-05-15T15:53:33.792548",
       "kpis_snapshot": {
         "conversion_rate": 0,
@@ -789,6 +613,182 @@
       "focus_department": "sales",
       "reason": "Конверсия критически низкая — фокус на продажах",
       "cycle": "2026-05-15T15:55:58.415807",
+      "kpis_snapshot": {
+        "conversion_rate": 0.1,
+        "orders_total": 50,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve follow-up messages",
+        "Reduce response time",
+        "Add pricing info"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "sales",
+      "reason": "Конверсия критически низкая — фокус на продажах",
+      "cycle": "2026-05-15T16:14:39.383828",
+      "kpis_snapshot": {
+        "conversion_rate": 0,
+        "orders_total": 0,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve follow-up messages",
+        "Reduce response time",
+        "Add pricing info"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "sales",
+      "reason": "Конверсия критически низкая — фокус на продажах",
+      "cycle": "2026-05-15T16:14:39.385415",
+      "kpis_snapshot": {
+        "conversion_rate": 0,
+        "orders_total": 0,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve follow-up messages",
+        "Reduce response time",
+        "Add pricing info"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "sales",
+      "reason": "Конверсия критически низкая — фокус на продажах",
+      "cycle": "2026-05-15T16:14:39.386842",
+      "kpis_snapshot": {
+        "conversion_rate": 0,
+        "orders_total": 0,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve follow-up messages",
+        "Reduce response time",
+        "Add pricing info"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "sales",
+      "reason": "Конверсия критически низкая — фокус на продажах",
+      "cycle": "2026-05-15T16:14:39.388302",
+      "kpis_snapshot": {
+        "conversion_rate": 0,
+        "orders_total": 0,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve follow-up messages",
+        "Reduce response time",
+        "Add pricing info"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "sales",
+      "reason": "Конверсия критически низкая — фокус на продажах",
+      "cycle": "2026-05-15T16:14:39.389846",
+      "kpis_snapshot": {
+        "conversion_rate": 0,
+        "orders_total": 0,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve follow-up messages",
+        "Reduce response time",
+        "Add pricing info"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "sales",
+      "reason": "Конверсия критически низкая — фокус на продажах",
+      "cycle": "2026-05-15T16:14:39.391246",
+      "kpis_snapshot": {
+        "conversion_rate": 0.1,
+        "orders_total": 50,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve follow-up messages",
+        "Reduce response time",
+        "Add pricing info"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "marketing",
+      "reason": "Мало заявок — нужно усилить маркетинг",
+      "cycle": "2026-05-15T16:14:39.392757",
+      "kpis_snapshot": {
+        "conversion_rate": 0.5,
+        "orders_total": 5,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Post to Telegram channel",
+        "Update model descriptions",
+        "SEO improvements"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "product",
+      "reason": "Бизнес стабилен — фокус на росте через product",
+      "cycle": "2026-05-15T16:14:39.394207",
+      "kpis_snapshot": {
+        "conversion_rate": 0.7,
+        "orders_total": 100,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve booking UX",
+        "Add wishlist feature",
+        "Better search"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "sales",
+      "reason": "Конверсия критически низкая — фокус на продажах",
+      "cycle": "2026-05-15T16:14:39.395640",
+      "kpis_snapshot": {
+        "conversion_rate": 0,
+        "orders_total": 0,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve follow-up messages",
+        "Reduce response time",
+        "Add pricing info"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "sales",
+      "reason": "Конверсия критически низкая — фокус на продажах",
+      "cycle": "2026-05-15T16:14:39.399692",
+      "kpis_snapshot": {
+        "conversion_rate": 0,
+        "orders_total": 0,
+        "health_score": 50
+      },
+      "priority_tasks": [
+        "Improve follow-up messages",
+        "Reduce response time",
+        "Add pricing info"
+      ],
+      "outcome": null
+    },
+    {
+      "focus_department": "sales",
+      "reason": "Конверсия критически низкая — фокус на продажах",
+      "cycle": "2026-05-15T16:14:39.408959",
       "kpis_snapshot": {
         "conversion_rate": 0.1,
         "orders_total": 50,
