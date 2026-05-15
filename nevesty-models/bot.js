@@ -41,26 +41,82 @@ const ACTIVE_BOOKING_STATES = new Set([
   'ai_match_desc',
 ]);
 
+// States that have active user input in progress (booking + admin flows)
+function isActiveInputState(state) {
+  if (!state || state === 'idle') return false;
+  if (ACTIVE_BOOKING_STATES.has(state)) return true;
+  // Admin input states
+  if (state.startsWith('adm_mdl_')) return true;
+  if (state.startsWith('adm_set_')) return true;
+  if (state.startsWith('adm_gallery_')) return true;
+  if (state.startsWith('adm_ai_bio_preview_')) return true;
+  if (state.startsWith('adm_add_busy_')) return true;
+  if (state.startsWith('adm_ef_')) return true;
+  if (state.startsWith('adm_note_input_')) return true;
+  if (state.startsWith('adm_personal_msg_')) return true;
+  if (['adm_broadcast_msg', 'adm_broadcast_preview', 'adm_broadcast_photo_wait',
+       'adm_broadcast_edit_text', 'adm_broadcast_caption',
+       'adm_sched_bcast_text', 'adm_sched_bcast_time', 'adm_sched_bcast_segment',
+       'adm_search_order_input', 'adm_search_notes_input', 'adm_search_model_input',
+       'adm_note_order_id', 'adm_add_admin_id',
+       'replying', 'direct_reply', 'msg_to_manager',
+       'check_status', 'search_height', 'search_age',
+       'broadcast_schedule_time',
+  ].includes(state)) return true;
+  return false;
+}
+
 function resetSessionTimer(chatId) {
   clearTimeout(sessionTimers.get(chatId));
   const timer = setTimeout(async () => {
     try {
       const sess = await getSession(chatId);
       const state = sess?.state;
-      if (state && ACTIVE_BOOKING_STATES.has(state)) {
+      if (state && isActiveInputState(state)) {
         await clearSession(chatId);
-        await safeSend(chatId,
-          '⏰ *Время сессии истекло\\. Бронирование отменено\\.*\n\nХотите начать заново?',
-          {
-            parse_mode: 'MarkdownV2',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🔄 Начать заново', callback_data: 'bk_start'   }],
-                [{ text: '← Меню',           callback_data: 'main_menu'  }],
-              ]
+        const adminUser = isAdmin(chatId);
+        if (ACTIVE_BOOKING_STATES.has(state)) {
+          // Booking flow timeout — offer restart
+          await safeSend(chatId,
+            '⏰ *Время сессии истекло\\. Бронирование отменено\\.*\n\nВаши данные не сохранены\\. Хотите начать заново?',
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Начать заново', callback_data: 'bk_start'  }],
+                  [{ text: '🏠 Главное меню',  callback_data: 'main_menu' }],
+                ]
+              }
             }
-          }
-        );
+          );
+        } else if (adminUser) {
+          // Admin flow timeout
+          await safeSend(chatId,
+            '⏰ *Время ввода истекло\\.*\n\nДействие отменено из\\-за длительного бездействия\\.',
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Продолжить',     callback_data: 'admin_menu' }],
+                  [{ text: '🏠 Главное меню',    callback_data: 'main_menu'  }],
+                ]
+              }
+            }
+          );
+        } else {
+          // Client non-booking flow timeout
+          await safeSend(chatId,
+            '⏰ *Время ожидания истекло\\.*\n\nДействие сброшено\\. Напишите /start чтобы вернуться в меню\\.',
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+                ]
+              }
+            }
+          );
+        }
       }
     } catch {}
     sessionTimers.delete(chatId);
@@ -3870,19 +3926,24 @@ function initBot(app) {
   // ── /cancel ────────────────────────────────────────────────────────────────
   bot.onText(/\/cancel/, async (msg) => {
     const chatId = msg.chat.id;
-    // Clear session timeout if any booking flow was active
+    // Check if there is an active state before clearing
+    const sess = await getSession(chatId);
+    const hadActiveState = isActiveInputState(sess?.state);
+
+    // Clear session timeout if any active flow was running
     clearTimeout(sessionTimers.get(chatId));
     sessionTimers.delete(chatId);
     // Clear any active state/flow
     await clearSession(chatId);
 
-    await safeSend(chatId,
-      '❌ Действие отменено\\. Возвращаю вас в главное меню\\.',
-      {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
-      }
-    );
+    const cancelText = hadActiveState
+      ? '❌ Действие отменено\\. Возвращаю вас в главное меню\\.'
+      : 'ℹ️ Активного действия нет\\. Вы уже в главном меню\\.';
+
+    await safeSend(chatId, cancelText, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+    });
 
     if (isAdmin(chatId)) {
       return showAdminMenu(chatId, msg.from.first_name);
@@ -3906,7 +3967,12 @@ function initBot(app) {
       ? `\n\nПо вопросам: ${esc(managerContact)}`
       : '';
     const text = isAdmin(chatId)
-      ? `📖 *Команды администратора:*\n\n/start — главное меню\n/cancel — отменить действие\n/help — помощь\n\nДля управления ботом используйте меню 👆`
+      ? `📖 *Команды администратора:*\n\n` +
+        `/start — главное меню\n` +
+        `/cancel — отменить текущее действие\n` +
+        `/help — эта справка\n` +
+        `/admin — панель управления\n\n` +
+        `*Подсказка:* если бот завис во время ввода — напишите /cancel, чтобы сбросить состояние и вернуться в меню\\.`
       : `📖 *Справка по боту Nevesty Models*\n\n` +
         `*Основные команды:*\n` +
         `/start — главное меню\n` +
@@ -3923,9 +3989,14 @@ function initBot(app) {
         `💃 Выбрать модель → Каталог → нажмите на модель\n` +
         `📝 Оформить заявку → кнопка «Оформить заявку»\n` +
         `📋 Следить за заявкой → Мои заявки\n` +
-        `❤️ Сохранить модель → кнопка «В избранное»` +
+        `❤️ Сохранить модель → кнопка «В избранное»\n\n` +
+        `*Что\\-то пошло не так?*\n` +
+        `Напишите /cancel чтобы сбросить состояние, или /start чтобы начать заново\\.` +
         managerLine;
-    return safeSend(chatId, text, { parse_mode: 'MarkdownV2' });
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+    });
   });
 
   // ── /faq ───────────────────────────────────────────────────────────────────
@@ -6219,33 +6290,38 @@ function initBot(app) {
     const state   = session?.state || 'idle';
     const d       = sessionData(session);
 
-    // ── Session timeout: предупреждение если бронирование активно > 30 минут ──
+    // ── Session timeout: предупреждение если сессия протухла ──────────────────
     if (state !== 'idle' && session?.updated_at) {
       const updatedAt = new Date(session.updated_at).getTime();
       if (!isNaN(updatedAt) && Date.now() - updatedAt > SESSION_TIMEOUT_MS) {
         if (state.startsWith('bk_')) {
-          // Booking session > 30 min — warn and ask to continue or restart
+          // Booking session > timeout — warn and ask to continue or restart
           return safeSend(chatId,
-            '⏰ Ваша сессия бронирования активна уже более 30 минут\\. Продолжить или начать заново?',
+            '⏰ *Сессия бронирования неактивна более 30 минут\\.*\n\nПродолжить с того же места или начать заново?',
             {
               parse_mode: 'MarkdownV2',
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '▶ Продолжить',     callback_data: 'session_continue' }],
-                  [{ text: '🔄 Начать заново',  callback_data: 'session_restart'  }],
+                  [{ text: '▶ Продолжить',      callback_data: 'session_continue' }],
+                  [{ text: '🔄 Начать заново',   callback_data: 'session_restart'  }],
+                  [{ text: '❌ Отменить /cancel', callback_data: 'cancel_booking'  }],
                 ]
               }
             }
           );
         }
-        // Non-booking session expired — silently reset and show menu
+        // Non-booking session expired — reset and show appropriate menu
         clearTimeout(sessionTimers.get(chatId));
         sessionTimers.delete(chatId);
         await clearSession(chatId);
         await safeSend(chatId,
-          '⏰ Сессия истекла\\. Действие отменено\\.', {
+          '⏰ *Сессия истекла\\. Действие отменено\\.*\n\nНапишите /start или нажмите кнопку ниже, чтобы продолжить\\.', {
             parse_mode: 'MarkdownV2',
-            reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '🏠 Главное меню', callback_data: 'main_menu' },
+              ]]
+            }
           }
         );
         return isAdmin(chatId)
