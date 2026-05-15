@@ -7114,13 +7114,12 @@ function _registerNewFeatures() {
   // ── Additional callback_query handlers ─────────────────────────────────────
   bot.on('callback_query', async (q) => {
     const chatId = q.message.chat.id;
+    const msgId  = q.message.message_id;
     const data   = q.data;
     try { await bot.answerCallbackQuery(q.id); } catch {}
 
     // Favorites / Wishlist list
-    if (data === 'fav_list') {
-      return showWishlist(chatId, 0);
-    }
+    if (data === 'fav_list') { return showWishlist(chatId, 0); }
     if (data.startsWith('fav_list_')) {
       const page = parseInt(data.replace('fav_list_', '')) || 0;
       return showWishlist(chatId, page);
@@ -7128,16 +7127,73 @@ function _registerNewFeatures() {
 
     // View model from wishlist
     if (data.startsWith('fav_view_')) {
-      const modelId = parseInt(data.replace('fav_view_', ''));
-      return showModel(chatId, modelId);
+      return showModel(chatId, parseInt(data.replace('fav_view_', '')));
     }
 
-    // Favorites add/remove
-    if (data.startsWith('fav_add_')) {
-      return addFavorite(chatId, parseInt(data.replace('fav_add_', '')));
+    // Wishlist clear — ask confirmation
+    if (data === 'fav_clear') {
+      return safeSend(chatId, '🗑 *Очистить список избранного?*\n\nВсе модели будут удалены из вашего списка\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[
+          { text: '✅ Да, очистить', callback_data: 'fav_clear_yes' },
+          { text: '❌ Отмена',       callback_data: 'fav_list_0'   },
+        ]] }
+      });
     }
+
+    // Wishlist clear — confirmed
+    if (data === 'fav_clear_yes') {
+      try { await bot.answerCallbackQuery(q.id, { text: '🗑 Список очищен' }); } catch {}
+      await run('DELETE FROM wishlists WHERE chat_id=?', [String(chatId)]).catch(() => {});
+      await run('DELETE FROM favorites WHERE chat_id=?', [String(chatId)]).catch(() => {});
+      return safeSend(chatId, '🗑 *Список избранного очищен\\.*\n\nВы можете добавить новые модели из каталога\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '💃 Перейти в каталог', callback_data: 'cat_cat__0' }],
+          [{ text: '🏠 Главное меню',      callback_data: 'main_menu'  }],
+        ]}
+      });
+    }
+
+    // Favorites add — add to wishlists, answer callback with toast, edit keyboard
+    if (data.startsWith('fav_add_')) {
+      const favModelId = parseInt(data.replace('fav_add_', ''));
+      const favModel = await get('SELECT id, name FROM models WHERE id=?', [favModelId]).catch(() => null);
+      if (!favModel) {
+        try { await bot.answerCallbackQuery(q.id, { text: '❌ Модель не найдена', show_alert: true }); } catch {}
+        return;
+      }
+      await addToWishlist(chatId, favModelId);
+      try { await bot.answerCallbackQuery(q.id, { text: '❤️ Добавлено в избранное!' }); } catch {}
+      try {
+        const favKb = (q.message.reply_markup?.inline_keyboard || []).map(row =>
+          row.map(btn => btn.callback_data === `fav_add_${favModelId}`
+            ? { text: '💔 Убрать из избранного', callback_data: `fav_remove_${favModelId}` }
+            : btn)
+        );
+        await bot.editMessageReplyMarkup({ inline_keyboard: favKb }, { chat_id: chatId, message_id: msgId });
+      } catch {}
+      return;
+    }
+
+    // Favorites remove — remove from wishlists, answer callback with toast, edit keyboard
     if (data.startsWith('fav_remove_')) {
-      return removeFavorite(chatId, parseInt(data.replace('fav_remove_', '')));
+      const remModelId = parseInt(data.replace('fav_remove_', ''));
+      await removeFromWishlist(chatId, remModelId);
+      try { await bot.answerCallbackQuery(q.id, { text: '💔 Убрано из избранного' }); } catch {}
+      try {
+        const remKb = q.message.reply_markup?.inline_keyboard || [];
+        if (remKb.some(row => row.some(btn => btn.callback_data === `fav_view_${remModelId}`))) {
+          return showWishlist(chatId, 0);
+        }
+        const newRemKb = remKb.map(row =>
+          row.map(btn => btn.callback_data === `fav_remove_${remModelId}`
+            ? { text: '❤️ В избранное', callback_data: `fav_add_${remModelId}` }
+            : btn)
+        );
+        await bot.editMessageReplyMarkup({ inline_keyboard: newRemKb }, { chat_id: chatId, message_id: msgId });
+      } catch {}
+      return;
     }
 
     // Category search
