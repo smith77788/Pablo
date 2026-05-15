@@ -1,10 +1,16 @@
 """
 Channel Content Agent — generates Telegram channel post templates for Nevesty Models agency.
+
+Classes:
+  ChannelContentGenerator — heuristic template-based generator (no API key required)
+  TelegramChannelAgent    — LLM-powered generator (falls back to templates when no API key)
 """
 from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 import random
+
+from factory.agents.base import FactoryAgent
 
 
 POST_FORMATS = ["case_study", "model_spotlight", "tips", "promotion", "behind_scenes", "stats"]
