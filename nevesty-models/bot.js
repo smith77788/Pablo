@@ -208,8 +208,9 @@ const KB_MAIN_ADMIN = (badge, score) => {
       [{ text: '📡 Фид агентов',            callback_data: 'agent_feed_0'   },
        { text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    },
        { text: '💬 Обсуждения',            callback_data: 'adm_discussions'}],
-      [{ text: '🏭 AI Factory',             callback_data: 'adm_factory'    },
-       { text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' }],
+      [{ text: '🔍 Найти заявку',           callback_data: 'adm_search_order'     },
+       { text: '🏭 AI Factory',             callback_data: 'adm_factory'          }],
+      [{ text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' }],
       ...(SITE_URL.startsWith('https://') ? [[
         { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } },
         { text: '🌐 Сайт', url: SITE_URL },
@@ -2320,7 +2321,45 @@ function initBot(app) {
     if (data === 'adm_wishlist_off') { if (!isAdmin(chatId)) return; await setSetting('wishlist_enabled','0'); return showAdminSettings(chatId,'bot'); }
     if (data === 'adm_search_on')    { if (!isAdmin(chatId)) return; await setSetting('search_enabled','1');   return showAdminSettings(chatId,'bot'); }
     if (data === 'adm_search_off')   { if (!isAdmin(chatId)) return; await setSetting('search_enabled','0');   return showAdminSettings(chatId,'bot'); }
-    if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; await setSession(chatId, 'adm_broadcast_msg', {}); return showBroadcast(chatId); }
+    if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; return showBroadcast(chatId); }
+    // ── Broadcast type selection
+    if (data === 'adm_broadcast_text') {
+      if (!isAdmin(chatId)) return;
+      await setSession(chatId, 'adm_broadcast_msg', {});
+      return safeSend(chatId,
+        `📝 *Рассылка — текст*\n\nВведите текст сообщения для рассылки:`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] }
+        }
+      );
+    }
+    if (data === 'adm_broadcast_photo') {
+      if (!isAdmin(chatId)) return;
+      await setSession(chatId, 'adm_broadcast_photo_wait', {});
+      return safeSend(chatId,
+        `🖼 *Рассылка — фото*\n\nОтправьте фото для рассылки:`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] }
+        }
+      );
+    }
+    // ── Admin search order
+    if (data === 'adm_search_order') { if (!isAdmin(chatId)) return; return showAdminSearchOrder(chatId); }
+    // ── My orders pagination
+    if (data.startsWith('my_orders_page_')) {
+      const pg = parseInt(data.replace('my_orders_page_', '')) || 0;
+      return showMyOrders(chatId, pg);
+    }
+    // ── Broadcast with photo: skip caption
+    if (data === 'adm_broadcast_photo_nosend') {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      if (!sd.broadcast_photo_id) return safeSend(chatId, '❌ Фото не найдено. Попробуйте заново.');
+      return sendBroadcastWithPhoto(chatId, sd.broadcast_photo_id, '');
+    }
     if (data === 'adm_reviews')          { if (!isAdmin(chatId)) return; return showAdminReviews(chatId); }
     if (data === 'adm_reviews_pending')  { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'pending'); }
     if (data === 'adm_reviews_approved') { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'approved'); }
@@ -2727,6 +2766,21 @@ function initBot(app) {
       const modelId = parseInt(state.replace('adm_ef_','').split('_')[0]);
       await clearSession(chatId);
       return showPhotoGalleryManager(chatId, modelId);
+    }
+    // ── Broadcast with photo: step 1 — receive photo
+    if (state === 'adm_broadcast_photo_wait') {
+      d.broadcast_photo_id = fileId;
+      await setSession(chatId, 'adm_broadcast_caption', d);
+      return safeSend(chatId,
+        `✅ Фото получено\\!\n\nТеперь введите подпись к рассылке \\(или нажмите «Пропустить»\\):`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '⏭ Пропустить подпись', callback_data: 'adm_broadcast_photo_nosend' }],
+            [{ text: '❌ Отмена',             callback_data: 'admin_menu'                  }],
+          ]}
+        }
+      );
     }
   });
 
