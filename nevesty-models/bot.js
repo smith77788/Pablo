@@ -39,7 +39,7 @@ const sessionReminderTimers = {};
 const ACTIVE_BOOKING_STATES = new Set([
   'bk_s1', 'bk_s1_add', 'bk_s2_event', 'bk_s2_date', 'bk_s2_dur', 'bk_s2_loc',
   'bk_s2_budget', 'bk_s2_comments', 'bk_s3_name', 'bk_s3_phone',
-  'bk_s3_email', 'bk_s3_tg', 'bk_s4',
+  'bk_s3_email', 'bk_s3_tg', 'bk_s4', 'bk_repeat_confirm',
   'leave_review_text', 'bk_quick_name', 'bk_quick_phone',
   'profile_edit_name', 'profile_edit_phone', 'profile_edit_email',
   'ai_match_desc',
@@ -6599,6 +6599,28 @@ function initBot(app) {
       return repeatOrder(chatId, orderId);
     }
 
+    // ── Підтвердити повторну заявку
+    if (data === 'bk_repeat_confirm') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      if (session?.state !== 'bk_repeat_confirm' || !d.client_name || !d.client_phone || !d.event_type) {
+        await clearSession(chatId);
+        return safeSend(chatId, '❌ Сесія застаріла\\. Спробуйте ще раз\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '📋 Мої заявки', callback_data: 'my_orders' }]] }
+        });
+      }
+      return bkRepeatSubmit(chatId, d, q.from.username);
+    }
+
+    // ── Скасувати повторну заявку
+    if (data === 'bk_repeat_cancel') {
+      await clearSession(chatId);
+      return isAdmin(chatId)
+        ? showAdminMenu(chatId, q.from.first_name)
+        : showMainMenu(chatId, q.from.first_name);
+    }
+
     // ── Профиль: изменить контакты
     if (data === 'profile_edit_contacts') return startEditProfile(chatId);
     if (data === 'profile_edit_name') {
@@ -9156,7 +9178,7 @@ async function startLeaveReview(chatId, orderId) {
   });
 }
 
-// ─── Повторить заявку ─────────────────────────────────────────────────────────
+// ─── Повторити заявку ─────────────────────────────────────────────────────────
 
 async function repeatOrder(chatId, orderId) {
   try {
@@ -9166,31 +9188,146 @@ async function repeatOrder(chatId, orderId) {
     );
     if (!o) {
       return safeSend(chatId, RU.ORDER_NOT_FOUND, {
-        reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] }
+        reply_markup: { inline_keyboard: [[{ text: '📋 Мої заявки', callback_data: 'my_orders' }]] }
       });
     }
 
-    const prefill = {
-      client_name:     o.client_name,
-      client_phone:    o.client_phone,
-      client_email:    o.client_email || null,
-      client_telegram: o.client_telegram || null,
-    };
+    // Check model availability
+    let modelId   = null;
+    let modelName = null;
     if (o.model_id) {
       const m = await get('SELECT id,name,available FROM models WHERE id=?', [o.model_id]).catch(()=>null);
       if (m?.available) {
-        prefill.model_id   = m.id;
-        prefill.model_name = m.name;
+        modelId   = m.id;
+        modelName = m.name;
       }
     }
 
-    await setSession(chatId, 'bk_s1', prefill);
-    await safeSend(chatId,
-      `🔁 *Повторная заявка*\n\nКонтактные данные предзаполнены из предыдущей заявки\\.`,
-      { parse_mode: 'MarkdownV2' }
-    );
-    return bkStep2EventType(chatId, prefill);
+    // Pre-fill session with all data from original order
+    const prefill = {
+      repeat_from:     orderId,
+      client_name:     o.client_name,
+      client_phone:    o.client_phone,
+      client_email:    o.client_email    || null,
+      client_telegram: o.client_telegram || null,
+      event_type:      o.event_type      || null,
+      event_duration:  o.event_duration  || null,
+      location:        o.location        || null,
+      budget:          o.budget          || null,
+      comments:        o.comments        || null,
+      model_id:        modelId,
+      model_name:      modelName,
+    };
+
+    await setSession(chatId, 'bk_repeat_confirm', prefill);
+
+    // Build summary message
+    const eventLabel = prefill.event_type
+      ? (EVENT_TYPES[prefill.event_type] || prefill.event_type)
+      : '—';
+
+    let text = `🔁 *Повторити заявку?*\n\n`;
+    text += `👤 Ім'я: ${esc(prefill.client_name || '—')}\n`;
+    text += `📱 Телефон: ${esc(prefill.client_phone || '—')}\n`;
+    if (prefill.client_email)   text += `📧 Email: ${esc(prefill.client_email)}\n`;
+    text += `\n`;
+    text += `🎭 Тип події: ${esc(eventLabel)}\n`;
+    if (prefill.event_duration) text += `⏱ Тривалість: ${esc(String(prefill.event_duration))} год\\.\n`;
+    if (prefill.location)       text += `📍 Місце: ${esc(prefill.location)}\n`;
+    if (prefill.budget)         text += `💰 Бюджет: ${esc(prefill.budget)}\n`;
+    if (prefill.model_name)     text += `💃 Модель: ${esc(prefill.model_name)}\n`;
+    text += `\n_Нову заявку буде створено зі статусом «нова»\\._`;
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '✅ Підтвердити',  callback_data: 'bk_repeat_confirm' }],
+        [{ text: '❌ Скасувати',    callback_data: 'bk_repeat_cancel'  }],
+      ]}
+    });
   } catch (e) { console.error('[Bot] repeatOrder:', e.message); }
+}
+
+async function bkRepeatSubmit(chatId, d, tgUsername) {
+  try {
+    // Check active orders limit
+    const maxActive = parseInt(await getSetting('client_max_active_orders').catch(() => '10')) || 10;
+    const activeCountRow = await get(
+      "SELECT COUNT(*) as cnt FROM orders WHERE client_chat_id=? AND status NOT IN ('completed','cancelled')",
+      [String(chatId)]
+    ).catch(() => ({ cnt: 0 }));
+    if ((activeCountRow?.cnt || 0) >= maxActive) {
+      await clearSession(chatId);
+      return safeSend(chatId, '⚠️ *Перевищено ліміт активних заявок*\\.\nЗачекайте завершення поточних заявок\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📋 Мої заявки',   callback_data: 'my_orders'  }],
+          [{ text: '🏠 Головне меню', callback_data: 'main_menu'  }],
+        ]}
+      });
+    }
+
+    if (tgUsername && !d.client_telegram) d.client_telegram = tgUsername;
+
+    const orderNum = generateOrderNumber();
+    await run(
+      `INSERT INTO orders
+        (order_number,client_name,client_phone,client_email,client_telegram,
+         client_chat_id,model_id,event_type,event_date,event_duration,
+         location,budget,comments,status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'new')`,
+      [
+        orderNum,
+        d.client_name, d.client_phone,
+        d.client_email    || null,
+        d.client_telegram || null,
+        String(chatId),
+        d.model_id        || null,
+        d.event_type      || null,
+        null,                           // no date — user needs to clarify with manager
+        parseInt(d.event_duration) || 4,
+        d.location        || null,
+        d.budget          || null,
+        d.comments        || null,
+      ]
+    );
+    const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
+    await clearSession(chatId);
+
+    await safeSend(chatId,
+      `🎉 *Заявку прийнято\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер зв'яжеться з вами протягом 1 години для підтвердження\\.`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📋 Мої заявки',   callback_data: 'my_orders'  }],
+          [{ text: '🏠 Головне меню', callback_data: 'main_menu'  }],
+        ]}
+      }
+    );
+
+    if (order) {
+      notifyNewOrder(order);
+      if (mailer) {
+        if (order.client_email) {
+          mailer.sendOrderConfirmation(order.client_email, order).catch(e => console.error('[mailer] repeat order confirm:', e.message));
+        }
+        mailer.getAdminEmails().forEach(adminEmail => {
+          mailer.sendManagerNotification(adminEmail, order).catch(() => {});
+        });
+      }
+      try {
+        const { notifyCRM } = require('./services/crm');
+        notifyCRM('order.created', order, getSetting).catch(e => console.error('[CRM] repeat:', e.message));
+      } catch {}
+    }
+  } catch (e) {
+    console.error('[Bot] bkRepeatSubmit:', e.message);
+    await clearSession(chatId);
+    return safeSend(chatId, '❌ Помилка при створенні заявки\\. Спробуйте ще раз\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '🏠 Меню', callback_data: 'main_menu' }]] }
+    });
+  }
 }
 
 // ─── Редактировать профиль ────────────────────────────────────────────────────
