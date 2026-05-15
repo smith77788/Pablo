@@ -345,6 +345,51 @@
     }
     .status-flash { animation: statusFlash 0.8s ease-out; }
 
+    /* Days to event countdown */
+    .event-countdown {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      margin-top: 20px;
+      padding: 14px 18px;
+      background: rgba(201,169,110,0.07);
+      border: 1px solid rgba(201,169,110,0.2);
+    }
+    .event-countdown.visible { display: flex; }
+    .event-countdown .countdown-icon { font-size: 1.1rem; flex-shrink: 0; }
+    .event-countdown .countdown-text { font-size: 0.85rem; color: var(--text-muted); }
+    .event-countdown .countdown-days { color: var(--gold); font-weight: 600; }
+
+    /* Contact buttons */
+    .contact-buttons {
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .contact-buttons.visible { display: flex; }
+    .contact-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 20px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      letter-spacing: 0.3px;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      color: var(--text-muted);
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+    }
+    .contact-btn:hover { border-color: rgba(201,169,110,0.4); color: var(--text); }
+    .contact-btn.tg-btn:hover { border-color: rgba(41,182,246,0.4); }
+    .contact-btn.wa-btn:hover { border-color: rgba(76,175,80,0.4); }
+    .contact-btn.share-btn { border-style: dashed; }
+    .contact-btn-icon { font-size: 1rem; flex-shrink: 0; }
+
     /* Hint box */
     .status-hint {
       max-width: 560px;
@@ -482,6 +527,28 @@
             </div>
           </div>
 
+          <!-- Days-to-event countdown -->
+          <div class="event-countdown" id="eventCountdown">
+            <div class="countdown-icon">📅</div>
+            <div class="countdown-text">До события: <span class="countdown-days" id="countdownDays"></span></div>
+          </div>
+
+          <!-- Contact & share buttons -->
+          <div class="contact-buttons" id="contactButtons">
+            <a class="contact-btn tg-btn" id="tgBtn" href="#" target="_blank" rel="noopener">
+              <span class="contact-btn-icon">💬</span>
+              Написать менеджеру в Telegram
+            </a>
+            <a class="contact-btn wa-btn" id="waBtn" href="#" target="_blank" rel="noopener" style="display:none">
+              <span class="contact-btn-icon">📞</span>
+              Написать в WhatsApp
+            </a>
+            <button class="contact-btn share-btn" id="shareBtn" onclick="shareOrderLink()">
+              <span class="contact-btn-icon">🔗</span>
+              Поделиться ссылкой на статус заявки
+            </button>
+          </div>
+
           <!-- Actions -->
           <div class="order-actions">
             <a href="/booking.html" class="btn-outline" style="font-size:0.8rem;padding:12px 24px;">Новая заявка</a>
@@ -600,8 +667,11 @@
     // Disconnect previous WS
     if (_ws) { try { _ws.close(); } catch (_) {} _ws = null; }
     _wsOrderId = null;
+    _wsOrderNumber = null;
     if (_wsReconnectTimer) { clearTimeout(_wsReconnectTimer); _wsReconnectTimer = null; }
     document.getElementById('wsIndicator').classList.remove('visible');
+    _contactsLoaded = false;
+    _currentOrderNumberForShare = null;
 
     // Show skeleton
     hintEl.style.display = 'none';
@@ -709,35 +779,146 @@
         })
       : '—';
 
+    // Days-to-event countdown
+    const countdownEl = document.getElementById('eventCountdown');
+    const countdownDaysEl = document.getElementById('countdownDays');
+    if (order.event_date && (order.status === 'confirmed' || order.status === 'in_progress')) {
+      const days = Math.max(0, Math.floor((new Date(order.event_date) - Date.now()) / 86400000));
+      countdownDaysEl.textContent = days === 0 ? 'сегодня!' : days + ' ' + pluralDays(days);
+      countdownEl.classList.add('visible');
+    } else {
+      countdownEl.classList.remove('visible');
+    }
+
+    // Contact & share buttons
+    document.getElementById('contactButtons').classList.add('visible');
+    loadContactButtons(order.order_number);
+
     resultEl.classList.add('visible');
     resultEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     // Start WS real-time monitoring if order is active
     if (order.id && order.status !== 'completed' && order.status !== 'cancelled') {
-      connectWS(order.id);
+      connectWS(order.id, order.order_number);
       // Also start polling as fallback when WS is unavailable
       startStatusPolling(order.order_number);
     } else {
       // Disconnect any previous WS and stop polling
       if (_ws) { try { _ws.close(); } catch (_) {} _ws = null; }
       _wsOrderId = null;
+      _wsOrderNumber = null;
       document.getElementById('wsIndicator').classList.remove('visible');
       stopStatusPolling();
     }
   }
 
+  function pluralDays(n) {
+    const abs = Math.abs(n) % 100;
+    const mod10 = abs % 10;
+    if (abs > 10 && abs < 20) return 'дней';
+    if (mod10 === 1) return 'день';
+    if (mod10 >= 2 && mod10 <= 4) return 'дня';
+    return 'дней';
+  }
+
+  // ─── Load contact buttons from settings ─────────────────────────────────────
+  let _contactsLoaded = false;
+  let _currentOrderNumberForShare = null;
+
+  async function loadContactButtons(orderNumber) {
+    _currentOrderNumberForShare = orderNumber;
+
+    if (_contactsLoaded) return; // already populated
+
+    try {
+      const [settingsRes, configRes] = await Promise.all([
+        fetch('/api/settings/public'),
+        fetch('/api/config'),
+      ]);
+      const settings = settingsRes.ok ? await settingsRes.json() : {};
+      const config   = configRes.ok   ? await configRes.json()   : {};
+
+      const botUsername  = config.bot_username  || settings.bot_username  || '';
+      const whatsapp     = settings.contacts_whatsapp || '';
+
+      const tgBtn = document.getElementById('tgBtn');
+      if (botUsername) {
+        tgBtn.href = `https://t.me/${botUsername.replace(/^@/, '')}`;
+      } else {
+        tgBtn.href = 'https://t.me/nevesty_models';
+      }
+
+      const waBtn = document.getElementById('waBtn');
+      if (whatsapp) {
+        const waNum = whatsapp.replace(/\D/g, '');
+        waBtn.href = `https://wa.me/${waNum}`;
+        waBtn.style.display = '';
+      }
+
+      _contactsLoaded = true;
+    } catch (_) {
+      // fallback: keep default href
+      document.getElementById('tgBtn').href = 'https://t.me/nevesty_models';
+    }
+  }
+
+  // ─── Share order status link ─────────────────────────────────────────────────
+  function shareOrderLink() {
+    const orderNum = _currentOrderNumberForShare;
+    if (!orderNum) return;
+    const shareUrl = `${location.origin}/order-status.html?order=${encodeURIComponent(orderNum)}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        showToast('Ссылка скопирована в буфер обмена');
+      }).catch(() => fallbackCopy(shareUrl));
+    } else {
+      fallbackCopy(shareUrl);
+    }
+  }
+
+  function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    try {
+      document.execCommand('copy');
+      showToast('Ссылка скопирована в буфер обмена');
+    } catch (_) {
+      showToast('Не удалось скопировать — ' + text);
+    }
+    document.body.removeChild(ta);
+  }
+
+  function showToast(msg) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = msg;
+    container.appendChild(toast);
+    requestAnimationFrame(() => { toast.classList.add('show'); });
+    setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
   // ─── WebSocket real-time monitoring ─────────────────────────────────────────
   let _wsOrderId = null;
+  let _wsOrderNumber = null;
   let _ws = null;
   let _wsReconnectTimer = null;
 
-  function connectWS(orderId) {
+  function connectWS(orderId, orderNumber) {
     _wsOrderId = orderId;
+    _wsOrderNumber = orderNumber;
     if (_ws) { try { _ws.close(); } catch (_) {} }
     if (_wsReconnectTimer) { clearTimeout(_wsReconnectTimer); _wsReconnectTimer = null; }
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    _ws = new WebSocket(`${proto}//${location.host}`);
+    _ws = new WebSocket(`${proto}//${location.host}/ws`);
 
     _ws.onopen = () => {
       _ws.send(JSON.stringify({ type: 'subscribe', order_id: orderId }));
@@ -748,14 +929,16 @@
         const msg = JSON.parse(e.data);
         if (msg.type === 'subscribed') {
           document.getElementById('wsIndicator').classList.add('visible');
-        } else if (msg.type === 'order_update' && msg.order_id === _wsOrderId) {
+        } else if (msg.type === 'order_update' &&
+            (msg.order_id === _wsOrderId || msg.order_number === _wsOrderNumber)) {
           // Animate badge flash
           const badge = document.getElementById('resStatusBadge');
           badge.classList.remove('status-flash');
           void badge.offsetWidth; // reflow
           badge.classList.add('status-flash');
           // Re-render status
-          updateStatusDisplay(msg.status);
+          const newStatus = msg.status || msg.new_status;
+          if (newStatus) updateStatusDisplay(newStatus);
         } else if (msg.type === 'ping') {
           _ws.send(JSON.stringify({ type: 'pong' }));
         }
@@ -765,7 +948,7 @@
     _ws.onclose = () => {
       document.getElementById('wsIndicator').classList.remove('visible');
       if (_wsOrderId) {
-        _wsReconnectTimer = setTimeout(() => connectWS(_wsOrderId), 3000);
+        _wsReconnectTimer = setTimeout(() => connectWS(_wsOrderId, _wsOrderNumber), 3000);
       }
     };
 
@@ -845,7 +1028,7 @@
   // Check from URL query param on load
   window.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
-    const num = params.get('number') || params.get('n');
+    const num = params.get('order') || params.get('number') || params.get('n');
     if (num) {
       document.getElementById('orderInput').value = num.toUpperCase();
       checkOrderStatus();
