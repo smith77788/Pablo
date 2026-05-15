@@ -1050,6 +1050,7 @@ async function loadSettings() {
       'booking_min_budget', 'booking_confirm_msg', 'booking_thanks_text',
       'catalog_per_page', 'cities_list',
       'reviews_min_completed', 'reviews_prompt_text',
+      'faq_items',
     ];
     textFields.forEach(key => {
       const el = document.getElementById(key);
@@ -1526,6 +1527,52 @@ loadSettings = async function() {
     onPaymentProviderChange();
   } catch {}
 };
+
+/* ─── Save: FAQ ───────────────────────────────────────────── */
+async function saveFaq(btn) {
+  const el = document.getElementById('faq_items');
+  const status = document.getElementById('faqJsonStatus');
+  if (!el) return;
+  try {
+    JSON.parse(el.value || '[]'); // validate JSON
+  } catch(e) {
+    if (status) { status.textContent = '✗ Ошибка JSON: ' + e.message; status.style.color = 'var(--error)'; }
+    _admin.toast('Некорректный JSON', 'error');
+    return;
+  }
+  startSave(btn);
+  if (status) status.textContent = '';
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ faq_items: el.value })
+    });
+    _admin.toast('FAQ сохранён', 'success');
+    if (status) { status.textContent = '✓ Сохранено'; status.style.color = 'var(--success, #4caf50)'; }
+    setTimeout(function() { if (status) status.textContent = ''; }, 3000);
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
+}
+
+function validateFaqJson() {
+  const el = document.getElementById('faq_items');
+  const status = document.getElementById('faqJsonStatus');
+  if (!el || !status) return;
+  try {
+    const items = JSON.parse(el.value || '[]');
+    if (!Array.isArray(items)) throw new Error('Ожидается массив []');
+    items.forEach(function(item, i) {
+      if (typeof item.q !== 'string' || !item.q.trim()) throw new Error('Элемент ' + i + ': поле "q" обязательно');
+      if (typeof item.a !== 'string' || !item.a.trim()) throw new Error('Элемент ' + i + ': поле "a" обязательно');
+    });
+    status.textContent = '✓ JSON корректен, ' + items.length + ' элементов';
+    status.style.color = 'var(--success, #4caf50)';
+  } catch(e) {
+    status.textContent = '✗ ' + e.message;
+    status.style.color = 'var(--error)';
+  }
+  setTimeout(function() { if (status) status.textContent = ''; }, 4000);
+}
 
 /* ─── Init ────────────────────────────────────────────────── */
 loadSettings();
