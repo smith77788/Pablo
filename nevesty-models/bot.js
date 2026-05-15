@@ -6424,7 +6424,7 @@ function initBot(app) {
     }
 
     // ── Отзывы (публичные)
-    if (data === 'show_reviews' || data === 'cat_rev') return showPublicReviews(chatId, 0);
+    if (data === 'show_reviews' || data === 'cat_rev' || data === 'cat_reviews') return showPublicReviews(chatId, 0);
     if (data.startsWith('show_reviews_')) {
       const page = parseInt(data.replace('show_reviews_', '')) || 0;
       return showPublicReviews(chatId, page);
@@ -6441,6 +6441,9 @@ function initBot(app) {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
       });
+    }
+    if (data === 'leave_review') {
+      return startLeaveReview(chatId, 0);
     }
     if (data.startsWith('leave_review_')) {
       const orderId = parseInt(data.replace('leave_review_', ''));
