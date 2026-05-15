@@ -107,20 +107,72 @@ async function sendEventReminders() {
 
 async function checkFactoryStaleness() {
   try {
+    const fs = require('fs');
     const { get } = require('../database');
-    const row = await get("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'", []);
-    if (!row?.value) return;
-    const lastRun = new Date(row.value);
+
+    // Primary: check factory/.last_run file (written by cycle.py)
+    const lastRunFile = require('path').join(__dirname, '../../factory/.last_run');
+    let lastRun = null;
+
+    if (fs.existsSync(lastRunFile)) {
+      try {
+        const ts = fs.readFileSync(lastRunFile, 'utf8').trim();
+        lastRun = new Date(ts);
+        if (isNaN(lastRun.getTime())) lastRun = null;
+      } catch (_) {}
+    }
+
+    // Fallback: check bot_settings DB record
+    if (!lastRun) {
+      const row = await get("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'", []);
+      if (row?.value) lastRun = new Date(row.value);
+    }
+
+    if (!lastRun) return;
+
     const hoursSince = (Date.now() - lastRun.getTime()) / (1000 * 60 * 60);
     if (hoursSince > 12) {
       const h = Math.round(hoursSince);
-      const lastStr = row.value.slice(0, 16).replace('T', ' ');
+      const lastStr = lastRun.toISOString().slice(0, 16).replace('T', ' ');
       const msg = `⚠️ Factory Alert: последний цикл был ${h}ч назад (${lastStr}). Проверьте factory/cycle.py`;
       console.warn(`[scheduler] ${msg}`);
       _notify(msg);
     }
   } catch (e) {
     console.error('[scheduler] checkFactoryStaleness error:', e.message);
+  }
+}
+
+// ─── Bot watchdog: check every 5 minutes ─────────────────────────────────────
+let _botDownSince = null;
+let _botAlertSent = false;
+
+async function checkBotHealth() {
+  if (!_bot) return; // bot not configured
+  try {
+    await _bot.getMe();
+    // Bot is responsive — reset watchdog
+    if (_botDownSince !== null) {
+      const downMin = Math.round((Date.now() - _botDownSince) / 60000);
+      console.log(`[scheduler] Bot recovered after ${downMin} min downtime`);
+      _notify(`✅ Telegram бот восстановился после ${downMin} хв простою`);
+    }
+    _botDownSince = null;
+    _botAlertSent = false;
+  } catch (e) {
+    if (_botDownSince === null) {
+      _botDownSince = Date.now();
+      _botAlertSent = false;
+      console.warn('[scheduler] Bot getMe() failed — watchdog started:', e.message);
+    } else {
+      const downMin = (Date.now() - _botDownSince) / 60000;
+      if (downMin >= 5 && !_botAlertSent) {
+        _botAlertSent = true;
+        const msg = `🚨 Telegram бот недоступний > 5 хвилин! Перевірте polling. Помилка: ${e.message}`;
+        console.error(`[scheduler] ${msg}`);
+        _notify(msg);
+      }
+    }
   }
 }
 
@@ -199,13 +251,28 @@ function scheduleEvery(fn, name, intervalHours) {
   console.log(`[scheduler] ${name} scheduled every ${intervalHours}h`);
 }
 
+// Schedule a task every N minutes
+function scheduleEveryMinutes(fn, name, intervalMinutes) {
+  const intervalMs = intervalMinutes * 60 * 1000;
+  const timer = setInterval(() => {
+    fn();
+  }, intervalMs);
+  if (timer.unref) timer.unref();
+  _intervals.push(timer);
+  console.log(`[scheduler] ${name} scheduled every ${intervalMinutes}min`);
+}
+
 function start() {
   scheduleDaily(runBackup, 'DB backup', 1, 0);
   scheduleWeekly(runVacuum, 'SQLite VACUUM + WAL TRUNCATE', 0, 3, 0); // Sunday 03:00
   scheduleEvery(runWalCheckpoint, 'WAL checkpoint (PASSIVE)', 6);
   scheduleDaily(sendEventReminders, 'Event reminders', 9, 0);
   scheduleEvery(checkFactoryStaleness, 'Factory staleness check', 6);
-  console.log('[scheduler] Started: backup (daily 01:00), VACUUM (Sunday 03:00), WAL checkpoint (every 6h), event reminders (daily 09:00), factory staleness check (every 6h)');
+  // Additional 30-min factory staleness check (faster detection)
+  scheduleEveryMinutes(checkFactoryStaleness, 'Factory staleness check (30min)', 30);
+  // Bot watchdog: check bot polling every 5 minutes
+  scheduleEveryMinutes(checkBotHealth, 'Bot watchdog', 5);
+  console.log('[scheduler] Started: backup (daily 01:00), VACUUM (Sunday 03:00), WAL checkpoint (every 6h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min)');
 }
 
 function stop() {

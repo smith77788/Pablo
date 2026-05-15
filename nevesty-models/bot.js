@@ -297,6 +297,7 @@ const showAdminStats        = _adminHandlers.showAdminStats;
 const showAdminModels       = _adminHandlers.showAdminModels;
 const showAdminOrders       = _adminHandlers.showAdminOrders;
 const showAdminOrdersToday  = _adminHandlers.showAdminOrdersToday;
+const showAdminReviewsPanel = _adminHandlers.showAdminReviews;
 
 // ─── Keyboards ────────────────────────────────────────────────────────────────
 
@@ -5611,10 +5612,18 @@ function initBot(app) {
       if (!sd.broadcast_photo_id) return safeSend(chatId, '❌ Фото не найдено. Попробуйте заново.');
       return sendBroadcastWithPhoto(chatId, sd.broadcast_photo_id, '');
     }
-    if (data === 'adm_reviews')          { if (!isAdmin(chatId)) return; return showAdminReviews(chatId); }
-    if (data === 'adm_reviews_pending'  || data === 'adm_rev_pending')  { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'pending'); }
-    if (data === 'adm_reviews_approved' || data === 'adm_rev_approved') { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'approved'); }
-    if (data === 'adm_rev_all') { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'all'); }
+    if (data === 'adm_reviews')          { if (!isAdmin(chatId)) return; return showAdminReviewsPanel(chatId, 'pending', 0); }
+    if (data === 'adm_reviews_pending'  || data === 'adm_rev_pending')  { if (!isAdmin(chatId)) return; return showAdminReviewsPanel(chatId, 'pending', 0); }
+    if (data === 'adm_reviews_approved' || data === 'adm_rev_approved') { if (!isAdmin(chatId)) return; return showAdminReviewsPanel(chatId, 'approved', 0); }
+    if (data === 'adm_rev_all') { if (!isAdmin(chatId)) return; return showAdminReviewsPanel(chatId, 'all', 0); }
+    if (data.startsWith('adm_rev_p_')) {
+      if (!isAdmin(chatId)) return;
+      // Format: adm_rev_p_{filter}_{page}
+      const parts = data.replace('adm_rev_p_', '').split('_');
+      const revPage = parseInt(parts[parts.length - 1]) || 0;
+      const revFilter = parts.slice(0, parts.length - 1).join('_') || 'all';
+      return showAdminReviewsPanel(chatId, revFilter, revPage);
+    }
     if (data.startsWith('rev_view_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_view_', ''));
@@ -5659,13 +5668,13 @@ function initBot(app) {
           }
         }
       } catch {}
-      return showAdminReviewsList(chatId, 'pending');
+      return showAdminReviewsPanel(chatId, 'pending', 0);
     }
     if (data.startsWith('rev_reject_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_reject_', ''));
       await run("UPDATE reviews SET approved=0, status='rejected' WHERE id=?", [id]).catch(()=>{});
-      await bot.answerCallbackQuery(q.id, { text: '❌ Отзыв отклонён' }).catch(()=>{});
+      await bot.answerCallbackQuery(q.id, { text: '❌ Отклонено' }).catch(()=>{});
       // Notify client if linked to an order
       try {
         const rev = await get('SELECT * FROM reviews WHERE id=?', [id]);
@@ -5676,14 +5685,14 @@ function initBot(app) {
           }
         }
       } catch {}
-      return showAdminReviewsList(chatId, 'pending');
+      return showAdminReviewsPanel(chatId, 'pending', 0);
     }
     if (data.startsWith('rev_delete_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_delete_', ''));
       await run('DELETE FROM reviews WHERE id=?', [id]).catch(()=>{});
-      await bot.answerCallbackQuery(q.id, { text: '🗑 Отзыв удалён' }).catch(()=>{});
-      return showAdminReviewsList(chatId, 'all');
+      await bot.answerCallbackQuery(q.id, { text: '🗑️ Удалён' }).catch(()=>{});
+      return showAdminReviewsPanel(chatId, 'all', 0);
     }
     if (data === 'adm_admins')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminManagement(chatId); }
     if (data === 'adm_export')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showExportMenu(chatId); }
@@ -8388,7 +8397,7 @@ async function showAdminExperiments(chatId) {
 
 // ─── Admin Reviews ────────────────────────────────────────────────────────────
 
-async function showAdminReviews(chatId) {
+async function _showAdminReviews(chatId) {
   if (!isAdmin(chatId)) return;
   try {
     const [pendingCount, approvedCount, totalCount] = await Promise.all([
@@ -8411,7 +8420,7 @@ async function showAdminReviews(chatId) {
   } catch (e) { console.error('[Bot] showAdminReviews:', e.message); }
 }
 
-async function showAdminReviewsList(chatId, filter) {
+async function _showAdminReviewsList(chatId, filter) {
   if (!isAdmin(chatId)) return;
   try {
     let reviews;

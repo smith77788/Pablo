@@ -494,9 +494,23 @@ async function buildHealthResponse() {
   }
 
   try {
-    const row = await dbGet("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'");
-    if (row?.value) {
-      factoryLastCycle = row.value;
+    // Primary: read factory/.last_run file written by cycle.py
+    const factoryLastRunFile = require('path').join(__dirname, '../factory/.last_run');
+    if (require('fs').existsSync(factoryLastRunFile)) {
+      try {
+        const ts = require('fs').readFileSync(factoryLastRunFile, 'utf8').trim();
+        const d = new Date(ts);
+        if (!isNaN(d.getTime())) factoryLastCycle = d.toISOString();
+      } catch (_) {}
+    }
+
+    // Fallback: check bot_settings DB record
+    if (!factoryLastCycle) {
+      const row = await dbGet("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'");
+      if (row?.value) factoryLastCycle = row.value;
+    }
+
+    if (factoryLastCycle) {
       const lastRunDate = new Date(factoryLastCycle);
       factoryHoursSince = Math.round((Date.now() - lastRunDate.getTime()) / (1000 * 60 * 60) * 10) / 10;
       factoryStale = factoryHoursSince > 12;
@@ -580,9 +594,16 @@ async function buildHealthResponse() {
       factory_last_cycle: factoryLastCycle,
       cache: cacheStats,
     },
+    // Structured bot health (matches task spec)
+    botHealth: {
+      status: botInstance ? 'ok' : 'disabled',
+      polling: botInstance ? true : false,
+    },
     factory: {
+      lastRun: factoryLastCycle,
       last_run: factoryLastCycle,
       hours_since_run: factoryHoursSince,
+      staleSinceHours: factoryStale ? factoryHoursSince : 0,
       stale: factoryStale,
       status: factoryLastCycle === null ? 'never_run' : factoryStale ? 'stale' : 'ok',
     },

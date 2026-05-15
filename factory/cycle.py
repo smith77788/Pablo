@@ -2980,4 +2980,13 @@ def run_cycle() -> dict:
     except Exception as _e_lr:
         logger.warning("[LastRun] Failed to write factory_last_cycle: %s", _e_lr)
 
+    # ─── Write .last_run file for monitoring ──────────────────────────────────
+    try:
+        import pathlib as _pathlib
+        _last_run_path = _pathlib.Path(__file__).parent / '.last_run'
+        _last_run_path.write_text(datetime.now(timezone.utc).isoformat(), encoding='utf-8')
+        logger.info("[LastRun] .last_run file updated: %s", _last_run_path)
+    except Exception as _e_file:
+        logger.warning("[LastRun] Failed to write .last_run file: %s", _e_file)
+
     return results

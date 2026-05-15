@@ -366,4 +366,103 @@ async function showAdminOrdersToday(chatId) {
   } catch (e) { console.error('[Bot] showAdminOrdersToday:', e.message); }
 }
 
-module.exports = { init, showAdminStats, showAdminModels, showAdminOrders, showAdminOrdersToday };
+// ─── Admin Reviews Management ─────────────────────────────────────────────────
+
+/**
+ * showAdminReviews(chatId, filter='pending', page=0)
+ * Displays paginated list of reviews with approve/reject/delete controls.
+ *
+ * Filter values: 'pending' | 'approved' | 'all'
+ * Reviews table: id, order_id, client_chat_id, model_id, rating, text, approved, created_at
+ */
+async function showAdminReviews(chatId, filter = 'pending', page = 0) {
+  if (!isAdmin(chatId)) return;
+  page = parseInt(page) || 0;
+
+  const PER_PAGE = 5;
+
+  try {
+    // Build SQL based on filter — handle missing table gracefully
+    let whereClause;
+    if (filter === 'pending') {
+      whereClause = "WHERE r.approved=0 AND (r.status IS NULL OR r.status != 'rejected')";
+    } else if (filter === 'approved') {
+      whereClause = 'WHERE r.approved=1';
+    } else {
+      whereClause = '';
+    }
+
+    // Count total for pagination
+    const countSql = `SELECT COUNT(*) as n FROM reviews r ${whereClause}`;
+    const countRow = await get(countSql).catch(() => ({ n: 0 }));
+    const total = countRow?.n || 0;
+
+    // Fetch page slice
+    const rows = await query(
+      `SELECT r.*, m.name as model_name
+       FROM reviews r
+       LEFT JOIN models m ON r.model_id = m.id
+       ${whereClause}
+       ORDER BY r.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [PER_PAGE, page * PER_PAGE]
+    ).catch(() => []);
+
+    // Filter tab buttons
+    const filterBtns = [
+      { text: filter === 'pending'  ? '⏳ Ожидают ✓' : '⏳ Ожидают',  callback_data: 'adm_rev_pending'  },
+      { text: filter === 'approved' ? '✅ Одобренные ✓' : '✅ Одобренные', callback_data: 'adm_rev_approved' },
+      { text: filter === 'all'      ? '📋 Все ✓' : '📋 Все',           callback_data: 'adm_rev_all'      },
+    ];
+
+    if (!rows.length) {
+      return safeSend(chatId, 'Нет отзывов для показа', {
+        reply_markup: { inline_keyboard: [filterBtns, [{ text: '← Меню', callback_data: 'admin_menu' }]] }
+      });
+    }
+
+    // Build single combined message with all reviews on this page
+    let text = `⭐ *Отзывы* — ${esc(filter === 'pending' ? 'ожидают' : filter === 'approved' ? 'одобренные' : 'все')} \\(${esc(String(total))}\\)\n\n`;
+
+    const keyboard = [];
+    keyboard.push(filterBtns);
+
+    for (const r of rows) {
+      const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 1)));
+      const preview = r.text ? r.text.slice(0, 150) + (r.text.length > 150 ? '…' : '') : '—';
+      const statusIcon = r.approved ? '✅' : (r.status === 'rejected' ? '❌' : '⏳');
+      const modelInfo = r.model_name ? ` \\| Модель: ${esc(r.model_name)}` : '';
+      text += `${statusIcon} *\\#${esc(String(r.id))}* ${stars}${modelInfo}\n`;
+      text += `👤 Клиент: \`${esc(String(r.client_chat_id || '—'))}\`\n`;
+      text += `_${esc(preview)}_\n\n`;
+
+      keyboard.push([
+        { text: '✅ Одобрить',  callback_data: `rev_approve_${r.id}` },
+        { text: '❌ Отклонить', callback_data: `rev_reject_${r.id}`  },
+        { text: '🗑️ Удалить',  callback_data: `rev_delete_${r.id}`  },
+      ]);
+    }
+
+    // Pagination nav
+    const totalPages = Math.ceil(total / PER_PAGE);
+    const nav = [];
+    if (page > 0)              nav.push({ text: '◀️ Назад', callback_data: `adm_rev_p_${filter}_${page - 1}` });
+    if ((page + 1) < totalPages) nav.push({ text: 'Вперёд ▶️', callback_data: `adm_rev_p_${filter}_${page + 1}` });
+    if (nav.length) keyboard.push(nav);
+
+    keyboard.push([{ text: '← Меню', callback_data: 'admin_menu' }]);
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: keyboard },
+    });
+  } catch (e) {
+    console.error('[Bot] showAdminReviews:', e.message);
+    // Gracefully handle missing reviews table
+    return safeSend(chatId, 'Нет отзывов для показа', {
+      reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+    });
+  }
+}
+
+module.exports = { init, showAdminStats, showAdminModels, showAdminOrders, showAdminOrdersToday, showAdminReviews };
