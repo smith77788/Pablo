@@ -1,224 +1,293 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru" class="dark">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>404 — Страница не найдена | Nevesty Models</title>
-  <meta name="description" content="Страница не найдена. Возможно, страница была удалена или вы перешли по неверной ссылке.">
-  <meta name="robots" content="noindex, nofollow">
-  <meta property="og:title" content="404 — Страница не найдена | Nevesty Models">
-  <meta property="og:description" content="Страница не найдена. Возможно, страница была удалена или вы перешли по неверной ссылке.">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
-  <meta property="og:url" content="https://nevesty-models.ru/404.html">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="404 — Страница не найдена | Nevesty Models">
-  <meta name="twitter:description" content="Страница не найдена. Возможно, страница была удалена или вы перешли по неверной ссылке.">
-  <meta name="theme-color" content="#080808">
-  <meta name="color-scheme" content="dark">
-  <link rel="canonical" href="https://nevesty-models.ru/404.html">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="/css/main.css" />
-  <!-- Google Analytics 4 (loads only if consent given) -->
-  <script>
-    window._ga_id = ''; // loaded from API
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ga_measurement_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      window._ga_id = d.ga_measurement_id;
-      var s = document.createElement('script');
-      s.async = true;
-      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
-      document.head.appendChild(s);
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      window.gtag = gtag;
-      gtag('js', new Date());
-      gtag('config', d.ga_measurement_id, { 'send_page_view': true });
-      window._ga_ready = true;
-    }).catch(()=>{});
-  </script>
-  <!-- Analytics wrapper -->
-  <script src="/js/analytics.js"></script>
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-  <style>
-    .page-404 {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      padding: 40px 24px;
-      position: relative;
-      overflow: hidden;
-    }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>404 — Страница не найдена | Nevesty Models</title>
+    <meta
+      name="description"
+      content="Страница не найдена. Возможно, страница была удалена или вы перешли по неверной ссылке."
+    />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta property="og:title" content="404 — Страница не найдена | Nevesty Models" />
+    <meta
+      property="og:description"
+      content="Страница не найдена. Возможно, страница была удалена или вы перешли по неверной ссылке."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg" />
+    <meta property="og:url" content="https://nevesty-models.ru/404.html" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="404 — Страница не найдена | Nevesty Models" />
+    <meta
+      name="twitter:description"
+      content="Страница не найдена. Возможно, страница была удалена или вы перешли по неверной ссылке."
+    />
+    <meta name="theme-color" content="#080808" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="canonical" href="https://nevesty-models.ru/404.html" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="/css/main.css" />
+    <!-- Google Analytics 4 (loads only if consent given) -->
+    <script>
+      window._ga_id = ''; // loaded from API
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ga_measurement_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          window._ga_id = d.ga_measurement_id;
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+          function gtag() {
+            dataLayer.push(arguments);
+          }
+          window.gtag = gtag;
+          gtag('js', new Date());
+          gtag('config', d.ga_measurement_id, { send_page_view: true });
+          window._ga_ready = true;
+        })
+        .catch(() => {});
+    </script>
+    <!-- Analytics wrapper -->
+    <script src="/js/analytics.js"></script>
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+    <style>
+      .page-404 {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 40px 24px;
+        position: relative;
+        overflow: hidden;
+      }
 
-    .page-404::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(201,169,110,0.06) 0%, transparent 70%);
-      pointer-events: none;
-    }
+      .page-404::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(201, 169, 110, 0.06) 0%, transparent 70%);
+        pointer-events: none;
+      }
 
-    .err-code {
-      font-size: clamp(7rem, 22vw, 16rem);
-      font-weight: 900;
-      line-height: 1;
-      background: linear-gradient(135deg, #C9A96E 0%, #e8d5a3 40%, #C9A96E 65%, #9a7840 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      user-select: none;
-      letter-spacing: -0.03em;
-      margin-bottom: -16px;
-      animation: pulse404 3s ease-in-out infinite;
-    }
+      .err-code {
+        font-size: clamp(7rem, 22vw, 16rem);
+        font-weight: 900;
+        line-height: 1;
+        background: linear-gradient(135deg, #c9a96e 0%, #e8d5a3 40%, #c9a96e 65%, #9a7840 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        user-select: none;
+        letter-spacing: -0.03em;
+        margin-bottom: -16px;
+        animation: pulse404 3s ease-in-out infinite;
+      }
 
-    @keyframes pulse404 {
-      0%, 100% { opacity: 1; filter: drop-shadow(0 0 24px rgba(201,169,110,0.28)); }
-      50%       { opacity: 0.82; filter: drop-shadow(0 0 48px rgba(201,169,110,0.52)); }
-    }
+      @keyframes pulse404 {
+        0%,
+        100% {
+          opacity: 1;
+          filter: drop-shadow(0 0 24px rgba(201, 169, 110, 0.28));
+        }
+        50% {
+          opacity: 0.82;
+          filter: drop-shadow(0 0 48px rgba(201, 169, 110, 0.52));
+        }
+      }
 
-    .err-divider {
-      width: 60px;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, var(--gold), transparent);
-      margin: 0 auto 28px;
-    }
+      .err-divider {
+        width: 60px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--gold), transparent);
+        margin: 0 auto 28px;
+      }
 
-    .err-label {
-      font-size: 0.7rem;
-      letter-spacing: 4px;
-      text-transform: uppercase;
-      color: var(--gold);
-      margin-bottom: 16px;
-    }
+      .err-label {
+        font-size: 0.7rem;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 16px;
+      }
 
-    .err-title {
-      font-size: clamp(1.6rem, 4vw, 2.4rem);
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 16px;
-    }
+      .err-title {
+        font-size: clamp(1.6rem, 4vw, 2.4rem);
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 16px;
+      }
 
-    .err-desc {
-      color: var(--text-muted);
-      font-size: 0.95rem;
-      max-width: 440px;
-      line-height: 1.7;
-      margin-bottom: 40px;
-    }
+      .err-desc {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        max-width: 440px;
+        line-height: 1.7;
+        margin-bottom: 40px;
+      }
 
-    .err-actions {
-      display: flex;
-      gap: 14px;
-      flex-wrap: wrap;
-      justify-content: center;
-      margin-bottom: 32px;
-    }
+      .err-actions {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-bottom: 32px;
+      }
 
-    .err-back {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 11px 24px;
-      background: transparent;
-      border: 1px solid rgba(201,169,110,0.35);
-      border-radius: 8px;
-      color: var(--gold);
-      font-size: 0.875rem;
-      font-family: inherit;
-      cursor: pointer;
-      text-decoration: none;
-      transition: background 0.2s, border-color 0.2s;
-    }
-    .err-back:hover {
-      background: rgba(201,169,110,0.1);
-      border-color: var(--gold);
-    }
-    .err-back svg {
-      width: 15px;
-      height: 15px;
-      flex-shrink: 0;
-    }
+      .err-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 11px 24px;
+        background: transparent;
+        border: 1px solid rgba(201, 169, 110, 0.35);
+        border-radius: 8px;
+        color: var(--gold);
+        font-size: 0.875rem;
+        font-family: inherit;
+        cursor: pointer;
+        text-decoration: none;
+        transition:
+          background 0.2s,
+          border-color 0.2s;
+      }
+      .err-back:hover {
+        background: rgba(201, 169, 110, 0.1);
+        border-color: var(--gold);
+      }
+      .err-back svg {
+        width: 15px;
+        height: 15px;
+        flex-shrink: 0;
+      }
 
-    .err-corner {
-      position: absolute;
-      width: 80px;
-      height: 80px;
-      border-color: rgba(201,169,110,0.12);
-      border-style: solid;
-    }
-    .err-corner-tl { top: 32px; left: 32px; border-width: 1px 0 0 1px; }
-    .err-corner-tr { top: 32px; right: 32px; border-width: 1px 1px 0 0; }
-    .err-corner-bl { bottom: 32px; left: 32px; border-width: 0 0 1px 1px; }
-    .err-corner-br { bottom: 32px; right: 32px; border-width: 0 1px 1px 0; }
+      .err-corner {
+        position: absolute;
+        width: 80px;
+        height: 80px;
+        border-color: rgba(201, 169, 110, 0.12);
+        border-style: solid;
+      }
+      .err-corner-tl {
+        top: 32px;
+        left: 32px;
+        border-width: 1px 0 0 1px;
+      }
+      .err-corner-tr {
+        top: 32px;
+        right: 32px;
+        border-width: 1px 1px 0 0;
+      }
+      .err-corner-bl {
+        bottom: 32px;
+        left: 32px;
+        border-width: 0 0 1px 1px;
+      }
+      .err-corner-br {
+        bottom: 32px;
+        right: 32px;
+        border-width: 0 1px 1px 0;
+      }
 
-    @media (max-width: 480px) {
-      .err-corner { display: none; }
-      .err-actions { gap: 10px; }
-    }
-  </style>
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-  <nav class="navbar scrolled" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links">
-        <a href="/catalog.html">Модели</a>
-        <a href="/pricing.html">Цены</a>
-        <a href="/about.html">О нас</a>
-        <a href="/contact.html">Контакты</a>
-        <a href="/booking.html" class="btn-nav">Заказать</a>
+      @media (max-width: 480px) {
+        .err-corner {
+          display: none;
+        }
+        .err-actions {
+          gap: 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+    <nav class="navbar scrolled" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links">
+          <a href="/catalog.html">Модели</a>
+          <a href="/pricing.html">Цены</a>
+          <a href="/about.html">О нас</a>
+          <a href="/contact.html">Контакты</a>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
+        </div>
       </div>
-    </div>
-  </nav>
-
-  <main class="page-404" id="main-content" role="main">
-    <div class="err-corner err-corner-tl" aria-hidden="true"></div>
-    <div class="err-corner err-corner-tr" aria-hidden="true"></div>
-    <div class="err-corner err-corner-bl" aria-hidden="true"></div>
-    <div class="err-corner err-corner-br" aria-hidden="true"></div>
-
-    <div class="err-code" aria-label="Ошибка 404">404</div>
-    <div class="err-divider" aria-hidden="true"></div>
-    <div class="err-label" aria-hidden="true">Ошибка</div>
-    <h1 class="err-title">Страница не найдена</h1>
-    <p class="err-desc">
-      Возможно, страница была удалена или вы перешли по неверной ссылке.
-    </p>
-    <nav class="err-actions" aria-label="Полезные ссылки">
-      <a href="/catalog.html" class="btn-outline" style="padding:13px 28px;font-size:0.85rem">Каталог моделей</a>
-      <a href="/booking.html" class="btn-outline" style="padding:13px 28px;font-size:0.85rem">Бронирование</a>
-      <a href="/" class="btn-primary" style="padding:13px 28px;font-size:0.85rem">На главную</a>
     </nav>
-    <button class="err-back" onclick="history.length > 1 ? history.back() : (window.location.href = '/')" aria-label="Вернуться на предыдущую страницу">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <polyline points="15 18 9 12 15 6"/>
-      </svg>
-      Вернуться назад
-    </button>
-  </main>
-</body>
+
+    <main class="page-404" id="main-content" role="main" tabindex="-1">
+      <div class="err-corner err-corner-tl" aria-hidden="true"></div>
+      <div class="err-corner err-corner-tr" aria-hidden="true"></div>
+      <div class="err-corner err-corner-bl" aria-hidden="true"></div>
+      <div class="err-corner err-corner-br" aria-hidden="true"></div>
+
+      <div class="err-code" aria-label="Ошибка 404">404</div>
+      <div class="err-divider" aria-hidden="true"></div>
+      <div class="err-label" aria-hidden="true">Ошибка</div>
+      <h1 class="err-title">Страница не найдена</h1>
+      <p class="err-desc">Возможно, страница была удалена или вы перешли по неверной ссылке.</p>
+      <nav class="err-actions" aria-label="Полезные ссылки">
+        <a href="/catalog.html" class="btn-outline" style="padding: 13px 28px; font-size: 0.85rem">Каталог моделей</a>
+        <a href="/booking.html" class="btn-outline" style="padding: 13px 28px; font-size: 0.85rem">Бронирование</a>
+        <a href="/" class="btn-primary" style="padding: 13px 28px; font-size: 0.85rem">На главную</a>
+      </nav>
+      <button
+        class="err-back"
+        onclick="history.length > 1 ? history.back() : (window.location.href = '/')"
+        aria-label="Вернуться на предыдущую страницу"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+        Вернуться назад
+      </button>
+    </main>
+  </body>
 </html>

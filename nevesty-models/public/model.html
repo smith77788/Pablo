@@ -657,7 +657,7 @@
       <a href="/booking.html" style="color: var(--gold)">Заказать</a>
     </nav>
 
-    <div class="model-page" id="main-content" role="main">
+    <div class="model-page" id="main-content" role="main" tabindex="-1">
       <!-- SKELETON while loading -->
       <div id="skeletonView" aria-busy="true" aria-label="Загрузка профиля модели">
         <div class="skeleton-hero"></div>
@@ -1613,18 +1613,27 @@
 
         // ── lightbox ───────────────────────────────────────────────────────────────
         let _lbPhotos = [],
-          _lbIdx = 0;
+          _lbIdx = 0,
+          _lbTrigger = null;
         window.openLightbox = function (photos, idx) {
           _lbPhotos = Array.isArray(photos) ? photos : [photos];
           _lbIdx = idx || 0;
+          _lbTrigger = document.activeElement;
           updateLightboxImg();
           el('lightbox').style.display = 'flex';
           document.body.style.overflow = 'hidden';
+          // Move focus to close button for keyboard and screen reader users
+          const closeBtn = el('lightbox').querySelector('[aria-label="Закрыть"]');
+          if (closeBtn) setTimeout(() => closeBtn.focus(), 50);
         };
         function updateLightboxImg() {
-          el('lightboxImg').src = _lbPhotos[_lbIdx];
+          const img = el('lightboxImg');
+          img.src = _lbPhotos[_lbIdx];
           const counter = el('lightboxCounter');
-          if (counter) counter.textContent = _lbPhotos.length > 1 ? `${_lbIdx + 1} / ${_lbPhotos.length}` : '';
+          const total = _lbPhotos.length;
+          if (counter) counter.textContent = total > 1 ? `${_lbIdx + 1} / ${total}` : '';
+          // Update alt text with photo position for screen readers
+          img.alt = total > 1 ? `Фото модели ${_lbIdx + 1} из ${total}` : 'Фото модели';
         }
         window.prevPhoto = function () {
           _lbIdx = (_lbIdx - 1 + _lbPhotos.length) % _lbPhotos.length;
@@ -1637,6 +1646,10 @@
         window.closeLightbox = function () {
           el('lightbox').style.display = 'none';
           document.body.style.overflow = '';
+          // Restore focus to the element that triggered the lightbox
+          if (_lbTrigger && typeof _lbTrigger.focus === 'function') {
+            _lbTrigger.focus();
+          }
         };
         document.addEventListener('keydown', function (e) {
           if (e.key === 'Escape') window.closeLightbox();
