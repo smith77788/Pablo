@@ -3361,6 +3361,11 @@ function initBot(app) {
       const id = parseInt(data.replace('client_order_',''));
       return showClientOrder(chatId, id);
     }
+    if (data.startsWith('my_order_')) {
+      const id = parseInt(data.replace('my_order_', ''));
+      await bot.answerCallbackQuery(callbackQuery.id).catch(() => {});
+      return showClientOrder(chatId, id);
+    }
 
     // ── Pay order
     if (data.startsWith('pay_order_')) {
