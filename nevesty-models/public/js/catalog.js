@@ -355,7 +355,7 @@
 
           <div class="model-card-img" style="position:relative">
             ${m.photo_main
-              ? `<picture><source srcset="${escHtml(m.photo_main.replace(/\.(jpg|jpeg|png|gif)$/i, '.webp'))}" type="image/webp" /><img src="${escHtml(m.photo_main)}" alt="${escHtml(m.name)}" loading="lazy" /></picture>`
+              ? `<picture><source srcset="${escHtml(m.photo_main.replace(/\.(jpg|jpeg|png|gif)$/i, '.webp'))}" type="image/webp" /><img src="${escHtml(m.photo_main)}" alt="${escHtml(m.name)} — фото модели" loading="lazy" /></picture>`
               : `<div class="model-card-placeholder" aria-hidden="true">${escHtml(m.name[0])}</div>`}
             ${m.featured ? `<div style="position:absolute;top:8px;left:8px;background:var(--gold);color:#000;font-size:0.7rem;font-weight:700;padding:3px 8px;border-radius:10px;z-index:4;pointer-events:none">⭐ Топ</div>` : ''}
             <div class="model-card-overlay" aria-hidden="true">

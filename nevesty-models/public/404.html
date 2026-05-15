@@ -38,6 +38,20 @@
   </script>
   <!-- Analytics wrapper -->
   <script src="/js/analytics.js"></script>
+  <!-- Yandex.Metrica (loads only if consent given) -->
+  <script>
+    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
+      if (!d.ym_counter_id) return;
+      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+      m[i].l=1*new Date();
+      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
+      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
+      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
+    }).catch(()=>{});
+  </script>
+  <!-- /Yandex.Metrica -->
   <style>
     .page-404 {
       min-height: 100vh;
@@ -160,7 +174,8 @@
   </style>
 </head>
 <body>
-  <nav class="navbar scrolled">
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+  <nav class="navbar scrolled" role="navigation" aria-label="Главное меню">
     <div class="nav-inner">
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
       <div class="nav-links">
@@ -173,7 +188,7 @@
     </div>
   </nav>
 
-  <main class="page-404" role="main">
+  <main class="page-404" id="main-content" role="main">
     <div class="err-corner err-corner-tl" aria-hidden="true"></div>
     <div class="err-corner err-corner-tr" aria-hidden="true"></div>
     <div class="err-corner err-corner-bl" aria-hidden="true"></div>

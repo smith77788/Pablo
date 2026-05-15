@@ -59,14 +59,20 @@
       window._ga_ready = true;
     }).catch(()=>{});
   </script>
-  <!-- Yandex.Metrica -->
+  <!-- Yandex.Metrica (loads only if consent given) -->
   <script>
-    window.YM_ID = 00000000; // Replace with real ID
-    (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-    m[i].l=1*new Date();k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-    (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
-    ym(window.YM_ID, "init", { clickmap:true, trackLinks:true, accurateTrackBounce:true, webvisor:true });
+    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
+      if (!d.ym_counter_id) return;
+      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+      m[i].l=1*new Date();
+      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
+      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
+      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
+    }).catch(()=>{});
   </script>
+  <!-- /Yandex.Metrica -->
   <!-- Analytics wrapper -->
   <script src="/js/analytics.js"></script>
 </head>
@@ -136,8 +142,8 @@
         <a href="/booking.html" class="btn-outline">Оформить заявку</a>
       </div>
       <div class="quick-form" style="display:flex;gap:8px;flex-wrap:wrap;max-width:500px;margin:24px auto 0">
-        <input type="text" id="qf-name" placeholder="Ваше имя" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
-        <input type="tel" id="qf-phone" placeholder="+7 (999) 123-45-67" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
+        <input type="text" id="qf-name" placeholder="Ваше имя" aria-label="Ваше имя" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
+        <input type="tel" id="qf-phone" placeholder="+7 (999) 123-45-67" aria-label="Номер телефона" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
         <button onclick="quickSubmitForm()" style="padding:12px 24px;background:#c8a96e;color:#000;border:none;border-radius:8px;font-weight:600;cursor:pointer;white-space:nowrap">Залишити заявку</button>
       </div>
     </div>
