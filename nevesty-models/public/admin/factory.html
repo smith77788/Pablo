@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Factory — Nevesty Models Admin</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-text">Nevesty Models</div>
+      <div class="sidebar-logo-sub">Панель управления</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Главная</div>
+      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+      <div class="nav-section-label">Бизнес</div>
+      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки</a>
+      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+      <div class="nav-section-label">AI</div>
+      <a href="/admin/factory.html" class="active"><span class="nav-icon">🤖</span> AI Factory</a>
+      <div class="nav-section-label">Настройки</div>
+      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user">
+        <div class="sidebar-avatar sidebar-user-letter">A</div>
+        <div class="sidebar-user-info">
+          <strong class="sidebar-user-name">—</strong>
+          <span class="sidebar-user-role">—</span>
+        </div>
+      </div>
+      <button class="btn-logout" data-action="logout">Выйти</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <div class="topbar-title">🤖 AI Factory Dashboard</div>
+      <div class="topbar-right">
+        <button onclick="loadData()" class="topbar-btn">↺ Обновить</button>
+        <button id="run-cycle-btn" onclick="runCycle()" class="topbar-btn primary">▶ Запустить цикл</button>
+      </div>
+    </header>
+
+    <div class="page-content">
+
+      <!-- Status KPI cards -->
+      <div class="stat-cards" style="margin-bottom:24px">
+        <div class="stat-card">
+          <div class="stat-card-label">Последний цикл</div>
+          <div class="stat-card-value" id="last-cycle" style="font-size:1.1rem">—</div>
+          <div class="stat-card-icon">🕐</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Активных задач</div>
+          <div class="stat-card-value gold" id="tasks-count">—</div>
+          <div class="stat-card-icon">🎯</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Выполнено задач</div>
+          <div class="stat-card-value" id="done-count">—</div>
+          <div class="stat-card-icon">✅</div>
+        </div>
+      </div>
+
+      <!-- CEO Memo -->
+      <div class="section-card" style="margin-bottom:24px">
+        <div class="section-card-header">
+          <div class="section-card-title">📊 CEO Weekly Memo</div>
+        </div>
+        <div class="section-card-body padded">
+          <div id="ceo-memo" style="color:var(--text-muted);white-space:pre-wrap;font-size:0.88rem;line-height:1.7">
+            Загрузка...
+          </div>
+        </div>
+      </div>
+
+      <!-- Factory Tasks -->
+      <div class="section-card">
+        <div class="section-card-header">
+          <div class="section-card-title">🎯 AI Growth Tasks</div>
+        </div>
+        <div id="tasks-list" class="section-card-body">
+          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+<script src="/js/admin.js"></script>
+<script>
+async function loadData() {
+  try {
+    // Load settings for CEO memo
+    const settingsResp = await _admin.apiFetch('/admin/settings');
+    let memo = 'CEO memo пока не доступен. Запустите цикл Factory.';
+    if (Array.isArray(settingsResp)) {
+      const memoSetting = settingsResp.find(s => s.key === 'ceo_memo');
+      if (memoSetting && memoSetting.value) memo = memoSetting.value;
+    } else if (settingsResp && settingsResp.ceo_memo) {
+      memo = settingsResp.ceo_memo;
+    }
+    document.getElementById('ceo-memo').textContent = memo;
+  } catch (e) {
+    document.getElementById('ceo-memo').textContent = 'CEO memo недоступен.';
+  }
+
+  try {
+    // Load factory tasks
+    const { tasks = [], stats = {} } = await _admin.apiFetch('/admin/factory-tasks');
+
+    const pending = stats.pending != null ? stats.pending : tasks.filter(t => t.status === 'pending').length;
+    const done    = stats.done    != null ? stats.done    : tasks.filter(t => t.status === 'done').length;
+
+    document.getElementById('tasks-count').textContent = pending;
+    document.getElementById('done-count').textContent  = done;
+
+    if (stats.last_cycle) {
+      document.getElementById('last-cycle').textContent = _admin.formatDateTime
+        ? _admin.formatDateTime(stats.last_cycle)
+        : stats.last_cycle;
+    }
+
+    const container = document.getElementById('tasks-list');
+    if (!tasks.length) {
+      container.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Задач нет. Запустите цикл Factory.</div>';
+      return;
+    }
+
+    const priorityColor = { high: 'var(--error)', medium: '#f59e0b', low: 'var(--success)' };
+    const priorityLabel = { high: '🔴 Высокий', medium: '🟡 Средний', low: '🟢 Низкий' };
+    const statusLabel   = { done: '✅ Выполнено', skipped: '⏭️ Пропущено', pending: '⏳ Ожидает' };
+
+    container.innerHTML = `<table class="data-table">
+      <thead>
+        <tr>
+          <th>Приоритет</th>
+          <th>Задача</th>
+          <th>Ожидаемый эффект</th>
+          <th>Отдел</th>
+          <th>Статус</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tasks.map(task => `
+          <tr>
+            <td>
+              <span style="font-size:0.75rem;font-weight:600;color:${priorityColor[task.priority] || 'var(--text-muted)'}">
+                ${priorityLabel[task.priority] || task.priority || '—'}
+              </span>
+            </td>
+            <td style="font-weight:500">${_admin.escapeHtml(task.action || '')}</td>
+            <td style="font-size:0.82rem;color:var(--text-muted)">${_admin.escapeHtml(task.expected_impact || '—')}</td>
+            <td style="font-size:0.8rem;color:var(--text-dim)">${_admin.escapeHtml(task.department || '—')}</td>
+            <td style="font-size:0.8rem">${statusLabel[task.status] || task.status}</td>
+            <td>
+              ${task.status === 'pending' ? `
+                <button onclick="markTaskDone(${task.id})"
+                  class="btn btn-sm btn-ghost" style="border-color:var(--success);color:var(--success)">
+                  Выполнено
+                </button>` : ''}
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+  } catch (e) {
+    document.getElementById('tasks-list').innerHTML =
+      '<div style="padding:24px;color:var(--error)">Ошибка загрузки задач: ' + _admin.escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function markTaskDone(taskId) {
+  try {
+    await _admin.apiFetch(`/admin/factory-tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'done' })
+    });
+    _admin.toast('Задача отмечена как выполненная', 'success');
+    loadData();
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function runCycle() {
+  const btn = document.getElementById('run-cycle-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Запуск...';
+  try {
+    const data = await _admin.apiFetch('/admin/factory/run', { method: 'POST' });
+    _admin.toast(data.message || 'Цикл запущен в фоне', 'success');
+    setTimeout(loadData, 4000);
+  } catch (e) {
+    _admin.toast('Ошибка запуска цикла: ' + e.message, 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = '▶ Запустить цикл';
+}
+
+loadData();
+setInterval(loadData, 30000);
+</script>
+</body>
+</html>

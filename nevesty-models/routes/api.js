@@ -354,6 +354,31 @@ router.get('/models', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Models search (public, extended filters) ─────────────────────────────────
+router.get('/models/search', async (req, res, next) => {
+  try {
+    const { min_height, max_height, min_age, max_age, category, city, page = 0, limit = 12 } = req.query;
+    const where = ['1=1'];
+    const params = [];
+    if (min_height && !isNaN(+min_height)) { where.push('height >= ?'); params.push(parseInt(min_height)); }
+    if (max_height && !isNaN(+max_height)) { where.push('height <= ?'); params.push(parseInt(max_height)); }
+    if (min_age && !isNaN(+min_age)) { where.push('age >= ?'); params.push(parseInt(min_age)); }
+    if (max_age && !isNaN(+max_age)) { where.push('age <= ?'); params.push(parseInt(max_age)); }
+    if (category && ALLOWED_CATEGORIES.includes(category)) { where.push('category = ?'); params.push(category); }
+    if (city) { where.push('city = ?'); params.push(city); }
+    const whereSql = where.join(' AND ');
+    const limitN = Math.min(50, Math.max(1, parseInt(limit) || 12));
+    const offset = Math.max(0, parseInt(page) || 0) * limitN;
+    const countParams = [...params];
+    params.push(limitN, offset);
+    const [models, totalRow] = await Promise.all([
+      query(`SELECT id, name, age, height, city, category, available, photo_main, bio, hair_color FROM models WHERE ${whereSql} ORDER BY available DESC, id DESC LIMIT ? OFFSET ?`, params),
+      get(`SELECT COUNT(*) as cnt FROM models WHERE ${whereSql}`, countParams)
+    ]);
+    res.json({ models, total: totalRow?.cnt || 0, page: parseInt(page) || 0 });
+  } catch (e) { next(e); }
+});
+
 router.get('/models/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
@@ -1097,6 +1122,49 @@ router.get('/admin/findings', auth, async (req, res, next) => {
       [status]
     );
     res.json(findings);
+  } catch(e) { next(e); }
+});
+
+// ─── Factory tasks list ───────────────────────────────────────────────────────
+router.get('/admin/factory-tasks', auth, async (req, res, next) => {
+  try {
+    const tasks = await query(`SELECT * FROM factory_tasks ORDER BY
+      CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+      created_at DESC LIMIT 50`);
+    const stats = await get(`SELECT
+      SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) as pending,
+      SUM(CASE WHEN status='done'    THEN 1 ELSE 0 END) as done,
+      MAX(created_at) as last_cycle
+    FROM factory_tasks`);
+    res.json({ tasks, stats });
+  } catch(e) { next(e); }
+});
+
+// ─── Update factory task status ───────────────────────────────────────────────
+router.patch('/admin/factory-tasks/:id', auth, async (req, res, next) => {
+  try {
+    const { status } = req.body;
+    if (!['pending', 'done', 'skipped'].includes(status))
+      return res.status(400).json({ error: 'Invalid status' });
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    await run(`UPDATE factory_tasks SET status=? WHERE id=?`, [status, id]);
+    res.json({ success: true });
+  } catch(e) { next(e); }
+});
+
+// ─── Manual factory cycle trigger ─────────────────────────────────────────────
+router.post('/admin/factory/run', auth, async (req, res, next) => {
+  try {
+    const { spawn } = require('child_process');
+    const factoryScript = '/home/user/Pablo/factory/factory_main.py';
+    const proc = spawn('python3', [factoryScript, '--once'], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env }
+    });
+    proc.unref();
+    res.json({ message: 'Цикл Factory запущен в фоне. Результаты появятся через несколько минут.' });
   } catch(e) { next(e); }
 });
 
