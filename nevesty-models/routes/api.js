@@ -1728,7 +1728,12 @@ router.delete('/admin/broadcasts/:id', auth, async (req, res, next) => {
 router.get('/admin/managers', auth, async (req, res, next) => {
   try {
     if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
-    const managers = await query('SELECT id, username, email, role, telegram_id, created_at FROM admins ORDER BY created_at DESC');
+    const managers = await query(
+      `SELECT a.id, a.username, a.email, a.role, a.telegram_id, a.created_at,
+        (SELECT COUNT(*) FROM orders WHERE manager_id=a.id) as total_orders,
+        (SELECT COUNT(*) FROM orders WHERE manager_id=a.id AND status='completed') as completed_orders
+       FROM admins a ORDER BY a.created_at DESC`
+    );
     res.json(managers);
   } catch (e) { next(e); }
 });
@@ -1760,6 +1765,34 @@ router.delete('/admin/managers/:id', auth, async (req, res, next) => {
     await run('DELETE FROM admins WHERE id = ?', [id]);
     res.json({ ok: true });
   } catch (e) { next(e); }
+});
+
+router.get('/admin/managers/:id/stats', auth, async (req, res) => {
+  if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
+  const managerId = parseInt(req.params.id);
+  try {
+    const [assignedTotal, assignedCompleted, assignedActive] = await Promise.all([
+      get('SELECT COUNT(*) as n FROM orders WHERE manager_id=?', [managerId]),
+      get("SELECT COUNT(*) as n FROM orders WHERE manager_id=? AND status='completed'", [managerId]),
+      get("SELECT COUNT(*) as n FROM orders WHERE manager_id=? AND status IN ('new','reviewing','confirmed','in_progress')", [managerId]),
+    ]);
+    const cycleRow = await get(
+      `SELECT AVG(CAST(julianday(updated_at) - julianday(created_at) AS INTEGER)) as avg_days
+       FROM orders WHERE manager_id=? AND status='completed'`,
+      [managerId]
+    ).catch(() => null);
+
+    res.json({
+      ok: true,
+      stats: {
+        total_assigned: assignedTotal?.n || 0,
+        completed: assignedCompleted?.n || 0,
+        active: assignedActive?.n || 0,
+        completion_rate: assignedTotal?.n > 0 ? Math.round((assignedCompleted?.n / assignedTotal?.n) * 100) : 0,
+        avg_days_to_complete: cycleRow?.avg_days ? Math.round(cycleRow.avg_days) : null,
+      }
+    });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
 // GET /api/settings/public — public read-only settings (no auth required, cached 5 min)
