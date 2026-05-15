@@ -700,11 +700,14 @@
     // Start WS real-time monitoring if order is active
     if (order.id && order.status !== 'completed' && order.status !== 'cancelled') {
       connectWS(order.id);
+      // Also start polling as fallback when WS is unavailable
+      startStatusPolling(order.order_number);
     } else {
-      // Disconnect any previous WS
+      // Disconnect any previous WS and stop polling
       if (_ws) { try { _ws.close(); } catch (_) {} _ws = null; }
       _wsOrderId = null;
       document.getElementById('wsIndicator').classList.remove('visible');
+      stopStatusPolling();
     }
   }
 
@@ -797,6 +800,31 @@
         </div>${line}`;
       }).join('');
     }
+  }
+
+  // ─── Polling fallback (30s) when WS is not connected ────────────────────────
+  let _pollInterval = null;
+  let _currentOrderNumber = null;
+
+  function startStatusPolling(orderNumber) {
+    _currentOrderNumber = orderNumber;
+    if (_pollInterval) clearInterval(_pollInterval);
+    _pollInterval = setInterval(async () => {
+      // Only poll when WS is not actively connected
+      if (_ws && _ws.readyState === WebSocket.OPEN) return;
+      if (!_currentOrderNumber) return;
+      try {
+        const res = await fetch(`/api/orders/status?number=${encodeURIComponent(_currentOrderNumber)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.status) updateStatusDisplay(data.status);
+      } catch { /* silently skip */ }
+    }, 30000);
+  }
+
+  function stopStatusPolling() {
+    if (_pollInterval) { clearInterval(_pollInterval); _pollInterval = null; }
+    _currentOrderNumber = null;
   }
 
   // Check from URL query param on load

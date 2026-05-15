@@ -685,6 +685,9 @@
               <a href="${bookingUrl}" class="btn-repeat" title="Создать похожую заявку">
                 🔄 Повторить заявку
               </a>
+              <a href="https://t.me/Verdiktnikbot?start=support_${order.id}" class="btn-repeat" target="_blank" rel="noopener">
+                💬 Написать менеджеру
+              </a>
               ${isCompleted ? `<button class="btn-review" onclick="Cabinet.openReview(${order.id})" data-order-id="${order.id}">
                 ⭐ Оставить отзыв
               </button>` : ''}
@@ -886,6 +889,42 @@
       }
     }
 
+    // ── Polling fallback (30s) ────────────────────────────────────
+    // Used when WebSocket is unavailable or disconnected
+    let _pollingInterval = null;
+
+    async function pollOrders() {
+      if (!_phone) return;
+      // Only poll when WS is not connected
+      if (_ws && _ws.readyState === WebSocket.OPEN) return;
+      const phone10 = normalizePhone(_phone);
+      if (!phone10) return;
+      try {
+        const r = await fetch(`/api/client/orders?phone=${encodeURIComponent('7' + phone10)}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        const newOrders = data.orders || [];
+        // Update only changed statuses to avoid full re-render
+        newOrders.forEach(updated => {
+          const existing = _orders.find(o => o.id === updated.id);
+          if (existing && existing.status !== updated.status) {
+            wsUpdateOrderCard(updated.id, updated.status);
+            existing.status = updated.status;
+          }
+        });
+        _orders = newOrders;
+      } catch { /* silently skip */ }
+    }
+
+    function startPolling() {
+      if (_pollingInterval) clearInterval(_pollingInterval);
+      _pollingInterval = setInterval(pollOrders, 30000);
+    }
+
+    function stopPolling() {
+      if (_pollingInterval) { clearInterval(_pollingInterval); _pollingInterval = null; }
+    }
+
     // ── Init ──────────────────────────────────────────────────────
     function init() {
       // Support ?phone=... in URL (from booking.html redirect)
@@ -916,10 +955,13 @@
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeReview();
       });
+
+      // Start polling fallback for order status updates
+      startPolling();
     }
 
     // Expose public API
-    window.Cabinet = { search, logout, toggleCard, openReview, closeReview, setStar, submitReview };
+    window.Cabinet = { search, logout, toggleCard, openReview, closeReview, setStar, submitReview, startPolling, stopPolling };
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', init);
