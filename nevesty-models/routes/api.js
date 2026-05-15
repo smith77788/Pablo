@@ -7695,6 +7695,9 @@ function requireClientAuth(req, res, next) {
   try {
     const decoded = jwt.verify(auth.replace(/^Bearer\s+/i, ''), process.env.JWT_SECRET);
     if (decoded.type !== 'client') return res.status(403).json({ ok: false, error: 'Forbidden' });
+    if (!decoded.phone || !/^\d{10}$/.test(decoded.phone)) {
+      return res.status(400).json({ ok: false, error: 'Invalid token payload' });
+    }
     req.clientPhone = decoded.phone;
     req.clientChatId = decoded.chat_id || null;
     next();
@@ -7838,10 +7841,10 @@ router.patch('/cabinet/profile', requireClientAuth, async (req, res, next) => {
     const phone10 = req.clientPhone;
     const { name, email } = req.body;
 
-    if (name !== undefined && (typeof name !== 'string' || name.trim().length < 2)) {
-      return res.status(400).json({ ok: false, error: 'Имя должно содержать минимум 2 символа' });
+    if (name !== undefined && (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 200)) {
+      return res.status(400).json({ ok: false, error: 'Имя: от 2 до 200 символов' });
     }
-    if (email !== undefined && email !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (email !== undefined && email !== '' && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
       return res.status(400).json({ ok: false, error: 'Некорректный email' });
     }
 
