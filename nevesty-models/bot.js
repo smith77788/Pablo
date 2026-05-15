@@ -215,35 +215,64 @@ const REPLY_KB_ADMIN = {
 };
 
 async function buildClientKeyboard() {
-  const [tgChannel, calcEnabled] = await Promise.all([
+  const [tgChannel, calcEnabled, wishlistEnabled, quickBookingEnabled, searchEnabled, reviewsEnabled] = await Promise.all([
     getSetting('tg_channel').catch(() => null),
     getSetting('calc_enabled').catch(() => null),
+    getSetting('wishlist_enabled', '1').catch(() => '1'),
+    getSetting('quick_booking_enabled', '1').catch(() => '1'),
+    getSetting('search_enabled', '1').catch(() => '1'),
+    getSetting('reviews_enabled', '1').catch(() => '1'),
   ]);
+
+  // Row 1: always
   const rows = [
-    [{ text: '💃 Каталог',              callback_data: 'cat_cat__0'         },
-     { text: '⭐ Топ-модели',           callback_data: 'cat_top_0'          }],
-    [{ text: '📝 Оформить заявку',      callback_data: 'bk_start'           },
-     { text: '⚡ Быстрая заявка',       callback_data: 'bk_quick'           }],
-    [{ text: '📋 Мои заявки',           callback_data: 'my_orders'          },
-     { text: '👤 Мой профиль',          callback_data: 'profile'            }],
-    [{ text: '❤️ Избранное',            callback_data: 'fav_list_0'         },
-     { text: '🧮 Калькулятор',         callback_data: 'calculator'         }],
-    [{ text: '⭐ Отзывы',              callback_data: 'show_reviews'        },
-     { text: '❓ FAQ',                  callback_data: 'faq'                }],
-    [{ text: '🎁 Реферальная программа',callback_data: 'referral'           },
-     { text: '💫 Баллы лояльности',    callback_data: 'loyalty'            }],
-    [{ text: '👗 Fashion',              callback_data: 'cat_filter_fashion'  },
-     { text: '📷 Commercial',           callback_data: 'cat_filter_commercial'}],
-    [{ text: '🔍 Поиск по параметрам', callback_data: 'cat_search'          },
-     { text: '📏 Поиск по росту',      callback_data: 'search_height_input' }],
-    [{ text: '💰 Прайс-лист',          callback_data: 'pricing'            },
-     { text: '💬 Написать менеджеру',   callback_data: 'contact_mgr'        }],
-    [{ text: 'ℹ️ О нас',               callback_data: 'about_us'           },
-     { text: '📞 Контакты',             callback_data: 'contacts'           }],
+    [{ text: '💃 Каталог',         callback_data: 'cat_cat__0' },
+     { text: '⭐ Топ-модели',      callback_data: 'cat_top_0'  }],
   ];
-  if (calcEnabled === '1') {
-    rows.push([{ text: '📋 Прайс', callback_data: 'show_pricing' }]);
+
+  // Row 2: booking (quick booking is gated)
+  const bookingRow = [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }];
+  if (quickBookingEnabled !== '0') bookingRow.push({ text: '⚡ Быстрая заявка', callback_data: 'bk_quick' });
+  rows.push(bookingRow);
+
+  // Row 3: orders + profile
+  rows.push([{ text: '📋 Мои заявки', callback_data: 'my_orders' },
+             { text: '👤 Мой профиль', callback_data: 'profile' }]);
+
+  // Row 4: wishlist + calculator (wishlist gated)
+  const favRow = [];
+  if (wishlistEnabled !== '0') favRow.push({ text: '❤️ Избранное', callback_data: 'fav_list_0' });
+  if (calcEnabled === '1') favRow.push({ text: '🧮 Калькулятор', callback_data: 'calculator' });
+  if (favRow.length) rows.push(favRow);
+
+  // Row 5: reviews + FAQ (reviews gated)
+  const reviewRow = [];
+  if (reviewsEnabled !== '0') reviewRow.push({ text: '⭐ Отзывы', callback_data: 'show_reviews' });
+  reviewRow.push({ text: '❓ FAQ', callback_data: 'faq' });
+  rows.push(reviewRow);
+
+  // Row 6: loyalty + referral
+  rows.push([{ text: '🎁 Реферальная программа', callback_data: 'referral' },
+             { text: '💫 Баллы лояльности', callback_data: 'loyalty' }]);
+
+  // Row 7: category filters
+  rows.push([{ text: '👗 Fashion', callback_data: 'cat_filter_fashion' },
+             { text: '📷 Commercial', callback_data: 'cat_filter_commercial' }]);
+
+  // Row 8: search (gated)
+  if (searchEnabled !== '0') {
+    rows.push([{ text: '🔍 Поиск по параметрам', callback_data: 'cat_search' },
+               { text: '📏 Поиск по росту', callback_data: 'search_height_input' }]);
   }
+
+  // Row 9: pricing + manager
+  rows.push([{ text: '💰 Прайс-лист', callback_data: 'pricing' },
+             { text: '💬 Написать менеджеру', callback_data: 'contact_mgr' }]);
+
+  // Row 10: about + contacts
+  rows.push([{ text: 'ℹ️ О нас', callback_data: 'about_us' },
+             { text: '📞 Контакты', callback_data: 'contacts' }]);
+
   if (tgChannel) {
     rows.push([{ text: '📣 Наш канал', callback_data: 'tg_channel' }]);
   }
