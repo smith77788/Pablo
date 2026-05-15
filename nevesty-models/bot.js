@@ -1737,6 +1737,27 @@ async function bkSubmit(chatId, data) {
       ]
     );
     const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
+
+    // Post-insert race condition check: verify active order count wasn't exceeded
+    // by a concurrent submission that slipped through the pre-check
+    const activeAfterInsert = await get(
+      "SELECT COUNT(*) as n FROM orders WHERE client_chat_id=? AND status NOT IN ('completed','cancelled')",
+      [String(chatId)]
+    ).catch(() => ({ n: 0 }));
+    if (maxActive > 0 && (activeAfterInsert?.n || 0) > maxActive) {
+      // Race condition detected — remove the just-inserted order
+      await run('DELETE FROM orders WHERE order_number=?', [orderNum]).catch(() => {});
+      await clearSession(chatId);
+      return safeSend(
+        chatId,
+        '❌ У вас уже слишком много активных заявок\\. Пожалуйста, дождитесь завершения текущих\\.',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] },
+        }
+      );
+    }
+
     await clearSession(chatId);
 
     // Auto-confirm if setting enabled
@@ -2625,6 +2646,41 @@ async function showAdminSettings(chatId, section) {
             { text: '⏱ Интервал сообщений', callback_data: 'adm_set_client_msg_delay' },
             { text: '🔒 Rate limit', callback_data: 'adm_set_api_rate_limit' },
           ],
+          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+        ],
+      },
+    });
+  }
+
+  // ── Интерфейс (alias for bot section) ────────────────────────────────────
+  if (section === 'ui') {
+    return showAdminSettings(chatId, 'bot');
+  }
+
+  // ── Соцсети ───────────────────────────────────────────────────────────────
+  if (section === 'social') {
+    const [instaEnabled, insta] = await Promise.all([getSetting('instagram_enabled'), getSetting('contacts_insta')]);
+    let socialCount = 0;
+    try {
+      const row = await get('SELECT COUNT(*) as cnt FROM social_posts');
+      socialCount = row ? row.cnt : 0;
+    } catch (_) {}
+    const on = v => (v === '0' ? '❌' : '✅');
+    const text =
+      `📱 Соцсети\n\n` +
+      `📸 Instagram: ${insta || '—'}\n` +
+      `${on(instaEnabled ?? '1')} Instagram включён\n` +
+      `📋 Постов в очереди: ${socialCount}`;
+    return safeSend(chatId, text, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: (instaEnabled ?? '1') === '0' ? '📸 Instagram ВКЛ' : '📸 Instagram ВЫКЛ',
+              callback_data: (instaEnabled ?? '1') === '0' ? 'adm_instagram_on' : 'adm_instagram_off',
+            },
+          ],
+          [{ text: '📸 Изменить Instagram', callback_data: 'adm_set_insta' }],
           [{ text: '← Настройки', callback_data: 'adm_settings' }],
         ],
       },
@@ -6316,6 +6372,24 @@ function initBot(app) {
     if (data === 'adm_settings_limits') {
       if (!isAdmin(chatId)) return;
       return showAdminSettings(chatId, 'limits');
+    }
+    if (data === 'adm_settings_ui') {
+      if (!isAdmin(chatId)) return;
+      return showAdminSettings(chatId, 'ui');
+    }
+    if (data === 'adm_settings_social') {
+      if (!isAdmin(chatId)) return;
+      return showAdminSettings(chatId, 'social');
+    }
+    if (data === 'adm_instagram_on') {
+      if (!isAdmin(chatId)) return;
+      await setSetting('instagram_enabled', '1');
+      return showAdminSettings(chatId, 'social');
+    }
+    if (data === 'adm_instagram_off') {
+      if (!isAdmin(chatId)) return;
+      await setSetting('instagram_enabled', '0');
+      return showAdminSettings(chatId, 'social');
     }
     // Toggle налаштування каталогу
     if (data === 'adm_catalog_sort_date') {
@@ -11297,6 +11371,25 @@ async function bkRepeatSubmit(chatId, d, tgUsername) {
       ]
     );
     const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
+
+    // Post-insert race condition check: verify active order count wasn't exceeded
+    const activeAfterInsert = await get(
+      "SELECT COUNT(*) as n FROM orders WHERE client_chat_id=? AND status NOT IN ('completed','cancelled')",
+      [String(chatId)]
+    ).catch(() => ({ n: 0 }));
+    if (maxActive > 0 && (activeAfterInsert?.n || 0) > maxActive) {
+      await run('DELETE FROM orders WHERE order_number=?', [orderNum]).catch(() => {});
+      await clearSession(chatId);
+      return safeSend(
+        chatId,
+        '❌ У вас уже слишком много активных заявок\\. Пожалуйста, дождитесь завершения текущих\\.',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '📋 Мої заявки', callback_data: 'my_orders' }]] },
+        }
+      );
+    }
+
     await clearSession(chatId);
 
     await safeSend(
