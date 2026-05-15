@@ -2276,6 +2276,14 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
       sendBookingConfirmationSms(s.client_phone, order_number).catch(e => console.error('[SMS] Failed:', e.message));
     }
 
+    // ─── WhatsApp booking confirmation (non-blocking) ─────────────────────────
+    if (s.client_phone) {
+      const whatsapp = require('../services/whatsapp');
+      const waPhone = s.client_phone.replace(/\D/g, '');
+      const waMsg = `Здравствуйте, ${s.client_name || 'клиент'}! Ваша заявка №${order_number} принята. Менеджер свяжется с вами в ближайшее время. Nevesty Models`;
+      whatsapp.sendText(waPhone, waMsg).catch(e => console.error('[WhatsApp] order notify:', e.message));
+    }
+
     res.json({ order_number, id: result.id });
   } catch (e) {
     next(e);
@@ -2520,6 +2528,15 @@ router.post('/quick-booking', strictLimiter, async (req, res, next) => {
         .notifyNewOrder({ ...order, order_number })
         .catch(e => console.error('Bot notify quick booking:', e.message));
     }
+
+    // ─── WhatsApp quick-booking confirmation (non-blocking) ───────────────────
+    if (client_phone) {
+      const whatsapp = require('../services/whatsapp');
+      const waPhone = client_phone.replace(/\D/g, '');
+      const waMsg = `Здравствуйте, ${sanitize(client_name, 100) || 'клиент'}! Ваша заявка №${order_number} принята. Менеджер свяжется с вами в ближайшее время. Nevesty Models`;
+      whatsapp.sendText(waPhone, waMsg).catch(e => console.error('[WhatsApp] quick-booking notify:', e.message));
+    }
+
     res.json({ ok: true, order_number });
   } catch (e) {
     next(e);
