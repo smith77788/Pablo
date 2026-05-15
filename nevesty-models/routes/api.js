@@ -8,6 +8,8 @@ const fs = require('fs');
 let sharp;
 try { sharp = require('sharp'); } catch { sharp = null; }
 const crypto = require('crypto');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
 const { query, run, get, generateOrderNumber, getSetting } = require('../database');
 const auth = require('../middleware/auth');
 const mailer = require('../services/mailer');
@@ -172,6 +174,24 @@ router.get('/csrf-token', (req, res) => {
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
+
+/** Helper: issue full JWT + refresh token pair for an admin */
+async function issueTokenPair(admin) {
+  const token = jwt.sign(
+    { id: admin.id, username: admin.username, role: admin.role },
+    process.env.JWT_SECRET || 'secret',
+    { expiresIn: '15m' }
+  );
+  const refreshTokenRaw = crypto.randomBytes(48).toString('hex');
+  const refreshHash = crypto.createHash('sha256').update(refreshTokenRaw).digest('hex');
+  await run(
+    "INSERT INTO refresh_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
+    [refreshHash, admin.id]
+  );
+  await run("DELETE FROM refresh_tokens WHERE admin_id=? AND (expires_at < CURRENT_TIMESTAMP OR revoked=1)", [admin.id]).catch(() => {});
+  return { token, refresh_token: refreshTokenRaw };
+}
+
 router.post('/admin/login', authLimiter, async (req, res, next) => {
   try {
     const { username, password } = req.body;
@@ -180,21 +200,67 @@ router.post('/admin/login', authLimiter, async (req, res, next) => {
     if (!admin) return res.status(401).json({ error: 'Неверный логин или пароль' });
     const ok = await bcrypt.compare(password, admin.password_hash);
     if (!ok) return res.status(401).json({ error: 'Неверный логин или пароль' });
-    const token = jwt.sign(
-      { id: admin.id, username: admin.username, role: admin.role },
-      process.env.JWT_SECRET || 'secret',
-      { expiresIn: '15m' }
+
+    // If 2FA is enabled, issue a short-lived temp token instead of full JWT
+    if (admin.totp_enabled) {
+      const tempTokenRaw = crypto.randomBytes(32).toString('hex');
+      const tempHash = crypto.createHash('sha256').update(tempTokenRaw).digest('hex');
+      // Clean up stale temp tokens for this admin
+      await run("DELETE FROM totp_temp_tokens WHERE admin_id=? AND expires_at < CURRENT_TIMESTAMP", [admin.id]).catch(() => {});
+      await run(
+        "INSERT INTO totp_temp_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+5 minutes'))",
+        [tempHash, admin.id]
+      );
+      return res.json({ requires_2fa: true, temp_token: tempTokenRaw });
+    }
+
+    // No 2FA — issue full token pair
+    const { token, refresh_token } = await issueTokenPair(admin);
+    res.json({ token, refresh_token, admin: { id: admin.id, username: admin.username, role: admin.role } });
+  } catch (e) { next(e); }
+});
+
+// ─── Auth: verify TOTP ────────────────────────────────────────────────────────
+router.post('/auth/verify-totp', authLimiter, async (req, res, next) => {
+  try {
+    const { temp_token, totp_code } = req.body;
+    if (!temp_token || !totp_code) return res.status(400).json({ error: 'temp_token and totp_code required' });
+
+    const tempHash = crypto.createHash('sha256').update(String(temp_token)).digest('hex');
+    const stored = await get(
+      'SELECT * FROM totp_temp_tokens WHERE token_hash=? AND expires_at > CURRENT_TIMESTAMP',
+      [tempHash]
     );
-    // Issue refresh token (7 day, stored server-side as SHA-256 hash)
-    const refreshTokenRaw = crypto.randomBytes(48).toString('hex');
-    const refreshHash = crypto.createHash('sha256').update(refreshTokenRaw).digest('hex');
-    await run(
-      "INSERT INTO refresh_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
-      [refreshHash, admin.id]
-    );
-    // Clean up old expired tokens for this admin
-    await run("DELETE FROM refresh_tokens WHERE admin_id=? AND (expires_at < CURRENT_TIMESTAMP OR revoked=1)", [admin.id]).catch(() => {});
-    res.json({ token, refresh_token: refreshTokenRaw, admin: { id: admin.id, username: admin.username, role: admin.role } });
+    if (!stored) return res.status(401).json({ error: 'Неверный или истёкший токен' });
+
+    // Check attempt limit (3 max)
+    if (stored.attempts >= 3) {
+      await run('DELETE FROM totp_temp_tokens WHERE id=?', [stored.id]);
+      return res.status(401).json({ error: 'Превышено количество попыток. Войдите заново.' });
+    }
+
+    const admin = await get('SELECT * FROM admins WHERE id=?', [stored.admin_id]);
+    if (!admin || !admin.totp_secret) {
+      await run('DELETE FROM totp_temp_tokens WHERE id=?', [stored.id]);
+      return res.status(401).json({ error: 'Ошибка аутентификации' });
+    }
+
+    const valid = speakeasy.totp.verify({
+      secret: admin.totp_secret,
+      encoding: 'base32',
+      token: String(totp_code).replace(/\s/g, ''),
+      window: 1,
+    });
+
+    if (!valid) {
+      await run('UPDATE totp_temp_tokens SET attempts=attempts+1 WHERE id=?', [stored.id]);
+      return res.status(401).json({ error: 'Неверный код. Проверьте время и попробуйте снова.' });
+    }
+
+    // Valid — delete temp token and issue full JWT pair
+    await run('DELETE FROM totp_temp_tokens WHERE id=?', [stored.id]);
+    const { token, refresh_token } = await issueTokenPair(admin);
+    res.json({ token, refresh_token, admin: { id: admin.id, username: admin.username, role: admin.role } });
   } catch (e) { next(e); }
 });
 
@@ -242,8 +308,72 @@ router.post('/auth/logout', async (req, res, next) => {
 
 router.get('/admin/me', auth, async (req, res, next) => {
   try {
-    const admin = await get('SELECT id, username, email, role, telegram_id FROM admins WHERE id = ?', [req.admin.id]);
+    const admin = await get('SELECT id, username, email, role, telegram_id, totp_enabled FROM admins WHERE id = ?', [req.admin.id]);
     res.json(admin);
+  } catch (e) { next(e); }
+});
+
+// ─── TOTP 2FA management ──────────────────────────────────────────────────────
+
+// GET /admin/totp/setup — generate a new TOTP secret (do NOT save yet)
+router.get('/admin/totp/setup', auth, async (req, res, next) => {
+  try {
+    const secret = speakeasy.generateSecret({
+      name: `Nevesty Models (${req.admin.username})`,
+      length: 20,
+    });
+    const qr_url = await QRCode.toDataURL(secret.otpauth_url);
+    res.json({
+      secret: secret.base32,
+      qr_url,
+      manual_key: secret.base32,
+      otpauth_url: secret.otpauth_url,
+    });
+  } catch (e) { next(e); }
+});
+
+// POST /admin/totp/enable — validate code against provided secret, then save
+router.post('/admin/totp/enable', auth, async (req, res, next) => {
+  try {
+    const { secret, totp_code } = req.body;
+    if (!secret || !totp_code) return res.status(400).json({ error: 'secret and totp_code required' });
+
+    const valid = speakeasy.totp.verify({
+      secret: String(secret),
+      encoding: 'base32',
+      token: String(totp_code).replace(/\s/g, ''),
+      window: 1,
+    });
+    if (!valid) return res.status(400).json({ error: 'Неверный код. Проверьте приложение и попробуйте снова.' });
+
+    await run('UPDATE admins SET totp_secret=?, totp_enabled=1 WHERE id=?', [String(secret), req.admin.id]);
+    await logAudit(req, 'totp_enable', 'admin', req.admin.id, { username: req.admin.username });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// DELETE /admin/totp/disable — validate current TOTP then disable
+router.delete('/admin/totp/disable', auth, async (req, res, next) => {
+  try {
+    const { totp_code } = req.body;
+    if (!totp_code) return res.status(400).json({ error: 'totp_code required' });
+
+    const admin = await get('SELECT totp_secret, totp_enabled FROM admins WHERE id=?', [req.admin.id]);
+    if (!admin || !admin.totp_enabled || !admin.totp_secret) {
+      return res.status(400).json({ error: '2FA не включена' });
+    }
+
+    const valid = speakeasy.totp.verify({
+      secret: admin.totp_secret,
+      encoding: 'base32',
+      token: String(totp_code).replace(/\s/g, ''),
+      window: 1,
+    });
+    if (!valid) return res.status(400).json({ error: 'Неверный код подтверждения' });
+
+    await run('UPDATE admins SET totp_secret=NULL, totp_enabled=0 WHERE id=?', [req.admin.id]);
+    await logAudit(req, 'totp_disable', 'admin', req.admin.id, { username: req.admin.username });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -1524,6 +1654,15 @@ router.put('/settings', auth, async (req, res, next) => {
     // Bot settings extras
     'welcome_photo_url', 'main_menu_text', 'pricing_text', 'booking_thanks_text',
     'calc_enabled', 'catalog_title', 'catalog_sort',
+    // Limits
+    'model_max_photos', 'client_max_active_orders',
+    // Additional notifications
+    'notifications_reviews', 'notifications_messages',
+    // Booking additional
+    'booking_autoconfirm', 'booking_quick_enabled',
+    // Analytics
+    'ga_measurement_id', 'ym_counter_id',
+    'sms_enabled',
   ];
   try {
     const body = req.body;

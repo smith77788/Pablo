@@ -186,6 +186,8 @@
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('password')"   id="tab-password">🔑 Пароль</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('faq')"         id="tab-faq">❓ FAQ</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('broadcast')"   id="tab-broadcast">📢 Рассылка</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('totp')"        id="tab-totp">🔐 2FA</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('limits')"      id="tab-limits">📊 Лимиты</button>
       </div>
 
       <!-- ═══ TAB: Профиль ═══════════════════════════════════════════════════ -->
@@ -294,6 +296,14 @@
               <label>Фото приветствия (URL)</label>
               <input class="admin-input" type="url" id="welcome_photo_url" placeholder="https://example.com/welcome.jpg" />
               <div class="field-note">Отправляется клиенту при первом /start вместо текста</div>
+            </div>
+
+            <!-- Main menu text -->
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>Текст главного меню</label>
+              <textarea class="admin-input" id="main_menu_text" rows="3" style="resize:vertical"
+                placeholder="Выберите действие из меню ниже:"></textarea>
+              <div class="field-note">Текст, отображаемый вместе с кнопками главного меню клиента</div>
             </div>
 
             <div class="sticky-save-bar">
@@ -452,6 +462,18 @@
               </label>
             </div>
 
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Авто-подтверждение (booking_autoconfirm)</div>
+                <div class="toggle-row-desc">Альтернативный ключ авто-подтверждения для внешних интеграций</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="booking_autoconfirm"
+                  onchange="saveSetting('booking_autoconfirm', this.checked ? '1' : '0')" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
             <div class="admin-form-group" style="margin-top:20px">
               <label>Минимальный бюджет</label>
               <input class="admin-input" type="text" id="booking_min_budget" placeholder="5000" />
@@ -479,6 +501,12 @@
           <div class="section-card-body padded" style="max-width:560px">
 
             <div class="admin-form-group">
+              <label>Заголовок каталога</label>
+              <input class="admin-input" type="text" id="catalog_title" placeholder="Наши модели" />
+              <div class="field-note">Заголовок страницы каталога на сайте</div>
+            </div>
+
+            <div class="admin-form-group" style="margin-top:16px">
               <label>Количество моделей на странице</label>
               <input class="admin-input" type="number" id="catalog_per_page" placeholder="12" min="1" max="100" />
             </div>
@@ -781,6 +809,28 @@
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" id="sms_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Уведомления об отзывах</div>
+                <div class="toggle-row-desc">Уведомлять менеджера о новых отзывах (notifications_reviews)</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="notifications_reviews"
+                  onchange="saveSetting('notifications_reviews', this.checked ? '1' : '0')" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Уведомления о сообщениях</div>
+                <div class="toggle-row-desc">Уведомлять менеджера о новых сообщениях от клиентов (notifications_messages)</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="notifications_messages"
+                  onchange="saveSetting('notifications_messages', this.checked ? '1' : '0')" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -1104,6 +1154,92 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre>
         </div>
       </div>
 
+      <!-- ═══ TAB: Лимиты ═══════════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-limits">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">📊 Лимиты</div></div>
+          <div class="section-card-body padded" style="max-width:560px">
+
+            <div class="admin-form-group">
+              <label>Макс. фотографий на модель</label>
+              <input class="admin-input" type="number" id="model_max_photos" placeholder="20" min="1" max="200" />
+              <div class="field-note">Максимальное количество фотографий в профиле одной модели</div>
+            </div>
+
+            <div class="admin-form-group" style="margin-top:16px">
+              <label>Макс. активных заявок на клиента</label>
+              <input class="admin-input" type="number" id="client_max_active_orders" placeholder="5" min="1" max="100" />
+              <div class="field-note">Максимальное количество незавершённых заявок от одного клиента</div>
+            </div>
+
+            <div class="sticky-save-bar">
+              <button class="btn btn-md btn-gold" id="btnSaveLimits" onclick="saveLimits(this)">Сохранить лимиты</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- ═══ TAB: 2FA ════════════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-totp">
+        <div class="section-card" style="max-width:560px">
+          <div class="section-card-header">
+            <div class="section-card-title">🔐 Двухфакторная аутентификация</div>
+          </div>
+          <div class="section-card-body padded">
+            <!-- Status bar -->
+            <div id="totp-status-bar" style="padding:12px 16px;border-radius:8px;margin-bottom:20px;font-size:0.85rem;display:flex;align-items:center;gap:10px">
+              <span id="totp-status-icon">⏳</span>
+              <span id="totp-status-text">Загрузка статуса...</span>
+            </div>
+            <!-- 2FA DISABLED: Setup flow -->
+            <div id="totp-setup-section" style="display:none">
+              <p style="font-size:0.83rem;color:var(--text-muted);margin-bottom:16px">
+                Защитите аккаунт с помощью приложения-аутентификатора (Google Authenticator, Authy и др.)
+              </p>
+              <button class="btn btn-md btn-gold" id="btnSetup2FA" onclick="startTotpSetup()">Настроить 2FA</button>
+              <!-- QR / verification panel -->
+              <div id="totp-qr-panel" style="display:none;margin-top:20px">
+                <p style="font-size:0.83rem;color:var(--text-muted);margin-bottom:12px">
+                  1. Отсканируйте QR-код приложением-аутентификатором
+                </p>
+                <div style="text-align:center;margin-bottom:16px">
+                  <img id="totp-qr-img" src="" alt="QR-код 2FA" style="width:200px;height:200px;border:4px solid var(--bg2);border-radius:8px" />
+                </div>
+                <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px">Или введите ключ вручную:</p>
+                <div style="font-family:monospace;font-size:0.85rem;background:var(--bg2);padding:10px 14px;border-radius:6px;word-break:break-all;margin-bottom:16px" id="totp-manual-key"></div>
+                <p style="font-size:0.83rem;color:var(--text-muted);margin-bottom:10px">
+                  2. Введите 6-значный код из приложения для подтверждения
+                </p>
+                <div class="admin-form-group" style="max-width:200px">
+                  <input class="admin-input" type="number" id="totp-enable-code"
+                    placeholder="000000" maxlength="6" inputmode="numeric"
+                    style="font-size:1.2rem;letter-spacing:0.2em;text-align:center" />
+                </div>
+                <div id="totp-enable-error" style="color:var(--error);font-size:0.8rem;margin-bottom:10px"></div>
+                <button class="btn btn-md btn-gold" id="btnEnable2FA" onclick="enableTotp()">Включить 2FA</button>
+              </div>
+            </div>
+            <!-- 2FA ENABLED: Disable flow -->
+            <div id="totp-disable-section" style="display:none">
+              <p style="font-size:0.83rem;color:var(--text-muted);margin-bottom:16px">
+                Для отключения двухфакторной аутентификации введите код из приложения.
+              </p>
+              <div class="admin-form-group" style="max-width:200px">
+                <label>Текущий код 2FA</label>
+                <input class="admin-input" type="number" id="totp-disable-code"
+                  placeholder="000000" maxlength="6" inputmode="numeric"
+                  style="font-size:1.1rem;letter-spacing:0.15em;text-align:center" />
+              </div>
+              <div id="totp-disable-error" style="color:var(--error);font-size:0.8rem;margin-bottom:10px"></div>
+              <button class="btn btn-md" id="btnDisable2FA"
+                style="background:rgba(244,67,54,0.15);color:var(--error);border:1px solid rgba(244,67,54,0.4)"
+                onclick="disableTotp()">Отключить 2FA</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ─── Sticky global save bar ──────────────────────────── -->
       <div class="sticky bottom-0 bg-white border-t px-6 py-4" style="position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--border);padding:14px 0;margin-top:28px;display:flex;align-items:center;gap:16px;z-index:10;">
         <button id="save-btn" onclick="saveAll()"
@@ -1216,13 +1352,14 @@ async function loadSettings() {
     // Text fields
     const textFields = [
       'greeting', 'about_text', 'pricing', 'pricing_text', 'manager_hours', 'manager_reply', 'site_url',
-      'tg_channel', 'welcome_photo_url',
+      'tg_channel', 'welcome_photo_url', 'main_menu_text',
       'contacts_phone', 'contacts_email', 'contacts_instagram', 'contacts_whatsapp', 'contacts_address',
       'booking_min_budget', 'booking_confirm_msg', 'booking_thanks_text',
-      'catalog_per_page', 'cities_list',
+      'catalog_per_page', 'catalog_title', 'cities_list',
       'reviews_min_completed', 'reviews_prompt_text',
       'faq_items',
       'pricing_start_from', 'pricing_event_from', 'pricing_premium_from',
+      'model_max_photos', 'client_max_active_orders',
     ];
     textFields.forEach(key => {
       const el = document.getElementById(key);
@@ -1237,9 +1374,10 @@ async function loadSettings() {
 
     // Toggle fields
     const toggleFields = [
-      'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email',
+      'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email', 'booking_autoconfirm',
       'catalog_show_city', 'catalog_badge_top',
       'notify_new_order', 'notify_status_change', 'notify_review', 'notify_message', 'sms_enabled',
+      'notifications_reviews', 'notifications_messages',
       'wishlist_enabled', 'search_enabled', 'reviews_enabled', 'loyalty_enabled', 'referral_enabled',
       'faq_enabled', 'calc_enabled', 'reviews_auto_approve',
     ];
@@ -1292,17 +1430,19 @@ async function saveAll() {
 
   const textFields = [
     'greeting', 'about_text', 'pricing', 'pricing_text', 'manager_hours', 'manager_reply', 'site_url',
-    'tg_channel', 'welcome_photo_url',
+    'tg_channel', 'welcome_photo_url', 'main_menu_text',
     'contacts_phone', 'contacts_email', 'contacts_instagram', 'contacts_whatsapp', 'contacts_address',
     'booking_min_budget', 'booking_confirm_msg', 'booking_thanks_text',
-    'catalog_per_page', 'cities_list',
+    'catalog_per_page', 'catalog_title', 'cities_list',
     'reviews_min_completed', 'reviews_prompt_text',
     'pricing_start_from', 'pricing_event_from', 'pricing_premium_from',
+    'model_max_photos', 'client_max_active_orders',
   ];
   const toggleFields = [
-    'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email',
+    'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email', 'booking_autoconfirm',
     'catalog_show_city', 'catalog_badge_top',
     'notify_new_order', 'notify_status_change', 'notify_review', 'notify_message',
+    'notifications_reviews', 'notifications_messages',
     'wishlist_enabled', 'search_enabled', 'reviews_enabled', 'loyalty_enabled', 'referral_enabled',
     'faq_enabled', 'calc_enabled', 'reviews_auto_approve',
   ];
@@ -1404,6 +1544,7 @@ async function saveBot(btn) {
         site_url:          document.getElementById('site_url').value,
         tg_channel:        document.getElementById('tg_channel')?.value || '',
         welcome_photo_url: document.getElementById('welcome_photo_url')?.value || '',
+        main_menu_text:    document.getElementById('main_menu_text')?.value || '',
       })
     });
     _admin.toast('Тексты бота сохранены', 'success');
@@ -1450,9 +1591,10 @@ async function saveBooking(btn) {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        quick_booking_enabled: document.getElementById('quick_booking_enabled').checked ? '1' : '0',
-        booking_auto_confirm:  document.getElementById('booking_auto_confirm').checked  ? '1' : '0',
-        booking_require_email: document.getElementById('booking_require_email').checked ? '1' : '0',
+        quick_booking_enabled: document.getElementById('quick_booking_enabled').checked  ? '1' : '0',
+        booking_auto_confirm:  document.getElementById('booking_auto_confirm').checked   ? '1' : '0',
+        booking_autoconfirm:   document.getElementById('booking_autoconfirm')?.checked   ? '1' : '0',
+        booking_require_email: document.getElementById('booking_require_email').checked  ? '1' : '0',
         booking_min_budget:    document.getElementById('booking_min_budget').value,
         booking_confirm_msg:   document.getElementById('booking_confirm_msg').value,
       })
@@ -1469,6 +1611,7 @@ async function saveCatalog(btn) {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
+        catalog_title:        document.getElementById('catalog_title')?.value || '',
         catalog_per_page:     document.getElementById('catalog_per_page').value,
         catalog_default_sort: document.getElementById('catalog_default_sort').value,
         catalog_sort:         document.getElementById('catalog_sort')?.value || 'featured',
@@ -1549,11 +1692,13 @@ async function saveNotif(btn) {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        notify_new_order:    document.getElementById('notify_new_order').checked    ? '1' : '0',
-        notify_status_change: document.getElementById('notify_status_change').checked ? '1' : '0',
-        notify_review:       document.getElementById('notify_review').checked       ? '1' : '0',
-        notify_message:      document.getElementById('notify_message').checked      ? '1' : '0',
-        sms_enabled:         document.getElementById('sms_enabled').checked         ? '1' : '0',
+        notify_new_order:       document.getElementById('notify_new_order').checked       ? '1' : '0',
+        notify_status_change:   document.getElementById('notify_status_change').checked   ? '1' : '0',
+        notify_review:          document.getElementById('notify_review').checked          ? '1' : '0',
+        notify_message:         document.getElementById('notify_message').checked         ? '1' : '0',
+        sms_enabled:            document.getElementById('sms_enabled').checked            ? '1' : '0',
+        notifications_reviews:  document.getElementById('notifications_reviews')?.checked  ? '1' : '0',
+        notifications_messages: document.getElementById('notifications_messages')?.checked ? '1' : '0',
       })
     });
     _admin.toast('Настройки уведомлений сохранены', 'success');
@@ -1944,6 +2089,22 @@ async function cancelBroadcast(id) {
     _admin.toast('Рассылка отменена', 'success');
     loadBroadcasts();
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+/* ─── Save: Limits ────────────────────────────────────────── */
+async function saveLimits(btn) {
+  startSave(btn);
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        model_max_photos:         document.getElementById('model_max_photos')?.value || '',
+        client_max_active_orders: document.getElementById('client_max_active_orders')?.value || '',
+      })
+    });
+    _admin.toast('Лимиты сохранены', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
 }
 
 /* ─── Init ────────────────────────────────────────────────── */
