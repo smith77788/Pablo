@@ -2662,6 +2662,7 @@ async function showAdminSettings(chatId, section) {
             { text: '🖼 Фото «О нас»', callback_data: 'adm_set_about_photo' },
             { text: '🖼 Фото прайс-листа', callback_data: 'adm_set_pricing_photo' },
           ],
+          [{ text: '🖼 Фото «Контакты»', callback_data: 'adm_set_contacts_photo' }],
           [{ text: '🎉 Текст после бронирования', callback_data: 'adm_set_booking_thanks' }],
           [{ text: '📣 Telegram канал', callback_data: 'adm_set_tg_channel' }],
           [{ text: '🔙 Назад', callback_data: 'adm_settings_main' }],
@@ -4910,28 +4911,58 @@ async function showLoyaltyProfile(chatId) {
   // Next level info
   const nextLevelIndex = LOYALTY_LEVELS.findIndex(l => l.key === level.key) - 1;
   const nextLevel = nextLevelIndex >= 0 ? LOYALTY_LEVELS[nextLevelIndex] : null;
-  const toNextLine = nextLevel
-    ? `До уровня *${esc(nextLevel.label)}*: *${nextLevel.minEarned - lp.total_earned} баллов*\n`
-    : ``;
 
-  const text = [
+  // Progress bar toward next level
+  let progressLine = '';
+  if (nextLevel) {
+    const prevLevelDef = LOYALTY_LEVELS[LOYALTY_LEVELS.findIndex(l => l.key === level.key) + 1] || { minEarned: 0 };
+    const rangeSize = nextLevel.minEarned - prevLevelDef.minEarned;
+    const earned = lp.total_earned - prevLevelDef.minEarned;
+    const pct = Math.min(100, Math.round((earned / rangeSize) * 100));
+    const filled = Math.round(pct / 10);
+    const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(10 - filled);
+    const toNext = nextLevel.minEarned - lp.total_earned;
+    progressLine = `Прогресс: \`${bar}\` ${pct}%\nДо уровня *${esc(nextLevel.label)}*: *${toNext} баллов*`;
+  } else {
+    progressLine = `Прогресс: \`██████████\` 100% 🎉\n_Максимальный уровень достигнут\\!_`;
+  }
+
+  // Level benefits
+  const discountLine =
+    level.discount > 0 ? `Скидка на услуги: *${level.discount}%*` : `_Повышайте уровень для получения скидок\\._`;
+
+  // Referral link
+  let refLinkLine = '';
+  try {
+    const botInfo = await bot.getMe();
+    const refLink = `https://t.me/${botInfo.username}?start=ref${chatId}`;
+    refLinkLine = `🔗 Ваша реф\\-ссылка:\n\`${esc(refLink)}\``;
+  } catch (_) {}
+
+  const lines = [
     `💫 *Ваши бонусные баллы*`,
     ``,
     `Уровень: *${esc(level.label)}*`,
+    discountLine,
     `Текущий баланс: *${lp.points} баллов*`,
     `Всего заработано: *${lp.total_earned} баллов*`,
-    toNextLine.trim(),
+    ``,
+    progressLine,
     ``,
     `*Последние операции:*`,
     txText,
-  ]
-    .filter(l => l !== '')
-    .join('\n');
+  ];
+  if (refLinkLine) {
+    lines.push(``, refLinkLine);
+  }
+
+  const text = lines.filter(l => l !== '').join('\n');
 
   return safeSend(chatId, text, {
     parse_mode: 'MarkdownV2',
     reply_markup: {
       inline_keyboard: [
+        [{ text: '🎁 Пригласить друга', callback_data: 'referral' }],
         [{ text: '🏆 Мои достижения', callback_data: 'my_achievements' }],
         [{ text: '🏆 Топ клиентов', callback_data: 'loyalty_leaderboard' }],
         [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
@@ -5119,6 +5150,7 @@ async function showPriceCalculator(chatId, params = {}) {
           { text: '📋 Оставить заявку', callback_data: `calc_book_${bookingEtype}_${bookingDur}` },
           { text: '🔄 Пересчитать', callback_data: 'calculator' },
         ],
+        [{ text: '📤 Поделиться расчётом', callback_data: `calc_share_${models}_${hours}_${eventType}` }],
         [{ text: '💬 Уточнить у менеджера', callback_data: 'msg_manager_start' }],
         [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
       ],
@@ -5935,6 +5967,50 @@ function initBot(app) {
 
     // ── Калькулятор цен: calc_models_N_H_TYPE | calc_hours_N_H_TYPE | calc_type_N_H_TYPE
     if (data.startsWith('calc_')) {
+      // calc_share_N_H_TYPE — plain-text summary for sharing/saving
+      const csm = data.match(/^calc_share_(\d+)_(\d+)_(.+)$/);
+      if (csm) {
+        const [, modelsStr, hoursStr, evType] = csm;
+        const calcModels = parseInt(modelsStr);
+        const calcHours = parseInt(hoursStr);
+        const calcEventLabels = {
+          fashion_show: 'Показ мод',
+          photo_shoot: 'Фотосессия',
+          event: 'Корпоратив',
+          commercial: 'Коммерческая съёмка',
+          runway: 'Подиум',
+          other: 'Другое',
+        };
+        const rates = await getCalcRates();
+        const typeMult = rates.type_multipliers[evType] ?? 1.0;
+        const modelCost = rates.base_per_hour * calcModels * calcHours * typeMult;
+        const orgFee = rates.organization_fee;
+        const tiers = Object.entries(CALC_TIERS).map(([, tier]) => {
+          const mc = Math.round((modelCost * tier.mult) / 1000) * 1000;
+          return mc + orgFee;
+        });
+        const minPrice = Math.min(...tiers).toLocaleString('ru-RU');
+        const maxPrice = Math.max(...tiers).toLocaleString('ru-RU');
+        const shareText =
+          `💰 Расчёт стоимости:\n` +
+          `• Тип: ${calcEventLabels[evType] || evType}\n` +
+          `• Длительность: ${calcHours} ч.\n` +
+          `• Моделей: ${calcModels}\n` +
+          `\n` +
+          `💵 Ориентировочная стоимость: от ${minPrice} до ${maxPrice} ₽\n` +
+          `\n` +
+          `📋 Заявку можно оформить через бот или сайт nevesty-models.ru`;
+        await bot.answerCallbackQuery(q.id);
+        return safeSend(chatId, shareText, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📋 Оформить заявку', callback_data: `calc_book_${evType}_${Math.min(calcHours, 12)}` }],
+              [{ text: '← Назад к калькулятору', callback_data: 'calculator' }],
+            ],
+          },
+        });
+      }
+
       // calc_book_ETYPE_HOURS — start booking pre-filled from calculator
       const cbm = data.match(/^calc_book_(.+)_(\d+)$/);
       if (cbm) {
@@ -7725,6 +7801,7 @@ function initBot(app) {
       adm_set_welcome_photo: '🖼 Введите *URL фото* для приветствия (или отправьте ссылку на изображение):',
       adm_set_about_photo: '🖼 Введите *URL фото* для страницы «О нас»:',
       adm_set_pricing_photo: '🖼 Введите *URL фото* для страницы «Прайс-лист»:',
+      adm_set_contacts_photo: '🖼 Введите *URL фото* для страницы «Контакты»:',
       adm_set_main_menu_text: '📋 Введите *текст главного меню* бота:',
       adm_set_model_max_photos: '🖼 Введите *максимальное кол-во фото* у модели:',
       adm_set_client_max_orders: '📋 Введите *максимум активных заявок* у одного клиента:',
@@ -8636,6 +8713,23 @@ function initBot(app) {
       });
     }
 
+    // ── FAQ: "Was this helpful?" feedback callbacks
+    if (data.startsWith('faq_helpful_')) {
+      await bot.answerCallbackQuery(q.id, { text: '👍 Спасибо за отзыв!' });
+      return;
+    }
+    if (data.startsWith('faq_nothelpful_')) {
+      await bot.answerCallbackQuery(q.id);
+      return safeSend(chatId, '📞 Хотите спросить менеджера?', {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💬 Написать менеджеру', callback_data: 'msg_manager_start' }],
+            [{ text: '← Все вопросы', callback_data: 'faq' }],
+          ],
+        },
+      });
+    }
+
     // ── FAQ: отдельный вопрос
     if (data.startsWith('faq_')) {
       const faqId = parseInt(data.replace('faq_', ''));
@@ -8645,6 +8739,10 @@ function initBot(app) {
         parse_mode: 'MarkdownV2',
         reply_markup: {
           inline_keyboard: [
+            [
+              { text: '👍 Полезно', callback_data: `faq_helpful_${faqId}` },
+              { text: '👎 Не помогло', callback_data: `faq_nothelpful_${faqId}` },
+            ],
             [{ text: '← Все вопросы', callback_data: 'faq' }],
             [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
           ],
@@ -8889,6 +8987,7 @@ function initBot(app) {
         adm_set_welcome_photo: ['welcome_photo_url', '🖼 Фото приветствия обновлено!'],
         adm_set_about_photo: ['about_photo_url', '🖼 Фото «О нас» обновлено!'],
         adm_set_pricing_photo: ['pricing_photo_url', '🖼 Фото прайс-листа обновлено!'],
+        adm_set_contacts_photo: ['contacts_photo_url', '🖼 Фото «Контакты» обновлено!'],
         adm_set_main_menu_text: ['main_menu_text', '📋 Текст меню обновлён!'],
         adm_set_model_max_photos: ['model_max_photos', '🖼 Лимит фото обновлён!'],
         adm_set_client_max_orders: ['client_max_active_orders', '📋 Лимит заявок обновлён!'],
@@ -10789,13 +10888,14 @@ async function showTopModels(chatId, page = 0) {
 // ─── Написать менеджеру ───────────────────────────────────────────────────────
 
 async function showContactManager(chatId) {
-  const [phone, insta, waPhone, mgrHours] = await Promise.all([
+  const [phone, insta, waPhone, mgrHours, contactPhoto] = await Promise.all([
     getSetting('contacts_phone').catch(() => '+7 (900) 000-00-00'),
     getSetting('contacts_insta').catch(() => '@nevesty_models'),
     getSetting('contacts_whatsapp')
       .catch(() => null)
       .then(v => v || getSetting('agency_phone').catch(() => '')),
     getSetting('manager_hours').catch(() => ''),
+    getSetting('contacts_photo_url').catch(() => null),
   ]);
   await setSession(chatId, 'msg_to_manager', {});
   const waDigits = (waPhone || '').replace(/\D/g, '');
@@ -10813,10 +10913,17 @@ async function showContactManager(chatId) {
     inlineRows.push([{ text: '📱 WhatsApp', url: `https://wa.me/${waDigits}` }]);
   }
   inlineRows.push([{ text: '🏠 Главное меню', callback_data: 'main_menu' }]);
-  return safeSend(chatId, msgText, {
-    parse_mode: 'MarkdownV2',
-    reply_markup: { inline_keyboard: inlineRows },
-  });
+  const kb = { inline_keyboard: inlineRows };
+  if (contactPhoto && typeof contactPhoto === 'string' && contactPhoto.startsWith('http')) {
+    try {
+      return await bot.sendPhoto(chatId, contactPhoto, {
+        caption: msgText.slice(0, 1020),
+        parse_mode: 'MarkdownV2',
+        reply_markup: kb,
+      });
+    } catch (_) {}
+  }
+  return safeSend(chatId, msgText, { parse_mode: 'MarkdownV2', reply_markup: kb });
 }
 
 // ─── Получить контакт модели ──────────────────────────────────────────────────
