@@ -6498,6 +6498,30 @@ function initBot(app) {
       return showSearchMenu(chatId);
     }
 
+    // City text input: prompt user to type a city name
+    if (data === 'search_city_input') {
+      await setSession(chatId, 'search_city_input', {});
+      const f = getSearchFilters(chatId);
+      const currentCity = f.city ? `\n\n_Текущий город: ${esc(f.city)}_` : '';
+      return safeSend(chatId,
+        `🏙 *Поиск по городу*${currentCity}\n\nВведите название города:`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            ...(f.city ? [[{ text: '✖️ Сбросить город', callback_data: 'search_city_clear' }]] : []),
+            [{ text: '← Назад к поиску', callback_data: 'cat_search' }],
+          ]}
+        }
+      );
+    }
+
+    // Clear city filter
+    if (data === 'search_city_clear') {
+      const f = getSearchFilters(chatId);
+      delete f.city;
+      return showSearchMenu(chatId);
+    }
+
     // Reset all filters
     if (data === 'search_reset') {
       searchFilters.set(String(chatId), {});
@@ -10171,6 +10195,21 @@ function _registerNewFeatures() {
           { parse_mode: 'MarkdownV2' }
         );
       }
+    }
+
+    // City search: free-text city input
+    if (state === 'search_city_input') {
+      const city = text.trim();
+      if (!city || city.length < 2) {
+        return safeSend(chatId,
+          '❌ Введите название города \\(минимум 2 символа\\)',
+          { parse_mode: 'MarkdownV2' }
+        );
+      }
+      await clearSession(chatId);
+      const f = getSearchFilters(chatId);
+      f.city = city;
+      return showSearchMenu(chatId);
     }
   });
 }
