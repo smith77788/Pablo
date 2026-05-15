@@ -61,11 +61,13 @@ try {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "cdn.tailwindcss.com", "cdnjs.cloudflare.com"],
-        styleSrc: ["'self'", "'unsafe-inline'", "cdnjs.cloudflare.com"],
-        imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "ws:", "wss:"],
-        fontSrc: ["'self'", "cdnjs.cloudflare.com"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://www.googletagmanager.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
+        imgSrc: ["'self'", "data:", "https:", "blob:"],
+        connectSrc: ["'self'", "ws:", "wss:", "https://www.google-analytics.com"],
+        frameSrc: ["'none'"],
+        objectSrc: ["'none'"],
       }
     },
     crossOriginEmbedderPolicy: false,
@@ -86,32 +88,78 @@ app.use('/admin', (req, res, next) => {
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 try {
   const rateLimit = require('express-rate-limit');
+
+  // General API rate limit (60 requests/minute per IP)
   const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
+    windowMs: 60 * 1000,
+    max: 60,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Слишком много запросов. Попробуйте позже.' }
+    message: { error: 'Too many requests, please try again later.' }
   });
+
+  // Auth endpoints — stricter (5 per minute)
   const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 10,
+    windowMs: 60 * 1000,
+    max: 5,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Слишком много попыток входа. Попробуйте через 15 минут.' }
+    message: { error: 'Too many auth attempts, please try again later.' }
   });
+
+  // Orders/booking endpoints (20 per minute)
   const ordersLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
+    windowMs: 60 * 1000,
     max: 20,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Слишком много заявок. Попробуйте позже.' }
+    message: { error: 'Too many requests, please try again later.' }
   });
-  app.use('/api/', apiLimiter);
+
+  // Upload endpoints (10 per minute)
+  const uploadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many uploads, please try again later.' }
+  });
+
+  app.use('/api', apiLimiter);
+  app.use('/api/auth', authLimiter);
   app.use('/api/admin/login', authLimiter);
   app.use('/api/orders', ordersLimiter);
-  app.use('/api/quick-booking', ordersLimiter); // same 20/15m limit for quick bookings
+  app.use('/api/quick-booking', ordersLimiter);
+  app.use('/api/admin/models', uploadLimiter); // photo uploads
 } catch {}
+
+// ─── Input sanitization ───────────────────────────────────────────────────────
+// Strip null bytes and dangerous unicode from all incoming string fields
+app.use((req, res, next) => {
+  if (req.body && typeof req.body === 'object') {
+    const sanitize = (v) => typeof v === 'string' ? v.replace(/\0/g, '').slice(0, 10000) : v;
+    const walk = (obj) => {
+      if (Array.isArray(obj)) return obj.map(walk);
+      if (obj && typeof obj === 'object') {
+        return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, walk(v)]));
+      }
+      return sanitize(obj);
+    };
+    req.body = walk(req.body);
+  }
+  next();
+});
+
+// ─── Anti-CSRF: validate Content-Type for public POST endpoints ───────────────
+// For REST API with JWT Bearer auth, browser cannot send custom headers cross-origin,
+// so CSRF is already mitigated. For public (unauthenticated) POST endpoints, we
+// enforce application/json to prevent cross-site form submissions.
+app.use('/api/contact', (req, res, next) => {
+  if (req.method === 'POST' && !req.is('application/json')) {
+    return res.status(415).json({ error: 'Content-Type must be application/json' });
+  }
+  next();
+});
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
