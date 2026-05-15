@@ -8961,8 +8961,6 @@ function initBot(app) {
         if (text === '📞 Контакты') return showContacts(chatId);
         if (text === '📋 Тех. задание') return startTechSpec(chatId);
       }
-      // NOTE: Legacy REPLY_KB_ADMIN text handlers removed — admin reply keyboard was
-      // eliminated in the menu restructuring. Admins now use inline-only KB_MAIN_ADMIN.
     }
 
     // ── Admin: settings text inputs
