@@ -190,6 +190,20 @@ def init_db() -> None:
         """)
         conn.commit()
 
+        # Migrate: add applied_at/metric columns to experiments if missing
+        _exp_cols = [r[1] for r in conn.execute("PRAGMA table_info(experiments)").fetchall()]
+        if "applied_at" not in _exp_cols:
+            conn.execute("ALTER TABLE experiments ADD COLUMN applied_at TEXT")
+        if "metric" not in _exp_cols:
+            conn.execute("ALTER TABLE experiments ADD COLUMN metric TEXT")
+        conn.commit()
+
+        # Migrate: add description column to growth_actions if missing
+        _ga_cols = [r[1] for r in conn.execute("PRAGMA table_info(growth_actions)").fetchall()]
+        if "description" not in _ga_cols:
+            conn.execute("ALTER TABLE growth_actions ADD COLUMN description TEXT")
+        conn.commit()
+
         # Migrate existing growth_actions table — add experiment columns if missing
         _existing = [r[1] for r in conn.execute("PRAGMA table_info(growth_actions)").fetchall()]
         _new_cols = {
@@ -244,6 +258,10 @@ def execute(sql: str, params: tuple = ()) -> None:
     with get_conn() as conn:
         conn.execute(sql, params)
         conn.commit()
+
+
+# Alias: db.run() → db.execute()
+run = execute
 
 
 # ─── Domain-specific queries ──────────────────────────────────────────────────

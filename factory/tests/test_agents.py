@@ -1336,3 +1336,186 @@ class TestCycleWithMock:
         src = open(cycle.__file__).read()
         for phase_num in (16, 17, 18, 19, 20, 21):
             assert f'Phase {phase_num}' in src, f"Phase {phase_num} not found in cycle.py"
+
+
+class TestExperimentSystemExtended:
+    def test_rule_based_eval_scale(self):
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        exp = {"conversion_a": 3.0, "conversion_b": 6.0, "created_at": "2024-01-01T00:00:00"}
+        result = sys._rule_based_eval(exp)
+        assert result == "scale"
+
+    def test_rule_based_eval_kill(self):
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        exp = {"conversion_a": 4.0, "conversion_b": 1.0, "created_at": "2024-01-01T00:00:00"}
+        result = sys._rule_based_eval(exp)
+        assert result == "kill"
+
+    def test_rule_based_eval_returns_none_for_middle(self):
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        exp = {"conversion_a": 3.0, "conversion_b": 3.5, "created_at": "2024-01-01T00:00:00"}
+        result = sys._rule_based_eval(exp)
+        assert result is None
+
+    def test_generate_experiment_report_returns_dict(self, mocker):
+        mocker.patch('factory.db.fetch_all', return_value=[])
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        report = sys.generate_experiment_report()
+        assert isinstance(report, dict)
+        assert "total_experiments" in report
+        assert "win_rate" in report
+
+    def test_generate_experiment_report_win_rate(self, mocker):
+        experiments = [
+            {"status": "concluded", "result": "scale", "name": "Test A"},
+            {"status": "concluded", "result": "kill", "name": "Test B"},
+        ]
+        mocker.patch('factory.db.fetch_all', return_value=experiments)
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        report = sys.generate_experiment_report()
+        assert report["win_rate"] == 50.0
+        assert report["concluded"] == 2
+
+
+class TestStrategicCoreMonthlyReport:
+    """Tests for CEO monthly report and decision tracking methods."""
+
+    def test_generate_monthly_report_exists(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        assert hasattr(ceo, 'generate_monthly_report')
+        assert callable(ceo.generate_monthly_report)
+
+    def test_track_decision_execution_exists(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        assert hasattr(ceo, 'track_decision_execution')
+        assert callable(ceo.track_decision_execution)
+
+    def test_generate_monthly_report_returns_dict(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        mock_report = {
+            "period": "May 2026",
+            "executive_summary": "Strong growth in Q2",
+            "kpis": {"total_decisions": 20, "experiments_run": 3, "active_products": 2},
+            "achievements": ["Launched new MVP", "Improved conversion"],
+            "challenges": ["Low traffic"],
+            "next_month_goals": ["Scale marketing"],
+            "strategic_direction": "Expand to new cities",
+            "health_trend": "improving",
+        }
+        mocker.patch('factory.db.get_recent_decisions', return_value=[])
+        mocker.patch('factory.db.get_active_products', return_value=[])
+        mocker.patch('factory.db.get_running_experiments', return_value=[])
+        mocker.patch('factory.db.save_ceo_decision', return_value=None)
+        mocker.patch.object(ceo, 'think_json', return_value=mock_report)
+        result = ceo.generate_monthly_report()
+        assert isinstance(result, dict)
+        assert 'period' in result
+        assert 'health_trend' in result
+
+    def test_generate_monthly_report_fallback_on_invalid_ai(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        mocker.patch('factory.db.get_recent_decisions', return_value=[])
+        mocker.patch('factory.db.get_active_products', return_value=[])
+        mocker.patch('factory.db.get_running_experiments', return_value=[])
+        mocker.patch('factory.db.save_ceo_decision', return_value=None)
+        mocker.patch.object(ceo, 'think_json', return_value="invalid string")
+        result = ceo.generate_monthly_report()
+        assert isinstance(result, dict)
+        assert 'executive_summary' in result
+        assert result['executive_summary'] == "Monthly report unavailable"
+
+    def test_monthly_report_has_required_keys(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        mocker.patch('factory.db.get_recent_decisions', return_value=[{"decision_type": "grow"}] * 5)
+        mocker.patch('factory.db.get_active_products', return_value=[{}] * 3)
+        mocker.patch('factory.db.get_running_experiments', return_value=[{}])
+        mocker.patch('factory.db.save_ceo_decision', return_value=None)
+        mocker.patch.object(ceo, 'think_json', return_value={
+            "period": "May 2026", "executive_summary": "OK",
+            "kpis": {}, "achievements": [], "challenges": [],
+            "next_month_goals": [], "strategic_direction": "grow",
+            "health_trend": "stable"
+        })
+        result = ceo.generate_monthly_report()
+        for key in ('period', 'executive_summary', 'kpis', 'achievements',
+                    'challenges', 'next_month_goals', 'strategic_direction', 'health_trend'):
+            assert key in result, f"Key '{key}' missing from monthly report"
+
+    def test_track_decision_execution_not_found(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        mocker.patch('factory.db.fetch_all', return_value=[])
+        result = ceo.track_decision_execution(999)
+        assert isinstance(result, dict)
+        assert 'error' in result
+
+    def test_track_decision_execution_returns_dict(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        mock_decision = [{
+            "id": 1, "decision_type": "grow", "rationale": "Low traffic",
+            "payload": {}, "created_at": "2026-05-01T00:00:00"
+        }]
+        mock_status = {"executed": True, "impact": "Traffic increased 20%", "completion_pct": 100, "blockers": []}
+        mocker.patch('factory.db.fetch_all', return_value=mock_decision)
+        mocker.patch('factory.db.run', return_value=None)
+        mocker.patch.object(ceo, 'think_json', return_value=mock_status)
+        result = ceo.track_decision_execution(1)
+        assert isinstance(result, dict)
+        assert 'executed' in result or 'impact' in result
+
+
+class TestExperimentSystemExtended:
+    """Tests for extended experiment system methods."""
+
+    def test_experiment_system_imports(self):
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        assert sys is not None
+
+    def test_generate_experiment_report_exists(self):
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        assert hasattr(sys, 'generate_experiment_report')
+
+    def test_apply_experiment_exists(self):
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        assert hasattr(sys, 'apply_experiment')
+
+    def test_rule_based_eval_scale(self):
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        if not hasattr(sys, '_rule_based_eval'):
+            pytest.skip("_rule_based_eval not implemented yet")
+        exp = {"conversion_a": 3.0, "conversion_b": 6.0, "created_at": "2024-01-01T00:00:00"}
+        result = sys._rule_based_eval(exp)
+        assert result == "scale"
+
+    def test_rule_based_eval_kill(self):
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        if not hasattr(sys, '_rule_based_eval'):
+            pytest.skip("_rule_based_eval not implemented yet")
+        exp = {"conversion_a": 4.0, "conversion_b": 1.0, "created_at": "2024-01-01T00:00:00"}
+        result = sys._rule_based_eval(exp)
+        assert result == "kill"
+
+    def test_rule_based_eval_returns_none_for_middle(self):
+        from factory.agents.experiment_system import ExperimentSystem
+        sys = ExperimentSystem()
+        if not hasattr(sys, '_rule_based_eval'):
+            pytest.skip("_rule_based_eval not implemented yet")
+        exp = {"conversion_a": 3.0, "conversion_b": 3.5, "created_at": "2024-01-01T00:00:00"}
+        result = sys._rule_based_eval(exp)
+        assert result is None

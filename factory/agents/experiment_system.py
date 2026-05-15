@@ -207,6 +207,77 @@ class ExperimentSystem(FactoryAgent):
 
         return results
 
+    def _rule_based_eval(self, exp: dict) -> str | None:
+        """Apply simple rules before calling AI for edge cases."""
+        conv_a = float(exp.get("conversion_a") or 0)
+        conv_b = float(exp.get("conversion_b") or 0)
+
+        if conv_b > SCALE_THRESHOLD:
+            return "scale"
+        if conv_b < KILL_THRESHOLD and conv_a >= conv_b:
+            return "kill"
+
+        # Check duration: if running > 14 days with no data, kill
+        start = exp.get("start_date") or exp.get("created_at") or exp.get("started_at")
+        if start:
+            try:
+                start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                days = (datetime.now(timezone.utc) - start_dt).days
+                if days > 14 and conv_b == 0:
+                    return "kill"
+            except Exception:
+                pass
+
+        return None  # Use AI
+
+    def generate_experiment_report(self) -> dict:
+        """Generate a summary of all experiments."""
+        all_exps = db.fetch_all(
+            "SELECT * FROM experiments ORDER BY created_at DESC LIMIT 20"
+        )
+
+        running = [e for e in all_exps if e.get("status") == "running"]
+        concluded = [e for e in all_exps if e.get("status") == "concluded"]
+
+        wins = [e for e in concluded if e.get("result") in ("scale", "apply")]
+        losses = [e for e in concluded if e.get("result") in ("kill", "reject")]
+
+        return {
+            "total_experiments": len(all_exps),
+            "running": len(running),
+            "concluded": len(concluded),
+            "win_rate": round(len(wins) / len(concluded) * 100, 1) if concluded else 0,
+            "wins": [{"name": e.get("name"), "result": e.get("result")} for e in wins[:3]],
+            "losses": [{"name": e.get("name"), "result": e.get("result")} for e in losses[:3]],
+            "running_experiments": [
+                {"name": e.get("name"), "metric": e.get("metric"), "started": e.get("created_at")}
+                for e in running[:5]
+            ],
+        }
+
+    def apply_experiment(self, exp_id: int) -> bool:
+        """Mark a winning experiment as applied and log the action."""
+        try:
+            db.run(
+                "UPDATE experiments SET status='applied', applied_at=?, notes=COALESCE(notes,'')||? WHERE id=?",
+                (datetime.now(timezone.utc).isoformat(),
+                 f"\n[AUTO-APPLIED at {datetime.now(timezone.utc).strftime('%Y-%m-%d')}]",
+                 exp_id)
+            )
+            growth_action = {
+                "action_type": "apply_experiment",
+                "description": f"Applied winning experiment #{exp_id}",
+                "status": "pending",
+                "priority": 8,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            db.insert("growth_actions", growth_action)
+            logger.info("[ExperimentSystem] Applied experiment %d", exp_id)
+            return True
+        except Exception as e:
+            logger.error("[ExperimentSystem] apply_experiment error: %s", e)
+            return False
+
     def update_conversion(self, experiment_id: int, variant: str, conversion: float) -> None:
         """Update conversion rate for an experiment variant."""
         field = "conversion_a" if variant == "a" else "conversion_b"
