@@ -4104,6 +4104,7 @@ router.get('/admin/factory/status', auth, async (req, res, next) => {
     if (!fs.existsSync(factoryDbPath)) {
       return res.json({
         available: false,
+        status: 'unavailable',
         message: 'Factory not connected. Run factory cycle to generate data.',
       });
     }
@@ -4143,6 +4144,7 @@ router.get('/admin/factory/status', auth, async (req, res, next) => {
 
       res.json({
         available: true,
+        status: 'ok',
         lastRun: cycle?.created_at || null,
         healthScore: cycle?.health_score || null,
         elapsedSeconds: cycle?.elapsed_s || null,
@@ -4155,7 +4157,7 @@ router.get('/admin/factory/status', auth, async (req, res, next) => {
       fdb.close();
     }
   } catch (e) {
-    res.json({ available: false, error: e.message });
+    res.json({ available: false, status: 'error', error: e.message });
   }
 });
 
