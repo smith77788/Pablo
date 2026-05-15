@@ -555,11 +555,26 @@ async function showCatalog(chatId, cat, page, filter) {
       cityRows.push(row);
     }
 
-    // Model buttons (show ⭐ for featured models)
-    const modelBtns = slice.map(m => [{
-      text: `${m.available ? '🟢' : '🔴'}${m.featured ? '⭐' : ''} ${m.name}  ·  ${m.height}см  ·  ${m.hair_color || ''}`,
-      callback_data: `cat_model_${m.id}`
-    }]);
+    // Determine if models span multiple cities for city indicator
+    const citySet = new Set(slice.map(m => m.city).filter(Boolean));
+    const showCityInCard = citySet.size > 1;
+
+    // Category short labels for inline display
+    const catShortLabels = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
+
+    // Model buttons: numbered, featured-first indicator, key stats
+    const modelBtns = slice.map((m, i) => {
+      const num     = page * perPage + i + 1;
+      const featStar = m.featured ? '⭐' : '·';
+      const catShort = catShortLabels[m.category] || m.category || '';
+      const cityPart = showCityInCard && m.city ? ` | ${m.city}` : '';
+      const agePart  = m.age ? ` | ${m.age} л` : '';
+      const heightPart = m.height ? ` | ${m.height} см` : '';
+      return [{
+        text: `[${num}] ${featStar} ${m.name}${heightPart}${agePart}${catShort ? ` | ${catShort}` : ''}${cityPart}`,
+        callback_data: `cat_model_${m.id}`
+      }];
+    });
 
     // Pagination
     const nav = [];
@@ -579,8 +594,13 @@ async function showCatalog(chatId, cat, page, filter) {
 
     const label = CATEGORIES[cat] || 'Все';
     const cityLabel = filter.city ? ` — 🏙 ${esc(filter.city)}` : '';
+    const pageInfo  = Math.ceil(total / perPage) > 1
+      ? ` \\(стр\\. ${page+1}/${Math.ceil(total / perPage)}\\)`
+      : '';
+    const featuredCount = models.filter(mo => mo.featured).length;
+    const featuredNote  = featuredCount > 0 ? `\n⭐ — топ\\-модели` : '';
     return safeSend(chatId,
-      `💃 *Каталог моделей — ${esc(label)}${cityLabel}*\n\nНайдено: ${total} ${ru_plural(total,'модель','модели','моделей')}\n\nВыберите модель для просмотра:`,
+      `💃 *Каталог моделей — ${esc(label)}${cityLabel}*${pageInfo}\n\nНайдено: *${total}* ${ru_plural(total,'модель','модели','моделей')}${featuredNote}\n\nВыберите модель:`,
       { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
     );
   } catch (e) { console.error('[Bot] showCatalog:', e.message); }
@@ -597,9 +617,13 @@ async function showModel(chatId, modelId) {
     // Increment view counter (fire-and-forget)
     run('UPDATE models SET view_count = COALESCE(view_count,0) + 1 WHERE id=?', [modelId]).catch(() => {});
 
-    // Reviews count
-    const reviewRow = await get('SELECT COUNT(*) as cnt FROM reviews WHERE model_id=? AND approved=1', [modelId]).catch(() => null);
+    // Reviews: count + average rating
+    const reviewRow = await get(
+      'SELECT AVG(rating) as avg, COUNT(*) as cnt FROM reviews WHERE model_id=? AND approved=1',
+      [modelId]
+    ).catch(() => null);
     const reviewCount = reviewRow ? (reviewRow.cnt || 0) : 0;
+    const reviewAvg   = reviewRow ? (reviewRow.avg || 0) : 0;
 
     // Completed orders count
     const orderCountRow = await get('SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status="completed"', [m.id]).catch(() => ({ n: 0 }));
@@ -612,6 +636,20 @@ async function showModel(chatId, modelId) {
     ).catch(() => []);
     const busyRanges = groupBusyDatesIntoRanges(upcomingBusy);
 
+    // Category banner
+    const categoryBanners = {
+      fashion:    '👗 Fashion Model',
+      commercial: '📸 Commercial Model',
+      events:     '🎭 Event Model',
+    };
+    const catBanner = categoryBanners[m.category] || '💃 Model';
+
+    // Rating stars (filled up to rounded avg, out of 5)
+    function ratingStars(avg) {
+      const filled = Math.round(avg);
+      return '⭐'.repeat(Math.min(5, Math.max(0, filled))) + '☆'.repeat(Math.max(0, 5 - filled));
+    }
+
     const lines = [];
     if (m.featured)                    lines.push(`⭐ Топ\\-модель`);
     if (m.age)                         lines.push(`📅 Возраст: *${m.age}* лет`);
@@ -621,13 +659,14 @@ async function showModel(chatId, modelId) {
     if (m.shoe_size)                   lines.push(`👟 Обувь: *${esc(m.shoe_size)}*`);
     if (m.hair_color)                  lines.push(`💇 Волосы: *${esc(m.hair_color)}*`);
     if (m.eye_color)                   lines.push(`👁 Глаза: *${esc(m.eye_color)}*`);
-    if (m.category)                    lines.push(`🏷 Категория: *${esc(m.category)}*`);
     if (m.city)                        lines.push(`🏙 Город: *${esc(m.city)}*`);
     if (m.instagram)                   lines.push(`📸 @${esc(m.instagram)}`);
-    if (reviewCount > 0)               lines.push(`⭐ Отзывов: *${reviewCount}*`);
-    if (completedOrders > 0)           lines.push(`📋 Завершено заявок: *${esc(String(completedOrders))}*`);
+    // Enhanced stats
+    if (reviewCount > 0)               lines.push(`${ratingStars(reviewAvg)} *${reviewCount}* ${ru_plural(reviewCount,'отзыв','отзыва','отзывов')}`);
+    if (completedOrders > 0)           lines.push(`📋 *${esc(String(completedOrders))}* заявок`);
     const viewCount = (m.view_count || 0) + 1; // +1 for the just-incremented count
-    if (viewCount > 0)                 lines.push(`👁 Просмотров: *${viewCount}*`);
+    if (viewCount > 50)                lines.push(`🔥 Популярная`);
+    if (viewCount > 0)                 lines.push(`👁 *${viewCount}* просмотров`);
 
     let avail;
     if (!m.available) {
@@ -647,12 +686,12 @@ async function showModel(chatId, modelId) {
     const bioEsc  = m.bio ? esc(m.bio) : '';
     const bioFits = bioEsc.slice(0, 180) + (bioEsc.length > 180 ? '…' : '');
     const breadcrumb = `🏠 Главная › 💃 Каталог › ${esc(m.name)}`;
-    const captionParts = [breadcrumb, `💃 ${star}*${esc(m.name)}*`, '', ...lines, '', avail];
+    const captionParts = [breadcrumb, `*${esc(catBanner)}*`, `${star}*${esc(m.name)}*`, '', ...lines, '', avail];
     if (bioFits) captionParts.push('', `_${bioFits}_`);
     const caption = captionParts.join('\n').slice(0, 1020);
 
     const contactBtn = m.phone || m.instagram
-      ? [{ text: '📱 Получить контакт', callback_data: `model_contact_${m.id}` }]
+      ? [{ text: '📞 Написать менеджеру', callback_data: `model_contact_${m.id}` }]
       : [];
     const profileUrl = siteUrl(`/model/${m.id}`, { utm_campaign: 'model_card', utm_content: String(m.id) });
     const shareUrl  = `https://t.me/share/url?url=${encodeURIComponent(siteUrl('/model/' + m.id, { utm_campaign: 'share' }))}&text=${encodeURIComponent('Посмотри эту модель: ' + m.name)}`;
@@ -662,24 +701,37 @@ async function showModel(chatId, modelId) {
       getSetting('wishlist_enabled').catch(() => '1'),
       isInWishlist(chatId, m.id).catch(() => false),
     ]);
-    const favBtn = wishlistEnabled !== '0'
-      ? (inWishlist
-          ? [{ text: '💔 Убрать из избранного', callback_data: `fav_remove_${m.id}` }]
-          : [{ text: '❤️ В избранное',           callback_data: `fav_add_${m.id}`    }])
-      : [];
+    const favText = inWishlist ? '💔 Убрать из избранного' : '❤️ В избранное';
+    const favCb   = inWishlist ? `fav_remove_${m.id}` : `fav_add_${m.id}`;
 
-    const keyboard = {
-      inline_keyboard: [
-        m.available ? [{ text: '📝 Заказать эту модель', callback_data: `bk_model_${m.id}` }] : [],
-        contactBtn,
-        [{ text: m.available ? '📅 Уточнить доступность' : '📞 Узнать о доступности', callback_data: `ask_availability_${m.id}` }],
-        ...(favBtn.length ? [favBtn] : []),
-        [{ text: '⚖️ Сравнить', callback_data: `compare_add_${m.id}` }],
-        [{ text: '🌐 Профиль', url: profileUrl },
-         { text: '📤 Поделиться', url: shareUrl }],
-        [{ text: '← Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Меню', callback_data: 'main_menu' }],
-      ].filter(r => r.length)
-    };
+    // Improved keyboard layout
+    const keyboardRows = [];
+    // Row 1: Book (large, prominent)
+    if (m.available) keyboardRows.push([{ text: '📋 Забронировать', callback_data: `bk_model_${m.id}` }]);
+    // Row 2: Fav + Reviews
+    const row2 = [];
+    if (wishlistEnabled !== '0') row2.push({ text: favText, callback_data: favCb });
+    row2.push({ text: '⭐ Отзывы', callback_data: `reviews_model_${m.id}` });
+    if (row2.length) keyboardRows.push(row2);
+    // Row 3: All photos + Back to catalog
+    keyboardRows.push([
+      { text: '🌐 Профиль на сайте', url: profileUrl },
+      { text: '← Назад в каталог', callback_data: 'cat_cat__0' },
+    ]);
+    // Row 4: Contact manager (if available)
+    if (contactBtn.length) keyboardRows.push(contactBtn);
+    // Row 5: Compare + Share
+    keyboardRows.push([
+      { text: '⚖️ Сравнить', callback_data: `compare_add_${m.id}` },
+      { text: '📤 Поделиться', url: shareUrl },
+    ]);
+    // Row 6: Availability + Main menu
+    keyboardRows.push([
+      { text: m.available ? '📅 Уточнить доступность' : '📞 Узнать о доступности', callback_data: `ask_availability_${m.id}` },
+      { text: '🏠 Меню', callback_data: 'main_menu' },
+    ]);
+
+    const keyboard = { inline_keyboard: keyboardRows };
 
     // Собираем все фото: photo_main + галерея
     let galleryUrls = [];
@@ -690,9 +742,15 @@ async function showModel(chatId, modelId) {
 
     if (galleryUrls.length >= 2) {
       // Медиагруппа — caption только на первом фото (лимит 1024 chars)
+      const totalPhotos = galleryUrls.length;
       const media = galleryUrls.slice(0, 8).map((url, i) => {
         const item = { type: 'photo', media: url };
-        if (i === 0) { item.caption = caption; item.parse_mode = 'MarkdownV2'; }
+        if (i === 0) {
+          // Add photo count to caption header
+          const galCaption = caption.slice(0, 950) + `\n\n📸 Фото: 1 из ${totalPhotos}`;
+          item.caption = galCaption.slice(0, 1020);
+          item.parse_mode = 'MarkdownV2';
+        }
         return item;
       });
       try {
@@ -706,7 +764,7 @@ async function showModel(chatId, modelId) {
         await safeSend(chatId, `📝 *Описание:*\n\n_${bioEsc}_`, { parse_mode: 'MarkdownV2' });
       }
       // Кнопки отдельным сообщением (медиагруппы не поддерживают reply_markup)
-      return safeSend(chatId, `📸 Фото: ${galleryUrls.length} шт\\.`, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
+      return safeSend(chatId, `📸 *${esc(m.name)}* — фото: ${totalPhotos} шт\\.`, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
     }
 
     if (m.photo_main) {
@@ -717,7 +775,7 @@ async function showModel(chatId, modelId) {
       return;
     }
     // Нет фото — полная карточка текстом (лимит 4096)
-    const fullCaption = [`💃 ${star}*${esc(m.name)}*`, '', ...lines, '', avail,
+    const fullCaption = [`*${esc(catBanner)}*`, `${star}*${esc(m.name)}*`, '', ...lines, '', avail,
       ...(bioEsc ? ['', `📝 *Описание:*\n_${bioEsc}_`] : [])].join('\n');
     return safeSend(chatId, fullCaption, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
   } catch (e) { console.error('[Bot] showModel:', e.message); }
@@ -7027,7 +7085,15 @@ async function showCatalogByCity(chatId, city, page = 0) {
 
     const total = models.length;
     const slice = models.slice(page * perPage, page * perPage + perPage);
-    const modelBtns = slice.map(m => [{ text: `${m.name} · ${m.height}см`, callback_data: `cat_model_${m.id}` }]);
+    const catShortLabelsByCity = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
+    const modelBtns = slice.map((m, i) => {
+      const num      = page * perPage + i + 1;
+      const featStar = m.featured ? '⭐' : '·';
+      const catShort = catShortLabelsByCity[m.category] || m.category || '';
+      const agePart  = m.age ? ` | ${m.age} л` : '';
+      const heightPart = m.height ? ` | ${m.height} см` : '';
+      return [{ text: `[${num}] ${featStar} ${m.name}${heightPart}${agePart}${catShort ? ` | ${catShort}` : ''}`, callback_data: `cat_model_${m.id}` }];
+    });
     const nav = [];
     if (page > 0) nav.push({ text: '◀️', callback_data: `cat_city_${city}_${page-1}` });
     if ((page+1)*perPage < total) nav.push({ text: '▶️', callback_data: `cat_city_${city}_${page+1}` });
