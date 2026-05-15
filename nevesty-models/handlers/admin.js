@@ -563,6 +563,10 @@ async function showAdminReviews(chatId, filter = 'pending', page = 0) {
         { text: '❌ Отклонить', callback_data: `rev_reject_${r.id}` },
         { text: '🗑️ Удалить', callback_data: `rev_delete_${r.id}` },
       ]);
+      keyboard.push([
+        { text: '💬 Ответить', callback_data: `rev_reply_${r.id}` },
+        { text: '👁 Подробнее', callback_data: `rev_view_${r.id}` },
+      ]);
     }
 
     // Pagination nav
