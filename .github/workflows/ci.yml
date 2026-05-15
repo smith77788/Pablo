@@ -13,7 +13,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18.x, 20.x]
+        node-version: [20.x, 22.x]
 
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +87,7 @@ jobs:
       - name: Run ESLint
         working-directory: nevesty-models
         run: |
-          npx eslint routes/api.js database.js services/*.js utils/*.js --max-warnings 30 || true
+          npx eslint routes/api.js database.js server.js services/*.js utils/*.js --max-warnings 30 || true
 
   python-check:
     name: Factory Python Check
@@ -119,3 +119,9 @@ jobs:
         run: |
           pip install mypy
           python -m mypy agents/ --ignore-missing-imports || true
+
+      - name: Run Factory unit tests
+        working-directory: factory
+        run: |
+          pip install pytest pytest-asyncio
+          python -m pytest tests/ -v --tb=short 2>&1 | head -80 || true
