@@ -189,7 +189,7 @@ app.use((req, res, next) => {
 app.get('/sitemap.xml', async (req, res) => {
   try {
     const { query: dbQuery } = require('./database');
-    const models = await dbQuery('SELECT id, name, updated_at FROM models WHERE available=1 ORDER BY featured DESC, id ASC');
+    const models = await dbQuery('SELECT id, name, updated_at FROM models WHERE available=1 AND archived=0 ORDER BY updated_at DESC');
     const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
 
     const modelUrls = models.map(m => `
@@ -218,6 +218,7 @@ app.get('/sitemap.xml', async (req, res) => {
 </urlset>`;
 
     res.header('Content-Type', 'application/xml');
+    res.header('Cache-Control', 'public, max-age=3600');
     res.send(xml);
   } catch (e) {
     console.error('[sitemap]', e.message);
@@ -330,6 +331,23 @@ app.get('/model/:id', async (req, res) => {
   } catch (e) {
     console.error('[model-page]', e.message);
     res.redirect('/catalog.html');
+  }
+});
+
+// ─── SEO: OG image redirect (first model photo → social sharing) ──────────────
+app.get('/og-image/:modelId', async (req, res) => {
+  const { get: dbGetOg } = require('./database');
+  const modelId = parseInt(req.params.modelId, 10);
+  if (!modelId || !Number.isInteger(modelId) || modelId <= 0) return res.redirect('/og-image.jpg');
+  try {
+    const model = await dbGetOg('SELECT photos, photo_main FROM models WHERE id=? AND available=1', [modelId]);
+    if (!model) return res.redirect('/og-image.jpg');
+    if (model.photo_main) return res.redirect(`/uploads/${model.photo_main}`);
+    const photos = JSON.parse(model.photos || '[]');
+    if (photos.length) return res.redirect(`/uploads/${photos[0]}`);
+    return res.redirect('/og-image.jpg');
+  } catch (_) {
+    return res.redirect('/og-image.jpg');
   }
 });
 
