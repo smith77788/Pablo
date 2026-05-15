@@ -804,9 +804,10 @@ router.get('/models', async (req, res, next) => {
 // ─── Models search (public, extended filters) ─────────────────────────────────
 router.get('/models/search', async (req, res, next) => {
   try {
-    const { min_height, max_height, min_age, max_age, category, city, page = 0, limit = 12 } = req.query;
-    const where = ['1=1'];
+    const { min_height, max_height, min_age, max_age, category, city, name, page = 0, limit = 12 } = req.query;
+    const where = ['archived=0'];
     const params = [];
+    if (name) { where.push('name LIKE ?'); params.push(`%${name}%`); }
     if (min_height && !isNaN(+min_height)) { where.push('height >= ?'); params.push(parseInt(min_height)); }
     if (max_height && !isNaN(+max_height)) { where.push('height <= ?'); params.push(parseInt(max_height)); }
     if (min_age && !isNaN(+min_age)) { where.push('age >= ?'); params.push(parseInt(min_age)); }
@@ -843,6 +844,60 @@ router.get('/models/related', async (req, res) => {
     );
     res.json({ models });
   } catch (e) { res.status(500).json({ error: 'DB error' }); }
+});
+
+// ─── Model recommendation engine (public) ─────────────────────────────────────
+router.get('/recommend', async (req, res) => {
+  try {
+    const { event_type, budget, city, limit = 5 } = req.query;
+    const limitN = Math.min(20, Math.max(1, parseInt(limit) || 5));
+
+    // Map event types to preferred categories
+    const categoryMap = {
+      'фотосессия': 'fashion', 'photo_shoot': 'fashion',
+      'показ мод': 'fashion', 'runway': 'fashion',
+      'корпоратив': 'events', 'corporate': 'events',
+      'промо': 'commercial', 'promo': 'commercial',
+      'реклама': 'commercial', 'advertising': 'commercial',
+      'мероприятие': 'events', 'event': 'events'
+    };
+    const budgetNum = parseInt((budget || '').replace(/\D/g, '')) || 0;
+
+    const where = ['archived=0', 'available=1'];
+    const params = [];
+
+    if (city) { where.push('city = ?'); params.push(city); }
+
+    // Prefer category matching event type
+    const preferredCategory = event_type
+      ? (categoryMap[event_type.toLowerCase()] || null)
+      : null;
+
+    // Query with scoring: featured + category match + order_count
+    const scoreExpr = preferredCategory
+      ? `(featured * 30 + (CASE WHEN category=? THEN 20 ELSE 0 END) + MIN(order_count, 10) * 2)`
+      : `(featured * 30 + MIN(order_count, 10) * 2)`;
+
+    if (preferredCategory) params.push(preferredCategory);
+    params.push(limitN);
+
+    const models = await query(
+      `SELECT id, name, age, height, city, category, available, photo_main, bio, featured, order_count
+       FROM models WHERE ${where.join(' AND ')}
+       ORDER BY ${scoreExpr} DESC, id DESC LIMIT ?`,
+      params
+    );
+
+    res.json({
+      models,
+      meta: {
+        event_type: event_type || null,
+        preferred_category: preferredCategory,
+        budget: budgetNum || null,
+        city: city || null
+      }
+    });
+  } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
 router.get('/models/:id', async (req, res, next) => {
