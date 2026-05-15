@@ -625,6 +625,7 @@ async function initDatabase() {
     answer TEXT NOT NULL,
     sort_order INTEGER DEFAULT 0,
     active INTEGER DEFAULT 1,
+    category TEXT DEFAULT 'general',
     created_at TEXT DEFAULT (datetime('now'))
   )`).catch(() => {});
   await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (12, 'faq table')`).catch(() => {});

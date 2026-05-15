@@ -278,6 +278,21 @@ const upload = multer({
     else cb(new Error('Допускаются только изображения JPG, PNG, GIF, WebP'));
   },
 });
+const uploadCsv = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (
+      ext === '.csv' ||
+      file.mimetype === 'text/csv' ||
+      file.mimetype === 'text/plain' ||
+      file.mimetype === 'application/csv'
+    )
+      cb(null, true);
+    else cb(new Error('Допускаются только CSV файлы'));
+  },
+});
 
 // ─── Public config ────────────────────────────────────────────────────────────
 router.get('/config', (req, res) => {
@@ -4610,7 +4625,7 @@ router.get('/export/orders', auth, async (req, res, next) => {
 });
 
 // ─── Model CSV import ─────────────────────────────────────────────────────────
-router.post('/admin/models/import-csv', auth, upload.single('file'), async (req, res, next) => {
+router.post('/admin/models/import-csv', auth, uploadCsv.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'CSV file required' });
     const content = req.file.buffer ? req.file.buffer.toString('utf8') : fs.readFileSync(req.file.path, 'utf8');
@@ -4669,15 +4684,45 @@ router.post('/admin/models/import-csv', auth, upload.single('file'), async (req,
         errors.push(`Row ${i + 1}: name required`);
         continue;
       }
+      // Sanitize string fields: enforce length limits and strip control chars
+      const STR_LIMITS = { name: 100, hair_color: 50, eye_color: 50, city: 100, instagram: 100, bio: 2000 };
+      for (const [field, maxLen] of Object.entries(STR_LIMITS)) {
+        if (obj[field] != null)
+          obj[field] =
+            String(obj[field])
+              .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+              .slice(0, maxLen) || null;
+      }
+      // Validate numeric fields: must be positive finite numbers within sane range
+      const NUM_FIELDS = ['age', 'height', 'weight', 'bust', 'waist', 'hips', 'shoe_size'];
+      for (const field of NUM_FIELDS) {
+        if (obj[field] != null) {
+          const n = parseFloat(obj[field]);
+          obj[field] = !isNaN(n) && n > 0 && n < 10000 ? n : null;
+        }
+      }
+      // Validate photo_main: must be a relative /uploads/ path or http(s) URL; reject javascript:/data:/etc.
+      if (obj.photo_main != null) {
+        const pm = String(obj.photo_main).trim();
+        if (pm && !/^(https?:\/\/|\/uploads\/)/.test(pm)) {
+          errors.push(`Row ${i + 1}: photo_main must be a URL or /uploads/ path`);
+          obj.photo_main = null;
+        } else {
+          obj.photo_main = pm.slice(0, 500) || null;
+        }
+      }
       if (!ALLOWED_CATEGORIES.includes(obj.category)) obj.category = 'fashion';
       obj.available = obj.available === '0' || obj.available === 'false' || obj.available === 'нет' ? 0 : 1;
       const cols = Object.keys(obj);
       const vals = Object.values(obj);
       const placeholders = cols.map(() => '?').join(',');
-      await run(`INSERT INTO models (${cols.join(',')}) VALUES (${placeholders})`, vals).catch(e => {
-        errors.push(`Row ${i + 1}: ${e.message}`);
-      });
-      created++;
+      const insertOk = await run(`INSERT INTO models (${cols.join(',')}) VALUES (${placeholders})`, vals)
+        .then(() => true)
+        .catch(e => {
+          errors.push(`Row ${i + 1}: ${e.message}`);
+          return false;
+        });
+      if (insertOk) created++;
     }
     // Clean up temp file if multer wrote to disk
     if (req.file.path) fs.unlink(req.file.path, () => {});
@@ -6648,7 +6693,7 @@ router.post('/admin/faq', auth, async (req, res, next) => {
       parseInt(sort_order) || 0,
       (category || 'general').slice(0, 50),
     ]);
-    res.json({ ok: true, id: result.lastID });
+    res.json({ ok: true, id: result.id });
   } catch (e) {
     next(e);
   }
@@ -6784,7 +6829,7 @@ router.post('/admin/price-packages', auth, async (req, res, next) => {
       ]
     );
     cache.del('pricing:public');
-    res.json({ ok: true, id: result.lastID });
+    res.json({ ok: true, id: result.id });
   } catch (e) {
     next(e);
   }

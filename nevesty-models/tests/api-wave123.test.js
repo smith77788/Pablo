@@ -52,48 +52,38 @@ describe('Model CSV import — POST /api/admin/models/import-csv', () => {
     expect(res.body).toHaveProperty('error');
   });
 
-  it('returns non-200 for CSV with header-only (no data rows)', async () => {
-    // The endpoint uses an image-only multer filter so CSV files are rejected at the
-    // middleware level (500 with multer error). Either way it must not succeed (200)
-    // since there is nothing to import from a header-only file.
+  it('returns 400 for CSV with header-only (no data rows)', async () => {
     const csvContent = 'name,age,height,city\n';
     const res = await request(app)
       .post('/api/admin/models/import-csv')
       .set('Authorization', `Bearer ${adminToken}`)
       .attach('file', Buffer.from(csvContent, 'utf8'), { filename: 'models.csv', contentType: 'text/csv' });
-    // Acceptable: 400 (content validation) or 500 (multer file-filter rejection)
-    expect([400, 500]).toContain(res.status);
+    expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
   });
 
-  it('endpoint rejects non-image files — multer returns error with auth', async () => {
-    // The import-csv route re-uses the image-only multer middleware,
-    // so CSV files are rejected at the file-filter level.
-    const csvContent = 'name,age,height,city\nTestovaya Model,22,175,Moscow\n';
+  it('returns 200 with valid CSV file containing data rows', async () => {
+    const csvContent = 'name,age,height,city,category\nTestovaya Model,22,175,Москва,fashion\n';
     const res = await request(app)
       .post('/api/admin/models/import-csv')
       .set('Authorization', `Bearer ${adminToken}`)
       .attach('file', Buffer.from(csvContent, 'utf8'), { filename: 'models.csv', contentType: 'text/csv' });
-    // Should not be 401 (auth is valid) — responds with some non-auth error status
-    expect(res.status).not.toBe(401);
-    // Response must have an error field describing the problem
-    expect(res.body).toHaveProperty('error');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('created');
+    expect(res.body.created).toBeGreaterThanOrEqual(1);
   });
 
-  it('response body always has error field when CSV file is rejected by multer', async () => {
-    const csvContent = 'name,age,height,city\nImport Test,25,170,Kazan\n';
+  it('successful import has created, errors, total fields', async () => {
+    const csvContent = 'name,age,height,city,category\nImport Test,25,170,Казань,fashion\n';
     const res = await request(app)
       .post('/api/admin/models/import-csv')
       .set('Authorization', `Bearer ${adminToken}`)
       .attach('file', Buffer.from(csvContent, 'utf8'), { filename: 'models.csv', contentType: 'text/csv' });
-    // Multer rejects the file — response always contains error key
-    if (res.status >= 400) {
-      expect(res.body).toHaveProperty('error');
-      expect(typeof res.body.error).toBe('string');
-    } else {
-      // If the endpoint was fixed to accept CSV, it should have created count
-      expect(res.body).toHaveProperty('created');
-    }
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('created');
+    expect(res.body).toHaveProperty('errors');
+    expect(res.body).toHaveProperty('total');
+    expect(Array.isArray(res.body.errors)).toBe(true);
   });
 });
 
