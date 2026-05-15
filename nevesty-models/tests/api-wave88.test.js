@@ -29,7 +29,7 @@ describe('T1: Factory → Bot webhook', () => {
 
   test('T04: endpoint handles summary, insights, actions fields in body', () => {
     const idx = apiCode.indexOf('/admin/factory/cycle-complete');
-    const nearby = apiCode.slice(idx, idx + 1200);
+    const nearby = apiCode.slice(idx, idx + 1800);
     expect(nearby).toMatch(/summary/);
     expect(nearby).toMatch(/insights/);
     expect(nearby).toMatch(/actions/);

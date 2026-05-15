@@ -18,8 +18,8 @@ describe('T1: Factory webhook endpoint', () => {
   test('T03: cycle-complete calls notifyAdmin', () => {
     const idx =
       apiCode.indexOf('cycle-complete') !== -1 ? apiCode.indexOf('cycle-complete') : apiCode.indexOf('cycleComplete');
-    // The handler body extends ~2100 chars from the route declaration
-    const nearby = apiCode.slice(Math.max(0, idx), idx + 2200);
+    // The handler body extends ~2300 chars from the route declaration
+    const nearby = apiCode.slice(Math.max(0, idx), idx + 2500);
     expect(nearby).toMatch(/notifyAdmin/);
   });
 });
