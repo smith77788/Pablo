@@ -6221,7 +6221,10 @@ router.post('/client/verify', clientOtpLimiter, async (req, res, next) => {
       return res.status(429).json({ error: 'Превышено число попыток. Запросите новый код.' });
     }
 
-    if (otp.code !== code) return res.status(401).json({ error: 'Неверный код' });
+    const crypto = require('crypto');
+    const codeMatch =
+      otp.code.length === code.length && crypto.timingSafeEqual(Buffer.from(otp.code), Buffer.from(code));
+    if (!codeMatch) return res.status(401).json({ error: 'Неверный код' });
 
     // Mark used
     await run('UPDATE client_otp SET used=1 WHERE id=?', [otp.id]);
