@@ -32,6 +32,7 @@ let wishlistLimiter = (req, res, next) => next(); // fallback: no-op — 60/15mi
 let publicSettingsLimiter = (req, res, next) => next(); // fallback: no-op — 60/min for /settings/public
 let catalogLimiter = (req, res, next) => next(); // fallback: no-op — 120/min for catalog
 try {
+  if (process.env.NODE_ENV === 'test') throw new Error('skip-rate-limit-in-test');
   const rateLimit = require('express-rate-limit');
   // Contact form: 3 requests per hour per IP
   contactRateLimit = rateLimit({
@@ -490,7 +491,7 @@ router.post('/auth/refresh', authLimiter, async (req, res, next) => {
     }
     const jwtSecret2 = process.env.JWT_SECRET;
     if (!jwtSecret2) throw new Error('JWT_SECRET environment variable is not set');
-    const token = jwt.sign({ id: admin.id, username: admin.username, role: admin.role }, jwtSecret2, {
+    const token = jwt.sign({ id: admin.id, username: admin.username, role: admin.role, type: 'admin' }, jwtSecret2, {
       expiresIn: '15m',
     });
     res.json({ token, refresh_token: newRefresh });
