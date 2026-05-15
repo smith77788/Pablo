@@ -1,491 +1,341 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Модели — Nevesty Models Admin</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Модели — Admin Nevesty Models</title>
   <meta name="robots" content="noindex, nofollow">
-  <link rel="stylesheet" href="/css/admin.css" />
+  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body>
-<div class="admin-layout">
-  <aside class="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-text">Nevesty Models</div>
-      <div class="sidebar-logo-sub">Панель управления</div>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+  <!-- Topbar -->
+  <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
+    <div class="flex items-center gap-4">
+      <a href="/admin/" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+        <i class="fas fa-arrow-left"></i>
+      </a>
+      <h1 class="text-xl font-bold text-gray-900 dark:text-white">💃 Управление моделями</h1>
+      <span id="models-count" class="text-sm text-gray-500 dark:text-gray-400"></span>
     </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Главная</div>
-      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
-      <div class="nav-section-label">Бизнес</div>
-      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
-      <a href="/admin/models.html" class="active"><span class="nav-icon">💃</span> Модели</a>
-      <div class="nav-section-label">AI</div>
-      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
-      <div class="nav-section-label">Настройки</div>
-      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
-      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
-      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-user">
-        <div class="sidebar-avatar sidebar-user-letter">A</div>
-        <div class="sidebar-user-info">
-          <strong class="sidebar-user-name">—</strong>
-          <span class="sidebar-user-role">—</span>
-        </div>
-      </div>
-      <button class="btn-logout" data-action="logout">Выйти</button>
-    </div>
-  </aside>
+    <button onclick="openAddModal()"
+      class="flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg text-sm font-medium">
+      <i class="fas fa-plus"></i>
+      Добавить модель
+    </button>
+  </div>
 
-  <div class="main-content">
-    <header class="topbar">
-      <div class="topbar-title" id="pageTitle">Модели</div>
-      <div class="topbar-right">
-        <button class="topbar-btn" onclick="showList()">☰ Список</button>
-        <button class="topbar-btn primary" onclick="showForm()">+ Добавить модель</button>
+  <!-- Filters & Search -->
+  <div class="max-w-7xl mx-auto px-6 py-4">
+    <div class="flex flex-wrap gap-3 mb-4 items-center">
+      <!-- Status filter -->
+      <div class="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+        <button onclick="setFilter('active')" id="filter-active"
+          class="px-4 py-2 text-sm font-medium bg-pink-600 text-white">Активные</button>
+        <button onclick="setFilter('archived')" id="filter-archived"
+          class="px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300">Архив</button>
+        <button onclick="setFilter('all')" id="filter-all"
+          class="px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300">Все</button>
       </div>
-    </header>
 
-    <!-- LIST VIEW -->
-    <div id="listView" class="page-content">
-      <div class="section-card">
-        <div class="filters-bar" style="flex-wrap:wrap;gap:10px;align-items:center">
-          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск по имени..." style="min-width:180px;flex:1" />
-          <select class="filter-select" id="categoryFilter">
-            <option value="">Все категории</option>
-            <option value="fashion">Fashion</option>
-            <option value="commercial">Commercial</option>
-            <option value="events">Events</option>
-          </select>
-          <div class="toggle-filter-group" style="display:flex;gap:4px">
-            <button class="btn btn-sm avail-filter-btn active" data-avail="" onclick="setAvailFilter(this,'')">Все</button>
-            <button class="btn btn-sm avail-filter-btn" data-avail="1" onclick="setAvailFilter(this,'1')" style="color:#27ae60">Свободные</button>
-            <button class="btn btn-sm avail-filter-btn" data-avail="0" onclick="setAvailFilter(this,'0')" style="color:#e74c3c">Занятые</button>
-          </div>
-          <!-- hidden backing value for fetchModels() -->
-          <select id="availFilter" style="display:none">
-            <option value=""></option>
-            <option value="1">1</option>
-            <option value="0">0</option>
-          </select>
-        </div>
-        <div class="section-card-body" style="overflow-x:auto;padding:0">
-          <table class="models-table" id="modelsTable" style="width:100%;border-collapse:collapse">
-            <thead>
-              <tr style="background:var(--bg-secondary,#f8f8f8);text-align:left">
-                <th style="padding:10px 12px;font-weight:600;font-size:13px;white-space:nowrap">Фото</th>
-                <th style="padding:10px 12px;font-weight:600;font-size:13px">Имя</th>
-                <th style="padding:10px 12px;font-weight:600;font-size:13px">Рост</th>
-                <th style="padding:10px 12px;font-weight:600;font-size:13px">Возраст</th>
-                <th style="padding:10px 12px;font-weight:600;font-size:13px">Город</th>
-                <th style="padding:10px 12px;font-weight:600;font-size:13px">Доступность</th>
-                <th style="padding:10px 12px;font-weight:600;font-size:13px">Действия</th>
-              </tr>
-            </thead>
-            <tbody id="modelsGrid">
-              <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <!-- Search -->
+      <input type="text" id="search-input" placeholder="Поиск по имени..." oninput="debounceSearch()"
+        class="px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:bg-gray-800 dark:text-white flex-1 min-w-48">
+
+      <!-- Sort -->
+      <select id="sort-select" onchange="loadModels()"
+        class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:bg-gray-800 dark:text-white">
+        <option value="name">По алфавиту</option>
+        <option value="orders">По заказам</option>
+        <option value="views">По просмотрам</option>
+        <option value="created">По дате добавления</option>
+      </select>
     </div>
 
-    <!-- FORM VIEW -->
-    <div id="formView" class="page-content" style="display:none">
-      <div class="section-card">
-        <div class="section-card-header">
-          <div class="section-card-title" id="formTitle">Добавить модель</div>
-          <button class="btn btn-sm btn-ghost" onclick="showList()">← Назад</button>
-        </div>
-        <div class="section-card-body padded">
-          <form id="modelForm" enctype="multipart/form-data">
-            <input type="hidden" id="editId" />
-            <!-- Basic info -->
-            <div class="form-section">
-              <div class="form-section-title">Основная информация</div>
-              <div class="form-row-2">
-                <div class="admin-form-group">
-                  <label>Имя *</label>
-                  <input class="admin-input" type="text" id="f_name" required placeholder="Имя Фамилия" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Категория *</label>
-                  <select class="admin-input" id="f_category">
-                    <option value="fashion">Fashion</option>
-                    <option value="commercial">Commercial</option>
-                    <option value="events">Events</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-row-3">
-                <div class="admin-form-group">
-                  <label>Возраст</label>
-                  <input class="admin-input" type="number" id="f_age" placeholder="22" min="16" max="50" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Рост (см)</label>
-                  <input class="admin-input" type="number" id="f_height" placeholder="175" min="155" max="195" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Вес (кг)</label>
-                  <input class="admin-input" type="number" id="f_weight" placeholder="55" min="40" max="90" />
-                </div>
-              </div>
-              <div class="form-row-4">
-                <div class="admin-form-group">
-                  <label>Грудь (см)</label>
-                  <input class="admin-input" type="number" id="f_bust" placeholder="86" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Талия (см)</label>
-                  <input class="admin-input" type="number" id="f_waist" placeholder="61" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Бёдра (см)</label>
-                  <input class="admin-input" type="number" id="f_hips" placeholder="88" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Размер обуви</label>
-                  <input class="admin-input" type="text" id="f_shoe_size" placeholder="38" />
-                </div>
-              </div>
-              <div class="form-row-2">
-                <div class="admin-form-group">
-                  <label>Цвет волос</label>
-                  <select class="admin-input" id="f_hair_color">
-                    <option value="Блонд">Блонд</option>
-                    <option value="Тёмный блонд">Тёмный блонд</option>
-                    <option value="Шатен">Шатен</option>
-                    <option value="Брюнетка">Брюнетка</option>
-                    <option value="Рыжая">Рыжая</option>
-                    <option value="Чёрные">Чёрные</option>
-                  </select>
-                </div>
-                <div class="admin-form-group">
-                  <label>Цвет глаз</label>
-                  <select class="admin-input" id="f_eye_color">
-                    <option value="Карие">Карие</option>
-                    <option value="Голубые">Голубые</option>
-                    <option value="Зелёные">Зелёные</option>
-                    <option value="Серые">Серые</option>
-                    <option value="Чёрные">Чёрные</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-row-2">
-                <div class="admin-form-group">
-                  <label>Instagram</label>
-                  <input class="admin-input" type="text" id="f_instagram" placeholder="@username" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Доступность</label>
-                  <div class="toggle-group">
-                    <div class="toggle-option active" data-val="1" onclick="setAvail(1)">✅ Доступна</div>
-                    <div class="toggle-option" data-val="0" onclick="setAvail(0)">❌ Занята</div>
-                  </div>
-                  <input type="hidden" id="f_available" value="1" />
-                </div>
-              </div>
-              <div class="admin-form-group">
-                <label>Биография / Описание</label>
-                <textarea class="admin-input" id="f_bio" placeholder="Опыт работы, специализация, достижения..." rows="4"></textarea>
-              </div>
-            </div>
+    <!-- Models Table -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
+      <table class="w-full">
+        <thead>
+          <tr class="border-b border-gray-100 dark:border-gray-700">
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Модель</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden md:table-cell">Параметры</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden lg:table-cell">Город</th>
+            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Статус</th>
+            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden sm:table-cell">Заявок</th>
+            <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Действия</th>
+          </tr>
+        </thead>
+        <tbody id="models-tbody">
+          <tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">Загрузка...</td></tr>
+        </tbody>
+      </table>
 
-            <!-- Photos -->
-            <div class="form-section">
-              <div class="form-section-title">Фотографии</div>
-              <div class="admin-form-group">
-                <label>Главное фото (обложка)</label>
-                <div class="upload-zone" onclick="document.getElementById('mainPhotoInput').click()" id="mainPhotoZone">
-                  <div class="upload-zone-icon" id="mainPhotoPreviewWrap">📷</div>
-                  <p>Нажмите для выбора или перетащите файл</p>
-                  <span>JPG, PNG до 10 МБ</span>
-                </div>
-                <input type="file" id="mainPhotoInput" accept="image/*" style="display:none" />
-              </div>
-              <div class="admin-form-group">
-                <label>Портфолио (до 10 фото)</label>
-                <div class="upload-zone" onclick="document.getElementById('photosInput').click()">
-                  <div class="upload-zone-icon">🖼️</div>
-                  <p>Добавить фотографии портфолио</p>
-                  <span>JPG, PNG до 10 МБ каждое</span>
-                </div>
-                <input type="file" id="photosInput" accept="image/*" multiple style="display:none" />
-                <div class="photos-grid" id="photosPreview"></div>
-              </div>
-            </div>
-
-            <div style="display:flex;gap:12px;margin-top:8px">
-              <button type="submit" class="btn btn-lg btn-gold">💾 Сохранить модель</button>
-              <button type="button" class="btn btn-lg btn-ghost" onclick="showList()">Отмена</button>
-            </div>
-          </form>
+      <!-- Pagination -->
+      <div class="px-4 py-3 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+        <span id="pagination-info" class="text-sm text-gray-500"></span>
+        <div class="flex gap-2">
+          <button id="prev-btn" onclick="changePage(-1)" disabled
+            class="px-3 py-1 text-sm border border-gray-200 dark:border-gray-700 rounded disabled:opacity-40">← Назад</button>
+          <button id="next-btn" onclick="changePage(1)"
+            class="px-3 py-1 text-sm border border-gray-200 dark:border-gray-700 rounded disabled:opacity-40">Вперёд →</button>
         </div>
       </div>
     </div>
   </div>
-</div>
-<div class="toast-container" id="toastContainer"></div>
-<script src="/js/admin.js"></script>
+
+  <!-- Add/Edit Modal -->
+  <div id="model-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-screen overflow-y-auto">
+      <div class="p-6 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+        <h2 id="modal-title" class="text-lg font-bold text-gray-900 dark:text-white">Добавить модель</h2>
+        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+      </div>
+      <form id="model-form" onsubmit="saveModel(event)" class="p-6 space-y-4">
+        <input type="hidden" id="model-id">
+        <div class="grid grid-cols-2 gap-4">
+          <div class="col-span-2">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Имя *</label>
+            <input type="text" id="f-name" required placeholder="Полное имя модели"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Возраст</label>
+            <input type="number" id="f-age" min="18" max="60" placeholder="25"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Рост (см)</label>
+            <input type="number" id="f-height" min="150" max="200" placeholder="170"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Категория</label>
+            <select id="f-category" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+              <option value="">Не выбрана</option>
+              <option value="fashion">Fashion</option>
+              <option value="commercial">Commercial</option>
+              <option value="events">Events</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Город</label>
+            <input type="text" id="f-city" placeholder="Москва"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Instagram</label>
+            <input type="text" id="f-instagram" placeholder="username (без @)"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Телефон</label>
+            <input type="text" id="f-phone" placeholder="+7 999 123 45 67"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+          </div>
+          <div class="col-span-2">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание (bio)</label>
+            <textarea id="f-bio" rows="3" placeholder="Профессиональное описание модели..."
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white resize-none"></textarea>
+          </div>
+          <div class="col-span-2 flex gap-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="f-available" class="rounded">
+              <span class="text-sm text-gray-700 dark:text-gray-300">Доступна для заказа</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="f-featured" class="rounded">
+              <span class="text-sm text-gray-700 dark:text-gray-300">В топе (⭐)</span>
+            </label>
+          </div>
+        </div>
+        <div class="flex gap-3 justify-end pt-4 border-t border-gray-100 dark:border-gray-700">
+          <button type="button" onclick="closeModal()"
+            class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50">Отмена</button>
+          <button type="submit"
+            class="px-6 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium">
+            Сохранить
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
 <script>
-let allModels = [];
-let editingId = null;
+const token = localStorage.getItem('admin_token');
+if (!token) window.location.href = '/admin/login.html';
+const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 
-function setAvail(v) {
-  document.getElementById('f_available').value = v;
-  document.querySelectorAll('.toggle-option').forEach(o => o.classList.toggle('active', +o.dataset.val === v));
+let currentPage = 0, currentFilter = 'active', currentSort = 'name', searchQuery = '';
+let searchTimeout;
+
+function debounceSearch() {
+  clearTimeout(searchTimeout);
+  searchQuery = document.getElementById('search-input').value;
+  searchTimeout = setTimeout(() => { currentPage = 0; loadModels(); }, 300);
 }
 
-async function fetchModels() {
-  const params = new URLSearchParams();
-  const cat = document.getElementById('categoryFilter').value;
-  const av = document.getElementById('availFilter').value;
-  const search = document.getElementById('searchInput').value.trim();
-  if (cat) params.set('category', cat);
-  if (av !== '') params.set('available', av);
-  if (search) params.set('search', search);
-  const qs = params.toString();
+function setFilter(f) {
+  currentFilter = f;
+  currentPage = 0;
+  ['active','archived','all'].forEach(id => {
+    const btn = document.getElementById('filter-'+id);
+    if (id === f) {
+      btn.className = 'px-4 py-2 text-sm font-medium bg-pink-600 text-white';
+    } else {
+      btn.className = 'px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300';
+    }
+  });
+  loadModels();
+}
+
+function changePage(dir) {
+  currentPage += dir;
+  loadModels();
+}
+
+async function loadModels() {
+  currentSort = document.getElementById('sort-select').value;
+  const archived = currentFilter === 'archived' ? 1 : currentFilter === 'all' ? undefined : 0;
+  let url = `/api/admin/models?page=${currentPage}&sort=${currentSort}&limit=15`;
+  if (archived !== undefined) url += `&archived=${archived}`;
+  if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
+
   try {
-    allModels = await _admin.apiFetch('/models' + (qs ? '?' + qs : ''));
-    renderModels();
-  } catch (e) { _admin.toast('Ошибка загрузки: ' + e.message, 'error'); }
-}
+    const resp = await fetch(url, { headers });
+    const { models = [], total = 0 } = await resp.json();
 
-function renderModels() {
-  const tbody = document.getElementById('modelsGrid');
-  if (!allModels.length) {
-    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state" style="text-align:center;padding:40px"><div class="empty-state-icon">💃</div><p>Модели не найдены</p></div></td></tr>';
-    return;
-  }
-  tbody.innerHTML = allModels.map(m => {
-    const thumb = m.photo_main
-      ? `<img src="${m.photo_main}" alt="" loading="lazy" style="width:40px;height:40px;object-fit:cover;border-radius:6px;display:block" />`
-      : `<div style="width:40px;height:40px;border-radius:6px;background:var(--bg-secondary,#eee);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">${(m.name || '?')[0].toUpperCase()}</div>`;
-    const availDot = m.available
-      ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27ae60;margin-right:5px;vertical-align:middle"></span><span style="color:#27ae60;font-size:13px">Свободна</span>`
-      : `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#e74c3c;margin-right:5px;vertical-align:middle"></span><span style="color:#e74c3c;font-size:13px">Занята</span>`;
-    return `<tr style="border-bottom:1px solid var(--border-color,#eee)" data-id="${m.id}">
-      <td style="padding:8px 12px">${thumb}</td>
-      <td style="padding:8px 12px;font-weight:500;font-size:14px">${_admin.escHtml ? _admin.escHtml(m.name) : m.name}</td>
-      <td style="padding:8px 12px;font-size:13px;color:var(--text-dim)">${m.height ? m.height + ' см' : '—'}</td>
-      <td style="padding:8px 12px;font-size:13px;color:var(--text-dim)">${m.age || '—'}</td>
-      <td style="padding:8px 12px;font-size:13px;color:var(--text-dim)">${m.city ? _admin.escHtml ? _admin.escHtml(m.city) : m.city : '—'}</td>
-      <td style="padding:8px 12px">
-        <button class="btn btn-sm" data-action="toggle" data-id="${m.id}" data-avail="${m.available ? 1 : 0}"
-          style="padding:3px 10px;font-size:12px;background:${m.available ? '#eafaf1' : '#fdecea'};color:${m.available ? '#27ae60' : '#e74c3c'};border:1px solid ${m.available ? '#a9dfbf' : '#f5b7b1'};border-radius:20px;cursor:pointer"
-          aria-label="Переключить доступность ${m.name}">
-          ${availDot}
-        </button>
-      </td>
-      <td style="padding:8px 12px;white-space:nowrap">
-        <button class="btn btn-sm btn-ghost" data-action="edit" data-id="${m.id}" aria-label="Редактировать ${m.name}" style="margin-right:4px">✏️</button>
-        <button class="btn btn-sm btn-ghost" data-action="copy" data-id="${m.id}" aria-label="Копировать ID ${m.id}" style="margin-right:4px" title="Копировать ID">📋 ID</button>
-        <a href="/catalog.html" target="_blank" class="btn btn-sm btn-ghost" aria-label="Просмотреть ${m.name} на сайте" style="margin-right:4px">👁</a>
-        <button class="btn btn-sm btn-danger" data-action="delete" data-id="${m.id}" aria-label="Удалить модель ${m.name}">🗑</button>
-      </td>
-    </tr>`;
-  }).join('');
+    document.getElementById('models-count').textContent = `(${total} моделей)`;
+    document.getElementById('pagination-info').textContent = `${currentPage*15+1}–${Math.min((currentPage+1)*15, total)} из ${total}`;
+    document.getElementById('prev-btn').disabled = currentPage === 0;
+    document.getElementById('next-btn').disabled = (currentPage+1)*15 >= total;
 
-  // Attach events after render (avoids inline onclick XSS risk)
-  tbody.querySelectorAll('[data-action="edit"]').forEach(btn => btn.addEventListener('click', () => editModel(+btn.dataset.id)));
-  tbody.querySelectorAll('[data-action="delete"]').forEach(btn => btn.addEventListener('click', () => {
-    const m = allModels.find(x => x.id === +btn.dataset.id);
-    if (m) deleteModel(m.id, m.name);
-  }));
-  tbody.querySelectorAll('[data-action="toggle"]').forEach(btn => btn.addEventListener('click', () => {
-    toggleAvailability(+btn.dataset.id, +btn.dataset.avail);
-  }));
-  tbody.querySelectorAll('[data-action="copy"]').forEach(btn => btn.addEventListener('click', () => copyId(+btn.dataset.id)));
-}
+    const tbody = document.getElementById('models-tbody');
+    if (!models.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">Нет моделей</td></tr>';
+      return;
+    }
 
-function showList() {
-  document.getElementById('listView').style.display = 'block';
-  document.getElementById('formView').style.display = 'none';
-  document.getElementById('pageTitle').textContent = 'Модели';
-  editingId = null;
-  fetchModels();
-}
-
-function showForm(model) {
-  document.getElementById('listView').style.display = 'none';
-  document.getElementById('formView').style.display = 'block';
-  clearForm();
-  if (model) {
-    editingId = model.id;
-    document.getElementById('formTitle').textContent = `Редактировать: ${model.name}`;
-    document.getElementById('pageTitle').textContent = `Ред. модели`;
-    fillForm(model);
-  } else {
-    editingId = null;
-    document.getElementById('formTitle').textContent = 'Добавить модель';
-    document.getElementById('pageTitle').textContent = 'Добавить модель';
+    tbody.innerHTML = models.map(m => {
+      const photos = tryParseJSON(m.photos, []);
+      const photo = m.photo_main || photos[0] || '';
+      return `
+        <tr class="border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30">
+          <td class="px-4 py-3">
+            <div class="flex items-center gap-3">
+              ${photo ? `<img src="${photo}" alt="${escHtml(m.name)}" class="w-10 h-10 rounded-lg object-cover bg-gray-100" loading="lazy">`
+                      : `<div class="w-10 h-10 rounded-lg bg-pink-100 dark:bg-pink-900 flex items-center justify-center text-pink-500 font-bold">${(m.name||'?')[0]}</div>`}
+              <div>
+                <div class="font-medium text-gray-900 dark:text-white">${m.featured ? '⭐ ' : ''}${escHtml(m.name)}</div>
+                <div class="text-xs text-gray-400">${m.category || '—'}</div>
+              </div>
+            </div>
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 hidden md:table-cell">
+            ${[m.age ? m.age+'л' : null, m.height ? m.height+'см' : null].filter(Boolean).join(' / ') || '—'}
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 hidden lg:table-cell">${m.city || '—'}</td>
+          <td class="px-4 py-3 text-center">
+            <button onclick="toggleAvailable(${m.id}, ${m.available ? 1 : 0})" title="Переключить доступность"
+              class="text-lg">${m.available ? '🟢' : '🔴'}</button>
+          </td>
+          <td class="px-4 py-3 text-center text-sm text-gray-600 dark:text-gray-400 hidden sm:table-cell">
+            ${m.order_count || 0}
+          </td>
+          <td class="px-4 py-3 text-right">
+            <div class="flex items-center justify-end gap-2">
+              <button onclick="editModel(${m.id})" class="text-blue-500 hover:text-blue-700 text-sm px-2 py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20">
+                <i class="fas fa-edit"></i>
+              </button>
+              <button onclick="toggleFeatured(${m.id}, ${m.featured ? 1 : 0})" title="Топ"
+                class="text-yellow-500 hover:text-yellow-700 text-sm px-2 py-1 rounded hover:bg-yellow-50 dark:hover:bg-yellow-900/20">
+                <i class="fas fa-star"></i>
+              </button>
+              <button onclick="archiveModel(${m.id}, ${m.archived ? 1 : 0})" title="${m.archived ? 'Восстановить' : 'В архив'}"
+                class="text-gray-400 hover:text-gray-600 text-sm px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700">
+                <i class="fas fa-${m.archived ? 'undo' : 'archive'}"></i>
+              </button>
+            </div>
+          </td>
+        </tr>`;
+    }).join('');
+  } catch(e) {
+    console.error(e);
   }
 }
 
-function clearForm() {
-  ['f_name','f_age','f_height','f_weight','f_bust','f_waist','f_hips','f_shoe_size','f_bio','f_instagram'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  document.getElementById('f_category').value = 'fashion';
-  document.getElementById('f_hair_color').value = 'Блонд';
-  document.getElementById('f_eye_color').value = 'Карие';
-  document.getElementById('f_available').value = '1';
-  setAvail(1);
-  document.getElementById('mainPhotoPreviewWrap').innerHTML = '📷';
-  document.getElementById('photosPreview').innerHTML = '';
-  document.getElementById('mainPhotoInput').value = '';
-  document.getElementById('photosInput').value = '';
-}
+function tryParseJSON(str, def) { try { return JSON.parse(str||'[]'); } catch { return def; } }
+function escHtml(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-function fillForm(m) {
-  document.getElementById('f_name').value = m.name || '';
-  document.getElementById('f_age').value = m.age || '';
-  document.getElementById('f_height').value = m.height || '';
-  document.getElementById('f_weight').value = m.weight || '';
-  document.getElementById('f_bust').value = m.bust || '';
-  document.getElementById('f_waist').value = m.waist || '';
-  document.getElementById('f_hips').value = m.hips || '';
-  document.getElementById('f_shoe_size').value = m.shoe_size || '';
-  document.getElementById('f_bio').value = m.bio || '';
-  document.getElementById('f_instagram').value = m.instagram || '';
-  document.getElementById('f_category').value = m.category || 'fashion';
-  document.getElementById('f_hair_color').value = m.hair_color || 'Блонд';
-  document.getElementById('f_eye_color').value = m.eye_color || 'Карие';
-  document.getElementById('f_available').value = m.available ? '1' : '0';
-  setAvail(m.available ? 1 : 0);
-  if (m.photo_main) {
-    document.getElementById('mainPhotoPreviewWrap').innerHTML = `<img src="${m.photo_main}" style="max-height:120px;max-width:100%;object-fit:contain" />`;
-  }
-  const photos = typeof m.photos === 'string' ? JSON.parse(m.photos || '[]') : (m.photos || []);
-  document.getElementById('photosPreview').innerHTML = photos.map(p => `
-    <div class="photo-item">
-      <img src="${p}" />
-      <button class="photo-del" onclick="deletePhoto('${p}', ${m.id})" aria-label="Удалить фото">✕</button>
-    </div>`).join('');
+async function toggleAvailable(id, current) {
+  await fetch(`/api/admin/models/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ available: current ? 0 : 1 }) });
+  loadModels();
+}
+async function toggleFeatured(id, current) {
+  await fetch(`/api/admin/models/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ featured: current ? 0 : 1 }) });
+  loadModels();
+}
+async function archiveModel(id, archived) {
+  await fetch(`/api/admin/models/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ archived: archived ? 0 : 1, ...(archived ? {} : { available: 0 }) }) });
+  loadModels();
 }
 
 async function editModel(id) {
-  try {
-    const m = await _admin.apiFetch(`/models/${id}`);
-    showForm(m);
-  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  const resp = await fetch(`/api/models/${id}`, { headers });
+  const m = await resp.json();
+  document.getElementById('modal-title').textContent = 'Редактировать модель';
+  document.getElementById('model-id').value = m.id;
+  document.getElementById('f-name').value = m.name || '';
+  document.getElementById('f-age').value = m.age || '';
+  document.getElementById('f-height').value = m.height || '';
+  document.getElementById('f-category').value = m.category || '';
+  document.getElementById('f-city').value = m.city || '';
+  document.getElementById('f-instagram').value = m.instagram || '';
+  document.getElementById('f-phone').value = m.phone || '';
+  document.getElementById('f-bio').value = m.bio || '';
+  document.getElementById('f-available').checked = !!m.available;
+  document.getElementById('f-featured').checked = !!m.featured;
+  openModal();
 }
 
-async function deleteModel(id, name) {
-  _admin.adminConfirm('Удалить модель?', `"${name}" будет удалена безвозвратно.`, async () => {
-    try {
-      await _admin.apiFetch(`/admin/models/${id}`, { method: 'DELETE' });
-      _admin.toast('Модель удалена', 'success');
-      fetchModels();
-    } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
-  });
+function openAddModal() {
+  document.getElementById('modal-title').textContent = 'Добавить модель';
+  document.getElementById('model-form').reset();
+  document.getElementById('model-id').value = '';
+  openModal();
 }
+function openModal() { document.getElementById('model-modal').classList.replace('hidden','flex'); }
+function closeModal() { document.getElementById('model-modal').classList.replace('flex','hidden'); }
 
-async function deletePhoto(photo, modelId) {
-  try {
-    await _admin.apiFetch(`/admin/models/${modelId}/photo`, { method: 'DELETE', body: JSON.stringify({ photo }) });
-    const m = await _admin.apiFetch(`/models/${modelId}`);
-    fillForm(m);
-    _admin.toast('Фото удалено', 'success');
-  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
-}
-
-// Photo preview
-document.getElementById('mainPhotoInput').addEventListener('change', e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => { document.getElementById('mainPhotoPreviewWrap').innerHTML = `<img src="${ev.target.result}" style="max-height:120px;max-width:100%;object-fit:contain" />`; };
-  reader.readAsDataURL(file);
-});
-
-document.getElementById('photosInput').addEventListener('change', e => {
-  const preview = document.getElementById('photosPreview');
-  Array.from(e.target.files).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const div = document.createElement('div');
-      div.className = 'photo-item';
-      div.innerHTML = `<img src="${ev.target.result}" />`;
-      preview.appendChild(div);
-    };
-    reader.readAsDataURL(file);
-  });
-});
-
-// Form submit
-document.getElementById('modelForm').addEventListener('submit', async (e) => {
+async function saveModel(e) {
   e.preventDefault();
-  const btn = e.target.querySelector('[type=submit]');
-  btn.disabled = true; btn.textContent = 'Сохранение...';
+  const id = document.getElementById('model-id').value;
+  const body = {
+    name: document.getElementById('f-name').value,
+    age: parseInt(document.getElementById('f-age').value) || null,
+    height: parseInt(document.getElementById('f-height').value) || null,
+    category: document.getElementById('f-category').value,
+    city: document.getElementById('f-city').value,
+    instagram: document.getElementById('f-instagram').value,
+    phone: document.getElementById('f-phone').value,
+    bio: document.getElementById('f-bio').value,
+    available: document.getElementById('f-available').checked ? 1 : 0,
+    featured: document.getElementById('f-featured').checked ? 1 : 0
+  };
+
   try {
-    const fd = new FormData();
-    const fields = ['name','age','height','weight','bust','waist','hips','shoe_size','hair_color','eye_color','bio','instagram','category','available'];
-    fields.forEach(f => fd.append(f, document.getElementById(`f_${f}`).value));
-    const mainPhoto = document.getElementById('mainPhotoInput').files[0];
-    if (mainPhoto) fd.append('photo_main', mainPhoto);
-    const photos = document.getElementById('photosInput').files;
-    Array.from(photos).forEach(p => fd.append('photos', p));
-
-    if (editingId) {
-      await _admin.apiFetchForm(`/admin/models/${editingId}`, fd, 'PUT');
-      _admin.toast('Модель обновлена!', 'success');
-    } else {
-      await _admin.apiFetchForm('/admin/models', fd);
-      _admin.toast('Модель добавлена!', 'success');
-    }
-    setTimeout(() => showList(), 1000);
-  } catch (err) {
-    _admin.toast('Ошибка: ' + err.message, 'error');
-  } finally {
-    btn.disabled = false; btn.textContent = '💾 Сохранить модель';
+    const url = id ? `/api/admin/models/${id}/json` : '/api/admin/models/json';
+    const method = id ? 'PUT' : 'POST';
+    const resp = await fetch(url, { method, headers, body: JSON.stringify(body) });
+    if (!resp.ok) throw new Error('Save failed');
+    closeModal();
+    loadModels();
+  } catch {
+    alert('Ошибка сохранения');
   }
-});
-
-async function toggleAvailability(id, currentVal) {
-  const token = localStorage.getItem('jwt');
-  const res = await fetch('/api/models/' + id, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({ available: currentVal ? 0 : 1 })
-  });
-  if (res.ok) loadModels();
-  else _admin.toast('Ошибка обновления доступности', 'error');
 }
 
-function copyId(id) {
-  navigator.clipboard.writeText(String(id)).then(() => {
-    _admin.toast('ID ' + id + ' скопирован', 'success');
-  }).catch(() => {
-    // fallback for older browsers
-    const ta = document.createElement('textarea');
-    ta.value = String(id);
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    _admin.toast('ID ' + id + ' скопирован', 'success');
-  });
-}
-
-function setAvailFilter(btn, val) {
-  document.querySelectorAll('.avail-filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('availFilter').value = val;
-  fetchModels();
-}
-
-function loadModels() { fetchModels(); }
-
-// Search / filter
-let searchTimer;
-document.getElementById('searchInput').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(fetchModels, 400); });
-document.getElementById('categoryFilter').addEventListener('change', fetchModels);
-
-// URL params
-const urlParams = new URLSearchParams(window.location.search);
-if (urlParams.get('action') === 'new') { showForm(); } else { fetchModels(); }
+loadModels();
 </script>
 </body>
 </html>

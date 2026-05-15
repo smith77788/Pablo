@@ -418,6 +418,88 @@ router.patch('/models/:id', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Models admin list with filters/pagination ────────────────────────────────
+router.get('/admin/models', auth, async (req, res, next) => {
+  try {
+    const { page = 0, sort = 'name', limit = 15, archived, search } = req.query;
+    const offset = parseInt(page) * parseInt(limit);
+
+    const sortMap = { name: 'name ASC', orders: 'order_count DESC', views: 'view_count DESC', created: 'id DESC' };
+    const orderBy = sortMap[sort] || 'name ASC';
+
+    let where = [];
+    const params = [];
+    if (archived !== undefined) { where.push('archived=?'); params.push(parseInt(archived)); }
+    if (search) { where.push('name LIKE ?'); params.push(`%${search}%`); }
+    const whereStr = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const total = (await get(`SELECT COUNT(*) as cnt FROM models ${whereStr}`, params))?.cnt || 0;
+    const models = await query(
+      `SELECT *, (SELECT COUNT(*) FROM orders WHERE model_id=models.id) as order_count
+       FROM models ${whereStr} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      [...params, parseInt(limit), offset]
+    );
+
+    res.json({ models, total });
+  } catch (e) {
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+// ─── Create model (admin, JSON body — no photo upload) ────────────────────────
+router.post('/admin/models/json', auth, async (req, res, next) => {
+  try {
+    const { name, age, height, weight, bust, waist, hips, shoe_size, hair_color, eye_color, bio, instagram, phone, category, city, featured, available } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
+    const result = await run(
+      `INSERT INTO models (name,age,height,weight,bust,waist,hips,shoe_size,hair_color,eye_color,bio,instagram,phone,category,city,featured,available,archived) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`,
+      [name, age||null, height||null, weight||null, bust||null, waist||null, hips||null,
+       shoe_size||null, hair_color||null, eye_color||null, bio||null, instagram||null,
+       phone||null, category||null, city||null, featured?1:0, available?1:0]
+    );
+    res.json({ id: result.id, success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+// ─── Full update model via JSON body (admin PUT, no file upload) ──────────────
+router.put('/admin/models/:id/json', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const { name, age, height, bio, instagram, phone, category, city, featured, available } = req.body;
+    await run(
+      `UPDATE models SET name=?,age=?,height=?,bio=?,instagram=?,phone=?,category=?,city=?,featured=?,available=? WHERE id=?`,
+      [name, age||null, height||null, bio||null, instagram||null, phone||null,
+       category||null, city||null, featured?1:0, available?1:0, id]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+// ─── Partial update model (admin PATCH) ───────────────────────────────────────
+router.patch('/admin/models/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const allowed = ['name','age','height','weight','bio','instagram','phone','category','city','featured','available','archived'];
+    const updates = [];
+    const params = [];
+    for (const [k, v] of Object.entries(req.body)) {
+      if (allowed.includes(k)) { updates.push(`${k}=?`); params.push(v); }
+    }
+    if (!updates.length) return res.status(400).json({ error: 'Nothing to update' });
+    params.push(id);
+    await run(`UPDATE models SET ${updates.join(',')} WHERE id=?`, params);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
 // ─── Models (admin CRUD) ──────────────────────────────────────────────────────
 router.post('/admin/models', auth, upload.fields([{ name: 'photo_main', maxCount: 1 }, { name: 'photos', maxCount: 10 }]), async (req, res, next) => {
   try {
