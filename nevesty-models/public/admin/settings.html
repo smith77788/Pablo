@@ -266,6 +266,23 @@
               <div class="field-note">Используется в ссылках, которые бот отправляет клиентам</div>
             </div>
 
+            <!-- Telegram channel -->
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>Telegram-канал агентства</label>
+              <div style="position:relative">
+                <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:0.9rem">@</span>
+                <input class="admin-input" type="text" id="tg_channel" placeholder="nevesty_models" style="padding-left:28px" />
+              </div>
+              <div class="field-note">Кнопка «Наш канал» появится в главном меню клиента</div>
+            </div>
+
+            <!-- Welcome photo URL -->
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>Фото приветствия (URL)</label>
+              <input class="admin-input" type="url" id="welcome_photo_url" placeholder="https://example.com/welcome.jpg" />
+              <div class="field-note">Отправляется клиенту при первом /start вместо текста</div>
+            </div>
+
             <div class="sticky-save-bar">
               <button class="btn btn-md btn-gold" id="btnSaveBot" onclick="saveBot(this)">Сохранить тексты бота</button>
             </div>
@@ -540,6 +557,55 @@
                 <input type="checkbox" id="referral_enabled" />
                 <span class="toggle-slider"></span>
               </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">FAQ в боте</div>
+                <div class="toggle-row-desc">Раздел FAQ доступен клиентам через главное меню</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="faq_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Калькулятор стоимости</div>
+                <div class="toggle-row-desc">Интерактивный калькулятор доступен клиентам в боте</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="calc_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <!-- Reviews sub-section -->
+            <div class="settings-divider" style="margin-top:24px">Настройки отзывов</div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Авто-одобрение отзывов</div>
+                <div class="toggle-row-desc">Отзывы публикуются без модерации</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="reviews_auto_approve" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="admin-form-group" style="margin-top:16px">
+              <label>Мин. завершённых заявок для отзыва</label>
+              <input class="admin-input" type="number" id="reviews_min_completed" placeholder="1" min="1" max="10" />
+              <div class="field-note">Клиент может оставить отзыв только после N завершённых заявок</div>
+            </div>
+
+            <div class="admin-form-group" style="margin-top:16px">
+              <label>Приглашение к отзыву</label>
+              <textarea class="admin-input" id="reviews_prompt_text" rows="3" style="resize:vertical"
+                placeholder="Понравилось сотрудничество? Оставьте отзыв — это займёт 1 минуту"></textarea>
+              <div class="field-note">Отправляется клиенту после завершения заявки</div>
             </div>
 
             <div class="sticky-save-bar">
@@ -938,9 +1004,11 @@ async function loadSettings() {
     // Text fields
     const textFields = [
       'greeting', 'about_text', 'pricing', 'manager_hours', 'manager_reply', 'site_url',
+      'tg_channel', 'welcome_photo_url',
       'contacts_phone', 'contacts_email', 'contacts_instagram', 'contacts_whatsapp', 'contacts_address',
-      'booking_min_budget', 'booking_confirm_msg',
+      'booking_min_budget', 'booking_confirm_msg', 'booking_thanks_text',
       'catalog_per_page', 'cities_list',
+      'reviews_min_completed', 'reviews_prompt_text',
     ];
     textFields.forEach(key => {
       const el = document.getElementById(key);
@@ -957,6 +1025,7 @@ async function loadSettings() {
       'catalog_show_city', 'catalog_badge_top',
       'notify_new_order', 'notify_status_change', 'notify_review', 'notify_message',
       'wishlist_enabled', 'search_enabled', 'reviews_enabled', 'loyalty_enabled', 'referral_enabled',
+      'faq_enabled', 'calc_enabled', 'reviews_auto_approve',
     ];
     toggleFields.forEach(key => {
       const el = document.getElementById(key);
@@ -1005,15 +1074,18 @@ async function saveAll() {
 
   const textFields = [
     'greeting', 'about_text', 'pricing', 'manager_hours', 'manager_reply', 'site_url',
+    'tg_channel', 'welcome_photo_url',
     'contacts_phone', 'contacts_email', 'contacts_instagram', 'contacts_whatsapp', 'contacts_address',
-    'booking_min_budget', 'booking_confirm_msg',
+    'booking_min_budget', 'booking_confirm_msg', 'booking_thanks_text',
     'catalog_per_page', 'cities_list',
+    'reviews_min_completed', 'reviews_prompt_text',
   ];
   const toggleFields = [
     'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email',
     'catalog_show_city', 'catalog_badge_top',
     'notify_new_order', 'notify_status_change', 'notify_review', 'notify_message',
     'wishlist_enabled', 'search_enabled', 'reviews_enabled', 'loyalty_enabled', 'referral_enabled',
+    'faq_enabled', 'calc_enabled', 'reviews_auto_approve',
   ];
 
   const body = {};
@@ -1105,11 +1177,13 @@ async function saveBot(btn) {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        greeting:      document.getElementById('greeting').value,
-        about_text:    document.getElementById('about_text').value,
-        manager_hours: document.getElementById('manager_hours').value,
-        manager_reply: document.getElementById('manager_reply').value,
-        site_url:      document.getElementById('site_url').value,
+        greeting:          document.getElementById('greeting').value,
+        about_text:        document.getElementById('about_text').value,
+        manager_hours:     document.getElementById('manager_hours').value,
+        manager_reply:     document.getElementById('manager_reply').value,
+        site_url:          document.getElementById('site_url').value,
+        tg_channel:        document.getElementById('tg_channel')?.value || '',
+        welcome_photo_url: document.getElementById('welcome_photo_url')?.value || '',
       })
     });
     _admin.toast('Тексты бота сохранены', 'success');
@@ -1191,14 +1265,20 @@ async function saveCatalog(btn) {
 async function saveFeatures(btn) {
   startSave(btn);
   try {
+    const el = id => document.getElementById(id);
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        wishlist_enabled:  document.getElementById('wishlist_enabled').checked  ? '1' : '0',
-        search_enabled:    document.getElementById('search_enabled').checked    ? '1' : '0',
-        reviews_enabled:   document.getElementById('reviews_enabled').checked   ? '1' : '0',
-        loyalty_enabled:   document.getElementById('loyalty_enabled').checked   ? '1' : '0',
-        referral_enabled:  document.getElementById('referral_enabled').checked  ? '1' : '0',
+        wishlist_enabled:     el('wishlist_enabled')?.checked     ? '1' : '0',
+        search_enabled:       el('search_enabled')?.checked       ? '1' : '0',
+        reviews_enabled:      el('reviews_enabled')?.checked      ? '1' : '0',
+        loyalty_enabled:      el('loyalty_enabled')?.checked      ? '1' : '0',
+        referral_enabled:     el('referral_enabled')?.checked     ? '1' : '0',
+        faq_enabled:          el('faq_enabled')?.checked          ? '1' : '0',
+        calc_enabled:         el('calc_enabled')?.checked         ? '1' : '0',
+        reviews_auto_approve: el('reviews_auto_approve')?.checked ? '1' : '0',
+        reviews_min_completed: el('reviews_min_completed')?.value || '1',
+        reviews_prompt_text:   el('reviews_prompt_text')?.value   || '',
       })
     });
     _admin.toast('Функции бота сохранены', 'success');
