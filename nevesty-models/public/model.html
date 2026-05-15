@@ -611,9 +611,16 @@
   </div>
 
   <!-- Lightbox overlay for gallery -->
-  <div id="lightbox" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.93);backdrop-filter:blur(8px);cursor:zoom-out;align-items:center;justify-content:center" onclick="closeLightbox()">
+  <div id="lightbox" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.93);backdrop-filter:blur(8px);align-items:center;justify-content:center"
+       onclick="if(event.target===this)closeLightbox()">
+    <button onclick="closeLightbox()" aria-label="Закрыть"
+      style="position:absolute;top:20px;right:20px;background:var(--bg3);border:none;color:var(--text);width:44px;height:44px;font-size:1.3rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10">✕</button>
+    <button onclick="prevPhoto()" aria-label="Предыдущее фото"
+      style="position:absolute;left:16px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.5);border:none;color:#fff;width:48px;height:48px;font-size:2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10;border-radius:50%">‹</button>
     <img id="lightboxImg" src="" alt="" style="max-width:90vw;max-height:90vh;object-fit:contain;display:block">
-    <button onclick="closeLightbox()" style="position:absolute;top:20px;right:20px;background:var(--bg3);border:none;color:var(--text);width:44px;height:44px;font-size:1.3rem;cursor:pointer;display:flex;align-items:center;justify-content:center">✕</button>
+    <button onclick="nextPhoto()" aria-label="Следующее фото"
+      style="position:absolute;right:16px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.5);border:none;color:#fff;width:48px;height:48px;font-size:2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10;border-radius:50%">›</button>
+    <div id="lightboxCounter" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);color:#fff;font-size:0.85rem;opacity:0.7;pointer-events:none"></div>
   </div>
 
   <div class="toast-container" id="toastContainer"></div>
@@ -768,6 +775,7 @@
 
         const galleryGrid = el('galleryGrid');
         const GALLERY_SLOTS = 6;
+        const realPhotos = allPhotos.slice(0, GALLERY_SLOTS);
         for (let i = 0; i < GALLERY_SLOTS; i++) {
           const item = document.createElement('div');
           item.className = 'model-gallery-item';
@@ -776,9 +784,10 @@
             img.src = allPhotos[i];
             img.alt = `${m.name} — фото ${i + 1}`;
             img.loading = 'lazy';
+            img.style.cursor = 'zoom-in';
             item.appendChild(img);
-            const photoSrc = allPhotos[i];
-            item.addEventListener('click', () => openLightbox(photoSrc));
+            const capturedIdx = i;
+            item.addEventListener('click', () => openLightbox(realPhotos, capturedIdx));
           } else {
             const ph = document.createElement('div');
             ph.className = 'model-gallery-placeholder';
@@ -810,11 +819,26 @@
       }
 
       // ── lightbox ───────────────────────────────────────────────────────────────
-      window.openLightbox = function (src) {
-        const lb = el('lightbox');
-        el('lightboxImg').src = src;
-        lb.style.display = 'flex';
+      let _lbPhotos = [], _lbIdx = 0;
+      window.openLightbox = function (photos, idx) {
+        _lbPhotos = Array.isArray(photos) ? photos : [photos];
+        _lbIdx = idx || 0;
+        updateLightboxImg();
+        el('lightbox').style.display = 'flex';
         document.body.style.overflow = 'hidden';
+      };
+      function updateLightboxImg() {
+        el('lightboxImg').src = _lbPhotos[_lbIdx];
+        const counter = el('lightboxCounter');
+        if (counter) counter.textContent = _lbPhotos.length > 1 ? `${_lbIdx + 1} / ${_lbPhotos.length}` : '';
+      }
+      window.prevPhoto = function () {
+        _lbIdx = (_lbIdx - 1 + _lbPhotos.length) % _lbPhotos.length;
+        updateLightboxImg();
+      };
+      window.nextPhoto = function () {
+        _lbIdx = (_lbIdx + 1) % _lbPhotos.length;
+        updateLightboxImg();
       };
       window.closeLightbox = function () {
         el('lightbox').style.display = 'none';
@@ -822,6 +846,8 @@
       };
       document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') window.closeLightbox();
+        if (e.key === 'ArrowLeft') window.prevPhoto();
+        if (e.key === 'ArrowRight') window.nextPhoto();
       });
 
       // ── Favorites (wishlist) ───────────────────────────────────────────────────
