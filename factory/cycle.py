@@ -566,6 +566,60 @@ def run_cycle() -> dict:
         logger.error("Ideas phase error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 9 — IDEAS DEPARTMENT: creative brainstorming & gamification
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🧠 IDEAS DEPARTMENT")
+    try:
+        from agents.ideas_dept import FeatureInventor, TrendAnalystIdeas, UserJourneyMapper, GamificationDesigner
+
+        inventor = FeatureInventor()
+        trend_analyst = TrendAnalystIdeas()
+        journey_mapper = UserJourneyMapper()
+        gamification = GamificationDesigner()
+
+        ideas_prompt = f"""Контекст платформы:
+- Telegram-бот для бронирования моделей агентства
+- Сайт с каталогом, формой бронирования, личным кабинетом
+- AI Factory для автономной генерации идей
+- Текущая статистика: {results.get('analytics', {})}
+
+Придумай 5 новых функций которые:
+1. Улучшат конверсию из просмотра в заявку
+2. Повысят возврат клиентов
+3. Упростят работу администраторов
+
+Отвечай JSON массивом: [{{"feature": "...", "for": "bot|site|both", "effort": "low|medium|high", "impact": "low|medium|high", "description": "..."}}]"""
+
+        new_ideas = inventor.think_json(ideas_prompt, {"insights": insights})
+        trends = trend_analyst.think(
+            f"Назови 3 актуальных тренда в моделинг-индустрии и как их внедрить. Контекст: {results.get('analytics', {})}",
+            {"insights": insights},
+        )
+        friction = journey_mapper.think(
+            "Опиши 3 точки трения в процессе бронирования модели через Telegram-бот. Как их устранить?",
+            {"insights": insights},
+        )
+        gamif = gamification.think_json(
+            'Предложи 3 механики лояльности для клиентов модельного агентства. JSON: [{"mechanic": ..., "description": ...}]',
+            {"insights": insights},
+        )
+
+        ideas_result = {
+            "new_features": new_ideas if isinstance(new_ideas, list) else [],
+            "industry_trends": trends,
+            "friction_points": friction,
+            "gamification": gamif if isinstance(gamif, list) else [],
+        }
+        results["phases"]["ideas_dept"] = ideas_result
+
+        feature_count = len(ideas_result["new_features"])
+        if feature_count:
+            summary_lines.append(f"🧠 IDEAS: {feature_count} новых идей сгенерировано")
+        logger.info("[Phase9] IDEAS dept: features=%s, gamif=%s", feature_count, len(ideas_result["gamification"]))
+    except Exception as e:
+        logger.error("IDEAS dept phase error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)

@@ -182,7 +182,8 @@ function buildClientKeyboard() {
     [{ text: 'ℹ️ О нас',               callback_data: 'about_us'           },
      { text: '📞 Контакты',             callback_data: 'contacts'           },
      { text: '❓ FAQ',                  callback_data: 'faq'                }],
-    [{ text: '👤 Мой профиль',          callback_data: 'profile'            }],
+    [{ text: '👤 Мой профиль',          callback_data: 'profile'            },
+     { text: '💫 Баллы',               callback_data: 'loyalty'            }],
   ];
   if (SITE_URL.startsWith('https://')) {
     const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
@@ -2079,6 +2080,54 @@ async function doExportOrders(chatId, period) {
   } catch (e) { return safeSend(chatId, `❌ Ошибка экспорта: ${e.message}`); }
 }
 
+// ─── Loyalty system ───────────────────────────────────────────────────────────
+
+async function addLoyaltyPoints(chatId, points, type, description, orderId = null) {
+  await run(`INSERT INTO loyalty_points (chat_id, points, total_earned) VALUES (?,?,?)
+    ON CONFLICT(chat_id) DO UPDATE SET
+      points = points + excluded.points,
+      total_earned = total_earned + excluded.points,
+      updated_at = CURRENT_TIMESTAMP`,
+    [chatId, points, points]).catch(()=>{});
+  await run(`INSERT INTO loyalty_transactions (chat_id, points, type, description, order_id) VALUES (?,?,?,?,?)`,
+    [chatId, points, type, description, orderId]).catch(()=>{});
+}
+
+async function showLoyaltyProfile(chatId) {
+  const lp = await get(`SELECT * FROM loyalty_points WHERE chat_id=?`, [chatId]);
+  if (!lp) {
+    return safeSend(chatId, '💫 У вас пока нет баллов лояльности\\.\n\nЗаработайте баллы, оформив первую заявку\\!', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] }
+    });
+  }
+  const level = lp.total_earned >= 5000 ? '💎 Платиновый'
+    : lp.total_earned >= 2000 ? '🥇 Золотой'
+    : lp.total_earned >= 500 ? '🥈 Серебряный'
+    : '🥉 Бронзовый';
+
+  const transactions = await query(`SELECT * FROM loyalty_transactions WHERE chat_id=? ORDER BY created_at DESC LIMIT 5`, [chatId]);
+  const txText = transactions.map(t => `${t.points > 0 ? '\\+' : ''}${t.points} — ${esc(t.description)}`).join('\n') || 'Нет операций';
+
+  const text = [
+    `💫 *Ваши бонусные баллы*`,
+    ``,
+    `Уровень: *${esc(level)}*`,
+    `Текущий баланс: *${lp.points} баллов*`,
+    `Всего заработано: *${lp.total_earned} баллов*`,
+    ``,
+    `*Последние операции:*`,
+    txText
+  ].join('\n');
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]
+    ]}
+  });
+}
+
 // ─── Admin order actions ──────────────────────────────────────────────────────
 
 async function adminChangeStatus(chatId, orderId, newStatus) {
@@ -2108,6 +2157,12 @@ async function adminChangeStatus(chatId, orderId, newStatus) {
 
     const order = await get('SELECT * FROM orders WHERE id=?', [orderId]);
     if (order?.client_chat_id) notifyStatusChange(order.client_chat_id, order.order_number, newStatus);
+
+    // Award loyalty points on order completion
+    if (newStatus === 'completed' && order?.client_chat_id) {
+      await addLoyaltyPoints(order.client_chat_id, 100, 'order_complete', 'Завершена заявка #' + orderId, orderId);
+    }
+
     return showAdminOrder(chatId, orderId);
   } catch (e) { console.error('[Bot] adminChangeStatus:', e.message); }
 }
@@ -2294,6 +2349,7 @@ function initBot(app) {
     if (data === 'about_us')   return showAboutUs(chatId);
     if (data === 'pricing')    return showPricing(chatId);
     if (data === 'profile')    return showUserProfile(chatId, q.from.first_name);
+    if (data === 'loyalty')    return showLoyaltyProfile(chatId);
     if (data === 'my_orders')  return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
     if (data === 'adm_stats')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminStats(chatId); }

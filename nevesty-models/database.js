@@ -199,6 +199,28 @@ async function initDatabase() {
   await run(`CREATE INDEX IF NOT EXISTS idx_factory_tasks_status ON factory_tasks(status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_factory_tasks_priority ON factory_tasks(priority DESC, created_at DESC)`);
 
+  // Loyalty points system
+  await run(`CREATE TABLE IF NOT EXISTS loyalty_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL UNIQUE,
+    points INTEGER DEFAULT 0,
+    total_earned INTEGER DEFAULT 0,
+    level TEXT DEFAULT 'bronze',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(()=>{});
+
+  await run(`CREATE TABLE IF NOT EXISTS loyalty_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    points INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    description TEXT,
+    order_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(()=>{});
+
+  await run(`CREATE INDEX IF NOT EXISTS idx_loyalty_chat ON loyalty_points(chat_id)`).catch(()=>{});
+
   // Migrations — add status column to reviews if missing
   await run(`ALTER TABLE reviews ADD COLUMN status TEXT DEFAULT 'pending'`).catch(() => {});
 
