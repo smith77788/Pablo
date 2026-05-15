@@ -469,12 +469,19 @@ async function initDatabase() {
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);
   if (!admin) {
-    const hash = await bcrypt.hash(process.env.ADMIN_PASSWORD || 'admin123', 10);
+    const adminPassword = process.env.ADMIN_PASSWORD ||
+      require('crypto').randomBytes(12).toString('base64').replace(/[+/=]/g, '').slice(0, 16);
+    const hash = await bcrypt.hash(adminPassword, 10);
     await run(
       'INSERT INTO admins (username, email, password_hash, role) VALUES (?, ?, ?, ?)',
       [process.env.ADMIN_USERNAME || 'admin', process.env.AGENCY_EMAIL || 'admin@nevesty-models.ru', hash, 'superadmin']
     );
-    console.log('Default admin account created. Set ADMIN_USERNAME and ADMIN_PASSWORD in .env');
+    if (!process.env.ADMIN_PASSWORD) {
+      console.log(`[SETUP] Admin created. Temporary password: ${adminPassword}`);
+      console.log('[SETUP] Set ADMIN_PASSWORD in .env to use a fixed password.');
+    } else {
+      console.log('[SETUP] Admin account created from ADMIN_PASSWORD env var.');
+    }
   }
 
   // Seed demo models if empty
