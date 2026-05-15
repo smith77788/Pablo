@@ -2658,6 +2658,10 @@ async function showAdminSettings(chatId, section) {
             { text: '🖼 Фото приветствия', callback_data: 'adm_set_welcome_photo' },
             { text: '📋 Текст меню', callback_data: 'adm_set_main_menu_text' },
           ],
+          [
+            { text: '🖼 Фото «О нас»', callback_data: 'adm_set_about_photo' },
+            { text: '🖼 Фото прайс-листа', callback_data: 'adm_set_pricing_photo' },
+          ],
           [{ text: '🎉 Текст после бронирования', callback_data: 'adm_set_booking_thanks' }],
           [{ text: '📣 Telegram канал', callback_data: 'adm_set_tg_channel' }],
           [{ text: '🔙 Назад', callback_data: 'adm_settings_main' }],
@@ -7719,6 +7723,8 @@ function initBot(app) {
       adm_set_reviews_prompt: '📝 Введите *текст приглашения к отзыву*:',
       adm_set_cities_list: '🏙 Введите *список городов* через запятую (например: Москва, Санкт-Петербург, Казань):',
       adm_set_welcome_photo: '🖼 Введите *URL фото* для приветствия (или отправьте ссылку на изображение):',
+      adm_set_about_photo: '🖼 Введите *URL фото* для страницы «О нас»:',
+      adm_set_pricing_photo: '🖼 Введите *URL фото* для страницы «Прайс-лист»:',
       adm_set_main_menu_text: '📋 Введите *текст главного меню* бота:',
       adm_set_model_max_photos: '🖼 Введите *максимальное кол-во фото* у модели:',
       adm_set_client_max_orders: '📋 Введите *максимум активных заявок* у одного клиента:',
@@ -8881,6 +8887,8 @@ function initBot(app) {
         adm_set_reviews_prompt: ['reviews_prompt_text', '📝 Приглашение к отзыву обновлено!'],
         adm_set_cities_list: ['cities_list', '🏙 Список городов обновлён!'],
         adm_set_welcome_photo: ['welcome_photo_url', '🖼 Фото приветствия обновлено!'],
+        adm_set_about_photo: ['about_photo_url', '🖼 Фото «О нас» обновлено!'],
+        adm_set_pricing_photo: ['pricing_photo_url', '🖼 Фото прайс-листа обновлено!'],
         adm_set_main_menu_text: ['main_menu_text', '📋 Текст меню обновлён!'],
         adm_set_model_max_photos: ['model_max_photos', '🖼 Лимит фото обновлён!'],
         adm_set_client_max_orders: ['client_max_active_orders', '📋 Лимит заявок обновлён!'],
@@ -10852,34 +10860,45 @@ async function showModelContact(chatId, modelId) {
 // ─── О нас ────────────────────────────────────────────────────────────────────
 
 async function showAboutUs(chatId) {
-  const about = await getSetting('about').catch(() => 'Мы работаем с 2018 года. Более 200 моделей в базе.');
-  const phone = await getSetting('contacts_phone').catch(() => '');
-  return safeSend(
-    chatId,
+  const [about, phone, aboutPhoto] = await Promise.all([
+    getSetting('about').catch(() => 'Мы работаем с 2018 года. Более 200 моделей в базе.'),
+    getSetting('contacts_phone').catch(() => ''),
+    getSetting('about_photo_url').catch(() => null),
+  ]);
+  const text =
     `ℹ️ *О нас — Nevesty Models*\n\n${esc(about)}\n\n` +
-      `💎 *Почему мы:*\n` +
-      `• Более 200 профессиональных моделей\n` +
-      `• Работаем по всей России\n` +
-      `• Договор и полная юридическая чистота\n` +
-      `• Fashion, Commercial, Events, Runway\n\n` +
-      (phone ? `📞 ${esc(phone)}` : ''),
-    {
-      parse_mode: 'MarkdownV2',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '💃 Смотреть каталог', callback_data: 'cat_cat__0' }],
-          [{ text: '📞 Контакты', callback_data: 'contacts' }],
-          [{ text: '🏠 Меню', callback_data: 'main_menu' }],
-        ],
-      },
-    }
-  );
+    `💎 *Почему мы:*\n` +
+    `• Более 200 профессиональных моделей\n` +
+    `• Работаем по всей России\n` +
+    `• Договор и полная юридическая чистота\n` +
+    `• Fashion, Commercial, Events, Runway\n\n` +
+    (phone ? `📞 ${esc(phone)}` : '');
+  const kb = {
+    inline_keyboard: [
+      [{ text: '💃 Смотреть каталог', callback_data: 'cat_cat__0' }],
+      [{ text: '📞 Контакты', callback_data: 'contacts' }],
+      [{ text: '🏠 Меню', callback_data: 'main_menu' }],
+    ],
+  };
+  if (aboutPhoto && typeof aboutPhoto === 'string' && aboutPhoto.startsWith('http')) {
+    try {
+      return await bot.sendPhoto(chatId, aboutPhoto, {
+        caption: text.slice(0, 1020),
+        parse_mode: 'MarkdownV2',
+        reply_markup: kb,
+      });
+    } catch (_) {}
+  }
+  return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: kb });
 }
 
 // ─── Прайс-лист ───────────────────────────────────────────────────────────────
 
 async function showPricing(chatId) {
-  const pricing = await getSetting('pricing').catch(() => '');
+  const [pricing, pricingPhoto] = await Promise.all([
+    getSetting('pricing').catch(() => ''),
+    getSetting('pricing_photo_url').catch(() => null),
+  ]);
   const pricingText =
     pricing ||
     `💰 *Наши пакеты услуг*
@@ -10904,16 +10923,23 @@ async function showPricing(chatId) {
 
 _Цены ориентировочные\\. Точная стоимость согласовывается индивидуально\\._`;
 
-  return safeSend(chatId, pricingText, {
-    parse_mode: 'MarkdownV2',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
-        [{ text: '📞 Связаться с менеджером', callback_data: 'msg_manager_start' }],
-        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
-      ],
-    },
-  });
+  const kb = {
+    inline_keyboard: [
+      [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
+      [{ text: '📞 Связаться с менеджером', callback_data: 'msg_manager_start' }],
+      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+    ],
+  };
+  if (pricingPhoto && typeof pricingPhoto === 'string' && pricingPhoto.startsWith('http')) {
+    try {
+      return await bot.sendPhoto(chatId, pricingPhoto, {
+        caption: pricingText.slice(0, 1020),
+        parse_mode: 'MarkdownV2',
+        reply_markup: kb,
+      });
+    } catch (_) {}
+  }
+  return safeSend(chatId, pricingText, { parse_mode: 'MarkdownV2', reply_markup: kb });
 }
 
 // ─── Каталог по городу ────────────────────────────────────────────────────────
