@@ -312,6 +312,107 @@
       line-height: 1.65;
     }
 
+    /* ─── TIMELINE ──────────────────────────────────── */
+    .timeline-section {
+      padding: 80px 0;
+      background: var(--bg);
+    }
+    .timeline {
+      position: relative;
+      max-width: 720px;
+      margin: 48px auto 0;
+      padding-left: 40px;
+    }
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: linear-gradient(to bottom, transparent, rgba(201,169,110,0.5), rgba(201,169,110,0.5), transparent);
+    }
+    .timeline-item {
+      position: relative;
+      margin-bottom: 48px;
+    }
+    .timeline-item:last-child { margin-bottom: 0; }
+    .timeline-dot {
+      position: absolute;
+      left: -48px;
+      top: 4px;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--gold);
+      background: var(--bg);
+      border-radius: 50%;
+    }
+    .timeline-year {
+      font-size: 0.7rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 8px;
+    }
+    .timeline-title {
+      color: var(--white);
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .timeline-text {
+      color: var(--text-muted);
+      font-size: 0.87rem;
+      line-height: 1.7;
+    }
+
+    /* ─── PROCESS SECTION ────────────────────────────── */
+    .process-section {
+      padding: 80px 0;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .process-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+      margin-top: 48px;
+    }
+    @media (max-width: 768px) {
+      .process-grid { grid-template-columns: repeat(2, 1fr); gap: 24px; }
+    }
+    @media (max-width: 480px) {
+      .process-grid { grid-template-columns: 1fr; }
+    }
+    .process-step {
+      padding: 32px 24px;
+      border-right: 1px solid var(--border);
+      text-align: center;
+    }
+    .process-step:last-child { border-right: none; }
+    @media (max-width: 768px) {
+      .process-step { border-right: none; }
+    }
+    .process-num {
+      font-family: 'Playfair Display', serif;
+      font-size: 3rem;
+      color: rgba(201,169,110,0.15);
+      line-height: 1;
+      margin-bottom: 16px;
+    }
+    .process-title {
+      color: var(--white);
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+    .process-text {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      line-height: 1.65;
+    }
+
     /* ─── CTA ────────────────────────────────────────── */
     .about-cta {
       padding: 80px 0 100px;
@@ -450,6 +551,76 @@
           <p id="about-text-main">Мы — модельное агентство полного цикла, работающее с 2014 года. За это время мы стали одним из ведущих агентств страны, объединив в своей базе более 200 профессиональных моделей.</p>
           <p>Наша миссия — обеспечить клиентам безупречный сервис и предоставить моделей, которые идеально соответствуют концепции и задачам проекта.</p>
           <p>Каждая модель проходит строгий кастинг и профессиональную подготовку. Мы гарантируем пунктуальность, профессионализм и результат.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TIMELINE -->
+  <section class="timeline-section" aria-labelledby="timeline-heading">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-tag">Вехи развития</div>
+        <h2 id="timeline-heading">Наша история</h2>
+        <div class="gold-line"></div>
+      </div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2014 — Основание</div>
+          <div class="timeline-title">Рождение агентства</div>
+          <p class="timeline-text">Основана команда из трёх специалистов, началось формирование первой базы из 20 моделей. Первые успешные проекты в Москве и Санкт-Петербурге.</p>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2017 — Рост</div>
+          <div class="timeline-title">Выход в регионы</div>
+          <p class="timeline-text">Расширение на 8 городов России. База моделей выросла до 80 человек. Запуск собственного онлайн-каталога и системы бронирования.</p>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2021 — Масштаб</div>
+          <div class="timeline-title">Международные проекты</div>
+          <p class="timeline-text">Первые выезды в ОАЭ и Дубай. Партнёрство с крупными fashion-домами. База превысила 150 профессиональных моделей.</p>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2024 — Сегодня</div>
+          <div class="timeline-title">Лидер рынка</div>
+          <p class="timeline-text">Более 200 моделей, 500+ успешных проектов, 15+ городов присутствия. Запуск нового цифрового сервиса для мгновенного бронирования и онлайн-каталога.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW WE WORK -->
+  <section class="process-section" aria-labelledby="process-heading">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-tag">Наш процесс</div>
+        <h2 id="process-heading">Как мы работаем</h2>
+        <div class="gold-line"></div>
+      </div>
+      <div class="process-grid">
+        <div class="process-step">
+          <div class="process-num">01</div>
+          <div class="process-title">Заявка</div>
+          <p class="process-text">Вы оставляете заявку онлайн или пишете менеджеру. Описываете задачу, дату, формат мероприятия.</p>
+        </div>
+        <div class="process-step">
+          <div class="process-num">02</div>
+          <div class="process-title">Подбор</div>
+          <p class="process-text">В течение 1 часа менеджер предлагает подходящих моделей из нашей базы с учётом ваших требований.</p>
+        </div>
+        <div class="process-step">
+          <div class="process-num">03</div>
+          <div class="process-title">Согласование</div>
+          <p class="process-text">Выбираете модель, подписываем договор, фиксируем все детали и стоимость. Никаких скрытых платежей.</p>
+        </div>
+        <div class="process-step">
+          <div class="process-num">04</div>
+          <div class="process-title">Результат</div>
+          <p class="process-text">Модель прибывает вовремя и профессионально выполняет задачу. Менеджер на связи весь день мероприятия.</p>
         </div>
       </div>
     </div>
