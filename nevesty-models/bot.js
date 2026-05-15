@@ -782,6 +782,13 @@ async function showAdminMenu(chatId, name) {
 
 // Per-user sort preferences for catalog (in-memory)
 const catalogSortPrefs = new Map(); // chatId → 'featured' | 'alpha'
+// Cleanup stale sort preferences every 12 hours to prevent unbounded growth
+setInterval(
+  () => {
+    catalogSortPrefs.clear();
+  },
+  12 * 60 * 60 * 1000
+).unref();
 
 async function showCatalog(chatId, cat, page, filter) {
   bot.sendChatAction(chatId, 'typing').catch(() => {});
