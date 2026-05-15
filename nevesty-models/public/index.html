@@ -1097,5 +1097,29 @@ if (document.getElementById('reviews-container')) loadReviewsPage(1);
   })();
   </script>
   <script src="/js/chat-widget.js" defer></script>
+  <script>
+  // ── Analytics event tracking (БЛОК 9.3) ─────────────────────────
+  // Track model card clicks by data-model-id attribute
+  document.addEventListener('click', function(e) {
+    var card = e.target.closest('[data-model-id]');
+    if (card) {
+      var modelId = card.dataset.modelId;
+      var modelName = card.dataset.modelName || 'unknown';
+      if (window.NM && NM.analytics) NM.analytics.viewModel(modelId, modelName);
+    }
+    // Track explicit booking button clicks by data-action="book"
+    var bookBtn = e.target.closest('[data-action="book"]');
+    if (bookBtn) {
+      var mId = bookBtn.dataset.modelId;
+      var mType = bookBtn.dataset.eventType || '';
+      if (window.NM && NM.analytics) NM.analytics.startBooking(mId, mType);
+    }
+  });
+  // Track successful order submission dispatched as a window event
+  window.addEventListener('order_submitted', function(e) {
+    var detail = (e && e.detail) || {};
+    if (window.NM && NM.analytics) NM.analytics.submitOrder(detail.event_type || '', detail.budget || 0);
+  });
+  </script>
 </body>
 </html>
