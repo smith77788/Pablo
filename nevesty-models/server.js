@@ -701,9 +701,11 @@ async function buildHealthResponse() {
     factory: {
       lastRun: factoryLastCycle,
       last_run: factoryLastCycle,
+      factory_last_run: factoryLastCycle,
       hours_since_run: factoryHoursSince,
       staleSinceHours: factoryStale ? factoryHoursSince : 0,
       stale: factoryStale,
+      factory_alert: factoryStale,
       status: factoryLastCycle === null ? 'never_run' : factoryStale ? 'stale' : 'ok',
     },
     metrics: {

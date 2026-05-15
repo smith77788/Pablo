@@ -67,17 +67,17 @@ async function sendEventReminders() {
     for (const order of orders) {
       try {
         // Check client preference for reminders
-        const prefs = await get(
-          'SELECT notify_reminders FROM client_prefs WHERE chat_id=?',
-          [order.client_chat_id]
-        ).catch(() => null);
+        const prefs = await get('SELECT notify_reminders FROM client_prefs WHERE chat_id=?', [
+          order.client_chat_id,
+        ]).catch(() => null);
         // Default is 1 (enabled); skip only if explicitly set to 0
         if (prefs && prefs.notify_reminders === 0) continue;
 
         const daysLeft = Math.round((new Date(order.event_date) - Date.now()) / 86400000);
         const daysStr = daysLeft === 1 ? '1 день' : daysLeft === 2 ? '2 дня' : '3 дня';
 
-        const text = `🔔 *Напоминание о мероприятии*\n\n` +
+        const text =
+          `🔔 *Напоминание о мероприятии*\n\n` +
           `Заявка \\#${order.order_number}\n` +
           `📅 Мероприятие через *${daysStr}*: ${order.event_date}\n` +
           (order.model_name ? `💃 Модель: ${order.model_name}\n` : '') +
@@ -89,10 +89,7 @@ async function sendEventReminders() {
         }
 
         // Mark as sent
-        await run(
-          `UPDATE orders SET reminder_sent_at=CURRENT_TIMESTAMP WHERE id=?`,
-          [order.id]
-        );
+        await run(`UPDATE orders SET reminder_sent_at=CURRENT_TIMESTAMP WHERE id=?`, [order.id]);
         sent++;
       } catch (e) {
         console.error('[scheduler] reminder error for order', order.id, e.message);
@@ -286,6 +283,8 @@ function scheduleEveryMinutes(fn, name, intervalMinutes) {
 
 function start() {
   // DB backup every 6 hours (keeps last 28 = 7 days of backups)
+  // Run immediately on startup so first backup is available right away
+  runBackup();
   scheduleEvery(runBackup, 'DB backup (every 6h)', 6);
   scheduleWeekly(runVacuum, 'SQLite VACUUM + WAL TRUNCATE', 0, 3, 0); // Sunday 03:00
   // Also run vacuum via shell script weekly (Sunday 03:30) for additional WAL cleanup
@@ -299,7 +298,9 @@ function start() {
   scheduleEveryMinutes(checkFactoryStaleness, 'Factory staleness check (30min)', 30);
   // Bot watchdog: check bot polling every 5 minutes
   scheduleEveryMinutes(checkBotHealth, 'Bot watchdog', 5);
-  console.log('[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min)');
+  console.log(
+    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min)'
+  );
 }
 
 function stop() {
