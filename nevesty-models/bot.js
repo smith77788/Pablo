@@ -4747,6 +4747,9 @@ function initBot(app) {
       return showSearchResults(chatId, f, page);
     }
 
+    // No-op button (page indicator x/N) — already answered above, just return
+    if (data === 'srch_noop') return;
+
     // View model from search results
     if (data.startsWith('srch_view_')) {
       const modelId = parseInt(data.replace('srch_view_', ''));
@@ -6371,101 +6374,139 @@ function getSearchFilters(chatId) {
 }
 
 async function showSearchMenu(chatId) {
-  const f = getSearchFilters(chatId);
+  try {
+    const f = getSearchFilters(chatId);
 
-  // Height range label
-  const heightRanges = [
-    { key: '155_160', label: '155–160 см', min: 155, max: 160 },
-    { key: '161_165', label: '161–165 см', min: 161, max: 165 },
-    { key: '166_170', label: '166–170 см', min: 166, max: 170 },
-    { key: '171_175', label: '171–175 см', min: 171, max: 175 },
-    { key: '176_180', label: '176–180 см', min: 176, max: 180 },
-    { key: '181_999', label: '181+ см',    min: 181, max: 999 },
-  ];
-  const ageRanges = [
-    { key: '18_22', label: '18–22 года', min: 18, max: 22 },
-    { key: '23_27', label: '23–27 лет',  min: 23, max: 27 },
-    { key: '28_32', label: '28–32 лет',  min: 28, max: 32 },
-    { key: '33_99', label: '33+ лет',    min: 33, max: 99 },
-  ];
+    // Height ranges definition
+    const heightRanges = [
+      { key: '155_160', label: '155–160 см', min: 155, max: 160 },
+      { key: '161_165', label: '161–165 см', min: 161, max: 165 },
+      { key: '166_170', label: '166–170 см', min: 166, max: 170 },
+      { key: '171_175', label: '171–175 см', min: 171, max: 175 },
+      { key: '176_180', label: '176–180 см', min: 176, max: 180 },
+      { key: '181_999', label: '181+ см',    min: 181, max: 999 },
+    ];
+    const ageRanges = [
+      { key: '18_22', label: '18–22 года', min: 18, max: 22 },
+      { key: '23_27', label: '23–27 лет',  min: 23, max: 27 },
+      { key: '28_32', label: '28–32 лет',  min: 28, max: 32 },
+      { key: '33_99', label: '33+ лет',    min: 33, max: 99 },
+    ];
 
-  // Height buttons (2 per row)
-  const heightBtns = [];
-  for (let i = 0; i < heightRanges.length; i += 2) {
-    const row = heightRanges.slice(i, i + 2).map(r => {
-      const active = f.height_min === r.min && f.height_max === r.max;
-      return { text: (active ? '✅ ' : '📏 ') + r.label, callback_data: `srch_h_${r.key}` };
+    // Height buttons (2 per row)
+    const heightBtns = [];
+    for (let i = 0; i < heightRanges.length; i += 2) {
+      const row = heightRanges.slice(i, i + 2).map(r => {
+        const active = f.height_min === r.min && f.height_max === r.max;
+        return { text: (active ? '✅ ' : '📏 ') + r.label, callback_data: `srch_h_${r.key}` };
+      });
+      heightBtns.push(row);
+    }
+
+    // Age buttons (2 per row)
+    const ageBtns = [];
+    for (let i = 0; i < ageRanges.length; i += 2) {
+      const row = ageRanges.slice(i, i + 2).map(r => {
+        const active = f.age_min === r.min && f.age_max === r.max;
+        return { text: (active ? '✅ ' : '🎂 ') + r.label, callback_data: `srch_a_${r.key}` };
+      });
+      ageBtns.push(row);
+    }
+
+    // Category buttons
+    const catDefs = [
+      { key: 'fashion',    label: '👗 Fashion'    },
+      { key: 'commercial', label: '📷 Commercial' },
+      { key: 'events',     label: '🎉 Events'     },
+    ];
+    const catBtns = catDefs.map(c => {
+      const active = f.category === c.key;
+      return { text: (active ? '✅ ' : '') + c.label, callback_data: `srch_c_${c.key}` };
     });
-    heightBtns.push(row);
-  }
 
-  // Age buttons (2 per row)
-  const ageBtns = [];
-  for (let i = 0; i < ageRanges.length; i += 2) {
-    const row = ageRanges.slice(i, i + 2).map(r => {
-      const active = f.age_min === r.min && f.age_max === r.max;
-      return { text: (active ? '✅ ' : '🎂 ') + r.label, callback_data: `srch_a_${r.key}` };
+    // City buttons — query DISTINCT cities from available models (up to 8)
+    let cities = [];
+    try {
+      const cityRows = await query(
+        "SELECT DISTINCT city FROM models WHERE available=1 AND city IS NOT NULL AND city != '' ORDER BY city"
+      );
+      cities = cityRows.map(r => r.city).filter(Boolean).slice(0, 8);
+    } catch (e) { console.error('[Bot] showSearchMenu cities:', e.message); }
+
+    const cityBtns = cities.map(city => {
+      const active = f.city === city;
+      return { text: (active ? '✅ ' : '🏙 ') + city, callback_data: `srch_city_${city}` };
     });
-    ageBtns.push(row);
+
+    // Count matching models for the current filters
+    let matchCount = 0;
+    try {
+      const conditions = ['available=1'];
+      const params = [];
+      if (f.height_min != null) { conditions.push('height >= ?'); params.push(f.height_min); }
+      if (f.height_max != null && f.height_max < 999) { conditions.push('height <= ?'); params.push(f.height_max); }
+      if (f.age_min != null)    { conditions.push('age >= ?');    params.push(f.age_min); }
+      if (f.age_max != null && f.age_max < 99) { conditions.push('age <= ?');    params.push(f.age_max); }
+      if (f.category)           { conditions.push('category = ?'); params.push(f.category); }
+      if (f.city)               { conditions.push('city = ?');     params.push(f.city); }
+      const countRow = await get(
+        `SELECT COUNT(*) as cnt FROM models WHERE ${conditions.join(' AND ')}`, params
+      );
+      matchCount = countRow?.cnt || 0;
+    } catch (e) { console.error('[Bot] showSearchMenu count:', e.message); }
+
+    // Build active filter summary for heading
+    const activeParts = [];
+    if (f.height_min != null) {
+      const r = heightRanges.find(r => r.min === f.height_min);
+      if (r) activeParts.push(`📏 ${r.label}`);
+      else activeParts.push(`📏 ${f.height_min}–${f.height_max} см`);
+    }
+    if (f.age_min != null) {
+      const r = ageRanges.find(r => r.min === f.age_min);
+      if (r) activeParts.push(`🎂 ${r.label}`);
+      else activeParts.push(`🎂 ${f.age_min}–${f.age_max} лет`);
+    }
+    if (f.category) activeParts.push(`🏷 ${f.category}`);
+    if (f.city)     activeParts.push(`🏙 ${f.city}`);
+
+    const hasFilters = activeParts.length > 0;
+    const summaryLine = hasFilters
+      ? `\n\n_Выбрано: ${esc(activeParts.join(', '))}_`
+      : `\n\n_Выберите фильтры для поиска_`;
+
+    // Find button label: show count only when filters selected
+    const findLabel = hasFilters
+      ? `🔍 Найти (${matchCount})`
+      : `🔍 Найти всех (${matchCount})`;
+
+    const keyboard = [
+      ...heightBtns,
+      ...ageBtns,
+      [catBtns[0], catBtns[1], catBtns[2]],
+      ...(cityBtns.length ? [cityBtns.slice(0, 4)] : []),
+      ...(cityBtns.length > 4 ? [cityBtns.slice(4)] : []),
+      [
+        ...(hasFilters ? [{ text: '✖️ Сбросить', callback_data: 'srch_reset' }] : []),
+        { text: findLabel, callback_data: 'srch_go' },
+      ],
+      [{ text: '← Меню', callback_data: 'main_menu' }],
+    ];
+
+    return safeSend(chatId,
+      `🔍 *Поиск моделей*${summaryLine}`,
+      { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
+    );
+  } catch (e) {
+    console.error('[Bot] showSearchMenu:', e.message);
+    return safeSend(chatId, '⚠️ Ошибка загрузки меню поиска. Попробуйте ещё раз.');
   }
-
-  // Category buttons
-  const catDefs = [
-    { key: 'fashion',    label: '👗 Fashion'    },
-    { key: 'commercial', label: '📷 Commercial' },
-    { key: 'events',     label: '🎉 Events'     },
-  ];
-  const catBtns = catDefs.map(c => {
-    const active = f.category === c.key;
-    return { text: (active ? '✅ ' : '') + c.label, callback_data: `srch_c_${c.key}` };
-  });
-
-  // City buttons from settings (up to 8)
-  const citiesSetting = await getSetting('cities_list').catch(() => '');
-  const cities = citiesSetting ? citiesSetting.split(',').map(c => c.trim()).filter(Boolean).slice(0, 8) : [];
-  const cityBtns = cities.map(city => {
-    const active = f.city === city;
-    return { text: (active ? '✅ ' : '🏙 ') + city, callback_data: `srch_city_${city}` };
-  });
-
-  // Build active filter summary
-  const activeParts = [];
-  if (f.height_min != null) {
-    const r = heightRanges.find(r => r.min === f.height_min);
-    if (r) activeParts.push(`📏 ${r.label}`);
-  }
-  if (f.age_min != null) {
-    const r = ageRanges.find(r => r.min === f.age_min);
-    if (r) activeParts.push(`🎂 ${r.label}`);
-  }
-  if (f.category) activeParts.push(`🏷 ${f.category}`);
-  if (f.city)     activeParts.push(`🏙 ${f.city}`);
-
-  const summaryLine = activeParts.length
-    ? `\n\n_Выбрано: ${esc(activeParts.join(', '))}_`
-    : `\n\n_Фильтры не выбраны — показать всех_`;
-
-  const keyboard = [
-    ...heightBtns,
-    ...ageBtns,
-    [catBtns[0], catBtns[1], catBtns[2]],
-    ...(cityBtns.length ? [cityBtns.slice(0, 4)] : []),
-    ...(cityBtns.length > 4 ? [cityBtns.slice(4)] : []),
-    [{ text: '🔄 Сбросить', callback_data: 'srch_reset' },
-     { text: '🔍 Найти',    callback_data: 'srch_go'    }],
-    [{ text: '← Назад',   callback_data: 'main_menu'   }],
-  ];
-
-  return safeSend(chatId,
-    `🔍 *Поиск моделей*${summaryLine}`,
-    { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
-  );
 }
 
 async function showSearchResults(chatId, filters, page = 0) {
   try {
     page = parseInt(page) || 0;
-    const perPage = 5;
+    const perPage = 6;
 
     const conditions = ['available=1'];
     const params = [];
@@ -6477,48 +6518,66 @@ async function showSearchResults(chatId, filters, page = 0) {
     if (filters.city)               { conditions.push('city = ?');     params.push(filters.city); }
 
     const where = conditions.join(' AND ');
-    const models = await query(`SELECT * FROM models WHERE ${where} ORDER BY name`, params);
-    const total  = models.length;
+    const models = await query(
+      `SELECT id, name, age, height, city, category, photo_main, photos FROM models WHERE ${where} ORDER BY featured DESC, name`,
+      params
+    );
+    const total = models.length;
+    const totalPages = Math.ceil(total / perPage) || 1;
 
     if (!total) {
       return safeSend(chatId,
-        `🔍 *Поиск моделей*\n\nПо выбранным фильтрам ничего не найдено\\.`,
+        `🔍 *Поиск моделей*\n\nПо вашему запросу ничего не найдено\\.\n\n_Попробуйте изменить или сбросить фильтры_`,
         {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [
-            [{ text: '🔄 Изменить фильтры', callback_data: 'cat_search'  }],
-            [{ text: '💃 Все модели',        callback_data: 'cat_cat__0' }],
+            [{ text: '🔍 Изменить поиск', callback_data: 'cat_search' }],
+            [{ text: '✖️ Сбросить фильтры', callback_data: 'srch_reset' }],
+            [{ text: '🏠 Главное меню',     callback_data: 'main_menu'  }],
           ]}
         }
       );
     }
 
     const slice = models.slice(page * perPage, page * perPage + perPage);
-    let text = `🔍 *Результаты поиска*\n\nНайдено: *${total}* ${ru_plural(total,'модель','модели','моделей')}\n\n`;
+
+    // Build result text
+    let text = `🔍 *Результаты поиска*\n\nНайдено: *${total}* ${ru_plural(total,'модель','модели','моделей')}`;
+    if (totalPages > 1) text += ` \\(стр\\. ${esc(String(page + 1))}/${esc(String(totalPages))}\\)`;
+    text += '\n\n';
+
     slice.forEach((m, i) => {
       text += `${page * perPage + i + 1}\\. *${esc(m.name)}*`;
-      if (m.city)   text += ` · ${esc(m.city)}`;
-      if (m.height) text += ` · ${m.height} см`;
-      if (m.age)    text += ` · ${m.age} лет`;
+      const parts = [];
+      if (m.city)     parts.push(esc(m.city));
+      if (m.height)   parts.push(`${m.height} см`);
+      if (m.age)      parts.push(`${m.age} лет`);
+      if (m.category) parts.push(esc(m.category));
+      if (parts.length) text += ` — ${parts.join(' · ')}`;
       text += '\n';
     });
 
-    const modelBtns = slice.map(m => [{
-      text: `👁 ${m.name}`,
-      callback_data: `srch_view_${m.id}`
-    }]);
+    // Model buttons (one per row)
+    const modelBtns = slice.map(m => {
+      const label = `👁 ${m.name}` +
+        (m.city ? ` · ${m.city}` : '') +
+        (m.height ? ` · ${m.height}см` : '');
+      return [{ text: label, callback_data: `srch_view_${m.id}` }];
+    });
 
+    // Navigation row
     const nav = [];
-    if (page > 0)                     nav.push({ text: '◀️', callback_data: `srch_page_${page-1}` });
-    if ((page+1)*perPage < total)     nav.push({ text: '▶️', callback_data: `srch_page_${page+1}` });
+    if (page > 0)                    nav.push({ text: '◀️ Пред', callback_data: `srch_page_${page - 1}` });
+    nav.push({ text: `${page + 1}/${totalPages}`, callback_data: 'srch_noop' });
+    if ((page + 1) * perPage < total) nav.push({ text: 'След ▶️', callback_data: `srch_page_${page + 1}` });
 
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         ...modelBtns,
-        ...(nav.length ? [nav] : []),
-        [{ text: '🔍 Изменить поиск', callback_data: 'cat_search'  }],
-        [{ text: '🏠 Главное меню',   callback_data: 'main_menu'   }],
+        nav,
+        [{ text: '🔍 Новый поиск', callback_data: 'cat_search' }],
+        [{ text: '🏠 Меню',        callback_data: 'main_menu'  }],
       ]}
     });
   } catch (e) { console.error('[Bot] showSearchResults:', e.message); }
