@@ -718,6 +718,11 @@
               <input type="text" id="s_ga_measurement_id" class="admin-input" placeholder="G-XXXXXXXXXX" maxlength="20" />
               <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Вставте Measurement ID з Google Analytics 4</div>
             </div>
+            <div class="admin-form-group">
+              <label>Яндекс.Метрика — номер счётчика</label>
+              <input type="text" id="s_ym_counter_id" class="admin-input" placeholder="12345678" maxlength="20" />
+              <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Номер счётчика Яндекс.Метрики (только цифры). Загружается только при наличии согласия на cookie.</div>
+            </div>
 
             <button class="btn btn-md btn-gold" id="btnSaveIntegrations" onclick="saveIntegrations(this)" style="margin-top:20px">Сохранить интеграции</button>
           </div>
@@ -1235,6 +1240,7 @@ async function loadSettings() {
       's_hero_image': 'hero_image',
       's_webhook_url': 'webhook_url',
       's_ga_measurement_id': 'ga_measurement_id',
+      's_ym_counter_id': 'ym_counter_id',
     };
     for (const [elId, key] of Object.entries(appearanceMap)) {
       const el = document.getElementById(elId);
@@ -1511,7 +1517,8 @@ async function saveIntegrations(btn) {
       body: JSON.stringify({
         webhook_url:        document.getElementById('s_webhook_url').value,
         tg_notif_enabled:   document.getElementById('s_tg_notif_enabled').checked ? '1' : '0',
-        ga_measurement_id:  document.getElementById('s_ga_measurement_id').value.trim()
+        ga_measurement_id:  document.getElementById('s_ga_measurement_id').value.trim(),
+        ym_counter_id:      document.getElementById('s_ym_counter_id').value.trim()
       })
     });
     _admin.toast('Интеграции сохранены', 'success');

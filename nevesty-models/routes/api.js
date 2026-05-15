@@ -180,9 +180,60 @@ router.post('/admin/login', authLimiter, async (req, res, next) => {
     const token = jwt.sign(
       { id: admin.id, username: admin.username, role: admin.role },
       process.env.JWT_SECRET || 'secret',
-      { expiresIn: '24h' }
+      { expiresIn: '15m' }
     );
-    res.json({ token, admin: { id: admin.id, username: admin.username, role: admin.role } });
+    // Issue refresh token (7 day, stored server-side as SHA-256 hash)
+    const refreshTokenRaw = crypto.randomBytes(48).toString('hex');
+    const refreshHash = crypto.createHash('sha256').update(refreshTokenRaw).digest('hex');
+    await run(
+      "INSERT INTO refresh_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
+      [refreshHash, admin.id]
+    );
+    // Clean up old expired tokens for this admin
+    await run("DELETE FROM refresh_tokens WHERE admin_id=? AND (expires_at < CURRENT_TIMESTAMP OR revoked=1)", [admin.id]).catch(() => {});
+    res.json({ token, refresh_token: refreshTokenRaw, admin: { id: admin.id, username: admin.username, role: admin.role } });
+  } catch (e) { next(e); }
+});
+
+// ─── Auth: refresh token ─────────────────────────────────────────────────────
+router.post('/auth/refresh', authLimiter, async (req, res, next) => {
+  try {
+    const { refresh_token } = req.body;
+    if (!refresh_token) return res.status(400).json({ error: 'refresh_token required' });
+    const tokenHash = crypto.createHash('sha256').update(refresh_token).digest('hex');
+    const stored = await get(
+      'SELECT * FROM refresh_tokens WHERE token_hash=? AND revoked=0 AND expires_at > CURRENT_TIMESTAMP',
+      [tokenHash]
+    );
+    if (!stored) return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    const admin = await get('SELECT id, username, role FROM admins WHERE id=?', [stored.admin_id]);
+    if (!admin) return res.status(401).json({ error: 'Admin not found' });
+    // Rotate: revoke old token, issue new pair
+    await run('UPDATE refresh_tokens SET revoked=1 WHERE id=?', [stored.id]);
+    const newRefresh = crypto.randomBytes(48).toString('hex');
+    const newHash = crypto.createHash('sha256').update(newRefresh).digest('hex');
+    await run(
+      "INSERT INTO refresh_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
+      [newHash, admin.id]
+    );
+    const token = jwt.sign(
+      { id: admin.id, username: admin.username, role: admin.role },
+      process.env.JWT_SECRET || 'secret',
+      { expiresIn: '15m' }
+    );
+    res.json({ token, refresh_token: newRefresh });
+  } catch (e) { next(e); }
+});
+
+// ─── Auth: revoke (logout) ───────────────────────────────────────────────────
+router.post('/auth/logout', async (req, res, next) => {
+  try {
+    const { refresh_token } = req.body;
+    if (refresh_token) {
+      const tokenHash = crypto.createHash('sha256').update(refresh_token).digest('hex');
+      await run('UPDATE refresh_tokens SET revoked=1 WHERE token_hash=?', [tokenHash]);
+    }
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -1288,7 +1339,7 @@ router.get('/settings/public', async (req, res) => {
       'contacts_whatsapp', 'about', 'greeting', 'agency_name', 'tagline',
       'catalog_per_page', 'site_url', 'manager_hours',
       'pricing_start_from', 'pricing_event_from', 'pricing_premium_from',
-      'ga_measurement_id'
+      'ga_measurement_id', 'ym_counter_id'
     ];
     const cacheKey = 'settings:public';
     const cached = cache.get(cacheKey);
