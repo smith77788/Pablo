@@ -1173,6 +1173,46 @@ def run_cycle() -> dict:
         nevesty_kpis['revenue_month'],
         nevesty_kpis['db_connected'],
     )
+
+    # Run full 8-KPI analysis via KPIAnalyzer (БЛОК 5.7)
+    from factory.agents.kpi_analyzer import KPIAnalyzer
+    try:
+        _kpi_analyzer = KPIAnalyzer()
+        kpi_analysis = _kpi_analyzer.run_full_analysis()
+        nevesty_kpis['kpi_analysis'] = kpi_analysis
+        # Enrich nevesty_kpis with derived values from KPIAnalyzer where MetricsCollector has gaps
+        _k1 = kpi_analysis.get('kpi_1_orders_per_period', {})
+        _k2 = kpi_analysis.get('kpi_2_conversion', {})
+        _k4 = kpi_analysis.get('kpi_4_client_return_rate', {})
+        _k5 = kpi_analysis.get('kpi_5_deal_cycle_days', {})
+        _k7 = kpi_analysis.get('kpi_7_bot_activity', {})
+        if nevesty_kpis['orders_this_week'] == 0 and _k1.get('week', 0) > 0:
+            nevesty_kpis['orders_this_week'] = _k1['week']
+        if nevesty_kpis['orders_this_month'] == 0 and _k1.get('month', 0) > 0:
+            nevesty_kpis['orders_this_month'] = _k1['month']
+        if nevesty_kpis['conversion_rate_pct'] == 0 and _k2.get('conversion_rate', 0) > 0:
+            nevesty_kpis['conversion_rate_pct'] = round(_k2['conversion_rate'] * 100, 1)
+        if nevesty_kpis['repeat_client_rate'] == 0 and _k4.get('return_rate', 0) > 0:
+            nevesty_kpis['repeat_client_rate'] = round(_k4['return_rate'] * 100, 1)
+        nevesty_kpis['avg_deal_cycle_days'] = _k5.get('avg_days', 0)
+        nevesty_kpis['popular_categories'] = kpi_analysis.get('kpi_3_popular_categories', [])
+        nevesty_kpis['top_client_requests'] = kpi_analysis.get('kpi_8_top_requests', [])
+        nevesty_kpis['model_ratings'] = kpi_analysis.get('kpi_6_model_ratings', [])
+        nevesty_kpis['bot_users_week'] = _k7.get('users_this_week', 0)
+        logger.info(
+            "[Phase5.7] KPIAnalyzer: orders_total=%s, conversion=%.3f, return_rate=%.3f, "
+            "deal_cycle=%.1f days, categories=%d, top_requests=%d",
+            _k1.get('total', 0),
+            _k2.get('conversion_rate', 0),
+            _k4.get('return_rate', 0),
+            _k5.get('avg_days', 0),
+            len(kpi_analysis.get('kpi_3_popular_categories', [])),
+            len(kpi_analysis.get('kpi_8_top_requests', [])),
+        )
+    except Exception as _kpi_err:
+        logger.warning("[Phase5.7] KPIAnalyzer failed (non-critical): %s", _kpi_err)
+        nevesty_kpis['kpi_analysis'] = {}
+
     # Save metrics snapshot to factory DB for historical tracking
     try:
         db.run(
