@@ -458,25 +458,49 @@ def _format_weekly_report(cycle_results: list, nevesty_kpis: dict | None = None)
     return "\n".join(lines)
 
 
-def _format_monthly_report(cycle_results: list, db_path: str) -> str:
-    """Generate a monthly summary with DB metrics."""
+def _format_monthly_report(cycle_results: list, db_path: str, nevesty_kpis: dict | None = None) -> str:
+    """Generate a monthly summary with DB metrics and period comparison.
+
+    Args:
+        cycle_results: List of recent cycle result dicts loaded from history.
+        db_path: Path to the Nevesty SQLite database.
+        nevesty_kpis: Current KPIs dict for supplementing DB data when DB is unavailable.
+    """
+    kpis = nevesty_kpis or {}
+
     lines = [
         "📊 ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ CEO",
         f"Всего циклов за месяц: {len(cycle_results)}",
         "",
     ]
 
+    # Collect avg factory health from cycle history
+    health_scores = [
+        r.get("health_score")
+        for r in cycle_results
+        if isinstance(r.get("health_score"), (int, float))
+    ]
+    avg_health = round(sum(health_scores) / len(health_scores)) if health_scores else None
+
     try:
         import sqlite3 as _sqlite3_monthly
         conn = _sqlite3_monthly.connect(db_path)
-        # Orders this month
+        # Orders this month vs previous month
         orders_month = conn.execute(
             "SELECT COUNT(*) FROM orders WHERE created_at >= date('now', '-30 days')"
         ).fetchone()[0]
-        # Revenue this month
+        orders_prev_month = conn.execute(
+            "SELECT COUNT(*) FROM orders WHERE created_at >= date('now', '-60 days') "
+            "AND created_at < date('now', '-30 days')"
+        ).fetchone()[0]
+        # Revenue this month vs previous month
         revenue = conn.execute(
             "SELECT COALESCE(SUM(budget),0) FROM orders WHERE status IN ('confirmed','completed') "
             "AND created_at >= date('now', '-30 days')"
+        ).fetchone()[0]
+        revenue_prev = conn.execute(
+            "SELECT COALESCE(SUM(budget),0) FROM orders WHERE status IN ('confirmed','completed') "
+            "AND created_at >= date('now', '-60 days') AND created_at < date('now', '-30 days')"
         ).fetchone()[0]
         # New clients
         new_clients = conn.execute(
@@ -484,24 +508,67 @@ def _format_monthly_report(cycle_results: list, db_path: str) -> str:
         ).fetchone()[0]
         conn.close()
 
+        # Compute month-over-month deltas
+        def _pct_change(cur: float, prev: float) -> str:
+            if prev == 0:
+                return "+∞" if cur > 0 else "0%"
+            delta = round((cur - prev) / prev * 100)
+            return f"{'↑' if delta >= 0 else '↓'}{abs(delta)}%"
+
+        orders_delta = _pct_change(orders_month, orders_prev_month)
+        revenue_delta = _pct_change(revenue, revenue_prev)
+
         lines += [
-            f"📋 Заявок за месяц: {orders_month}",
-            f"💰 Выручка: {int(revenue):,} ₽".replace(",", " "),
-            f"👥 Новых клиентов: {new_clients}",
+            "📋 ЗАЯВКИ:",
+            f"  Этот месяц: {orders_month} ({orders_delta} к прошлому)",
+            f"  Прошлый месяц: {orders_prev_month}",
             "",
-            "🎯 Стратегические цели:",
-            "• Увеличить конверсию на 15%",
-            "• Расширить каталог на 10+ моделей",
-            "• Запустить реферальную программу",
+            "💰 ВЫРУЧКА:",
+            f"  Этот месяц: {int(revenue):,} ₽ ({revenue_delta} к прошлому)".replace(",", " "),
+            f"  Прошлый месяц: {int(revenue_prev):,} ₽".replace(",", " "),
+            "",
+            f"👥 Новых клиентов (30д): {new_clients}",
         ]
     except Exception as e:
-        lines.append(f"(Ошибка получения метрик: {e})")
+        # Fallback to kpis dict if DB unavailable
+        orders_month = kpis.get("orders_this_month", 0)
+        revenue = kpis.get("revenue_month", 0)
+        lines.append(f"📋 Заявок за месяц: {orders_month}")
+        lines.append(f"💰 Выручка: {int(revenue):,} ₽".replace(",", " "))
+        lines.append(f"(Прямой доступ к БД недоступен: {e})")
+
+    if avg_health is not None:
+        health_icon = "🟢" if avg_health >= 70 else "🟡" if avg_health >= 40 else "🔴"
+        lines += [
+            "",
+            f"{health_icon} Средний Factory Health Score: {avg_health}/100",
+        ]
+
+    lines += [
+        "",
+        "🎯 Стратегические цели:",
+        "• Увеличить конверсию на 15%",
+        "• Расширить каталог на 10+ моделей",
+        "• Запустить реферальную программу",
+    ]
 
     return "\n".join(lines)
 
 
-def run_phase_ceo_reports(db_path: str, history_path: str | None = None) -> dict:
-    """Generate CEO weekly and monthly reports from cycle history."""
+def run_phase_ceo_reports(
+    db_path: str,
+    history_path: str | None = None,
+    nevesty_kpis: dict | None = None,
+) -> dict:
+    """Generate CEO weekly and monthly reports from cycle history.
+
+    Args:
+        db_path: Path to the Nevesty SQLite database for real order/revenue metrics.
+        history_path: Optional path to a single JSON file with cycle history list.
+                      When None, loads from factory/history/*.json automatically.
+        nevesty_kpis: Current cycle KPIs dict (orders_this_week, revenue_month, etc.)
+                      forwarded to the report formatters for enriched business metrics.
+    """
     import json as _json_ceo
     import os as _os_ceo
     from pathlib import Path as _Path_ceo
@@ -527,12 +594,13 @@ def run_phase_ceo_reports(db_path: str, history_path: str | None = None) -> dict
                     cycle_results.append({
                         "timestamp": data.get("timestamp") or data.get("cycle_id", ""),
                         "phases": data.get("phases", {}),
+                        "health_score": data.get("health_score"),
                     })
                 except Exception:
                     pass
 
-    weekly = _format_weekly_report(cycle_results)
-    monthly = _format_monthly_report(cycle_results, db_path)
+    weekly = _format_weekly_report(cycle_results, nevesty_kpis=nevesty_kpis)
+    monthly = _format_monthly_report(cycle_results, db_path, nevesty_kpis=nevesty_kpis)
 
     return {
         "status": "ok",
@@ -2773,6 +2841,7 @@ def run_cycle() -> dict:
     try:
         _ceo_reports = run_phase_ceo_reports(
             db_path="/home/user/Pablo/nevesty-models/data.db",
+            nevesty_kpis=nevesty_kpis,
         )
         results["ceo_weekly_report"] = _ceo_reports.get("weekly_report", "")
         results["ceo_monthly_report"] = _ceo_reports.get("monthly_report", "")

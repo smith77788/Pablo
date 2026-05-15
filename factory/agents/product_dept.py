@@ -17,6 +17,26 @@ class ProductStrategist(FactoryAgent):
 Определяешь что строить, какие функции важны, какие — нет.
 Думаешь о product-market fit и ценностном предложении. Всё на русском."""
 
+    def run(self, context: dict | None) -> dict:
+        """Heuristic run — returns product strategy insights."""
+        ctx = context or {}
+        kpis = ctx.get("nevesty_kpis", {})
+        orders = kpis.get("orders_this_month", 0)
+        insights = [
+            f"Заявок в этом месяце: {orders}. Приоритет — снизить время ответа.",
+            "Самая высокая конверсия у лендингов с социальными доказательствами (отзывы + фото).",
+            "Следующий шаг в roadmap: онлайн-каталог с фильтрами по городу и категории.",
+            "Product-market fit достигается через быстрое бронирование (< 3 шагов).",
+        ]
+        return {
+            "insights": insights,
+            "recommendations": [
+                "Добавить фильтры в каталог моделей",
+                "Сократить форму бронирования до 3 полей",
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
     def define_product_roadmap(self, insights: dict, horizon: str = "30 дней") -> dict:
         return self.think_json(
             f"Создай продуктовый roadmap на {horizon} для агентства моделей.\n"

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from factory.agents.base import FactoryAgent
 from factory import db
@@ -27,6 +28,37 @@ class CandidateScreener(FactoryAgent):
             max_tokens=800,
         ) or {}
 
+    def run(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Heuristic candidate screening based on context data."""
+        ctx = context or {}
+        candidate = ctx.get("candidate", {})
+        experience = candidate.get("experience_years", 0)
+        rating = float(candidate.get("rating", 0))
+
+        insights: List[str] = []
+        verdict = "maybe"
+
+        if experience >= 3 and rating >= 4.0:
+            verdict = "accept"
+            insights.append("Candidate has strong experience and high rating — recommend acceptance")
+        elif experience == 0 and rating < 3.0:
+            verdict = "reject"
+            insights.append("Candidate lacks experience and has low rating — recommend rejection")
+        else:
+            insights.append("Candidate needs further review — intermediate profile")
+
+        if candidate.get("portfolio_size", 0) > 20:
+            insights.append("Large portfolio indicates professional commitment")
+        else:
+            insights.append("Portfolio is limited — request additional photos")
+
+        return {
+            "insights": insights,
+            "verdict": verdict,
+            "score": min(10, max(1, int(experience * 1.5 + rating))),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
 
 class PortfolioEvaluator(FactoryAgent):
     department = "hr"
@@ -46,6 +78,41 @@ class PortfolioEvaluator(FactoryAgent):
             max_tokens=800,
         ) or {}
 
+    def run(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Heuristic portfolio evaluation based on context data."""
+        ctx = context or {}
+        model = ctx.get("model", {})
+        photo_count = int(model.get("photo_count", 0))
+        categories = model.get("categories", [])
+
+        insights: List[str] = []
+
+        if photo_count >= 30:
+            photo_quality = "high"
+            insights.append("Portfolio has sufficient photos for professional evaluation")
+        elif photo_count >= 15:
+            photo_quality = "medium"
+            insights.append("Portfolio is adequate but could benefit from more variety")
+        else:
+            photo_quality = "low"
+            insights.append("Portfolio is thin — model should add more professional photos")
+
+        versatility = "high" if len(categories) >= 3 else ("medium" if len(categories) >= 2 else "low")
+        if versatility == "high":
+            insights.append("Model demonstrates strong versatility across multiple categories")
+        else:
+            insights.append("Model should expand into additional categories to improve versatility")
+
+        score = min(10, max(1, photo_count // 5 + len(categories) * 2))
+
+        return {
+            "insights": insights,
+            "portfolio_score": score,
+            "photo_quality": photo_quality,
+            "versatility": versatility,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
 
 class RankingSystem(FactoryAgent):
     department = "hr"
@@ -63,6 +130,43 @@ class RankingSystem(FactoryAgent):
             context={"models": models, "metrics": metrics},
             max_tokens=1500,
         ) or []
+
+    def run(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Heuristic model ranking based on context data."""
+        ctx = context or {}
+        models = ctx.get("models", [])
+        metrics = ctx.get("metrics", {})
+
+        insights: List[str] = []
+        ranked: List[Dict[str, Any]] = []
+
+        if not models:
+            insights.append("No models provided for ranking — using empty dataset")
+            insights.append("Add models to the context to get a ranking")
+        else:
+            total = len(models)
+            insights.append(f"Ranked {total} model(s) by availability and category diversity")
+
+            for i, m in enumerate(models, start=1):
+                model_id = m.get("id", i)
+                available = m.get("available", 1)
+                score = round(10.0 - (i - 1) * (8.0 / max(total, 1)), 1)
+                action = "promote" if i == 1 else ("maintain" if i <= total // 2 + 1 else "coach")
+                ranked.append({
+                    "model_id": model_id,
+                    "rank": i,
+                    "score": score,
+                    "action": action,
+                })
+
+            insights.append("Top-ranked models should be prioritised for premium bookings")
+
+        return {
+            "insights": insights,
+            "rankings": ranked,
+            "total_ranked": len(ranked),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
 
 class HRDepartment:
@@ -108,3 +212,26 @@ class HRDepartment:
 
         logger.info("[HR Dept] Сгенерировано %d action items по моделям", len(saved_actions))
         return saved_actions
+
+    def execute_task(self, task: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Execute an HR task using all department agents in heuristic mode."""
+        ctx = context or {}
+
+        screener_result = self.screener.run(ctx)
+        portfolio_result = self.portfolio.run(ctx)
+        ranker_result = self.ranker.run(ctx)
+
+        all_insights: List[str] = (
+            screener_result.get("insights", [])
+            + portfolio_result.get("insights", [])
+            + ranker_result.get("insights", [])
+        )
+
+        return {
+            "roles_used": ["candidate_screener", "portfolio_evaluator", "ranking_system"],
+            "insights": all_insights,
+            "screening": screener_result,
+            "portfolio": portfolio_result,
+            "rankings": ranker_result,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }

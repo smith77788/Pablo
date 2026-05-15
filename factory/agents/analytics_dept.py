@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from factory.agents.base import FactoryAgent
 from factory import db
 
+_NOW = lambda: datetime.now(timezone.utc).isoformat()
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,23 @@ class DataAnalyst(FactoryAgent):
             context={"metrics": metrics},
             max_tokens=1200,
         ) or {}
+
+    def run(self, context: dict | None) -> dict:
+        """Heuristic run — returns data analysis insights."""
+        ctx = context or {}
+        kpis = ctx.get("nevesty_kpis", {})
+        total_users = kpis.get("total_users", 0)
+        total_orders = kpis.get("total_orders", 0)
+        insights = [
+            f"Зарегистрировано пользователей: {total_users}. Анализируй сегментацию для роста конверсии.",
+            f"Всего заказов: {total_orders}. Сравни с предыдущим периодом для определения тренда.",
+            "Отслеживай аномалии: резкий рост или падение > 20% требует немедленного анализа.",
+        ]
+        return {
+            "insights": insights,
+            "recommendations": ["Настроить дашборд метрик в реальном времени"],
+            "timestamp": _NOW(),
+        }
 
 
 class ConversionAnalyst(FactoryAgent):
