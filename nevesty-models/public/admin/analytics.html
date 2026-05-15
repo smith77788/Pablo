@@ -660,6 +660,16 @@
           <div class="skeleton h-6 w-1/2 rounded"></div>
         </div>
       </div>
+
+      <!-- Revenue Forecast (БЛОК 12.4) -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-1">🔮 Прогноз выручки</h2>
+        <p class="text-xs text-gray-400 dark:text-gray-500 mb-4">Линейная регрессия по последним 6 месяцам</p>
+        <div id="forecast-section">
+          <div class="skeleton h-6 w-full rounded mb-2"></div>
+          <div class="skeleton h-6 w-3/4 rounded"></div>
+        </div>
+      </div>
     </div>
     <!-- /max-w-7xl -->
 
@@ -1931,10 +1941,50 @@
         }
       }
 
+      // ── Revenue Forecast loader (БЛОК 12.4) ──────────────────────────────────────
+      async function loadForecast() {
+        try {
+          const d = await fetch('/api/admin/analytics/forecast', { headers: h }).then(r => r.json());
+          const el = document.getElementById('forecast-section');
+          if (!d.ok || !d.forecast) {
+            el.innerHTML = `<p class="text-sm text-gray-400">${d.message || 'Недостаточно данных для прогноза (нужно минимум 2 месяца)'}</p>`;
+            return;
+          }
+          const f = d.forecast;
+          const trendIcon = f.trend === 'growing' ? '📈' : f.trend === 'declining' ? '📉' : '➡️';
+          const trendColor =
+            f.trend === 'growing'
+              ? 'text-green-600 dark:text-green-400'
+              : f.trend === 'declining'
+                ? 'text-red-500 dark:text-red-400'
+                : 'text-gray-600 dark:text-gray-400';
+          el.innerHTML = `
+            <div class="flex flex-wrap gap-4 items-center mb-4">
+              <div class="bg-indigo-50 dark:bg-indigo-900/30 rounded-lg px-5 py-3 text-center">
+                <div class="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Прогноз на ${escHtml(f.month)}</div>
+                <div class="text-2xl font-bold text-indigo-700 dark:text-indigo-300">${Number(f.revenue).toLocaleString('ru-RU')} ₽</div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm">${trendIcon} Тренд:</span>
+                  <span class="text-sm font-medium ${trendColor}">${f.trend === 'growing' ? 'Рост' : f.trend === 'declining' ? 'Снижение' : 'Стабильно'}${f.trend_pct ? ` (${f.trend_pct > 0 ? '+' : ''}${f.trend_pct}%/мес)` : ''}</span>
+                </div>
+                <div class="text-xs text-gray-400">На основе ${d.history ? d.history.length : 0} мес. данных</div>
+              </div>
+            </div>
+          `;
+        } catch (e) {
+          console.error('forecast', e);
+          document.getElementById('forecast-section').innerHTML =
+            '<p class="text-sm text-gray-400">Ошибка загрузки прогноза</p>';
+        }
+      }
+
       // ── Call new loaders on page init ─────────────────────────────────────────────
       loadFunnel();
       loadRevenueChart();
       loadTopCities();
+      loadForecast();
     </script>
   </body>
 </html>
