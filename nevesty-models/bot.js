@@ -40,6 +40,49 @@ const DURATIONS = ['1', '2', '3', '4', '6', '8', '12'];
 
 let bot = null;
 
+// ─── Session timers (in-memory, cleared on restart) ───────────────────────────
+const sessionTimers = new Map();
+
+const ACTIVE_BOOKING_STATES = new Set([
+  'bk_s1', 'bk_s2_event', 'bk_s2_date', 'bk_s2_dur', 'bk_s2_loc',
+  'bk_s2_budget', 'bk_s2_comments', 'bk_s3_name', 'bk_s3_phone',
+  'bk_s3_email', 'bk_s3_tg', 'bk_s4',
+  'leave_review_text', 'bk_quick_name', 'bk_quick_phone',
+]);
+
+function resetSessionTimer(chatId) {
+  clearTimeout(sessionTimers.get(chatId));
+  const timer = setTimeout(async () => {
+    try {
+      const sess = await getSession(chatId);
+      const state = sess?.state;
+      if (state && ACTIVE_BOOKING_STATES.has(state)) {
+        await safeSend(chatId,
+          '⏰ *Продолжить?*\n\nВы не завершили оформление\\. Хотите продолжить или начать заново?',
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '▶ Продолжить',    callback_data: 'session_continue' }],
+                [{ text: '🔄 Начать заново', callback_data: 'session_restart'  }],
+              ]
+            }
+          }
+        );
+      }
+    } catch {}
+    sessionTimers.delete(chatId);
+  }, 30 * 60 * 1000); // 30 minutes
+  sessionTimers.set(chatId, timer);
+}
+
+// ─── Booking progress helper ──────────────────────────────────────────────────
+function bookingProgress(step, total = 4) {
+  const filled = '▓'.repeat(step);
+  const empty  = '░'.repeat(total - step);
+  return `${filled}${empty} Шаг ${step}/${total}`;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function esc(s) {
@@ -172,7 +215,10 @@ const REPLY_KB_ADMIN = {
 };
 
 async function buildClientKeyboard() {
-  const tgChannel = await getSetting('tg_channel').catch(() => null);
+  const [tgChannel, calcEnabled] = await Promise.all([
+    getSetting('tg_channel').catch(() => null),
+    getSetting('calc_enabled').catch(() => null),
+  ]);
   const rows = [
     [{ text: '💃 Каталог',              callback_data: 'cat_cat__0'         },
      { text: '⭐ Топ-модели',           callback_data: 'cat_top_0'          }],
@@ -195,6 +241,9 @@ async function buildClientKeyboard() {
     [{ text: 'ℹ️ О нас',               callback_data: 'about_us'           },
      { text: '📞 Контакты',             callback_data: 'contacts'           }],
   ];
+  if (calcEnabled === '1') {
+    rows.push([{ text: '📋 Прайс', callback_data: 'show_pricing' }]);
+  }
   if (tgChannel) {
     rows.push([{ text: '📣 Наш канал', callback_data: 'tg_channel' }]);
   }
@@ -914,8 +963,9 @@ async function bkStep2Comments(chatId, data) {
 // STEP 3a — name
 async function bkStep3Name(chatId, data) {
   await setSession(chatId, 'bk_s3_name', data);
+  resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + 'Введите ваше имя и фамилию:',
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\nВведите ваше имя и фамилию:`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] }
@@ -926,11 +976,15 @@ async function bkStep3Name(chatId, data) {
 // STEP 3b — phone
 async function bkStep3Phone(chatId, data) {
   await setSession(chatId, 'bk_s3_phone', data);
+  resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + 'Введите номер телефона:',
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(2, 4))}_\n\nВведите номер телефона:`,
     {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] }
+      reply_markup: { inline_keyboard: [
+        [{ text: '← Назад', callback_data: 'bk_back_to_name' }],
+        [{ text: '❌ Отменить', callback_data: 'bk_cancel'    }],
+      ]}
     }
   );
 }
@@ -938,13 +992,15 @@ async function bkStep3Phone(chatId, data) {
 // STEP 3c — email (optional)
 async function bkStep3Email(chatId, data) {
   await setSession(chatId, 'bk_s3_email', data);
+  resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + 'Введите email \\(необязательно\\):',
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(3, 4))}_\n\nВведите email \\(необязательно\\):`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
-        [{ text: '⏭ Пропустить', callback_data: 'bk_skip_email' }],
-        [{ text: '❌ Отменить',   callback_data: 'bk_cancel'     }],
+        [{ text: '← Назад',      callback_data: 'bk_back_to_phone' }],
+        [{ text: '⏭ Пропустить', callback_data: 'bk_skip_email'    }],
+        [{ text: '❌ Отменить',   callback_data: 'bk_cancel'        }],
       ]}
     }
   );
@@ -953,17 +1009,19 @@ async function bkStep3Email(chatId, data) {
 // STEP 3d — telegram username (optional)
 async function bkStep3Telegram(chatId, data, tgUsername) {
   await setSession(chatId, 'bk_s3_tg', data);
+  resetSessionTimer(chatId);
   const hint = tgUsername
     ? `_Ваш username в Telegram: @${esc(tgUsername)}_\n\n`
     : '';
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + hint + 'Введите Telegram username для связи \\(необязательно\\):\n_Пример: @username_',
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(4, 4))}_\n\n` + hint + 'Введите Telegram username для связи \\(необязательно\\):\n_Пример: @username_',
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         tgUsername ? [{ text: `✅ Использовать @${tgUsername}`, callback_data: `bk_use_tg_${tgUsername}` }] : [],
-        [{ text: '⏭ Пропустить', callback_data: 'bk_skip_tg' }],
-        [{ text: '❌ Отменить',   callback_data: 'bk_cancel'  }],
+        [{ text: '← Назад',      callback_data: 'bk_back_to_email' }],
+        [{ text: '⏭ Пропустить', callback_data: 'bk_skip_tg'       }],
+        [{ text: '❌ Отменить',   callback_data: 'bk_cancel'        }],
       ].filter(r => r.length) }
     }
   );
@@ -1037,7 +1095,16 @@ async function bkSubmit(chatId, data) {
   } catch (e) {
     console.error('[Bot] bkSubmit:', e.message);
     await clearSession(chatId);
-    return safeSend(chatId, '❌ Ошибка при отправке заявки\\. Попробуйте позже или свяжитесь с нами\\.', { parse_mode: 'MarkdownV2' });
+    return safeSend(chatId,
+      '❌ *Не удалось создать заявку\\.* Попробуйте позже или напишите менеджеру\\.',
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '💬 Написать менеджеру', callback_data: 'contact_mgr' }],
+          [{ text: '🏠 Главное меню',        callback_data: 'main_menu'  }],
+        ]}
+      }
+    );
   }
 }
 
@@ -3424,6 +3491,20 @@ function initBot(app) {
     if (data === 'faq')        return showFaq(chatId);
     if (data === 'about_us')   return showAboutUs(chatId);
     if (data === 'pricing')    return showPricing(chatId);
+    if (data === 'show_pricing') {
+      const pricingText = await getSetting('pricing_text').catch(() => '');
+      const siteUrl = await getSetting('site_url').catch(() => 'https://nevesty-models.ru') || 'https://nevesty-models.ru';
+      const msg = pricingText
+        ? esc(pricingText)
+        : `💰 *Стоимость услуг*\n\nПодробный прайс\\-лист доступен на сайте:\n[Смотреть цены](${esc(siteUrl + '/pricing.html')})`;
+      return safeSend(chatId, msg, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '🌐 Открыть прайс', url: siteUrl + '/pricing.html' }],
+          [{ text: '← Меню', callback_data: 'main_menu' }],
+        ]}
+      });
+    }
     if (data === 'profile')    return showUserProfile(chatId, q.from.first_name);
     if (data === 'loyalty')              return showLoyaltyProfile(chatId);
     if (data === 'my_achievements')      return showAchievements(chatId);
@@ -4506,6 +4587,10 @@ function initBot(app) {
     // ── Написать менеджеру
     if (data === 'msg_manager_start') {
       await setSession(chatId, 'msg_to_manager', {});
+      const autoReply = await getSetting('manager_reply').catch(() => '');
+      if (autoReply && autoReply.trim()) {
+        await safeSend(chatId, esc(autoReply), { parse_mode: 'MarkdownV2' });
+      }
       return safeSend(chatId,
         '✍️ *Напишите ваш вопрос*\n\nОтправьте сообщение — менеджер ответит в течение часа\\.',
         {
@@ -6008,23 +6093,34 @@ async function showTopModels(chatId, page = 0) {
 // ─── Написать менеджеру ───────────────────────────────────────────────────────
 
 async function showContactManager(chatId) {
-  const phone  = await getSetting('contacts_phone').catch(() => '+7 (900) 000-00-00');
-  const insta  = await getSetting('contacts_insta').catch(() => '@nevesty_models');
+  const [phone, insta, waPhone, mgrHours] = await Promise.all([
+    getSetting('contacts_phone').catch(() => '+7 (900) 000-00-00'),
+    getSetting('contacts_insta').catch(() => '@nevesty_models'),
+    getSetting('contacts_whatsapp').catch(() => null).then(v => v || getSetting('agency_phone').catch(() => '')),
+    getSetting('manager_hours').catch(() => ''),
+  ]);
   await setSession(chatId, 'msg_to_manager', {});
-  return safeSend(chatId,
+  const waDigits = (waPhone || '').replace(/\D/g, '');
+  let msgText =
     `💬 *Связаться с менеджером*\n\n` +
     `Напишите ваш вопрос прямо здесь — менеджер ответит в течение часа\\.\n\n` +
     `Или свяжитесь напрямую:\n` +
     `📞 ${esc(phone)}\n` +
-    `📸 Instagram: ${esc(insta)}`,
-    {
-      parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [
-        [{ text: '✍️ Написать вопрос сейчас', callback_data: 'msg_manager_start' }],
-        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
-      ]}
-    }
-  );
+    `📸 Instagram: ${esc(insta)}`;
+  if (mgrHours && mgrHours.trim()) {
+    msgText += `\n🕐 Часы работы: ${esc(mgrHours)}`;
+  }
+  const inlineRows = [
+    [{ text: '✍️ Написать вопрос сейчас', callback_data: 'msg_manager_start' }],
+  ];
+  if (waDigits) {
+    inlineRows.push([{ text: '📱 WhatsApp', url: `https://wa.me/${waDigits}` }]);
+  }
+  inlineRows.push([{ text: '🏠 Главное меню', callback_data: 'main_menu' }]);
+  return safeSend(chatId, msgText, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: inlineRows }
+  });
 }
 
 // ─── Получить контакт модели ──────────────────────────────────────────────────

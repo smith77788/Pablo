@@ -263,6 +263,14 @@
                 placeholder="Спасибо за ваше сообщение! Менеджер ответит в ближайшее время."></textarea>
             </div>
 
+            <!-- Pricing text -->
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>Текст прайс-листа в боте</label>
+              <textarea class="admin-input" id="pricing_text" rows="6" style="resize:vertical"
+                placeholder="✨ Прайс-лист&#10;&#10;• Деловые мероприятия: от 15 000 ₽&#10;• Фотосессии: от 8 000 ₽&#10;• Показы мод: от 30 000 ₽"></textarea>
+              <div class="field-note">Отображается по кнопке «📋 Прайс» в меню клиента (если включён Калькулятор)</div>
+            </div>
+
             <!-- Site URL -->
             <div class="admin-form-group" style="margin-top:20px">
               <label>URL сайта</label>
@@ -1111,7 +1119,7 @@ async function loadSettings() {
 
     // Text fields
     const textFields = [
-      'greeting', 'about_text', 'pricing', 'manager_hours', 'manager_reply', 'site_url',
+      'greeting', 'about_text', 'pricing', 'pricing_text', 'manager_hours', 'manager_reply', 'site_url',
       'tg_channel', 'welcome_photo_url',
       'contacts_phone', 'contacts_email', 'contacts_instagram', 'contacts_whatsapp', 'contacts_address',
       'booking_min_budget', 'booking_confirm_msg', 'booking_thanks_text',
@@ -1183,7 +1191,7 @@ async function saveAll() {
   if (status) status.textContent = '';
 
   const textFields = [
-    'greeting', 'about_text', 'pricing', 'manager_hours', 'manager_reply', 'site_url',
+    'greeting', 'about_text', 'pricing', 'pricing_text', 'manager_hours', 'manager_reply', 'site_url',
     'tg_channel', 'welcome_photo_url',
     'contacts_phone', 'contacts_email', 'contacts_instagram', 'contacts_whatsapp', 'contacts_address',
     'booking_min_budget', 'booking_confirm_msg', 'booking_thanks_text',
@@ -1292,6 +1300,7 @@ async function saveBot(btn) {
         about_text:        document.getElementById('about_text').value,
         manager_hours:     document.getElementById('manager_hours').value,
         manager_reply:     document.getElementById('manager_reply').value,
+        pricing_text:      document.getElementById('pricing_text')?.value || '',
         site_url:          document.getElementById('site_url').value,
         tg_channel:        document.getElementById('tg_channel')?.value || '',
         welcome_photo_url: document.getElementById('welcome_photo_url')?.value || '',
