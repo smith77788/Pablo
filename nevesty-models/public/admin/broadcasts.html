@@ -60,7 +60,20 @@
     .stat-chip { font-size: 0.78rem; color: var(--text-dim); }
     .stat-chip.ok { color: #28a745; }
     .stat-chip.err { color: #e05555; }
+    .stat-chip.pct { color: var(--gold); font-weight: 600; }
     .empty-state { text-align: center; padding: 48px; color: var(--text-dim); }
+    /* Tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+    .tab-btn {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-dim); padding: 10px 20px; cursor: pointer;
+      font-size: 0.88rem; font-weight: 500; transition: all 0.2s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    .photo-hint { font-size: 0.75rem; color: var(--text-dim); margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -104,6 +117,7 @@
     <header class="topbar">
       <div class="topbar-title">📢 Рассылки</div>
       <div class="topbar-right">
+        <button onclick="document.getElementById('newBroadcastForm').scrollIntoView({behavior:'smooth'})" class="topbar-btn btn-gold" style="margin-right:8px">+ Новая рассылка</button>
         <button onclick="loadBroadcasts()" class="topbar-btn">↺ Обновить</button>
       </div>
     </header>
@@ -111,7 +125,7 @@
     <div class="page-content">
 
       <!-- Create new broadcast -->
-      <div class="create-form">
+      <div class="create-form" id="newBroadcastForm">
         <div style="font-weight:600;font-size:1rem;margin-bottom:16px;color:var(--text)">📝 Новая рассылка</div>
 
         <label style="display:block;font-size:0.78rem;color:var(--text-muted);margin-bottom:6px">Текст сообщения <span style="color:var(--gold)">*</span></label>
@@ -124,6 +138,8 @@
               <option value="all">Все клиенты</option>
               <option value="completed">Завершённые заявки</option>
               <option value="active">Активные 30 дней</option>
+              <option value="new">Новые (без заявок)</option>
+              <optgroup label="По городу" id="cityOptgroup"></optgroup>
             </select>
           </div>
           <div>
@@ -131,8 +147,9 @@
             <input type="datetime-local" id="broadcastScheduled" class="admin-input" />
           </div>
           <div>
-            <label>Фото (URL, необязательно)</label>
-            <input type="url" id="broadcastPhoto" class="admin-input" placeholder="https://…" />
+            <label>Фото (file_id или URL, необязательно)</label>
+            <input type="text" id="broadcastPhoto" class="admin-input" placeholder="Telegram file_id или https://…" />
+            <div class="photo-hint">💡 Поддерживается: Telegram file_id (для фото из бота) или https:// URL</div>
           </div>
         </div>
 
@@ -142,13 +159,21 @@
         </div>
       </div>
 
-      <!-- List -->
+      <!-- List with tabs -->
       <div class="section-card">
         <div class="section-card-header">
           <div class="section-card-title">📋 История рассылок</div>
         </div>
-        <div id="broadcastList" class="section-card-body">
-          <div style="padding:24px;color:var(--text-dim)">Загрузка…</div>
+        <div class="section-card-body">
+          <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('all')">Все</button>
+            <button class="tab-btn" onclick="switchTab('scheduled')">⏳ Запланированные</button>
+            <button class="tab-btn" onclick="switchTab('sent')">✅ Отправленные</button>
+            <button class="tab-btn" onclick="switchTab('cancelled')">❌ Отменённые</button>
+          </div>
+          <div id="broadcastList">
+            <div style="padding:24px;color:var(--text-dim)">Загрузка…</div>
+          </div>
         </div>
       </div>
 
@@ -159,18 +184,69 @@
 <div class="toast-container" id="toastContainer"></div>
 <script src="/js/admin.js"></script>
 <script>
-const SEGMENT_LABELS = { all: 'Все', completed: 'Завершённые', active: 'Активные 30д' };
-const STATUS_LABELS  = { pending: 'Ожидает', sending: 'Отправляется', sent: 'Отправлено', cancelled: 'Отменено' };
+const SEGMENT_LABELS = {
+  all: 'Все',
+  completed: 'Завершённые',
+  active: 'Активные 30д',
+  new: 'Новые'
+};
+const STATUS_LABELS = { pending: 'Ожидает', sending: 'Отправляется', sent: 'Отправлено', cancelled: 'Отменено' };
 
-async function loadBroadcasts() {
-  const cont = document.getElementById('broadcastList');
+function segmentLabel(seg) {
+  if (!seg) return '—';
+  if (SEGMENT_LABELS[seg]) return SEGMENT_LABELS[seg];
+  if (seg.startsWith('city_')) return '🏙 ' + seg.slice(5);
+  if (seg.startsWith('city:')) return '🏙 ' + seg.slice(5);
+  return seg;
+}
+
+function deliveryPct(row) {
+  const sent = row.sent_count || 0;
+  const err  = row.error_count || 0;
+  const total = sent + err;
+  if (total === 0) return null;
+  const pct = Math.round(sent / total * 100);
+  return { sent, err, total, pct };
+}
+
+let _allBroadcasts = [];
+let _currentTab = 'all';
+
+async function loadCities() {
   try {
-    const rows = await _admin.apiFetch('/admin/broadcasts?limit=50');
-    if (!rows || !rows.length) {
-      cont.innerHTML = '<div class="empty-state">📭 Рассылок пока нет</div>';
-      return;
-    }
-    cont.innerHTML = rows.map(r => `
+    const rows = await _admin.apiFetch('/admin/models?limit=200&fields=city');
+    const cities = [...new Set((rows || []).map(r => r.city).filter(Boolean))].sort();
+    const optgroup = document.getElementById('cityOptgroup');
+    optgroup.innerHTML = cities.map(c =>
+      `<option value="city_${c}">🏙 ${_admin.escapeHtml(c)}</option>`
+    ).join('');
+  } catch (e) {
+    // silently fail — city options just won't show
+  }
+}
+
+function switchTab(tab) {
+  _currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  renderBroadcasts(_allBroadcasts);
+}
+
+function renderBroadcasts(rows) {
+  const cont = document.getElementById('broadcastList');
+  let filtered = rows;
+  if (_currentTab === 'scheduled') filtered = rows.filter(r => r.status === 'pending' || r.status === 'sending');
+  else if (_currentTab === 'sent')  filtered = rows.filter(r => r.status === 'sent');
+  else if (_currentTab === 'cancelled') filtered = rows.filter(r => r.status === 'cancelled');
+
+  if (!filtered.length) {
+    cont.innerHTML = '<div class="empty-state">📭 Рассылок нет</div>';
+    return;
+  }
+
+  cont.innerHTML = filtered.map(r => {
+    const dp = deliveryPct(r);
+    return `
       <div class="broadcast-card">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
           <div class="broadcast-text">${_admin.escapeHtml(r.text || '')}</div>
@@ -180,18 +256,30 @@ async function loadBroadcasts() {
         </div>
         <div class="broadcast-meta">
           <span class="badge-status ${r.status || 'pending'}">${STATUS_LABELS[r.status] || r.status}</span>
-          <span class="broadcast-segment">${SEGMENT_LABELS[r.segment] || r.segment}</span>
+          <span class="broadcast-segment">${_admin.escapeHtml(segmentLabel(r.segment))}</span>
           <span style="color:var(--text-dim)">📅 ${(r.scheduled_at || r.created_at || '').slice(0,16).replace('T',' ')}</span>
           ${r.sent_at ? `<span style="color:var(--text-dim)">✓ ${r.sent_at.slice(0,16).replace('T',' ')}</span>` : ''}
           <span style="color:var(--text-dim)">👤 ${_admin.escapeHtml(r.created_by || '—')}</span>
+          ${r.photo_url ? `<span style="color:var(--text-dim)">🖼 С фото</span>` : ''}
         </div>
         ${(r.sent_count != null || r.error_count != null) ? `
         <div class="stats-row" style="margin-top:8px">
           ${r.sent_count != null  ? `<span class="stat-chip ok">✅ ${r.sent_count} доставлено</span>` : ''}
           ${r.error_count != null && r.error_count > 0 ? `<span class="stat-chip err">❌ ${r.error_count} ошибок</span>` : ''}
+          ${dp ? `<span class="stat-chip pct">${dp.sent} / ${dp.total} (${dp.pct}%)</span>` : ''}
         </div>` : ''}
       </div>
-    `).join('');
+    `;
+  }).join('');
+}
+
+async function loadBroadcasts() {
+  const cont = document.getElementById('broadcastList');
+  cont.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Загрузка…</div>';
+  try {
+    const rows = await _admin.apiFetch('/admin/broadcasts?limit=100');
+    _allBroadcasts = rows || [];
+    renderBroadcasts(_allBroadcasts);
   } catch (e) {
     cont.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
   }
@@ -201,7 +289,7 @@ async function createBroadcast() {
   const text = document.getElementById('broadcastText').value.trim();
   const segment = document.getElementById('broadcastSegment').value;
   const scheduledRaw = document.getElementById('broadcastScheduled').value;
-  const photoUrl = document.getElementById('broadcastPhoto').value.trim();
+  const photoVal = document.getElementById('broadcastPhoto').value.trim();
   const statusEl = document.getElementById('createStatus');
   const btn = document.getElementById('createBtn');
 
@@ -209,12 +297,19 @@ async function createBroadcast() {
 
   const body = { text, segment };
   if (scheduledRaw) body.scheduled_at = new Date(scheduledRaw).toISOString();
-  if (photoUrl) body.photo_url = photoUrl;
+  if (photoVal) {
+    // If it looks like a URL, use photo_url; otherwise treat as Telegram file_id
+    if (photoVal.startsWith('http://') || photoVal.startsWith('https://')) {
+      body.photo_url = photoVal;
+    } else {
+      body.photo_url = photoVal; // API stores as photo_url; bot uses it as file_id fallback
+    }
+  }
 
   btn.disabled = true;
   statusEl.textContent = 'Создаётся…';
   try {
-    const result = await _admin.apiFetch('/admin/broadcasts', { method: 'POST', body: JSON.stringify(body) });
+    await _admin.apiFetch('/admin/broadcasts', { method: 'POST', body: JSON.stringify(body) });
     _admin.toast(scheduledRaw ? 'Рассылка запланирована!' : 'Рассылка поставлена в очередь!', 'success');
     document.getElementById('broadcastText').value = '';
     document.getElementById('broadcastScheduled').value = '';
@@ -240,6 +335,7 @@ async function cancelBroadcast(id) {
   }
 }
 
+loadCities();
 loadBroadcasts();
 </script>
 </body>
