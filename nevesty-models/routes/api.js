@@ -2398,6 +2398,114 @@ router.get('/export/models', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// ─── Model import (JSON body or file — JSON array / CSV) ──────────────────────
+router.post('/admin/models/import', auth, upload.single('file'), async (req, res, next) => {
+  try {
+    let models = [];
+    if (req.file) {
+      const content = req.file.buffer ? req.file.buffer.toString('utf8') : fs.readFileSync(req.file.path, 'utf8');
+      if (content.trim().startsWith('[')) {
+        models = JSON.parse(content);
+      } else {
+        // Parse CSV: name,age,height,weight,category,city,bio,...
+        const lines = content.split(/\r?\n/).filter(l => l.trim());
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        models = lines.slice(1).map(line => {
+          const values = line.split(',');
+          return Object.fromEntries(headers.map((h, i) => [h, values[i]?.trim() || '']));
+        });
+      }
+      if (req.file.path) fs.unlink(req.file.path, () => {});
+    } else if (req.body.models) {
+      models = req.body.models;
+    }
+
+    if (!Array.isArray(models) || !models.length) {
+      return res.status(400).json({ error: 'No models data provided' });
+    }
+
+    const ALLOWED_FIELDS = ['name', 'age', 'height', 'weight', 'category', 'city', 'bio', 'instagram', 'params'];
+    let imported = 0;
+    const errors = [];
+
+    for (const m of models.slice(0, 50)) { // max 50 at once
+      if (!m.name || !m.name.trim()) { errors.push('Missing name'); continue; }
+      try {
+        const fields = ALLOWED_FIELDS.filter(f => m[f] !== undefined && m[f] !== '');
+        const extraFields = fields.filter(f => f !== 'name');
+        const cols = ['name', 'available', ...extraFields].join(', ');
+        const placeholders = ['?', '1', ...extraFields.map(() => '?')].join(', ');
+        const vals = [m.name.trim(), ...extraFields.map(f => m[f])];
+        await run(`INSERT INTO models (${cols}) VALUES (${placeholders})`, vals);
+        imported++;
+      } catch (e) {
+        errors.push(`${m.name}: ${e.message}`);
+      }
+    }
+
+    await logAudit(req, 'import_models', 'model', null, { imported, errors: errors.length });
+    cache.delByPrefix('catalog:');
+    res.json({ ok: true, imported, errors });
+  } catch (e) { next(e); }
+});
+
+// ─── Bulk model operations (feature/unfeature/enable/disable/archive/restore) ──
+router.patch('/admin/models/bulk', auth, async (req, res, next) => {
+  try {
+    const { ids, action } = req.body;
+    if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids required' });
+    const validIds = ids.map(Number).filter(n => n > 0);
+    if (!validIds.length) return res.status(400).json({ error: 'no valid ids' });
+
+    const placeholders = validIds.map(() => '?').join(',');
+
+    const actionMap = {
+      'feature':   `UPDATE models SET featured=1 WHERE id IN (${placeholders})`,
+      'unfeature': `UPDATE models SET featured=0 WHERE id IN (${placeholders})`,
+      'enable':    `UPDATE models SET available=1, archived=0 WHERE id IN (${placeholders})`,
+      'disable':   `UPDATE models SET available=0 WHERE id IN (${placeholders})`,
+      'archive':   `UPDATE models SET archived=1, available=0 WHERE id IN (${placeholders})`,
+      'restore':   `UPDATE models SET archived=0 WHERE id IN (${placeholders})`,
+    };
+
+    const sql = actionMap[action];
+    if (!sql) return res.status(400).json({ error: 'Invalid action' });
+
+    const result = await run(sql, validIds);
+    await logAudit(req, `bulk_${action}_models`, 'model', null, { ids: validIds, changes: result.changes });
+    cache.delByPrefix('catalog:');
+    res.json({ ok: true, updated: result.changes });
+  } catch (e) { next(e); }
+});
+
+// ─── Model CSV export ─────────────────────────────────────────────────────────
+router.get('/admin/models/export', auth, async (req, res, next) => {
+  try {
+    const models = await query(
+      `SELECT name, age, height, weight, category, city, bio, instagram, params, available, featured
+       FROM models WHERE archived=0 ORDER BY name`
+    );
+    const BOM = '\xEF\xBB\xBF';
+    const headerRow = 'Имя;Возраст;Рост;Вес;Категория;Город;Описание;Instagram;Параметры;Доступна;Топ';
+    const rows = models.map(m => [
+      m.name,
+      m.age || '',
+      m.height || '',
+      m.weight || '',
+      m.category || '',
+      m.city || '',
+      (m.bio || '').replace(/;/g, ',').replace(/\r?\n/g, ' '),
+      m.instagram || '',
+      m.params || '',
+      m.available ? 'Да' : 'Нет',
+      m.featured ? 'Да' : 'Нет'
+    ].join(';'));
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', 'attachment; filename="models.csv"');
+    res.send(BOM + headerRow + '\n' + rows.join('\n'));
+  } catch (e) { next(e); }
+});
+
 // ─── Stats (simple summary) ───────────────────────────────────────────────────
 router.get('/stats', auth, async (req, res, next) => {
   try {

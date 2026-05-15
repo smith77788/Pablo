@@ -20,10 +20,14 @@
       <span id="models-count" class="text-sm text-gray-500 dark:text-gray-400"></span>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
-      <label title="Импорт моделей из CSV" style="cursor:pointer;padding:8px 12px;background:#1f2937;color:#9ca3af;border-radius:6px;font-size:0.8rem;font-weight:500;display:flex;align-items:center;gap:6px">
-        <i class="fas fa-file-csv"></i> CSV импорт
-        <input type="file" accept=".csv" style="display:none" onchange="importCSV(this)">
+      <label title="Импорт моделей из CSV или JSON" style="cursor:pointer;padding:8px 12px;background:#1f2937;color:#9ca3af;border-radius:6px;font-size:0.8rem;font-weight:500;display:flex;align-items:center;gap:6px">
+        <i class="fas fa-file-import"></i> 📥 Импорт CSV
+        <input type="file" accept=".csv,.json" style="display:none" onchange="importCSV(this)">
       </label>
+      <button onclick="exportCSV()" title="Экспорт всех активных моделей в CSV"
+        style="padding:8px 12px;background:#1f2937;color:#9ca3af;border:none;border-radius:6px;font-size:0.8rem;font-weight:500;display:flex;align-items:center;gap:6px;cursor:pointer">
+        📤 Экспорт CSV
+      </button>
       <button onclick="openAddModal()"
         class="flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg text-sm font-medium">
         <i class="fas fa-plus"></i>
@@ -64,13 +68,25 @@
     <!-- Bulk action bar -->
     <div id="bulk-bar" class="hidden mb-3 flex items-center gap-3 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg flex-wrap">
       <span id="bulk-count" class="text-sm font-semibold text-yellow-800 dark:text-yellow-300">0 выбрано</span>
-      <button onclick="bulkSetFeatured(true)"
+      <button onclick="bulkAction('feature')"
         class="px-3 py-1.5 text-sm bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium flex items-center gap-1">
-        <i class="fas fa-star"></i> Сделать Featured
+        ⭐ В топ
       </button>
-      <button onclick="bulkSetFeatured(false)"
+      <button onclick="bulkAction('unfeature')"
         class="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium flex items-center gap-1">
-        <i class="far fa-star"></i> Убрать Featured
+        ❌ Убрать из топа
+      </button>
+      <button onclick="bulkAction('enable')"
+        class="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center gap-1">
+        ✅ Включить
+      </button>
+      <button onclick="bulkAction('disable')"
+        class="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium flex items-center gap-1">
+        🚫 Отключить
+      </button>
+      <button onclick="bulkAction('archive')"
+        class="px-3 py-1.5 text-sm bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium flex items-center gap-1">
+        📦 Архив
       </button>
       <button onclick="clearModelSelection()"
         class="ml-auto text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400">✕ Снять выбор</button>
@@ -427,19 +443,33 @@ function clearModelSelection() {
 }
 
 async function bulkSetFeatured(featured) {
+  return bulkAction(featured ? 'feature' : 'unfeature');
+}
+
+const BULK_ACTION_LABELS = {
+  'feature':   n => `Сделать ${n} моделей(и) в топ (⭐)?`,
+  'unfeature': n => `Убрать ${n} моделей(и) из топа?`,
+  'enable':    n => `Включить (активировать) ${n} моделей(и)?`,
+  'disable':   n => `Отключить ${n} моделей(и)?`,
+  'archive':   n => `Архивировать ${n} моделей(и)?`,
+  'restore':   n => `Восстановить ${n} моделей(и) из архива?`,
+};
+
+async function bulkAction(action) {
   const ids = [...selectedModelIds];
   if (!ids.length) return;
-  const msg = featured
-    ? `Сделать ${ids.length} моделей(и) Featured (топ)?`
-    : `Убрать ${ids.length} моделей(и) из Featured?`;
+  const label = BULK_ACTION_LABELS[action];
+  const msg = label ? label(ids.length) : `Выполнить "${action}" для ${ids.length} моделей(и)?`;
   if (!confirm(msg)) return;
   try {
-    const resp = await fetch('/api/admin/models/bulk-featured', {
-      method: 'POST', headers,
-      body: JSON.stringify({ model_ids: ids, featured })
+    const resp = await fetch('/api/admin/models/bulk', {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ ids, action })
     });
     const data = await resp.json();
     if (data.ok) {
+      const toast = `Готово: ${data.updated} моделей(и) обновлено`;
+      if (window._admin?.toast) _admin.toast(toast, 'success');
       clearModelSelection();
       loadModels();
     } else {
@@ -532,18 +562,39 @@ async function importCSV(input) {
   input.value = '';
   try {
     const token = localStorage.getItem('admin_token');
-    const r = await fetch('/api/admin/models/import-csv', {
+    // Use new unified import endpoint (supports CSV and JSON)
+    const r = await fetch('/api/admin/models/import', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
       body: formData
     });
     const data = await r.json();
     if (!r.ok) { alert('Ошибка импорта: ' + (data.error || r.status)); return; }
-    const msg = `✅ Импортировано: ${data.created} из ${data.total} моделей` +
+    const msg = `Импортировано: ${data.imported} моделей, ошибок: ${data.errors ? data.errors.length : 0}` +
       (data.errors && data.errors.length ? `\n⚠️ Ошибки:\n${data.errors.slice(0,5).join('\n')}` : '');
-    alert(msg);
+    if (window._admin?.toast) _admin.toast('✅ ' + msg, 'success');
+    else alert('✅ ' + msg);
     loadModels();
   } catch (e) { alert('Ошибка соединения: ' + e.message); }
+}
+
+async function exportCSV() {
+  try {
+    const token = localStorage.getItem('admin_token');
+    const resp = await fetch('/api/admin/models/export', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!resp.ok) { alert('Ошибка экспорта: HTTP ' + resp.status); return; }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'models.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) { alert('Ошибка: ' + e.message); }
 }
 
 function openAddModal() {
