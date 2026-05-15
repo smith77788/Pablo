@@ -2508,6 +2508,9 @@ async function showBroadcast(chatId) {
         [
           { text: '🏙 По городу',                        callback_data: 'adm_bc_seg_city'      },
         ],
+        [
+          { text: '📋 История рассылок',                 callback_data: 'adm_broadcast_history' },
+        ],
         [{ text: '← Назад', callback_data: 'admin_menu' }],
       ]}
     }
@@ -2703,13 +2706,57 @@ async function doSendBroadcast(chatId) {
 
   await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, segment, duration: durationSec });
   await clearSession(chatId);
+  const total = recipients.length;
   return safeSend(chatId,
-    `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*\n⏱ Время: *${durationSec}с*`,
+    `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*\n📬 Всего: *${total}*\n⏱ Время: *${durationSec}с*`,
     {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+      reply_markup: { inline_keyboard: [
+        [{ text: '📋 История рассылок', callback_data: 'adm_broadcast_history' }],
+        [{ text: '← Меню',              callback_data: 'admin_menu'             }],
+      ]}
     }
   );
+}
+
+async function showBroadcastHistory(chatId) {
+  if (!isAdmin(chatId)) return;
+  const rows = await query(
+    `SELECT id, message, photo_id, segment, delivered, failed, total_recipients, status, started_at, finished_at
+     FROM bot_broadcasts
+     ORDER BY started_at DESC
+     LIMIT 5`
+  ).catch(() => []);
+
+  let text = `📋 *История рассылок \\(последние 5\\)*\n\n`;
+  if (!rows.length) {
+    text += '_Рассылок ещё не было_';
+  } else {
+    for (const b of rows) {
+      const dt = b.started_at
+        ? new Date(b.started_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+        : '—';
+      const segLabel = _bcSegmentLabel(b.segment || 'all');
+      const msgType  = b.photo_id ? '🖼' : '📝';
+      const statusEmoji = b.status === 'done' ? '✅' : b.status === 'sending' ? '🔄' : '⏳';
+      const delivered = b.delivered ?? 0;
+      const failed    = b.failed ?? 0;
+      const total     = b.total_recipients ?? (delivered + failed);
+      const preview   = String(b.message || '').slice(0, 50);
+      const previewText = preview ? esc(preview) + ((b.message || '').length > 50 ? '…' : '') : '_без текста_';
+      text += `${statusEmoji} ${msgType} *${esc(dt)}* — ${esc(segLabel)}\n`;
+      text += `✅ ${delivered}  ❌ ${failed}  📬 ${total}\n`;
+      text += `${previewText}\n\n`;
+    }
+  }
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '📢 Новая рассылка', callback_data: 'adm_broadcast' }],
+      [{ text: '← Меню',            callback_data: 'admin_menu'    }],
+    ]}
+  });
 }
 
 async function sendBroadcastWithPhoto(chatId, photoFileId, caption) {
@@ -5124,6 +5171,7 @@ function initBot(app) {
       }
     }
     if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; return showBroadcast(chatId); }
+    if (data === 'adm_broadcast_history') { if (!isAdmin(chatId)) return; return showBroadcastHistory(chatId); }
 
     // ── Scheduled broadcasts
     if (data === 'adm_sched_bcast') { if (!isAdmin(chatId)) return; return showScheduledBroadcasts(chatId); }

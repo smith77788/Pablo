@@ -89,22 +89,24 @@ app.use('/admin', (req, res, next) => {
 try {
   const rateLimit = require('express-rate-limit');
 
-  // General API rate limit (60 requests/minute per IP)
-  const apiLimiter = rateLimit({
+  // Global API rate limit: 100 requests/minute per IP
+  // Skip authenticated admin requests to avoid blocking legitimate admin activity
+  const globalApiLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 60,
+    max: 100,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many requests, please try again later.' }
+    message: { error: 'Too many requests, please try again later.' },
+    skip: (req) => req.path.startsWith('/api/admin/') && !!req.headers.authorization,
   });
 
-  // Auth endpoints — stricter (5 per minute)
+  // Auth endpoints — strict (5 per 15 minutes per IP)
   const authLimiter = rateLimit({
-    windowMs: 60 * 1000,
+    windowMs: 15 * 60 * 1000,
     max: 5,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many auth attempts, please try again later.' }
+    message: { error: 'Too many auth attempts, please try again in 15 minutes.' }
   });
 
   // Orders/booking endpoints (20 per minute)
@@ -125,7 +127,7 @@ try {
     message: { error: 'Too many uploads, please try again later.' }
   });
 
-  app.use('/api', apiLimiter);
+  app.use('/api/', globalApiLimiter);
   app.use('/api/auth', authLimiter);
   app.use('/api/admin/login', authLimiter);
   app.use('/api/orders', ordersLimiter);
@@ -134,10 +136,18 @@ try {
 } catch {}
 
 // ─── Input sanitization ───────────────────────────────────────────────────────
-// Strip null bytes and dangerous unicode from all incoming string fields
+// Strip null bytes, dangerous unicode, and XSS payloads from all incoming string fields
 app.use((req, res, next) => {
   if (req.body && typeof req.body === 'object') {
-    const sanitize = (v) => typeof v === 'string' ? v.replace(/\0/g, '').slice(0, 10000) : v;
+    const sanitize = (v) => {
+      if (typeof v !== 'string') return v;
+      return v
+        .replace(/\0/g, '')                                                           // null bytes
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')          // <script> blocks
+        .replace(/javascript\s*:/gi, '')                                              // javascript: URIs
+        .replace(/on\w+\s*=/gi, '')                                                   // inline event handlers (onclick=, etc.)
+        .slice(0, 10000);
+    };
     const walk = (obj) => {
       if (Array.isArray(obj)) return obj.map(walk);
       if (obj && typeof obj === 'object') {

@@ -50,13 +50,13 @@ try {
     legacyHeaders: false,
     message: { error: 'Превышен лимит заявок, попробуйте через час' },
   });
-  // Auth limit: 20 attempts per 15 minutes
+  // Auth limit: 5 attempts per 15 minutes (brute-force protection)
   authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 20,
+    max: 5,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Слишком много попыток входа' },
+    message: { error: 'Слишком много попыток входа. Попробуйте через 15 минут.' },
   });
   // AI match: 10 requests per hour per IP (public endpoint using paid API)
   aiMatchLimiter = rateLimit({
@@ -287,9 +287,15 @@ router.post('/admin/login', authLimiter, async (req, res, next) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Укажите логин и пароль' });
     const admin = await get('SELECT * FROM admins WHERE username = ?', [username]);
-    if (!admin) return res.status(401).json({ error: 'Неверный логин или пароль' });
+    if (!admin) {
+      console.warn(`[AUTH] Failed login attempt for user "${username}" from IP ${req.ip} at ${new Date().toISOString()} (user not found)`);
+      return res.status(401).json({ error: 'Неверный логин или пароль' });
+    }
     const ok = await bcrypt.compare(password, admin.password_hash);
-    if (!ok) return res.status(401).json({ error: 'Неверный логин или пароль' });
+    if (!ok) {
+      console.warn(`[AUTH] Failed login attempt for user "${username}" from IP ${req.ip} at ${new Date().toISOString()} (wrong password)`);
+      return res.status(401).json({ error: 'Неверный логин или пароль' });
+    }
 
     // If 2FA is enabled, issue a short-lived temp token instead of full JWT
     if (admin.totp_enabled) {
