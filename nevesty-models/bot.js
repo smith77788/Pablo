@@ -420,6 +420,7 @@ async function showAdminMenu(chatId, name) {
 const catalogSortPrefs = new Map(); // chatId → 'featured' | 'alpha'
 
 async function showCatalog(chatId, cat, page, filter) {
+  bot.sendChatAction(chatId, 'typing').catch(() => {});
   try {
     // Normalise: support showCatalog(chatId, page, filter) new-style calls
     if (typeof cat === 'number' && (typeof page === 'object' || page === undefined)) {
@@ -967,7 +968,7 @@ async function bkStep3Phone(chatId, data) {
   await setSession(chatId, 'bk_s3_phone', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(2, 4))}_\n\nВведите номер телефона:`,
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(2, 4))}_\n\nВведите номер телефона:\n_Пример: \\+7\\(999\\)123\\-45\\-67_`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
@@ -6596,7 +6597,7 @@ async function bkQuickPhone(chatId, data) {
   await setSession(chatId, 'bk_quick_phone', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    `⚡ *Быстрая заявка*\n\n✅ Имя: *${esc(data.quick_name)}*\n\n📝 Шаг 2/2 — Введите номер телефона:`, {
+    `⚡ *Быстрая заявка*\n\n✅ Имя: *${esc(data.quick_name)}*\n\n📝 Шаг 2/2 — Введите номер телефона:\n_Пример: \\+7\\(999\\)123\\-45\\-67_`, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'main_menu' }]] }
     }
