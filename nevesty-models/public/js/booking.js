@@ -1,84 +1,105 @@
 /* ─── Booking form logic — 5-step multi-step form ────────────────────── */
 (function () {
   let BOT_USERNAME = '';
-  fetch('/api/config').then(r => r.json()).then(cfg => { BOT_USERNAME = cfg.bot_username || ''; }).catch(() => {});
+  fetch('/api/config')
+    .then(r => r.json())
+    .then(cfg => {
+      BOT_USERNAME = cfg.bot_username || '';
+    })
+    .catch(() => {});
 
-  const DRAFT_KEY = 'nm_booking_draft';
+  const DRAFT_KEY = 'nm_booking_progress';
+  const DRAFT_TTL = 24 * 60 * 60 * 1000; // 24 hours in ms
   const TOTAL_STEPS = 5; // steps 1–5, step 6 is the success screen
 
-  /* ─── Persist / restore draft from sessionStorage ─── */
+  /* ─── Persist / restore draft from localStorage (24h TTL) ─── */
   function saveDraft() {
     try {
-      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
-        step: state.step,
-        model_id: state.model_id,
-        model_ids: state.model_ids,
-        model_name: state.model_name,
-        model_photo: state.model_photo,
-        selected_models: state.selected_models,
-        event_type: state.event_type,
-        event_date: state.event_date,
-        event_duration: state.event_duration,
-        location: state.location,
-        budget: state.budget,
-        comments: state.comments,
-        client_name: state.client_name,
-        client_phone: state.client_phone,
-        client_email: state.client_email,
-        client_telegram: state.client_telegram,
-      }));
+      localStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({
+          step: state.step,
+          model_id: state.model_id,
+          model_ids: state.model_ids,
+          model_name: state.model_name,
+          model_photo: state.model_photo,
+          selected_models: state.selected_models,
+          event_type: state.event_type,
+          event_date: state.event_date,
+          event_duration: state.event_duration,
+          location: state.location,
+          budget: state.budget,
+          comments: state.comments,
+          client_name: state.client_name,
+          client_phone: state.client_phone,
+          client_email: state.client_email,
+          client_telegram: state.client_telegram,
+          timestamp: Date.now(),
+        })
+      );
     } catch (_) {}
   }
 
   function loadDraft() {
     try {
-      const raw = sessionStorage.getItem(DRAFT_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (_) { return null; }
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      // Expire drafts older than 24 hours
+      if (parsed.timestamp && Date.now() - parsed.timestamp > DRAFT_TTL) {
+        localStorage.removeItem(DRAFT_KEY);
+        return null;
+      }
+      return parsed;
+    } catch (_) {
+      return null;
+    }
   }
 
   function clearDraft() {
-    try { sessionStorage.removeItem(DRAFT_KEY); } catch (_) {}
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch (_) {}
   }
 
   const _draft = loadDraft();
 
   const state = {
     step: 1,
-    model_id:        _draft?.model_id        ?? null,
-    model_ids:       _draft?.model_ids        ?? [],
-    model_name:      _draft?.model_name      ?? null,
-    model_photo:     _draft?.model_photo     ?? null,
-    selected_models: _draft?.selected_models  ?? [],  // array of {id, name, photo}
-    event_type:      _draft?.event_type      ?? '',
-    event_date:      _draft?.event_date      ?? '',
-    event_duration:  _draft?.event_duration  ?? '4',
-    location:        _draft?.location        ?? '',
-    budget:          _draft?.budget          ?? '',
-    comments:        _draft?.comments        ?? '',
-    client_name:     _draft?.client_name     ?? '',
-    client_phone:    _draft?.client_phone    ?? '',
-    client_email:    _draft?.client_email    ?? '',
+    model_id: _draft?.model_id ?? null,
+    model_ids: _draft?.model_ids ?? [],
+    model_name: _draft?.model_name ?? null,
+    model_photo: _draft?.model_photo ?? null,
+    selected_models: _draft?.selected_models ?? [], // array of {id, name, photo}
+    event_type: _draft?.event_type ?? '',
+    event_date: _draft?.event_date ?? '',
+    event_duration: _draft?.event_duration ?? '4',
+    location: _draft?.location ?? '',
+    budget: _draft?.budget ?? '',
+    comments: _draft?.comments ?? '',
+    client_name: _draft?.client_name ?? '',
+    client_phone: _draft?.client_phone ?? '',
+    client_email: _draft?.client_email ?? '',
     client_telegram: _draft?.client_telegram ?? '',
-    tor_file:        null,  // File object — not persisted in sessionStorage
+    tor_file: null, // File object — not persisted in sessionStorage
   };
 
   const EVENT_LABELS = {
-    photo_shoot:  'Фотосессия',
-    event:        'Мероприятие',
+    photo_shoot: 'Фотосессия',
+    event: 'Мероприятие',
     fashion_show: 'Показ мод',
-    commercial:   'Реклама / Коммерческая съёмка',
-    runway:       'Подиум',
-    other:        'Другое'
+    commercial: 'Реклама / Коммерческая съёмка',
+    runway: 'Подиум',
+    other: 'Другое',
   };
 
   const EVENT_ICONS = {
-    photo_shoot:  '👗',
-    event:        '🎪',
+    photo_shoot: '👗',
+    event: '🎪',
     fashion_show: '👠',
-    commercial:   '📢',
-    runway:       '✦',
-    other:        '💍'
+    commercial: '📢',
+    runway: '✦',
+    other: '💍',
   };
 
   /* ─── Set min date on date input ─────────────────── */
@@ -124,11 +145,13 @@
       const newVal = formatPhone(oldVal);
       phoneEl.value = newVal;
       const diff = newVal.length - oldVal.length;
-      try { phoneEl.setSelectionRange(selStart + diff, selStart + diff); } catch (_) {}
+      try {
+        phoneEl.setSelectionRange(selStart + diff, selStart + diff);
+      } catch (_) {}
       clearFieldError('client_phone');
     });
 
-    phoneEl.addEventListener('keydown', (e) => {
+    phoneEl.addEventListener('keydown', e => {
       if (e.key === 'Backspace' && phoneEl.value.length <= 4) {
         phoneEl.value = '';
         e.preventDefault();
@@ -176,8 +199,14 @@
       emailEl.style.borderColor = valid ? 'rgba(201,169,110,0.4)' : 'var(--error, #e05c5c)';
     }
 
-    emailEl.addEventListener('input', () => { clearTimeout(emailTimeout); emailTimeout = setTimeout(checkEmail, 400); });
-    emailEl.addEventListener('blur', () => { clearTimeout(emailTimeout); checkEmail(); });
+    emailEl.addEventListener('input', () => {
+      clearTimeout(emailTimeout);
+      emailTimeout = setTimeout(checkEmail, 400);
+    });
+    emailEl.addEventListener('blur', () => {
+      clearTimeout(emailTimeout);
+      checkEmail();
+    });
   }
 
   /* ─── Budget: positive-number validation on blur ─── */
@@ -236,8 +265,11 @@
         return;
       }
       // Validate type
-      const allowed = ['application/pdf', 'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+      const allowed = [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ];
       if (!allowed.includes(file.type) && !/\.(pdf|doc|docx)$/i.test(file.name)) {
         markError('tor_file', 'Допустимые форматы: PDF, DOC, DOCX');
         torFileInput.value = '';
@@ -270,17 +302,18 @@
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         if (state.step === 3) {
-          state.event_date     = document.getElementById('event_date')?.value     || state.event_date;
+          state.event_date = document.getElementById('event_date')?.value || state.event_date;
           state.event_duration = document.getElementById('event_duration')?.value || state.event_duration;
-          state.location       = document.getElementById('location')?.value       ?? state.location;
-          state.budget         = document.getElementById('budget')?.value         ?? state.budget;
-          state.comments       = document.getElementById('comments')?.value       ?? state.comments;
+          state.location = document.getElementById('location')?.value ?? state.location;
+          state.budget = document.getElementById('budget')?.value ?? state.budget;
+          state.comments = document.getElementById('comments')?.value ?? state.comments;
         }
         if (state.step === 4) {
-          state.client_name     = document.getElementById('client_name')?.value.trim()  || state.client_name;
-          state.client_phone    = document.getElementById('client_phone')?.value.trim() || state.client_phone;
-          state.client_email    = document.getElementById('client_email')?.value.trim() || state.client_email;
-          state.client_telegram = (document.getElementById('client_telegram')?.value.trim() || '').replace(/^@/, '') || state.client_telegram;
+          state.client_name = document.getElementById('client_name')?.value.trim() || state.client_name;
+          state.client_phone = document.getElementById('client_phone')?.value.trim() || state.client_phone;
+          state.client_email = document.getElementById('client_email')?.value.trim() || state.client_email;
+          state.client_telegram =
+            (document.getElementById('client_telegram')?.value.trim() || '').replace(/^@/, '') || state.client_telegram;
         }
         saveDraft();
       }, 600);
@@ -295,19 +328,23 @@
   })();
 
   /* ─── Load models for selector ───────────────────── */
-  apiFetch('/models?available=1').then(models => {
-    const grid = document.getElementById('modelSelectGrid');
-    if (!grid) return;
-    const subset = models.slice(0, 8);
-    grid.innerHTML = subset.map(m => `
+  apiFetch('/models?available=1')
+    .then(models => {
+      const grid = document.getElementById('modelSelectGrid');
+      if (!grid) return;
+      const subset = models.slice(0, 8);
+      grid.innerHTML = subset
+        .map(
+          m => `
       <div class="model-select-card" id="mc_${m.id}" role="button" tabindex="0"
            aria-label="${escHtml(m.name)}"
            onclick="_booking.toggleModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')"
            onkeydown="if(event.key==='Enter'||event.key===' ')_booking.toggleModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')">
         <div class="model-select-thumb">
-          ${m.photo_main
-            ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" loading="lazy" />`
-            : `<div class="model-select-thumb-placeholder">${escHtml(m.name[0])}</div>`
+          ${
+            m.photo_main
+              ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" loading="lazy" />`
+              : `<div class="model-select-thumb-placeholder">${escHtml(m.name[0])}</div>`
           }
         </div>
         <div class="model-select-info">
@@ -315,14 +352,17 @@
           <span>${m.height ? m.height + 'см' : ''}${m.hair_color ? ' · ' + escHtml(m.hair_color) : ''}</span>
         </div>
         <div class="model-select-check" aria-hidden="true">✓</div>
-      </div>`).join('');
+      </div>`
+        )
+        .join('');
 
-    initFromUrlParams();
-    restoreModelFromDraft();
-  }).catch(() => {
-    initFromUrlParams();
-    restoreModelFromDraft();
-  });
+      initFromUrlParams();
+      restoreModelFromDraft();
+    })
+    .catch(() => {
+      initFromUrlParams();
+      restoreModelFromDraft();
+    });
 
   /* ─── Render selected model chips ───────────────── */
   function renderModelChips() {
@@ -336,13 +376,17 @@
     }
 
     chipsEl.style.display = 'flex';
-    chipsEl.innerHTML = state.selected_models.map(m => `
+    chipsEl.innerHTML = state.selected_models
+      .map(
+        m => `
       <div class="model-chip" data-id="${m.id}">
         ${m.photo ? `<img src="${escHtml(m.photo)}" alt="${escHtml(m.name)}" class="model-chip-thumb" />` : ''}
         <span>${escHtml(m.name)}</span>
         <button type="button" class="model-chip-remove" aria-label="Убрать ${escHtml(m.name)}"
           onclick="_booking.removeModel(${m.id})">✕</button>
-      </div>`).join('');
+      </div>`
+      )
+      .join('');
 
     // Update noModelOption visibility
     const noOpt = document.getElementById('noModelOption');
@@ -364,12 +408,12 @@
 
     // Sync legacy model_id/name/photo to first selected (for backward compat)
     if (state.selected_models.length > 0) {
-      state.model_id    = state.selected_models[0].id;
-      state.model_name  = state.selected_models[0].name;
+      state.model_id = state.selected_models[0].id;
+      state.model_name = state.selected_models[0].name;
       state.model_photo = state.selected_models[0].photo;
     } else {
-      state.model_id    = null;
-      state.model_name  = null;
+      state.model_id = null;
+      state.model_name = null;
       state.model_photo = null;
     }
 
@@ -405,11 +449,13 @@
 
     state.model_ids = state.selected_models.map(m => m.id);
     if (state.selected_models.length > 0) {
-      state.model_id    = state.selected_models[0].id;
-      state.model_name  = state.selected_models[0].name;
+      state.model_id = state.selected_models[0].id;
+      state.model_name = state.selected_models[0].name;
       state.model_photo = state.selected_models[0].photo;
     } else {
-      state.model_id = null; state.model_name = null; state.model_photo = null;
+      state.model_id = null;
+      state.model_name = null;
+      state.model_photo = null;
     }
 
     // Update card visual
@@ -431,10 +477,10 @@
     if (!id) {
       // "No model" selected
       state.selected_models = [];
-      state.model_id    = null;
-      state.model_name  = null;
+      state.model_id = null;
+      state.model_name = null;
       state.model_photo = null;
-      state.model_ids   = [];
+      state.model_ids = [];
       document.querySelectorAll('.model-select-card').forEach(c => {
         c.classList.remove('selected');
         c.setAttribute('aria-pressed', 'false');
@@ -452,10 +498,10 @@
     if (!state.selected_models.some(m => m.id === id)) {
       state.selected_models.push({ id, name: name || '', photo: photo || '' });
     }
-    state.model_id    = id;
-    state.model_name  = name  || null;
+    state.model_id = id;
+    state.model_name = name || null;
     state.model_photo = photo || null;
-    state.model_ids   = state.selected_models.map(m => m.id);
+    state.model_ids = state.selected_models.map(m => m.id);
 
     document.querySelectorAll('.model-select-card').forEach(c => {
       const cid = parseInt(c.id.replace('mc_', ''), 10);
@@ -494,7 +540,7 @@
       }
     }
 
-    const savedStep = (_draft.step && _draft.step > 1) ? _draft.step : 1;
+    const savedStep = _draft.step && _draft.step > 1 ? _draft.step : 1;
     if (savedStep > 1) showDraftBanner(savedStep);
   }
 
@@ -504,7 +550,8 @@
     if (!wrap) return;
     const banner = document.createElement('div');
     banner.id = 'draftBanner';
-    banner.style.cssText = 'background:rgba(201,169,110,0.1);border:1px solid var(--gold);padding:12px 20px;margin-bottom:16px;font-size:0.82rem;display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--text-muted);';
+    banner.style.cssText =
+      'background:rgba(201,169,110,0.1);border:1px solid var(--gold);padding:12px 20px;margin-bottom:16px;font-size:0.82rem;display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--text-muted);';
     banner.innerHTML = `
       <span>📋 Найден незаполненный черновик. <strong style="color:var(--gold)">Продолжить с шага ${savedStep}?</strong></span>
       <span style="display:flex;gap:8px;flex-shrink:0">
@@ -520,11 +567,21 @@
     document.getElementById('draftDiscard').addEventListener('click', () => {
       clearDraft();
       Object.assign(state, {
-        model_id: null, model_ids: [], model_name: null, model_photo: null,
+        model_id: null,
+        model_ids: [],
+        model_name: null,
+        model_photo: null,
         selected_models: [],
-        event_type: '', event_date: '', event_duration: '4',
-        location: '', budget: '', comments: '',
-        client_name: '', client_phone: '', client_email: '', client_telegram: '',
+        event_type: '',
+        event_date: '',
+        event_duration: '4',
+        location: '',
+        budget: '',
+        comments: '',
+        client_name: '',
+        client_phone: '',
+        client_email: '',
+        client_telegram: '',
         tor_file: null,
       });
       banner.remove();
@@ -635,7 +692,8 @@
     }
 
     if (parts.length > 0) {
-      bar.innerHTML = parts.join(' &bull; ') +
+      bar.innerHTML =
+        parts.join(' &bull; ') +
         ` <span class="mini-bar-edit" role="button" tabindex="0"
             onclick="window._booking.goToStepPublic(${state.selected_models.length > 0 ? 2 : 1})"
             onkeydown="if(event.key==='Enter')window._booking.goToStepPublic(${state.selected_models.length > 0 ? 2 : 1})"
@@ -647,11 +705,11 @@
   /* ─── Parse URL params & pre-select model / event type / city ─── */
   function initFromUrlParams() {
     const urlParams = new URLSearchParams(window.location.search);
-    const urlModel     = urlParams.get('model') || urlParams.get('model_id');
+    const urlModel = urlParams.get('model') || urlParams.get('model_id');
     const urlModelName = urlParams.get('model_name');
     const urlEventType = urlParams.get('event_type');
-    const urlCity      = urlParams.get('city');
-    const urlBudget    = urlParams.get('budget');
+    const urlCity = urlParams.get('city');
+    const urlBudget = urlParams.get('budget');
 
     // Show selected model banner if model_name is passed
     if (urlModelName) {
@@ -694,7 +752,8 @@
           if (wrap && !document.getElementById('pricingCalcBanner')) {
             const banner = document.createElement('div');
             banner.id = 'pricingCalcBanner';
-            banner.style.cssText = 'background:rgba(201,169,110,0.1);border:1px solid rgba(201,169,110,0.25);color:var(--gold);font-size:0.8rem;padding:10px 16px;margin-bottom:16px;border-radius:2px;text-align:center';
+            banner.style.cssText =
+              'background:rgba(201,169,110,0.1);border:1px solid rgba(201,169,110,0.25);color:var(--gold);font-size:0.8rem;padding:10px 16px;margin-bottom:16px;border-radius:2px;text-align:center';
             banner.textContent = `💰 Расчётная стоимость из калькулятора: ${calcLabel} ₽`;
             wrap.insertBefore(banner, wrap.firstChild);
           }
@@ -714,14 +773,16 @@
     if (!urlModel) return;
 
     // Pre-select model from URL param
-    apiFetch(`/models/${urlModel}`).then(m => {
-      selectModel(m.id, m.name, m.photo_main || '');
-      showModelInfoCard(m);
-      // If event type was also given, skip to step 3
-      if (urlEventType && EVENT_LABELS[urlEventType]) {
-        if (!_draft || _draft.step <= 2) goToStepInstant(3);
-      }
-    }).catch(() => {});
+    apiFetch(`/models/${urlModel}`)
+      .then(m => {
+        selectModel(m.id, m.name, m.photo_main || '');
+        showModelInfoCard(m);
+        // If event type was also given, skip to step 3
+        if (urlEventType && EVENT_LABELS[urlEventType]) {
+          if (!_draft || _draft.step <= 2) goToStepInstant(3);
+        }
+      })
+      .catch(() => {});
   }
 
   /* ─── Model info card (shown when pre-filled from URL) ─ */
@@ -731,9 +792,11 @@
     container.innerHTML = `
       <div class="prefilled-model-card">
         <div class="prefilled-model-thumb">
-          ${m.photo_main
-            ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" />`
-            : `<div class="model-select-thumb-placeholder">${escHtml(m.name[0])}</div>`}
+          ${
+            m.photo_main
+              ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" />`
+              : `<div class="model-select-thumb-placeholder">${escHtml(m.name[0])}</div>`
+          }
         </div>
         <div class="prefilled-model-info">
           <div class="prefilled-model-tag">Выбранная модель</div>
@@ -783,11 +846,15 @@
     hint.setAttribute('role', 'alert');
     hint.textContent = msg;
     el.insertAdjacentElement('afterend', hint);
-    el.addEventListener('input', () => {
-      el.style.borderColor = '';
-      el.removeAttribute('data-error');
-      hint.remove();
-    }, { once: true });
+    el.addEventListener(
+      'input',
+      () => {
+        el.style.borderColor = '';
+        el.removeAttribute('data-error');
+        hint.remove();
+      },
+      { once: true }
+    );
   }
 
   function markServiceError(msg) {
@@ -815,19 +882,22 @@
     }
     if (n === 2) {
       // Load recommended models based on selected event type, then restore selection
-      const loadAndRestore = (models) => {
+      const loadAndRestore = models => {
         const grid = document.getElementById('modelSelectGrid');
         if (grid) {
           const subset = models.slice(0, 8);
-          grid.innerHTML = subset.map(m => `
+          grid.innerHTML = subset
+            .map(
+              m => `
             <div class="model-select-card" id="mc_${m.id}" role="button" tabindex="0"
                  aria-label="${escHtml(m.name)}"
                  onclick="_booking.toggleModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')"
                  onkeydown="if(event.key==='Enter'||event.key===' ')_booking.toggleModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')">
               <div class="model-select-thumb">
-                ${m.photo_main
-                  ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" loading="lazy" />`
-                  : `<div class="model-select-thumb-placeholder">${escHtml(m.name[0])}</div>`
+                ${
+                  m.photo_main
+                    ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" loading="lazy" />`
+                    : `<div class="model-select-thumb-placeholder">${escHtml(m.name[0])}</div>`
                 }
               </div>
               <div class="model-select-info">
@@ -835,7 +905,9 @@
                 <span>${m.height ? m.height + 'см' : ''}${m.hair_color ? ' · ' + escHtml(m.hair_color) : ''}</span>
               </div>
               <div class="model-select-check" aria-hidden="true">✓</div>
-            </div>`).join('');
+            </div>`
+            )
+            .join('');
         }
         document.querySelectorAll('.model-select-card').forEach(c => {
           const cid = parseInt(c.id.replace('mc_', ''), 10);
@@ -850,14 +922,23 @@
       if (state.event_type) {
         apiFetch(`/recommend?event_type=${encodeURIComponent(state.event_type)}&limit=8`)
           .then(d => loadAndRestore(d.models || d))
-          .catch(() => apiFetch('/models?available=1').then(m => loadAndRestore(m)).catch(() => {}));
+          .catch(() =>
+            apiFetch('/models?available=1')
+              .then(m => loadAndRestore(m))
+              .catch(() => {})
+          );
       } else {
-        apiFetch('/models?available=1').then(loadAndRestore).catch(() => {});
+        apiFetch('/models?available=1')
+          .then(loadAndRestore)
+          .catch(() => {});
       }
     }
     if (n === 3) {
       const dateEl = document.getElementById('event_date');
-      if (dateEl) { dateEl.value = state.event_date || ''; dateEl.min = today; }
+      if (dateEl) {
+        dateEl.value = state.event_date || '';
+        dateEl.min = today;
+      }
       const durEl = document.getElementById('event_duration');
       if (durEl) durEl.value = state.event_duration || '4';
       const budgetEl2 = document.getElementById('budget');
@@ -866,7 +947,9 @@
       if (budgetEl2 && !budgetEl2.value && state.event_type) {
         const modelCount = (state.selected_models || []).length || 1;
         const duration = state.event_duration || 4;
-        apiFetch(`/budget-estimate?event_type=${encodeURIComponent(state.event_type)}&model_count=${modelCount}&duration_hours=${duration}`)
+        apiFetch(
+          `/budget-estimate?event_type=${encodeURIComponent(state.event_type)}&model_count=${modelCount}&duration_hours=${duration}`
+        )
           .then(d => {
             const hint = document.getElementById('budget-estimate-hint');
             const txt = document.getElementById('budget-estimate-text');
@@ -875,7 +958,8 @@
               txt.textContent = `💡 Оценка бюджета: от ${fmt(d.budget.min)} до ${fmt(d.budget.max)} ₽ (рекомендуем ${fmt(d.budget.recommended)} ₽)`;
               hint.style.display = 'block';
             }
-          }).catch(() => {});
+          })
+          .catch(() => {});
       }
       const locEl = document.getElementById('location');
       if (locEl) locEl.value = state.location || '';
@@ -940,8 +1024,10 @@
         const hint = document.createElement('div');
         hint.id = 'step2SkipHint';
         hint.role = 'alert';
-        hint.style.cssText = 'background:rgba(201,169,110,0.08);border:1px solid rgba(201,169,110,0.3);color:var(--text-muted);font-size:0.82rem;padding:10px 14px;margin-bottom:16px;';
-        hint.innerHTML = '💡 Менеджер подберёт подходящую модель самостоятельно. Нажмите <strong style="color:var(--gold)">Далее</strong> ещё раз чтобы продолжить без выбора.';
+        hint.style.cssText =
+          'background:rgba(201,169,110,0.08);border:1px solid rgba(201,169,110,0.3);color:var(--text-muted);font-size:0.82rem;padding:10px 14px;margin-bottom:16px;';
+        hint.innerHTML =
+          '💡 Менеджер подберёт подходящую модель самостоятельно. Нажмите <strong style="color:var(--gold)">Далее</strong> ещё раз чтобы продолжить без выбора.';
         const nav = document.querySelector('#step2 .booking-nav');
         if (nav) nav.insertAdjacentElement('beforebegin', hint);
         return; // stop here — user must confirm by pressing Next again
@@ -976,19 +1062,22 @@
         }
       }
 
-      if (hasError) { toast('Проверьте правильность заполнения полей', 'error'); return; }
+      if (hasError) {
+        toast('Проверьте правильность заполнения полей', 'error');
+        return;
+      }
 
-      state.event_date     = dateVal;
+      state.event_date = dateVal;
       state.event_duration = document.getElementById('event_duration')?.value || '4';
-      state.budget         = document.getElementById('budget')?.value         || '';
-      state.location       = document.getElementById('location')?.value       || '';
-      state.comments       = document.getElementById('comments')?.value       || '';
+      state.budget = document.getElementById('budget')?.value || '';
+      state.location = document.getElementById('location')?.value || '';
+      state.comments = document.getElementById('comments')?.value || '';
       saveDraft();
     }
 
     // Step 4 validation: name (min 2 chars) + phone (10+ digits)
     if (state.step === 4) {
-      const name  = document.getElementById('client_name')?.value.trim()  || '';
+      const name = document.getElementById('client_name')?.value.trim() || '';
       const phone = document.getElementById('client_phone')?.value.trim() || '';
       const email = document.getElementById('client_email')?.value.trim() || '';
       let hasError = false;
@@ -1008,11 +1097,14 @@
         markError('client_email', 'Введите корректный email');
         hasError = true;
       }
-      if (hasError) { toast('Проверьте правильность заполнения полей', 'error'); return; }
+      if (hasError) {
+        toast('Проверьте правильность заполнения полей', 'error');
+        return;
+      }
 
-      state.client_name     = name;
-      state.client_phone    = phone;
-      state.client_email    = email;
+      state.client_name = name;
+      state.client_phone = phone;
+      state.client_email = email;
       state.client_telegram = (document.getElementById('client_telegram')?.value.trim() || '').replace(/^@/, '');
       saveDraft();
       buildSummary();
@@ -1044,14 +1136,18 @@
   function goToStep(n, isBack = false) {
     if (n < 1 || n > TOTAL_STEPS) return;
     const currentEl = document.getElementById(`step${state.step}`);
-    const nextEl    = document.getElementById(`step${n}`);
+    const nextEl = document.getElementById(`step${n}`);
 
     if (currentEl && currentEl !== nextEl) {
       const outClass = isBack ? 'slide-out-back' : 'slide-out';
       currentEl.classList.add(outClass);
-      currentEl.addEventListener('animationend', () => {
-        currentEl.classList.remove('active', 'slide-out', 'slide-out-back');
-      }, { once: true });
+      currentEl.addEventListener(
+        'animationend',
+        () => {
+          currentEl.classList.remove('active', 'slide-out', 'slide-out-back');
+        },
+        { once: true }
+      );
     }
 
     updateStepIndicators(n);
@@ -1061,10 +1157,14 @@
     if (nextEl) {
       if (isBack) {
         nextEl.classList.add('slide-in-back');
-        nextEl.addEventListener('animationend', () => {
-          nextEl.classList.remove('slide-in-back');
-          nextEl.classList.add('active');
-        }, { once: true });
+        nextEl.addEventListener(
+          'animationend',
+          () => {
+            nextEl.classList.remove('slide-in-back');
+            nextEl.classList.add('active');
+          },
+          { once: true }
+        );
       } else {
         nextEl.classList.add('active');
       }
@@ -1131,9 +1231,10 @@
         </div>`;
     }
 
-    const modelDisplay = state.selected_models.length > 0
-      ? state.selected_models.map(m => escHtml(m.name)).join(', ')
-      : escHtml(state.model_name || 'Менеджер подберёт');
+    const modelDisplay =
+      state.selected_models.length > 0
+        ? state.selected_models.map(m => escHtml(m.name)).join(', ')
+        : escHtml(state.model_name || 'Менеджер подберёт');
 
     summaryEl.innerHTML = `
       ${modelHTML}
@@ -1150,7 +1251,7 @@
       ${state.event_date ? `<div class="summary-row"><label>Дата</label><span>${formatDate(state.event_date)}</span><button class="summary-edit-btn" onclick="window._booking.goToStepPublic(3)" title="Изменить">✎</button></div>` : ''}
       <div class="summary-row"><label>Продолжительность</label><span>${state.event_duration} ч</span></div>
       ${state.location ? `<div class="summary-row"><label>Место</label><span>${escHtml(state.location)}</span></div>` : ''}
-      ${state.budget   ? `<div class="summary-row"><label>Бюджет</label><span>${escHtml(state.budget)}</span></div>` : ''}
+      ${state.budget ? `<div class="summary-row"><label>Бюджет</label><span>${escHtml(state.budget)}</span></div>` : ''}
       ${state.tor_file ? `<div class="summary-row"><label>ТЗ / Файл</label><span>📎 ${escHtml(state.tor_file.name)}</span></div>` : ''}
       <div class="summary-divider"></div>
       <div class="summary-row">
@@ -1159,7 +1260,7 @@
         <button class="summary-edit-btn" onclick="window._booking.goToStepPublic(4)" title="Изменить">✎</button>
       </div>
       <div class="summary-row"><label>Телефон</label><span>${escHtml(state.client_phone)}</span></div>
-      ${state.client_email    ? `<div class="summary-row"><label>Email</label><span>${escHtml(state.client_email)}</span></div>` : ''}
+      ${state.client_email ? `<div class="summary-row"><label>Email</label><span>${escHtml(state.client_email)}</span></div>` : ''}
       ${state.client_telegram ? `<div class="summary-row"><label>Telegram</label><span>@${escHtml(state.client_telegram)}</span></div>` : ''}
       ${state.comments ? `<div class="summary-row summary-row--block"><label>Пожелания</label><span>${escHtml(state.comments)}</span></div>` : ''}`;
   }
@@ -1167,7 +1268,7 @@
   function formatDate(d) {
     if (!d) return '';
     const [y, m, day] = d.split('-');
-    const months = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+    const months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
     return `${+day} ${months[+m - 1]} ${y}`;
   }
 
@@ -1187,7 +1288,9 @@
       const r = await fetch('/api/csrf-token');
       const d = await r.json();
       return d.token || '';
-    } catch { return ''; }
+    } catch {
+      return '';
+    }
   }
 
   /* ─── Submit ──────────────────────────────────────── */
@@ -1200,30 +1303,30 @@
       const csrfToken = await getCsrfToken();
 
       // Use first model_id for backward compat with API, send model_ids array for multi-model support
-      const modelIdForApi  = state.selected_models.length > 0 ? state.selected_models[0].id : (state.model_id || null);
+      const modelIdForApi = state.selected_models.length > 0 ? state.selected_models[0].id : state.model_id || null;
       const modelIdsForApi = state.model_ids.length > 1 ? state.model_ids : null;
 
       const body = {
-        client_name:     state.client_name,
-        client_phone:    state.client_phone,
-        client_email:    state.client_email    || null,
+        client_name: state.client_name,
+        client_phone: state.client_phone,
+        client_email: state.client_email || null,
         client_telegram: state.client_telegram || null,
-        model_id:        modelIdForApi,
-        model_ids:       modelIdsForApi,
-        event_type:      state.event_type,
-        event_date:      state.event_date       || null,
-        event_duration:  +state.event_duration  || 4,
-        location:        state.location         || null,
-        budget:          state.budget           || null,
-        comments:        state.comments         || null,
+        model_id: modelIdForApi,
+        model_ids: modelIdsForApi,
+        event_type: state.event_type,
+        event_date: state.event_date || null,
+        event_duration: +state.event_duration || 4,
+        location: state.location || null,
+        budget: state.budget || null,
+        comments: state.comments || null,
       };
 
       // Attach UTM parameters if available
       if (window.NM && NM.analytics) {
         const utm = NM.analytics.getSavedUTM();
         if (utm.source) {
-          body.utm_source   = utm.source;
-          body.utm_medium   = utm.medium;
+          body.utm_source = utm.source;
+          body.utm_medium = utm.medium;
           body.utm_campaign = utm.campaign;
         }
       }
@@ -1233,10 +1336,16 @@
       // If there's a TOR file, use FormData
       if (state.tor_file) {
         const formData = new FormData();
-        Object.entries(body).forEach(([k, v]) => { if (v !== null && v !== undefined) formData.append(k, v); });
+        Object.entries(body).forEach(([k, v]) => {
+          if (v !== null && v !== undefined) formData.append(k, v);
+        });
         formData.append('tor_file', state.tor_file, state.tor_file.name);
         formData.append('_csrf', csrfToken);
-        const resp = await fetch('/api/orders', { method: 'POST', body: formData, headers: { 'x-csrf-token': csrfToken } });
+        const resp = await fetch('/api/orders', {
+          method: 'POST',
+          body: formData,
+          headers: { 'x-csrf-token': csrfToken },
+        });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
           throw new Error(err.error || 'Ошибка при отправке заявки');
@@ -1255,9 +1364,9 @@
       if (window.NM && NM.analytics) {
         NM.analytics.event('booking_submitted', {
           event_type: state.event_type,
-          model_id:   state.model_id,
+          model_id: state.model_id,
           model_count: state.selected_models.length,
-          ...NM.analytics.getSavedUTM()
+          ...NM.analytics.getSavedUTM(),
         });
       }
 
@@ -1294,11 +1403,21 @@
         bookAnotherBtn.addEventListener('click', () => {
           clearDraft();
           Object.assign(state, {
-            model_id: null, model_ids: [], model_name: null, model_photo: null,
+            model_id: null,
+            model_ids: [],
+            model_name: null,
+            model_photo: null,
             selected_models: [],
-            event_type: '', event_date: '', event_duration: '4',
-            location: '', budget: '', comments: '',
-            client_name: '', client_phone: '', client_email: '', client_telegram: '',
+            event_type: '',
+            event_date: '',
+            event_duration: '4',
+            location: '',
+            budget: '',
+            comments: '',
+            client_name: '',
+            client_phone: '',
+            client_email: '',
+            client_telegram: '',
             tor_file: null,
           });
           document.getElementById('step6')?.classList.remove('active');
@@ -1314,21 +1433,28 @@
         if (navigator.share) {
           shareBtn.style.display = 'inline-flex';
           shareBtn.addEventListener('click', async () => {
-            try { await navigator.share({ title: shareText, url: shareUrl }); } catch (_) {}
+            try {
+              await navigator.share({ title: shareText, url: shareUrl });
+            } catch (_) {}
           });
         } else {
           shareBtn.style.display = 'inline-flex';
           shareBtn.title = 'Скопировать ссылку';
           shareBtn.addEventListener('click', () => {
-            navigator.clipboard.writeText(shareUrl).then(() => {
-              shareBtn.textContent = '✓ Скопировано';
-              setTimeout(() => { shareBtn.textContent = '🔗 Поделиться'; }, 2000);
-            }).catch(() => {});
+            navigator.clipboard
+              .writeText(shareUrl)
+              .then(() => {
+                shareBtn.textContent = '✓ Скопировано';
+                setTimeout(() => {
+                  shareBtn.textContent = '🔗 Поделиться';
+                }, 2000);
+              })
+              .catch(() => {});
           });
         }
       }
 
-      const cabinetLink     = document.getElementById('cabinetLink');
+      const cabinetLink = document.getElementById('cabinetLink');
       const cabinetPhoneHint = document.getElementById('cabinetPhoneHint');
       const cabinetPhoneLink = document.getElementById('cabinetPhoneLink');
       if (state.client_phone && cabinetLink) {
@@ -1342,7 +1468,7 @@
       if (window._tgWebAppOnBookingSuccess) window._tgWebAppOnBookingSuccess(orderNum);
 
       const tgLink = document.getElementById('tgConnectLink');
-      const tgBox  = document.getElementById('tgConnectBox');
+      const tgBox = document.getElementById('tgConnectBox');
       if (state.client_telegram) {
         if (tgBox) tgBox.style.display = 'none';
       } else {
@@ -1371,7 +1497,10 @@
         const timer = setInterval(() => {
           countdown--;
           countdownEl.textContent = countdown;
-          if (countdown <= 0) { clearInterval(timer); window.location.href = '/'; }
+          if (countdown <= 0) {
+            clearInterval(timer);
+            window.location.href = '/';
+          }
         }, 1000);
         // Cancel redirect if user interacts with success page
         ['bookAnotherBtn', 'shareBookingBtn', 'statusPageLink', 'cabinetLink'].forEach(id => {
@@ -1388,16 +1517,24 @@
   /* ─── Check order status ─────────────────────────── */
   async function checkStatus() {
     const num = document.getElementById('statusInput')?.value.trim().toUpperCase();
-    if (!num) { if (typeof toast === 'function') toast('Введите номер заявки', 'error'); return; }
+    if (!num) {
+      if (typeof toast === 'function') toast('Введите номер заявки', 'error');
+      return;
+    }
     const resultEl = document.getElementById('statusResult');
     if (resultEl) resultEl.innerHTML = '<span style="color:var(--text-muted)">Поиск...</span>';
     try {
       const o = await apiFetch(`/orders/status/${num}`);
       const statusLabels = {
-        new: '🆕 Новая', reviewing: '🔍 На рассмотрении', confirmed: '✅ Подтверждена',
-        in_progress: '▶️ В процессе', completed: '🏁 Завершена', cancelled: '❌ Отменена'
+        new: '🆕 Новая',
+        reviewing: '🔍 На рассмотрении',
+        confirmed: '✅ Подтверждена',
+        in_progress: '▶️ В процессе',
+        completed: '🏁 Завершена',
+        cancelled: '❌ Отменена',
       };
-      if (resultEl) resultEl.innerHTML = `
+      if (resultEl)
+        resultEl.innerHTML = `
         <div style="background:var(--bg3);border:1px solid var(--border);padding:20px;margin-top:12px">
           <div style="display:flex;justify-content:space-between;margin-bottom:12px">
             <strong style="color:var(--gold)">${escHtml(o.order_number)}</strong>
@@ -1415,7 +1552,9 @@
   }
 
   /* ─── Public API ─────────────────────────────────── */
-  function goToStepPublic(n) { goToStep(n, n < state.step); }
+  function goToStepPublic(n) {
+    goToStep(n, n < state.step);
+  }
 
   /* ─── Initialize step indicators on page load ─────── */
   // Sync ARIA progressbar and step dot classes with initial step state
@@ -1423,7 +1562,14 @@
   updateStepIndicators(state.step);
 
   window._booking = {
-    nextStep, prevStep, selectModel, selectService, submit, checkStatus,
-    goToStepPublic, toggleModel, removeModel,
+    nextStep,
+    prevStep,
+    selectModel,
+    selectService,
+    submit,
+    checkStatus,
+    goToStepPublic,
+    toggleModel,
+    removeModel,
   };
 })();

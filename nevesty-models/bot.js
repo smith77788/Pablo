@@ -1833,6 +1833,11 @@ async function bkSubmit(chatId, data) {
         ],
       },
     });
+    // Send custom booking thanks text if configured
+    const thanksText = await getSetting('booking_thanks_text').catch(() => null);
+    if (thanksText) {
+      safeSend(chatId, esc(thanksText), { parse_mode: 'MarkdownV2' }).catch(() => {});
+    }
     if (order) {
       notifyNewOrder(order);
       // Email notifications (non-blocking)
