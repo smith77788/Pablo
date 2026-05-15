@@ -37,9 +37,9 @@ const STRINGS = {
   quickBookingAccepted: '⚡ *Заявка принята\\!*',
 
   // ─── Profile edit prompts ──────────────────────────────────────────────────
-  profileEditName: '✏️ Введите ваше имя:',
-  profileEditPhone: '📱 Введите номер телефона:',
-  profileEditEmail: '📧 Введите новый email:',
+  profileEditName: '✏️ Введите ваше имя:\n💡 _Например: Алексей Смирнов \\(минимум 2 символа\\)_',
+  profileEditPhone: '📱 Введите номер телефона:\n💡 _Формат: \\+7 999 123\\-45\\-67_',
+  profileEditEmail: '📧 Введите новый email:\n💡 _Например: name@mail\\.ru_',
 
   // ─── Status labels ─────────────────────────────────────────────────────────
   statusNew: '🆕 Новая',
