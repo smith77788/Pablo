@@ -143,10 +143,47 @@ async function showAdminStats(chatId) {
       text += `*⏱ Средний цикл сделки:* ${esc(String(avgCycleDays))} дн\\.\n`;
     }
 
+    // Revenue: sum of budgets for confirmed+completed orders
+    let revenue = { total: 0, month: 0, week: 0 };
+    try {
+      const [revTotal, revMonth, revWeek] = await Promise.all([
+        get(`SELECT SUM(CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','') AS REAL)) as s FROM orders WHERE status IN ('confirmed','completed') AND budget GLOB '[0-9]*'`),
+        get(`SELECT SUM(CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','') AS REAL)) as s FROM orders WHERE status IN ('confirmed','completed') AND budget GLOB '[0-9]*' AND created_at >= datetime('now','-30 days')`),
+        get(`SELECT SUM(CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','') AS REAL)) as s FROM orders WHERE status IN ('confirmed','completed') AND budget GLOB '[0-9]*' AND created_at >= datetime('now','-7 days')`),
+      ]);
+      revenue = {
+        total: Math.round(revTotal?.s || 0),
+        month: Math.round(revMonth?.s || 0),
+        week: Math.round(revWeek?.s || 0),
+      };
+    } catch {}
+
+    // Repeat clients (ordered more than once)
+    let repeatClients = 0;
+    try {
+      const rc = await get(`SELECT COUNT(*) as n FROM (SELECT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL GROUP BY client_chat_id HAVING COUNT(*) > 1)`);
+      repeatClients = rc?.n || 0;
+    } catch {}
+
+    if (revenue.total > 0) {
+      text += `\n*💰 Выручка:*\n`;
+      text += `  За неделю: *${esc(revenue.week.toLocaleString('ru'))} ₽*\n`;
+      text += `  За месяц: *${esc(revenue.month.toLocaleString('ru'))} ₽*\n`;
+      text += `  Всего: *${esc(revenue.total.toLocaleString('ru'))} ₽*\n`;
+    }
+    text += `*🔄 Повторные клиенты:* ${esc(String(repeatClients))}\n`;
+
+    // Broadcast stats
+    const bcastRow = await get(`SELECT COUNT(*) as total, SUM(sent_count) as sent FROM scheduled_broadcasts WHERE status='sent'`).catch(() => null);
+    if (bcastRow?.total > 0) {
+      text += `*📢 Рассылки:* ${esc(String(bcastRow.total))} отправлено, ${esc(String(bcastRow.sent || 0))} доставлено\n`;
+    }
+
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         [{ text: '📋 Все заявки', callback_data: 'adm_orders__0' }],
+        [{ text: '📊 Аналитика (сайт)', url: 'https://nevesty-models.ru/admin/analytics.html' }],
         [{ text: '← Меню',        callback_data: 'admin_menu'    }],
       ]}
     });

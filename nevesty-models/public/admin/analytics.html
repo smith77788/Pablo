@@ -305,6 +305,35 @@
       </div>
     </div>
 
+    <!-- Row: Revenue by Month (bar) + New vs Repeat Clients (doughnut) -->
+    <div class="grid md:grid-cols-2 gap-6">
+
+      <!-- Выручка по месяцам — bar chart -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white">💰 Выручка по месяцам</h2>
+          <button class="chart-export-btn" onclick="exportChart('chart-revenue-bar', 'revenue-bar.png')" title="Скачать PNG" style="position:static;margin:0"><i class="fas fa-download"></i></button>
+        </div>
+        <div id="revenue-bar-wrap" class="relative" style="height:240px">
+          <div id="revenue-bar-skeleton" class="skeleton h-full w-full rounded-lg"></div>
+          <canvas id="chart-revenue-bar" class="hidden"></canvas>
+          <div id="revenue-bar-error" class="chart-error hidden" style="height:240px">Нет данных о выручке</div>
+        </div>
+      </div>
+
+      <!-- Новые vs Повторные клиенты — doughnut -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🔄 Новые vs Повторные клиенты</h2>
+        <button class="chart-export-btn" onclick="exportChart('chart-repeat-clients', 'repeat-clients.png')" title="Скачать PNG"><i class="fas fa-download"></i></button>
+        <div id="repeat-clients-wrap" class="relative" style="height:240px">
+          <div id="repeat-clients-skeleton" class="skeleton h-full w-full rounded-lg"></div>
+          <canvas id="chart-repeat-clients" class="hidden"></canvas>
+          <div id="repeat-clients-error" class="chart-error hidden" style="height:240px">Нет данных</div>
+        </div>
+        <div id="repeat-clients-summary" class="mt-3 text-sm text-gray-500 dark:text-gray-400 text-center" style="display:none"></div>
+      </div>
+    </div>
+
     <!-- Top Clients / LTV -->
     <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
       <h3 class="font-semibold text-gray-800 dark:text-white mb-4">👑 Топ клиентов по выручке</h3>
@@ -446,8 +475,17 @@ async function loadAll() {
   document.getElementById('chart-daily-skeleton').classList.remove('hidden');
   document.getElementById('chart-daily').classList.add('hidden');
   document.getElementById('chart-daily-error').classList.add('hidden');
+  // Reset new chart skeletons
+  ['revenue-bar', 'repeat-clients'].forEach(id => {
+    const sk = document.getElementById(id + '-skeleton');
+    const cv = document.getElementById('chart-' + id);
+    const er = document.getElementById(id + '-error');
+    if (sk) { sk.classList.remove('hidden'); }
+    if (cv) { cv.classList.add('hidden'); }
+    if (er) { er.classList.add('hidden'); }
+  });
 
-  const [stats, basicStats, chart, funnel, topModels, eventTypes, sources] = await Promise.all([
+  const [stats, basicStats, chart, funnel, topModels, eventTypes, sources, revenueBar, repeatClients] = await Promise.all([
     safeJson(fetch(`/api/admin/analytics/kpi?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
     safeJson(fetch(`/api/admin/stats`, {headers:h}).then(r=>r.json())),
     safeJson(fetch(`/api/admin/orders-chart?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
@@ -455,6 +493,8 @@ async function loadAll() {
     safeJson(fetch(`/api/admin/analytics/top-models?days=${currentPeriod}&limit=10`, {headers:h}).then(r=>r.json())),
     safeJson(fetch(`/api/admin/analytics/event-types?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
     safeJson(fetch(`/api/admin/analytics/sources?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
+    safeJson(fetch(`/api/admin/analytics/revenue?months=6`, {headers:h}).then(r=>r.json())),
+    safeJson(fetch(`/api/admin/analytics/repeat-clients`, {headers:h}).then(r=>r.json())),
   ]);
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
@@ -491,6 +531,12 @@ async function loadAll() {
 
   // ── Sources: doughnut ─────────────────────────────────────────────────────
   renderSourcesChart(sources.sources || []);
+
+  // ── Revenue bar chart ─────────────────────────────────────────────────────
+  renderRevenueBarChart(revenueBar.months || revenueBar.data || []);
+
+  // ── Repeat vs new clients doughnut ────────────────────────────────────────
+  renderRepeatClientsChart(repeatClients.data || null);
 
   loadExtended();
 }
@@ -853,6 +899,130 @@ async function loadMonthly() {
     if (sk) sk.style.display = 'none';
     if (err) { err.style.display = 'block'; err.textContent = 'Ошибка: ' + e.message; }
   }
+}
+
+// ── Revenue by Month bar chart ────────────────────────────────────────────────
+function renderRevenueBarChart(rows) {
+  destroyChart('revenue-bar');
+  const sk = document.getElementById('revenue-bar-skeleton');
+  const cv = document.getElementById('chart-revenue-bar');
+  const er = document.getElementById('revenue-bar-error');
+  if (sk) sk.classList.add('hidden');
+  if (!rows || !rows.length) { if (er) er.classList.remove('hidden'); return; }
+  if (cv) cv.classList.remove('hidden');
+
+  const labels = rows.map(r => r.month);
+  const revenues = rows.map(r => Math.round(r.revenue || 0));
+  const orderCounts = rows.map(r => r.order_count || 0);
+
+  _charts['revenue-bar'] = new Chart(cv.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Выручка (₽)',
+          data: revenues,
+          backgroundColor: 'rgba(16,185,129,0.72)',
+          borderColor: '#10b981',
+          borderWidth: 1.5,
+          borderRadius: 6,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Заявок',
+          data: orderCounts,
+          type: 'line',
+          borderColor: '#ec4899',
+          backgroundColor: 'transparent',
+          tension: 0.3,
+          pointRadius: 4,
+          yAxisID: 'y1',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset.yAxisID === 'y') return ` Выручка: ${ctx.parsed.y.toLocaleString('ru-RU')} ₽`;
+              return ` Заявок: ${ctx.parsed.y}`;
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          position: 'left',
+          ticks: { callback: v => (v >= 1000 ? Math.round(v/1000) + 'k' : v) + ' ₽' },
+          grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }
+        },
+        y1: {
+          beginAtZero: true,
+          position: 'right',
+          ticks: { precision: 0 },
+          grid: { drawOnChartArea: false }
+        }
+      }
+    }
+  });
+}
+
+// ── New vs Repeat Clients doughnut ────────────────────────────────────────────
+function renderRepeatClientsChart(data) {
+  destroyChart('repeat-clients');
+  const sk = document.getElementById('repeat-clients-skeleton');
+  const cv = document.getElementById('chart-repeat-clients');
+  const er = document.getElementById('repeat-clients-error');
+  const summary = document.getElementById('repeat-clients-summary');
+  if (sk) sk.classList.add('hidden');
+  if (!data || data.total === 0) { if (er) er.classList.remove('hidden'); return; }
+  if (cv) cv.classList.remove('hidden');
+
+  const total = data.total || 0;
+  const repeat = data.repeat || 0;
+  const newCount = data.new || (total - repeat);
+  const repeatPct = total > 0 ? Math.round((repeat / total) * 100) : 0;
+
+  if (summary) {
+    summary.textContent = `Повторных: ${repeat} (${repeatPct}%) из ${total} уникальных клиентов`;
+    summary.style.display = '';
+  }
+
+  _charts['repeat-clients'] = new Chart(cv.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Новые клиенты', 'Повторные клиенты'],
+      datasets: [{
+        data: [newCount, repeat],
+        backgroundColor: ['rgba(59,130,246,0.8)', 'rgba(16,185,129,0.8)'],
+        borderColor: isDark() ? '#1f2937' : '#ffffff',
+        borderWidth: 2,
+        hoverOffset: 8,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { boxWidth: 12, padding: 10, font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+              return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
 }
 
 loadAll();
