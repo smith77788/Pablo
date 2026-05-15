@@ -3321,6 +3321,7 @@ router.get('/settings/public', async (req, res) => {
 });
 
 // GET /api/pricing — public pricing tiers (no auth required, cached 5 min)
+// Tries price_packages table first; falls back to bot_settings overrides on 3 hardcoded tiers
 router.get('/pricing', async (req, res) => {
   const DEFAULT_PRICING = [
     {
@@ -3363,7 +3364,30 @@ router.get('/pricing', async (req, res) => {
     const cached = cache.get(cacheKey);
     if (cached !== undefined) return res.json(cached);
 
-    // Override defaults with values from bot_settings if available
+    // Try price_packages table (БЛОК 4.1 dynamic pricing)
+    const packages = await query('SELECT * FROM price_packages WHERE active=1 ORDER BY sort_order, id').catch(
+      () => null
+    );
+
+    if (packages && packages.length > 0) {
+      // Map to unified format compatible with pricing.html expectations
+      const result = packages.map(p => ({
+        id: p.id,
+        name: p.name,
+        price_from: p.price_from,
+        price_to: p.price_to || null,
+        duration: p.duration || '',
+        description: p.description || '',
+        category: p.category || 'standard',
+        features: [],
+        featured: false,
+        cta_url: `/booking.html?package=${encodeURIComponent(p.name)}`,
+      }));
+      cache.set(cacheKey, result);
+      return res.json(result);
+    }
+
+    // Fallback: 3 hardcoded tiers with bot_settings overrides
     const rows = await query(`SELECT key, value FROM bot_settings WHERE key IN (?,?,?)`, [
       'pricing_start_from',
       'pricing_event_from',
@@ -6586,6 +6610,83 @@ router.post('/admin/faq/seed', auth, async (req, res, next) => {
     }
 
     res.json({ ok: true, seeded });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── Admin: Price packages CRUD (БЛОК 4.1) ────────────────────────────────────
+// GET /api/admin/price-packages — list all packages
+router.get('/admin/price-packages', auth, async (req, res, next) => {
+  try {
+    const packages = await query('SELECT * FROM price_packages ORDER BY sort_order, id');
+    res.json({ ok: true, packages });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/admin/price-packages — create new package
+router.post('/admin/price-packages', auth, async (req, res, next) => {
+  try {
+    const { name, description, price_from, price_to, duration, category, sort_order, active } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name is required' });
+    const result = await run(
+      'INSERT INTO price_packages (name, description, price_from, price_to, duration, category, sort_order, active) VALUES (?,?,?,?,?,?,?,?)',
+      [
+        name.trim(),
+        description || null,
+        parseInt(price_from) || 0,
+        price_to ? parseInt(price_to) : null,
+        duration || null,
+        category || 'standard',
+        parseInt(sort_order) || 0,
+        active !== undefined ? (active ? 1 : 0) : 1,
+      ]
+    );
+    cache.del('pricing:public');
+    res.json({ ok: true, id: result.lastID });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PUT /api/admin/price-packages/:id — update package
+router.put('/admin/price-packages/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
+    const { name, description, price_from, price_to, duration, category, sort_order, active } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name is required' });
+    await run(
+      'UPDATE price_packages SET name=?, description=?, price_from=?, price_to=?, duration=?, category=?, sort_order=?, active=? WHERE id=?',
+      [
+        name.trim(),
+        description || null,
+        parseInt(price_from) || 0,
+        price_to ? parseInt(price_to) : null,
+        duration || null,
+        category || 'standard',
+        parseInt(sort_order) || 0,
+        active !== undefined ? (active ? 1 : 0) : 1,
+        id,
+      ]
+    );
+    cache.del('pricing:public');
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// DELETE /api/admin/price-packages/:id — delete package
+router.delete('/admin/price-packages/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
+    await run('DELETE FROM price_packages WHERE id=?', [id]);
+    cache.del('pricing:public');
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }
