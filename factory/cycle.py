@@ -174,6 +174,55 @@ def _sync_growth_actions_to_bot_db(growth_actions: list, bot_db_path: str) -> No
         logger.error("Failed to sync growth actions: %s", e)
 
 
+def _save_cycle_to_history(results: dict) -> None:
+    """Save this cycle's results to JSON history file."""
+    import json
+    from pathlib import Path
+
+    history_dir = Path(__file__).parent / "history"
+    history_dir.mkdir(exist_ok=True)
+
+    timestamp = results.get("timestamp") or results.get("cycle_id", "unknown")
+    cycle_file = history_dir / f"cycle_{str(timestamp)[:19].replace(':', '-')}.json"
+
+    try:
+        with open(cycle_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+        logger.info("Cycle saved to %s", cycle_file)
+
+        # Keep only last 30 cycles
+        all_cycles = sorted(history_dir.glob("cycle_*.json"))
+        for old in all_cycles[:-30]:
+            old.unlink()
+    except Exception as e:
+        logger.warning("Failed to save cycle history: %s", e)
+
+
+def _load_metrics_trend(metric_key: str, last_n: int = 5) -> list:
+    """Load metric trend from last N cycles."""
+    import json
+    from pathlib import Path
+
+    history_dir = Path(__file__).parent / "history"
+    if not history_dir.exists():
+        return []
+
+    cycles = sorted(history_dir.glob("cycle_*.json"))[-last_n:]
+    trend = []
+    for cycle_file in cycles:
+        try:
+            with open(cycle_file) as f:
+                data = json.load(f)
+            val = data
+            for k in metric_key.split('.'):
+                val = val.get(k, {}) if isinstance(val, dict) else None
+            if val is not None:
+                trend.append({'timestamp': data.get('timestamp') or data.get('cycle_id'), 'value': val})
+        except Exception:
+            pass
+    return trend
+
+
 def run_cycle() -> dict:
     """Один полный цикл AI-офиса. Возвращает сводку."""
     cycle_start = time.time()
@@ -196,6 +245,7 @@ def run_cycle() -> dict:
 
     results = {
         "cycle_id": cycle_id,
+        "timestamp": cycle_id,
         "phases": {},
         "decisions": [],
         "new_actions": 0,
@@ -512,10 +562,44 @@ def run_cycle() -> dict:
             )
 
         ceo_agent = CEOSynthesisAgent()
+
+        # Load trend data for CEO context
+        prev_cycles = _load_metrics_trend('phases.ceo_synthesis.health_score', last_n=3)
+        trend_info = f"Тренд health_score за последние циклы: {[c.get('value') for c in prev_cycles]}" if prev_cycles else "Первый цикл (история отсутствует)"
+
+        context_str = json.dumps(all_department_results, ensure_ascii=False, indent=2, default=str)
+
+        memo_prompt = f"""Ты — CEO модельного агентства. Напиши ЕЖЕНЕДЕЛЬНЫЙ МЕМОРАНДУМ на русском языке.
+
+Данные этого цикла:
+{context_str}
+
+{trend_info}
+
+Структура меморандума (строго следуй):
+## 📊 Ключевые метрики
+- 3 главных показателя этой недели
+
+## 🎯 Главное решение недели
+- Одно конкретное действие которое нужно выполнить
+
+## ⚠️ Риски
+- Главный риск (1 пункт)
+
+## 🚀 Возможности
+- Главная возможность (1 пункт)
+
+## 📋 Задачи команде
+- 3 конкретных задачи для операционной команды
+
+Пиши кратко, по делу, как настоящий CEO. Максимум 300 слов."""
+
         ceo_synthesis_prompt = (
             "Ты — CEO агентства моделей Nevesty Models. Получи отчёты всех департаментов и сделай выводы.\n\n"
-            "ОТЧЁТЫ ДЕПАРТАМЕНТОВ:\n"
-            + json.dumps(all_department_results, ensure_ascii=False, indent=2, default=str)
+            "ИНСТРУКЦИЯ ДЛЯ CEO MEMO:\n"
+            + memo_prompt
+            + "\n\nОТЧЁТЫ ДЕПАРТАМЕНТОВ:\n"
+            + context_str
             + "\n\nВерни JSON:\n"
             '{\n'
             '  "health_score": 75,\n'
@@ -524,7 +608,7 @@ def run_cycle() -> dict:
             '    {"priority": 1, "action": "...", "department": "marketing", "expected_impact": "высокий"},\n'
             '    {"priority": 2, "action": "...", "department": "sales", "expected_impact": "средний"}\n'
             '  ],\n'
-            '  "ceo_memo": "Краткое резюме состояния бизнеса и стратегии на неделю...",\n'
+            '  "ceo_memo": "Еженедельный меморандум CEO со структурой из инструкции выше...",\n'
             '  "risks": ["Риск 1", "Риск 2"],\n'
             '  "opportunities": ["Возможность 1", "Возможность 2"]\n'
             '}'
@@ -701,6 +785,9 @@ def run_cycle() -> dict:
         ),
     )
 
+    results["duration_seconds"] = elapsed
+
     logger.info("✅ CYCLE DONE: %.1fs | Score=%s%%", elapsed, results["health_score"])
     notify(tg_report)
+    _save_cycle_to_history(results)
     return results

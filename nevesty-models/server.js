@@ -158,6 +158,13 @@ async function buildHealthResponse() {
     if (row) factoryLastCycle = row.value;
   } catch (_) { /* table may not have this key yet */ }
 
+  let factoryStatus = 'unknown';
+  try {
+    const { execSync } = require('child_process');
+    const out = execSync('python3 /home/user/Pablo/factory_main.py --status 2>/dev/null', { timeout: 5000 }).toString();
+    factoryStatus = out.includes('Last cycle:') ? 'ok' : 'no_cycles';
+  } catch (_) { factoryStatus = 'unavailable'; }
+
   const uptime = Math.floor(process.uptime());
   return {
     status: dbStatus === 'ok' ? 'ok' : 'degraded',
@@ -171,6 +178,7 @@ async function buildHealthResponse() {
     },
     memory_mb: Math.round(mem.rss / 1024 / 1024), // legacy field kept for compatibility
     factory_last_cycle: factoryLastCycle,
+    factory: factoryStatus,
     version: pkg.version,
     ts: new Date().toISOString(),
   };
