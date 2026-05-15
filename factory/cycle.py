@@ -1333,7 +1333,7 @@ def run_cycle() -> dict[str, Any]:
     except Exception:
         pass  # metrics snapshot is non-critical
 
-    results = {
+    results: dict[str, Any] = {
         "cycle_id": cycle_id,
         "timestamp": cycle_id,
         "phases": {},
@@ -1420,7 +1420,7 @@ def run_cycle() -> dict[str, Any]:
     # PHASE 2 — CEO CORE: стратегические решения и диспетчеризация
     # ════════════════════════════════════════════════════════════════
     logger.info("\n🧠 CEO CORE")
-    decisions = []
+    decisions: list[dict[str, Any]] = []
     try:
         # Build execution context from previous cycle's factory_tasks
         executed = [t.get("action", "") for t in previous_decisions if t.get("status") == "done"]
