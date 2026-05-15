@@ -1278,6 +1278,7 @@ function switchTab(name) {
   if (name === 'email') loadEmailSettings();
   if (name === 'faq') loadFaqAdmin();
   if (name === 'broadcast') loadBroadcasts();
+  if (name === 'totp') loadTotpStatus();
 }
 
 /* ─── Character count ─────────────────────────────────────── */
@@ -2105,6 +2106,105 @@ async function saveLimits(btn) {
     _admin.toast('Лимиты сохранены', 'success');
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
   finally { endSave(btn); }
+}
+
+/* ─── TOTP 2FA ────────────────────────────────────────────── */
+let _totpSecret = null;
+
+async function loadTotpStatus() {
+  const bar = document.getElementById('totp-status-bar');
+  const icon = document.getElementById('totp-status-icon');
+  const text = document.getElementById('totp-status-text');
+  const setup = document.getElementById('totp-setup-section');
+  const disable = document.getElementById('totp-disable-section');
+  try {
+    const res = await fetch('/api/admin/me', { headers: h });
+    const data = await res.json();
+    if (data.totp_enabled) {
+      icon.textContent = '✅';
+      text.textContent = 'Двухфакторная аутентификация включена';
+      bar.style.background = 'rgba(76,175,80,0.12)';
+      bar.style.border = '1px solid rgba(76,175,80,0.3)';
+      setup.style.display = 'none';
+      disable.style.display = '';
+    } else {
+      icon.textContent = '⚠️';
+      text.textContent = 'Двухфакторная аутентификация отключена';
+      bar.style.background = 'rgba(255,152,0,0.1)';
+      bar.style.border = '1px solid rgba(255,152,0,0.3)';
+      setup.style.display = '';
+      disable.style.display = 'none';
+    }
+  } catch(e) {
+    text.textContent = 'Ошибка загрузки статуса';
+  }
+}
+
+async function startTotpSetup() {
+  const btn = document.getElementById('btnSetup2FA');
+  btn.disabled = true; btn.textContent = 'Загрузка...';
+  try {
+    const res = await fetch('/api/admin/totp/setup', { headers: h });
+    const data = await res.json();
+    if (!res.ok) { _admin.toast(data.error || 'Ошибка', 'error'); return; }
+    _totpSecret = data.secret;
+    document.getElementById('totp-qr-img').src = data.qr_url;
+    document.getElementById('totp-manual-key').textContent = data.manual_key;
+    document.getElementById('totp-qr-panel').style.display = '';
+    document.getElementById('totp-enable-code').value = '';
+    document.getElementById('totp-enable-error').textContent = '';
+  } catch(e) {
+    _admin.toast('Ошибка соединения', 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Настроить 2FA';
+  }
+}
+
+async function enableTotp() {
+  const btn = document.getElementById('btnEnable2FA');
+  const err = document.getElementById('totp-enable-error');
+  const code = document.getElementById('totp-enable-code').value.trim();
+  if (!_totpSecret) { err.textContent = 'Сначала нажмите "Настроить 2FA"'; return; }
+  if (!code || code.length !== 6) { err.textContent = 'Введите 6-значный код'; return; }
+  btn.disabled = true; btn.textContent = 'Проверка...'; err.textContent = '';
+  try {
+    const res = await fetch('/api/admin/totp/enable', {
+      method: 'POST', headers: h,
+      body: JSON.stringify({ secret: _totpSecret, totp_code: code })
+    });
+    const data = await res.json();
+    if (!res.ok) { err.textContent = data.error || 'Ошибка'; return; }
+    _admin.toast('2FA успешно включена!', 'success');
+    _totpSecret = null;
+    await loadTotpStatus();
+  } catch(e) {
+    err.textContent = 'Ошибка соединения';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Включить 2FA';
+  }
+}
+
+async function disableTotp() {
+  const btn = document.getElementById('btnDisable2FA');
+  const err = document.getElementById('totp-disable-error');
+  const code = document.getElementById('totp-disable-code').value.trim();
+  if (!code || code.length !== 6) { err.textContent = 'Введите 6-значный код'; return; }
+  btn.disabled = true; btn.textContent = 'Отключение...'; err.textContent = '';
+  try {
+    const res = await fetch('/api/admin/totp/disable', {
+      method: 'DELETE', headers: h,
+      body: JSON.stringify({ totp_code: code })
+    });
+    const data = await res.json();
+    if (!res.ok) { err.textContent = data.error || 'Ошибка'; return; }
+    _admin.toast('2FA отключена', 'success');
+    document.getElementById('totp-disable-code').value = '';
+    await loadTotpStatus();
+  } catch(e) {
+    err.textContent = 'Ошибка соединения';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Отключить 2FA';
+  }
 }
 
 /* ─── Init ────────────────────────────────────────────────── */
