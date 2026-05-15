@@ -793,6 +793,15 @@
       }
       state.event_type = selectedCard.dataset.value;
       saveDraft();
+
+      // GA4: begin_checkout (booking funnel start)
+      if (window.gtag) {
+        gtag('event', 'begin_checkout', { event_type: state.event_type });
+      }
+      // Yandex: booking_start goal
+      if (window.ym && window.YM_ID) {
+        ym(window.YM_ID, 'reachGoal', 'booking_start', { event_type: state.event_type });
+      }
     }
 
     // Step 3 validation: date must be selected and in future
@@ -857,6 +866,17 @@
       state.client_telegram = (document.getElementById('client_telegram')?.value.trim() || '').replace(/^@/, '');
       saveDraft();
       buildSummary();
+    }
+
+    // GA4: checkout_progress when completing a step
+    const completedStep = state.step;
+    if (window.gtag && completedStep >= 2) {
+      gtag('event', 'checkout_progress', { checkout_step: completedStep });
+    }
+    // Yandex: step-specific goals
+    if (window.ym && window.YM_ID) {
+      if (completedStep === 2) ym(window.YM_ID, 'reachGoal', 'booking_step2');
+      if (completedStep === 3) ym(window.YM_ID, 'reachGoal', 'booking_step3');
     }
 
     goToStep(state.step + 1);
@@ -1069,6 +1089,25 @@
       }
 
       const orderNum = result.order_number;
+
+      // GA4: purchase event (booking complete)
+      const budgetNum = parseFloat((state.budget || '').replace(/[^\d.]/g, '')) || 0;
+      if (window.gtag) {
+        gtag('event', 'purchase', {
+          transaction_id: orderNum,
+          value: budgetNum,
+          currency: 'RUB',
+          event_type: state.event_type,
+        });
+      }
+      // Yandex: booking_complete goal
+      if (window.ym && window.YM_ID) {
+        ym(window.YM_ID, 'reachGoal', 'booking_complete', {
+          order_number: orderNum,
+          event_type: state.event_type,
+          value: budgetNum,
+        });
+      }
       const orderNumDisplay = document.getElementById('orderNumDisplay');
       if (orderNumDisplay) orderNumDisplay.textContent = orderNum;
 

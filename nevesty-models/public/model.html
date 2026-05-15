@@ -64,6 +64,7 @@
       for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
       k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
       (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
+      window.YM_ID = d.ym_counter_id;
       ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
     }).catch(()=>{});
   </script>
@@ -800,6 +801,20 @@
         if (window.NM?.analytics) NM.analytics.viewModel(model.id, model.name);
         // Track model view (fire and forget)
         fetch(`/api/models/${model.id}/view`, { method: 'POST' });
+
+        // GA4 view_item event
+        if (window.gtag && model) {
+          gtag('event', 'view_item', {
+            item_id: model.id,
+            item_name: model.name,
+            item_category: model.category,
+            item_variant: model.city,
+          });
+        }
+        // Yandex Metrica goal
+        if (window.ym && window.YM_ID) {
+          ym(window.YM_ID, 'reachGoal', 'model_view', { model_id: model.id, category: model.category });
+        }
       }
 
       function renderModel(m) {

@@ -200,6 +200,16 @@ function renderStars(rating) {
 function openModelModal(id) {
   apiFetch(`/models/${id}`)
     .then(m => {
+      // GA4: select_item event (model card clicked in catalog/homepage)
+      if (window.gtag) {
+        gtag('event', 'select_item', {
+          item_id: m.id,
+          item_name: m.name,
+          item_category: m.category,
+          item_variant: m.city,
+        });
+      }
+      if (window.NM?.analytics) NM.analytics.viewModel(m.id, m.name);
       const photos = Array.isArray(m.photos) ? m.photos : [];
       const allPhotos = m.photo_main
         ? [m.photo_main, ...photos.filter(p => p !== m.photo_main)]
@@ -562,6 +572,14 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => {
       if (window.NM && NM.analytics) {
         NM.analytics.event('cta_click', { location: 'homepage' });
+      }
+      // GA4: standard click event with CTA category
+      if (window.gtag) {
+        gtag('event', 'click', {
+          event_category: 'CTA',
+          event_label: 'homepage_cta',
+          page_location: window.location.pathname,
+        });
       }
     });
   });

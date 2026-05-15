@@ -66,6 +66,12 @@ NM.analytics = {
 
   filterCatalog(filterType, filterValue) {
     this.event('filter_catalog', { filter_type: filterType, filter_value: filterValue });
+    // Also send GA4 'filter_applied' standard event name
+    try {
+      if (typeof gtag !== 'undefined') {
+        gtag('event', 'filter_applied', { filter_type: filterType, filter_value: filterValue });
+      }
+    } catch {}
   },
 
   clickWhatsApp() {
