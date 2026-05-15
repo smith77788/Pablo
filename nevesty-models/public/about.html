@@ -849,19 +849,76 @@
   <script src="/js/darkmode.js"></script>
   <script src="/js/analytics.js" defer></script>
   <script>
-  // Load about text and contact info from API
-  fetch('/api/settings/public').then(r => r.json()).then(d => {
-    if (d.about_text) {
-      // Support both element ids: about-text-main (primary) and about-text (alias)
+  // Load about text, contact info, dynamic stats, and reviews from APIs
+  Promise.all([
+    fetch('/api/settings/public').then(r => r.json()).catch(() => ({})),
+    fetch('/api/stats/public').then(r => r.json()).catch(() => ({})),
+    fetch('/api/reviews/recent?limit=3').then(r => r.json()).catch(() => [])
+  ]).then(([d, stats, reviews]) => {
+    // About text
+    const aboutText = d.about_text || d.about;
+    if (aboutText) {
       const mainEl = document.getElementById('about-text-main');
       const aliasEl = document.getElementById('about-text');
-      if (mainEl) mainEl.textContent = d.about_text;
-      if (aliasEl) aliasEl.textContent = d.about_text;
+      if (mainEl) mainEl.textContent = aboutText;
+      if (aliasEl) aliasEl.textContent = aboutText;
     }
+
+    // WhatsApp button
     if (d.contacts_whatsapp) {
       const waNum = d.contacts_whatsapp.replace(/\D/g, '');
       const btn = document.getElementById('whatsapp-btn');
       if (btn) { btn.href = `https://wa.me/${waNum}`; btn.style.display = 'flex'; }
+      const floatWa = document.getElementById('float-wa-link');
+      if (floatWa) { floatWa.href = `https://wa.me/${waNum}`; document.getElementById('float-whatsapp').style.display = 'block'; }
+    }
+
+    // Dynamic stats from /api/stats/public
+    if (stats && (stats.total_models || stats.completed_orders || stats.cities_count)) {
+      const statNums = document.querySelectorAll('.about-stat-num');
+      const statLabels = document.querySelectorAll('.about-stat-label');
+      if (statNums.length >= 4) {
+        if (stats.total_models > 0) { statNums[0].textContent = stats.total_models + '+'; }
+        if (stats.completed_orders > 0) { statNums[1].textContent = stats.completed_orders + '+'; }
+        if (stats.cities_count > 0) { statNums[3].textContent = stats.cities_count + '+'; }
+      }
+    }
+
+    // Testimonials from /api/reviews/recent
+    const container = document.getElementById('testimonials-container');
+    if (container && reviews && reviews.length > 0) {
+      const stars = n => '★'.repeat(Math.min(5, Math.max(0, n))) + '☆'.repeat(Math.max(0, 5 - n));
+      const cards = reviews.map(r => {
+        const text = r.text ? r.text.slice(0, 300) + (r.text.length > 300 ? '…' : '') : '';
+        const authorName = r.client_name || r.author_name || 'Клиент';
+        const modelLine = r.model_name ? `<div class="testimonial-model">Модель: ${r.model_name}</div>` : '';
+        return `<div class="testimonial-card">
+          <div class="testimonial-stars">${stars(r.rating || 5)}</div>
+          <p class="testimonial-text">"${text}"</p>
+          <div class="testimonial-author">${authorName}</div>
+          ${modelLine}
+        </div>`;
+      }).join('');
+      container.innerHTML = `<div class="testimonials-grid">${cards}</div>`;
+    } else if (container) {
+      // No reviews yet — hide section gracefully
+      container.closest('.testimonials-section').style.display = 'none';
+    }
+
+    // Update Schema.org Organization markup with dynamic data
+    const schemaEl = document.querySelector('script[type="application/ld+json"]');
+    if (schemaEl) {
+      try {
+        const schemas = JSON.parse(schemaEl.textContent);
+        const org = schemas.find(s => s['@type'] === 'Organization');
+        if (org) {
+          if (d.contacts_email) org.email = d.contacts_email;
+          if (d.contacts_phone) org.telephone = d.contacts_phone;
+          if (d.site_url) org.url = d.site_url;
+          if (d.agency_name) org.name = d.agency_name;
+          schemaEl.textContent = JSON.stringify(schemas, null, 2);
+        }
+      } catch (_) {}
     }
   }).catch(() => {});
   </script>
