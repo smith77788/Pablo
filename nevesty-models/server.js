@@ -84,6 +84,17 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 // ─── Compression ──────────────────────────────────────────────────────────────
 if (compression) app.use(compression());
 
+// ─── Response-time header (useful for monitoring / APM) ───────────────────────
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint();
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    // header may already be sent for streamed responses — ignore the throw
+    try { res.setHeader('X-Response-Time', `${ms.toFixed(2)}ms`); } catch (_) {}
+  });
+  next();
+});
+
 // ─── SEO: Dynamic sitemap.xml ─────────────────────────────────────────────────
 app.get('/sitemap.xml', async (req, res) => {
   try {
@@ -99,14 +110,19 @@ app.get('/sitemap.xml', async (req, res) => {
     <priority>0.7</priority>
   </url>`).join('');
 
+    const today = new Date().toISOString().split('T')[0];
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>${baseUrl}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>
-  <url><loc>${baseUrl}/catalog.html</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
-  <url><loc>${baseUrl}/booking.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>${baseUrl}/faq.html</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>${baseUrl}/favorites.html</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
-  <url><loc>${baseUrl}/privacy.html</loc><changefreq>monthly</changefreq><priority>0.4</priority></url>${modelUrls}
+  <url><loc>${baseUrl}/</loc><lastmod>${today}</lastmod><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>${baseUrl}/catalog.html</loc><lastmod>${today}</lastmod><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>${baseUrl}/booking.html</loc><lastmod>${today}</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>${baseUrl}/about.html</loc><lastmod>${today}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>${baseUrl}/contact.html</loc><lastmod>${today}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>${baseUrl}/faq.html</loc><lastmod>${today}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>${baseUrl}/search.html</loc><lastmod>${today}</lastmod><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>${baseUrl}/favorites.html</loc><lastmod>${today}</lastmod><changefreq>weekly</changefreq><priority>0.5</priority></url>
+  <url><loc>${baseUrl}/cabinet.html</loc><lastmod>${today}</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>${baseUrl}/privacy.html</loc><lastmod>${today}</lastmod><changefreq>monthly</changefreq><priority>0.3</priority></url>${modelUrls}
 </urlset>`;
 
     res.header('Content-Type', 'application/xml');
