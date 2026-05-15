@@ -196,6 +196,9 @@
           <button onclick="openAiMatchModal()" class="btn-favorites" aria-label="AI подбор модели" style="color:var(--gold);border-color:rgba(201,169,110,0.4)">
             🤖 AI Подбор
           </button>
+          <button id="shareLinkBtn" onclick="copyShareLink()" class="btn-favorites" aria-label="Скопировать ссылку на текущий каталог с фильтрами">
+            🔗 Скопировать ссылку
+          </button>
         </div>
       </div>
       <div class="catalog-layout">
@@ -500,6 +503,38 @@
 
   <!-- AI Match logic -->
   <script>
+  function copyShareLink() {
+    const button = document.getElementById('shareLinkBtn');
+    const url = window.location.href;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        button.textContent = '✓ Скопировано!';
+        setTimeout(() => { button.textContent = '🔗 Скопировать ссылку'; }, 2000);
+      }).catch(() => {
+        fallbackCopyLink(url, button);
+      });
+    } else {
+      fallbackCopyLink(url, button);
+    }
+  }
+  function fallbackCopyLink(url, button) {
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand('copy');
+      button.textContent = '✓ Скопировано!';
+      setTimeout(() => { button.textContent = '🔗 Скопировать ссылку'; }, 2000);
+    } catch (e) {
+      button.textContent = '❌ Не удалось';
+      setTimeout(() => { button.textContent = '🔗 Скопировать ссылку'; }, 2000);
+    }
+    document.body.removeChild(ta);
+  }
+
   function openAiMatchModal() {
     const modal = document.getElementById('aiMatchModal');
     modal.style.display = 'flex';

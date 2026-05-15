@@ -51,7 +51,7 @@
       if (filters.maxHeight)   p.set('maxH', filters.maxHeight);
       const qs = p.toString();
       const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-      window.history.pushState({}, '', newUrl);
+      window.history.replaceState({}, '', newUrl);
     }, 300);
   }
 

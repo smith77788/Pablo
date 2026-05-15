@@ -1,0 +1,75 @@
+services:
+  # ── Main App (Node.js + Express + SQLite + Telegram Bot) ──
+  - type: web
+    name: nevesty-models
+    runtime: node
+    rootDir: nevesty-models
+    plan: starter
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: REFRESH_TOKEN_SECRET
+        generateValue: true
+      - key: TOTP_ENCRYPTION_KEY
+        generateValue: true
+      - key: SITE_URL
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: YOOKASSA_SHOP_ID
+        sync: false
+      - key: YOOKASSA_SECRET_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_ID
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    disk:
+      name: nevesty-data
+      mountPath: /opt/render/project/src/nevesty-models
+      sizeGB: 5
+    autoDeploy: false
+
+  # ── AI Factory (Python) ──
+  - type: worker
+    name: nevesty-factory
+    runtime: python
+    rootDir: factory
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python factory_main.py
+    envVars:
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: FACTORY_SCHEDULE
+        value: "0 */6 * * *"
+    autoDeploy: false
