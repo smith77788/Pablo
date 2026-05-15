@@ -320,10 +320,11 @@
         text-transform: uppercase;
         white-space: nowrap;
       }
+      /* Status colors: new=blue, confirmed=yellow, in_progress=orange, completed=green, cancelled=grey */
       .status-badge.new {
-        background: rgba(99, 102, 241, 0.15);
-        color: #a5b4fc;
-        border: 1px solid rgba(99, 102, 241, 0.3);
+        background: rgba(59, 130, 246, 0.15);
+        color: #93c5fd;
+        border: 1px solid rgba(59, 130, 246, 0.3);
       }
       .status-badge.reviewing {
         background: rgba(245, 158, 11, 0.15);
@@ -331,24 +332,24 @@
         border: 1px solid rgba(245, 158, 11, 0.3);
       }
       .status-badge.confirmed {
-        background: rgba(16, 185, 129, 0.15);
-        color: #6ee7b7;
-        border: 1px solid rgba(16, 185, 129, 0.3);
+        background: rgba(234, 179, 8, 0.15);
+        color: #fde047;
+        border: 1px solid rgba(234, 179, 8, 0.3);
       }
       .status-badge.in_progress {
-        background: rgba(59, 130, 246, 0.15);
-        color: #93c5fd;
-        border: 1px solid rgba(59, 130, 246, 0.3);
+        background: rgba(249, 115, 22, 0.15);
+        color: #fdba74;
+        border: 1px solid rgba(249, 115, 22, 0.3);
       }
       .status-badge.completed {
-        background: rgba(201, 169, 110, 0.15);
-        color: var(--gold);
-        border: 1px solid rgba(201, 169, 110, 0.3);
+        background: rgba(34, 197, 94, 0.15);
+        color: #86efac;
+        border: 1px solid rgba(34, 197, 94, 0.3);
       }
       .status-badge.cancelled {
-        background: rgba(239, 68, 68, 0.1);
-        color: #fca5a5;
-        border: 1px solid rgba(239, 68, 68, 0.2);
+        background: rgba(107, 114, 128, 0.15);
+        color: #9ca3af;
+        border: 1px solid rgba(107, 114, 128, 0.3);
       }
 
       /* ── Progress bar ── */
@@ -704,6 +705,142 @@
         animation: pulse-badge 2s ease-in-out infinite;
       }
 
+      /* ── Profile section ── */
+      .profile-section {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        padding: 28px 28px 24px;
+        margin-bottom: 28px;
+      }
+      .profile-section h3 {
+        font-size: 0.85rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        margin-bottom: 20px;
+      }
+      .profile-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+      @media (max-width: 520px) {
+        .profile-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .profile-field label {
+        display: block;
+        font-size: 0.65rem;
+        letter-spacing: 1.5px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      .profile-field span {
+        font-size: 0.88rem;
+        color: var(--white);
+      }
+      .profile-input {
+        width: 100%;
+        padding: 10px 14px;
+        font-size: 0.88rem;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--white);
+        outline: none;
+        transition: border-color var(--transition);
+        font-family: inherit;
+        box-sizing: border-box;
+      }
+      .profile-input:focus {
+        border-color: var(--gold);
+      }
+      .profile-input::placeholder {
+        color: var(--text-dim);
+      }
+      .profile-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .btn-profile-edit {
+        padding: 8px 18px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        background: transparent;
+        cursor: pointer;
+        transition: all var(--transition);
+      }
+      .btn-profile-edit:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .btn-profile-save {
+        padding: 8px 18px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+        color: var(--bg);
+        border: none;
+        cursor: pointer;
+        transition: opacity var(--transition);
+      }
+      .btn-profile-save:hover {
+        opacity: 0.88;
+      }
+      .btn-profile-save:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .btn-profile-cancel {
+        padding: 8px 14px;
+        font-size: 0.78rem;
+        border: none;
+        background: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        transition: color var(--transition);
+      }
+      .btn-profile-cancel:hover {
+        color: var(--text-muted);
+      }
+
+      /* ── Stats bar ── */
+      .stats-bar {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-bottom: 28px;
+      }
+      @media (max-width: 520px) {
+        .stats-bar {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      .stat-item {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        padding: 16px 12px;
+        text-align: center;
+      }
+      .stat-num {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1;
+        margin-bottom: 4px;
+      }
+      .stat-label {
+        font-size: 0.68rem;
+        letter-spacing: 0.5px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+      }
+
       /* ── Toast notifications ── */
       .toast-container {
         position: fixed;
@@ -985,6 +1122,76 @@
             <button class="cabinet-logout-btn" onclick="Cabinet.logout()">Сменить номер</button>
           </div>
 
+          <!-- ── Profile section ── -->
+          <div class="profile-section" id="profileSection" style="display: none">
+            <h3>Профиль</h3>
+            <!-- View mode -->
+            <div id="profileView">
+              <div class="profile-grid">
+                <div class="profile-field"><label>Имя</label><span id="profileName">—</span></div>
+                <div class="profile-field"><label>Телефон</label><span id="profilePhone">—</span></div>
+                <div class="profile-field"><label>Email</label><span id="profileEmail">—</span></div>
+              </div>
+              <div class="profile-actions">
+                <button class="btn-profile-edit" onclick="Cabinet.editProfile()">✎ Изменить</button>
+              </div>
+            </div>
+            <!-- Edit mode -->
+            <div id="profileEdit" style="display: none">
+              <div class="profile-grid">
+                <div class="profile-field">
+                  <label for="editName">Имя</label>
+                  <input type="text" class="profile-input" id="editName" placeholder="Ваше имя" autocomplete="name" />
+                </div>
+                <div class="profile-field">
+                  <label>Телефон</label>
+                  <span
+                    id="editPhoneDisplay"
+                    style="font-size: 0.88rem; color: var(--text-muted); padding: 10px 0; display: block"
+                  ></span>
+                </div>
+                <div class="profile-field" style="grid-column: 1 / -1">
+                  <label for="editEmail">Email</label>
+                  <input
+                    type="email"
+                    class="profile-input"
+                    id="editEmail"
+                    placeholder="email@example.com"
+                    autocomplete="email"
+                  />
+                </div>
+              </div>
+              <div
+                id="profileSaveError"
+                style="color: #f87171; font-size: 0.78rem; margin-bottom: 10px; display: none"
+              ></div>
+              <div class="profile-actions">
+                <button class="btn-profile-save" id="profileSaveBtn" onclick="Cabinet.saveProfile()">Сохранить</button>
+                <button class="btn-profile-cancel" onclick="Cabinet.cancelEditProfile()">Отмена</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Stats bar ── -->
+          <div class="stats-bar" id="statsBar" style="display: none">
+            <div class="stat-item">
+              <div class="stat-num" id="statTotal">0</div>
+              <div class="stat-label">Всего</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-num" id="statActive" style="color: #fdba74">0</div>
+              <div class="stat-label">Активных</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-num" id="statCompleted" style="color: #86efac">0</div>
+              <div class="stat-label">Завершено</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-num" id="statCancelled" style="color: #9ca3af">0</div>
+              <div class="stat-label">Отменено</div>
+            </div>
+          </div>
+
           <!-- Empty state -->
           <div class="cabinet-empty" id="cabinetEmpty">
             <div class="cabinet-empty-icon">📋</div>
@@ -1067,8 +1274,64 @@
 
     <div class="toast-container" id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
 
+    <!-- FOOTER -->
+    <footer class="footer" role="contentinfo">
+      <div class="container">
+        <div class="footer-grid">
+          <div class="footer-brand">
+            <div class="nav-logo" style="font-family: 'Playfair Display', serif; font-size: 1.3rem; color: var(--gold)">
+              NEVESTY <span style="color: var(--text)">MODELS</span>
+            </div>
+            <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
+          </div>
+          <div class="footer-col">
+            <h4>Агентство</h4>
+            <a href="/catalog.html">Каталог моделей</a>
+            <a href="/pricing.html">Цены</a>
+            <a href="/cases.html">Кейсы</a>
+            <a href="/about.html">О нас</a>
+            <a href="/contact.html">Контакты</a>
+          </div>
+          <div class="footer-col">
+            <h4>Клиентам</h4>
+            <a href="/booking.html">Оформить заявку</a>
+            <a href="/cabinet.html">Мои заявки</a>
+            <a href="/order-status.html">Статус заявки</a>
+            <a href="/catalog.html">Выбрать модель</a>
+            <a href="/compare.html">Сравнить модели</a>
+            <a href="/favorites.html">Избранное</a>
+            <a href="/faq.html">FAQ</a>
+            <a href="/privacy.html">Конфиденциальность</a>
+          </div>
+          <div class="footer-col">
+            <h4>Связаться</h4>
+            <a href="tel:+78005550000">+7 (800) 555-00-00</a>
+            <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
+            <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
+            <a href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>© 2024 Nevesty Models. Все права защищены.</p>
+          <div class="footer-socials" aria-label="Социальные сети">
+            <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"
+              ><span aria-hidden="true">📸</span></a
+            >
+            <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"
+              ><span aria-hidden="true">✈</span></a
+            >
+            <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"
+              ><span aria-hidden="true">V</span></a
+            >
+          </div>
+        </div>
+      </div>
+    </footer>
+
     <script src="/js/main.js" defer></script>
     <script src="/js/darkmode.js"></script>
+    <script src="/js/cookie-consent.js" defer></script>
+    <script src="/js/chat-widget.js" defer></script>
     <script type="application/ld+json">
       [
         {
@@ -1128,6 +1391,8 @@
         let _orders = [];
         let _reviewOrderId = null;
         let _starRating = 0;
+        let _csrfToken = null;
+        let _authToken = null;
 
         // ── WebSocket real-time monitoring ────────────────────────────────────────
         let _ws = null;
@@ -1291,6 +1556,134 @@
           }, 4000);
         }
 
+        // ── CSRF token ────────────────────────────────────────────────
+        async function getCsrfToken() {
+          if (_csrfToken) return _csrfToken;
+          try {
+            const r = await fetch('/api/csrf-token');
+            const d = await r.json();
+            _csrfToken = d.token || d.csrfToken || '';
+          } catch (_e) {
+            _csrfToken = '';
+          }
+          return _csrfToken;
+        }
+
+        // ── Auth headers helper ───────────────────────────────────────
+        async function authHeaders(extra) {
+          const csrf = await getCsrfToken();
+          const token = _authToken || localStorage.getItem('nm_client_token') || '';
+          return Object.assign(
+            {
+              'Content-Type': 'application/json',
+              Authorization: token ? 'Bearer ' + token : '',
+              'X-CSRF-Token': csrf,
+            },
+            extra || {}
+          );
+        }
+
+        // ── Profile load / display ────────────────────────────────────
+        async function loadProfile() {
+          const token = _authToken || localStorage.getItem('nm_client_token');
+          if (!token) return;
+          try {
+            const r = await fetch('/api/cabinet/profile', {
+              headers: { Authorization: 'Bearer ' + token },
+            });
+            if (!r.ok) return;
+            const d = await r.json();
+            const profile = d.profile || d;
+            document.getElementById('profileName').textContent = profile.name || '—';
+            document.getElementById('profilePhone').textContent =
+              profile.phone || formatPhoneDisplay(normalizePhone(_phone)) || '—';
+            document.getElementById('profileEmail').textContent = profile.email || '—';
+
+            // Show profile section
+            const ps = document.getElementById('profileSection');
+            if (ps) ps.style.display = '';
+          } catch (_e) {
+            /* profile unavailable — skip silently */
+          }
+        }
+
+        function editProfile() {
+          document.getElementById('profileView').style.display = 'none';
+          document.getElementById('profileEdit').style.display = '';
+
+          // Pre-fill edit fields from view
+          document.getElementById('editName').value =
+            document.getElementById('profileName').textContent === '—'
+              ? ''
+              : document.getElementById('profileName').textContent;
+          document.getElementById('editEmail').value =
+            document.getElementById('profileEmail').textContent === '—'
+              ? ''
+              : document.getElementById('profileEmail').textContent;
+          document.getElementById('editPhoneDisplay').textContent = document.getElementById('profilePhone').textContent;
+          document.getElementById('editName').focus();
+        }
+
+        function cancelEditProfile() {
+          document.getElementById('profileView').style.display = '';
+          document.getElementById('profileEdit').style.display = 'none';
+          document.getElementById('profileSaveError').style.display = 'none';
+        }
+
+        async function saveProfile() {
+          const name = (document.getElementById('editName').value || '').trim();
+          const email = (document.getElementById('editEmail').value || '').trim();
+          const errEl = document.getElementById('profileSaveError');
+          const btn = document.getElementById('profileSaveBtn');
+
+          errEl.style.display = 'none';
+          btn.disabled = true;
+          btn.textContent = 'Сохраняем…';
+
+          try {
+            const headers = await authHeaders();
+            const r = await fetch('/api/cabinet/profile', {
+              method: 'PATCH',
+              headers,
+              body: JSON.stringify({ name, email }),
+            });
+            const d = await r.json();
+            if (!r.ok) {
+              errEl.textContent = d.error || 'Ошибка сохранения';
+              errEl.style.display = 'block';
+              return;
+            }
+            // Update view
+            document.getElementById('profileName').textContent = name || '—';
+            document.getElementById('profileEmail').textContent = email || '—';
+            cancelEditProfile();
+            toast('Профиль обновлён', 'info');
+          } catch (_e) {
+            errEl.textContent = 'Ошибка соединения. Попробуйте позже.';
+            errEl.style.display = 'block';
+          } finally {
+            btn.disabled = false;
+            btn.textContent = 'Сохранить';
+          }
+        }
+
+        // ── Render stats bar ──────────────────────────────────────────
+        function renderStats(orders) {
+          const active = ['new', 'reviewing', 'confirmed', 'in_progress'];
+          const total = orders.length;
+          const activeCount = orders.filter(o => active.includes(o.status)).length;
+          const completed = orders.filter(o => o.status === 'completed').length;
+          const cancelled = orders.filter(o => o.status === 'cancelled').length;
+
+          document.getElementById('statTotal').textContent = total;
+          document.getElementById('statActive').textContent = activeCount;
+          document.getElementById('statCompleted').textContent = completed;
+          document.getElementById('statCancelled').textContent = cancelled;
+
+          const sb = document.getElementById('statsBar');
+          if (sb) sb.style.display = '';
+        }
+
         // ── Panel switching ───────────────────────────────────────────
         function showLogin() {
           document.getElementById('loginPanel').style.display = '';
@@ -1403,9 +1796,13 @@
             ${order.comments ? `<div class="order-detail-desc"><strong style="font-size:0.7rem;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase">Описание</strong><br/>${order.comments}</div>` : ''}
 
             <div class="order-actions">
-              <a href="${bookingUrl}" class="btn-repeat" title="Создать похожую заявку">
+              ${
+                order.status === 'completed' || order.status === 'cancelled'
+                  ? `<button class="btn-repeat" onclick="Cabinet.repeatOrder(${order.id}, this)" title="Создать похожую заявку">
                 🔄 Повторить заявку
-              </a>
+              </button>`
+                  : ''
+              }
               <a href="https://t.me/Verdiktnikbot?start=support_${order.id}" class="btn-repeat" target="_blank" rel="noopener">
                 💬 Написать менеджеру
               </a>
@@ -1438,6 +1835,10 @@
                 : orders.length < 5
                   ? `${orders.length} заявки`
                   : `${orders.length} заявок`;
+
+          // Always render stats and load profile
+          renderStats(orders);
+          loadProfile();
 
           if (!orders.length) {
             emptyEl.style.display = 'block';
@@ -1624,8 +2025,9 @@
             }
 
             // Persist JWT for 7 days (survives page refresh)
-            localStorage.setItem('cabinet_token', data.token);
+            localStorage.setItem('nm_client_token', data.token);
             sessionStorage.setItem('cabinet_phone', raw);
+            _authToken = data.token;
 
             // Load orders using the JWT
             await loadOrdersAuth(phone10, data.token);
@@ -1650,7 +2052,7 @@
 
             if (r.status === 401 || r.status === 403) {
               // Token expired — clear and fall back to phone search
-              localStorage.removeItem('cabinet_token');
+              localStorage.removeItem('nm_client_token');
               await loadOrders(phone10);
               return;
             }
@@ -1702,17 +2104,71 @@
           }
         }
 
+        // ── Repeat order ─────────────────────────────────────────────
+        async function repeatOrder(orderId, btn) {
+          const origText = btn ? btn.textContent : '';
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Создаём…';
+          }
+          try {
+            const headers = await authHeaders();
+            const r = await fetch('/api/cabinet/orders/' + orderId + '/repeat', {
+              method: 'POST',
+              headers,
+            });
+            const d = await r.json();
+            if (r.status === 401 || r.status === 403) {
+              // Token invalid — redirect to booking with params
+              const order = _orders.find(o => o.id === orderId);
+              if (order) {
+                window.location.href =
+                  '/booking.html?event_type=' +
+                  encodeURIComponent(order.event_type || '') +
+                  (order.model_id ? '&model=' + order.model_id : '');
+              }
+              return;
+            }
+            if (!r.ok) {
+              toast(d.error || 'Ошибка создания заявки', 'error');
+              return;
+            }
+            toast('Заявка успешно создана! Номер: ' + (d.order_number || d.id || ''), 'info');
+            // Reload orders to show new one
+            const phone10 = normalizePhone(_phone);
+            if (phone10) {
+              showSkeleton();
+              const token = _authToken || localStorage.getItem('nm_client_token');
+              if (token) await loadOrdersAuth(phone10, token);
+              else await loadOrders(phone10);
+            }
+          } catch (_e) {
+            toast('Ошибка соединения. Попробуйте позже.', 'error');
+          } finally {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = origText;
+            }
+          }
+        }
+
         // ── Logout ────────────────────────────────────────────────────
         function logout() {
           wsDisconnect();
           sessionStorage.removeItem('cabinet_phone');
           sessionStorage.removeItem('cabinet_token');
-          localStorage.removeItem('cabinet_token');
+          localStorage.removeItem('nm_client_token');
           _phone = '';
           _orders = [];
+          _csrfToken = null;
           document.getElementById('phoneInput').value = '';
           document.getElementById('stepPhone').style.display = '';
           document.getElementById('stepCode').style.display = 'none';
+          // Hide profile/stats sections
+          const ps = document.getElementById('profileSection');
+          if (ps) ps.style.display = 'none';
+          const sb = document.getElementById('statsBar');
+          if (sb) sb.style.display = 'none';
           showLogin();
         }
 
@@ -1940,12 +2396,13 @@
           const initPhone = urlPhone || savedPhone;
 
           // Check for persisted JWT from loginByPhone (localStorage, 7-day)
-          const persistedToken = localStorage.getItem('cabinet_token');
+          const persistedToken = localStorage.getItem('nm_client_token');
           if (persistedToken && initPhone && !urlPhone) {
             // Try JWT-authenticated load first
             const phone10 = normalizePhone(initPhone);
             if (phone10) {
               _phone = initPhone;
+              _authToken = persistedToken;
               document.getElementById('phoneInput').value = initPhone;
               showSkeleton();
               loadOrdersAuth(phone10, persistedToken);
@@ -2015,6 +2472,10 @@
           backToPhone,
           verifyCode,
           loadFavorites,
+          repeatOrder,
+          editProfile,
+          cancelEditProfile,
+          saveProfile,
         };
 
         if (document.readyState === 'loading') {
