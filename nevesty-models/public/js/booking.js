@@ -388,6 +388,7 @@
     if (noOpt) noOpt.classList.toggle('selected', state.selected_models.length === 0);
 
     renderModelChips();
+    updateStep2Badge();
     saveDraft();
 
     // Clear prefilled card if user manually deselects a pre-filled model
@@ -421,6 +422,7 @@
     if (noOpt) noOpt.classList.toggle('selected', state.selected_models.length === 0);
 
     renderModelChips();
+    updateStep2Badge();
     saveDraft();
   }
 
@@ -441,6 +443,7 @@
       const card = document.getElementById('prefilledModelCard');
       if (card) card.style.display = 'none';
       renderModelChips();
+      updateStep2Badge();
       saveDraft();
       return;
     }
@@ -462,6 +465,7 @@
     });
     document.getElementById('noModelOption')?.classList.remove('selected');
     renderModelChips();
+    updateStep2Badge();
     saveDraft();
   }
 
@@ -917,15 +921,37 @@
       }
       state.event_type = selectedCard.dataset.value;
       saveDraft();
+      // Cancel any pending auto-advance since we're navigating manually
+      clearTimeout(_autoAdvanceTimer);
+      // Analytics are fired from selectService() on auto-advance;
+      // only fire here if user clicked "Next" without triggering auto-advance
+      if (!state._step1AnalyticsFired) {
+        if (window.gtag) gtag('event', 'begin_checkout', { event_type: state.event_type });
+        if (window.ym && window.YM_ID) ym(window.YM_ID, 'reachGoal', 'booking_start', { event_type: state.event_type });
+      }
+    }
 
-      // GA4: begin_checkout (booking funnel start)
-      if (window.gtag) {
-        gtag('event', 'begin_checkout', { event_type: state.event_type });
+    // Step 2: no hard validation (models optional), but show a soft hint if none selected
+    if (state.step === 2 && state.selected_models.length === 0 && !state._step2SkipHintShown) {
+      state._step2SkipHintShown = true;
+      // Briefly show a soft confirmation; user can click Next again to confirm skip
+      const existingHint = document.getElementById('step2SkipHint');
+      if (!existingHint) {
+        const hint = document.createElement('div');
+        hint.id = 'step2SkipHint';
+        hint.role = 'alert';
+        hint.style.cssText = 'background:rgba(201,169,110,0.08);border:1px solid rgba(201,169,110,0.3);color:var(--text-muted);font-size:0.82rem;padding:10px 14px;margin-bottom:16px;';
+        hint.innerHTML = '💡 Менеджер подберёт подходящую модель самостоятельно. Нажмите <strong style="color:var(--gold)">Далее</strong> ещё раз чтобы продолжить без выбора.';
+        const nav = document.querySelector('#step2 .booking-nav');
+        if (nav) nav.insertAdjacentElement('beforebegin', hint);
+        return; // stop here — user must confirm by pressing Next again
       }
-      // Yandex: booking_start goal
-      if (window.ym && window.YM_ID) {
-        ym(window.YM_ID, 'reachGoal', 'booking_start', { event_type: state.event_type });
-      }
+      // Second press: remove hint and proceed
+      document.getElementById('step2SkipHint')?.remove();
+    } else if (state.step === 2) {
+      // Reset the hint flag when moving forward with selection
+      state._step2SkipHintShown = false;
+      document.getElementById('step2SkipHint')?.remove();
     }
 
     // Step 3 validation: date must be selected and in future
@@ -1006,7 +1032,14 @@
     goToStep(state.step + 1);
   }
 
-  function prevStep() { goToStep(state.step - 1, true); }
+  function prevStep() {
+    // When going back to step 2, reset the skip hint so it can show again
+    if (state.step === 3) {
+      state._step2SkipHintShown = false;
+      document.getElementById('step2SkipHint')?.remove();
+    }
+    goToStep(state.step - 1, true);
+  }
 
   function goToStep(n, isBack = false) {
     if (n < 1 || n > TOTAL_STEPS) return;
@@ -1042,6 +1075,7 @@
   }
 
   /* ─── Service card selection ─────────────────────── */
+  let _autoAdvanceTimer = null;
   function selectService(value) {
     document.querySelectorAll('.service-option-card').forEach(c => {
       const isThis = c.dataset.value === value;
@@ -1051,6 +1085,26 @@
     state.event_type = value;
     saveDraft();
     document.querySelectorAll('#serviceOptions .field-error-msg').forEach(n => n.remove());
+
+    // Auto-advance to step 2 after a short visual pause (600ms)
+    // so the user can see the selection before the transition
+    if (state.step === 1) {
+      clearTimeout(_autoAdvanceTimer);
+      _autoAdvanceTimer = setTimeout(() => {
+        if (state.step === 1 && state.event_type === value) {
+          // GA4: begin_checkout (booking funnel start)
+          if (window.gtag) {
+            gtag('event', 'begin_checkout', { event_type: state.event_type });
+          }
+          // Yandex: booking_start goal
+          if (window.ym && window.YM_ID) {
+            ym(window.YM_ID, 'reachGoal', 'booking_start', { event_type: state.event_type });
+          }
+          state._step1AnalyticsFired = true;
+          goToStep(2);
+        }
+      }, 600);
+    }
   }
 
   /* ─── Build confirmation summary ─────────────────── */
