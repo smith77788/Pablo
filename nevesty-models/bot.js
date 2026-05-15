@@ -2475,21 +2475,26 @@ async function previewBroadcast(chatId) {
     await safeSend(chatId, msgBody, { parse_mode: 'MarkdownV2' }).catch(() => {});
   }
 
+  const photoRowBtn = photoId
+    ? [{ text: '🖼 Изменить фото', callback_data: 'adm_bc_edit_photo' }, { text: '🗑 Убрать фото', callback_data: 'adm_bc_remove_photo' }]
+    : [{ text: '📷 Добавить фото', callback_data: 'adm_bc_edit_photo' }];
+
   return safeSend(chatId, '─────\n📤 Отправить рассылку?', {
     reply_markup: { inline_keyboard: [
       [
         { text: '✅ Отправить сейчас', callback_data: 'adm_bc_confirm'        },
         { text: '🕐 Запланировать',    callback_data: 'adm_bc_schedule'       },
       ],
+      photoRowBtn,
       [
-        { text: '✏️ Изменить',         callback_data: 'adm_bc_edit'           },
+        { text: '✏️ Изменить текст',   callback_data: 'adm_bc_edit'           },
         { text: '❌ Отмена',            callback_data: 'adm_bc_cancel_preview' },
       ],
     ]}
   });
 }
 
-async function sendBroadcast(chatId, text) {
+async function sendBroadcast(chatId, text, preservePhoto = false) {
   const sess = await getSession(chatId);
   const sd   = sessionData(sess);
   const segment = sd.broadcastSegment || 'all';
@@ -2497,8 +2502,14 @@ async function sendBroadcast(chatId, text) {
   if (!clients.length) return safeSend(chatId, '❌ Нет клиентов для рассылки.', {
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
   });
-  const newSd = { ...sd, broadcastRecipients: clients.map(c => c.client_chat_id), broadcastText: text, broadcastPhotoId: null };
+  // Preserve existing photo when admin is only editing text from preview
+  const photoId = preservePhoto ? (sd.broadcastPhotoId || null) : null;
+  const newSd = { ...sd, broadcastRecipients: clients.map(c => c.client_chat_id), broadcastText: text, broadcastPhotoId: photoId };
   await setSession(chatId, 'adm_broadcast_preview', newSd);
+  if (preservePhoto) {
+    // Coming from "edit text" in preview — skip photo prompt, go straight to preview
+    return previewBroadcast(chatId);
+  }
   return _askBroadcastPhoto(chatId);
 }
 
@@ -4831,19 +4842,47 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       return doSendBroadcast(chatId);
     }
-    // ── Broadcast: edit text
+    // ── Broadcast: edit text (preserve photo)
     if (data === 'adm_bc_edit') {
       if (!isAdmin(chatId)) return;
       const sess = await getSession(chatId);
       const sd   = sessionData(sess);
-      await setSession(chatId, 'adm_broadcast_msg', { ...sd });
+      await setSession(chatId, 'adm_broadcast_edit_text', { ...sd });
       return safeSend(chatId,
-        `✏️ *Изменить текст рассылки*\n\nВведите новый текст:`,
+        `✏️ *Изменить текст рассылки*\n\nВведите новый текст${sd.broadcastPhotoId ? ' \\(фото сохранится\\)' : ''}:`,
         {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_broadcast' }]] }
+          reply_markup: { inline_keyboard: [[{ text: '← Назад к предпросмотру', callback_data: 'adm_bc_back_preview' }]] }
         }
       );
+    }
+
+    // ── Broadcast: edit/add photo from preview
+    if (data === 'adm_bc_edit_photo') {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      await setSession(chatId, 'adm_broadcast_photo_wait', { ...sd });
+      return safeSend(chatId,
+        `🖼 *Рассылка — ${sd.broadcastPhotoId ? 'изменить' : 'добавить'} фото*\n\nОтправьте фото для рассылки:`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '← Назад к предпросмотру', callback_data: 'adm_bc_back_preview' }],
+          ]}
+        }
+      );
+    }
+
+    // ── Broadcast: remove photo from preview
+    if (data === 'adm_bc_remove_photo') {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      sd.broadcastPhotoId = null;
+      await setSession(chatId, 'adm_broadcast_preview', sd);
+      await bot.answerCallbackQuery(q.id, { text: '🗑 Фото удалено' }).catch(() => {});
+      return previewBroadcast(chatId);
     }
     // ── Broadcast: cancel from preview
     if (data === 'adm_bc_cancel_preview') {
@@ -4851,6 +4890,14 @@ function initBot(app) {
       await clearSession(chatId);
       await bot.answerCallbackQuery(q.id, { text: '❌ Рассылка отменена' }).catch(() => {});
       return showBroadcast(chatId);
+    }
+    // ── Broadcast: back to preview (from edit text/photo screens) without clearing
+    if (data === 'adm_bc_back_preview') {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      await setSession(chatId, 'adm_broadcast_preview', sd);
+      return previewBroadcast(chatId);
     }
     // ── Broadcast: schedule from preview
     if (data === 'adm_bc_schedule') {
@@ -6290,9 +6337,14 @@ function initBot(app) {
         );
       }
 
-      // ── Broadcast text
+      // ── Broadcast text (initial entry — no photo yet)
       if (state === 'adm_broadcast_msg') {
-        return sendBroadcast(chatId, text);
+        return sendBroadcast(chatId, text, false);
+      }
+
+      // ── Broadcast text edit from preview (preserve existing photo)
+      if (state === 'adm_broadcast_edit_text') {
+        return sendBroadcast(chatId, text, true);
       }
 
       // ── Broadcast photo caption
