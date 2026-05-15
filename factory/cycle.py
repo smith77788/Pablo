@@ -2387,6 +2387,22 @@ def run_cycle() -> dict:
         logger.error("Phase 5.4 weekly factory summary error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 5.4 — AUTONOMOUS EXPERIMENTS (ExperimentSystemAgent, БЛОК 5.4)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🧪 PHASE 5.4: AUTONOMOUS EXPERIMENTS")
+    try:
+        from factory.agents.experiment_system import ExperimentSystemAgent
+        exp_agent = ExperimentSystemAgent()
+        exp_result = exp_agent.run(db_path=db_path)
+        results["experiment_system"] = exp_result
+        proposals_count = len(exp_result.get("proposals", []))
+        if proposals_count:
+            summary_lines.append(f"🧪 ExperimentSystem: {proposals_count} экспериментов предложено")
+        logger.info("[Phase5.4] ExperimentSystem proposals: %d", proposals_count)
+    except Exception as e:
+        logger.error("Phase 5.4 ExperimentSystem error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 4 — IDEAS (если мало)
     # ════════════════════════════════════════════════════════════════
     logger.info("\n💡 IDEAS")

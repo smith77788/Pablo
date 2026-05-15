@@ -939,3 +939,95 @@ class CEODelegation:
                 f"Выполнение: {int(fulfillment_rate * 100)}%"
             ),
         }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# БЛОК 5.4 — ExperimentSystemAgent: proposes, tracks, and reports A/B experiments
+# ══════════════════════════════════════════════════════════════════════════════
+
+from factory.agents.base import FactoryAgent as _FactoryAgent
+
+
+class ExperimentSystemAgent(_FactoryAgent):
+    """Автономная система экспериментов для агентства (БЛОК 5.4)."""
+
+    name = "ExperimentSystemAgent"
+    department = "experiments"
+    role = "ExperimentSystem"
+    system_prompt = "Ты — аналитик A/B экспериментов для модельного агентства."
+
+    def propose_experiments(self, metrics: dict[str, Any]) -> dict[str, Any]:
+        """Предлагает гипотезы для A/B экспериментов на основе метрик."""
+        prompt = f"""
+Ты — аналитик агентства моделей. На основе метрик предложи 3 A/B эксперимента.
+
+Метрики: {_json.dumps(metrics, ensure_ascii=False)}
+
+Верни JSON с полями:
+{{
+  "experiments": [
+    {{
+      "id": "exp_001",
+      "hypothesis": "...",
+      "metric": "conversion_rate",
+      "variant_a": "...",
+      "variant_b": "...",
+      "duration_days": 14
+    }}
+  ]
+}}
+"""
+        return self.think_json(prompt)
+
+    def track_experiment(self, exp_id: str, results: dict[str, Any]) -> dict[str, Any]:
+        """Анализирует результаты эксперимента и принимает решение."""
+        prompt = f"""
+Эксперимент {exp_id} завершён. Результаты:
+{_json.dumps(results, ensure_ascii=False)}
+
+Определи победителя и реши применять ли изменение. Верни JSON:
+{{
+  "winner": "A",
+  "confidence": 0.0,
+  "apply": false,
+  "recommendation": "...",
+  "next_steps": []
+}}
+"""
+        return self.think_json(prompt)
+
+    def generate_experiment_report(self, experiments: list[dict[str, Any]]) -> dict[str, Any]:
+        """Генерирует отчёт по всем экспериментам."""
+        prompt = f"""
+Сформируй отчёт по {len(experiments)} экспериментам агентства моделей.
+{_json.dumps(experiments[:5], ensure_ascii=False)}
+
+Верни JSON:
+{{
+  "total": {len(experiments)},
+  "successful": 0,
+  "inconclusive": 0,
+  "insights": ["..."],
+  "recommended_changes": ["..."]
+}}
+"""
+        return self.think_json(prompt)
+
+    def run(self, db_path: str | None = None) -> dict[str, Any]:
+        """Полный цикл: читаем метрики, предлагаем эксперименты."""
+        metrics: dict[str, Any] = {"conversion_rate": 0.15, "avg_order_value": 50000}
+        if db_path:
+            try:
+                import factory.db as _fdb_mod
+                _get = getattr(_fdb_mod, "get_latest_metrics", None)
+                if callable(_get):
+                    metrics = _get() or metrics
+            except Exception:
+                pass
+
+        proposals = self.propose_experiments(metrics)
+        return {
+            "role": self.role,
+            "proposals": proposals.get("experiments", []),
+            "metrics_used": metrics,
+        }
