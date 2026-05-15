@@ -210,7 +210,8 @@ const KB_MAIN_ADMIN = (badge, score) => {
        { text: '💬 Обсуждения',            callback_data: 'adm_discussions'}],
       [{ text: '🔍 Найти заявку',           callback_data: 'adm_search_order'     },
        { text: '🏭 AI Factory',             callback_data: 'adm_factory'          }],
-      [{ text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' }],
+      [{ text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' },
+       { text: '🎯 AI Задачи',             callback_data: 'adm_factory_tasks'  }],
       ...(SITE_URL.startsWith('https://') ? [[
         { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } },
         { text: '🌐 Сайт', url: SITE_URL },
@@ -233,9 +234,8 @@ async function showMainMenu(chatId, name) {
     { reply_markup: REPLY_KB_CLIENT }
   );
   if (greeting) {
-    const text = greeting.replace('{name}', name || 'гость');
-    // Greeting is user-edited content — send as plain text to avoid injection
-    return safeSend(chatId, text, { reply_markup: buildClientKeyboard() });
+    const rawGreeting = greeting.replace('{name}', name || 'гость');
+    return safeSend(chatId, esc(rawGreeting), { parse_mode: 'MarkdownV2', reply_markup: buildClientKeyboard() });
   }
   const greetingText = menuText || 'Выберите действие:';
   return safeSend(chatId,
@@ -2812,7 +2812,9 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const session2 = await getSession(chatId);
       const d2 = sessionData(session2);
-      d2.category = data.replace('adm_mdl_cat_',''); d2._step = 'instagram';
+      const newCat = data.replace('adm_mdl_cat_','');
+      if (!Object.keys(MODEL_CATEGORIES).includes(newCat)) return;
+      d2.category = newCat; d2._step = 'instagram';
       return showAddModelStep(chatId, d2);
     }
     if (data === 'adm_mdl_save') {
@@ -2926,6 +2928,30 @@ function initBot(app) {
     }
     if (data === 'adm_factory_exp')       { if (!isAdmin(chatId)) return; return showFactoryExperiments(chatId); }
     if (data === 'adm_factory_decisions') { if (!isAdmin(chatId)) return; return showFactoryDecisions(chatId); }
+    if (data === 'adm_factory_tasks')     { if (!isAdmin(chatId)) return; return showFactoryTasks(chatId, 0); }
+    if (data.startsWith('adm_factory_tasks_')) {
+      if (!isAdmin(chatId)) return;
+      const page = parseInt(data.replace('adm_factory_tasks_', '')) || 0;
+      return showFactoryTasks(chatId, page);
+    }
+    if (data.startsWith('factory_task_done_')) {
+      if (!isAdmin(chatId)) return;
+      const taskId = parseInt(data.replace('factory_task_done_', ''));
+      await run("UPDATE factory_tasks SET status='done' WHERE id=?", [taskId]).catch(() => {});
+      await bot.answerCallbackQuery(q.id, { text: 'Задача выполнена!' }).catch(() => {});
+      return safeSend(chatId, 'Задача отмечена как выполненная.', {
+        reply_markup: { inline_keyboard: [[{ text: 'AI Задачи', callback_data: 'adm_factory_tasks' }]] }
+      });
+    }
+    if (data.startsWith('factory_task_skip_')) {
+      if (!isAdmin(chatId)) return;
+      const taskId = parseInt(data.replace('factory_task_skip_', ''));
+      await run("UPDATE factory_tasks SET status='skipped' WHERE id=?", [taskId]).catch(() => {});
+      await bot.answerCallbackQuery(q.id, { text: 'Задача пропущена' }).catch(() => {});
+      return safeSend(chatId, 'Задача пропущена.', {
+        reply_markup: { inline_keyboard: [[{ text: 'AI Задачи', callback_data: 'adm_factory_tasks' }]] }
+      });
+    }
     if (data.startsWith('adm_factory_done_')) {
       if (!isAdmin(chatId)) return;
       const actionId = parseInt(data.replace('adm_factory_done_', ''));
@@ -3738,6 +3764,7 @@ async function showFactoryPanel(chatId) {
          { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' }],
         [{ text: '🧪 Эксперименты',  callback_data: 'adm_factory_exp' },
          { text: '📋 Решения CEO',   callback_data: 'adm_factory_decisions' }],
+        [{ text: '🎯 AI Задачи',     callback_data: 'adm_factory_tasks' }],
         [{ text: '← Меню', callback_data: 'admin_menu' }],
       ]}
     });

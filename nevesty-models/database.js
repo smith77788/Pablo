@@ -186,6 +186,19 @@ async function initDatabase() {
     FOREIGN KEY(order_id) REFERENCES orders(id)
   )`);
 
+  // Factory tasks — synced from AI Factory CEO growth_actions
+  await run(`CREATE TABLE IF NOT EXISTS factory_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,
+    priority INTEGER DEFAULT 5,
+    department TEXT,
+    expected_impact TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_factory_tasks_status ON factory_tasks(status)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_factory_tasks_priority ON factory_tasks(priority DESC, created_at DESC)`);
+
   // Migrations — add status column to reviews if missing
   await run(`ALTER TABLE reviews ADD COLUMN status TEXT DEFAULT 'pending'`).catch(() => {});
 
@@ -243,6 +256,7 @@ async function initDatabase() {
   await run(`CREATE INDEX IF NOT EXISTS idx_models_category ON models(category)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_models_available ON models(available)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_models_featured ON models(featured DESC)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_models_featured_active ON models(featured) WHERE featured=1`);
   await run(`CREATE INDEX IF NOT EXISTS idx_sessions_updated ON telegram_sessions(updated_at)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_findings_status ON agent_findings(status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_findings_created ON agent_findings(created_at DESC)`);
