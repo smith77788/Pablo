@@ -4011,6 +4011,15 @@ router.post('/admin/db-vacuum', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// POST /api/admin/db/vacuum — manual VACUUM with WAL checkpoint
+router.post('/admin/db/vacuum', auth, async (req, res, next) => {
+  try {
+    await run('PRAGMA wal_checkpoint(TRUNCATE)');
+    await run('VACUUM');
+    res.json({ ok: true, message: 'VACUUM completed successfully' });
+  } catch (e) { next(e); }
+});
+
 // ─── Cache stats & control (admin) ────────────────────────────────────────────
 // GET  /api/admin/cache/stats  → hit/miss/keys count
 // DELETE /api/admin/cache      → clear entire in-memory cache

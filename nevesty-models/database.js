@@ -659,18 +659,21 @@ async function initDatabase() {
     await seedSampleReviews();
   }
 
-  // VACUUM every Sunday at 03:00
+  // VACUUM + WAL checkpoint every Sunday at 03:00
   function scheduleVacuum() {
     const now = new Date();
     const nextSunday = new Date(now);
     nextSunday.setDate(now.getDate() + (7 - now.getDay()) % 7 || 7);
     nextSunday.setHours(3, 0, 0, 0);
     const delay = nextSunday - now;
-    setTimeout(() => {
-      db.run('VACUUM', (err) => {
-        if (err) console.error('[DB] VACUUM error:', err.message);
-        else console.log('[DB] VACUUM completed');
-      });
+    setTimeout(async () => {
+      try {
+        await run('PRAGMA wal_checkpoint(TRUNCATE)');
+        await run('VACUUM');
+        console.log('[DB] Weekly VACUUM + WAL checkpoint completed');
+      } catch (e) {
+        console.error('[DB] VACUUM error:', e.message);
+      }
       scheduleVacuum(); // reschedule
     }, delay).unref(); // allow process to exit cleanly if no other work remains
   }
