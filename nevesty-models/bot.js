@@ -8237,17 +8237,19 @@ async function showAdminExperiments(chatId) {
 async function showAdminReviews(chatId) {
   if (!isAdmin(chatId)) return;
   try {
-    const [pendingCount, approvedCount] = await Promise.all([
+    const [pendingCount, approvedCount, totalCount] = await Promise.all([
       get("SELECT COUNT(*) as n FROM reviews WHERE approved=0 AND (status IS NULL OR status != 'rejected')"),
       get("SELECT COUNT(*) as n FROM reviews WHERE approved=1"),
+      get("SELECT COUNT(*) as n FROM reviews"),
     ]);
-    const text = `*⭐ Управление отзывами*\n\nОжидают одобрения: *${esc(String(pendingCount.n))}*\nОдобрено: *${esc(String(approvedCount.n))}*`;
+    const text = `*⭐ Управление отзывами*\n\nОжидают одобрения: *${esc(String(pendingCount.n))}*\nОдобрено: *${esc(String(approvedCount.n))}*\nВсего: *${esc(String(totalCount.n))}*`;
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         [
-          { text: `⏳ Ожидают (${pendingCount.n})`,  callback_data: 'adm_reviews_pending'  },
-          { text: `✅ Одобрены (${approvedCount.n})`, callback_data: 'adm_reviews_approved' },
+          { text: `⏳ Ожидают (${pendingCount.n})`,  callback_data: 'adm_rev_pending'  },
+          { text: `✅ Одобрены (${approvedCount.n})`, callback_data: 'adm_rev_approved' },
+          { text: `📋 Все (${totalCount.n})`,         callback_data: 'adm_rev_all'      },
         ],
         [{ text: '← Меню', callback_data: 'admin_menu' }],
       ]}
@@ -8260,39 +8262,49 @@ async function showAdminReviewsList(chatId, filter) {
   try {
     let reviews;
     if (filter === 'pending') {
-      reviews = await query("SELECT * FROM reviews WHERE approved=0 AND (status IS NULL OR status != 'rejected') ORDER BY created_at DESC").catch(()=>[]);
+      reviews = await query("SELECT * FROM reviews WHERE approved=0 AND (status IS NULL OR status != 'rejected') ORDER BY created_at DESC LIMIT 15").catch(()=>[]);
+    } else if (filter === 'approved') {
+      reviews = await query("SELECT * FROM reviews WHERE approved=1 ORDER BY created_at DESC LIMIT 15").catch(()=>[]);
     } else {
-      reviews = await query("SELECT * FROM reviews WHERE approved=1 ORDER BY created_at DESC").catch(()=>[]);
+      reviews = await query("SELECT * FROM reviews ORDER BY created_at DESC LIMIT 15").catch(()=>[]);
     }
 
+    const filterLabels = { pending: 'ожидающих одобрения', approved: 'одобренных', all: 'отзывов' };
+    const filterBtns = [
+      { text: '⏳ Ожидают', callback_data: 'adm_rev_pending'  },
+      { text: '✅ Одобрены', callback_data: 'adm_rev_approved' },
+      { text: '📋 Все',     callback_data: 'adm_rev_all'      },
+    ];
+
     if (!reviews.length) {
-      const label = filter === 'pending' ? 'ожидающих одобрения' : 'одобренных';
-      return safeSend(chatId, `Нет ${label} отзывов.`, {
-        reply_markup: { inline_keyboard: [[{ text: '← К отзывам', callback_data: 'adm_reviews' }]] }
+      return safeSend(chatId, `Нет ${filterLabels[filter] || 'отзывов'}.`, {
+        reply_markup: { inline_keyboard: [filterBtns, [{ text: '← К отзывам', callback_data: 'adm_reviews' }]] }
       });
     }
 
     for (const r of reviews) {
       const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 1)));
-      const preview = r.text ? r.text.slice(0, 100) + (r.text.length > 100 ? '…' : '') : '';
-      const msgText = `*Отзыв \\#${esc(String(r.id))}*\n👤 ${esc(r.client_name)}\n${stars}\n\n${esc(preview)}`;
+      const preview = r.text ? r.text.slice(0, 120) + (r.text.length > 120 ? '…' : '') : '';
+      const statusIcon = r.approved ? '✅' : (r.status === 'rejected' ? '❌' : '⏳');
+      const msgText = `${statusIcon} *Отзыв \\#${esc(String(r.id))}*\n👤 ${esc(r.client_name || 'Клиент')}\n${stars}\n\n${esc(preview)}`;
       const btns = [];
-      if (filter === 'pending') {
-        btns.push({ text: '✅ Одобрить', callback_data: `rev_approve_${r.id}` });
-        btns.push({ text: '❌ Отклонить', callback_data: `rev_reject_${r.id}` });
-      } else {
-        btns.push({ text: '🗑 Удалить',  callback_data: `rev_delete_${r.id}` });
+      if (!r.approved || r.status === 'rejected') {
+        btns.push({ text: '✅ Одобрить',  callback_data: `rev_approve_${r.id}` });
+      }
+      if (r.approved || r.status !== 'rejected') {
         btns.push({ text: '❌ Отклонить', callback_data: `rev_reject_${r.id}` });
       }
+      btns.push({ text: '🔍 Подробнее',  callback_data: `rev_view_${r.id}` });
+      btns.push({ text: '🗑 Удалить',    callback_data: `rev_delete_${r.id}` });
       await safeSend(chatId, msgText, {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [btns] }
       });
     }
 
-    const label = filter === 'pending' ? 'ожидают одобрения' : 'одобрено';
-    return safeSend(chatId, `Всего ${label}: ${reviews.length}`, {
-      reply_markup: { inline_keyboard: [[{ text: '← К отзывам', callback_data: 'adm_reviews' }]] }
+    const label = filter === 'pending' ? 'ожидают одобрения' : filter === 'approved' ? 'одобрено' : 'всего';
+    return safeSend(chatId, `${label}: ${reviews.length}`, {
+      reply_markup: { inline_keyboard: [filterBtns, [{ text: '← К отзывам', callback_data: 'adm_reviews' }]] }
     });
   } catch (e) { console.error('[Bot] showAdminReviewsList:', e.message); }
 }
