@@ -176,7 +176,7 @@ function resetSessionTimer(chatId) {
               reply_markup: {
                 inline_keyboard: [
                   [{ text: '🔄 Начать заново', callback_data: 'bk_start' }],
-                  [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+                  [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
                 ],
               },
             }
@@ -191,7 +191,7 @@ function resetSessionTimer(chatId) {
               reply_markup: {
                 inline_keyboard: [
                   [{ text: '🔄 Продолжить', callback_data: 'admin_menu' }],
-                  [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+                  [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
                 ],
               },
             }
@@ -204,7 +204,7 @@ function resetSessionTimer(chatId) {
             {
               parse_mode: 'MarkdownV2',
               reply_markup: {
-                inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]],
+                inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]],
               },
             }
           );
@@ -250,7 +250,7 @@ function setSessionReminder(chatId) {
           reply_markup: {
             inline_keyboard: [
               [{ text: '▶️ Продолжить', callback_data: 'resume_session' }],
-              [{ text: '❌ Отменить', callback_data: 'cancel_session' }],
+              [{ text: STRINGS.btnCancel, callback_data: 'cancel_session' }],
             ],
           },
         });
@@ -438,18 +438,8 @@ const REPLY_KB_CLIENT = {
     [{ text: '⭐ Топ-модели' }, { text: '💃 Каталог' }],
     [{ text: '📝 Подать заявку' }, { text: '⚡ Быстрая заявка' }],
     [{ text: '❤️ Избранное' }, { text: '💬 Менеджер' }],
-    [{ text: '📋 Мои заявки' }, { text: '🔍 Статус заявки' }, { text: '👤 Профиль' }],
+    [{ text: STRINGS.btnMyOrders }, { text: '🔍 Статус заявки' }, { text: '👤 Профиль' }],
     [{ text: '💰 Прайс' }, { text: '📞 Контакты' }, { text: '❓ FAQ' }],
-  ],
-  resize_keyboard: true,
-  persistent: true,
-};
-
-const REPLY_KB_ADMIN = {
-  keyboard: [
-    [{ text: '📋 Заявки' }, { text: '💃 Модели' }, { text: '📊 Статистика' }],
-    [{ text: '🤖 Организм' }, { text: '📡 Фид агентов' }, { text: '💬 Обсуждения' }],
-    [{ text: '⚙️ Настройки' }, { text: '📢 Рассылка' }, { text: '📤 Экспорт' }],
   ],
   resize_keyboard: true,
   persistent: true,
@@ -496,7 +486,7 @@ async function buildClientKeyboard() {
 
   // Row 3: orders + profile
   rows.push([
-    { text: '📋 Мои заявки', callback_data: 'my_orders' },
+    { text: STRINGS.btnMyOrders, callback_data: 'my_orders' },
     { text: '👤 Мой профиль', callback_data: 'profile' },
   ]);
 
@@ -556,6 +546,70 @@ async function buildClientKeyboard() {
   return { inline_keyboard: rows };
 }
 
+// ─── Admin sub-menus ─────────────────────────────────────────────────────────
+const KB_ADMIN_ANALYTICS = {
+  inline_keyboard: [
+    [
+      { text: '📊 Статистика', callback_data: 'adm_stats' },
+      { text: '📈 Дашборд', callback_data: 'adm_dashboard' },
+    ],
+    [
+      { text: '⚡ Кратко', callback_data: 'adm_quick_stats' },
+      { text: '👥 Клиенты', callback_data: 'adm_clients' },
+    ],
+    [{ text: '📋 Журнал аудита', callback_data: 'adm_audit_log' }],
+    [{ text: '◀️ Главное меню', callback_data: 'admin_menu' }],
+  ],
+};
+
+const KB_ADMIN_MARKETING = {
+  inline_keyboard: [
+    [
+      { text: '📢 Рассылка', callback_data: 'adm_broadcast' },
+      { text: '📅 Расписание рассылок', callback_data: 'adm_sched_bcast' },
+    ],
+    [
+      { text: '📤 Экспорт заявок', callback_data: 'adm_export' },
+      { text: '📸 Соцсети', callback_data: 'adm_social' },
+    ],
+    [{ text: '◀️ Главное меню', callback_data: 'admin_menu' }],
+  ],
+};
+
+const KB_ADMIN_TEAM = {
+  inline_keyboard: [
+    [
+      { text: '👑 Администраторы', callback_data: 'adm_admins' },
+      { text: '👥 Менеджеры', callback_data: 'adm_managers' },
+    ],
+    [
+      { text: '⭐ Отзывы', callback_data: 'adm_reviews' },
+      { text: '💬 Обсуждения', callback_data: 'adm_discussions' },
+    ],
+    [
+      { text: '🔍 Найти заявку', callback_data: 'adm_search_order' },
+      { text: '🔍 Поиск по заметкам', callback_data: 'adm_search_notes' },
+    ],
+    [{ text: '◀️ Главное меню', callback_data: 'admin_menu' }],
+  ],
+};
+
+const KB_ADMIN_FACTORY = health => ({
+  inline_keyboard: [
+    [
+      { text: `🤖 Организм${health}`, callback_data: 'adm_organism' },
+      { text: '🏭 AI Factory', callback_data: 'adm_factory' },
+    ],
+    [
+      { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' },
+      { text: '🎯 AI Задачи', callback_data: 'adm_factory_tasks' },
+    ],
+    [{ text: '📡 Фид агентов', callback_data: 'agent_feed_0' }],
+    [{ text: '◀️ Главное меню', callback_data: 'admin_menu' }],
+  ],
+});
+
+// ─── Main admin keyboard — compact, sectioned ────────────────────────────────
 const KB_MAIN_ADMIN = (badge, score) => {
   const health = score != null ? ` 💚${score}%` : '';
   return {
@@ -565,41 +619,16 @@ const KB_MAIN_ADMIN = (badge, score) => {
         { text: '💃 Модели', callback_data: 'adm_models_0' },
       ],
       [
-        { text: '📊 Статистика', callback_data: 'adm_stats' },
-        { text: '📈 Дашборд', callback_data: 'adm_dashboard' },
-        { text: '⚡ Кратко', callback_data: 'adm_quick_stats' },
-      ],
-      [
-        { text: `🤖 Организм${health}`, callback_data: 'adm_organism' },
+        { text: '📊 Аналитика', callback_data: 'adm_menu_analytics' },
         { text: '⚙️ Настройки', callback_data: 'adm_settings' },
       ],
       [
-        { text: '📢 Рассылка', callback_data: 'adm_broadcast' },
-        { text: '📅 Рассылки', callback_data: 'adm_sched_bcast' },
-        { text: '📤 Экспорт заявок', callback_data: 'adm_export' },
+        { text: '📢 Маркетинг', callback_data: 'adm_menu_marketing' },
+        { text: '👥 Команда', callback_data: 'adm_menu_team' },
       ],
       [
+        { text: `🤖 AI Factory${health}`, callback_data: 'adm_menu_factory' },
         { text: '➕ Добавить модель', callback_data: 'adm_addmodel' },
-        { text: '👑 Администраторы', callback_data: 'adm_admins' },
-      ],
-      [
-        { text: '📡 Фид агентов', callback_data: 'agent_feed_0' },
-        { text: '⭐ Отзывы', callback_data: 'adm_reviews' },
-        { text: '💬 Обсуждения', callback_data: 'adm_discussions' },
-      ],
-      [
-        { text: '🔍 Найти заявку', callback_data: 'adm_search_order' },
-        { text: '🔍 Заметки', callback_data: 'adm_search_notes' },
-        { text: '🏭 AI Factory', callback_data: 'adm_factory' },
-      ],
-      [
-        { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' },
-        { text: '🎯 AI Задачи', callback_data: 'adm_factory_tasks' },
-      ],
-      [
-        { text: '👥 Клиенты', callback_data: 'adm_clients' },
-        { text: '📋 Журнал', callback_data: 'adm_audit_log' },
-        { text: '👥 Менеджеры', callback_data: 'adm_managers' },
       ],
       ...(SITE_URL.startsWith('https://')
         ? [
@@ -776,8 +805,6 @@ async function showAdminMenu(chatId, name) {
     const badge = ordersRow.n > 0 ? ` 🔴${ordersRow.n}` : '';
     const scoreMatch = scoreRow?.message?.match(/Health Score:\s*(\d+)%/);
     const score = scoreMatch ? parseInt(scoreMatch[1]) : null;
-    // Сначала показываем persistent ReplyKeyboard для быстрого доступа
-    await safeSend(chatId, `👑 Панель администратора — меню активировано`, { reply_markup: REPLY_KB_ADMIN });
     return safeSend(
       chatId,
       `👑 *Панель администратора*${name ? `\n_${esc(name)}_` : ''}\n\nЗаявок в очереди: *${ordersRow.n}*`,
@@ -937,7 +964,7 @@ async function showCatalog(chatId, cat, page, filter) {
         { text: '🔍 Поиск', callback_data: 'cat_search' },
         { text: '📝 Оформить заявку', callback_data: 'bk_start' },
       ],
-      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+      [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
     ];
 
     const label = CATEGORIES[cat] || 'Все';
@@ -1219,7 +1246,7 @@ async function showMyOrders(chatId, page = 0) {
           reply_markup: {
             inline_keyboard: [
               [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }],
-              [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+              [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
             ],
           },
         }
@@ -1260,7 +1287,7 @@ async function showMyOrders(chatId, page = 0) {
           ...btns,
           ...(nav.length ? [nav] : []),
           [{ text: '📝 Новая заявка', callback_data: 'bk_start' }],
-          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
         ],
       },
     });
@@ -1278,7 +1305,7 @@ async function showClientOrder(chatId, orderId) {
     );
     if (!o || o.client_chat_id !== String(chatId)) {
       return safeSend(chatId, RU.ORDER_NOT_FOUND, {
-        reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }]] },
       });
     }
     const msgs = await query('SELECT * FROM messages WHERE order_id=? ORDER BY created_at DESC LIMIT 3', [orderId]);
@@ -1382,7 +1409,7 @@ async function showOrderStatus(chatId, orderNum) {
         reply_markup: {
           inline_keyboard: [
             [{ text: '🔄 Ввести другой номер', callback_data: 'check_status' }],
-            [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+            [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
           ],
         },
       });
@@ -1399,7 +1426,7 @@ async function showOrderStatus(chatId, orderNum) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '🔄 Проверить другой', callback_data: 'check_status' }],
-          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
         ],
       },
     });
@@ -1428,7 +1455,7 @@ async function showContacts(chatId) {
     .join('\n');
   return safeSend(chatId, lines, {
     parse_mode: 'MarkdownV2',
-    reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+    reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
   });
 }
 
@@ -1475,7 +1502,7 @@ async function bkStep1(chatId, data = {}) {
           inline_keyboard: [
             ...btns,
             [{ text: '✨ Менеджер подберёт', callback_data: 'bk_pick_any' }],
-            [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+            [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
           ],
         },
       }
@@ -1496,7 +1523,7 @@ async function bkStep2EventType(chatId, data) {
       inline_keyboard: [
         ...btns,
         [{ text: '← Выбрать модель', callback_data: 'bk_start' }],
-        [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+        [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
       ],
     },
   });
@@ -1512,7 +1539,7 @@ async function bkStep2Date(chatId, data) {
       `✅ Тип: *${esc(EVENT_TYPES[data.event_type] || data.event_type)}*\n\nВведите дату мероприятия:\n💡 Формат: ДД\\.ММ\\.ГГГГ, например: 25\\.12\\.2025`,
     {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+      reply_markup: { inline_keyboard: [[{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }]] },
     }
   );
 }
@@ -1537,7 +1564,7 @@ async function bkStep2Duration(chatId, data) {
         row1,
         row2,
         [{ text: '← Назад', callback_data: 'bk_back_event_type' }],
-        [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+        [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
       ],
     },
   });
@@ -1556,7 +1583,7 @@ async function bkStep2Location(chatId, data) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '← Назад', callback_data: 'bk_back_duration' }],
-          [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+          [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
         ],
       },
     }
@@ -1576,8 +1603,8 @@ async function bkStep2Budget(chatId, data) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '← Назад', callback_data: 'bk_back_location' }],
-          [{ text: '⏭ Пропустить', callback_data: 'bk_skip_budget' }],
-          [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+          [{ text: STRINGS.btnSkip, callback_data: 'bk_skip_budget' }],
+          [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
         ],
       },
     }
@@ -1593,8 +1620,8 @@ async function bkStep2Comments(chatId, data) {
     reply_markup: {
       inline_keyboard: [
         [{ text: '← Назад', callback_data: 'bk_back_budget' }],
-        [{ text: '⏭ Пропустить', callback_data: 'bk_skip_comments' }],
-        [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+        [{ text: STRINGS.btnSkip, callback_data: 'bk_skip_comments' }],
+        [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
       ],
     },
   });
@@ -1609,7 +1636,7 @@ async function bkStep3Name(chatId, data) {
     stepHeader(3, 'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\n${STRINGS.bookingAskName}`,
     {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+      reply_markup: { inline_keyboard: [[{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }]] },
     }
   );
 }
@@ -1626,7 +1653,7 @@ async function bkStep3Phone(chatId, data) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '← Назад', callback_data: 'bk_back_to_name' }],
-          [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+          [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
         ],
       },
     }
@@ -1640,9 +1667,9 @@ async function bkStep3Email(chatId, data) {
   const requireEmail = await getSetting('booking_require_email').catch(() => '0');
   const buttons = [[{ text: '← Назад', callback_data: 'bk_back_to_phone' }]];
   if (requireEmail !== '1') {
-    buttons.splice(0, 0, [{ text: '⏭ Пропустить', callback_data: 'bk_skip_email' }]);
+    buttons.splice(0, 0, [{ text: STRINGS.btnSkip, callback_data: 'bk_skip_email' }]);
   }
-  buttons.push([{ text: '❌ Отменить', callback_data: 'bk_cancel' }]);
+  buttons.push([{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }]);
   const hint = requireEmail === '1' ? '\n_Email обязателен для подтверждения заявки\\._' : '';
   return safeSend(
     chatId,
@@ -1671,8 +1698,8 @@ async function bkStep3Telegram(chatId, data, tgUsername) {
         inline_keyboard: [
           tgUsername ? [{ text: `✅ Использовать @${tgUsername}`, callback_data: `bk_use_tg_${tgUsername}` }] : [],
           [{ text: '← Назад', callback_data: 'bk_back_to_email' }],
-          [{ text: '⏭ Пропустить', callback_data: 'bk_skip_tg' }],
-          [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+          [{ text: STRINGS.btnSkip, callback_data: 'bk_skip_tg' }],
+          [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
         ].filter(r => r.length),
       },
     }
@@ -1719,7 +1746,7 @@ async function bkStep4Confirm(chatId, data) {
         [{ text: '✅ Отправить заявку', callback_data: 'bk_submit' }],
         [{ text: '➕ Добавить модель', callback_data: 'bk_add_model' }],
         [{ text: '← Изменить', callback_data: 'bk_start' }],
-        [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+        [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
       ],
     },
   });
@@ -1741,8 +1768,8 @@ async function bkSubmit(chatId, data) {
           parse_mode: 'MarkdownV2',
           reply_markup: {
             inline_keyboard: [
-              [{ text: '📋 Мои заявки', callback_data: 'my_orders' }],
-              [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+              [{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }],
+              [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
             ],
           },
         }
@@ -1793,7 +1820,7 @@ async function bkSubmit(chatId, data) {
         '❌ У вас уже слишком много активных заявок\\. Пожалуйста, дождитесь завершения текущих\\.',
         {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] },
+          reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }]] },
         }
       );
     }
@@ -1828,8 +1855,8 @@ async function bkSubmit(chatId, data) {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '📋 Мои заявки', callback_data: 'my_orders' }],
-          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+          [{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
         ],
       },
     });
@@ -1865,7 +1892,7 @@ async function bkSubmit(chatId, data) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '💬 Написать менеджеру', callback_data: 'contact_mgr' }],
-          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
         ],
       },
     });
@@ -2915,7 +2942,7 @@ async function showAddModelStep(chatId, d) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_age' },
+            { text: STRINGS.btnSkip, callback_data: 'adm_mdl_skip_age' },
             { text: '❌ Отмена', callback_data: 'admin_menu' },
           ],
         ],
@@ -2928,7 +2955,7 @@ async function showAddModelStep(chatId, d) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_height' },
+            { text: STRINGS.btnSkip, callback_data: 'adm_mdl_skip_height' },
             { text: '❌ Отмена', callback_data: 'admin_menu' },
           ],
         ],
@@ -2941,7 +2968,7 @@ async function showAddModelStep(chatId, d) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_params' },
+            { text: STRINGS.btnSkip, callback_data: 'adm_mdl_skip_params' },
             { text: '❌ Отмена', callback_data: 'admin_menu' },
           ],
         ],
@@ -2954,7 +2981,7 @@ async function showAddModelStep(chatId, d) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_shoe' },
+            { text: STRINGS.btnSkip, callback_data: 'adm_mdl_skip_shoe' },
             { text: '❌ Отмена', callback_data: 'admin_menu' },
           ],
         ],
@@ -2964,13 +2991,13 @@ async function showAddModelStep(chatId, d) {
   if (step === 'hair') {
     await setSession(chatId, 'adm_mdl_hair', d);
     const btns = MODEL_HAIR_COLORS.map(c => [{ text: c, callback_data: `adm_mdl_hair_${c}` }]);
-    btns.push([{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_hair' }]);
+    btns.push([{ text: STRINGS.btnSkip, callback_data: 'adm_mdl_skip_hair' }]);
     return safeSend(chatId, header + `💇 Выберите цвет волос:`, { reply_markup: { inline_keyboard: btns } });
   }
   if (step === 'eye') {
     await setSession(chatId, 'adm_mdl_eye', d);
     const btns = MODEL_EYE_COLORS.map(c => [{ text: c, callback_data: `adm_mdl_eye_${c}` }]);
-    btns.push([{ text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_eye' }]);
+    btns.push([{ text: STRINGS.btnSkip, callback_data: 'adm_mdl_skip_eye' }]);
     return safeSend(chatId, header + `👁 Выберите цвет глаз:`, { reply_markup: { inline_keyboard: btns } });
   }
   if (step === 'category') {
@@ -2984,7 +3011,7 @@ async function showAddModelStep(chatId, d) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_instagram' },
+            { text: STRINGS.btnSkip, callback_data: 'adm_mdl_skip_instagram' },
             { text: '❌ Отмена', callback_data: 'admin_menu' },
           ],
         ],
@@ -2997,7 +3024,7 @@ async function showAddModelStep(chatId, d) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_bio' },
+            { text: STRINGS.btnSkip, callback_data: 'adm_mdl_skip_bio' },
             { text: '❌ Отмена', callback_data: 'admin_menu' },
           ],
         ],
@@ -3010,7 +3037,7 @@ async function showAddModelStep(chatId, d) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '⏭ Пропустить', callback_data: 'adm_mdl_skip_photo' },
+            { text: STRINGS.btnSkip, callback_data: 'adm_mdl_skip_photo' },
             { text: '❌ Отмена', callback_data: 'admin_menu' },
           ],
         ],
@@ -4834,7 +4861,7 @@ async function showAchievements(chatId) {
     reply_markup: {
       inline_keyboard: [
         [{ text: '💫 Мои баллы', callback_data: 'loyalty' }],
-        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+        [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
       ],
     },
   });
@@ -4884,7 +4911,7 @@ async function showLoyaltyLeaderboard(chatId) {
       inline_keyboard: [
         [{ text: '💫 Мои баллы', callback_data: 'loyalty' }],
         [{ text: '🏆 Мои достижения', callback_data: 'my_achievements' }],
-        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+        [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
       ],
     },
   });
@@ -4965,7 +4992,7 @@ async function showLoyaltyProfile(chatId) {
         [{ text: '🎁 Пригласить друга', callback_data: 'referral' }],
         [{ text: '🏆 Мои достижения', callback_data: 'my_achievements' }],
         [{ text: '🏆 Топ клиентов', callback_data: 'loyalty_leaderboard' }],
-        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+        [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
       ],
     },
   });
@@ -5013,7 +5040,7 @@ async function showReferralProgram(chatId) {
             },
           ],
           [{ text: '💫 Мои баллы', callback_data: 'loyalty' }],
-          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
         ],
       },
     });
@@ -5152,7 +5179,7 @@ async function showPriceCalculator(chatId, params = {}) {
         ],
         [{ text: '📤 Поделиться расчётом', callback_data: `calc_share_${models}_${hours}_${eventType}` }],
         [{ text: '💬 Уточнить у менеджера', callback_data: 'msg_manager_start' }],
-        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+        [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
       ],
     },
   });
@@ -5440,7 +5467,7 @@ function initBot(app) {
             reply_markup: {
               inline_keyboard: [
                 [{ text: '📋 Статус заявки', callback_data: `client_order_${order.id}` }],
-                [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+                [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
               ],
             },
           }
@@ -5523,7 +5550,7 @@ function initBot(app) {
 
     await safeSend(chatId, cancelText, {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+      reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
     });
 
     if (isAdmin(chatId)) {
@@ -5575,7 +5602,7 @@ function initBot(app) {
         managerLine;
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+      reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
     });
   });
 
@@ -5702,6 +5729,32 @@ function initBot(app) {
     if (data === 'admin_menu') {
       if (!isAdmin(chatId)) return;
       return showAdminMenu(chatId, q.from.first_name);
+    }
+    // ── Admin sub-menus
+    if (data === 'adm_menu_analytics') {
+      if (!isAdmin(chatId)) return;
+      return safeSend(chatId, '📊 *Аналитика*', { parse_mode: 'MarkdownV2', reply_markup: KB_ADMIN_ANALYTICS });
+    }
+    if (data === 'adm_menu_marketing') {
+      if (!isAdmin(chatId)) return;
+      return safeSend(chatId, '📢 *Маркетинг*', { parse_mode: 'MarkdownV2', reply_markup: KB_ADMIN_MARKETING });
+    }
+    if (data === 'adm_menu_team') {
+      if (!isAdmin(chatId)) return;
+      return safeSend(chatId, '👥 *Команда*', { parse_mode: 'MarkdownV2', reply_markup: KB_ADMIN_TEAM });
+    }
+    if (data === 'adm_menu_factory') {
+      if (!isAdmin(chatId)) return;
+      const scoreRow = await get(
+        "SELECT message FROM agent_logs WHERE from_name='Orchestrator' ORDER BY created_at DESC LIMIT 1"
+      ).catch(() => null);
+      const scoreMatch = scoreRow?.message?.match(/Health Score:\s*(\d+)%/);
+      const score = scoreMatch ? parseInt(scoreMatch[1]) : null;
+      const health = score != null ? ` 💚${score}%` : '';
+      return safeSend(chatId, '🤖 *AI Factory*', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: KB_ADMIN_FACTORY(health),
+      });
     }
     if (data === 'contacts') return showContacts(chatId);
     if (data === 'faq') return showFaq(chatId);
@@ -6280,7 +6333,7 @@ function initBot(app) {
           inline_keyboard: [
             [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }],
             [{ text: '⚡ Быстрая заявка', callback_data: 'bk_quick' }],
-            [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+            [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
           ],
         },
       });
@@ -8441,7 +8494,7 @@ function initBot(app) {
       // Client dismissed the review follow-up
       return safeSend(chatId, '✅ Спасибо, что воспользовались нашими услугами\\!', {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
       });
     }
     if (data === 'leave_review') {
@@ -8463,7 +8516,7 @@ function initBot(app) {
         if (existing) {
           return safeSend(chatId, STRINGS.reviewAlreadyLeft, {
             parse_mode: 'MarkdownV2',
-            reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+            reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
           });
         }
       }
@@ -8508,7 +8561,7 @@ function initBot(app) {
         if (existing) {
           return safeSend(chatId, '✅ Ви вже залишали відгук на цю заявку\\.', {
             parse_mode: 'MarkdownV2',
-            reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+            reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
           });
         }
       }
@@ -8542,7 +8595,7 @@ function initBot(app) {
         await clearSession(chatId);
         return safeSend(chatId, '❌ Сесія застаріла\\. Спробуйте ще раз\\.', {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] },
+          reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }]] },
         });
       }
       return bkRepeatSubmit(chatId, d, q.from.username);
@@ -8912,7 +8965,7 @@ function initBot(app) {
           {
             parse_mode: 'MarkdownV2',
             reply_markup: {
-              inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]],
+              inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]],
             },
           }
         );
@@ -8937,7 +8990,7 @@ function initBot(app) {
         if (text === '⚡ Быстрая заявка') return bkQuickStart(chatId);
         if (text === '❤️ Избранное') return showWishlist(chatId, 0);
         if (text === '💬 Менеджер') return showContactManager(chatId);
-        if (text === '📋 Мои заявки') return showMyOrders(chatId);
+        if (text === STRINGS.btnMyOrders) return showMyOrders(chatId);
         if (text === '🔍 Статус заявки') {
           await setSession(chatId, 'check_status', {});
           return safeSend(chatId, '🔍 Введите номер заявки (например, НМ-001):');
@@ -9452,7 +9505,7 @@ function initBot(app) {
       }
       return safeSend(chatId, `✅ Спасибо за отзыв\\! Он появится на сайте после проверки\\.${reviewBonusMsg}`, {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
       });
     }
 
@@ -9531,7 +9584,7 @@ function initBot(app) {
           if (!dmyFmt) {
             return safeSend(chatId, '❌ Неверный формат\\. Введите дату в виде *ДД\\.ММ\\.ГГГГ*', {
               parse_mode: 'MarkdownV2',
-              reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+              reply_markup: { inline_keyboard: [[{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }]] },
             });
           }
           const dv = parseInt(dmyFmt[1]);
@@ -9539,7 +9592,7 @@ function initBot(app) {
           if (mv < 1 || mv > 12 || dv < 1 || dv > 31) {
             return safeSend(chatId, '❌ Неверная дата\\. Проверьте день и месяц\\.', {
               parse_mode: 'MarkdownV2',
-              reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+              reply_markup: { inline_keyboard: [[{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }]] },
             });
           }
         }
@@ -9559,7 +9612,7 @@ function initBot(app) {
                 reply_markup: {
                   inline_keyboard: [
                     [{ text: '← Выбрать другую модель', callback_data: 'bk_start' }],
-                    [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+                    [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
                   ],
                 },
               });
@@ -9586,8 +9639,8 @@ function initBot(app) {
               parse_mode: 'MarkdownV2',
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '⏭ Пропустить', callback_data: 'bk_skip_budget' }],
-                  [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+                  [{ text: STRINGS.btnSkip, callback_data: 'bk_skip_budget' }],
+                  [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
                 ],
               },
             }
@@ -9636,7 +9689,7 @@ function initBot(app) {
             '❌ Формат номера неверный\\. Введите номер в формате: \\+7 999 123\\-45\\-67 или 89991234567',
             {
               parse_mode: 'MarkdownV2',
-              reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+              reply_markup: { inline_keyboard: [[{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }]] },
             }
           );
         d.client_phone = text;
@@ -9647,10 +9700,10 @@ function initBot(app) {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
           const errKb =
             requireEmailVal === '1'
-              ? [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]]
+              ? [[{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }]]
               : [
-                  [{ text: '⏭ Пропустить', callback_data: 'bk_skip_email' }],
-                  [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+                  [{ text: STRINGS.btnSkip, callback_data: 'bk_skip_email' }],
+                  [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
                 ];
           return safeSend(chatId, STRINGS.bookingErrorEmail, {
             parse_mode: 'MarkdownV2',
@@ -9692,7 +9745,7 @@ function initBot(app) {
       await checkAndGrantAchievements(chatId).catch(() => {});
       return safeSend(chatId, '✅ Вопрос отправлен менеджеру\\. Мы ответим в ближайшее время\\!', {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
       });
     }
 
@@ -9747,7 +9800,7 @@ function initBot(app) {
       }
       return safeSend(chatId, '✅ Сообщение передано менеджеру\\. Ответим в ближайшее время\\!', {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
       });
     }
   });
@@ -9837,7 +9890,7 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus, clientPh
     inline_keyboard: [
       [
         { text: '💬 Написать менеджеру', callback_data: 'contact_mgr' },
-        { text: '📋 Мои заявки', callback_data: 'my_orders' },
+        { text: STRINGS.btnMyOrders, callback_data: 'my_orders' },
       ],
       [{ text: '📝 Повторить заявку', callback_data: 'bk_start' }],
     ],
@@ -9945,8 +9998,8 @@ async function notifyPaymentSuccess(clientChatId, orderNumber) {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '📋 Мои заявки', callback_data: 'my_orders' }],
-          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+          [{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
         ],
       },
     }
@@ -9958,7 +10011,7 @@ async function notifyPaymentSuccess(clientChatId, orderNumber) {
 async function showFaq(chatId) {
   const faqItems = await query('SELECT * FROM faq WHERE active=1 ORDER BY sort_order ASC, id ASC').catch(() => []);
   const keyboard = faqItems.map(faq => [{ text: `❓ ${faq.question}`, callback_data: `faq_${faq.id}` }]);
-  keyboard.push([{ text: '🏠 Главное меню', callback_data: 'main_menu' }]);
+  keyboard.push([{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]);
 
   return safeSend(chatId, '❓ *Часто задаваемые вопросы*\n\nВыберите вопрос:', {
     parse_mode: 'MarkdownV2',
@@ -10915,7 +10968,7 @@ async function showContactManager(chatId) {
   if (waDigits) {
     inlineRows.push([{ text: '📱 WhatsApp', url: `https://wa.me/${waDigits}` }]);
   }
-  inlineRows.push([{ text: '🏠 Главное меню', callback_data: 'main_menu' }]);
+  inlineRows.push([{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]);
   const kb = { inline_keyboard: inlineRows };
   if (contactPhoto && typeof contactPhoto === 'string' && contactPhoto.startsWith('http')) {
     try {
@@ -11037,7 +11090,7 @@ _Цены ориентировочные\\. Точная стоимость со
     inline_keyboard: [
       [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
       [{ text: '📞 Связаться с менеджером', callback_data: 'msg_manager_start' }],
-      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+      [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
     ],
   };
   if (pricingPhoto && typeof pricingPhoto === 'string' && pricingPhoto.startsWith('http')) {
@@ -11335,7 +11388,7 @@ async function showSearchResults(chatId, filters, page = 0) {
           inline_keyboard: [
             [{ text: '🔍 Изменить поиск', callback_data: 'cat_search' }],
             [{ text: '✖️ Сбросить фильтры', callback_data: 'srch_reset' }],
-            [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+            [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
           ],
         },
       });
@@ -11603,7 +11656,7 @@ async function showPublicReviews(chatId, page) {
         reply_markup: {
           inline_keyboard: [
             [{ text: '⭐ Оставить отзыв', callback_data: 'leave_review_0' }],
-            [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+            [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
           ],
         },
       });
@@ -11645,7 +11698,7 @@ async function showPublicReviews(chatId, page) {
         inline_keyboard: [
           nav,
           ...(reviewsEnabled !== '0' ? [[{ text: '✍️ Оставить отзыв', callback_data: 'leave_review_0' }]] : []),
-          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
         ],
       },
     });
@@ -11672,7 +11725,7 @@ async function startLeaveReview(chatId, orderId) {
         `⚠️ Для написания отзыва нужно завершить минимум *${minCompleted}* заявок\\.\nУ вас завершено: *${completedRow?.cnt || 0}*\\.`,
         {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+          reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
         }
       );
     }
@@ -11686,13 +11739,13 @@ async function startLeaveReview(chatId, orderId) {
     ]).catch(() => null);
     if (!order) {
       return safeSend(chatId, RU.ORDER_NOT_FOUND, {
-        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
       });
     }
     if (order.status !== 'completed') {
       return safeSend(chatId, '⚠️ Отзыв можно оставить только после завершения заявки\\.', {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }]] },
       });
     }
     // Check duplicate review for this order
@@ -11703,7 +11756,7 @@ async function startLeaveReview(chatId, orderId) {
     if (existing) {
       return safeSend(chatId, STRINGS.reviewAlreadyLeftForOrder, {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
       });
     }
   }
@@ -11730,7 +11783,7 @@ async function repeatOrder(chatId, orderId) {
     const o = await get('SELECT * FROM orders WHERE id=? AND client_chat_id=?', [orderId, String(chatId)]);
     if (!o) {
       return safeSend(chatId, RU.ORDER_NOT_FOUND, {
-        reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }]] },
       });
     }
 
@@ -11968,7 +12021,7 @@ async function showWishlist(chatId, page = 0) {
     if (enabled === '0') {
       return safeSend(chatId, STRINGS.wishlistUnavailable, {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
       });
     }
 
@@ -11991,7 +12044,7 @@ async function showWishlist(chatId, page = 0) {
         reply_markup: {
           inline_keyboard: [
             [{ text: '💃 Перейти в каталог', callback_data: 'cat_cat__0' }],
-            [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+            [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
           ],
         },
       });
@@ -12046,7 +12099,7 @@ async function bkQuickStart(chatId) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '📋 Полная форма', callback_data: 'bk_start' }],
-          [{ text: '❌ Отменить', callback_data: 'main_menu' }],
+          [{ text: STRINGS.btnCancel, callback_data: 'main_menu' }],
         ],
       },
     }
@@ -12061,7 +12114,7 @@ async function bkQuickPhone(chatId, data) {
     `${STRINGS.quickBookingTitle}\n\n✅ Имя: *${esc(data.quick_name)}*\n\n${STRINGS.quickBookingStep2}`,
     {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'main_menu' }]] },
+      reply_markup: { inline_keyboard: [[{ text: STRINGS.btnCancel, callback_data: 'main_menu' }]] },
     }
   );
 }
@@ -12083,8 +12136,8 @@ async function bkQuickSubmit(chatId, data) {
         parse_mode: 'MarkdownV2',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '📋 Мои заявки', callback_data: 'my_orders' }],
-            [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+            [{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }],
+            [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
           ],
         },
       }
@@ -12119,7 +12172,7 @@ async function showHeightSearchInput(chatId) {
             { text: '175–185 см', callback_data: 'cat_search_height_175-185' },
           ],
           [{ text: '← Поиск', callback_data: 'cat_search' }],
-          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
         ],
       },
     }
@@ -12312,7 +12365,7 @@ function _registerNewFeatures() {
         reply_markup: {
           inline_keyboard: [
             [{ text: '💃 Перейти в каталог', callback_data: 'cat_cat__0' }],
-            [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+            [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
           ],
         },
       });
@@ -12393,7 +12446,7 @@ function _registerNewFeatures() {
       if (!sd || !sd.spec) {
         return safeSend(chatId, '❌ Данные не найдены\\. Попробуйте ещё раз\\.', {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
+          reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
         });
       }
       try {
@@ -12413,8 +12466,8 @@ function _registerNewFeatures() {
             parse_mode: 'MarkdownV2',
             reply_markup: {
               inline_keyboard: [
-                [{ text: '📋 Мои заявки', callback_data: 'my_orders' }],
-                [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+                [{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }],
+                [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
               ],
             },
           }
