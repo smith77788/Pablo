@@ -11,8 +11,8 @@
   --bg3: #1a1a1a;
   --border: #2a2a2a;
   --text: #f0ede8;
-  --text-muted: #888;
-  --text-dim: #555;
+  --text-muted: #999;
+  --text-dim: #6e6e6e;
   --white: #ffffff;
   --radius: 4px;
   --transition: 0.3s ease;
@@ -692,18 +692,19 @@ select.form-control option { background: var(--bg2); }
 /* ─── FOCUS VISIBLE ──────────────────────────────── */
 :focus-visible {
   outline: 2px solid var(--gold);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--gold);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
+:focus:not(:focus-visible) { outline: none; }
 
 /* ─── ACCESSIBILITY HELPERS ─────────────────────────── */
 .skip-link {
   position: absolute;
-  top: -100%;
-  left: 8px;
+  top: -40px;
+  left: 0;
   background: var(--gold);
   color: #000;
   padding: 8px 16px;
@@ -711,7 +712,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   font-weight: 600;
   z-index: 9999;
   text-decoration: none;
-  border-radius: 0 0 4px 4px;
+  transition: top 0.15s;
 }
 .skip-link:focus { top: 0; }
 
@@ -1308,8 +1309,8 @@ html.dark {
   --bg3: #1a1a1a;
   --border: #2a2a2a;
   --text: #f0ede8;
-  --text-muted: #888;
-  --text-dim: #555;
+  --text-muted: #999;
+  --text-dim: #6e6e6e;
   --white: #ffffff;
 }
 

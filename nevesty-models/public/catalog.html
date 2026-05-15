@@ -165,13 +165,13 @@
     <a href="/reviews.html">Отзывы</a>
     <a href="/faq.html">FAQ</a>
     <a href="/contact.html">Контакты</a>
-    <a href="/favorites.html">❤️ Избранное</a>
-    <a href="/compare.html">⚖️ Сравнение</a>
-    <a href="/cabinet.html">👤 Мои заявки</a>
+    <a href="/favorites.html"><span aria-hidden="true">❤️</span> Избранное</a>
+    <a href="/compare.html"><span aria-hidden="true">⚖️</span> Сравнение</a>
+    <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
     <a href="/booking.html" style="color:var(--gold)">Заказать</a>
   </nav>
 
-  <main class="catalog-page" id="main-content" role="main">
+  <main class="catalog-page" id="main-content">
     <div class="container">
       <nav aria-label="breadcrumb" style="padding-top:24px;margin-bottom:8px">
         <ol class="breadcrumb" style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
@@ -185,8 +185,8 @@
         <h1>Каталог моделей</h1>
         <p style="color:var(--text-muted);margin-top:8px">Найдите идеальную модель для вашего проекта</p>
         <div style="margin-top:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-          <a href="/compare.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'">⚖️ Сравнить модели</a>
-          <a href="/favorites.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'">❤️ Мои избранные</a>
+          <a href="/compare.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'"><span aria-hidden="true">⚖️</span> Сравнить модели</a>
+          <a href="/favorites.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'"><span aria-hidden="true">❤️</span> Мои избранные</a>
           <button onclick="showFavorites()" class="btn-favorites" aria-label="Показать избранные модели">
             ❤ Обране <span id="fav-counter" style="display:none"></span>
           </button>
@@ -288,7 +288,7 @@
             </select>
           </div>
           <!-- Skeleton loader -->
-          <div class="catalog-grid" id="catalogSkeleton" aria-hidden="true" aria-busy="true">
+          <div class="catalog-grid" id="catalogSkeleton" aria-hidden="true" aria-busy="true" aria-live="polite">
             <div class="model-card-skeleton"></div>
             <div class="model-card-skeleton"></div>
             <div class="model-card-skeleton"></div>
@@ -621,10 +621,13 @@
     <div class="qb-modal-box">
       <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
       <div id="qbForm">
-        <div class="qb-modal-title" id="qbModalTitle">⚡ Быстрая заявка</div>
+        <div class="qb-modal-title" id="qbModalTitle"><span aria-hidden="true">⚡</span> Быстрая заявка</div>
         <div class="qb-modal-sub">Оставьте контакты — менеджер свяжется за 15 минут</div>
-        <input class="qb-input" id="qbName" type="text" placeholder="Ваше имя" autocomplete="name" />
-        <input class="qb-input" id="qbPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" />
+        <label for="qbName" class="sr-only">Ваше имя</label>
+        <input class="qb-input" id="qbName" type="text" placeholder="Ваше имя" autocomplete="name" aria-required="true" />
+        <label for="qbPhone" class="sr-only">Телефон</label>
+        <input class="qb-input" id="qbPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" aria-required="true" />
+        <label for="qbComment" class="sr-only">Тип мероприятия</label>
         <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
         <button class="qb-btn" onclick="submitQb()">Отправить заявку →</button>
       </div>

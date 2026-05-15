@@ -318,7 +318,7 @@
     <a href="/booking.html" style="color:var(--gold)">Заказать</a>
   </nav>
 
-  <div class="booking-page" id="main-content" role="main">
+  <main class="booking-page" id="main-content">
     <div class="container">
       <div class="booking-header">
         <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Бронирование</div>
@@ -374,42 +374,42 @@
                  role="radio" aria-checked="false" tabindex="0"
                  onclick="window._booking.selectService('photo_shoot')"
                  onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('photo_shoot')">
-              <div class="service-option-icon">👗</div>
+              <div class="service-option-icon" aria-hidden="true">👗</div>
               <div class="service-option-label">Фотосессия</div>
             </div>
             <div class="service-option-card" data-value="event"
                  role="radio" aria-checked="false" tabindex="0"
                  onclick="window._booking.selectService('event')"
                  onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('event')">
-              <div class="service-option-icon">🎪</div>
+              <div class="service-option-icon" aria-hidden="true">🎪</div>
               <div class="service-option-label">Мероприятие</div>
             </div>
             <div class="service-option-card" data-value="fashion_show"
                  role="radio" aria-checked="false" tabindex="0"
                  onclick="window._booking.selectService('fashion_show')"
                  onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('fashion_show')">
-              <div class="service-option-icon">👠</div>
+              <div class="service-option-icon" aria-hidden="true">👠</div>
               <div class="service-option-label">Показ мод</div>
             </div>
             <div class="service-option-card" data-value="commercial"
                  role="radio" aria-checked="false" tabindex="0"
                  onclick="window._booking.selectService('commercial')"
                  onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('commercial')">
-              <div class="service-option-icon">📢</div>
+              <div class="service-option-icon" aria-hidden="true">📢</div>
               <div class="service-option-label">Реклама</div>
             </div>
             <div class="service-option-card" data-value="runway"
                  role="radio" aria-checked="false" tabindex="0"
                  onclick="window._booking.selectService('runway')"
                  onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('runway')">
-              <div class="service-option-icon">✦</div>
+              <div class="service-option-icon" aria-hidden="true">✦</div>
               <div class="service-option-label">Подиум</div>
             </div>
             <div class="service-option-card" data-value="other"
                  role="radio" aria-checked="false" tabindex="0"
                  onclick="window._booking.selectService('other')"
                  onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('other')">
-              <div class="service-option-icon">💍</div>
+              <div class="service-option-icon" aria-hidden="true">💍</div>
               <div class="service-option-label">Другое</div>
             </div>
           </div>
@@ -460,7 +460,7 @@
           <div class="form-row">
             <div class="form-group">
               <label for="event_date">Дата мероприятия <span class="req">*</span></label>
-              <input type="date" class="form-control" id="event_date" />
+              <input type="date" class="form-control" id="event_date" aria-required="true" />
             </div>
             <div class="form-group">
               <label for="event_duration">Продолжительность (ч)</label>
@@ -523,7 +523,7 @@
           <div class="form-group">
             <label for="client_name">Ваше имя <span class="req">*</span></label>
             <input type="text" class="form-control" id="client_name"
-              placeholder="Иван Иванов" autocomplete="name" />
+              placeholder="Иван Иванов" autocomplete="name" aria-required="true" />
           </div>
 
           <div class="form-row">
@@ -531,7 +531,7 @@
               <label for="client_phone">Телефон <span class="req">*</span></label>
               <input type="tel" class="form-control" id="client_phone"
                 placeholder="+7 (999) 000-00-00"
-                autocomplete="tel" inputmode="tel" />
+                autocomplete="tel" inputmode="tel" aria-required="true" />
               <div class="phone-hint">Формат: +7 XXX XXX-XX-XX (не менее 10 цифр)</div>
             </div>
             <div class="form-group">
@@ -545,7 +545,7 @@
             <label for="client_telegram">Telegram</label>
             <input type="text" class="form-control" id="client_telegram"
               placeholder="@username" autocomplete="off" />
-            <div class="form-note">💡 Укажите username для уведомлений о статусе заявки через Telegram</div>
+            <div class="form-note"><span aria-hidden="true">💡</span> Укажите username для уведомлений о статусе заявки через Telegram</div>
           </div>
 
           <div class="booking-nav">
@@ -576,7 +576,7 @@
         <!-- ══════════ STEP 6 — SUCCESS ══════════ -->
         <div class="booking-section" id="step6" role="region" aria-label="Заявка принята">
           <div class="success-box">
-            <div class="success-icon" aria-hidden="true">✦</div>
+            <div class="success-icon" aria-hidden="true" role="presentation">✦</div>
             <h3>Заявка принята!</h3>
             <p>Ваш номер заявки:</p>
             <div class="order-num-display" id="orderNumDisplay" aria-live="polite">—</div>
@@ -595,8 +595,8 @@
               <a href="/catalog.html" class="btn-primary">Каталог моделей</a>
             </div>
             <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-              <a id="statusPageLink" href="/order-status.html" class="btn-outline" style="font-size:0.75rem;padding:10px 20px">🔍 Проверить статус заявки</a>
-              <a id="cabinetLink" href="/cabinet.html" class="btn-outline" style="font-size:0.75rem;padding:10px 20px">👤 Все мои заявки</a>
+              <a id="statusPageLink" href="/order-status.html" class="btn-outline" style="font-size:0.75rem;padding:10px 20px"><span aria-hidden="true">🔍</span> Проверить статус заявки</a>
+              <a id="cabinetLink" href="/cabinet.html" class="btn-outline" style="font-size:0.75rem;padding:10px 20px"><span aria-hidden="true">👤</span> Все мои заявки</a>
             </div>
             <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
               <button id="bookAnotherBtn" class="btn-outline" style="font-size:0.75rem;padding:10px 20px;cursor:pointer">
@@ -633,7 +633,7 @@
       </div>
 
     </div>
-  </div>
+  </main>
 
   <div class="toast-container" id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
   <script src="/js/main.js" defer></script>

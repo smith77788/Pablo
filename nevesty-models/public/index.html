@@ -122,13 +122,14 @@
     <a href="/reviews.html">Отзывы</a>
     <a href="/faq.html">FAQ</a>
     <a href="/contact.html">Контакты</a>
-    <a href="/favorites.html">❤️ Избранное</a>
-    <a href="/cabinet.html">👤 Мои заявки</a>
+    <a href="/favorites.html"><span aria-hidden="true">❤️</span> Избранное</a>
+    <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
     <a href="/booking.html" style="color:var(--gold)">Заказать</a>
   </nav>
 
+  <main id="main-content" tabindex="-1">
   <!-- HERO -->
-  <section class="hero" id="main-content" tabindex="-1" role="main" aria-label="Главная страница агентства">
+  <section class="hero" aria-label="Главная страница агентства">
     <div class="hero-bg"></div>
     <div class="hero-lines">
       <div class="hero-line"></div>
@@ -147,7 +148,7 @@
       <div class="quick-form" style="display:flex;gap:8px;flex-wrap:wrap;max-width:500px;margin:24px auto 0">
         <input type="text" id="qf-name" placeholder="Ваше имя" aria-label="Ваше имя" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
         <input type="tel" id="qf-phone" placeholder="+7 (999) 123-45-67" aria-label="Номер телефона" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
-        <button onclick="quickSubmitForm()" style="padding:12px 24px;background:#c8a96e;color:#000;border:none;border-radius:8px;font-weight:600;cursor:pointer;white-space:nowrap">Залишити заявку</button>
+        <button onclick="quickSubmitForm()" style="padding:12px 24px;background:#c8a96e;color:#000;border:none;border-radius:8px;font-weight:600;cursor:pointer;white-space:nowrap" aria-label="Залишити заявку — відправити форму">Залишити заявку</button>
       </div>
     </div>
     <div class="hero-scroll">Листайте</div>
@@ -595,28 +596,30 @@
       </div>
       <div class="stats-grid">
         <div class="stat-item">
-          <span style="font-size:2rem;display:block;margin-bottom:12px">📞</span>
+          <span style="font-size:2rem;display:block;margin-bottom:12px" aria-hidden="true">📞</span>
           <div class="stat-label">Телефон</div>
           <a href="tel:+78005550000" style="color:var(--gold);font-size:0.9rem;display:block;margin-top:6px">+7 (800) 555-00-00</a>
         </div>
         <div class="stat-item">
-          <span style="font-size:2rem;display:block;margin-bottom:12px">✉️</span>
+          <span style="font-size:2rem;display:block;margin-bottom:12px" aria-hidden="true">✉️</span>
           <div class="stat-label">Email</div>
           <a href="mailto:info@nevesty-models.ru" style="color:var(--gold);font-size:0.9rem;display:block;margin-top:6px">info@nevesty-models.ru</a>
         </div>
         <div class="stat-item">
-          <span style="font-size:2rem;display:block;margin-bottom:12px">💬</span>
+          <span style="font-size:2rem;display:block;margin-bottom:12px" aria-hidden="true">💬</span>
           <div class="stat-label">Telegram</div>
           <a href="https://t.me/nevesty_models" style="color:var(--gold);font-size:0.9rem;display:block;margin-top:6px" target="_blank">@nevesty_models</a>
         </div>
         <div class="stat-item">
-          <span style="font-size:2rem;display:block;margin-bottom:12px">🕐</span>
+          <span style="font-size:2rem;display:block;margin-bottom:12px" aria-hidden="true">🕐</span>
           <div class="stat-label">Режим работы</div>
           <span style="color:var(--text-muted);font-size:0.85rem;display:block;margin-top:6px">Пн–Вс: 9:00–22:00</span>
         </div>
       </div>
     </div>
   </section>
+
+  </main><!-- /#main-content -->
 
   <!-- SCROLL TO TOP -->
   <button id="scroll-top" aria-label="Вернуться наверх" title="Вернуться наверх">&#8679;</button>
@@ -778,7 +781,7 @@ fetch('/api/settings/public').then(r => r.json()).then(d => {
 
   <!-- PWA Install Banner -->
   <div id="install-banner" style="display:none; position:fixed; bottom:70px; left:16px; right:16px; background:var(--bg2); border:1px solid var(--gold); padding:12px 16px; border-radius:8px; z-index:1000; align-items:center; gap:12px; box-shadow:0 4px 20px rgba(0,0,0,0.4);" role="dialog" aria-label="Установить приложение">
-    <span style="flex:1; font-size:0.875rem; color:var(--text)">📱 Установить приложение Nevesty Models</span>
+    <span style="flex:1; font-size:0.875rem; color:var(--text)"><span aria-hidden="true">📱</span> Установить приложение Nevesty Models</span>
     <button id="install-btn" style="background:var(--gold); color:#000; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; white-space:nowrap; font-size:0.85rem;">Установить</button>
     <button onclick="document.getElementById('install-banner').style.display='none'" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem; padding:0 4px; line-height:1;" aria-label="Закрыть">✕</button>
   </div>
