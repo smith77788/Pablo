@@ -421,6 +421,26 @@ async function start() {
     } catch (_) {}
   }, 5 * 60 * 1000);
 
+  // ─── Factory health check (every 30 minutes) ──────────────────────────────────
+  const factoryCheckInterval = setInterval(async () => {
+    try {
+      const { get: dbGetLocal } = require('./database');
+      const row = await dbGetLocal("SELECT value FROM bot_settings WHERE key = 'factory_last_cycle'");
+      if (!row?.value) return;
+      const lastCycleMs = new Date(row.value).getTime();
+      const hoursAgo = (Date.now() - lastCycleMs) / (1000 * 60 * 60);
+      if (hoursAgo >= 12) {
+        const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').filter(Boolean);
+        const h = Math.round(hoursAgo);
+        for (const id of adminIds) {
+          botInstance?.instance?.sendMessage(id,
+            `⚠️ AI Factory не запускался ${h} ч. Последний цикл: ${row.value.slice(0, 16).replace('T', ' ')}`
+          ).catch(() => {});
+        }
+      }
+    } catch (_) {}
+  }, 30 * 60 * 1000);
+
   // Attach to app so api routes can use it
   app.set('wsServer', { notifyOrderUpdate });
   console.log('🔌 WebSocket server attached to HTTP server');
@@ -435,6 +455,7 @@ async function start() {
       }
       clearInterval(wsPingInterval);
       clearInterval(memAlertInterval);
+      clearInterval(factoryCheckInterval);
       await new Promise(resolve => wss.close(resolve));
       console.log('WebSocket server closed.');
       await new Promise(resolve => server.close(resolve));
