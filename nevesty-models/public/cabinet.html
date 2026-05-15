@@ -1454,7 +1454,8 @@
 
           _ws.onopen = () => {
             _wsSetIndicator('online');
-            _ws.send(JSON.stringify({ type: 'subscribe', phone: '7' + phone10 }));
+            const token = localStorage.getItem('nm_client_token') || '';
+            _ws.send(JSON.stringify({ type: 'subscribe', phone: '7' + phone10, token }));
           };
 
           _ws.onmessage = e => {

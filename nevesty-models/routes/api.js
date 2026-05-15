@@ -7773,7 +7773,6 @@ router.get('/cabinet/orders', requireClientAuth, async (req, res, next) => {
        LEFT JOIN models m ON o.model_id = m.id
        WHERE REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
           OR REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
-       GROUP BY o.id
        ORDER BY o.created_at DESC LIMIT 20`,
       [...patterns, ...patterns]
     );

@@ -989,10 +989,22 @@ async function start() {
               } catch (_) {}
             }
           } else if (msg.phone) {
-            const phone = String(msg.phone).replace(/\D/g, '').slice(-10);
-            if (phone.length === 10) {
+            // Require client JWT to subscribe by phone
+            const token = msg.token || '';
+            let authorized = false;
+            try {
+              const jwt = require('jsonwebtoken');
+              const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+              const tokenPhone = (decoded.phone || '').replace(/\D/g, '').slice(-10);
+              const reqPhone = String(msg.phone).replace(/\D/g, '').slice(-10);
+              authorized = decoded.type === 'client' && tokenPhone.length === 10 && tokenPhone === reqPhone;
+            } catch (_) {}
+            if (authorized) {
+              const phone = String(msg.phone).replace(/\D/g, '').slice(-10);
               wsSubscribePhone(ws, phone);
               ws.send(JSON.stringify({ type: 'subscribed', phone }));
+            } else {
+              ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
             }
           }
         } else if (msg.type === 'pong') {
