@@ -1583,11 +1583,33 @@ router.get('/admin/orders/search', auth, async (req, res, next) => {
       `SELECT o.*, m.name as model_name
        FROM orders o
        LEFT JOIN models m ON o.model_id = m.id
-       WHERE o.client_phone LIKE ? OR o.client_name LIKE ?
+       WHERE o.client_phone LIKE ? OR o.client_name LIKE ? OR o.order_number LIKE ?
        ORDER BY o.created_at DESC LIMIT 50`,
-      [like, like]
+      [like, like, like]
     );
     res.json({ orders, total: orders.length });
+  } catch (e) { next(e); }
+});
+
+// ─── PATCH /admin/orders/bulk-status — bulk status update (REST alias) ───────
+router.patch('/admin/orders/bulk-status', auth, async (req, res, next) => {
+  try {
+    const { ids, status } = req.body;
+    const VALID_STATUSES = ['new', 'reviewing', 'confirmed', 'in_progress', 'completed', 'cancelled'];
+    if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids required' });
+    if (!VALID_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    const validIds = ids.map(Number).filter(n => Number.isInteger(n) && n > 0);
+    if (!validIds.length) return res.status(400).json({ error: 'No valid IDs' });
+    const orders = await query(`SELECT id, client_chat_id, order_number, status FROM orders WHERE id IN (${validIds.map(() => '?').join(',')})`, validIds);
+    await run(
+      `UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id IN (${validIds.map(() => '?').join(',')})`,
+      [status, ...validIds]
+    );
+    if (botInstance) {
+      const toNotify = orders.filter(o => o.status !== status && o.client_chat_id);
+      await Promise.allSettled(toNotify.map(o => botInstance.notifyStatusChange(o.client_chat_id, o.order_number, status)));
+    }
+    res.json({ updated: validIds.length });
   } catch (e) { next(e); }
 });
 

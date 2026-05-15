@@ -476,21 +476,6 @@ async function loadOrders(page) {
   const model_id   = document.getElementById('modelFilter').value;
   const event_type = document.getElementById('eventTypeFilter').value;
 
-  // If search looks like a phone number, use dedicated search endpoint
-  if (search && /^[\d\s\+\(\)\-]{7,}$/.test(search)) {
-    try {
-      const data = await _admin.apiFetch('/admin/orders/search?q=' + encodeURIComponent(search));
-      const orders = data.orders || [];
-      totalPages   = 1;
-      totalOrders  = data.total || orders.length;
-      renderTable(orders);
-      renderPagination();
-      updateCountSummary(orders.length, totalOrders);
-      syncBulkBar();
-      return;
-    } catch (e) { /* fall through to normal search */ }
-  }
-
   const params = new URLSearchParams({ page: currentPage, limit: PAGE_LIMIT });
   if (status)     params.set('status', status);
   if (search)     params.set('search', search);
