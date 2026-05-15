@@ -7783,6 +7783,97 @@ router.get('/cabinet/orders', requireClientAuth, async (req, res, next) => {
   }
 });
 
+// GET /api/cabinet/profile — client profile + order stats
+router.get('/cabinet/profile', requireClientAuth, async (req, res, next) => {
+  try {
+    const phone10 = req.clientPhone;
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const ph = patterns.map(() => '?').join(',');
+
+    const [latest, stats] = await Promise.all([
+      get(
+        `SELECT client_name, client_email, client_chat_id
+         FROM orders
+         WHERE REPLACE(REPLACE(REPLACE(REPLACE(client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+            OR REPLACE(REPLACE(REPLACE(REPLACE(client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+         ORDER BY created_at DESC LIMIT 1`,
+        [...patterns, ...patterns]
+      ),
+      get(
+        `SELECT
+           COUNT(*) as total,
+           SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+           SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled,
+           SUM(CASE WHEN status IN ('new','confirmed','in_progress') THEN 1 ELSE 0 END) as active
+         FROM orders
+         WHERE REPLACE(REPLACE(REPLACE(REPLACE(client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+            OR REPLACE(REPLACE(REPLACE(REPLACE(client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph})`,
+        [...patterns, ...patterns]
+      ),
+    ]);
+
+    res.json({
+      ok: true,
+      profile: {
+        phone: phone10,
+        name: latest?.client_name || null,
+        email: latest?.client_email || null,
+        chat_id: latest?.client_chat_id || req.clientChatId || null,
+      },
+      stats: {
+        total: stats?.total || 0,
+        completed: stats?.completed || 0,
+        cancelled: stats?.cancelled || 0,
+        active: stats?.active || 0,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PATCH /api/cabinet/profile — update client name and/or email (phone is immutable)
+router.patch('/cabinet/profile', requireClientAuth, async (req, res, next) => {
+  try {
+    const phone10 = req.clientPhone;
+    const { name, email } = req.body;
+
+    if (name !== undefined && (typeof name !== 'string' || name.trim().length < 2)) {
+      return res.status(400).json({ ok: false, error: 'Имя должно содержать минимум 2 символа' });
+    }
+    if (email !== undefined && email !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ ok: false, error: 'Некорректный email' });
+    }
+
+    const updates = [];
+    const params = [];
+    if (name !== undefined) {
+      updates.push('client_name=?');
+      params.push(name.trim());
+    }
+    if (email !== undefined) {
+      updates.push('client_email=?');
+      params.push(email.trim());
+    }
+
+    if (!updates.length) return res.status(400).json({ ok: false, error: 'Нет полей для обновления' });
+
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const ph = patterns.map(() => '?').join(',');
+
+    await run(
+      `UPDATE orders SET ${updates.join(', ')}
+       WHERE REPLACE(REPLACE(REPLACE(REPLACE(client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+          OR REPLACE(REPLACE(REPLACE(REPLACE(client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph})`,
+      [...params, ...patterns, ...patterns]
+    );
+
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── CRM incoming webhooks (БЛОК 10.3) ───────────────────────────────────────
 const { registerWebhooks: _registerCrmWebhooks } = require('../services/crm');
 _registerCrmWebhooks(router);

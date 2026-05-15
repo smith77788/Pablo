@@ -276,20 +276,24 @@ describe('POST /auth/verify-totp — security: невалидные данные
   });
 });
 
-describe('GET /user/wishlist — доступ без аутентификации через chat_id', () => {
-  it('chat_id=999 возвращает пустой список без ошибки', async () => {
+describe('GET /user/wishlist — требует admin auth (защита от несанкционированного доступа)', () => {
+  it('без auth — 401', async () => {
     const res = await request(app).get('/api/user/wishlist?chat_id=999');
+    expect(res.status).toBe(401);
+  });
+
+  it('с admin auth + chat_id=999 — пустой список', async () => {
+    const res = await request(app).get('/api/user/wishlist?chat_id=999').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
-    // Returns wishlist data (array or object with items)
     const body = res.body;
     const items = Array.isArray(body) ? body : body.items || body.wishlist || body.models || [];
     expect(Array.isArray(items)).toBe(true);
-    expect(items.length).toBe(0); // no data for unknown chat_id
+    expect(items.length).toBe(0);
   });
 
-  it('без chat_id — возвращает пустой список или ошибку', async () => {
-    const res = await request(app).get('/api/user/wishlist');
-    expect([200, 400]).toContain(res.status);
+  it('с admin auth но без chat_id — 400', async () => {
+    const res = await request(app).get('/api/user/wishlist').set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(400);
   });
 });
 
