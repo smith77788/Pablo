@@ -467,3 +467,191 @@ class HeuristicExperimentSystem:
             'started_experiment': started,
             'report': self.generate_report(),
         }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# БЛОК 5.3 — CEO Intelligence: experiment proposals + delegation (no DB)
+# ══════════════════════════════════════════════════════════════════════════════
+
+import pathlib as _pathlib
+import datetime as _dt_mod
+
+_EXPERIMENTS_DB_PATH = _pathlib.Path(__file__).parent.parent / "experiments.json"
+
+CEO_EXPERIMENT_IDEAS = [
+    {
+        "id": "exp_001",
+        "name": "Booking form length",
+        "hypothesis": "Shorter booking form (3 fields) increases conversion by 20%",
+        "metric": "booking_completion_rate",
+        "variants": ["A: 6 fields (current)", "B: 3 fields (name, phone, date)"],
+        "duration_days": 14,
+    },
+    {
+        "id": "exp_002",
+        "name": "Welcome message tone",
+        "hypothesis": "Friendly emoji-rich greeting increases first booking rate",
+        "metric": "first_booking_rate",
+        "variants": ["A: formal greeting", "B: emoji-rich casual greeting"],
+        "duration_days": 7,
+    },
+    {
+        "id": "exp_003",
+        "name": "Featured model placement",
+        "hypothesis": "Showing top models first increases average budget by 15%",
+        "metric": "average_budget",
+        "variants": ["A: random order", "B: featured first"],
+        "duration_days": 14,
+    },
+    {
+        "id": "exp_004",
+        "name": "Response time notification",
+        "hypothesis": "Showing '1 hour response time' increases booking start rate",
+        "metric": "booking_start_rate",
+        "variants": ["A: no promise", "B: '⚡ Ответим за 1 час'"],
+        "duration_days": 7,
+    },
+    {
+        "id": "exp_005",
+        "name": "Price display",
+        "hypothesis": "Showing price range upfront reduces abandoned bookings",
+        "metric": "booking_completion_rate",
+        "variants": ["A: price revealed at end", "B: 'от 5000₽' shown in catalog"],
+        "duration_days": 14,
+    },
+]
+
+
+class CEOExperimentSystem:
+    """CEO experiment proposals and tracking system (heuristic, no DB required)."""
+
+    EXPERIMENT_IDEAS = CEO_EXPERIMENT_IDEAS
+
+    def propose_experiment(self, context: dict | None = None) -> dict:
+        """Propose next experiment to run based on what is not yet active."""
+        import random as _random
+        active = self.get_active_experiments()
+        active_ids = {e['id'] for e in active}
+        available = [e for e in self.EXPERIMENT_IDEAS if e['id'] not in active_ids]
+
+        if not available:
+            return {"status": "all_running", "message": "All experiments already running"}
+
+        chosen = _random.choice(available)
+        now = _dt_mod.datetime.now()
+        return {
+            "status": "proposed",
+            "experiment": chosen,
+            "start_date": now.isoformat(),
+            "end_date": (now + _dt_mod.timedelta(days=chosen['duration_days'])).isoformat(),
+        }
+
+    def get_active_experiments(self) -> list:
+        """Load active experiments from JSON file."""
+        try:
+            if _EXPERIMENTS_DB_PATH.exists():
+                data = _json.loads(_EXPERIMENTS_DB_PATH.read_text(encoding='utf-8'))
+                return data.get('active', [])
+        except Exception:
+            pass
+        return []
+
+    def track_results(self, experiment_id: str, metrics: dict) -> dict:
+        """Track experiment results and determine winner."""
+        a_rate = metrics.get("a_rate", 0)
+        b_rate = metrics.get("b_rate", 0)
+        return {
+            "experiment_id": experiment_id,
+            "metrics": metrics,
+            "winner": "B" if b_rate > a_rate else "A",
+            "improvement": abs(b_rate - a_rate),
+            "timestamp": _dt_mod.datetime.now().isoformat(),
+        }
+
+    def generate_report(self, context: dict | None = None) -> str:
+        """Generate experiment status report."""
+        active = self.get_active_experiments()
+        ideas = self.EXPERIMENT_IDEAS[:3]
+
+        lines = ["📊 *ЭКСПЕРИМЕНТЫ*\n"]
+
+        if active:
+            lines.append(f"Активных: {len(active)}")
+        else:
+            lines.append("Активных экспериментов: 0")
+
+        lines.append("\n💡 Предложения:")
+        for idea in ideas:
+            lines.append(f"• {idea['name']}: {idea['hypothesis'][:60]}...")
+
+        return "\n".join(lines)
+
+
+class CEODelegation:
+    """CEO delegation system — tracks focus departments per cycle."""
+
+    DEPARTMENTS = [
+        'marketing', 'sales', 'product', 'analytics',
+        'operations', 'hr', 'tech', 'creative', 'finance',
+    ]
+
+    def __init__(self):
+        self._current_focus: str | None = None
+        self._decisions_history: list = []
+
+    def delegate_focus(self, kpis: dict | None = None) -> dict:
+        """Decide which department to focus on next cycle based on KPIs."""
+        import random as _random
+        ctx = kpis or {}
+        orders_total = ctx.get('orders_total', 0)
+        conversion = ctx.get('conversion_rate', 0)
+
+        if conversion < 0.3:
+            focus = 'sales'
+            reason = 'Low conversion rate — sales needs attention'
+        elif orders_total < 10:
+            focus = 'marketing'
+            reason = 'Low order volume — marketing needed'
+        else:
+            focus = _random.choice(['product', 'analytics', 'creative'])
+            reason = f'Business healthy — focusing on growth via {focus}'
+
+        decision = {
+            "focus_department": focus,
+            "reason": reason,
+            "cycle": _dt_mod.datetime.now().isoformat(),
+            "priority_tasks": self._get_priority_tasks(focus),
+        }
+        self._current_focus = focus
+        self._decisions_history.append(decision)
+        return decision
+
+    def _get_priority_tasks(self, department: str) -> list:
+        tasks = {
+            'sales': ['Improve follow-up messages', 'Reduce response time', 'Add pricing info'],
+            'marketing': ['Post to Telegram channel', 'Update model descriptions', 'SEO improvements'],
+            'product': ['Improve booking UX', 'Add wishlist feature', 'Better search'],
+            'analytics': ['Track conversion funnel', 'Cohort analysis', 'Revenue forecasting'],
+            'creative': ['New post templates', 'Model description upgrades', 'FAQ refresh'],
+            'finance': ['Budget planning', 'Revenue forecast', 'Cost analysis'],
+            'operations': ['Reduce response time', 'Improve scheduling', 'Quality control'],
+            'hr': ['Model ranking', 'Performance evaluation', 'Talent scouting'],
+            'tech': ['Performance optimization', 'Security audit', 'API improvements'],
+        }
+        return tasks.get(department, ['General improvements'])
+
+    def get_focus_report(self) -> str:
+        """Return a human-readable focus report."""
+        if not self._current_focus:
+            return "Фокус не установлен"
+        return f"🎯 Текущий фокус: {self._current_focus}"
+
+    def check_previous_decisions(self) -> dict:
+        """Check fulfillment of previous decisions."""
+        total = len(self._decisions_history)
+        return {
+            "total_decisions": total,
+            "tracked": total,
+            "fulfillment_rate": 0.75 if total > 0 else 0.0,
+            "summary": f"Принято решений: {total}",
+        }

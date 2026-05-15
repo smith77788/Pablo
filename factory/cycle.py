@@ -2906,6 +2906,54 @@ def run_cycle() -> dict:
         logger.error("Phase 5.3 CEO Reports error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 5.3b — CEO INTELLIGENCE: experiment proposals + delegation
+    # CEOExperimentSystem proposes next A/B test; CEODelegation picks
+    # focus department for the next cycle; tracks previous decisions.
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🧠 PHASE 5.3b: CEO INTELLIGENCE (experiments + delegation)")
+    try:
+        from factory.agents.experiment_system import CEOExperimentSystem, CEODelegation
+        _ceo_exp_system = CEOExperimentSystem()
+        _ceo_delegation = CEODelegation()
+
+        # Propose next A/B experiment based on current KPIs
+        _exp_proposal = _ceo_exp_system.propose_experiment(nevesty_kpis)
+
+        # Delegate department focus using real KPI data
+        _kpis_for_delegation = {
+            "conversion_rate": nevesty_kpis.get("conversion_rate_pct", 0) / 100,
+            "orders_total": nevesty_kpis.get("orders_this_month", 0),
+        }
+        _focus_decision = _ceo_delegation.delegate_focus(_kpis_for_delegation)
+
+        # Check fulfillment of any previous delegation decisions
+        _prev_decisions_check = _ceo_delegation.check_previous_decisions()
+
+        result_5_3b = {
+            "status": "ok",
+            "experiment_proposal": _exp_proposal,
+            "ceo_focus": _focus_decision,
+            "previous_decisions": _prev_decisions_check,
+        }
+        results["experiment_proposal"] = _exp_proposal
+        results["ceo_focus"] = _focus_decision
+        results["phases"]["ceo_intelligence"] = result_5_3b
+
+        summary_lines.append(
+            f"🧠 CEO Intelligence: focus={_focus_decision.get('focus_department', '?')}, "
+            f"experiment={_exp_proposal.get('experiment', {}).get('name', '?')[:40]}"
+        )
+        logger.info(
+            "[Phase5.3b] CEO Intelligence: focus_dept=%s, exp=%s, total_decisions=%s",
+            _focus_decision.get("focus_department"),
+            _exp_proposal.get("experiment", {}).get("id", "?"),
+            _prev_decisions_check.get("total_decisions", 0),
+        )
+    except Exception as e:
+        results["phases"]["ceo_intelligence"] = {"status": "error", "error": str(e)}
+        logger.error("Phase 5.3b CEO Intelligence error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)
