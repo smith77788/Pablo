@@ -4156,6 +4156,35 @@ router.post('/admin/db/vacuum', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/admin/db/backups — list available DB backups
+router.get('/admin/db/backups', auth, (req, res) => {
+  const fsLocal = require('fs');
+  const pathLocal = require('path');
+  const backupDir = process.env.BACKUP_DIR || pathLocal.join(__dirname, '../backups');
+
+  try {
+    if (!fsLocal.existsSync(backupDir)) {
+      return res.json({ backups: [], backup_dir: backupDir, count: 0 });
+    }
+
+    const files = fsLocal.readdirSync(backupDir)
+      .filter(f => f.endsWith('.db'))
+      .map(f => {
+        const stat = fsLocal.statSync(pathLocal.join(backupDir, f));
+        return {
+          filename: f,
+          size_kb: Math.round(stat.size / 1024),
+          created_at: stat.mtime.toISOString(),
+        };
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+    res.json({ backups: files, backup_dir: backupDir, count: files.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Cache stats & control (admin) ────────────────────────────────────────────
 // GET  /api/admin/cache/stats  → hit/miss/keys count
 // DELETE /api/admin/cache      → clear entire in-memory cache

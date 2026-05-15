@@ -723,12 +723,12 @@ function scheduleBackups() {
         fs.mkdirSync(BACKUP_DIR, { recursive: true });
       }
 
-      // Keep only last 8 backups (48 hours at 6h interval)
+      // Keep only last 28 backups (7 days × 4 backups/day)
       const backupFiles = fs.readdirSync(BACKUP_DIR)
         .filter(f => f.startsWith('nevesty_') && f.endsWith('.db'))
         .sort();
-      if (backupFiles.length >= 8) {
-        const toDelete = backupFiles.slice(0, backupFiles.length - 7);
+      if (backupFiles.length >= 28) {
+        const toDelete = backupFiles.slice(0, backupFiles.length - 27);
         toDelete.forEach(f => {
           try { fs.unlinkSync(pathMod.join(BACKUP_DIR, f)); } catch(_) {}
         });
