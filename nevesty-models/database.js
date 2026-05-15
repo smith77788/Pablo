@@ -176,6 +176,19 @@ async function initDatabase() {
     FOREIGN KEY(order_id) REFERENCES orders(id)
   )`);
 
+  await run(`CREATE TABLE IF NOT EXISTS order_status_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    old_status TEXT,
+    new_status TEXT NOT NULL,
+    changed_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(order_id) REFERENCES orders(id)
+  )`);
+
+  // Migrations — add status column to reviews if missing
+  await run(`ALTER TABLE reviews ADD COLUMN status TEXT DEFAULT 'pending'`).catch(() => {});
+
   // Default settings
   const defaults = [
     ['greeting',       'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],
@@ -234,6 +247,8 @@ async function initDatabase() {
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_findings_created ON agent_findings(created_at DESC)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_discussions_created ON agent_discussions(created_at DESC)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_logs_created ON agent_logs(created_at DESC)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_order_status_history_order ON order_status_history(order_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_order_status_history_created ON order_status_history(created_at DESC)`);
 
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);
