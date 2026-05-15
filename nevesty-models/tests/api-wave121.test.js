@@ -104,10 +104,9 @@ describe('Revenue forecast — GET /api/admin/analytics/forecast', () => {
 
 // ── 2. Sitemap regeneration endpoint ─────────────────────────────────────────
 
-describe('Sitemap regeneration — GET /api/api/admin/sitemap/regenerate', () => {
-  // NOTE: The route is registered as '/api/admin/sitemap/regenerate' directly on the router,
-  // which is mounted at '/api', resulting in '/api/api/admin/sitemap/regenerate'
-  const SITEMAP_PATH = '/api/api/admin/sitemap/regenerate';
+describe('Sitemap regeneration — GET /api/admin/sitemap/regenerate', () => {
+  // Route is registered as '/admin/sitemap/regenerate' on a router mounted at '/api'
+  const SITEMAP_PATH = '/api/admin/sitemap/regenerate';
 
   it('returns 401 without auth', async () => {
     const res = await request(app).get(SITEMAP_PATH);

@@ -7193,7 +7193,7 @@ async function generateSitemap() {
 }
 
 // ─── SEO: Manual sitemap regeneration endpoint (admin) ───────────────────────
-router.get('/api/admin/sitemap/regenerate', auth, async (req, res, next) => {
+router.get('/admin/sitemap/regenerate', auth, async (req, res, next) => {
   try {
     await generateSitemap();
     res.json({ ok: true, message: 'Sitemap regenerated successfully' });
