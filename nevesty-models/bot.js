@@ -3850,7 +3850,7 @@ function initBot(app) {
 
   // ── /wishlist ──────────────────────────────────────────────────────────────
   bot.onText(/^\/wishlist/, async (msg) => {
-    return showFavorites(msg.chat.id, 0);
+    return showWishlist(msg.chat.id, 0);
   });
 
   // ── /calculator ────────────────────────────────────────────────────────────
@@ -5904,7 +5904,7 @@ function initBot(app) {
         if (text === '💃 Каталог')             return showCatalog(chatId, null, 0);
         if (text === '📝 Подать заявку')       return bkStep1(chatId);
         if (text === '⚡ Быстрая заявка')       return bkQuickStart(chatId);
-        if (text === '❤️ Избранное')            return showFavorites(chatId, 0);
+        if (text === '❤️ Избранное')            return showWishlist(chatId, 0);
         if (text === '💬 Менеджер')            return showContactManager(chatId);
         if (text === '📋 Мои заявки')          return showMyOrders(chatId);
         if (text === '🔍 Статус заявки') {
@@ -8147,6 +8147,16 @@ async function isInWishlist(chatId, modelId) {
 
 async function showWishlist(chatId, page = 0) {
   try {
+    const enabled = await getSetting('wishlist_enabled').catch(() => '1');
+    if (enabled === '0') {
+      return safeSend(chatId,
+        '❤️ Список избранного временно недоступен\\.',
+        { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [
+          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+        ]}}
+      );
+    }
+
     const PAGE_SIZE = 5;
     const rows = await query(
       `SELECT m.id, m.name, m.category, m.city, m.featured FROM wishlists w

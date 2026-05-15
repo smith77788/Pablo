@@ -298,6 +298,11 @@ async function initDatabase() {
   // Migration — add profile_hidden column to client_prefs (v18)
   await run(`ALTER TABLE client_prefs ADD COLUMN profile_hidden INTEGER DEFAULT 0`).catch(() => {});
 
+  // Migration — add name/phone/email to client_prefs (v19)
+  await run(`ALTER TABLE client_prefs ADD COLUMN name TEXT DEFAULT NULL`).catch(() => {});
+  await run(`ALTER TABLE client_prefs ADD COLUMN phone TEXT DEFAULT NULL`).catch(() => {});
+  await run(`ALTER TABLE client_prefs ADD COLUMN email TEXT DEFAULT NULL`).catch(() => {});
+
   // Default settings
   const defaults = [
     ['greeting',       'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],
