@@ -1,8 +1,8 @@
 'use strict';
 
-const STATIC_CACHE = 'nevesty-static-v4';
-const API_CACHE    = 'nevesty-api-v1';
-const IMAGE_CACHE  = 'nevesty-images-v1';
+const STATIC_CACHE = 'nevesty-static-v5';
+const API_CACHE = 'nevesty-api-v1';
+const IMAGE_CACHE = 'nevesty-images-v1';
 
 // All current caches — anything else will be deleted on activate
 const CURRENT_CACHES = [STATIC_CACHE, API_CACHE, IMAGE_CACHE, 'nm-pending-forms'];
@@ -18,6 +18,7 @@ const PRECACHE_URLS = [
   '/contact.html',
   '/reviews.html',
   '/404.html',
+  '/500.html',
   '/offline.html',
   '/cabinet.html',
   '/cases.html',
@@ -42,24 +43,23 @@ const PRECACHE_URLS = [
 self.addEventListener('install', event => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(STATIC_CACHE).then(cache =>
-      cache.addAll(
-        PRECACHE_URLS.map(url => new Request(url, { credentials: 'same-origin' }))
-      ).catch(err => console.warn('[SW] Precache partial failure:', err))
-    )
+    caches
+      .open(STATIC_CACHE)
+      .then(cache =>
+        cache
+          .addAll(PRECACHE_URLS.map(url => new Request(url, { credentials: 'same-origin' })))
+          .catch(err => console.warn('[SW] Precache partial failure:', err))
+      )
   );
 });
 
 // ── Activate: delete stale caches ────────────────────────────────────────────
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(names =>
-      Promise.all(
-        names
-          .filter(name => !CURRENT_CACHES.includes(name))
-          .map(name => caches.delete(name))
-      )
-    ).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then(names => Promise.all(names.filter(name => !CURRENT_CACHES.includes(name)).map(name => caches.delete(name))))
+      .then(() => self.clients.claim())
   );
 });
 
@@ -161,9 +161,7 @@ async function networkFirst(request, cacheName) {
 async function networkFirstWithTimeout(request, cacheName, timeoutMs) {
   const cache = await caches.open(cacheName);
 
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('SW timeout')), timeoutMs)
-  );
+  const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('SW timeout')), timeoutMs));
 
   try {
     const response = await Promise.race([fetch(request), timeoutPromise]);
@@ -206,7 +204,9 @@ async function replayPendingForms() {
   try {
     const cache = await caches.open('nm-pending-forms');
     pending = await cache.keys();
-  } catch { return; }
+  } catch {
+    return;
+  }
 
   for (const req of pending) {
     try {
@@ -240,9 +240,7 @@ self.addEventListener('push', event => {
     actions: data.actions || [],
   };
 
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'Nevesty Models', options)
-  );
+  event.waitUntil(self.registration.showNotification(data.title || 'Nevesty Models', options));
 });
 
 self.addEventListener('notificationclick', event => {
