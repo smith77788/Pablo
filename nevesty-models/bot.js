@@ -1721,10 +1721,11 @@ async function showAdminSettings(chatId, section) {
 
   // ── Уведомления ───────────────────────────────────────────────────────────
   if (section === 'notifs') {
-    const [notifNew, notifSt, notifRev, notifMsg, notifSms] = await Promise.all([
+    const [notifNew, notifSt, notifRev, notifMsg, notifSms, eventReminders] = await Promise.all([
       getSetting('notif_new_order'), getSetting('notif_status'),
       getSetting('notif_new_review'), getSetting('notif_new_message'),
       getSetting('sms_notifications_enabled'),
+      getSetting('event_reminders_enabled'),
     ]);
     const on = v => v === '1' ? '✅' : '❌';
     const text =
@@ -1733,7 +1734,8 @@ async function showAdminSettings(chatId, section) {
       `${on(notifSt)} Изменения статуса\n` +
       `${on(notifRev)} Новые отзывы\n` +
       `${on(notifMsg)} Сообщения клиентов\n` +
-      `${on(notifSms)} SMS уведомления`;
+      `${on(notifSms)} SMS уведомления\n` +
+      `${on(eventReminders ?? '1')} Напоминания о мероприятиях`;
     return safeSend(chatId, text, {
       reply_markup: { inline_keyboard: [
         [{ text: notifNew==='1' ? '🔕 Заявки ВЫКЛ'    : '🔔 Заявки ВКЛ',
@@ -1746,6 +1748,8 @@ async function showAdminSettings(chatId, section) {
            callback_data: notifMsg==='1' ? 'adm_notif_msg_off'    : 'adm_notif_msg_on'    }],
         [{ text: notifSms==='1' ? '🔕 SMS ВЫКЛ'       : '📱 SMS ВКЛ',
            callback_data: notifSms==='1' ? 'adm_notif_sms_off'    : 'adm_notif_sms_on'    }],
+        [{ text: (eventReminders ?? '1') === '1' ? '🔕 Напоминания о событиях ВЫКЛ' : '🔔 Напоминания о событиях ВКЛ',
+           callback_data: 'adm_toggle_event_reminders' }],
         [{ text: '← Настройки', callback_data: 'adm_settings' }],
       ]}
     });
@@ -4990,6 +4994,14 @@ function initBot(app) {
       return showAdminSettings(chatId, 'notifs');
     }
 
+    // ── Event reminders toggle (admin)
+    if (data === 'adm_toggle_event_reminders') {
+      if (!isAdmin(chatId)) return;
+      const current = await getSetting('event_reminders_enabled');
+      await setSetting('event_reminders_enabled', current === '0' ? '1' : '0');
+      return showAdminSettings(chatId, 'notifs');
+    }
+
     // ── Add admin Telegram ID
     if (data === 'adm_add_admin_id') {
       if (!isAdmin(chatId)) return;
@@ -5475,6 +5487,16 @@ function initBot(app) {
       await run(
         `INSERT INTO client_prefs (chat_id, notify_review) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET notify_review=excluded.notify_review, updated_at=CURRENT_TIMESTAMP`,
         [chatId, prefs.notify_review ? 0 : 1]
+      ).catch(() => {});
+      return showClientNotificationSettings(chatId);
+    }
+
+    if (data === 'client_notif_reminders') {
+      const prefs = await get('SELECT notify_reminders FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null) || { notify_reminders: 1 };
+      const newVal = (prefs.notify_reminders === 0 || prefs.notify_reminders === false) ? 1 : 0;
+      await run(
+        `INSERT INTO client_prefs (chat_id, notify_reminders) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET notify_reminders=excluded.notify_reminders, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, newVal]
       ).catch(() => {});
       return showClientNotificationSettings(chatId);
     }
@@ -6585,9 +6607,9 @@ async function showUserProfile(chatId, firstName) {
 
 async function showClientNotificationSettings(chatId) {
   const prefs = await get('SELECT * FROM client_prefs WHERE chat_id=?', [chatId])
-    .catch(() => null) || { notify_status: 1, notify_promo: 1, notify_review: 1 };
+    .catch(() => null) || { notify_status: 1, notify_promo: 1, notify_review: 1, notify_reminders: 1 };
 
-  const onOff = v => v ? '🔔 Вкл' : '🔕 Выкл';
+  const onOff = v => (v === undefined || v === null || v) ? '🔔 Вкл' : '🔕 Выкл';
 
   return safeSend(chatId, '🔔 *Настройки уведомлений*\n\nВыберите что вы хотите получать:', {
     parse_mode: 'MarkdownV2',
@@ -6595,6 +6617,7 @@ async function showClientNotificationSettings(chatId) {
       [{ text: `${onOff(prefs.notify_status)} Статус заявки`, callback_data: 'client_notif_status' }],
       [{ text: `${onOff(prefs.notify_promo)} Акции и предложения`, callback_data: 'client_notif_promo' }],
       [{ text: `${onOff(prefs.notify_review)} Просьба оставить отзыв`, callback_data: 'client_notif_review' }],
+      [{ text: `${onOff(prefs.notify_reminders !== 0 ? prefs.notify_reminders : 0)} Напоминания о мероприятиях`, callback_data: 'client_notif_reminders' }],
       [{ text: '← Назад', callback_data: 'profile' }]
     ]}
   });

@@ -285,6 +285,12 @@ async function initDatabase() {
   // Migration — add review_requested timestamp to orders
   await run(`ALTER TABLE orders ADD COLUMN review_requested DATETIME DEFAULT NULL`).catch(() => {});
 
+  // Migration — add reminder_sent_at for event reminders (v17)
+  await run(`ALTER TABLE orders ADD COLUMN reminder_sent_at TEXT DEFAULT NULL`).catch(() => {});
+
+  // Migration — add notify_reminders column to client_prefs (v17)
+  await run(`ALTER TABLE client_prefs ADD COLUMN notify_reminders INTEGER DEFAULT 1`).catch(() => {});
+
   // Default settings
   const defaults = [
     ['greeting',       'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],
@@ -299,6 +305,7 @@ async function initDatabase() {
     ['notif_message',         '1'],
     ['wishlist_enabled',      '1'],
     ['quick_booking_enabled', '1'],
+    ['event_reminders_enabled', '1'],
   ];
   for (const [key, value] of defaults) {
     await run('INSERT OR IGNORE INTO bot_settings (key,value) VALUES (?,?)', [key, value]);
