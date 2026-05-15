@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: nevesty-models
+    runtime: node
+    buildCommand: npm install --production
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BOT_TOKEN
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SITE_URL
+        sync: false
+      - key: DB_PATH
+        value: /var/data/nevesty.db
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
