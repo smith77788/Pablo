@@ -306,6 +306,55 @@
     </div>
   </section>
 
+  <!-- QUICK BOOKING POPUP MODAL -->
+  <div class="qb-modal" id="qbModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle">
+    <div class="qb-modal-box">
+      <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
+      <div id="qbForm">
+        <div class="qb-modal-title" id="qbModalTitle">⚡ Быстрая заявка</div>
+        <div class="qb-modal-sub">Оставьте контакты — менеджер свяжется за 15 минут</div>
+        <input class="qb-input" id="qbName" type="text" placeholder="Ваше имя" autocomplete="name" />
+        <input class="qb-input" id="qbPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" />
+        <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
+        <button class="qb-btn" onclick="submitQb()">Отправить заявку →</button>
+      </div>
+      <div class="qb-success" id="qbSuccess">
+        <div class="qb-success-icon">✅</div>
+        <p>Заявка принята! Менеджер свяжется с вами в течение 15 минут.</p>
+      </div>
+    </div>
+  </div>
+  <script>
+  function openQbModal() {
+    document.getElementById('qbModal')?.classList.add('open');
+    document.getElementById('qbName')?.focus();
+  }
+  function closeQbModal() {
+    document.getElementById('qbModal')?.classList.remove('open');
+  }
+  document.getElementById('qbModal')?.addEventListener('click', e => {
+    if (e.target.id === 'qbModal') closeQbModal();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeQbModal();
+  });
+  async function submitQb() {
+    const name = document.getElementById('qbName')?.value.trim();
+    const phone = document.getElementById('qbPhone')?.value.trim();
+    if (!name || !phone) { alert('Пожалуйста, заполните имя и телефон'); return; }
+    try {
+      await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_name: name, client_phone: phone, comments: document.getElementById('qbComment')?.value.trim() || '', event_type: 'other', quick_booking: true })
+      });
+      document.getElementById('qbForm').style.display = 'none';
+      document.getElementById('qbSuccess').style.display = 'block';
+      setTimeout(closeQbModal, 3000);
+    } catch (e) { alert('Ошибка отправки. Попробуйте позже.'); }
+  }
+  </script>
+
   <!-- QUICK BOOKING MODAL -->
   <div id="quickBookingModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,0.8);backdrop-filter:blur(6px);align-items:center;justify-content:center">
     <div style="background:var(--bg2);border:1px solid var(--border);padding:40px 32px;max-width:420px;width:90%;position:relative">
@@ -733,6 +782,11 @@ fetch('/api/settings/public').then(r => r.json()).then(d => {
     <button id="install-btn" style="background:var(--gold); color:#000; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; white-space:nowrap; font-size:0.85rem;">Установить</button>
     <button onclick="document.getElementById('install-banner').style.display='none'" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem; padding:0 4px; line-height:1;" aria-label="Закрыть">✕</button>
   </div>
+
+  <!-- Floating CTA Button -->
+  <button class="floating-cta" onclick="openQbModal()" aria-label="Оставить заявку">
+    ⚡ Заявка
+  </button>
 
   <!-- Floating WhatsApp Button -->
   <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">

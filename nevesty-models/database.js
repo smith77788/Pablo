@@ -291,6 +291,13 @@ async function initDatabase() {
   // Migration — add notify_reminders column to client_prefs (v17)
   await run(`ALTER TABLE client_prefs ADD COLUMN notify_reminders INTEGER DEFAULT 1`).catch(() => {});
 
+  // Migration — add notify_marketing and notify_review_invites columns to client_prefs (v18)
+  await run(`ALTER TABLE client_prefs ADD COLUMN notify_marketing INTEGER DEFAULT 1`).catch(() => {});
+  await run(`ALTER TABLE client_prefs ADD COLUMN notify_review_invites INTEGER DEFAULT 1`).catch(() => {});
+
+  // Migration — add profile_hidden column to client_prefs (v18)
+  await run(`ALTER TABLE client_prefs ADD COLUMN profile_hidden INTEGER DEFAULT 0`).catch(() => {});
+
   // Default settings
   const defaults = [
     ['greeting',       'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],
