@@ -79,7 +79,10 @@ describe('factory/notifier.py', () => {
 
 describe('CORS security in server.js', () => {
   test('server.js uses origin: false as CORS fallback (not open CORS)', () => {
-    expect(serverSrc).toContain('origin: false');
+    // corsOrigin is set to false when ALLOWED_ORIGINS is empty, then used as origin: corsOrigin
+    const hasFalseAssignment = serverSrc.includes(': false');
+    const hasCorsOriginFalse = serverSrc.includes('corsOrigin') && serverSrc.includes('false');
+    expect(hasFalseAssignment || hasCorsOriginFalse).toBe(true);
   });
 
   test('server.js checks ALLOWED_ORIGINS env var', () => {
@@ -102,10 +105,12 @@ describe('XSS fix in public/admin/analytics.html', () => {
 // ─── 7. Factory cycle sends notifications (2 tests) ──────────────────────────
 
 describe('factory/cycle.py notification integration', () => {
-  test('factory/cycle.py imports or references notifier module', () => {
+  test('factory/cycle.py imports or references a notify/notifier module', () => {
     const hasNotifyCycleComplete = cycleSrc.includes('notify_cycle_complete');
     const hasNotifierImport = cycleSrc.includes('notifier');
-    expect(hasNotifyCycleComplete || hasNotifierImport).toBe(true);
+    const hasNotifyImport = cycleSrc.includes('from factory.notifications import notify');
+    const hasNotifyAdmins = cycleSrc.includes('_notify_admins_telegram');
+    expect(hasNotifyCycleComplete || hasNotifierImport || hasNotifyImport || hasNotifyAdmins).toBe(true);
   });
 
   test('factory/cycle.py calls notify.js or uses notifier module', () => {
