@@ -3101,6 +3101,30 @@ def run_cycle() -> dict:
         logger.error("Phase 29 Social Media error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 30 — CONTENT DEPARTMENT: auto-generate model descriptions and FAQ
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n✍️ PHASE 30: CONTENT DEPARTMENT")
+    try:
+        from factory.agents.content_dept import ContentDepartment
+        content_dept = ContentDepartment()
+        content_results = content_dept.run_cycle()
+        results['content'] = content_results
+        desc_count = len([r for r in content_results.get('model_descriptions', []) if 'id' in r])
+        faq_status = content_results.get('faq', [{}])[0].get('status', 'populated') if content_results.get('faq') else 'none'
+        results["phases"]["content_dept"] = {
+            "models_updated": desc_count,
+            "faq_result": faq_status,
+            "status": "ok",
+        }
+        summary_lines.append(
+            f"✍️ Content Dept (Phase 30): models_updated={desc_count}, faq={faq_status}"
+        )
+        logger.info("[Phase30] Content Dept: models_updated=%d, faq=%s", desc_count, faq_status)
+    except Exception as e:
+        results["phases"]["content_dept"] = {"status": "error", "error": str(e)}
+        logger.error("Phase 30 Content Dept error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)
