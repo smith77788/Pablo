@@ -25,7 +25,7 @@ NM.analytics = {
       medium: p.get('utm_medium') || '',
       campaign: p.get('utm_campaign') || '',
       content: p.get('utm_content') || '',
-      term: p.get('utm_term') || ''
+      term: p.get('utm_term') || '',
     };
   },
 
@@ -35,7 +35,11 @@ NM.analytics = {
   },
 
   getSavedUTM() {
-    try { return JSON.parse(sessionStorage.getItem('utm') || '{}'); } catch { return {}; }
+    try {
+      return JSON.parse(sessionStorage.getItem('utm') || '{}');
+    } catch {
+      return {};
+    }
   },
 
   // ─── Named tracking events ─────────────────────────────────────
@@ -88,35 +92,53 @@ NM.analytics = {
 
   submitQuickBooking() {
     this.event('quick_booking_submit', { ...this.getSavedUTM() });
-  }
+  },
 };
 
 // Load GA4 + Yandex Metrica scripts after consent is given (late-consent support)
 function _loadAnalyticsScripts() {
-  fetch('/api/settings/public').then(r => r.json()).then(d => {
-    // GA4
-    if (d.ga_measurement_id && !window._ga_ready) {
-      var s = document.createElement('script');
-      s.async = true;
-      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
-      document.head.appendChild(s);
-      window.dataLayer = window.dataLayer || [];
-      window.gtag = function(){dataLayer.push(arguments);};
-      gtag('js', new Date());
-      gtag('config', d.ga_measurement_id, { send_page_view: true });
-      window._ga_ready = true;
-    }
-    // Yandex Metrica
-    if (d.ym_counter_id && !window.YM_ID) {
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      window.YM_ID = d.ym_counter_id;
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:false});
-    }
-  }).catch(()=>{});
+  fetch('/api/settings/public')
+    .then(r => r.json())
+    .then(d => {
+      // GA4
+      if (d.ga_measurement_id && !window._ga_ready) {
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
+        document.head.appendChild(s);
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () {
+          dataLayer.push(arguments);
+        };
+        gtag('js', new Date());
+        gtag('config', d.ga_measurement_id, { send_page_view: true });
+        window._ga_ready = true;
+      }
+      // Yandex Metrica
+      if (d.ym_counter_id && !window.YM_ID) {
+        (function (m, e, t, r, i, k, a) {
+          m[i] =
+            m[i] ||
+            function () {
+              (m[i].a = m[i].a || []).push(arguments);
+            };
+          m[i].l = 1 * new Date();
+          for (var j = 0; j < document.scripts.length; j++) {
+            if (document.scripts[j].src === r) {
+              return;
+            }
+          }
+          ((k = e.createElement(t)),
+            (a = e.getElementsByTagName(t)[0]),
+            (k.async = 1),
+            (k.src = r),
+            a.parentNode.insertBefore(k, a));
+        })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+        window.YM_ID = d.ym_counter_id;
+        ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: false });
+      }
+    })
+    .catch(() => {});
 }
 
 // Auto-init
@@ -128,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
     NM.analytics.event('page_view', {
       page_title: document.title,
       page_location: window.location.href,
-      ...NM.analytics.getSavedUTM()
+      ...NM.analytics.getSavedUTM(),
     });
   }
 
@@ -144,3 +166,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Late-consent: load analytics scripts when user accepts cookies
 document.addEventListener('cookieConsentAccepted', _loadAnalyticsScripts);
+
+// Unified shorthand alias: window.nmTrack(event, params)
+// Compatible with the spec in БЛОК 9.3 — delegates to NM.analytics.event
+window.nmTrack = function (event, params) {
+  if (window.NM && NM.analytics) NM.analytics.event(event, params || {});
+};

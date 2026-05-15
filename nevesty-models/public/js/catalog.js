@@ -1,17 +1,17 @@
 /* Catalog page — filters: name, category, city, age range, hair, height, availability, sort */
 (async function () {
-  const grid          = document.getElementById('catalogGrid');
-  const skeleton      = document.getElementById('catalogSkeleton');
-  const countEl       = document.getElementById('catalogCount');
-  const searchInput   = document.getElementById('searchInput');
-  const resetBtn      = document.getElementById('resetFilters');
-  const minHeightEl   = document.getElementById('minHeight');
-  const maxHeightEl   = document.getElementById('maxHeight');
-  const ageMinEl      = document.getElementById('age-min');
-  const ageMaxEl      = document.getElementById('age-max');
-  const citySelect    = document.getElementById('cityFilter');
+  const grid = document.getElementById('catalogGrid');
+  const skeleton = document.getElementById('catalogSkeleton');
+  const countEl = document.getElementById('catalogCount');
+  const searchInput = document.getElementById('searchInput');
+  const resetBtn = document.getElementById('resetFilters');
+  const minHeightEl = document.getElementById('minHeight');
+  const maxHeightEl = document.getElementById('maxHeight');
+  const ageMinEl = document.getElementById('age-min');
+  const ageMaxEl = document.getElementById('age-max');
+  const citySelect = document.getElementById('cityFilter');
   const availCheckbox = document.getElementById('availableOnly');
-  const sortEl        = document.getElementById('sortSelect');
+  const sortEl = document.getElementById('sortSelect');
   const activeFilterBadge = document.getElementById('activeFilterBadge');
 
   let allModels = [];
@@ -21,7 +21,8 @@
     const p = new URLSearchParams(window.location.search);
 
     // Support combined format: height=160-165, age=18-22 (for shareable links)
-    let minHeight = '', maxHeight = '';
+    let minHeight = '',
+      maxHeight = '';
     const heightVal = p.get('height');
     if (heightVal) {
       if (heightVal.endsWith('+')) {
@@ -37,7 +38,8 @@
       maxHeight = p.get('maxH') || '';
     }
 
-    let ageMin = '', ageMax = '';
+    let ageMin = '',
+      ageMax = '';
     const ageVal = p.get('age');
     if (ageVal) {
       if (ageVal.endsWith('+')) {
@@ -54,14 +56,14 @@
     }
 
     return {
-      category:      p.get('category') || '',
-      hair:          p.get('hair') || '',
-      city:          p.get('city') || '',
+      category: p.get('category') || '',
+      hair: p.get('hair') || '',
+      city: p.get('city') || '',
       ageMin,
       ageMax,
       availableOnly: p.get('available') === '1',
-      sort:          p.get('sort') || 'default',
-      search:        p.get('q') || '',
+      sort: p.get('sort') || 'default',
+      search: p.get('q') || '',
       minHeight,
       maxHeight,
     };
@@ -73,9 +75,9 @@
     clearTimeout(urlUpdateTimer);
     urlUpdateTimer = setTimeout(() => {
       const p = new URLSearchParams();
-      if (filters.category)    p.set('category', filters.category);
-      if (filters.hair)        p.set('hair', filters.hair);
-      if (filters.city)        p.set('city', filters.city);
+      if (filters.category) p.set('category', filters.category);
+      if (filters.hair) p.set('hair', filters.hair);
+      if (filters.city) p.set('city', filters.city);
 
       // Use human-readable combined format for height and age
       if (filters.minHeight || filters.maxHeight) {
@@ -99,7 +101,7 @@
 
       if (filters.availableOnly) p.set('available', '1');
       if (filters.sort && filters.sort !== 'default') p.set('sort', filters.sort);
-      if (filters.search)      p.set('q', filters.search);
+      if (filters.search) p.set('q', filters.search);
       const qs = p.toString();
       const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
       window.history.replaceState({}, '', newUrl);
@@ -127,7 +129,7 @@
 
   // ── Show skeleton, load models ───────────────────────────────────────────────
   if (skeleton) skeleton.style.display = '';
-  if (grid)     grid.style.display = 'none';
+  if (grid) grid.style.display = 'none';
   countEl.textContent = 'Загрузка...';
 
   try {
@@ -147,9 +149,7 @@
   if (grid) grid.style.display = '';
 
   // ── Populate city dropdown dynamically ───────────────────────────────────────
-  const cities = [...new Set(allModels.map(m => m.city).filter(Boolean))].sort((a, b) =>
-    a.localeCompare(b, 'ru')
-  );
+  const cities = [...new Set(allModels.map(m => m.city).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
   cities.forEach(city => {
     const opt = document.createElement('option');
     opt.value = city;
@@ -159,12 +159,12 @@
 
   // ── Apply initial values from URL ────────────────────────────────────────────
   function applyUrlParamsToUI() {
-    if (searchInput)   searchInput.value = filters.search || '';
-    if (minHeightEl)   minHeightEl.value = filters.minHeight || '';
-    if (maxHeightEl)   maxHeightEl.value = filters.maxHeight || '';
-    if (citySelect)    citySelect.value  = filters.city || '';
+    if (searchInput) searchInput.value = filters.search || '';
+    if (minHeightEl) minHeightEl.value = filters.minHeight || '';
+    if (maxHeightEl) maxHeightEl.value = filters.maxHeight || '';
+    if (citySelect) citySelect.value = filters.city || '';
     if (availCheckbox) availCheckbox.checked = filters.availableOnly;
-    if (sortEl)        sortEl.value      = filters.sort || 'default';
+    if (sortEl) sortEl.value = filters.sort || 'default';
 
     // Category tags
     document.querySelectorAll('#categoryFilters .filter-tag').forEach(t => {
@@ -176,14 +176,14 @@
     });
     // Age tags
     document.querySelectorAll('#ageFilters .filter-tag').forEach(t => {
-      const matches = (t.dataset.min || '') === (filters.ageMin || '') &&
-                      (t.dataset.max || '') === (filters.ageMax || '');
+      const matches =
+        (t.dataset.min || '') === (filters.ageMin || '') && (t.dataset.max || '') === (filters.ageMax || '');
       t.classList.toggle('active', matches);
     });
     // Height tags
     document.querySelectorAll('#heightFilters .filter-tag').forEach(t => {
-      const matches = (t.dataset.hmin || '') === (filters.minHeight || '') &&
-                      (t.dataset.hmax || '') === (filters.maxHeight || '');
+      const matches =
+        (t.dataset.hmin || '') === (filters.minHeight || '') && (t.dataset.hmax || '') === (filters.maxHeight || '');
       t.classList.toggle('active', matches);
     });
   }
@@ -250,59 +250,100 @@
   // ── Debounced inputs ─────────────────────────────────────────────────────────
   function debounce(fn, ms) {
     let t;
-    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
+    };
   }
-  searchInput?.addEventListener('input', debounce(() => {
-    filters.search = searchInput.value.trim();
-    if (filters.search && window.NM?.analytics) NM.analytics.filterCatalog('search', filters.search);
-    render();
-  }, 250));
-  minHeightEl?.addEventListener('input', debounce(() => {
-    filters.minHeight = minHeightEl.value;
-    // Deselect height tags when typing
-    document.querySelectorAll('#heightFilters .filter-tag').forEach(t => {
-      t.classList.remove('active');
-      t.setAttribute('aria-pressed', 'false');
-    });
-    const anyTag = document.querySelector('#heightFilters .filter-tag[data-hmin=""]');
-    if (anyTag && !filters.minHeight && !filters.maxHeight) { anyTag.classList.add('active'); anyTag.setAttribute('aria-pressed', 'true'); }
-    render();
-  }, 400));
-  maxHeightEl?.addEventListener('input', debounce(() => {
-    filters.maxHeight = maxHeightEl.value;
-    // Deselect height tags when typing
-    document.querySelectorAll('#heightFilters .filter-tag').forEach(t => {
-      t.classList.remove('active');
-      t.setAttribute('aria-pressed', 'false');
-    });
-    const anyTag = document.querySelector('#heightFilters .filter-tag[data-hmin=""]');
-    if (anyTag && !filters.minHeight && !filters.maxHeight) { anyTag.classList.add('active'); anyTag.setAttribute('aria-pressed', 'true'); }
-    render();
-  }, 400));
-  ageMinEl?.addEventListener('input', debounce(() => {
-    if (ageMinEl.value) {
-      // Numeric range inputs override tag-based age selection
-      filters.ageMin = ageMinEl.value;
-      document.querySelectorAll('#ageFilters .filter-tag').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-pressed', 'false'); });
-    } else {
-      filters.ageMin = '';
-    }
-    render();
-  }, 400));
-  ageMaxEl?.addEventListener('input', debounce(() => {
-    if (ageMaxEl.value) {
-      filters.ageMax = ageMaxEl.value;
-      document.querySelectorAll('#ageFilters .filter-tag').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-pressed', 'false'); });
-    } else {
-      filters.ageMax = '';
-    }
-    render();
-  }, 400));
+  searchInput?.addEventListener(
+    'input',
+    debounce(() => {
+      filters.search = searchInput.value.trim();
+      if (filters.search && window.NM?.analytics) NM.analytics.filterCatalog('search', filters.search);
+      render();
+    }, 250)
+  );
+  minHeightEl?.addEventListener(
+    'input',
+    debounce(() => {
+      filters.minHeight = minHeightEl.value;
+      // Deselect height tags when typing
+      document.querySelectorAll('#heightFilters .filter-tag').forEach(t => {
+        t.classList.remove('active');
+        t.setAttribute('aria-pressed', 'false');
+      });
+      const anyTag = document.querySelector('#heightFilters .filter-tag[data-hmin=""]');
+      if (anyTag && !filters.minHeight && !filters.maxHeight) {
+        anyTag.classList.add('active');
+        anyTag.setAttribute('aria-pressed', 'true');
+      }
+      render();
+    }, 400)
+  );
+  maxHeightEl?.addEventListener(
+    'input',
+    debounce(() => {
+      filters.maxHeight = maxHeightEl.value;
+      // Deselect height tags when typing
+      document.querySelectorAll('#heightFilters .filter-tag').forEach(t => {
+        t.classList.remove('active');
+        t.setAttribute('aria-pressed', 'false');
+      });
+      const anyTag = document.querySelector('#heightFilters .filter-tag[data-hmin=""]');
+      if (anyTag && !filters.minHeight && !filters.maxHeight) {
+        anyTag.classList.add('active');
+        anyTag.setAttribute('aria-pressed', 'true');
+      }
+      render();
+    }, 400)
+  );
+  ageMinEl?.addEventListener(
+    'input',
+    debounce(() => {
+      if (ageMinEl.value) {
+        // Numeric range inputs override tag-based age selection
+        filters.ageMin = ageMinEl.value;
+        document.querySelectorAll('#ageFilters .filter-tag').forEach(t => {
+          t.classList.remove('active');
+          t.setAttribute('aria-pressed', 'false');
+        });
+      } else {
+        filters.ageMin = '';
+      }
+      render();
+    }, 400)
+  );
+  ageMaxEl?.addEventListener(
+    'input',
+    debounce(() => {
+      if (ageMaxEl.value) {
+        filters.ageMax = ageMaxEl.value;
+        document.querySelectorAll('#ageFilters .filter-tag').forEach(t => {
+          t.classList.remove('active');
+          t.setAttribute('aria-pressed', 'false');
+        });
+      } else {
+        filters.ageMax = '';
+      }
+      render();
+    }, 400)
+  );
 
   // ── Reset ────────────────────────────────────────────────────────────────────
   // Defined as local function so it can be called before window.resetFilters is assigned
   function doReset() {
-    filters = { category: '', hair: '', city: '', ageMin: '', ageMax: '', availableOnly: false, sort: 'default', search: '', minHeight: '', maxHeight: '' };
+    filters = {
+      category: '',
+      hair: '',
+      city: '',
+      ageMin: '',
+      ageMax: '',
+      availableOnly: false,
+      sort: 'default',
+      search: '',
+      minHeight: '',
+      maxHeight: '',
+    };
     if (ageMinEl) ageMinEl.value = '';
     if (ageMaxEl) ageMaxEl.value = '';
     if (minHeightEl) minHeightEl.value = '';
@@ -311,10 +352,24 @@
     if (citySelect) citySelect.value = '';
     if (sortEl) sortEl.value = 'default';
     if (availCheckbox) availCheckbox.checked = false;
-    document.querySelectorAll('#categoryFilters .filter-tag').forEach(t => { t.classList.toggle('active', t.dataset.value === ''); t.setAttribute('aria-pressed', t.dataset.value === '' ? 'true' : 'false'); });
-    document.querySelectorAll('#hairFilters .filter-tag').forEach(t => { t.classList.toggle('active', t.dataset.value === ''); t.setAttribute('aria-pressed', t.dataset.value === '' ? 'true' : 'false'); });
-    document.querySelectorAll('#ageFilters .filter-tag').forEach(t => { const isAny = !t.dataset.min && !t.dataset.max; t.classList.toggle('active', isAny); t.setAttribute('aria-pressed', isAny ? 'true' : 'false'); });
-    document.querySelectorAll('#heightFilters .filter-tag').forEach(t => { const isAny = !t.dataset.hmin && !t.dataset.hmax; t.classList.toggle('active', isAny); t.setAttribute('aria-pressed', isAny ? 'true' : 'false'); });
+    document.querySelectorAll('#categoryFilters .filter-tag').forEach(t => {
+      t.classList.toggle('active', t.dataset.value === '');
+      t.setAttribute('aria-pressed', t.dataset.value === '' ? 'true' : 'false');
+    });
+    document.querySelectorAll('#hairFilters .filter-tag').forEach(t => {
+      t.classList.toggle('active', t.dataset.value === '');
+      t.setAttribute('aria-pressed', t.dataset.value === '' ? 'true' : 'false');
+    });
+    document.querySelectorAll('#ageFilters .filter-tag').forEach(t => {
+      const isAny = !t.dataset.min && !t.dataset.max;
+      t.classList.toggle('active', isAny);
+      t.setAttribute('aria-pressed', isAny ? 'true' : 'false');
+    });
+    document.querySelectorAll('#heightFilters .filter-tag').forEach(t => {
+      const isAny = !t.dataset.hmin && !t.dataset.hmax;
+      t.classList.toggle('active', isAny);
+      t.setAttribute('aria-pressed', isAny ? 'true' : 'false');
+    });
     history.replaceState(null, '', window.location.pathname);
     render();
   }
@@ -323,7 +378,7 @@
   // ── Experience label ─────────────────────────────────────────────────────────
   function experienceBadge(m) {
     if (!m.age) return '';
-    if (m.age < 21)  return '<span class="exp-badge exp-junior">Начинающая</span>';
+    if (m.age < 21) return '<span class="exp-badge exp-junior">Начинающая</span>';
     if (m.age <= 25) return '<span class="exp-badge exp-mid">Опыт</span>';
     return '<span class="exp-badge exp-senior">Профи</span>';
   }
@@ -333,10 +388,16 @@
   // ── Favorites helpers ─────────────────────────────────────────────────────────
   const FAV_KEY = 'nm_favorites';
   function getFavs() {
-    try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; }
+    try {
+      return JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+    } catch {
+      return [];
+    }
   }
   function saveFavs(arr) {
-    try { localStorage.setItem(FAV_KEY, JSON.stringify(arr)); } catch {}
+    try {
+      localStorage.setItem(FAV_KEY, JSON.stringify(arr));
+    } catch {}
   }
   function isFav(id) {
     const favs = getFavs();
@@ -397,7 +458,7 @@
 
   // ── Render ───────────────────────────────────────────────────────────────────
   function render() {
-    const q    = (filters.search || searchInput?.value || '').toLowerCase().trim();
+    const q = (filters.search || searchInput?.value || '').toLowerCase().trim();
     const minH = parseInt(filters.minHeight || minHeightEl?.value) || 0;
     const maxH = parseInt(filters.maxHeight || maxHeightEl?.value) || 999;
     const minA = filters.ageMin ? parseInt(filters.ageMin) : 0;
@@ -418,14 +479,29 @@
 
     // Sort
     switch (filters.sort) {
-      case 'featured':    list = [...list].sort((a, b) => (b.featured - a.featured) || (b.available - a.available) || (b.id - a.id)); break;
-      case 'name_asc':    list = [...list].sort((a, b) => a.name.localeCompare(b.name, 'ru')); break;
-      case 'newest':      list = [...list].sort((a, b) => b.id - a.id); break;
-      case 'available':   list = [...list].sort((a, b) => b.available - a.available); break;
-      case 'height_asc':  list = [...list].sort((a, b) => (a.height || 0) - (b.height || 0)); break;
-      case 'height_desc': list = [...list].sort((a, b) => (b.height || 0) - (a.height || 0)); break;
-      case 'age_asc':     list = [...list].sort((a, b) => (a.age || 99) - (b.age || 99)); break;
-      default: break;
+      case 'featured':
+        list = [...list].sort((a, b) => b.featured - a.featured || b.available - a.available || b.id - a.id);
+        break;
+      case 'name_asc':
+        list = [...list].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+        break;
+      case 'newest':
+        list = [...list].sort((a, b) => b.id - a.id);
+        break;
+      case 'available':
+        list = [...list].sort((a, b) => b.available - a.available);
+        break;
+      case 'height_asc':
+        list = [...list].sort((a, b) => (a.height || 0) - (b.height || 0));
+        break;
+      case 'height_desc':
+        list = [...list].sort((a, b) => (b.height || 0) - (a.height || 0));
+        break;
+      case 'age_asc':
+        list = [...list].sort((a, b) => (a.age || 99) - (b.age || 99));
+        break;
+      default:
+        break;
     }
 
     // Update URL
@@ -450,35 +526,42 @@
     grid.innerHTML = '';
     list.forEach(m => {
       const statusClass = m.available ? 'status-free' : 'status-busy';
-      const statusText  = m.available ? 'Свободна' : 'Занята';
-      const catLabel    = CAT_LABELS[m.category] || m.category || '';
-      const measures    = [m.bust, m.waist, m.hips].filter(Boolean).join('/');
-      const favd        = isFav(m.id);
+      const statusText = m.available ? 'Свободна' : 'Занята';
+      const catLabel = CAT_LABELS[m.category] || m.category || '';
+      const measures = [m.bust, m.waist, m.hips].filter(Boolean).join('/');
+      const favd = isFav(m.id);
 
       const article = document.createElement('article');
       article.className = 'model-card';
       article.tabIndex = 0;
       article.setAttribute('role', 'button');
       article.setAttribute('aria-label', `Подробнее о модели ${m.name}`);
+      article.dataset.modelId = m.id;
+      article.dataset.modelName = m.name;
       article.addEventListener('click', () => openModelModal(m.id));
       article.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openModelModal(m.id); }
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openModelModal(m.id);
+        }
       });
 
       article.innerHTML = `
           <div class="model-avail${m.available ? '' : ' unavailable'}" aria-hidden="true"></div>
 
           <div class="model-card-img" style="position:relative">
-            ${m.photo_main
-              ? (() => {
-                  // Use thumbnail for list view if available (smaller, faster), fall back to full
-                  const thumb = m.photo_thumb || m.photo_main;
-                  const full = m.photo_main;
-                  // thumb is always WebP (generated by sharp); full may be WebP or original
-                  const fullWebp = full.replace(/\.(jpg|jpeg|png|gif)$/i, '.webp');
-                  return `<picture><source srcset="${escHtml(thumb)}" type="image/webp" /><img src="${escHtml(fullWebp)}" alt="${escHtml(m.name)} — фото модели" loading="lazy" decoding="async" /></picture>`;
-                })()
-              : `<div class="model-card-placeholder" aria-hidden="true">${escHtml(m.name[0])}</div>`}
+            ${
+              m.photo_main
+                ? (() => {
+                    // Use thumbnail for list view if available (smaller, faster), fall back to full
+                    const thumb = m.photo_thumb || m.photo_main;
+                    const full = m.photo_main;
+                    // thumb is always WebP (generated by sharp); full may be WebP or original
+                    const fullWebp = full.replace(/\.(jpg|jpeg|png|gif)$/i, '.webp');
+                    return `<picture><source srcset="${escHtml(thumb)}" type="image/webp" /><img src="${escHtml(fullWebp)}" alt="${escHtml(m.name)} — фото модели" loading="lazy" decoding="async" /></picture>`;
+                  })()
+                : `<div class="model-card-placeholder" aria-hidden="true">${escHtml(m.name[0])}</div>`
+            }
             ${m.featured ? '<span class="badge-top">⭐ Топ</span>' : ''}
             <div class="model-card-overlay" aria-hidden="true">
               <div class="model-card-tag">${escHtml(catLabel)}</div>
@@ -490,14 +573,14 @@
             <div class="model-card-name">${escHtml(m.name)}</div>
             <div class="model-card-chips">
               ${m.height ? `<span class="mc-chip">${m.height} см</span>` : ''}
-              ${m.age    ? `<span class="mc-chip">${m.age} лет</span>` : ''}
-              ${m.city   ? `<span class="mc-chip mc-city">${escHtml(m.city)}</span>` : ''}
+              ${m.age ? `<span class="mc-chip">${m.age} лет</span>` : ''}
+              ${m.city ? `<span class="mc-chip mc-city">${escHtml(m.city)}</span>` : ''}
             </div>
             <div class="model-card-bottom">
               ${experienceBadge(m)}
               <span class="model-status-badge ${statusClass}">${statusText}</span>
               ${m.order_count > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.7" title="Завершённых заказов">📋 ${m.order_count} заказов</span>` : ''}
-              ${(m.view_count || 0) > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.6" title="Просмотров">👁 ${(m.view_count||0).toLocaleString('ru')}</span>` : ''}
+              ${(m.view_count || 0) > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.6" title="Просмотров">👁 ${(m.view_count || 0).toLocaleString('ru')}</span>` : ''}
             </div>
             <a href="/model.html?id=${m.id}"
                class="btn-book-model"
@@ -513,17 +596,34 @@
       favBtn.title = favd ? 'Убрать из избранного' : 'В избранное';
       favBtn.innerHTML = favd ? '❤️' : '🤍';
       favBtn.style.cssText = `position:absolute;top:8px;right:8px;width:34px;height:34px;border:none;background:rgba(0,0,0,0.55);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;`;
-      favBtn.addEventListener('mouseenter', () => { favBtn.style.background = 'rgba(0,0,0,0.8)'; });
-      favBtn.addEventListener('mouseleave', () => { favBtn.style.background = 'rgba(0,0,0,0.55)'; });
-      favBtn.addEventListener('click', (e) => {
+      favBtn.addEventListener('mouseenter', () => {
+        favBtn.style.background = 'rgba(0,0,0,0.8)';
+      });
+      favBtn.addEventListener('mouseleave', () => {
+        favBtn.style.background = 'rgba(0,0,0,0.55)';
+      });
+      favBtn.addEventListener('click', e => {
         e.stopPropagation();
         e.preventDefault();
         const favs = getFavs();
         const idx = favs.findIndex(f => (typeof f === 'object' ? f.id === m.id : f === m.id));
         if (idx === -1) {
-          if (favs.length >= 50) { alert('Максимум 50 в избранном'); return; }
+          if (favs.length >= 50) {
+            alert('Максимум 50 в избранном');
+            return;
+          }
           // Store full model object for offline display in favorites.html
-          favs.push({ id: m.id, name: m.name, city: m.city || '', category: m.category || '', photo: m.photo_main || '', photo_main: m.photo_main || '', height: m.height || 0, age: m.age || 0, available: !!m.available });
+          favs.push({
+            id: m.id,
+            name: m.name,
+            city: m.city || '',
+            category: m.category || '',
+            photo: m.photo_main || '',
+            photo_main: m.photo_main || '',
+            height: m.height || 0,
+            age: m.age || 0,
+            available: !!m.available,
+          });
           saveFavs(favs);
           favBtn.innerHTML = '❤️';
           favBtn.title = 'Убрать из избранного';
@@ -553,7 +653,7 @@
       cmpBtn.addEventListener('mouseleave', () => {
         if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(0,0,0,0.55)';
       });
-      cmpBtn.addEventListener('click', (e) => {
+      cmpBtn.addEventListener('click', e => {
         e.stopPropagation();
         e.preventDefault();
         if (window.toggleCompare) {
@@ -589,17 +689,17 @@
 
     const baseUrl = window.location.origin;
     const schema = {
-      "@context": "https://schema.org",
-      "@type": "ItemList",
-      "name": "Каталог моделей",
-      "url": baseUrl + "/catalog.html",
-      "numberOfItems": models.length,
-      "itemListElement": models.slice(0, 20).map((m, i) => ({
-        "@type": "ListItem",
-        "position": i + 1,
-        "url": `${baseUrl}/model.html?id=${m.id}`,
-        "name": m.name
-      }))
+      '@context': 'https://schema.org',
+      '@type': 'ItemList',
+      name: 'Каталог моделей',
+      url: baseUrl + '/catalog.html',
+      numberOfItems: models.length,
+      itemListElement: models.slice(0, 20).map((m, i) => ({
+        '@type': 'ListItem',
+        position: i + 1,
+        url: `${baseUrl}/model.html?id=${m.id}`,
+        name: m.name,
+      })),
     };
 
     const script = document.createElement('script');
@@ -611,10 +711,11 @@
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
   function plural(n) {
-    const m10 = n % 10, m100 = n % 100;
+    const m10 = n % 10,
+      m100 = n % 100;
     if (m100 >= 11 && m100 <= 19) return 'моделей';
-    if (m10 === 1)                 return 'модель';
-    if (m10 >= 2 && m10 <= 4)     return 'модели';
+    if (m10 === 1) return 'модель';
+    if (m10 >= 2 && m10 <= 4) return 'модели';
     return 'моделей';
   }
 
@@ -630,7 +731,7 @@
 
   // Analytics: booking_start when "Подробнее" link is clicked (leads to booking flow)
   // model_view is already fired inside openModelModal() in main.js
-  grid.addEventListener('click', function(e) {
+  grid.addEventListener('click', function (e) {
     const bookLink = e.target.closest('.btn-book-model');
     if (!bookLink) return;
     // Extract model id from the href, e.g. /model.html?id=42
@@ -644,12 +745,13 @@
   // ── Global API (for external scripts and share-link button) ──────────────────
   window.buildFilterParams = function () {
     const params = new URLSearchParams();
-    if (filters.category)    params.set('category', filters.category);
-    if (filters.hair)        params.set('hair', filters.hair);
-    if (filters.city)        params.set('city', filters.city);
+    if (filters.category) params.set('category', filters.category);
+    if (filters.hair) params.set('hair', filters.hair);
+    if (filters.city) params.set('city', filters.city);
     if (filters.minHeight || filters.maxHeight) {
       if (filters.minHeight && !filters.maxHeight) params.set('height', filters.minHeight + '+');
-      else if (filters.minHeight && filters.maxHeight) params.set('height', `${filters.minHeight}-${filters.maxHeight}`);
+      else if (filters.minHeight && filters.maxHeight)
+        params.set('height', `${filters.minHeight}-${filters.maxHeight}`);
       else params.set('height', filters.maxHeight);
     }
     if (filters.ageMin || filters.ageMax) {
