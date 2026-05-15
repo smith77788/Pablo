@@ -405,24 +405,27 @@ async function buildHealthResponse() {
   let activeOrders = 0;
   let totalOrders = 0;
   let modelsCount = 0;
+  let usersCount = 0;
   let ordersByStatus = {};
 
   try {
     await dbGet('SELECT 1 as ok');
     // Fetch DB metrics in parallel
     const today = new Date().toISOString().slice(0, 10);
-    const [todayRow, activeRow, modelsRow, totalOrdersRow, pageCountRow, pageSizeRow] = await Promise.all([
+    const [todayRow, activeRow, modelsRow, totalOrdersRow, pageCountRow, pageSizeRow, usersRow] = await Promise.all([
       dbGet('SELECT COUNT(*) as n FROM orders WHERE date(created_at)=?', [today]),
       dbGet("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','confirmed','in_progress')"),
       dbGet('SELECT COUNT(*) as n FROM models WHERE available=1'),
       dbGet('SELECT COUNT(*) as n FROM orders'),
       dbGet('PRAGMA page_count'),
       dbGet('PRAGMA page_size'),
+      dbGet('SELECT COUNT(*) as n FROM telegram_sessions'),
     ]);
     ordersToday = todayRow?.n || 0;
     activeOrders = activeRow?.n || 0;
     modelsCount = modelsRow?.n || 0;
     totalOrders = totalOrdersRow?.n || 0;
+    usersCount = usersRow?.n || 0;
 
     // DB size calculation
     const pageCount = pageCountRow?.page_count || 0;
@@ -519,6 +522,11 @@ async function buildHealthResponse() {
       active_orders: activeOrders,
       total_orders: totalOrders,
       orders_today: ordersToday,
+    },
+    db: {
+      models: modelsCount,
+      orders: totalOrders,
+      users: usersCount,
     },
     components: {
       database: dbStatus,

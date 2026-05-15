@@ -40,9 +40,10 @@ async function initDatabase() {
   // Performance pragmas — set before any table operations
   await run('PRAGMA journal_mode=WAL');
   await run('PRAGMA synchronous=NORMAL'); // Faster than FULL, still safe with WAL
-  await run('PRAGMA cache_size=-32000'); // 32MB page cache
+  await run('PRAGMA cache_size=-64000'); // 64MB page cache
   await run('PRAGMA temp_store=MEMORY');
   await run('PRAGMA mmap_size=268435456'); // 256MB mmap
+  await run('PRAGMA foreign_keys=ON');
   await run('PRAGMA optimize'); // Optimize query planner
 
   // Schema version tracking
@@ -416,6 +417,18 @@ async function initDatabase() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`).catch(()=>{});
 
+  // Notifications table — system notifications queue
+  await run(`CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT,
+    type TEXT NOT NULL,
+    payload TEXT DEFAULT '{}',
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    sent_at DATETIME DEFAULT NULL
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status)`).catch(() => {});
+
   // Scheduled broadcasts table
   await run(`CREATE TABLE IF NOT EXISTS scheduled_broadcasts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -518,6 +531,11 @@ async function initDatabase() {
     ['idx_reviews_model_id',        'CREATE INDEX IF NOT EXISTS idx_reviews_model_id ON reviews(model_id)'],
     ['idx_reviews_client_chat_id',  'CREATE INDEX IF NOT EXISTS idx_reviews_client_chat_id ON reviews(chat_id)'],
     ['idx_models_city',             'CREATE INDEX IF NOT EXISTS idx_models_city ON models(city)'],
+    // v9 additional indexes
+    ['idx_orders_client_phone',     'CREATE INDEX IF NOT EXISTS idx_orders_client_phone ON orders(client_phone)'],
+    ['idx_orders_event_date',       'CREATE INDEX IF NOT EXISTS idx_orders_event_date ON orders(event_date)'],
+    ['idx_audit_log_event_type',    'CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log(action)'],
+    ['idx_sessions_chat_id',        'CREATE INDEX IF NOT EXISTS idx_telegram_users_chat_id ON telegram_sessions(chat_id)'],
   ];
   for (const [name, sql] of perfIndexes) {
     await run(sql).catch(e => console.log(`Index ${name}: ${e.message}`));
