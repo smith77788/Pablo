@@ -2,6 +2,13 @@
 window.NM = window.NM || {};
 
 NM.analytics = {
+  // Consent handler — called by cookie-consent.js after user choice
+  consent(level) {
+    if (level === 'all' && typeof gtag !== 'undefined') {
+      gtag('consent', 'update', { analytics_storage: 'granted' });
+    }
+  },
+
   // GA4 + Yandex.Metrica event tracking
   event(name, params = {}) {
     try {
@@ -81,11 +88,15 @@ NM.analytics = {
 // Auto-init
 document.addEventListener('DOMContentLoaded', () => {
   NM.analytics.saveUTM();
-  NM.analytics.event('page_view', {
-    page_title: document.title,
-    page_location: window.location.href,
-    ...NM.analytics.getSavedUTM()
-  });
+
+  // Only fire GA4/Metrica events when full analytics consent is given
+  if (!window.NM?.cookieConsent || window.NM.cookieConsent.hasConsent()) {
+    NM.analytics.event('page_view', {
+      page_title: document.title,
+      page_location: window.location.href,
+      ...NM.analytics.getSavedUTM()
+    });
+  }
 
   // Auto-track WhatsApp/Telegram link clicks
   document.addEventListener('click', e => {
