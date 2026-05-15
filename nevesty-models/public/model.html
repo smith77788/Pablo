@@ -748,6 +748,7 @@
         renderModel(model);
         loadModelReviews(model.id);
         loadRelatedModels(model);
+        if (window.NM?.analytics) NM.analytics.viewModel(model.id, model.name);
       }
 
       function renderModel(m) {
@@ -1048,6 +1049,7 @@
           } : { id };
           favs.push(modelData);
           saveFavs(favs);
+          if (window.NM?.analytics) NM.analytics.addToFavorites(id, _currentModel?.name || '');
           if (btn) { btn.innerHTML = '<span aria-hidden="true">💔</span> Убрать из избранного'; btn.style.color = '#e07070'; btn.style.borderColor = '#e07070'; }
         } else {
           favs.splice(idx, 1);
