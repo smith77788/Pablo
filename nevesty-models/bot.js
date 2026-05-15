@@ -2389,22 +2389,14 @@ async function showAdminSettings(chatId, section) {
     return safeSend(chatId, text, {
       reply_markup: {
         inline_keyboard: [
-          [
-            { text: '💬 Контакты', callback_data: 'adm_settings_contacts' },
-            { text: '🔔 Уведомления', callback_data: 'adm_settings_notifs' },
-          ],
-          [
-            { text: '📋 Каталог', callback_data: 'adm_settings_catalog' },
-            { text: '🛒 Бронирование', callback_data: 'adm_settings_booking' },
-          ],
-          [
-            { text: '⭐ Отзывы', callback_data: 'adm_settings_reviews' },
-            { text: '🤖 Интерфейс', callback_data: 'adm_settings_ui' },
-          ],
-          [
-            { text: '📊 Лимиты', callback_data: 'adm_settings_limits' },
-            { text: '📱 Соцсети', callback_data: 'adm_settings_social' },
-          ],
+          [{ text: '💬 Контакты и тексты', callback_data: 'adm_settings_contacts' }],
+          [{ text: '🔔 Уведомления', callback_data: 'adm_settings_notifs' }],
+          [{ text: '📋 Каталог и модели', callback_data: 'adm_settings_catalog' }],
+          [{ text: '🛒 Бронирование', callback_data: 'adm_settings_booking' }],
+          [{ text: '⭐ Отзывы', callback_data: 'adm_settings_reviews' }],
+          [{ text: '🏙 Города', callback_data: 'adm_settings_cities' }],
+          [{ text: '🤖 Бот и интерфейс', callback_data: 'adm_settings_bot' }],
+          [{ text: '📊 Лимиты и доступ', callback_data: 'adm_settings_limits' }],
           [{ text: '← Назад', callback_data: 'admin_menu' }],
         ],
       },
@@ -7090,7 +7082,7 @@ function initBot(app) {
       const id = parseInt(data.replace('adm_model_', ''));
       return showAdminModel(chatId, id);
     }
-    if (data.startsWith('adm_toggle_')) {
+    if (data.startsWith('adm_toggle_') && /^adm_toggle_\d+$/.test(data)) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('adm_toggle_', ''));
       const m = await get('SELECT available FROM models WHERE id=?', [id]).catch(() => null);
