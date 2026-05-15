@@ -5325,7 +5325,10 @@ function initBot(app) {
       if (!text || text.trim().length < 2) {
         return safeSend(chatId, '❌ Введіть ім\'я (мінімум 2 символи):');
       }
-      const newName = text.trim();
+      if (text.trim().length > 100) {
+        return safeSend(chatId, '❌ Ім\'я занадто довге \\(максимум 100 символів\\):', { parse_mode: 'MarkdownV2' });
+      }
+      const newName = text.trim().slice(0, 100);
       await run(
         `UPDATE orders SET client_name=? WHERE client_chat_id=? AND id=(SELECT MAX(id) FROM orders WHERE client_chat_id=?)`,
         [newName, String(chatId), String(chatId)]
@@ -7002,7 +7005,8 @@ function _registerNewFeatures() {
     // Quick booking: collect name
     if (state === 'bk_quick_name') {
       if (text.length < 2) return safeSend(chatId, '❌ Введите имя (минимум 2 символа):');
-      d.quick_name = text;
+      if (text.length > 100) return safeSend(chatId, '❌ Имя слишком длинное (максимум 100 символов):');
+      d.quick_name = text.slice(0, 100);
       return bkQuickPhone(chatId, d);
     }
 

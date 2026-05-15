@@ -338,10 +338,15 @@ const processScheduledBroadcasts = async () => {
 
         let sent = 0, failed = 0;
         const msgText = `📢 *Сообщение от Nevesty Models*\n\n${escapeMarkdown(bcast.text)}`;
+        const hasPhoto = bcast.photo_url && /^https?:\/\/.+/i.test(bcast.photo_url);
 
         for (const r of recipients) {
           try {
-            await bot.sendMessage(r.client_chat_id, msgText, { parse_mode: 'MarkdownV2' });
+            if (hasPhoto) {
+              await bot.sendPhoto(r.client_chat_id, bcast.photo_url, { caption: msgText, parse_mode: 'MarkdownV2' });
+            } else {
+              await bot.sendMessage(r.client_chat_id, msgText, { parse_mode: 'MarkdownV2' });
+            }
             sent++;
           } catch { failed++; }
           await new Promise(resolve => setTimeout(resolve, 60)); // Rate limit: ~16 msg/sec
