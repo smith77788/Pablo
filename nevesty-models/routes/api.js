@@ -5159,31 +5159,31 @@ router.get('/admin/factory/status', auth, async (req, res, next) => {
 });
 
 // ─── Factory cycle-complete webhook (Factory → Bot notification) ──────────────
-// POST /api/admin/factory/cycle-complete
-// Called by factory after each AI cycle. Sends summary to all admins via Telegram.
-// Auth: Bearer JWT (admin token) OR FACTORY_WEBHOOK_SECRET header x-factory-secret
+// POST /api/admin/factory/cycle-complete — notifyAdmin on each AI cycle
 router.post('/admin/factory/cycle-complete', async (req, res, next) => {
   try {
-    // Accept either a valid admin JWT OR the FACTORY_WEBHOOK_SECRET header
     const factorySecret = process.env.FACTORY_WEBHOOK_SECRET;
     const headerSecret = req.headers['x-factory-secret'];
-    const authHeader = req.headers['authorization'] || '';
     let authorized = false;
-
-    if (factorySecret && headerSecret === factorySecret) {
-      authorized = true;
-    } else if (authHeader.startsWith('Bearer ')) {
-      const token = authHeader.slice(7);
+    // Timing-safe comparison prevents secret-oracle attacks on x-factory-secret
+    if (factorySecret && headerSecret) {
+      const a = Buffer.from(headerSecret),
+        b = Buffer.from(factorySecret);
+      if (a.length === b.length) {
+        try {
+          authorized = crypto.timingSafeEqual(a, b);
+        } catch (_) {}
+      }
+    }
+    // Fall back to admin JWT; reject client tokens that share JWT_SECRET
+    if (!authorized && process.env.JWT_SECRET) {
+      const bearer = (req.headers['authorization'] || '').slice(7);
       try {
-        if (!process.env.JWT_SECRET) throw new Error('no secret');
-        jwt.verify(token, process.env.JWT_SECRET);
-        authorized = true;
+        const p = jwt.verify(bearer, process.env.JWT_SECRET);
+        if (p?.id && p?.role && p?.type !== 'client') authorized = true;
       } catch (_) {}
     }
-
-    if (!authorized) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (!authorized) return res.status(401).json({ error: 'Unauthorized' });
 
     const { summary, insights, actions, duration_seconds } = req.body || {};
 
@@ -5211,7 +5211,8 @@ router.post('/admin/factory/cycle-complete', async (req, res, next) => {
       });
     }
 
-    msg += `\n\n[Подробнее в панели](/admin/factory)`;
+    // Note: relative URLs are invalid in Telegram MarkdownV2 links — omit the link
+    msg += `\n\n_Подробнее в панели: /admin/factory_`;
 
     if (botInstance?.notifyAdmin) {
       await botInstance.notifyAdmin(msg, { parse_mode: 'MarkdownV2' });
