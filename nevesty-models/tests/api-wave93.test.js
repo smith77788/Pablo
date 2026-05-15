@@ -55,8 +55,8 @@ describe('T2: Sitemap auto-regeneration (routes/api.js)', () => {
     expect(callCount).toBeGreaterThanOrEqual(1);
   });
 
-  test('T08: GET /api/admin/sitemap/regenerate endpoint exists', () => {
-    expect(apiCode).toMatch(/router\.get\s*\(\s*['"]\/api\/admin\/sitemap\/regenerate['"]/);
+  test('T08: GET /admin/sitemap/regenerate endpoint exists (router mounted at /api)', () => {
+    expect(apiCode).toMatch(/router\.get\s*\(\s*['"]\/admin\/sitemap\/regenerate['"]/);
   });
 
   test('T09: sitemap regeneration uses COALESCE(archived,0)=0 to filter models', () => {
