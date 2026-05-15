@@ -287,10 +287,36 @@ def record_metric(product_id: int, name: str, value: float, unit: str = "", peri
     })
 
 
+def save_cycle_result(cycle_id: str, phase: str, result: dict, tokens: int = 0) -> None:
+    """Persist a cycle phase result to the cycles table (upsert by cycle_id)."""
+    with get_conn() as conn:
+        existing = conn.execute("SELECT id FROM cycles WHERE id=?", (cycle_id,)).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE cycles SET phase=?, summary=?, finished_at=? WHERE id=?",
+                (phase, json.dumps(result, default=str), _now(), cycle_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO cycles (id, phase, summary, started_at) VALUES (?,?,?,?)",
+                (cycle_id, phase, json.dumps(result, default=str), _now()),
+            )
+        conn.commit()
+
+
+def save_factory_report(report_type: str, period_key: str, report: dict) -> None:
+    """Persist a factory report (weekly/monthly summary) to factory_reports table."""
+    insert("factory_reports", {
+        "report_type": report_type,
+        "period_key": period_key,
+        "report_json": json.dumps(report, default=str),
+    })
+
+
 def get_recent_ceo_decisions(limit: int = 3) -> list[dict]:
     """Return the last N CEO decisions for context."""
     return fetch_all(
-        "SELECT decision_text, health_score, weekly_focus, department_focus, "
+        "SELECT cycle_id, decision_text, health_score, weekly_focus, department_focus, "
         "experiment_proposal, created_at FROM ceo_decisions ORDER BY created_at DESC LIMIT ?",
         (limit,)
     )

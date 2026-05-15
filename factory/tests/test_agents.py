@@ -390,6 +390,213 @@ class TestExperimentSystem:
         assert isinstance(prompt, str)
 
 
+class TestAgentRequiredAttributes:
+    """Verify each agent has required class attributes: department, role, name."""
+
+    # Agents that have all three of: department, role, name
+    ALL_AGENT_CLASSES = [
+        ("factory.agents.analytics_engine", "AnalyticsEngine"),
+        ("factory.agents.content_generator", "ContentGenerator"),
+        ("factory.agents.sales", "LeadQualifier"),
+        ("factory.agents.sales", "ProposalWriter"),
+        ("factory.agents.sales", "FollowUpSpecialist"),
+        ("factory.agents.customer_success", "OnboardingSpecialist"),
+        ("factory.agents.customer_success", "RetentionAnalyst"),
+        ("factory.agents.customer_success", "FeedbackCollector"),
+        ("factory.agents.finance", "RevenueForecaster"),
+        ("factory.agents.finance", "PricingStrategist"),
+        ("factory.agents.research", "MarketResearcher"),
+        ("factory.agents.research", "TrendSpotter"),
+        ("factory.agents.research", "InsightSynthesizer"),
+    ]
+
+    # Agents that expose a run() method (AnalyticsEngine uses analyze() instead)
+    RUN_AGENT_CLASSES = [
+        ("factory.agents.content_generator", "ContentGenerator"),
+        ("factory.agents.sales", "LeadQualifier"),
+        ("factory.agents.sales", "ProposalWriter"),
+        ("factory.agents.sales", "FollowUpSpecialist"),
+        ("factory.agents.customer_success", "OnboardingSpecialist"),
+        ("factory.agents.customer_success", "RetentionAnalyst"),
+        ("factory.agents.customer_success", "FeedbackCollector"),
+        ("factory.agents.finance", "RevenueForecaster"),
+        ("factory.agents.finance", "PricingStrategist"),
+        ("factory.agents.research", "MarketResearcher"),
+        ("factory.agents.research", "TrendSpotter"),
+        ("factory.agents.research", "InsightSynthesizer"),
+    ]
+
+    @pytest.mark.parametrize("module_path,class_name", ALL_AGENT_CLASSES)
+    def test_agent_has_required_attributes(self, module_path, class_name):
+        import importlib
+        mod = importlib.import_module(module_path)
+        cls = getattr(mod, class_name)
+        agent = cls()
+        assert hasattr(agent, "department"), f"{class_name} missing 'department'"
+        assert hasattr(agent, "role"), f"{class_name} missing 'role'"
+        assert hasattr(agent, "name"), f"{class_name} missing 'name'"
+        assert isinstance(agent.department, str), f"{class_name}.department must be str"
+        assert isinstance(agent.role, str), f"{class_name}.role must be str"
+        assert isinstance(agent.name, str), f"{class_name}.name must be str"
+
+    @pytest.mark.parametrize("module_path,class_name", RUN_AGENT_CLASSES)
+    def test_agent_has_run_method(self, module_path, class_name):
+        import importlib
+        mod = importlib.import_module(module_path)
+        cls = getattr(mod, class_name)
+        agent = cls()
+        assert hasattr(agent, "run"), f"{class_name} missing 'run' method"
+        assert callable(agent.run), f"{class_name}.run must be callable"
+
+    @pytest.mark.parametrize("module_path,class_name", ALL_AGENT_CLASSES)
+    def test_agent_has_think_method(self, module_path, class_name):
+        import importlib
+        mod = importlib.import_module(module_path)
+        cls = getattr(mod, class_name)
+        agent = cls()
+        assert hasattr(agent, "think"), f"{class_name} missing 'think' method"
+        assert callable(agent.think), f"{class_name}.think must be callable"
+
+
+class TestBaseAgentRunReturnsDict:
+    """Test that agent run() returns a dict with standard keys."""
+
+    def _make_mock_agent(self, cls, mock_response: str = "Mock LLM response"):
+        """Instantiate an agent and replace its think method with a mock."""
+        agent = cls()
+        agent.think = lambda prompt, **kw: mock_response
+        return agent
+
+    def test_onboarding_run_returns_dict_with_role(self):
+        from factory.agents.customer_success import OnboardingSpecialist
+        agent = self._make_mock_agent(OnboardingSpecialist)
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert "role" in result
+
+    def test_retention_analyst_run_returns_dict_with_role(self):
+        from factory.agents.customer_success import RetentionAnalyst
+        agent = self._make_mock_agent(RetentionAnalyst)
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert "role" in result
+
+    def test_feedback_collector_run_returns_dict_with_role(self):
+        from factory.agents.customer_success import FeedbackCollector
+        agent = self._make_mock_agent(FeedbackCollector)
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert "role" in result
+
+    def test_revenue_forecaster_run_returns_dict_with_role(self):
+        from factory.agents.finance import RevenueForecaster
+        agent = self._make_mock_agent(RevenueForecaster)
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert "role" in result
+
+    def test_pricing_strategist_run_returns_dict_with_role(self):
+        from factory.agents.finance import PricingStrategist
+        agent = self._make_mock_agent(PricingStrategist)
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert "role" in result
+
+    def test_market_researcher_run_returns_dict_with_role(self):
+        from factory.agents.research import MarketResearcher
+        agent = self._make_mock_agent(MarketResearcher)
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert "role" in result
+
+    def test_trend_spotter_run_returns_dict_with_role(self):
+        from factory.agents.research import TrendSpotter
+        agent = self._make_mock_agent(TrendSpotter)
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert "role" in result
+
+    def test_insight_synthesizer_run_returns_dict_with_role(self):
+        from factory.agents.research import InsightSynthesizer
+        agent = self._make_mock_agent(InsightSynthesizer)
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert "role" in result
+
+
+class TestBaseAgentThinkMocked:
+    """Test FactoryAgent.think() with mocked SDK/CLI calls."""
+
+    def test_think_with_sdk_mock(self):
+        """think() via SDK path returns text from SDK response."""
+        from factory.agents.base import FactoryAgent
+        agent = FactoryAgent()
+        mock_content = MagicMock()
+        mock_content.text = "SDK response text"
+        mock_response = MagicMock()
+        mock_response.content = [mock_content]
+        with patch("factory.agents.base._sdk_client") as mock_client:
+            mock_client.messages.create.return_value = mock_response
+            result = agent._think_sdk("system", "prompt", 100)
+        assert result == "SDK response text"
+
+    def test_think_sdk_empty_content(self):
+        """think() via SDK returns empty string when content is empty."""
+        from factory.agents.base import FactoryAgent
+        agent = FactoryAgent()
+        mock_response = MagicMock()
+        mock_response.content = []
+        with patch("factory.agents.base._sdk_client") as mock_client:
+            mock_client.messages.create.return_value = mock_response
+            result = agent._think_sdk("system", "prompt", 100)
+        assert result == ""
+
+    def test_think_sdk_exception_returns_empty(self):
+        """think() via SDK returns empty string on exception."""
+        from factory.agents.base import FactoryAgent
+        agent = FactoryAgent()
+        with patch("factory.agents.base._sdk_client") as mock_client:
+            mock_client.messages.create.side_effect = Exception("API error")
+            result = agent._think_sdk("system", "prompt", 100)
+        assert result == ""
+
+    def test_think_json_returns_dict(self):
+        """think_json() parses JSON returned by think()."""
+        from factory.agents.base import FactoryAgent
+        agent = FactoryAgent()
+        with patch.object(agent, "think", return_value='{"key": "value"}'):
+            result = agent.think_json("Give me JSON")
+        assert isinstance(result, dict)
+        assert result["key"] == "value"
+
+    def test_think_json_with_code_block(self):
+        """think_json() strips markdown code fences before parsing."""
+        from factory.agents.base import FactoryAgent
+        agent = FactoryAgent()
+        response = '```json\n{"score": 42}\n```'
+        with patch.object(agent, "think", return_value=response):
+            result = agent.think_json("Give me JSON")
+        assert result["score"] == 42
+
+    def test_think_json_invalid_returns_empty_dict(self):
+        """think_json() returns {} on unparseable response."""
+        from factory.agents.base import FactoryAgent
+        agent = FactoryAgent()
+        with patch.object(agent, "think", return_value="not valid json at all"):
+            result = agent.think_json("Give me JSON")
+        assert isinstance(result, dict)
+        assert result == {}
+
+    def test_think_cli_timeout_returns_empty(self):
+        """_think_cli() returns empty string on timeout."""
+        import subprocess
+        from factory.agents.base import FactoryAgent
+        agent = FactoryAgent()
+        with patch("factory.agents.base.subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 30)):
+            result = agent._think_cli("system", "prompt")
+        assert result == ""
+
+
 class TestCyclePhase21:
     """Tests for Phase 21: CEO Weekly Summary."""
 
