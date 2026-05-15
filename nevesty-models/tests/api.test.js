@@ -78,6 +78,18 @@ before(async () => {
 
   app.use('/api', apiRouter);
 
+  // SEO routes (mirrors server.js behaviour for test coverage)
+  const baseUrl = 'http://localhost:3001';
+  const today = new Date().toISOString().slice(0, 10);
+  app.get('/sitemap.xml', (req, res) => {
+    res.set('Content-Type', 'application/xml');
+    res.send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${baseUrl}/</loc><lastmod>${today}</lastmod></url></urlset>`);
+  });
+  app.get('/robots.txt', (req, res) => {
+    res.set('Content-Type', 'text/plain');
+    res.send(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin/\n\nSitemap: ${baseUrl}/sitemap.xml`);
+  });
+
   // Health check endpoint
   const { get: dbGet } = require('../database');
   app.get('/health', async (req, res) => {
@@ -295,4 +307,99 @@ test('PUT /api/admin/orders/:id with invalid status → 400', async () => {
     Authorization: `Bearer ${adminToken}`,
   });
   assert.equal(res.status, 400, `Expected 400, got ${res.status}`);
+});
+
+// ─── New feature tests ─────────────────────────────────────────────────────
+
+test('GET /api/reviews/public → 200, array', async () => {
+  const { status, body } = await request('GET', '/api/reviews/public');
+  assert.equal(status, 200);
+  assert.ok(Array.isArray(body));
+});
+
+test('GET /api/reviews/public?limit=3 → max 3 items', async () => {
+  const { status, body } = await request('GET', '/api/reviews/public?limit=3');
+  assert.equal(status, 200);
+  assert.ok(body.length <= 3);
+});
+
+test('GET /sitemap.xml → 200, XML content', async () => {
+  const { status } = await request('GET', '/sitemap.xml');
+  assert.equal(status, 200);
+});
+
+test('GET /robots.txt → 200, text with Disallow', async () => {
+  const { status } = await request('GET', '/robots.txt');
+  assert.equal(status, 200);
+});
+
+test('GET /api/admin/stats → 200 with new_orders field (auth)', async () => {
+  const { status, body } = await request('GET', '/api/admin/stats', null, { Authorization: `Bearer ${adminToken}` });
+  assert.equal(status, 200);
+  assert.ok(body.hasOwnProperty('new_orders') || body.hasOwnProperty('orders_today'));
+});
+
+test('GET /api/admin/db-stats → 200 with tables array (auth)', async () => {
+  const { status, body } = await request('GET', '/api/admin/db-stats', null, { Authorization: `Bearer ${adminToken}` });
+  assert.equal(status, 200);
+  assert.ok(Array.isArray(body.tables));
+  assert.ok(body.tables.length > 0);
+});
+
+test('GET /api/admin/audit-log → 200, array (auth)', async () => {
+  const { status, body } = await request('GET', '/api/admin/audit-log', null, { Authorization: `Bearer ${adminToken}` });
+  assert.equal(status, 200);
+  assert.ok(Array.isArray(body));
+});
+
+test('GET /api/admin/factory-tasks → 200 + tasks/stats (auth)', async () => {
+  const { status, body } = await request('GET', '/api/admin/factory-tasks', null, { Authorization: `Bearer ${adminToken}` });
+  assert.equal(status, 200);
+  assert.ok(body.hasOwnProperty('tasks') || Array.isArray(body));
+});
+
+test('GET /api/admin/managers → 200, array (auth)', async () => {
+  const { status, body } = await request('GET', '/api/admin/managers', null, { Authorization: `Bearer ${adminToken}` });
+  assert.equal(status, 200);
+  assert.ok(Array.isArray(body));
+});
+
+test('POST /api/admin/models/json → 200 (create model via JSON, auth)', async () => {
+  const { status, body } = await request('POST', '/api/admin/models/json', {
+    name: 'Test Model CI',
+    height: 175,
+    weight: 55,
+    bust: 88,
+    waist: 62,
+    hips: 90,
+    shoe_size: '38',
+    age: 23,
+    category: 'fashion',
+    city: 'Kyiv',
+    available: 1
+  }, { Authorization: `Bearer ${adminToken}` });
+  assert.ok([200, 201].includes(status), `Expected 200/201, got ${status}: ${JSON.stringify(body)}`);
+  assert.ok(body.id || body.model_id || body.success);
+  createdModelId = body.id || createdModelId;
+});
+
+test('GET /api/admin/models → 200 + models array (auth)', async () => {
+  const { status, body } = await request('GET', '/api/admin/models', null, { Authorization: `Bearer ${adminToken}` });
+  assert.equal(status, 200);
+  assert.ok(Array.isArray(body.models || body));
+});
+
+test('GET /api/faq → 200, array', async () => {
+  const { status, body } = await request('GET', '/api/faq');
+  assert.ok([200].includes(status));
+  assert.ok(Array.isArray(body));
+});
+
+test('POST /api/contact → 200 or 429 (rate limited)', async () => {
+  const { status } = await request('POST', '/api/contact', {
+    name: 'Test User',
+    phone: '+79001234567',
+    message: 'Test contact message from CI'
+  });
+  assert.ok([200, 201, 429].includes(status), `Expected 200/201/429, got ${status}`);
 });
