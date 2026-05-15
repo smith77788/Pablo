@@ -61,6 +61,64 @@ class AnalyticsEngine(FactoryAgent):
                 "SELECT COUNT(*) as n FROM telegram_sessions WHERE updated_at > datetime('now','-7 days')"
             ).fetchone()["n"]
 
+            # Revenue (sum of budgets for confirmed+completed)
+            revenue_row = conn.execute(
+                "SELECT SUM(CAST(REPLACE(REPLACE(budget,'₽',''),' ','') AS INTEGER)) as total FROM orders "
+                "WHERE status IN ('confirmed','in_progress','completed') AND budget IS NOT NULL AND budget != ''"
+            ).fetchone()
+            revenue_total = revenue_row["total"] or 0
+
+            revenue_30d_row = conn.execute(
+                "SELECT SUM(CAST(REPLACE(REPLACE(budget,'₽',''),' ','') AS INTEGER)) as total FROM orders "
+                "WHERE status IN ('confirmed','in_progress','completed') AND budget IS NOT NULL AND budget != '' "
+                "AND created_at > datetime('now','-30 days')"
+            ).fetchone()
+            revenue_30d = revenue_30d_row["total"] or 0
+
+            # Average deal cycle (days from new to completed)
+            avg_cycle_row = conn.execute(
+                "SELECT AVG(CAST(julianday(updated_at) - julianday(created_at) AS REAL)) as avg_days "
+                "FROM orders WHERE status='completed'"
+            ).fetchone()
+            avg_deal_days = round(avg_cycle_row["avg_days"] or 0, 1)
+
+            # Repeat clients (phones with 2+ orders)
+            repeat_clients_row = conn.execute(
+                "SELECT COUNT(*) as n FROM ("
+                "  SELECT client_phone FROM orders WHERE client_phone IS NOT NULL "
+                "  GROUP BY client_phone HAVING COUNT(*) >= 2"
+                ")"
+            ).fetchone()
+            repeat_clients = repeat_clients_row["n"]
+
+            # Top categories
+            top_categories = conn.execute(
+                "SELECT event_type, COUNT(*) as cnt FROM orders GROUP BY event_type ORDER BY cnt DESC LIMIT 3"
+            ).fetchall()
+            category_breakdown = {row["event_type"]: row["cnt"] for row in top_categories if row["event_type"]}
+
+            # Top models by orders
+            top_models = conn.execute(
+                "SELECT m.name, COUNT(o.id) as order_count, "
+                "ROUND(AVG(r.rating), 1) as avg_rating "
+                "FROM orders o JOIN models m ON o.model_id = m.id "
+                "LEFT JOIN reviews r ON r.model_id = m.id AND r.approved = 1 "
+                "GROUP BY m.id ORDER BY order_count DESC LIMIT 5"
+            ).fetchall()
+            top_models_list = [
+                {"name": row["name"], "orders": row["order_count"], "rating": row["avg_rating"]}
+                for row in top_models
+            ]
+
+            # Reviews stats
+            reviews_total = conn.execute("SELECT COUNT(*) as n FROM reviews WHERE approved=1").fetchone()["n"]
+            reviews_avg = conn.execute(
+                "SELECT ROUND(AVG(rating), 2) as avg FROM reviews WHERE approved=1"
+            ).fetchone()["avg"] or 0
+
+            # Conversion new→confirmed
+            confirmed_from_new = round(orders_confirmed / max(orders_new + orders_confirmed, 1) * 100, 1)
+
             conn.close()
 
             conversion = round(orders_total / max(users_total, 1) * 100, 2)
@@ -81,6 +139,16 @@ class AnalyticsEngine(FactoryAgent):
                 "users_total": users_total,
                 "users_active_7d": users_active_7d,
                 "conversion_rate_pct": conversion,
+                "revenue_total": revenue_total,
+                "revenue_30d": revenue_30d,
+                "avg_deal_days": avg_deal_days,
+                "repeat_clients": repeat_clients,
+                "repeat_client_rate_pct": round(repeat_clients / max(orders_total, 1) * 100, 1),
+                "category_breakdown": category_breakdown,
+                "top_models": top_models_list,
+                "reviews_total": reviews_total,
+                "reviews_avg_rating": reviews_avg,
+                "conversion_new_to_confirmed_pct": confirmed_from_new,
             }
         except Exception as e:
             logger.warning("Cannot read Nevesty DB: %s", e)
@@ -125,9 +193,15 @@ class AnalyticsEngine(FactoryAgent):
             ("conversion_rate_pct", "%", "daily"),
             ("users_active_7d", "users", "weekly"),
             ("models_active", "models", "daily"),
+            ("revenue_30d", "₽", "monthly"),
+            ("revenue_total", "₽", "total"),
+            ("avg_deal_days", "days", "daily"),
+            ("repeat_client_rate_pct", "%", "weekly"),
+            ("reviews_avg_rating", "stars", "daily"),
+            ("conversion_new_to_confirmed_pct", "%", "daily"),
         ]
         for key, unit, period in fields:
-            if key in metrics:
+            if key in metrics and metrics[key] is not None:
                 db.record_metric(nevesty_product_id, key, metrics[key], unit, period)
 
     def analyze(self, all_metrics: dict) -> dict:
