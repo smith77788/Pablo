@@ -13,7 +13,9 @@ from factory.agents.experiment_system import ExperimentSystem
 from factory.agents.base import FactoryAgent
 from factory.agents.decision_tracker import DecisionTracker
 from factory.notifications import notify
+from factory.logging_config import configure_logging
 
+configure_logging()
 logger = logging.getLogger(__name__)
 
 NEVESTY_PRODUCT_NAME = "Nevesty Models Bot"
