@@ -402,6 +402,11 @@ async function initDatabase() {
   // Internal note column for quick manager notes (migration v9)
   await run(`ALTER TABLE orders ADD COLUMN internal_note TEXT`).catch(err => { if (err && !err.message.includes('duplicate')) console.error(err); });
 
+  // Broadcast stats columns (migration v10)
+  await run(`ALTER TABLE scheduled_broadcasts ADD COLUMN sent_count INTEGER DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE scheduled_broadcasts ADD COLUMN error_count INTEGER DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE scheduled_broadcasts ADD COLUMN sent_at TEXT`).catch(() => {});
+
   // Indexes for frequent queries
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_model_id ON orders(model_id)`);

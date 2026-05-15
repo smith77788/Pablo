@@ -347,9 +347,12 @@ const processScheduledBroadcasts = async () => {
           await new Promise(resolve => setTimeout(resolve, 60)); // Rate limit: ~16 msg/sec
         }
 
-        await dbRun("UPDATE scheduled_broadcasts SET status='sent' WHERE id=?", [bcast.id]).catch(() => {});
+        await dbRun(
+          "UPDATE scheduled_broadcasts SET status='sent', sent_count=?, error_count=?, sent_at=datetime('now') WHERE id=?",
+          [sent, failed, bcast.id]
+        ).catch(() => {});
         console.log(`[Scheduler] Scheduled broadcast #${bcast.id} sent: ${sent} ok, ${failed} failed`);
-        notify(`📅 Запланированная рассылка #${bcast.id} отправлена: ${sent} получателей`);
+        notify(`📅 Запланированная рассылка #${bcast.id} отправлена: ${sent} получателей, ошибок: ${failed}`);
       } catch (e) {
         await dbRun("UPDATE scheduled_broadcasts SET status='error' WHERE id=?", [bcast.id]).catch(() => {});
         console.error(`[Scheduler] Scheduled broadcast #${bcast.id} error:`, e.message);
