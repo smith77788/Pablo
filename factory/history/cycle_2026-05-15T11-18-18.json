@@ -1,0 +1,189 @@
+{
+  "cycle_id": "2026-05-15T11:18:18.596817+00:00",
+  "timestamp": "2026-05-15T11:18:18.596817+00:00",
+  "phases": {
+    "analytics": {
+      "health_score": 50,
+      "top_problem": "недостаточно данных для анализа",
+      "focus": "traffic"
+    },
+    "ceo": {
+      "decisions_count": 0,
+      "prev_executed_count": 0,
+      "prev_pending_count": 0
+    },
+    "departments": {
+      "new_mvps": 0,
+      "new_actions": 0,
+      "new_experiments": 0
+    },
+    "sales_creative_cs_simple": {
+      "brand_voice_tone": "профессиональный, элегантный, доступный",
+      "caption": "🌟 fashion прошёл великолепно! Москва — настоящий профессионал своего дела. Спасибо всем участникам! Nevesty Models #nevesty #models",
+      "caption_len": 131,
+      "promo": "🎉 Специальное предложение от Nevesty Models!\n\nСкидка 15% на все услуги агентства.\nАкция действует 7 дней!\n\nНе упустите возможность получить услуги premium-класса по выгодной цене. Свяжитесь с нами прямо сейчас и укажите промокод NEVESTY15.\n\n📞 Пишите в Telegram — мы ответим в течение 15 минут!",
+      "promo_len": 293,
+      "status": "ok"
+    },
+    "content_generation": {
+      "posts_generated": 0,
+      "weekly_plan_days": 0
+    },
+    "experiment_tracking": {
+      "evaluated": 0,
+      "success": 0,
+      "fail": 0,
+      "details": [],
+      "active_checked": 0,
+      "metric_updates": []
+    },
+    "sales_v2": {
+      "agents": [
+        "LeadQualifier",
+        "ProposalWriter",
+        "FollowUpSpecialist",
+        "PricingNegotiator"
+      ],
+      "results": {
+        "LeadQualifier": {
+          "role": "LeadQualifier",
+          "department": "sales",
+          "result": ""
+        },
+        "ProposalWriter": {
+          "role": "ProposalWriter",
+          "department": "sales",
+          "result": ""
+        },
+        "FollowUpSpecialist": {
+          "role": "FollowUpSpecialist",
+          "department": "sales",
+          "result": ""
+        },
+        "PricingNegotiator": {
+          "role": "PricingNegotiator",
+          "department": "sales",
+          "result": ""
+        }
+      }
+    },
+    "creative_v2": {
+      "agents": [
+        "Copywriter",
+        "VisualConceptor",
+        "BrandVoiceKeeper",
+        "Storytelling"
+      ],
+      "results": {
+        "Copywriter": {
+          "role": "Copywriter",
+          "department": "creative",
+          "result": ""
+        },
+        "VisualConceptor": {
+          "role": "VisualConceptor",
+          "department": "creative",
+          "result": ""
+        },
+        "BrandVoiceKeeper": {
+          "role": "BrandVoiceKeeper",
+          "department": "creative",
+          "result": ""
+        },
+        "Storytelling": {
+          "role": "Storytelling",
+          "department": "creative",
+          "result": ""
+        }
+      }
+    },
+    "ideas": {
+      "new": 0
+    },
+    "monthly_report": {
+      "month": "2026-05",
+      "generated": false,
+      "reason": "not_due"
+    },
+    "finance_department": {
+      "revenue_forecast": 0.0,
+      "trend": "stable",
+      "confidence": "low",
+      "cost_total": 10000,
+      "cost_suggestions": 1,
+      "seasonal_multiplier": 1.15,
+      "budget_surplus": -10000.0
+    },
+    "research_department": {
+      "top_segment": "commercial",
+      "market_opportunity_score": 62,
+      "top_opportunities": [
+        "Сегмент 'commercial' — 100% рынка доступно",
+        "Тренд: AI-assisted model selection — build recommendation engine"
+      ],
+      "strategic_alerts": [
+        "Конверсия ниже 30% — необходим анализ воронки продаж",
+        "Средний чек ниже целевого — рассмотреть повышение ценности услуг"
+      ],
+      "confidence": "medium"
+    },
+    "channel_content": {
+      "stats_post_chars": 314,
+      "tips_post_chars": 424,
+      "tips_post": "💡 <b>Как выбрать модель для вашего мероприятия</b>\n\n1. Определите тип события: корпоратив, промо или показ\n2. Учитывайте параметры: рост, возраст, опыт\n3. Проверьте портфолио и отзывы\n4. Заранее согласуйте дресс-код и сценарий\n5. Бронируйте за 2–4 недели до события\n\n✨ Nevesty Models — профессиональный подход к каждому проекту.\n\n📲 Консультация: @nevesty_models\n\n#советы #мероприятие #модели #агентствомоделей #nevestymodels",
+      "calendar_posts_scheduled": 4,
+      "next_post_format": "model_spotlight"
+    },
+    "channel_publisher": {
+      "status": "skipped",
+      "reason": "not_configured"
+    },
+    "model_bios": {
+      "status": "error",
+      "detail": "no such column: updated_at"
+    },
+    "faq_generator": {
+      "status": "ok",
+      "existing_faq": 6,
+      "suggestions": 10,
+      "improved": 6
+    },
+    "experiment_system": {
+      "status": "ok",
+      "active_count": 1,
+      "completed_count": 0,
+      "proposed_count": 4,
+      "started_experiment": null,
+      "report": "🧪 ОТЧЁТ ПО ЭКСПЕРИМЕНТАМ\n\n🔄 Активных: 1\n  • Сортировка каталога: featured первыми (до 2026-05-29)\n\n💡 Предложено к запуску: 4\n  • Кнопка быстрой заявки в главном меню\n  • Баннер скидки 10% на первый заказ\n  • Запрос отзыва сразу после завершения"
+    },
+    "ceo_reports_block53": {
+      "status": "ok",
+      "cycles_loaded": 3,
+      "weekly_lines": 16,
+      "monthly_lines": 11
+    }
+  },
+  "decisions": [],
+  "new_actions": 0,
+  "experiments_concluded": 0,
+  "health_score": 50,
+  "nevesty_kpis": {
+    "orders_this_week": 8,
+    "orders_this_month": 8,
+    "conversion_rate_pct": 100.0,
+    "revenue_month": 0,
+    "avg_check": 0,
+    "pipeline_value": 0,
+    "models_active": 22,
+    "clients_total": 4,
+    "repeat_client_rate": 50.0,
+    "avg_rating": 4.8,
+    "db_connected": true
+  },
+  "weekly_ceo_summary": "",
+  "ceo_weekly_report": "📊 ЕЖЕНЕДЕЛЬНЫЙ ОТЧЁТ CEO\nЦиклов выполнено: 3\nФаз обработано: 75\nОшибок: 3\nУспешность: 96%\n\n🎯 Ключевые достижения недели:\n✓ Faq Generator\n✓ Ceo Reports Block53\n✓ Sales Creative Cs Simple\n✓ Experiment System\n\n📈 Рекомендации на следующую неделю:\n• Фокус на конверсии заявок\n• Обновление каталога моделей\n• Анализ отзывов клиентов",
+  "ceo_monthly_report": "📊 ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ CEO\nВсего циклов за месяц: 3\n\n📋 Заявок за месяц: 8\n💰 Выручка: 0 ₽\n👥 Новых клиентов: 1\n\n🎯 Стратегические цели:\n• Увеличить конверсию на 15%\n• Расширить каталог на 10+ моделей\n• Запустить реферальную программу",
+  "elapsed_s": 0.2,
+  "summary": "📊 Health Score: 50%\n🎯 Фокус: traffic\n🧠 Решений CEO: 0\n💡 Новых action items: 0\n🏭 Sales+Creative+CS heuristic: brand_tone=профессиональный, элегантный, доступный, caption=131chars, promo=293chars\n💼 Sales v2 (Phase 22): LeadQualifier, ProposalWriter, FollowUpSpecialist, PricingNegotiator\n🎨 Creative v2 (Phase 23): Copywriter, VisualConceptor, BrandVoiceKeeper, Storytelling\n📊 CEO Weekly Summary (Phase 21): готово\n💰 Finance Dept (Phase 22): forecast=0₽, trend=stable, season=1.15x\n🔬 Research Dept (Phase 23): segment=commercial, opp_score=62, alerts=2\n📢 Channel Content (Phase 24): 4 posts scheduled, next=model_spotlight\n📢 Channel Publisher (Phase 25): skipped (not_configured)\n📝 Model Bios (Phase 26): error, updated=0\nPhase27 FAQ: 10 new suggestions\nPhase28 Experiments: 1 active, 4 proposed\n📊 CEO Reports: weekly 16 lines, monthly 11 lines",
+  "duration_seconds": 0.2
+}

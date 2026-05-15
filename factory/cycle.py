@@ -950,6 +950,16 @@ def run_cycle() -> dict:
     logger.info("🏢 AI OFFICE CYCLE: %s", cycle_id)
     logger.info("=" * 60)
 
+    # Check if real Anthropic API key is configured — phases that call Claude are skipped without it
+    from factory.agents.base import API_AVAILABLE as _api_available
+    if not _api_available:
+        logger.warning(
+            "⚠️  No real ANTHROPIC_API_KEY detected — AI department phases will be skipped. "
+            "Only heuristic phases will run (fast cycle)."
+        )
+    else:
+        logger.info("✅ Anthropic API key detected — full AI cycle enabled.")
+
     db.init_db()
     nevesty_id = _ensure_nevesty_product()
 
@@ -1055,9 +1065,9 @@ def run_cycle() -> dict:
         raw_insights = analytics_engine.analyze(all_metrics)
         analytics_engine.persist_nevesty_metrics(nevesty_id, all_metrics.get("nevesty_models", {}))
 
-        # Расширенный анализ через Analytics Department (если есть ключ)
+        # Расширенный анализ через Analytics Department (только с реальным API ключом)
         running_exps = db.get_running_experiments()
-        analytics_dept = _load_dept("analytics")
+        analytics_dept = _load_dept("analytics") if _api_available else None
         if analytics_dept:
             dept_insights = analytics_dept.run_full_analysis(all_metrics, running_exps)
             insights = {**raw_insights, **dept_insights}
@@ -1115,9 +1125,9 @@ def run_cycle() -> dict:
     # ════════════════════════════════════════════════════════════════
     logger.info("\n🏢 DEPARTMENTS EXECUTION")
 
-    dept_marketing = _load_dept("marketing")
-    dept_product = _load_dept("product")
-    dept_hr = _load_dept("hr")
+    dept_marketing = _load_dept("marketing") if _api_available else None
+    dept_product = _load_dept("product") if _api_available else None
+    dept_hr = _load_dept("hr") if _api_available else None
     experiment_sys = ExperimentSystem()
 
     total_new_actions = 0
@@ -1205,7 +1215,7 @@ def run_cycle() -> dict:
 
     # Operations Department
     try:
-        ops = _load_dept("operations")
+        ops = _load_dept("operations") if _api_available else None
         if ops:
             ops_result = ops.execute_task(
                 ceo_decision.get("focus", "optimize operations") if (ceo_decision := next(iter(decisions), {})) else "optimize operations",
@@ -1222,7 +1232,7 @@ def run_cycle() -> dict:
 
     # Tech Department
     try:
-        tech = _load_dept("tech")
+        tech = _load_dept("tech") if _api_available else None
         if tech:
             tech_focus = next(iter(decisions), {}).get("focus", "improve system")
             tech_result = tech.execute_task(
@@ -1245,7 +1255,7 @@ def run_cycle() -> dict:
 
     # Sales Department
     try:
-        sales = _load_dept("sales")
+        sales = _load_dept("sales") if _api_available else None
         if sales:
             sales_focus = next(iter(decisions), {}).get("focus", "lead qualification pricing")
             sales_result = sales.execute_task(
@@ -1263,7 +1273,7 @@ def run_cycle() -> dict:
 
     # Creative Department
     try:
-        creative = _load_dept("creative")
+        creative = _load_dept("creative") if _api_available else None
         if creative:
             creative_focus = next(iter(decisions), {}).get("focus", "content storytelling brand")
             creative_result = creative.execute_task(
@@ -1281,7 +1291,7 @@ def run_cycle() -> dict:
 
     # Customer Success Department
     try:
-        cs = _load_dept("customer_success")
+        cs = _load_dept("customer_success") if _api_available else None
         if cs:
             cs_focus = next(iter(decisions), {}).get("focus", "retention onboarding upsell")
             cs_result = cs.execute_task(
@@ -1354,7 +1364,7 @@ def run_cycle() -> dict:
 
     # Finance Department
     try:
-        finance = _load_dept("finance")
+        finance = _load_dept("finance") if _api_available else None
         if finance:
             finance_focus = "прогноз выручки бюджет расходы оптимизация"
             finance_result = finance.execute_task(finance_focus, dept_context)
@@ -1370,7 +1380,7 @@ def run_cycle() -> dict:
 
     # Research Department
     try:
-        research = _load_dept("research")
+        research = _load_dept("research") if _api_available else None
         if research:
             research_focus = "рынок конкуренты тренды инсайты рекомендации"
             research_result = research.execute_task(research_focus, dept_context)
@@ -1389,112 +1399,118 @@ def run_cycle() -> dict:
     # ════════════════════════════════════════════════════════════════
     logger.info("\n💼 PHASE 12: SALES DEPARTMENT (4 agents)")
     sales_agents_results = {}
-    try:
-        from factory.agents.sales_dept import LeadQualifier, ProposalWriter, FollowUpSpecialist, PricingNegotiator
-
-        sales_agent_context = {"insights": insights, "metrics": all_metrics}
-
+    if not _api_available:
+        logger.info("[Phase12] Skipped — no real API key")
+    else:
         try:
-            lead_qualifier = LeadQualifier()
-            lq_result = lead_qualifier.run(sales_agent_context)
-            sales_agents_results["lead_qualifier"] = lq_result
-            logger.info("[Phase12] LeadQualifier: insights=%d", len(lq_result.get("insights", [])))
-        except Exception as e:
-            logger.error("[Phase12] LeadQualifier error: %s", e)
-            sales_agents_results["lead_qualifier"] = {}
+            from factory.agents.sales_dept import LeadQualifier, ProposalWriter, FollowUpSpecialist, PricingNegotiator
 
-        try:
-            proposal_writer = ProposalWriter()
-            pw_result = proposal_writer.run(sales_agent_context)
-            sales_agents_results["proposal_writer"] = pw_result
-            logger.info("[Phase12] ProposalWriter: insights=%d", len(pw_result.get("insights", [])))
-        except Exception as e:
-            logger.error("[Phase12] ProposalWriter error: %s", e)
-            sales_agents_results["proposal_writer"] = {}
+            sales_agent_context = {"insights": insights, "metrics": all_metrics}
 
-        try:
-            followup_specialist = FollowUpSpecialist()
-            fu_result = followup_specialist.run(sales_agent_context)
-            sales_agents_results["followup_specialist"] = fu_result
-            logger.info("[Phase12] FollowUpSpecialist: insights=%d", len(fu_result.get("insights", [])))
-        except Exception as e:
-            logger.error("[Phase12] FollowUpSpecialist error: %s", e)
-            sales_agents_results["followup_specialist"] = {}
+            try:
+                lead_qualifier = LeadQualifier()
+                lq_result = lead_qualifier.run(sales_agent_context)
+                sales_agents_results["lead_qualifier"] = lq_result
+                logger.info("[Phase12] LeadQualifier: insights=%d", len(lq_result.get("insights", [])))
+            except Exception as e:
+                logger.error("[Phase12] LeadQualifier error: %s", e)
+                sales_agents_results["lead_qualifier"] = {}
 
-        try:
-            pricing_negotiator = PricingNegotiator()
-            pn_result = pricing_negotiator.run(sales_agent_context)
-            sales_agents_results["pricing_negotiator"] = pn_result
-            logger.info("[Phase12] PricingNegotiator: insights=%d", len(pn_result.get("insights", [])))
-        except Exception as e:
-            logger.error("[Phase12] PricingNegotiator error: %s", e)
-            sales_agents_results["pricing_negotiator"] = {}
+            try:
+                proposal_writer = ProposalWriter()
+                pw_result = proposal_writer.run(sales_agent_context)
+                sales_agents_results["proposal_writer"] = pw_result
+                logger.info("[Phase12] ProposalWriter: insights=%d", len(pw_result.get("insights", [])))
+            except Exception as e:
+                logger.error("[Phase12] ProposalWriter error: %s", e)
+                sales_agents_results["proposal_writer"] = {}
 
-        results["phases"]["sales_agents"] = {
-            "agents": list(sales_agents_results.keys()),
-            "results": sales_agents_results,
-        }
-        active_agents = [k for k, v in sales_agents_results.items() if v]
-        summary_lines.append(f"💼 Sales Agents (Phase 12): {', '.join(active_agents)}")
-    except Exception as e:
-        logger.error("Phase 12 Sales agents error: %s", e)
+            try:
+                followup_specialist = FollowUpSpecialist()
+                fu_result = followup_specialist.run(sales_agent_context)
+                sales_agents_results["followup_specialist"] = fu_result
+                logger.info("[Phase12] FollowUpSpecialist: insights=%d", len(fu_result.get("insights", [])))
+            except Exception as e:
+                logger.error("[Phase12] FollowUpSpecialist error: %s", e)
+                sales_agents_results["followup_specialist"] = {}
+
+            try:
+                pricing_negotiator = PricingNegotiator()
+                pn_result = pricing_negotiator.run(sales_agent_context)
+                sales_agents_results["pricing_negotiator"] = pn_result
+                logger.info("[Phase12] PricingNegotiator: insights=%d", len(pn_result.get("insights", [])))
+            except Exception as e:
+                logger.error("[Phase12] PricingNegotiator error: %s", e)
+                sales_agents_results["pricing_negotiator"] = {}
+
+            results["phases"]["sales_agents"] = {
+                "agents": list(sales_agents_results.keys()),
+                "results": sales_agents_results,
+            }
+            active_agents = [k for k, v in sales_agents_results.items() if v]
+            summary_lines.append(f"💼 Sales Agents (Phase 12): {', '.join(active_agents)}")
+        except Exception as e:
+            logger.error("Phase 12 Sales agents error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # PHASE 13 — CUSTOMER SUCCESS DEPARTMENT (все 4 агента индивидуально)
     # ════════════════════════════════════════════════════════════════
     logger.info("\n🤝 PHASE 13: CUSTOMER SUCCESS DEPARTMENT (4 agents)")
     cx_agents_results = {}
-    try:
-        from factory.agents.customer_success_dept import (
-            OnboardingSpecialist, RetentionAnalyst, FeedbackCollector, UpsellAdvisor
-        )
-
-        cx_agent_context = {"insights": insights, "metrics": all_metrics}
-
+    if not _api_available:
+        logger.info("[Phase13] Skipped — no real API key")
+    else:
         try:
-            onboarding = OnboardingSpecialist()
-            ob_result = onboarding.run(cx_agent_context)
-            cx_agents_results["onboarding_specialist"] = ob_result
-            logger.info("[Phase13] OnboardingSpecialist: insights=%d", len(ob_result.get("insights", [])))
-        except Exception as e:
-            logger.error("[Phase13] OnboardingSpecialist error: %s", e)
-            cx_agents_results["onboarding_specialist"] = {}
+            from factory.agents.customer_success_dept import (
+                OnboardingSpecialist, RetentionAnalyst, FeedbackCollector, UpsellAdvisor
+            )
 
-        try:
-            retention = RetentionAnalyst()
-            ra_result = retention.run(cx_agent_context)
-            cx_agents_results["retention_analyst"] = ra_result
-            logger.info("[Phase13] RetentionAnalyst: insights=%d", len(ra_result.get("insights", [])))
-        except Exception as e:
-            logger.error("[Phase13] RetentionAnalyst error: %s", e)
-            cx_agents_results["retention_analyst"] = {}
+            cx_agent_context = {"insights": insights, "metrics": all_metrics}
 
-        try:
-            feedback = FeedbackCollector()
-            fb_result = feedback.run(cx_agent_context)
-            cx_agents_results["feedback_collector"] = fb_result
-            logger.info("[Phase13] FeedbackCollector: insights=%d", len(fb_result.get("insights", [])))
-        except Exception as e:
-            logger.error("[Phase13] FeedbackCollector error: %s", e)
-            cx_agents_results["feedback_collector"] = {}
+            try:
+                onboarding = OnboardingSpecialist()
+                ob_result = onboarding.run(cx_agent_context)
+                cx_agents_results["onboarding_specialist"] = ob_result
+                logger.info("[Phase13] OnboardingSpecialist: insights=%d", len(ob_result.get("insights", [])))
+            except Exception as e:
+                logger.error("[Phase13] OnboardingSpecialist error: %s", e)
+                cx_agents_results["onboarding_specialist"] = {}
 
-        try:
-            upsell = UpsellAdvisor()
-            ua_result = upsell.run(cx_agent_context)
-            cx_agents_results["upsell_advisor"] = ua_result
-            logger.info("[Phase13] UpsellAdvisor: insights=%d", len(ua_result.get("insights", [])))
-        except Exception as e:
-            logger.error("[Phase13] UpsellAdvisor error: %s", e)
-            cx_agents_results["upsell_advisor"] = {}
+            try:
+                retention = RetentionAnalyst()
+                ra_result = retention.run(cx_agent_context)
+                cx_agents_results["retention_analyst"] = ra_result
+                logger.info("[Phase13] RetentionAnalyst: insights=%d", len(ra_result.get("insights", [])))
+            except Exception as e:
+                logger.error("[Phase13] RetentionAnalyst error: %s", e)
+                cx_agents_results["retention_analyst"] = {}
 
-        results["phases"]["cx_agents"] = {
-            "agents": list(cx_agents_results.keys()),
-            "results": cx_agents_results,
-        }
-        active_cx = [k for k, v in cx_agents_results.items() if v]
-        summary_lines.append(f"🤝 CX Agents (Phase 13): {', '.join(active_cx)}")
-    except Exception as e:
-        logger.error("Phase 13 Customer Success agents error: %s", e)
+            try:
+                feedback = FeedbackCollector()
+                fb_result = feedback.run(cx_agent_context)
+                cx_agents_results["feedback_collector"] = fb_result
+                logger.info("[Phase13] FeedbackCollector: insights=%d", len(fb_result.get("insights", [])))
+            except Exception as e:
+                logger.error("[Phase13] FeedbackCollector error: %s", e)
+                cx_agents_results["feedback_collector"] = {}
+
+            try:
+                upsell = UpsellAdvisor()
+                ua_result = upsell.run(cx_agent_context)
+                cx_agents_results["upsell_advisor"] = ua_result
+                logger.info("[Phase13] UpsellAdvisor: insights=%d", len(ua_result.get("insights", [])))
+            except Exception as e:
+                logger.error("[Phase13] UpsellAdvisor error: %s", e)
+                cx_agents_results["upsell_advisor"] = {}
+
+            results["phases"]["cx_agents"] = {
+                "agents": list(cx_agents_results.keys()),
+                "results": cx_agents_results,
+            }
+            active_cx = [k for k, v in cx_agents_results.items() if v]
+            summary_lines.append(f"🤝 CX Agents (Phase 13): {', '.join(active_cx)}")
+        except Exception as e:
+            logger.error("Phase 13 Customer Success agents error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # PHASE 14 — CONTENT GENERATION: Telegram posts & model bios

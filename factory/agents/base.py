@@ -11,14 +11,27 @@ logger = logging.getLogger(__name__)
 CLAUDE_BIN = os.getenv("CLAUDE_CODE_EXECPATH", "claude")
 MODEL = os.getenv("FACTORY_MODEL", "claude-sonnet-4-6")
 TIMEOUT = int(os.getenv("FACTORY_TIMEOUT", "300"))
-_USE_SDK = bool(os.getenv("ANTHROPIC_API_KEY"))
+
+# Real key looks like sk-ant-api03-... and is 100+ chars; placeholder/empty = no API calls
+def _is_real_api_key(key: str) -> bool:
+    return bool(key and key.startswith("sk-ant-api") and len(key) > 50 and key.isascii())
+
+_raw_key = os.getenv("ANTHROPIC_API_KEY", "")
+_USE_SDK = _is_real_api_key(_raw_key)
+API_AVAILABLE = _USE_SDK  # module-level flag for cycle.py to check
+
+if os.getenv("ANTHROPIC_API_KEY") and not _USE_SDK:
+    logger.warning(
+        "ANTHROPIC_API_KEY is set but looks like a placeholder — AI agent calls will be skipped. "
+        "Set a real key (sk-ant-api03-...) to enable AI department phases."
+    )
 
 
 def _make_sdk_client():
     """Создаёт Anthropic SDK клиент если есть API ключ."""
     try:
         import anthropic
-        return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        return anthropic.Anthropic(api_key=_raw_key)
     except Exception as e:
         logger.warning("SDK init failed: %s, falling back to CLI", e)
         return None
@@ -38,6 +51,11 @@ class FactoryAgent:
 
     def think(self, prompt: str, context: dict | None = None, max_tokens: int = 2048) -> str:
         """Вызывает Claude (SDK или CLI) и возвращает текст ответа."""
+        # Fast-fail when no real API key and CLI not available — avoids long timeouts
+        if not _sdk_client and not _is_real_api_key(_raw_key):
+            logger.debug("[%s/%s] No real API key — skipping think()", self.department, self.role)
+            return ""
+
         system = self.system_prompt
         if context:
             ctx_str = json.dumps(context, ensure_ascii=False, indent=2, default=str)
