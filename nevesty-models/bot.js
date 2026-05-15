@@ -159,6 +159,21 @@ function setSessionReminder(chatId) {
             },
           }
         );
+      } else if (sess?.state && isActiveInputState(sess.state)) {
+        // Non-booking active state — generic reminder
+        await bot.sendMessage(
+          chatId,
+          'Вы ещё здесь\\? Хотите продолжить?',
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '▶️ Продолжить', callback_data: 'resume_session' }],
+                [{ text: '❌ Отменить',   callback_data: 'cancel_session'  }],
+              ],
+            },
+          }
+        );
       }
     } catch { /* bot may be offline or session already cleared */ }
     delete sessionReminderTimers[chatId];
@@ -4841,6 +4856,26 @@ function initBot(app) {
       await clearSession(chatId);
       await safeSend(chatId,
         '❌ *Бронирование отменено\\.*',
+        { parse_mode: 'MarkdownV2' }
+      );
+      return showMainMenu(chatId, q.from.first_name);
+    }
+
+    // ── Generic session reminder: resume or cancel
+    if (data === 'resume_session') {
+      resetSessionTimer(chatId); // reset hard timeout + soft reminder
+      return safeSend(chatId,
+        '✅ Продолжаем\\!',
+        { parse_mode: 'MarkdownV2' }
+      );
+    }
+    if (data === 'cancel_session') {
+      clearTimeout(sessionTimers.get(chatId));
+      sessionTimers.delete(chatId);
+      clearSessionReminder(chatId);
+      await clearSession(chatId);
+      await safeSend(chatId,
+        '❌ Действие отменено\\.',
         { parse_mode: 'MarkdownV2' }
       );
       return showMainMenu(chatId, q.from.first_name);
