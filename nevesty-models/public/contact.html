@@ -268,7 +268,7 @@
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
       <div class="nav-links" role="list">
         <a href="/catalog.html">Модели</a>
-        <a href="/#services">Услуги</a>
+        <a href="/pricing.html">Цены</a>
         <a href="/about.html">О нас</a>
         <a href="/faq.html">FAQ</a>
         <a href="/contact.html" style="color:var(--gold)">Контакты</a>
@@ -286,15 +286,15 @@
         </a>
         <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
-      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
     </div>
   </nav>
 
   <!-- MOBILE MENU -->
   <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
     <a href="/catalog.html">Модели</a>
-    <a href="/#services">Услуги</a>
+    <a href="/pricing.html">Цены</a>
     <a href="/about.html">О нас</a>
     <a href="/faq.html">FAQ</a>
     <a href="/contact.html" style="color:var(--gold)">Контакты</a>
@@ -381,15 +381,15 @@
           <form id="contact-form" onsubmit="sendContactForm(event)">
             <div class="form-field">
               <label for="cf-name">Ваше имя *</label>
-              <input type="text" id="cf-name" required autocomplete="name" placeholder="Как к вам обращаться?">
+              <input type="text" id="cf-name" required aria-required="true" autocomplete="name" placeholder="Как к вам обращаться?">
             </div>
             <div class="form-field">
               <label for="cf-phone">Телефон *</label>
-              <input type="tel" id="cf-phone" required autocomplete="tel" inputmode="tel" placeholder="+7 (999) 123-45-67">
+              <input type="tel" id="cf-phone" required aria-required="true" autocomplete="tel" inputmode="tel" placeholder="+7 (999) 123-45-67">
             </div>
             <div class="form-field">
               <label for="cf-message">Сообщение *</label>
-              <textarea id="cf-message" required rows="5" placeholder="Опишите ваш вопрос или запрос..."></textarea>
+              <textarea id="cf-message" required aria-required="true" rows="5" placeholder="Опишите ваш вопрос или запрос..."></textarea>
             </div>
             <div id="cf-error" role="alert" style="display:none;color:#f44336;font-size:0.8rem;margin-bottom:12px"></div>
             <button type="submit" id="cf-submit" class="btn-primary" style="width:100%;font-size:0.88rem;padding:16px;">
@@ -418,7 +418,7 @@
         <div class="footer-col">
           <h4>Агентство</h4>
           <a href="/catalog.html">Каталог моделей</a>
-          <a href="/#services">Услуги</a>
+          <a href="/pricing.html">Цены</a>
           <a href="/about.html">О нас</a>
           <a href="/contact.html">Контакты</a>
         </div>

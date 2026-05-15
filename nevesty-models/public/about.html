@@ -318,11 +318,11 @@
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
       <div class="nav-links" role="list">
         <a href="/catalog.html">Модели</a>
-        <a href="/#services">Услуги</a>
+        <a href="/pricing.html">Цены</a>
         <a href="/about.html" style="color:var(--gold)">О нас</a>
         <a href="/faq.html">FAQ</a>
         <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
+        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
         <button onclick="DarkMode.toggle()"
           class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
           aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
@@ -336,15 +336,15 @@
         </a>
         <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
-      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
     </div>
   </nav>
 
   <!-- MOBILE MENU -->
   <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
     <a href="/catalog.html">Модели</a>
-    <a href="/#services">Услуги</a>
+    <a href="/pricing.html">Цены</a>
     <a href="/about.html" style="color:var(--gold)">О нас</a>
     <a href="/faq.html">FAQ</a>
     <a href="/contact.html">Контакты</a>
@@ -498,7 +498,7 @@
         <div class="footer-col">
           <h4>Агентство</h4>
           <a href="/catalog.html">Каталог моделей</a>
-          <a href="/#services">Услуги</a>
+          <a href="/pricing.html">Цены</a>
           <a href="/about.html">О нас</a>
           <a href="/contact.html">Контакты</a>
         </div>
