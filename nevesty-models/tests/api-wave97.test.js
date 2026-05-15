@@ -19,7 +19,8 @@ describe('calc_share whitelist validation', () => {
   const botSrc = fs.readFileSync(path.join(ROOT, 'bot.js'), 'utf8');
 
   test('calc_share callback regex pattern exists in bot.js', () => {
-    expect(botSrc).toMatch(/calc_share_\(\\d\+\)_\(\\d\+\)_\(\.+\)/);
+    // Matches: data.match(/^calc_share_(\d+)_(\d+)_(.+)$/)
+    expect(botSrc).toContain('data.match(/^calc_share_(\\d+)_(\\d+)_(.+)$/)');
   });
 
   test('bot.js contains VALID_SHARE_EVENT_TYPES whitelist for evType validation', () => {
