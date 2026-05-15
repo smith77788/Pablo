@@ -6,6 +6,8 @@ Classes:
   TelegramChannelAgent    — LLM-powered generator (falls back to templates when no API key)
 """
 from __future__ import annotations
+import json
+import os
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 import random
@@ -511,6 +513,111 @@ class TelegramChannelAgent(FactoryAgent):
             "calendar": calendar,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    # ── FAQ answers for bot ───────────────────────────────────────────────────
+
+    def generate_faq_answers(self, questions: list[str]) -> dict[str, Any]:
+        """Генерирует FAQ ответы для Telegram бота."""
+        prompt = f"""
+Ты — менеджер модельного агентства. Ответь на часто задаваемые вопросы клиентов.
+
+Вопросы: {json.dumps(questions, ensure_ascii=False)}
+
+Верни JSON:
+{{
+  "faq": [
+    {{"q": "...", "a": "..."}}
+  ]
+}}
+Ответы должны быть короткими (1-2 предложения), профессиональными, на русском.
+"""
+        result = self.think_json(prompt)
+        if not result or "error" in result:
+            # Template fallback: build FAQ from questions without LLM
+            faq_items = [
+                {"q": q, "a": "Пожалуйста, напишите нам в @nevesty_models — менеджер ответит в течение 30 минут."}
+                for q in questions
+            ]
+            return {"faq": faq_items}
+        return result
+
+    # ── Promo offer ───────────────────────────────────────────────────────────
+
+    def generate_promo_offer(self, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Генерирует специальное предложение для клиентов."""
+        ctx = context or {}
+        seasonal_theme = SEASONAL_THEMES.get(datetime.now(timezone.utc).month, "мероприятий")
+        prompt = f"""
+Придумай акцию для модельного агентства.
+
+Контекст: {json.dumps(ctx, ensure_ascii=False)}
+
+Верни JSON:
+{{
+  "title": "...",
+  "description": "...",
+  "discount": "...",
+  "valid_until": "...",
+  "cta": "...",
+  "telegram_post": "..."
+}}
+"""
+        result = self.think_json(prompt)
+        if not result or "error" in result:
+            # Template fallback
+            return {
+                "title": f"Специальное предложение к {seasonal_theme}",
+                "description": "Скидка 15% на бронирование моделей для вашего мероприятия.",
+                "discount": "15%",
+                "valid_until": "7 дней",
+                "cta": "Напишите @nevesty_models с промокодом PROMO15",
+                "telegram_post": (
+                    f"🎉 <b>Акция!</b> Скидка 15% к {seasonal_theme.lower()}.\n"
+                    "Пишите @nevesty_models, промокод: <code>PROMO15</code>"
+                ),
+            }
+        return result
+
+    # ── Model description from parameters ────────────────────────────────────
+
+    def generate_model_description(self, model_data: dict[str, Any]) -> dict[str, Any]:
+        """Генерирует профессиональное описание модели из параметров."""
+        prompt = f"""
+Напиши профессиональное описание модели для каталога агентства.
+
+Параметры модели: {json.dumps(model_data, ensure_ascii=False)}
+
+Верни JSON:
+{{
+  "short_bio": "...",
+  "full_bio": "...",
+  "instagram_caption": "..."
+}}
+Стиль: элегантный, профессиональный, на русском языке.
+"""
+        result = self.think_json(prompt)
+        if not result or "error" in result:
+            name = model_data.get("name", "Модель")
+            height = model_data.get("height", "")
+            city = model_data.get("city", "")
+            height_str = f", рост {height} см" if height else ""
+            city_str = f" из {city}" if city else ""
+            short_bio = f"{name}{city_str}{height_str} — профессиональная модель агентства Nevesty Models."
+            return {
+                "short_bio": short_bio,
+                "full_bio": (
+                    f"{short_bio} Работает в сферах fashion, commercial и event. "
+                    "Отличается пунктуальностью, профессионализмом и умением работать с разными клиентами. "
+                    "Готова к проектам различной сложности."
+                ),
+                "instagram_caption": (
+                    f"✨ {name} — элегантность и профессионализм в каждом образе. "
+                    "#модели #nevestymodels #fashion"
+                ),
+            }
+        return result
+
+    # ── run ───────────────────────────────────────────────────────────────────
 
     def run(self, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """FactoryAgent entry point — called by cycle.py."""

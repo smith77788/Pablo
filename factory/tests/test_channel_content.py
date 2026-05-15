@@ -1,7 +1,15 @@
 """Tests for channel_content.py — Telegram channel post generator."""
 from __future__ import annotations
 import pytest
-from factory.agents.channel_content import ChannelContentGenerator, POST_FORMATS, SEASONAL_THEMES
+from factory.agents.channel_content import ChannelContentGenerator, TelegramChannelAgent, POST_FORMATS, SEASONAL_THEMES
+
+
+@pytest.fixture
+def mock_agent() -> TelegramChannelAgent:
+    """TelegramChannelAgent without API key — forces template/fallback mode."""
+    agent = TelegramChannelAgent.__new__(TelegramChannelAgent)
+    agent.api_key = None
+    return agent
 
 
 class TestChannelContentGenerator:
@@ -265,3 +273,49 @@ class TestTelegramChannelAgent:
         for item in plan:
             assert "content" in item
             assert item["content"] is not None
+
+
+# ── БЛОК 9.1: FAQ, promo offer, model description ─────────────────────────────
+
+def test_generate_faq_answers(mock_agent: TelegramChannelAgent) -> None:
+    result = mock_agent.generate_faq_answers(["Как заказать?"])
+    assert "faq" in result or "error" in result
+
+
+def test_generate_faq_answers_returns_list(mock_agent: TelegramChannelAgent) -> None:
+    result = mock_agent.generate_faq_answers(["Сколько стоит?", "Как долго ждать?"])
+    assert isinstance(result, dict)
+    if "faq" in result:
+        assert isinstance(result["faq"], list)
+
+
+def test_generate_promo_offer(mock_agent: TelegramChannelAgent) -> None:
+    result = mock_agent.generate_promo_offer({})
+    assert isinstance(result, dict)
+
+
+def test_generate_promo_offer_with_context(mock_agent: TelegramChannelAgent) -> None:
+    result = mock_agent.generate_promo_offer({"season": "summer", "discount": "20%"})
+    assert isinstance(result, dict)
+    # fallback path always returns these keys
+    for key in ("title", "description", "discount", "valid_until", "cta", "telegram_post"):
+        assert key in result
+
+
+def test_generate_model_description(mock_agent: TelegramChannelAgent) -> None:
+    result = mock_agent.generate_model_description({"name": "Мария", "height": 175})
+    assert "short_bio" in result or "error" in result
+
+
+def test_generate_model_description_fallback_keys(mock_agent: TelegramChannelAgent) -> None:
+    result = mock_agent.generate_model_description({"name": "Анна", "city": "Москва"})
+    assert isinstance(result, dict)
+    # fallback always has all three keys
+    for key in ("short_bio", "full_bio", "instagram_caption"):
+        assert key in result
+
+
+def test_generate_model_description_name_in_short_bio(mock_agent: TelegramChannelAgent) -> None:
+    result = mock_agent.generate_model_description({"name": "Светлана", "height": 178})
+    if "short_bio" in result:
+        assert "Светлана" in result["short_bio"]
