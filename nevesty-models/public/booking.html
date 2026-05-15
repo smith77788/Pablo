@@ -192,6 +192,57 @@
     @media (max-width: 640px) {
       .booking-steps .booking-step-line { width: 18px; }
     }
+
+    /* ── Multi-model chips ── */
+    .model-chips {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      margin-bottom: 16px; min-height: 0;
+    }
+    .model-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(201,169,110,0.12); border: 1px solid var(--gold);
+      padding: 5px 10px 5px 6px; font-size: 0.78rem; color: var(--gold);
+      animation: chipIn 0.2s ease;
+    }
+    @keyframes chipIn {
+      from { opacity: 0; transform: scale(0.85); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    .model-chip-thumb {
+      width: 24px; height: 30px; object-fit: cover; flex-shrink: 0;
+    }
+    .model-chip-remove {
+      background: none; border: none; color: var(--gold); cursor: pointer;
+      font-size: 0.7rem; padding: 0 2px; line-height: 1;
+      transition: color var(--transition);
+    }
+    .model-chip-remove:hover { color: #e05c5c; }
+
+    /* ── "Add another model" link ── */
+    .btn-add-model {
+      font-size: 0.75rem; color: var(--gold); text-decoration: none;
+      letter-spacing: 0.5px; border-bottom: 1px dashed rgba(201,169,110,0.4);
+      transition: border-color var(--transition), color var(--transition);
+    }
+    .btn-add-model:hover { color: var(--gold-light); border-color: var(--gold-light); }
+
+    /* ── File upload button ── */
+    .file-upload-btn {
+      display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+      border: 1px dashed var(--border); padding: 10px 16px;
+      font-size: 0.82rem; color: var(--text-muted);
+      transition: all var(--transition); width: 100%;
+      background: var(--bg2);
+    }
+    .file-upload-btn:hover, .file-upload-btn:focus {
+      border-color: var(--gold); color: var(--gold); outline: none;
+    }
+    .file-upload-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+    .file-upload-icon { font-size: 1.1rem; }
+    .file-upload-name {
+      font-size: 0.78rem; color: var(--gold); margin-top: 6px;
+      min-height: 1.2em; word-break: break-all;
+    }
   </style>
   <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
   <!-- Google Analytics 4 (loads only if consent given) -->
