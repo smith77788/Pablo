@@ -32,15 +32,15 @@ describe('Wave 80 БЛОК A: Wishlist API — routes/api.js', () => {
   });
 
   test('GET /api/user/wishlist uses wishlistLimiter', () => {
-    expect(apiCode).toMatch(/router\.get\s*\(\s*'\/user\/wishlist'\s*,\s*wishlistLimiter/);
+    expect(apiCode).toMatch(/router\.get\s*\(\s*'\/user\/wishlist'\s*,[^)]*wishlistLimiter/);
   });
 
   test('POST /api/user/wishlist uses wishlistLimiter', () => {
-    expect(apiCode).toMatch(/router\.post\s*\(\s*'\/user\/wishlist'\s*,\s*wishlistLimiter/);
+    expect(apiCode).toMatch(/router\.post\s*\(\s*'\/user\/wishlist'\s*,[^)]*wishlistLimiter/);
   });
 
   test('DELETE /api/user/wishlist/:model_id uses wishlistLimiter', () => {
-    expect(apiCode).toMatch(/router\.delete\s*\(\s*'\/user\/wishlist\/:model_id'\s*,\s*wishlistLimiter/);
+    expect(apiCode).toMatch(/router\.delete\s*\(\s*'\/user\/wishlist\/:model_id'\s*,[^)]*wishlistLimiter/);
   });
 
   test('wishlistLimiter is defined (not no-op in production intent)', () => {

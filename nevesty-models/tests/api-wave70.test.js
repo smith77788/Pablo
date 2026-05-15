@@ -14,10 +14,10 @@ const cors = require('cors');
 
 let app, adminToken;
 
-const botContent     = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
-const routesContent  = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
-const dbContent      = fs.readFileSync(path.join(__dirname, '../database.js'), 'utf8');
-const serverContent  = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+const botContent = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
+const routesContent = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
+const dbContent = fs.readFileSync(path.join(__dirname, '../database.js'), 'utf8');
+const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
 
 const FACTORY_DIR = path.join(__dirname, '../../factory');
 const factoryExists = fs.existsSync(FACTORY_DIR);
@@ -37,9 +37,7 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body.token;
 }, 15000);
 
@@ -171,25 +169,23 @@ describe('Wave 70: Wishlist API endpoints', () => {
     expect(routesContent).toMatch(/user\/wishlist/);
   });
 
-  it('GET /api/user/wishlist?chat_id=123 returns 200', async () => {
-    const res = await request(app).get('/api/user/wishlist?chat_id=123');
+  it('GET /api/user/wishlist?chat_id=123 returns 200 (с admin auth)', async () => {
+    const res = await request(app).get('/api/user/wishlist?chat_id=123').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
-  it('GET /api/user/wishlist?chat_id=123 returns an array', async () => {
-    const res = await request(app).get('/api/user/wishlist?chat_id=123');
+  it('GET /api/user/wishlist?chat_id=123 returns an array (с admin auth)', async () => {
+    const res = await request(app).get('/api/user/wishlist?chat_id=123').set('Authorization', `Bearer ${adminToken}`);
     expect(Array.isArray(res.body)).toBe(true);
   });
 
-  it('GET /api/user/wishlist without chat_id returns 400', async () => {
-    const res = await request(app).get('/api/user/wishlist');
+  it('GET /api/user/wishlist без chat_id возвращает 400 (с auth)', async () => {
+    const res = await request(app).get('/api/user/wishlist').set('Authorization', `Bearer ${adminToken}`);
     expect([400, 422]).toContain(res.status);
   });
 
   it('POST /api/user/wishlist without chat_id returns client error', async () => {
-    const res = await request(app)
-      .post('/api/user/wishlist')
-      .send({ model_id: 1 });
+    const res = await request(app).post('/api/user/wishlist').send({ model_id: 1 });
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(res.status).toBeLessThan(500);
   });

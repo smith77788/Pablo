@@ -37,9 +37,7 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 }, 15000);
 
@@ -75,7 +73,7 @@ describe('E2E: Browse catalog', () => {
 
   test('GET /api/models/:id returns model details', async () => {
     const listRes = await request(app).get('/api/models');
-    const models = Array.isArray(listRes.body) ? listRes.body : (listRes.body.models || []);
+    const models = Array.isArray(listRes.body) ? listRes.body : listRes.body.models || [];
     if (!models.length) return; // no seed models in :memory: DB
     const firstId = models[0].id;
     const res = await request(app).get(`/api/models/${firstId}`);
@@ -97,18 +95,15 @@ describe('E2E: Create booking order', () => {
 
   test('POST /api/orders creates order with valid data', async () => {
     const csrfToken = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrfToken)
-      .send({
-        client_name: 'Test E2E Client',
-        client_phone: '+79001234567',
-        client_email: 'e2e@test.com',
-        event_type: 'photo_shoot',
-        event_date: '2026-06-15',
-        budget: '15000',
-        comments: 'E2E booking flow test',
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrfToken).send({
+      client_name: 'Test E2E Client',
+      client_phone: '+79001234567',
+      client_email: 'e2e@test.com',
+      event_type: 'photo_shoot',
+      event_date: '2026-06-15',
+      budget: '15000',
+      comments: 'E2E booking flow test',
+    });
     expect([200, 201]).toContain(res.status);
     if (res.status === 200 || res.status === 201) {
       expect(res.body).toHaveProperty('order_number');
@@ -119,44 +114,36 @@ describe('E2E: Create booking order', () => {
 
   test('POST /api/orders requires valid phone number', async () => {
     const csrfToken = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrfToken)
-      .send({
-        client_name: 'Test Client',
-        client_phone: 'not-a-phone',
-        client_email: 'test@test.com',
-        event_type: 'photo_shoot',
-        event_date: '2026-06-15',
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrfToken).send({
+      client_name: 'Test Client',
+      client_phone: 'not-a-phone',
+      client_email: 'test@test.com',
+      event_type: 'photo_shoot',
+      event_date: '2026-06-15',
+    });
     expect([400, 422]).toContain(res.status);
   });
 
   test('POST /api/orders requires valid event_type', async () => {
     const csrfToken = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrfToken)
-      .send({
-        client_name: 'Test Client',
-        client_phone: '+79001234568',
-        client_email: 'test@test.com',
-        event_type: 'invalid_type',
-        event_date: '2026-06-15',
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrfToken).send({
+      client_name: 'Test Client',
+      client_phone: '+79001234568',
+      client_email: 'test@test.com',
+      event_type: 'invalid_type',
+      event_date: '2026-06-15',
+    });
     expect([400, 422]).toContain(res.status);
   });
 
   test('POST /api/orders rejects missing CSRF token', async () => {
-    const res = await request(app)
-      .post('/api/orders')
-      .send({
-        client_name: 'CSRF Test Client',
-        client_phone: '+79001234569',
-        client_email: 'csrf@test.com',
-        event_type: 'photo_shoot',
-        event_date: '2026-06-15',
-      });
+    const res = await request(app).post('/api/orders').send({
+      client_name: 'CSRF Test Client',
+      client_phone: '+79001234569',
+      client_email: 'csrf@test.com',
+      event_type: 'photo_shoot',
+      event_date: '2026-06-15',
+    });
     expect([400, 403, 422]).toContain(res.status);
   });
 
@@ -187,26 +174,21 @@ describe('E2E: Admin order management', () => {
   beforeAll(async () => {
     // Create a fresh order for management tests
     const csrfToken = await getCsrfToken();
-    const createRes = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrfToken)
-      .send({
-        client_name: 'Admin Managed Client',
-        client_phone: '+79009876543',
-        client_email: 'admin-e2e@test.com',
-        event_type: 'event',
-        event_date: '2026-08-01',
-        budget: '45000',
-      });
+    const createRes = await request(app).post('/api/orders').set('x-csrf-token', csrfToken).send({
+      client_name: 'Admin Managed Client',
+      client_phone: '+79009876543',
+      client_email: 'admin-e2e@test.com',
+      event_type: 'event',
+      event_date: '2026-08-01',
+      budget: '45000',
+    });
     if ([200, 201].includes(createRes.status)) {
       managedOrderId = createRes.body?.id;
     }
   });
 
   test('Admin can list all orders', async () => {
-    const res = await request(app)
-      .get('/api/admin/orders')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/orders').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     const orders = res.body.orders || res.body;
     expect(Array.isArray(orders)).toBe(true);
@@ -254,16 +236,12 @@ describe('E2E: Admin order management', () => {
   });
 
   test('GET /api/admin/orders supports search param', async () => {
-    const res = await request(app)
-      .get('/api/admin/orders?search=Admin')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/orders?search=Admin').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   test('GET /api/admin/orders supports status filter', async () => {
-    const res = await request(app)
-      .get('/api/admin/orders?status=new')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/orders?status=new').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 });
@@ -301,17 +279,25 @@ describe('E2E: FAQ', () => {
 describe('E2E: Wishlist', () => {
   const testChatId = 888001;
 
-  test('GET /api/user/wishlist returns empty list for new user', async () => {
+  test('GET /api/user/wishlist returns 401 without auth', async () => {
     const res = await request(app).get(`/api/user/wishlist?chat_id=${testChatId}`);
+    expect(res.status).toBe(401);
+  });
+
+  test('GET /api/user/wishlist returns empty list for new user (with auth)', async () => {
+    const res = await request(app)
+      .get(`/api/user/wishlist?chat_id=${testChatId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     const wishlist = res.body.wishlist || res.body;
     expect(Array.isArray(wishlist)).toBe(true);
     expect(wishlist.length).toBe(0);
   });
 
-  test('POST /api/user/wishlist handles missing model gracefully', async () => {
+  test('POST /api/user/wishlist handles missing model gracefully (with auth)', async () => {
     const res = await request(app)
       .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ chat_id: testChatId, model_id: 99999 });
     // 404 if model doesn't exist in :memory: DB, else 200/201
     expect([200, 201, 404, 400]).toContain(res.status);
@@ -324,29 +310,22 @@ describe('E2E: Public order status lookup', () => {
   test('GET /api/orders/by-phone returns orders for known phone', async () => {
     // First create an order
     const csrfToken = await getCsrfToken();
-    await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrfToken)
-      .send({
-        client_name: 'Status Check Client',
-        client_phone: '+79991111222',
-        client_email: 'status@test.com',
-        event_type: 'commercial',
-        event_date: '2026-09-01',
-      });
+    await request(app).post('/api/orders').set('x-csrf-token', csrfToken).send({
+      client_name: 'Status Check Client',
+      client_phone: '+79991111222',
+      client_email: 'status@test.com',
+      event_type: 'commercial',
+      event_date: '2026-09-01',
+    });
 
-    const res = await request(app)
-      .get('/api/orders/by-phone')
-      .query({ phone: '+79991111222' });
+    const res = await request(app).get('/api/orders/by-phone').query({ phone: '+79991111222' });
     expect(res.status).toBe(200);
     const orders = res.body.orders || [];
     expect(Array.isArray(orders)).toBe(true);
   });
 
   test('GET /api/orders/status?number=INVALID returns 404', async () => {
-    const res = await request(app)
-      .get('/api/orders/status')
-      .query({ number: 'ORD-INVALID' });
+    const res = await request(app).get('/api/orders/status').query({ number: 'ORD-INVALID' });
     expect([404, 400]).toContain(res.status);
   });
 });

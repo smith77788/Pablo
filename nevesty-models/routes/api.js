@@ -7904,8 +7904,7 @@ router.post('/cabinet/orders/:id/repeat', requireClientAuth, async (req, res, ne
     const ALLOWED_TYPES = ['fashion_show', 'photo_shoot', 'event', 'commercial', 'runway', 'other'];
     const eventType = ALLOWED_TYPES.includes(src.event_type) ? src.event_type : 'other';
 
-    const shortId = Math.random().toString(36).slice(2, 8).toUpperCase();
-    const orderNumber = `NM-${shortId}`;
+    const orderNumber = generateOrderNumber();
 
     const result = await run(
       `INSERT INTO orders

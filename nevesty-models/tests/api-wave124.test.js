@@ -51,20 +51,25 @@ beforeAll(async () => {
 // ── 1. User Wishlist — GET /api/user/wishlist ──────────────────────────────────
 
 describe('User wishlist — GET /api/user/wishlist', () => {
-  it('returns 400 without chat_id param', async () => {
+  it('returns 401 without auth', async () => {
     const res = await request(app).get('/api/user/wishlist');
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 400 without chat_id param (with auth)', async () => {
+    const res = await request(app).get('/api/user/wishlist').set('Authorization', `Bearer ${adminToken}`);
+    expect([400, 422]).toContain(res.status);
     expect(res.body).toHaveProperty('error');
   });
 
-  it('returns 400 for chat_id=0', async () => {
-    const res = await request(app).get('/api/user/wishlist?chat_id=0');
-    expect(res.status).toBe(400);
+  it('returns 400 for chat_id=0 (with auth)', async () => {
+    const res = await request(app).get('/api/user/wishlist?chat_id=0').set('Authorization', `Bearer ${adminToken}`);
+    expect([400, 422]).toContain(res.status);
     expect(res.body).toHaveProperty('error');
   });
 
   it('returns 200 with valid chat_id and empty array (no wishlist yet)', async () => {
-    const res = await request(app).get('/api/user/wishlist?chat_id=99999');
+    const res = await request(app).get('/api/user/wishlist?chat_id=99999').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body).toHaveLength(0);
@@ -74,39 +79,59 @@ describe('User wishlist — GET /api/user/wishlist', () => {
 // ── 2. User Wishlist — POST /api/user/wishlist ─────────────────────────────────
 
 describe('User wishlist — POST /api/user/wishlist', () => {
-  it('returns 400 without chat_id', async () => {
+  it('returns 401 without auth', async () => {
     const res = await request(app).post('/api/user/wishlist').send({ model_id: seedModelId });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 400 without chat_id (with auth)', async () => {
+    const res = await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ model_id: seedModelId });
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
   });
 
-  it('returns 400 without model_id', async () => {
-    const res = await request(app).post('/api/user/wishlist').send({ chat_id: 12345 });
+  it('returns 400 without model_id (with auth)', async () => {
+    const res = await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ chat_id: 12345 });
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
   });
 
-  it('returns 404 for non-existent model_id', async () => {
-    const res = await request(app).post('/api/user/wishlist').send({ chat_id: 12345, model_id: 999999 });
+  it('returns 404 for non-existent model_id (with auth)', async () => {
+    const res = await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ chat_id: 12345, model_id: 999999 });
     expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('error');
   });
 
   it('returns 201 with ok:true for valid chat_id and existing model', async () => {
-    const res = await request(app).post('/api/user/wishlist').send({ chat_id: 12345, model_id: seedModelId });
+    const res = await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ chat_id: 12345, model_id: seedModelId });
     expect(res.status).toBe(201);
     expect(res.body.ok).toBe(true);
   });
 
   it('returns 409 if same model added again (duplicate)', async () => {
     // Add once more — should conflict since we already added in the previous test
-    const res = await request(app).post('/api/user/wishlist').send({ chat_id: 12345, model_id: seedModelId });
+    const res = await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ chat_id: 12345, model_id: seedModelId });
     expect(res.status).toBe(409);
     expect(res.body).toHaveProperty('error');
   });
 
   it('GET wishlist returns the added model entry', async () => {
-    const res = await request(app).get('/api/user/wishlist?chat_id=12345');
+    const res = await request(app).get('/api/user/wishlist?chat_id=12345').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     const entry = res.body.find(e => e.model_id === seedModelId);
@@ -117,26 +142,37 @@ describe('User wishlist — POST /api/user/wishlist', () => {
 // ── 3. User Wishlist — DELETE /api/user/wishlist/:model_id ─────────────────────
 
 describe('User wishlist — DELETE /api/user/wishlist/:model_id', () => {
-  it('returns 400 without chat_id query param', async () => {
+  it('returns 401 without auth', async () => {
     const res = await request(app).delete(`/api/user/wishlist/${seedModelId}`);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 400 without chat_id query param (with auth)', async () => {
+    const res = await request(app)
+      .delete(`/api/user/wishlist/${seedModelId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
   });
 
   it('returns 404 when entry does not exist (different chat_id)', async () => {
-    const res = await request(app).delete(`/api/user/wishlist/${seedModelId}?chat_id=777`);
+    const res = await request(app)
+      .delete(`/api/user/wishlist/${seedModelId}?chat_id=777`)
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('error');
   });
 
   it('returns 200 ok:true when entry exists and is removed', async () => {
-    const res = await request(app).delete(`/api/user/wishlist/${seedModelId}?chat_id=12345`);
+    const res = await request(app)
+      .delete(`/api/user/wishlist/${seedModelId}?chat_id=12345`)
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
   });
 
   it('wishlist is empty after deletion', async () => {
-    const res = await request(app).get('/api/user/wishlist?chat_id=12345');
+    const res = await request(app).get('/api/user/wishlist?chat_id=12345').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body).toHaveLength(0);

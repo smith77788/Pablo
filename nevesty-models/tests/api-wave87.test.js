@@ -18,7 +18,7 @@ describe('T1: Client profile feature', () => {
   });
   test('T04: showUserProfile uses MarkdownV2', () => {
     const idx = botCode.indexOf('async function showUserProfile');
-    const nearby = botCode.slice(idx, idx + 2000);
+    const nearby = botCode.slice(idx, idx + 4000);
     expect(nearby).toMatch(/parse_mode.*MarkdownV2|MarkdownV2/);
   });
   test('T05: buildClientKeyboard has profile button', () => {

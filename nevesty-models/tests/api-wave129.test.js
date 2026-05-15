@@ -202,39 +202,62 @@ describe('Broadcast — GET /api/admin/broadcasts', () => {
 // ── 5. Wishlists (user-facing) ────────────────────────────────────────────────
 
 describe('Wishlists — GET /api/user/wishlist', () => {
-  it('returns 400 without chat_id', async () => {
+  it('returns 401 without auth', async () => {
     const res = await request(app).get('/api/user/wishlist');
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
   });
 
-  it('returns 200 with valid chat_id', async () => {
-    const res = await request(app).get('/api/user/wishlist?chat_id=888001');
+  it('returns 400 without chat_id (with auth)', async () => {
+    const res = await request(app).get('/api/user/wishlist').set('Authorization', `Bearer ${adminToken}`);
+    expect([400, 422]).toContain(res.status);
+  });
+
+  it('returns 200 with valid chat_id (with auth)', async () => {
+    const res = await request(app)
+      .get('/api/user/wishlist?chat_id=888001')
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
-  it('response has models array', async () => {
-    const res = await request(app).get('/api/user/wishlist?chat_id=888001');
+  it('response has models array (with auth)', async () => {
+    const res = await request(app)
+      .get('/api/user/wishlist?chat_id=888001')
+      .set('Authorization', `Bearer ${adminToken}`);
     const hasModels = Array.isArray(res.body.models) || Array.isArray(res.body.wishlist) || Array.isArray(res.body);
     expect(hasModels).toBe(true);
   });
 });
 
 describe('Wishlists — POST /api/user/wishlist', () => {
-  it('returns 400 for missing fields', async () => {
+  it('returns 401 without auth', async () => {
     const res = await request(app).post('/api/user/wishlist').send({});
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 400 for missing fields (with auth)', async () => {
+    const res = await request(app).post('/api/user/wishlist').set('Authorization', `Bearer ${adminToken}`).send({});
     expect(res.status).toBe(400);
   });
 
-  it('returns 201 or 200 for valid add', async () => {
-    const res = await request(app).post('/api/user/wishlist').send({ chat_id: 888001, model_id: modelId });
+  it('returns 201 or 200 for valid add (with auth)', async () => {
+    const res = await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ chat_id: 888001, model_id: modelId });
     expect([200, 201]).toContain(res.status);
   });
 
-  it('returns 409 for duplicate add', async () => {
+  it('returns 409 for duplicate add (with auth)', async () => {
     // First add
-    await request(app).post('/api/user/wishlist').send({ chat_id: 888002, model_id: modelId });
+    await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ chat_id: 888002, model_id: modelId });
     // Second add (duplicate)
-    const res = await request(app).post('/api/user/wishlist').send({ chat_id: 888002, model_id: modelId });
+    const res = await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ chat_id: 888002, model_id: modelId });
     expect([409, 200]).toContain(res.status); // 409 conflict or 200 idempotent
   });
 });
