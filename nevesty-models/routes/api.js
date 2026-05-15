@@ -6155,6 +6155,18 @@ router.get('/admin/analytics/top-cities', auth, async (req, res, next) => {
 // ─── Client Cabinet ───────────────────────────────────────────────────────────
 // Rate-limit store: { ip: [timestamps] }
 const _clientRateLimits = new Map();
+// Очистка записей старше 1 часа каждые 2 часа (предотвращает unbounded growth)
+setInterval(
+  () => {
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const [ip, ts] of _clientRateLimits) {
+      const fresh = ts.filter(t => t > cutoff);
+      if (fresh.length === 0) _clientRateLimits.delete(ip);
+      else _clientRateLimits.set(ip, fresh);
+    }
+  },
+  2 * 60 * 60 * 1000
+).unref();
 
 function clientRateLimit(req, res, next) {
   const ip = req.ip || req.connection?.remoteAddress || 'unknown';
