@@ -6253,7 +6253,7 @@ function initBot(app) {
       return showClientOrder(chatId, id);
     }
 
-    // ── Pay order
+    // ── Pay order (client taps "💳 Оплатить" on confirmed order)
     if (data.startsWith('pay_order_')) {
       const orderId = parseInt(data.replace('pay_order_', ''));
       const ord = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(() => null);
@@ -6263,35 +6263,17 @@ function initBot(app) {
       if (ord.payment_status === 'paid') {
         return safeSend(chatId, '✅ Эта заявка уже оплачена\\.', { parse_mode: 'MarkdownV2' });
       }
-      // Request payment via API
       try {
-        const https = require('https');
-        const siteUrl = SITE_URL.replace(/\/$/, '');
-        const url = new URL(`${siteUrl}/api/orders/${orderId}/pay`);
-        const bodyStr = JSON.stringify({ phone: ord.client_phone });
-        const resp = await new Promise((resolve, reject) => {
-          const req = https.request(
-            {
-              hostname: url.hostname,
-              port: url.port || 443,
-              path: url.pathname,
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) },
-            },
-            res => {
-              const ch = [];
-              res.on('data', d => ch.push(d));
-              res.on('end', () => resolve({ status: res.statusCode, data: JSON.parse(Buffer.concat(ch).toString()) }));
-            }
-          );
-          req.on('error', reject);
-          req.write(bodyStr);
-          req.end();
-        });
-        if (resp.data.error) {
-          return safeSend(chatId, `❌ ${esc(resp.data.error)}`, { parse_mode: 'MarkdownV2' });
-        }
-        if (resp.data.payment_url) {
+        const { createPayment } = require('./services/payments');
+        const returnUrl = `${SITE_URL.replace(/\/$/, '')}/order-status.html?id=${ord.id}`;
+        const result = await createPayment(ord, returnUrl);
+        // Save payment ID to DB
+        await run('UPDATE orders SET payment_id=?, payment_status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [
+          result.paymentId,
+          'pending',
+          ord.id,
+        ]).catch(() => {});
+        if (result.confirmationUrl) {
           return safeSend(
             chatId,
             `💳 *Оплата заявки ${esc(ord.order_number)}*\n\nНажмите кнопку ниже для перехода к оплате:`,
@@ -6299,17 +6281,16 @@ function initBot(app) {
               parse_mode: 'MarkdownV2',
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '💳 Перейти к оплате', url: resp.data.payment_url }],
+                  [{ text: '💳 Перейти к оплате', url: result.confirmationUrl }],
                   [{ text: '← Назад к заявке', callback_data: `client_order_${orderId}` }],
                 ],
               },
             }
           );
         } else {
-          // Stripe: no hosted URL, show client_secret info
           return safeSend(
             chatId,
-            `💳 *Оплата инициирована*\n\nID платежа: \`${esc(resp.data.payment_id || '')}\`\n\nОбратитесь к менеджеру для завершения оплаты\\.`,
+            `💳 *Оплата инициирована*\n\nID платежа: \`${esc(result.paymentId || '')}\`\n\nОбратитесь к менеджеру для завершения оплаты\\.`,
             { parse_mode: 'MarkdownV2' }
           );
         }

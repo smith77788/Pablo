@@ -7458,6 +7458,101 @@ router.get('/admin/analytics/conversion', auth, async (req, res, next) => {
   }
 });
 
+// ─── Client Cabinet (БЛОК 4.3) ───────────────────────────────────────────────
+// Middleware: validate client JWT issued by /api/cabinet/login
+function requireClientAuth(req, res, next) {
+  const auth = (req.headers.authorization || '').trim();
+  if (!auth) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  try {
+    const decoded = jwt.verify(auth.replace(/^Bearer\s+/i, ''), process.env.JWT_SECRET);
+    if (decoded.type !== 'client') return res.status(403).json({ ok: false, error: 'Forbidden' });
+    req.clientPhone = decoded.phone;
+    req.clientChatId = decoded.chat_id || null;
+    next();
+  } catch {
+    return res.status(401).json({ ok: false, error: 'Token expired or invalid' });
+  }
+}
+
+// POST /api/cabinet/login — direct phone login (no OTP), returns 7-day JWT
+router.post('/cabinet/login', byPhoneLimiter, async (req, res, next) => {
+  try {
+    const raw = (req.body.phone || '').trim();
+    if (!raw) return res.status(400).json({ ok: false, error: 'Phone required' });
+
+    const digits = raw.replace(/\D/g, '');
+    let phone10 = null;
+    if (digits.length === 11 && (digits[0] === '7' || digits[0] === '8')) phone10 = digits.slice(1);
+    else if (digits.length === 10) phone10 = digits;
+    if (!phone10) return res.status(400).json({ ok: false, error: 'Некорректный формат номера' });
+
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const ph = patterns.map(() => '?').join(',');
+
+    const client = await get(
+      `SELECT client_chat_id, client_name, client_phone
+       FROM orders
+       WHERE REPLACE(REPLACE(REPLACE(REPLACE(client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+          OR REPLACE(REPLACE(REPLACE(REPLACE(client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+       LIMIT 1`,
+      [...patterns, ...patterns]
+    );
+
+    if (!client) {
+      return res.status(404).json({ ok: false, error: 'Клиент с таким телефоном не найден' });
+    }
+
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) return res.status(500).json({ ok: false, error: 'Server configuration error' });
+
+    const token = jwt.sign(
+      { type: 'client', phone: phone10, chat_id: client.client_chat_id || null, name: client.client_name || null },
+      jwtSecret,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ ok: true, token, client_name: client.client_name || null });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/cabinet/orders — order history for authenticated client
+router.get('/cabinet/orders', requireClientAuth, async (req, res, next) => {
+  try {
+    const phone10 = req.clientPhone; // already 10-digit from JWT
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const ph = patterns.map(() => '?').join(',');
+
+    const EVENT_RU = {
+      fashion_show: 'Показ мод',
+      photo_shoot: 'Фотосессия',
+      event: 'Мероприятие',
+      commercial: 'Коммерческая съёмка',
+      runway: 'Подиум',
+      other: 'Другое',
+    };
+
+    const orders = await query(
+      `SELECT o.id, o.order_number, o.created_at, o.event_type, o.event_date,
+              o.budget, o.status, o.model_id, o.comments, o.location, o.client_name,
+              m.name as model_name, m.photo_main as model_photo
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+          OR REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+       GROUP BY o.id
+       ORDER BY o.created_at DESC LIMIT 20`,
+      [...patterns, ...patterns]
+    );
+
+    const result = orders.map(o => ({ ...o, event_type_ru: EVENT_RU[o.event_type] || o.event_type }));
+    res.json({ ok: true, orders: result });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── CRM incoming webhooks (БЛОК 10.3) ───────────────────────────────────────
 const { registerWebhooks: _registerCrmWebhooks } = require('../services/crm');
 _registerCrmWebhooks(router);

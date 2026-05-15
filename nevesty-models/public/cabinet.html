@@ -1587,6 +1587,89 @@
           }
         }
 
+        // ── loginByPhone: POST /api/cabinet/login → 7-day JWT in localStorage ──
+        async function loginByPhone() {
+          const raw = (document.getElementById('phoneInput').value || '').trim();
+          if (!raw) {
+            showError('Введите номер телефона');
+            return;
+          }
+          const phone10 = normalizePhone(raw);
+          if (!phone10) {
+            showError('Некорректный формат номера. Укажите 10 цифр.');
+            return;
+          }
+          _phone = raw;
+          hideError();
+
+          const btn = document.getElementById('searchBtn');
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Ищем…';
+          }
+          showSkeleton();
+
+          try {
+            const r = await fetch('/api/cabinet/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phone: '7' + phone10 }),
+            });
+            const data = await r.json();
+
+            if (!r.ok || !data.ok) {
+              showLogin();
+              showError(data.error || 'Клиент с таким телефоном не найден');
+              return;
+            }
+
+            // Persist JWT for 7 days (survives page refresh)
+            localStorage.setItem('cabinet_token', data.token);
+            sessionStorage.setItem('cabinet_phone', raw);
+
+            // Load orders using the JWT
+            await loadOrdersAuth(phone10, data.token);
+          } catch {
+            showLogin();
+            showError('Ошибка соединения. Попробуйте позже.');
+          } finally {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = 'Найти заявки →';
+            }
+          }
+        }
+
+        // ── Load orders via JWT (GET /api/cabinet/orders) ─────────────
+        async function loadOrdersAuth(phone10, token) {
+          try {
+            const r = await fetch('/api/cabinet/orders', {
+              headers: { Authorization: 'Bearer ' + token },
+            });
+            const data = await r.json();
+
+            if (r.status === 401 || r.status === 403) {
+              // Token expired — clear and fall back to phone search
+              localStorage.removeItem('cabinet_token');
+              await loadOrders(phone10);
+              return;
+            }
+            if (!r.ok) {
+              showLogin();
+              showError(data.error || 'Ошибка сервера');
+              return;
+            }
+            _orders = data.orders || [];
+            sessionStorage.setItem('cabinet_phone', _phone);
+            showOrders();
+            renderOrders(_orders);
+            wsConnect(phone10);
+          } catch {
+            showLogin();
+            showError('Ошибка соединения. Попробуйте позже.');
+          }
+        }
+
         // ── Direct phone search (no OTP) ──────────────────────────────
         async function search() {
           const raw = (document.getElementById('phoneInput').value || '').trim();
@@ -1624,6 +1707,7 @@
           wsDisconnect();
           sessionStorage.removeItem('cabinet_phone');
           sessionStorage.removeItem('cabinet_token');
+          localStorage.removeItem('cabinet_token');
           _phone = '';
           _orders = [];
           document.getElementById('phoneInput').value = '';
@@ -1855,7 +1939,20 @@
           const savedPhone = sessionStorage.getItem('cabinet_phone');
           const initPhone = urlPhone || savedPhone;
 
-          if (initPhone) {
+          // Check for persisted JWT from loginByPhone (localStorage, 7-day)
+          const persistedToken = localStorage.getItem('cabinet_token');
+          if (persistedToken && initPhone && !urlPhone) {
+            // Try JWT-authenticated load first
+            const phone10 = normalizePhone(initPhone);
+            if (phone10) {
+              _phone = initPhone;
+              document.getElementById('phoneInput').value = initPhone;
+              showSkeleton();
+              loadOrdersAuth(phone10, persistedToken);
+            } else {
+              showLogin();
+            }
+          } else if (initPhone) {
             document.getElementById('phoneInput').value = initPhone;
             _phone = initPhone;
             search();
@@ -1905,6 +2002,8 @@
         // Expose public API
         window.Cabinet = {
           search,
+          loginByPhone,
+          loadOrdersAuth,
           logout,
           toggleCard,
           openReview,
