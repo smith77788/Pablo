@@ -232,7 +232,7 @@ app.get('/robots.txt', (req, res) => {
   const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
   res.type('text/plain');
   res.send(
-    `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin/\nDisallow: /uploads/\nDisallow: /data/\n\nSitemap: ${baseUrl}/sitemap.xml`
+    `User-agent: *\nAllow: /\nDisallow: /api/admin/\nDisallow: /api/admin/*\nDisallow: /admin/\nDisallow: /uploads/\nDisallow: /offline.html\nCrawl-delay: 2\n\nSitemap: ${baseUrl}/sitemap.xml\n\nUser-agent: Googlebot\nAllow: /\nDisallow: /admin/\nDisallow: /api/admin/\nDisallow: /api/admin/*\nDisallow: /offline.html\n\nUser-agent: Yandex\nAllow: /\nDisallow: /admin/\nDisallow: /api/admin/\nDisallow: /api/admin/*\nDisallow: /uploads/\nDisallow: /offline.html\nCrawl-delay: 3\nHost: nevesty-models.ru`
   );
 });
 
