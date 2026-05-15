@@ -268,6 +268,10 @@
     debounce(() => {
       filters.search = searchInput.value.trim();
       if (filters.search && window.NM?.analytics) NM.analytics.filterCatalog('search', filters.search);
+      // GA4: search event
+      if (filters.search && window.gtag) {
+        gtag('event', 'search', { search_term: filters.search });
+      }
       render();
     }, 250)
   );
@@ -546,7 +550,18 @@
       article.setAttribute('aria-label', `Подробнее о модели ${m.name}`);
       article.dataset.modelId = m.id;
       article.dataset.modelName = m.name;
-      article.addEventListener('click', () => openModelModal(m.id));
+      article.addEventListener('click', () => {
+        // GA4: select_item event
+        if (window.gtag) {
+          gtag('event', 'select_item', {
+            item_id: m.id,
+            item_name: m.name,
+            item_category: m.category,
+            item_list_name: 'catalog',
+          });
+        }
+        openModelModal(m.id);
+      });
       article.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -587,7 +602,18 @@
             <div class="model-card-bottom">
               ${experienceBadge(m)}
               <span class="model-status-badge ${statusClass}">${statusText}</span>
-              ${m.order_count > 0 ? `<span class="order-badge">📋 ${m.order_count} заказ${m.order_count === 1 ? '' : m.order_count < 5 ? 'а' : 'ов'}</span>` : ''}
+              ${
+                m.order_count > 0
+                  ? `<span class="order-badge">📋 ${m.order_count} ${(n => {
+                      const r = n % 100;
+                      const r10 = n % 10;
+                      if (r >= 11 && r <= 14) return 'заказов';
+                      if (r10 === 1) return 'заказ';
+                      if (r10 >= 2 && r10 <= 4) return 'заказа';
+                      return 'заказов';
+                    })(m.order_count)}</span>`
+                  : ''
+              }
               ${(m.view_count || 0) > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.6" title="Просмотров">👁 ${(m.view_count || 0).toLocaleString('ru')}</span>` : ''}
             </div>
             <a href="/model.html?id=${m.id}"

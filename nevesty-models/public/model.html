@@ -849,6 +849,11 @@
                   onclick="
                     if (window.NM?.analytics && window._currentModel)
                       NM.analytics.startBooking(window._currentModel.id, window._currentModel.category || '');
+                    if (window.gtag && window._currentModel)
+                      gtag('event', 'begin_checkout', {
+                        item_id: window._currentModel.id,
+                        item_name: window._currentModel.name,
+                      });
                   "
                 >
                   📋 Забронировать
@@ -867,6 +872,11 @@
                   onclick="
                     if (window.NM?.analytics && window._currentModel)
                       NM.analytics.startBooking(window._currentModel.id, window._currentModel.category || '');
+                    if (window.gtag && window._currentModel)
+                      gtag('event', 'begin_checkout', {
+                        item_id: window._currentModel.id,
+                        item_name: window._currentModel.name,
+                      });
                   "
                 >
                   <i class="fas fa-calendar-check" style="margin-right: 6px"></i>
