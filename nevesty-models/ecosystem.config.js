@@ -10,13 +10,15 @@ module.exports = {
       max_memory_restart: '512M',
       restart_delay: 3000,
       max_restarts: 20,
+      min_uptime: '10s',
+      kill_timeout: 10000,
       env: {
         NODE_ENV: 'production',
       },
       merge_logs: true,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-      out_file: '/var/log/nevesty/out.log',
-      error_file: '/var/log/nevesty/error.log',
+      out_file: 'logs/app-out.log',
+      error_file: 'logs/app-error.log',
     },
     {
       name: 'nevesty-scheduler',

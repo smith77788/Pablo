@@ -522,7 +522,11 @@ async function buildHealthResponse() {
     },
     components: {
       database: dbStatus,
-      bot: botInstance ? 'ok' : 'not_initialized',
+      bot: botInstance
+        ? 'ok'
+        : (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'your_bot_token_from_botfather' && process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here')
+          ? 'configured_not_started'
+          : 'disabled',
       factory: factoryStatus,
       factory_last_cycle: factoryLastCycle,
       cache: cacheStats,
@@ -536,7 +540,11 @@ async function buildHealthResponse() {
       orders_by_status: ordersByStatus,
     },
     // Legacy scalar fields kept for compatibility
-    bot: botInstance ? 'connected' : 'not_initialized',
+    bot: botInstance
+      ? 'connected'
+      : (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'your_bot_token_from_botfather' && process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here')
+        ? 'configured'
+        : 'disabled',
     memory_mb: memUsedMb,
     ts: new Date().toISOString(),
     _ordersByStatus: ordersByStatus,
@@ -836,8 +844,20 @@ async function start() {
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('uncaughtException', err => { console.error('[UNCAUGHT]', err); });
-  process.on('unhandledRejection', (reason) => { console.error('[UNHANDLED REJECTION]', reason); });
+  process.on('uncaughtException', (err) => {
+    console.error('[CRITICAL] Uncaught exception:', err);
+    // Attempt to notify admin via Telegram before crashing
+    try {
+      require('child_process').execSync(
+        `node ${require('path').join(__dirname, 'tools/notify.js')} --from "Server" "🚨 КРИТИЧНА ПОМИЛКА: ${(err.message || String(err)).replace(/['"]/g, '').substring(0, 100)}"`,
+        { timeout: 5000 }
+      );
+    } catch (_) { /* best-effort, never block the crash */ }
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[ERROR] Unhandled rejection:', reason);
+  });
 }
 
 start().catch(err => { console.error('Startup error:', err); process.exit(1); });
