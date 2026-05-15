@@ -29,7 +29,7 @@ const ACTIVE_BOOKING_STATES = new Set([
   'bk_s2_budget', 'bk_s2_comments', 'bk_s3_name', 'bk_s3_phone',
   'bk_s3_email', 'bk_s3_tg', 'bk_s4',
   'leave_review_text', 'bk_quick_name', 'bk_quick_phone',
-  'profile_edit_name', 'profile_edit_phone',
+  'profile_edit_name', 'profile_edit_phone', 'profile_edit_email',
   'ai_match_desc',
 ]);
 
@@ -615,13 +615,24 @@ async function showModel(chatId, modelId) {
       : [];
     const profileUrl = siteUrl(`/model/${m.id}`, { utm_campaign: 'model_card', utm_content: String(m.id) });
     const shareUrl  = `https://t.me/share/url?url=${encodeURIComponent(siteUrl('/model/' + m.id, { utm_campaign: 'share' }))}&text=${encodeURIComponent('Посмотри эту модель: ' + m.name)}`;
+
+    // Check wishlist status and wishlist_enabled setting in parallel
+    const [wishlistEnabled, inWishlist] = await Promise.all([
+      getSetting('wishlist_enabled').catch(() => '1'),
+      isInWishlist(chatId, m.id).catch(() => false),
+    ]);
+    const favBtn = wishlistEnabled !== '0'
+      ? (inWishlist
+          ? [{ text: '💔 Убрать из избранного', callback_data: `fav_remove_${m.id}` }]
+          : [{ text: '❤️ В избранное',           callback_data: `fav_add_${m.id}`    }])
+      : [];
+
     const keyboard = {
       inline_keyboard: [
         m.available ? [{ text: '📝 Заказать эту модель', callback_data: `bk_model_${m.id}` }] : [],
         contactBtn,
         [{ text: m.available ? '📅 Уточнить доступность' : '📞 Узнать о доступности', callback_data: `ask_availability_${m.id}` }],
-        [{ text: '❤️ В избранное', callback_data: `fav_add_${m.id}` },
-         { text: '💔 Убрать',      callback_data: `fav_remove_${m.id}` }],
+        ...(favBtn.length ? [favBtn] : []),
         [{ text: '⚖️ Сравнить', callback_data: `compare_add_${m.id}` }],
         [{ text: '🌐 Профиль', url: profileUrl },
          { text: '📤 Поделиться', url: shareUrl }],
@@ -4854,6 +4865,12 @@ function initBot(app) {
         reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'profile' }]] }
       });
     }
+    if (data === 'profile_edit_email') {
+      await setSession(chatId, 'profile_edit_email', {});
+      return safeSend(chatId, '📧 Введите новый email:', {
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'profile' }]] }
+      });
+    }
 
     // ── Настройки уведомлений клиента
     if (data === 'client_notif_settings') return showClientNotificationSettings(chatId);
@@ -5324,10 +5341,11 @@ function initBot(app) {
         if (ord?.client_name) clientName = ord.client_name;
         if (ord?.model_id) modelId = ord.model_id;
       } catch {}
-      await run(
+      const insertResult = await run(
         'INSERT OR IGNORE INTO reviews (chat_id, order_id, client_name, rating, text, model_id, approved) VALUES (?,?,?,?,?,?,0)',
         [String(chatId), orderId || null, clientName, rating, reviewText, modelId]
-      ).catch(e => console.error('[Bot] insert review:', e.message));
+      ).catch(e => { console.error('[Bot] insert review:', e.message); return null; });
+      const newReviewId = insertResult?.id || null;
       await clearSession(chatId);
 
       // Bonus points for good review (rating 4-5)
@@ -5341,13 +5359,19 @@ function initBot(app) {
 
       const adminIds2 = await getAdminChatIds();
       const reviewPreview = reviewText
-        ? `\n\n${esc(reviewText.substring(0, 200))}`
+        ? `\n\n_${esc(reviewText.substring(0, 200))}_`
         : ' _(текст не указан)_';
+      const adminReviewBtns = newReviewId
+        ? [
+            [{ text: '✅ Одобрить', callback_data: `rev_approve_${newReviewId}` },
+             { text: '❌ Отклонить', callback_data: `rev_reject_${newReviewId}` }],
+          ]
+        : [[{ text: '✅ Модерация отзывов', callback_data: 'adm_reviews' }]];
       await Promise.allSettled(adminIds2.map(id => safeSend(id,
-        `⭐ Новый отзыв от *${esc(clientName)}*\nОценка: ${'⭐'.repeat(rating)}${reviewPreview}`,
+        `📝 Новый отзыв от *${esc(clientName)}* — ★${rating}${reviewPreview}`,
         {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '✅ Модерация отзывов', callback_data: 'adm_reviews' }]] }
+          reply_markup: { inline_keyboard: adminReviewBtns }
         }
       )));
       return safeSend(chatId,
@@ -5397,6 +5421,23 @@ function initBot(app) {
       await run('UPDATE orders SET client_phone=? WHERE client_chat_id=?', [text, String(chatId)]).catch(()=>{});
       await clearSession(chatId);
       return safeSend(chatId, `✅ Телефон обновлён: *${esc(text)}*`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '👤 Мой профиль', callback_data: 'profile' }]] }
+      });
+    }
+
+    // ── Edit profile email
+    if (state === 'profile_edit_email') {
+      if (!text || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim())) {
+        return safeSend(chatId, '❌ Введите корректный email (например: name@example.com):');
+      }
+      const newEmail = text.trim().slice(0, 200);
+      await run(
+        `UPDATE orders SET client_email=? WHERE client_chat_id=? AND id=(SELECT MAX(id) FROM orders WHERE client_chat_id=?)`,
+        [newEmail, String(chatId), String(chatId)]
+      ).catch(() => {});
+      await clearSession(chatId);
+      return safeSend(chatId, `✅ Email обновлён: *${esc(newEmail)}*`, {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [[{ text: '👤 Мой профиль', callback_data: 'profile' }]] }
       });
@@ -5776,10 +5817,12 @@ async function showUserProfile(chatId, firstName) {
         [{ text: '📋 Все заявки',        callback_data: 'my_orders'             }],
         [{ text: '🏆 Достижения',        callback_data: 'my_achievements'       },
          { text: '💫 Баллы',             callback_data: 'loyalty'               }],
-        [{ text: '✏️ Изменить контакты', callback_data: 'profile_edit_contacts' }],
-        [{ text: '🔔 Уведомления',        callback_data: 'client_notif_settings' }],
-        [{ text: '📝 Новая заявка',       callback_data: 'bk_start'             }],
-        [{ text: '🏠 Главное меню',       callback_data: 'main_menu'            }],
+        [{ text: '✏️ Изменить имя',     callback_data: 'profile_edit_name'     },
+         { text: '✏️ Изменить телефон', callback_data: 'profile_edit_phone'    }],
+        [{ text: '✏️ Изменить email',   callback_data: 'profile_edit_email'    }],
+        [{ text: '🔔 Уведомления',       callback_data: 'client_notif_settings' }],
+        [{ text: '📝 Новая заявка',      callback_data: 'bk_start'             }],
+        [{ text: '🏠 Главное меню',      callback_data: 'main_menu'            }],
       ]}
     });
   } catch (e) { console.error('[Bot] showUserProfile:', e.message); }
@@ -6568,30 +6611,40 @@ async function showPublicReviews(chatId, page) {
     }
 
     const reviews = await query(
-      'SELECT * FROM reviews WHERE approved=1 ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      `SELECT r.*, m.name as model_name
+       FROM reviews r
+       LEFT JOIN models m ON m.id = r.model_id
+       WHERE r.approved=1 ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
       [perPage, page * perPage]
     ).catch(()=>[]);
 
-    let text = `⭐ *Отзывы клиентов Nevesty Models*\n\n`;
+    const totalPages = Math.ceil(total / perPage);
+    let text = `⭐ *Отзывы клиентов Nevesty Models*\n`;
+    text += `_Страница ${page + 1} из ${totalPages}_\n\n`;
     reviews.forEach((r, i) => {
       const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 5)));
       const date  = r.created_at ? new Date(r.created_at).toLocaleDateString('ru') : '';
+      const snippet = r.text ? (r.text.length > 200 ? r.text.slice(0, 200) + '…' : r.text) : '';
       text += `${page * perPage + i + 1}\\. *${esc(r.client_name)}* ${stars}`;
+      if (r.model_name) text += ` — _${esc(r.model_name)}_`;
       if (date) text += ` \\(${esc(date)}\\)`;
-      text += `\n_${esc(r.text)}_`;
+      text += `\n_${esc(snippet)}_`;
       if (r.admin_reply) text += `\n💬 _${esc(r.admin_reply)}_`;
       text += '\n\n';
     });
 
     const nav = [];
-    if (page > 0) nav.push({ text: '◀️', callback_data: `show_reviews_${page-1}` });
-    if ((page+1)*perPage < total) nav.push({ text: '▶️', callback_data: `show_reviews_${page+1}` });
+    if (page > 0) nav.push({ text: '← Пред', callback_data: `show_reviews_${page-1}` });
+    nav.push({ text: `${page + 1}/${totalPages}`, callback_data: 'noop' });
+    if ((page+1)*perPage < total) nav.push({ text: 'След →', callback_data: `show_reviews_${page+1}` });
+
+    const reviewsEnabled = await getSetting('reviews_enabled').catch(() => '1');
 
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
-        ...(nav.length ? [nav] : []),
-        [{ text: '⭐ Оставить отзыв', callback_data: 'leave_review_0' }],
+        nav,
+        ...(reviewsEnabled !== '0' ? [[{ text: '✍️ Оставить отзыв', callback_data: 'leave_review_0' }]] : []),
         [{ text: '🏠 Главное меню',    callback_data: 'main_menu'      }],
       ]}
     });
@@ -6639,7 +6692,7 @@ async function startLeaveReview(chatId, orderId) {
 
   const ratingRow = [1,2,3,4,5].map(n => ({
     text: '⭐'.repeat(n),
-    callback_data: `review_rating_${orderId}_${n}`
+    callback_data: `rev_rate_${n}_${orderId}`
   }));
 
   return safeSend(chatId, text, {
@@ -6786,8 +6839,8 @@ async function showFavorites(chatId, page = 0) {
 async function addFavorite(chatId, modelId) {
   try {
     const m = await get('SELECT id, name FROM models WHERE id=?', [modelId]);
-    if (!m) return safeSend(chatId, '❌ Модель не найдена\\.');
-    await run('INSERT OR IGNORE INTO favorites (chat_id, model_id) VALUES (?,?)', [String(chatId), modelId]);
+    if (!m) return safeSend(chatId, '❌ Модель не найдена\\.', { parse_mode: 'MarkdownV2' });
+    await addToWishlist(chatId, modelId);
     return safeSend(chatId,
       `❤️ *${esc(m.name)}* добавлена в избранное\\!`, {
         parse_mode: 'MarkdownV2',
@@ -6803,7 +6856,7 @@ async function addFavorite(chatId, modelId) {
 async function removeFavorite(chatId, modelId) {
   try {
     const m = await get('SELECT name FROM models WHERE id=?', [modelId]).catch(() => null);
-    await run('DELETE FROM favorites WHERE chat_id=? AND model_id=?', [String(chatId), modelId]);
+    await removeFromWishlist(chatId, modelId);
     return safeSend(chatId,
       `💔 *${esc(m?.name || 'Модель')}* убрана из избранного\\.`, {
         parse_mode: 'MarkdownV2',
@@ -6816,7 +6869,45 @@ async function removeFavorite(chatId, modelId) {
   } catch (e) { console.error('[Bot] removeFavorite:', e.message); }
 }
 
-// ─── Wishlist (wishlists table — mirrors favorites) ───────────────────────────
+// ─── Wishlist helpers (wishlists table) ──────────────────────────────────────
+
+async function getWishlist(chatId) {
+  return query(
+    `SELECT w.model_id, m.id, m.name, m.category, m.city, m.featured, m.available, m.height
+     FROM wishlists w
+     JOIN models m ON m.id = w.model_id
+     WHERE w.chat_id = ? AND m.available = 1 AND (m.archived IS NULL OR m.archived = 0)
+     ORDER BY w.created_at DESC`,
+    [String(chatId)]
+  ).catch(() => []);
+}
+
+async function addToWishlist(chatId, modelId) {
+  await run(
+    'INSERT OR IGNORE INTO wishlists (chat_id, model_id) VALUES (?,?)',
+    [String(chatId), modelId]
+  );
+  // Also sync to favorites table for compatibility
+  await run(
+    'INSERT OR IGNORE INTO favorites (chat_id, model_id) VALUES (?,?)',
+    [String(chatId), modelId]
+  ).catch(() => {});
+}
+
+async function removeFromWishlist(chatId, modelId) {
+  await run('DELETE FROM wishlists WHERE chat_id=? AND model_id=?', [String(chatId), modelId]);
+  await run('DELETE FROM favorites WHERE chat_id=? AND model_id=?', [String(chatId), modelId]).catch(() => {});
+}
+
+async function isInWishlist(chatId, modelId) {
+  const row = await get(
+    'SELECT id FROM wishlists WHERE chat_id=? AND model_id=?',
+    [String(chatId), modelId]
+  ).catch(() => null);
+  return !!row;
+}
+
+// ─── Wishlist (wishlists table) ───────────────────────────────────────────────
 
 async function showWishlist(chatId, page = 0) {
   try {
@@ -6835,14 +6926,20 @@ async function showWishlist(chatId, page = 0) {
 
     if (items.length === 0 && page === 0) {
       return safeSend(chatId,
-        '❤️ *Список избранного пуст*\n\nДобавляйте понравившихся моделей кнопкой ❤️ в их профиле\\.',
-        { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] } }
+        '❤️ *Ваш список избранного пуст*\n\nОткройте карточку модели и нажмите ❤️, чтобы добавить её в избранное\\.',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '💃 Перейти в каталог', callback_data: 'cat_cat__0' }],
+            [{ text: '🏠 Главное меню',      callback_data: 'main_menu'  }],
+          ]}
+        }
       );
     }
 
     const totalRow = await get('SELECT COUNT(*) as c FROM wishlists WHERE chat_id=?', [String(chatId)]).catch(() => ({ c: items.length }));
 
-    let text = `❤️ *Обрані моделі* \\(${totalRow.c}\\)\n\n`;
+    let text = `❤️ *Избранные модели* \\(${totalRow.c}\\)\n\n`;
     const keyboard = [];
     for (const m of items) {
       const star = m.featured ? '⭐ ' : '';
@@ -6850,16 +6947,22 @@ async function showWishlist(chatId, page = 0) {
       const city = m.city ? ` · ${esc(m.city)}` : '';
       text += `${star}*${esc(m.name)}* · ${esc(cat)}${city}\n`;
       keyboard.push([
-        { text: '👁 Переглянути', callback_data: `fav_view_${m.id}` },
-        { text: '❌ Видалити',    callback_data: `fav_remove_${m.id}` },
+        { text: `👁 ${m.name}`,  callback_data: `fav_view_${m.id}` },
+        { text: '❌ Убрать',     callback_data: `fav_remove_${m.id}` },
       ]);
     }
 
     const navRow = [];
-    if (page > 0) navRow.push({ text: '◀️ Назад',  callback_data: `fav_list_${page - 1}` });
-    if (hasMore)  navRow.push({ text: 'Далі ▶️',   callback_data: `fav_list_${page + 1}` });
+    if (page > 0) navRow.push({ text: '◀️ Назад', callback_data: `fav_list_${page - 1}` });
+    if (hasMore)  navRow.push({ text: 'Вперёд ▶️', callback_data: `fav_list_${page + 1}` });
     if (navRow.length) keyboard.push(navRow);
-    keyboard.push([{ text: '💃 Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Головна', callback_data: 'main_menu' }]);
+    keyboard.push([
+      { text: '🗑 Очистить список', callback_data: 'fav_clear' },
+    ]);
+    keyboard.push([
+      { text: '💃 Каталог', callback_data: 'cat_cat__0' },
+      { text: '🏠 Меню',   callback_data: 'main_menu'  },
+    ]);
 
     return safeSend(chatId, text,
       { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }

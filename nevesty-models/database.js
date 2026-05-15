@@ -407,6 +407,20 @@ async function initDatabase() {
   )`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_sched_bcast_status ON scheduled_broadcasts(status, scheduled_at)`).catch(() => {});
 
+  // Schema v16 — TOTP 2FA for admins
+  await run(`ALTER TABLE admins ADD COLUMN totp_secret TEXT DEFAULT NULL`).catch(() => {});
+  await run(`ALTER TABLE admins ADD COLUMN totp_enabled INTEGER DEFAULT 0`).catch(() => {});
+  await run(`CREATE TABLE IF NOT EXISTS totp_temp_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    admin_id INTEGER NOT NULL,
+    expires_at DATETIME NOT NULL,
+    attempts INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_totp_temp_hash ON totp_temp_tokens(token_hash)`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (16, 'TOTP 2FA for admins — totp_secret, totp_enabled, totp_temp_tokens')`).catch(() => {});
+
   // Migrations — add columns that may not exist in older DBs
   await run(`ALTER TABLE models ADD COLUMN city TEXT`).catch(() => {});
   await run(`ALTER TABLE models ADD COLUMN featured INTEGER DEFAULT 0`).catch(() => {});
@@ -477,6 +491,7 @@ async function initDatabase() {
     ['idx_models_status',           'CREATE INDEX IF NOT EXISTS idx_models_status ON models(available)'],
     ['idx_reviews_approved',        'CREATE INDEX IF NOT EXISTS idx_reviews_approved ON reviews(approved)'],
     ['idx_reviews_model_id',        'CREATE INDEX IF NOT EXISTS idx_reviews_model_id ON reviews(model_id)'],
+    ['idx_reviews_client_chat_id',  'CREATE INDEX IF NOT EXISTS idx_reviews_client_chat_id ON reviews(chat_id)'],
     ['idx_models_city',             'CREATE INDEX IF NOT EXISTS idx_models_city ON models(city)'],
   ];
   for (const [name, sql] of perfIndexes) {
