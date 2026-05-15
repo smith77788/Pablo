@@ -1941,10 +1941,9 @@ function initBot(app) {
   // ── /cancel ────────────────────────────────────────────────────────────────
   bot.onText(/\/cancel/, async (msg) => {
     const chatId = msg.chat.id;
-    const s = await getSession(chatId);
-    if (!s || s.state === 'idle') return safeSend(chatId, 'ℹ️ Нет активного действия.');
     await clearSession(chatId);
-    return safeSend(chatId, '❌ Действие отменено.', {
+    return safeSend(chatId, '❌ Действие отменено\\.', {
+      parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
     });
   });
@@ -1955,18 +1954,12 @@ function initBot(app) {
   });
 
   // ── /help ──────────────────────────────────────────────────────────────────
-  bot.onText(/\/help/, (msg) => {
+  bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id;
-    if (isAdmin(chatId)) {
-      return safeSend(chatId,
-        `📖 *Справка администратора*\n\n/start — главное меню\n/cancel — сбросить действие\n/msg НМ\\-XXXX текст — написать клиенту\n\nВсе функции управления — через кнопки меню\\.`,
-        { parse_mode: 'MarkdownV2' }
-      );
-    }
-    return safeSend(chatId,
-      `📖 *Справка Nevesty Models*\n\n/start — главное меню\n/status НОМЕР — статус заявки\n/cancel — отменить действие\n\nЕсли есть вопросы — напишите нам, менеджер ответит\\!`,
-      { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text:'🏠 Меню', callback_data:'main_menu' }]] } }
-    );
+    const text = isAdmin(chatId)
+      ? `📖 *Команды администратора:*\n\n/start — главное меню\n/cancel — отменить действие\n/help — помощь\n\nДля управления ботом используйте меню 👆`
+      : `📖 *Помощь:*\n\n/start — главное меню\n/cancel — отменить действие\n/help — эта справка\n\nПо вопросам — нажмите «💬 Менеджер» в меню`;
+    return safeSend(chatId, text, { parse_mode: 'MarkdownV2' });
   });
 
   // ── /faq ───────────────────────────────────────────────────────────────────
@@ -2815,7 +2808,7 @@ function initBot(app) {
       }
       // Кнопки администратора
       if (isAdmin(chatId)) {
-        if (text === '📋 Заявки')          return showAdminOrders(chatId, 0);
+        if (text === '📋 Заявки')          return showAdminOrders(chatId, '', 0);
         if (text === '💃 Модели')          return showAdminModels(chatId, 0);
         if (text === '📊 Статистика')      return showAdminStats(chatId);
         if (text === '🤖 Организм')        return showOrganismStatus(chatId);
@@ -2875,9 +2868,20 @@ function initBot(app) {
         });
       }
 
-      // ── Broadcast
+      // ── Broadcast text
       if (state === 'adm_broadcast_msg') {
         return sendBroadcast(chatId, text);
+      }
+
+      // ── Broadcast photo caption
+      if (state === 'adm_broadcast_caption') {
+        if (!d.broadcast_photo_id) return safeSend(chatId, '❌ Фото не найдено. Начните рассылку заново.');
+        return sendBroadcastWithPhoto(chatId, d.broadcast_photo_id, text);
+      }
+
+      // ── Admin search order input
+      if (state === 'adm_search_order_input') {
+        return searchAdminOrders(chatId, text);
       }
     }
 

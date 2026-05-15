@@ -125,14 +125,25 @@
             <div class="catalog-count" id="catalogCount">Загрузка...</div>
             <select id="sortSelect" class="filter-search" style="width:auto;padding:8px 14px;font-size:0.8rem;cursor:pointer">
               <option value="default">По умолчанию</option>
+              <option value="featured">По рейтингу</option>
+              <option value="name_asc">По алфавиту</option>
+              <option value="newest">Новинки</option>
               <option value="available">Сначала свободные</option>
               <option value="height_desc">По росту ↓</option>
               <option value="height_asc">По росту ↑</option>
-              <option value="name_asc">По имени А-Я</option>
               <option value="age_asc">По возрасту (моложе)</option>
             </select>
           </div>
-          <div class="catalog-grid" id="catalogGrid">
+          <!-- Skeleton loader -->
+          <div class="catalog-grid" id="catalogSkeleton" aria-hidden="true">
+            <div class="model-card-skeleton"></div>
+            <div class="model-card-skeleton"></div>
+            <div class="model-card-skeleton"></div>
+            <div class="model-card-skeleton"></div>
+            <div class="model-card-skeleton"></div>
+            <div class="model-card-skeleton"></div>
+          </div>
+          <div class="catalog-grid" id="catalogGrid" style="display:none">
             <!-- injected -->
           </div>
         </div>

@@ -232,6 +232,7 @@ async function initDatabase() {
   await run(`ALTER TABLE models ADD COLUMN featured INTEGER DEFAULT 0`).catch(() => {});
   await run(`ALTER TABLE models ADD COLUMN phone TEXT`).catch(() => {});
   await run(`ALTER TABLE models ADD COLUMN order_count INTEGER DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE models ADD COLUMN view_count INTEGER DEFAULT 0`).catch(() => {});
 
   // Indexes for frequent queries
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);

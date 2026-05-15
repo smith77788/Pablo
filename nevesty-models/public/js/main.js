@@ -375,12 +375,17 @@ if (featuredGrid) {
 
 /* ─── Reviews section ──────────────────────────────── */
 const reviewsContainer = document.getElementById('reviews-container');
+const reviewsSection = document.getElementById('reviews');
 if (reviewsContainer) {
-  apiFetch('/reviews?approved=1&limit=6')
+  apiFetch('/reviews?limit=6')
     .then(data => {
       // API may return array directly or {reviews:[...]} object
       const reviews = Array.isArray(data) ? data : (data && Array.isArray(data.reviews) ? data.reviews : []);
-      if (!reviews.length) return;
+      if (!reviews.length) {
+        // Hide the whole section if no approved reviews
+        if (reviewsSection) reviewsSection.style.display = 'none';
+        return;
+      }
       reviewsContainer.innerHTML = reviews.slice(0, 6).map((r, i) => {
         const name = r.client_name || r.author_name || 'Клиент';
         const initials = name
@@ -389,22 +394,32 @@ if (reviewsContainer) {
           .slice(0, 2)
           .join('')
           .toUpperCase() || 'К';
-        const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 5)));
+        const rating = Math.max(1, Math.min(5, r.rating || 5));
+        const starsHtml = Array.from({ length: 5 }, (_, i) =>
+          `<span style="color:${i < rating ? '#f5c542' : 'rgba(255,255,255,0.15)'}">★</span>`
+        ).join('');
+        const dateStr = r.created_at
+          ? new Date(r.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+          : '';
         return `
           <div class="testimonial-card" style="animation-delay:${i * 0.07}s">
-            <div class="testimonial-stars">${stars}</div>
+            <div class="testimonial-stars">${starsHtml}</div>
             <p class="testimonial-text">${r.text ? `«${r.text}»` : ''}</p>
             <div class="testimonial-author">
               <div class="testimonial-avatar">${initials}</div>
               <div>
                 <strong>${name}</strong>
                 ${r.model_name ? `<span>о модели ${r.model_name}</span>` : ''}
+                ${dateStr ? `<span style="display:block;font-size:0.72rem;color:var(--text-dim);margin-top:2px">${dateStr}</span>` : ''}
               </div>
             </div>
           </div>`;
       }).join('');
     })
-    .catch(() => { /* keep static content if API unavailable */ });
+    .catch(() => {
+      // Hide section on API error too
+      if (reviewsSection) reviewsSection.style.display = 'none';
+    });
 }
 
 /* ─── Contact section dynamic data ─────────────────── */

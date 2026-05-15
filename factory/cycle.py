@@ -1,5 +1,6 @@
 """🔁 AI Office Cycle — CEO диспетчеризует задачи по департаментам."""
 from __future__ import annotations
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from factory import db
 from factory.agents.strategic_core import StrategicCore
 from factory.agents.analytics_engine import AnalyticsEngine
 from factory.agents.experiment_system import ExperimentSystem
+from factory.agents.base import FactoryAgent
 from factory.notifications import notify
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,12 @@ def _load_dept(name: str):
         elif name == "customer_success":
             from factory.agents.customer_success_dept import CustomerSuccessDepartment
             return CustomerSuccessDepartment()
+        elif name == "finance":
+            from factory.agents.finance_dept import FinanceDepartment
+            return FinanceDepartment()
+        elif name == "research":
+            from factory.agents.research_dept import ResearchDepartment
+            return ResearchDepartment()
     except Exception as e:
         logger.warning("Dept %s unavailable: %s", name, e)
     return None
