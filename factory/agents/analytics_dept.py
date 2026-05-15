@@ -162,7 +162,7 @@ class AnalyticsDepartment:
 
     def run_full_analysis(self, metrics: dict, experiments: list) -> dict:
         """Запускает все роли и возвращает сводный отчёт."""
-        results = {}
+        results: dict = {}
 
         trends = self.analyst.analyze_trends(metrics)
         results["trends"] = trends
@@ -187,15 +187,19 @@ class AnalyticsDepartment:
                      eval_result.get("reasoning", "")[:300], exp["id"]),
                 )
                 logger.info("[Analytics Dept] Experiment %d → %s", exp["id"], result_val)
-        results["experiment_evaluations"] = exp_evaluations
+        results["experiment_evaluations"] = exp_evaluations  # type: ignore[assignment]
 
         targets = {"conversion_target": 5.0, "orders_target": 100}
         results["kpi_report"] = self.kpi.generate_kpi_report(metrics, targets)
 
         health = results["kpi_report"].get("overall_health", "yellow")
-        score = {"green": 80, "yellow": 50, "red": 25}.get(health, 50)
-        results["health_score"] = score
-        results["recommended_focus"] = trends.get("recommendations", ["conversion"])[0] if trends.get("recommendations") else "conversion"
+        score: int = {"green": 80, "yellow": 50, "red": 25}.get(health, 50)
+        results["health_score"] = score  # type: ignore[assignment]
+        results["recommended_focus"] = (  # type: ignore[assignment]
+            trends.get("recommendations", ["conversion"])[0]
+            if trends.get("recommendations")
+            else "conversion"
+        )
 
         return results
 

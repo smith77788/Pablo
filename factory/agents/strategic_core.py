@@ -37,7 +37,7 @@ class StrategicCore(FactoryAgent):
 
     MAX_ACTIVE_PRODUCTS = 5
 
-    def decide(self, analytics_insights: dict, all_metrics: dict) -> list[dict]:
+    def decide(self, analytics_insights: dict, all_metrics: dict) -> tuple[list[dict], str]:
         """Generate strategic decisions based on analytics."""
         active_products = db.get_active_products()
         running_experiments = db.get_running_experiments()
@@ -74,13 +74,12 @@ class StrategicCore(FactoryAgent):
             max_tokens=1500,
         )
 
-        if not isinstance(decisions_raw, list):
-            decisions_raw = []
+        decisions_list: list = decisions_raw if isinstance(decisions_raw, list) else []
 
         decisions = []
         cycle_id = datetime.now(timezone.utc).isoformat()
 
-        for d in decisions_raw[:5]:
+        for d in decisions_list[:5]:
             if not isinstance(d, dict) or "type" not in d:
                 continue
             if d["type"] not in DECISION_TYPES:
@@ -148,7 +147,7 @@ class StrategicCore(FactoryAgent):
             }
 
         cycle_id = datetime.now(timezone.utc).isoformat()
-        db.save_ceo_decision(
+        db.save_ceo_decision(  # type: ignore[call-arg]
             cycle_id=cycle_id,
             decision_text=briefing.get("summary", ""),
             metadata=briefing,
@@ -159,7 +158,7 @@ class StrategicCore(FactoryAgent):
     def generate_weekly_report_text(self) -> str:
         """Generate a weekly summary report from recent decisions (returns plain text)."""
         recent_decisions = db.get_recent_decisions(20)
-        dec_types = {}
+        dec_types: dict[str, int] = {}
         for d in recent_decisions:
             t = d.get("decision_type", "other")
             dec_types[t] = dec_types.get(t, 0) + 1
@@ -236,7 +235,7 @@ class StrategicCore(FactoryAgent):
                 except Exception:
                     pass
                 logger.info("[CEO] Weekly report generated: trend=%s", report.get("key_metric_trend"))
-                return report
+                return dict(report)
         except Exception as _e:
             logger.warning("[CEO] generate_weekly_report fallback: %s", _e)
 
@@ -290,7 +289,7 @@ class StrategicCore(FactoryAgent):
                     except Exception:
                         pass
                 logger.info("[CEO] Proposed %d experiments", len(experiments[:3]))
-                return experiments[:3]
+                return list(experiments[:3])
         except Exception as _e:
             logger.warning("[CEO] propose_experiments fallback: %s", _e)
 
@@ -366,7 +365,7 @@ class StrategicCore(FactoryAgent):
             }
 
         cycle_id = f"monthly_{datetime.now(timezone.utc).strftime('%Y_%m')}"
-        db.save_ceo_decision(
+        db.save_ceo_decision(  # type: ignore[call-arg]
             cycle_id=cycle_id,
             decision_text=report.get("executive_summary", ""),
             metadata={"type": "monthly_report", **report},

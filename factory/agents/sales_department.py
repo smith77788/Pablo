@@ -228,16 +228,16 @@ class FollowUpSpecialist:
 
         schedule = []
         for step in sequence:
-            send_at = base_time + datetime.timedelta(hours=step['delay_hours'])
+            send_at = base_time + datetime.timedelta(hours=float(str(step['delay_hours'])))
             schedule.append({
                 'send_at': send_at.isoformat(),
                 'channel': step['channel'],
-                'message': self.MESSAGES.get(step['message'], step['message']),
+                'message': self.MESSAGES.get(str(step['message']), str(step['message'])),
                 'message_key': step['message']
             })
         return schedule
 
-    def get_optimal_send_time(self, base_hour: int = 10) -> dict[str, int]:
+    def get_optimal_send_time(self, base_hour: int = 10) -> dict[str, Any]:
         """Return optimal send time (10-12am or 5-7pm)."""
         if 10 <= base_hour <= 12:
             return {'hour': base_hour, 'reason': 'morning_peak'}
@@ -300,13 +300,13 @@ class PricingNegotiator:
 
         if is_repeat:
             applicable_discounts.append(self.DISCOUNT_RULES[0])
-            total_discount_pct += self.DISCOUNT_RULES[0]['discount_pct']
+            total_discount_pct += int(str(self.DISCOUNT_RULES[0]['discount_pct']))
         if model_count >= 3:
             applicable_discounts.append(self.DISCOUNT_RULES[1])
-            total_discount_pct += self.DISCOUNT_RULES[1]['discount_pct']
+            total_discount_pct += int(str(self.DISCOUNT_RULES[1]['discount_pct']))
         if advance_days >= 14:
             applicable_discounts.append(self.DISCOUNT_RULES[2])
-            total_discount_pct += self.DISCOUNT_RULES[2]['discount_pct']
+            total_discount_pct += int(str(self.DISCOUNT_RULES[2]['discount_pct']))
 
         # Cap discount at 25%
         total_discount_pct = min(25, total_discount_pct)
@@ -385,7 +385,7 @@ class SalesDepartment:
     # ── qualify_lead ──────────────────────────────────────────────────────────
     def qualify_lead(self, order_data: dict[str, Any]) -> dict[str, Any]:
         """Return score (0-100), tier (premium/standard/economy), and notes."""
-        budget = 0
+        budget: float = 0.0
         try:
             budget = float(str(order_data.get('budget') or 0).replace(' ', ''))
         except (ValueError, TypeError):

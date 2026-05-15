@@ -54,7 +54,7 @@ class FAQGenerator:
         tmpl = FAQ_TEMPLATES.get(category, FAQ_TEMPLATES['general'])
         result = []
         for q in tmpl['questions']:
-            answer = self._build_answer(category, q, tmpl['answer_prefix'])
+            answer = self._build_answer(category, q, str(tmpl['answer_prefix']))
             result.append({'question': q, 'answer': answer, 'category': category})
         return result
 
@@ -90,7 +90,7 @@ class FAQGenerator:
 
     def suggest_questions(self, existing_questions: list[str]) -> list[str]:
         """Suggest new FAQ questions not already covered."""
-        all_questions = []
+        all_questions: list[str] = []
         for tmpl in FAQ_TEMPLATES.values():
             all_questions.extend(tmpl['questions'])
         existing_lower = {q.lower() for q in existing_questions}

@@ -22,7 +22,7 @@ class DecisionTracker:
         total = len(previous_tasks)
 
         def _title(t: Dict) -> str:
-            return t.get("title") or t.get("action", "")
+            return str(t.get("title") or t.get("action", ""))
 
         return {
             "done_count": len(done),

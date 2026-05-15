@@ -122,7 +122,7 @@ class RankingSystem(FactoryAgent):
 Предлагаешь кого продвигать, кого переобучить. Всё на русском."""
 
     def rank_models(self, models: list, metrics: dict) -> list[dict]:
-        return self.think_json(
+        return self.think_json(  # type: ignore[return-value]
             f"Проранжируй {len(models)} моделей агентства. Верни JSON массив:\n"
             '[{"model_id": 1, "rank": 1, "score": 8.5, '
             '"strengths": "...", "action": "promote|maintain|coach|archive"}]',
@@ -178,7 +178,7 @@ class HRDepartment:
 
     def run_model_optimization(self, product_id: int | None = None) -> list[dict]:
         """Анализирует текущих моделей и генерирует action items."""
-        saved_actions = []
+        saved_actions: list = []
         try:
             import sqlite3, os
             bot_db = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -201,7 +201,7 @@ class HRDepartment:
                     "product_id": product_id,
                     "action_type": "content",
                     "channel": "direct",
-                    "content": f"HR: Модель #{r.get('model_id')} → {r.get('action').upper()}\n"
+                    "content": f"HR: Модель #{r.get('model_id')} → {str(r.get('action', '')).upper()}\n"
                                f"Score: {r.get('score')} | {r.get('strengths', '')}",
                     "status": "pending",
                     "priority": 6,

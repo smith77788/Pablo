@@ -192,7 +192,7 @@ class CreativeDepartment:
         results = {}
         for agent in self.agents:
             try:
-                results[agent.role] = agent.run(context)
+                results[agent.role] = agent.run(context)  # type: ignore[attr-defined]
             except Exception as e:
                 results[agent.role] = {"error": str(e)}
         return results

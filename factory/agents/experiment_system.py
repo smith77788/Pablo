@@ -349,7 +349,8 @@ class HeuristicExperimentSystem:
         if _os.path.exists(self.history_path):
             try:
                 with open(self.history_path) as f:
-                    return _json.load(f)
+                    data = _json.load(f)
+                    return list(data) if isinstance(data, list) else []
             except Exception:
                 pass
         return []
@@ -383,7 +384,7 @@ class HeuristicExperimentSystem:
             'variants': tmpl['variants'],
             'status': 'running',
             'started_at': _datetime.utcnow().isoformat(),
-            'ends_at': (_datetime.utcnow() + _timedelta(days=tmpl['duration_days'])).isoformat(),
+            'ends_at': (_datetime.utcnow() + _timedelta(days=int(str(tmpl['duration_days'])))).isoformat(),
             'results': {},
         }
         self._history.append(record)
@@ -543,7 +544,8 @@ class CEOExperimentSystem:
     def _load_store(self) -> dict:
         try:
             if self._store_path.exists():
-                return _json.loads(self._store_path.read_text(encoding='utf-8'))
+                data = _json.loads(self._store_path.read_text(encoding='utf-8'))
+                return dict(data) if isinstance(data, dict) else {"active": [], "results": [], "history": []}
         except Exception:
             pass
         return {"active": [], "results": [], "history": []}
@@ -576,7 +578,7 @@ class CEOExperimentSystem:
             "status": "proposed",
             "experiment": chosen,
             "start_date": now.isoformat(),
-            "end_date": (now + _dt_mod.timedelta(days=chosen['duration_days'])).isoformat(),
+            "end_date": (now + _dt_mod.timedelta(days=int(str(chosen['duration_days'])))).isoformat(),
         }
 
     def propose_hypothesis(self, context: dict | None = None) -> dict:
@@ -748,7 +750,7 @@ class CEOExperimentSystem:
     def get_active_experiments(self) -> list[dict]:
         """Load active experiments from JSON file."""
         self._store = self._load_store()  # refresh from disk
-        return self._store.get('active', [])
+        return list(self._store.get('active', []))
 
     def generate_report(self, context: dict | None = None) -> str:
         """Generate experiment status report."""
@@ -769,7 +771,7 @@ class CEOExperimentSystem:
 
         lines.append("\n💡 Предложения:")
         for idea in ideas:
-            lines.append(f"• {idea['name']}: {idea['hypothesis'][:60]}...")
+            lines.append(f"• {idea.get('name', '')}: {str(idea.get('hypothesis', ''))[:60]}...")
 
         return "\n".join(lines)
 
@@ -795,7 +797,8 @@ class CEODelegation:
     def _load_store(self) -> dict:
         try:
             if self._store_path.exists():
-                return _json.loads(self._store_path.read_text(encoding='utf-8'))
+                data = _json.loads(self._store_path.read_text(encoding='utf-8'))
+                return dict(data) if isinstance(data, dict) else {"current_focus": None, "decisions_history": [], "task_outcomes": []}
         except Exception:
             pass
         return {"current_focus": None, "decisions_history": [], "task_outcomes": []}

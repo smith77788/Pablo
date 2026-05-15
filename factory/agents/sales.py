@@ -224,7 +224,7 @@ class SalesDepartment:
         results = {}
         for agent in self.agents:
             try:
-                results[agent.role] = agent.run()
+                results[agent.role] = agent.run()  # type: ignore[attr-defined]
             except Exception as e:
                 results[agent.role] = {"error": str(e)}
         return results

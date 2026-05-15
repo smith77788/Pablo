@@ -26,7 +26,7 @@ class ContentGenerator(FactoryAgent):
 
     def _get_recent_stats(self) -> dict:
         """Get recent business stats to inform content."""
-        stats = {}
+        stats: dict = {}
         if not NEVESTY_DB.exists():
             return stats
         try:

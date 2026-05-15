@@ -246,7 +246,7 @@ def insert(table: str, data: dict) -> int:
     with get_conn() as conn:
         cur = conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", list(data.values()))
         conn.commit()
-        return cur.lastrowid
+        return cur.lastrowid or 0
 
 
 def update(table: str, row_id: int, data: dict) -> None:

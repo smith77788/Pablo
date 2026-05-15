@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from factory.agents.base import FactoryAgent
 
@@ -18,7 +19,7 @@ class LeadQualifier(FactoryAgent):
 Предлагай конкретные действия для конвертации каждого лида.
 Всё на русском языке."""
 
-    def qualify(self, orders_data: dict) -> dict:
+    def qualify(self, orders_data: dict[str, Any]) -> dict[str, Any]:
         return self.think_json(
             f"Проанализируй заявки и оцени приоритет клиентов: {orders_data}"
         )
@@ -235,7 +236,7 @@ class PricingNegotiator(FactoryAgent):
 class SalesDepartment:
     """Координатор отдела продаж."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.qualifier = LeadQualifier()
         self.proposal = ProposalWriter()
         self.followup = FollowUpSpecialist()

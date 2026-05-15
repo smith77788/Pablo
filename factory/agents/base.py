@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import subprocess
+from typing import Any, Union
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ if os.getenv("ANTHROPIC_API_KEY") and not _USE_SDK:
     )
 
 
-def _make_sdk_client() -> object | None:
+def _make_sdk_client() -> Any:
     """Создаёт Anthropic SDK клиент если есть API ключ."""
     try:
         import anthropic
@@ -68,7 +69,8 @@ class FactoryAgent:
     def _think_sdk(self, system: str, prompt: str, max_tokens: int) -> str:
         """Через Anthropic SDK (работает на Lovable, Railway, VPS с API ключом)."""
         try:
-            resp = _sdk_client.messages.create(
+            client: Any = _sdk_client
+            resp = client.messages.create(
                 model=MODEL,
                 max_tokens=max_tokens,
                 system=system,
@@ -102,25 +104,31 @@ class FactoryAgent:
             logger.error("[%s/%s] CLI error: %s", self.department, self.role, e)
             return ""
 
-    def think_json(self, prompt: str, context: dict | None = None, max_tokens: int = 2048) -> dict | list:
+    def think_json(self, prompt: str, context: dict | None = None, max_tokens: int = 2048) -> dict[str, Any]:
         """Вызывает Claude и парсит JSON из ответа."""
         full_prompt = prompt + "\n\nОтветь ТОЛЬКО валидным JSON без пояснений."
         raw = self.think(full_prompt, context, max_tokens)
         return self._parse_json(raw)
 
     @staticmethod
-    def _parse_json(raw: str) -> dict | list:
+    def _parse_json(raw: str) -> dict[str, Any]:
         raw = raw.strip()
         match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
         if match:
             raw = match.group(1).strip()
         try:
-            return json.loads(raw)
+            result: Any = json.loads(raw)
+            if isinstance(result, dict):
+                return result
+            return {}
         except json.JSONDecodeError:
             obj_match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", raw)
             if obj_match:
                 try:
-                    return json.loads(obj_match.group(1))
+                    result = json.loads(obj_match.group(1))
+                    if isinstance(result, dict):
+                        return result
+                    return {}
                 except Exception:
                     pass
             logger.warning("Could not parse JSON from: %s…", raw[:100])

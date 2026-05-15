@@ -52,7 +52,8 @@ Output ONLY the description text, no labels or JSON."""
                 max_tokens=300,
                 messages=[{'role': 'user', 'content': prompt}],
             )
-            return msg.content[0].text.strip()
+            block = msg.content[0]
+            return block.text.strip() if hasattr(block, "text") else ""
         except Exception:
             # Fallback template if API unavailable
             cat_map = {'fashion': 'фэшн', 'commercial': 'коммерческой', 'events': 'событийной'}
@@ -132,7 +133,7 @@ class WeeklySummaryAgent(FactoryAgent):
     department = "content"
     role = "weekly_summary"
 
-    def generate_summary(self, db_path: str = None) -> dict:
+    def generate_summary(self, db_path: str | None = None) -> dict:
         """Generate a weekly performance summary from the database."""
         summary = {
             "period": f"{(datetime.now() - timedelta(days=7)).strftime('%d.%m')} – {datetime.now().strftime('%d.%m.%Y')}",
@@ -212,13 +213,13 @@ class WeeklySummaryAgent(FactoryAgent):
 
 
 class ContentDepartment:
-    def __init__(self):
+    def __init__(self) -> None:
         self.description_agent = ModelDescriptionAgent()
         self.faq_agent = FAQContentAgent()
 
     def run_cycle(self) -> dict:
         """Run one content generation cycle."""
-        results = {}
+        results: dict = {}
 
         # Generate descriptions for models without bio
         desc_results = self.description_agent.update_models_without_bio(max_models=3)

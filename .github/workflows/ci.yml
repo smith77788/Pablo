@@ -113,3 +113,9 @@ jobs:
           find agents -name "*.py" -exec python -m py_compile {} + && echo "All agents OK"
           python -m py_compile cycle.py && echo "cycle.py OK"
           python -m py_compile db.py && echo "db.py OK"
+
+      - name: Type check Factory
+        working-directory: factory
+        run: |
+          pip install mypy
+          python -m mypy agents/ --ignore-missing-imports || true

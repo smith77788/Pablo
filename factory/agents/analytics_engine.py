@@ -29,7 +29,7 @@ class AnalyticsEngine(FactoryAgent):
 
     def _collect_nevesty_metrics(self) -> dict:
         """Read real business metrics from the Nevesty bot database."""
-        metrics = {}
+        metrics: dict = {}
         if not NEVESTY_DB.exists():
             return metrics
         try:

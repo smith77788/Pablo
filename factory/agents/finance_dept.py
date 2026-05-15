@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from factory.agents.base import FactoryAgent
 from factory import db
@@ -232,7 +233,7 @@ class BudgetPlanner(FactoryAgent):
 class FinanceDepartment:
     """Координатор финансового департамента."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.forecaster = RevenueForecaster()
         self.optimizer = CostOptimizer()
         self.pricing = PricingStrategist()

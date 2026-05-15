@@ -18,7 +18,7 @@ class ContentStrategist(FactoryAgent):
 Думаешь о темах, форматах, расписании. Всё на русском."""
 
     def create_content_plan(self, insights: dict, weeks: int = 2) -> list[dict]:
-        return self.think_json(
+        return self.think_json(  # type: ignore[return-value]
             f"Создай контент-план на {weeks} недели для агентства моделей.\n"
             "Верни JSON массив постов:\n"
             '[{"day": "Пн", "platform": "instagram|telegram|tiktok", "topic": "...", '
@@ -36,7 +36,7 @@ class ViralEngineer(FactoryAgent):
 Создаёшь сценарии вирусного контента. Знаешь тренды, хуки, форматы. Всё на русском."""
 
     def generate_video_scripts(self, count: int = 3, trend: str = "") -> list[dict]:
-        return self.think_json(
+        return self.think_json(  # type: ignore[return-value]
             f"Придумай {count} сценария для TikTok/Reels для агентства моделей.\n"
             f"Тренд/тема: {trend or 'актуальное'}\n"
             "Верни JSON массив:\n"
@@ -75,7 +75,7 @@ class AdCopywriter(FactoryAgent):
 Аудитория: B2B (организаторы мероприятий, бренды). Всё на русском."""
 
     def generate_ad_set(self, product: dict, goal: str = "заявки") -> list[dict]:
-        return self.think_json(
+        return self.think_json(  # type: ignore[return-value]
             f"Создай набор рекламных объявлений. Цель: {goal}\n"
             "Верни JSON массив из 5 вариантов:\n"
             '[{"platform": "yandex|vk|telegram", "headline": "до 35 символов", '
@@ -93,7 +93,7 @@ class GrowthHacker(FactoryAgent):
 Фокус на быстрых экспериментах с минимальными затратами. B2B аудитория. Всё на русском."""
 
     def generate_growth_experiments(self, insights: dict, count: int = 5) -> list[dict]:
-        return self.think_json(
+        return self.think_json(  # type: ignore[return-value]
             f"Придумай {count} growth-экспериментов для агентства моделей.\n"
             "Верни JSON массив:\n"
             '[{"name": "...", "hypothesis": "...", "channel": "...", '
