@@ -1,5 +1,10 @@
 """
 Customer Success Department — Onboarding, retention, feedback, upsell.
+
+Includes heuristic CustomerSuccessDepartment (no-LLM) and
+agent-style specialist classes: OnboardingSpecialist, RetentionAnalyst,
+FeedbackCollector, UpsellAdvisor, plus a CustomerSuccessDepartment.execute_task
+entry-point that orchestrates them all.
 """
 from __future__ import annotations
 from datetime import datetime, timezone
