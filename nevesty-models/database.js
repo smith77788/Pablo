@@ -681,6 +681,14 @@ async function initDatabase() {
     `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (19, 'social_posts table for Instagram & social media planning')`
   ).catch(() => {});
 
+  // Schema v20 — UNIQUE constraint on reviews(chat_id, order_id) to prevent duplicate reviews
+  await run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_unique_chat_order ON reviews(chat_id, order_id) WHERE order_id IS NOT NULL`
+  ).catch(() => {});
+  await run(
+    `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (20, 'UNIQUE index on reviews(chat_id,order_id) to prevent duplicates')`
+  ).catch(() => {});
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {

@@ -1725,6 +1725,11 @@ async function bkSubmit(chatId, data) {
       await run("UPDATE orders SET status='confirmed' WHERE id=?", [order.id]).catch(() => {});
       order.status = 'confirmed';
       notifyStatusChange(chatId, orderNum, 'confirmed').catch(() => {});
+      // Always notify manager about auto-confirmed orders regardless of notif_new_order
+      notifyAdmin(
+        `✅ *Автоподтверждение заявки*\n\n📋 *${esc(orderNum)}*\n👤 ${esc(order.client_name)}\n📞 ${esc(order.client_phone)}`,
+        { parse_mode: 'MarkdownV2' }
+      ).catch(() => {});
     }
 
     // Grant "precise_choice" achievement if booking has a specific date set from the start
@@ -5665,6 +5670,11 @@ function initBot(app) {
       return bkStep3Name(chatId, d);
     }
     if (data === 'bk_skip_email') {
+      const requireEmail = await getSetting('booking_require_email').catch(() => '0');
+      if (requireEmail === '1') {
+        await bot.answerCallbackQuery(q.id, { text: '❌ Email обязателен для заявки' }).catch(() => {});
+        return;
+      }
       const session = await getSession(chatId);
       const d = sessionData(session);
       return bkStep3Telegram(chatId, d, q.from.username);
@@ -8013,7 +8023,7 @@ function initBot(app) {
         await clearSession(chatId);
         return safeSend(chatId, '❌ Сесія застаріла\\. Спробуйте ще раз\\.', {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '📋 Мої заявки', callback_data: 'my_orders' }]] },
+          reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] },
         });
       }
       return bkRepeatSubmit(chatId, d, q.from.username);
@@ -9056,19 +9066,24 @@ function initBot(app) {
         d.client_phone = text;
         return bkStep3Email(chatId, d);
 
-      case 'bk_s3_email':
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text))
+      case 'bk_s3_email': {
+        const requireEmailVal = await getSetting('booking_require_email').catch(() => '0');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+          const errKb =
+            requireEmailVal === '1'
+              ? [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]]
+              : [
+                  [{ text: '⏭ Пропустить', callback_data: 'bk_skip_email' }],
+                  [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+                ];
           return safeSend(chatId, STRINGS.bookingErrorEmail, {
             parse_mode: 'MarkdownV2',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '⏭ Пропустить', callback_data: 'bk_skip_email' }],
-                [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
-              ],
-            },
+            reply_markup: { inline_keyboard: errKb },
           });
+        }
         d.client_email = text;
         return bkStep3Telegram(chatId, d, msg.from.username);
+      }
 
       case 'bk_s3_tg':
         d.client_telegram = text.replace('@', '');
@@ -9221,9 +9236,7 @@ async function notifyNewOrder(order) {
 async function notifyStatusChange(clientChatId, orderNumber, newStatus, clientPhone = null) {
   if (!bot || !clientChatId) return;
 
-  // Check admin-level notif_status setting
-  const adminNotifStatus = await getSetting('notif_status').catch(() => '1');
-  if (adminNotifStatus === '0') return;
+  // notif_status setting is intentionally not checked here — client always receives status updates
 
   // Check client notification preferences
   const clientPrefs = await get('SELECT notify_status, notify_review_invites FROM client_prefs WHERE chat_id=?', [
@@ -9316,7 +9329,7 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus, clientPh
         getSetting('reviews_min_completed').catch(() => null),
         getSetting('reviews_prompt_text').catch(() => null),
       ]);
-      const minCompleted = parseInt(reviewsMinCompleted) || 1;
+      const minCompleted = parseInt(reviewsMinCompleted) || 0;
       const completedCount = await get(
         "SELECT COUNT(*) as n FROM orders WHERE client_chat_id=? AND status='completed'",
         [String(clientChatId)]
@@ -11046,7 +11059,7 @@ async function startLeaveReview(chatId, orderId) {
 
   // Check reviews_min_completed setting
   const minCompletedRaw = await getSetting('reviews_min_completed').catch(() => null);
-  const minCompleted = minCompletedRaw ? parseInt(minCompletedRaw) || 0 : 0;
+  const minCompleted = parseInt(minCompletedRaw) || 0;
   if (minCompleted > 0) {
     const completedRow = await get("SELECT COUNT(*) as cnt FROM orders WHERE client_chat_id=? AND status='completed'", [
       String(chatId),
@@ -11115,7 +11128,7 @@ async function repeatOrder(chatId, orderId) {
     const o = await get('SELECT * FROM orders WHERE id=? AND client_chat_id=?', [orderId, String(chatId)]);
     if (!o) {
       return safeSend(chatId, RU.ORDER_NOT_FOUND, {
-        reply_markup: { inline_keyboard: [[{ text: '📋 Мої заявки', callback_data: 'my_orders' }]] },
+        reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] },
       });
     }
 
@@ -11151,7 +11164,7 @@ async function repeatOrder(chatId, orderId) {
     // Build summary message
     const eventLabel = prefill.event_type ? EVENT_TYPES[prefill.event_type] || prefill.event_type : '—';
 
-    let text = `🔁 *Повторити заявку?*\n\n`;
+    let text = `🔁 *Повторить заявку?*\n\n`;
     text += `👤 Ім'я: ${esc(prefill.client_name || '—')}\n`;
     text += `📱 Телефон: ${esc(prefill.client_phone || '—')}\n`;
     if (prefill.client_email) text += `📧 Email: ${esc(prefill.client_email)}\n`;
