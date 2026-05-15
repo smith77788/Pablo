@@ -117,10 +117,10 @@ app.get('/sitemap.xml', async (req, res) => {
 
     const modelUrls = models.map(m => `
   <url>
-    <loc>${baseUrl}/model.html?id=${m.id}</loc>
+    <loc>${baseUrl}/model/${m.id}</loc>
     <lastmod>${m.updated_at ? m.updated_at.split('T')[0] : new Date().toISOString().split('T')[0]}</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.8</priority>
   </url>`).join('');
 
     const today = new Date().toISOString().split('T')[0];
@@ -155,6 +155,93 @@ app.get('/robots.txt', (req, res) => {
   res.send(
     `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin/\nDisallow: /uploads/\nDisallow: /data/\n\nSitemap: ${baseUrl}/sitemap.xml`
   );
+});
+
+// ─── SEO: Server-side rendered model page with OG/Schema.org meta tags ────────
+app.get('/model/:id', async (req, res) => {
+  try {
+    const { get: dbGetModel } = require('./database');
+    const modelId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(modelId) || modelId <= 0) return res.redirect('/catalog.html');
+
+    const model = await dbGetModel('SELECT * FROM models WHERE id=? AND available=1', [modelId]);
+    if (!model) return res.redirect('/catalog.html');
+
+    const siteUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
+    let photoUrl = `${siteUrl}/img/og-default.jpg`;
+    if (model.photo_main) {
+      photoUrl = `${siteUrl}/uploads/${model.photo_main}`;
+    } else if (model.photos) {
+      try {
+        const photos = JSON.parse(model.photos);
+        if (Array.isArray(photos) && photos.length > 0) {
+          photoUrl = `${siteUrl}/uploads/${photos[0]}`;
+        }
+      } catch (_) {}
+    }
+
+    const modelName = (model.name || 'Модель').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const title = `${modelName} — Nevesty Models Agency`;
+    const rawDesc = model.bio || `Модель ${model.name || ''}${model.city ? ', ' + model.city : ''}`;
+    const desc = rawDesc.slice(0, 160).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const descSchema = rawDesc.slice(0, 160).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const canonicalUrl = `${siteUrl}/model/${model.id}`;
+
+    const ogTags = `
+  <!-- Open Graph / Twitter Card (dynamic, server-injected) -->
+  <meta property="og:type" content="profile" />
+  <meta property="og:title" content="${title.replace(/"/g, '&quot;')}" />
+  <meta property="og:description" content="${desc}" />
+  <meta property="og:image" content="${photoUrl}" />
+  <meta property="og:url" content="${canonicalUrl}" />
+  <meta property="og:site_name" content="Nevesty Models" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${title.replace(/"/g, '&quot;')}" />
+  <meta name="twitter:description" content="${desc}" />
+  <meta name="twitter:image" content="${photoUrl}" />
+  <link rel="canonical" href="${canonicalUrl}" />
+  <!-- Schema.org Person -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    "name": "${(model.name || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}",
+    "description": "${descSchema}",
+    "image": "${photoUrl}",
+    "url": "${canonicalUrl}",
+    "worksFor": {
+      "@type": "Organization",
+      "name": "Nevesty Models Agency",
+      "url": "${siteUrl}"
+    }
+  }
+  <\/script>`;
+
+    const fs = require('fs');
+    let html = fs.readFileSync(path.join(__dirname, 'public', 'model.html'), 'utf8');
+
+    // Replace static OG tags in <head> with dynamic ones
+    html = html.replace(/<meta property="og:title"[^>]*>/i, '');
+    html = html.replace(/<meta property="og:description"[^>]*>/i, '');
+    html = html.replace(/<meta property="og:type"[^>]*>/i, '');
+    html = html.replace(/<meta property="og:image"[^>]*>/i, '');
+    html = html.replace(/<meta property="og:url"[^>]*>/i, '');
+    html = html.replace(/<meta property="og:site_name"[^>]*>/i, '');
+    html = html.replace(/<meta name="twitter:card"[^>]*>/i, '');
+    html = html.replace(/<link rel="canonical"[^>]*>/i, '');
+
+    // Inject dynamic tags and update title
+    html = html.replace('</head>', ogTags + '\n</head>');
+    html = html.replace(/<title>[^<]*<\/title>/i, `<title>${title.replace(/</g, '&lt;')}</title>`);
+    // Add data attribute for JS to auto-load the model
+    html = html.replace('<body', `<body data-model-id="${model.id}"`);
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) {
+    console.error('[model-page]', e.message);
+    res.redirect('/catalog.html');
+  }
 });
 
 // ─── Static files ─────────────────────────────────────────────────────────────
