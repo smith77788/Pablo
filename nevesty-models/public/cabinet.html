@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Мои заявки — Nevesty Models</title>
+  <meta name="description" content="Личный кабинет клиента — отслеживайте статусы заявок, оставляйте отзывы.">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#080808">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/css/main.css" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            pink: { 50:'#fdf2f8', 100:'#fce7f3', 200:'#fbcfe8', 300:'#f9a8d4', 400:'#f472b6', 500:'#ec4899', 600:'#db2777', 700:'#be185d', 800:'#9d174d', 900:'#831843' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* ── Cabinet layout ── */
+    .cabinet-page { min-height: 100vh; padding-top: 80px; padding-bottom: 60px; }
+    .cabinet-container { max-width: 800px; margin: 0 auto; padding: 0 20px; }
+
+    /* ── Login panel ── */
+    .cabinet-login {
+      max-width: 480px; margin: 60px auto 0;
+      background: var(--bg2); border: 1px solid var(--border);
+      padding: 40px 32px; text-align: center;
+    }
+    .cabinet-login-icon { font-size: 2.4rem; margin-bottom: 16px; line-height: 1; }
+    .cabinet-login h2 { font-size: 1.4rem; color: var(--white); margin-bottom: 8px; }
+    .cabinet-login p { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 28px; line-height: 1.6; }
+    .cabinet-phone-input {
+      width: 100%; padding: 14px 18px; font-size: 1rem;
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--white); outline: none; transition: border-color var(--transition);
+      -webkit-appearance: none; appearance: none;
+    }
+    .cabinet-phone-input:focus { border-color: var(--gold); }
+    .cabinet-phone-input::placeholder { color: var(--text-dim); }
+    .cabinet-login-btn {
+      width: 100%; margin-top: 14px; padding: 14px;
+      background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+      color: var(--bg); border: none; cursor: pointer;
+      font-size: 0.9rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+      transition: opacity var(--transition);
+    }
+    .cabinet-login-btn:hover { opacity: 0.88; }
+    .cabinet-login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .cabinet-login-hint { font-size: 0.72rem; color: var(--text-dim); margin-top: 10px; line-height: 1.5; }
+    .cabinet-login-error {
+      background: rgba(220,38,38,0.1); border: 1px solid rgba(220,38,38,0.3);
+      color: #f87171; padding: 10px 14px; font-size: 0.82rem;
+      margin-top: 14px; display: none;
+    }
+
+    /* ── Orders list ── */
+    .cabinet-orders { display: none; }
+    .cabinet-header-bar {
+      display: flex; align-items: center; gap: 16px;
+      padding: 28px 0 24px; border-bottom: 1px solid var(--border); margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+    .cabinet-user-badge {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .cabinet-user-avatar {
+      width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; color: var(--bg); font-weight: 700; flex-shrink: 0;
+    }
+    .cabinet-user-info { flex: 1; }
+    .cabinet-user-phone { font-size: 0.95rem; color: var(--white); font-weight: 600; }
+    .cabinet-user-count { font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; }
+    .cabinet-logout-btn {
+      margin-left: auto; background: none; border: 1px solid var(--border);
+      color: var(--text-dim); cursor: pointer; padding: 7px 14px; font-size: 0.78rem;
+      transition: all var(--transition); flex-shrink: 0;
+    }
+    .cabinet-logout-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+    /* ── Order card ── */
+    .order-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      margin-bottom: 16px; transition: border-color var(--transition);
+    }
+    .order-card:hover { border-color: rgba(201,169,110,0.3); }
+    .order-card-header {
+      display: flex; align-items: center; gap: 16px;
+      padding: 20px 24px; cursor: pointer; user-select: none;
+    }
+    .order-card-icon {
+      width: 44px; height: 44px; background: var(--bg3);
+      border: 1px solid var(--border); flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
+    }
+    .order-card-main { flex: 1; min-width: 0; }
+    .order-card-num { font-size: 0.65rem; letter-spacing: 2px; color: var(--gold); text-transform: uppercase; margin-bottom: 3px; }
+    .order-card-title { font-size: 0.95rem; color: var(--white); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .order-card-date { font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; }
+    .order-card-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+    .order-card-chevron { color: var(--text-dim); font-size: 0.7rem; transition: transform var(--transition); }
+    .order-card.expanded .order-card-chevron { transform: rotate(180deg); }
+
+    /* ── Status badge ── */
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.5px;
+      text-transform: uppercase; white-space: nowrap;
+    }
+    .status-badge.new       { background: rgba(99,102,241,0.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3); }
+    .status-badge.reviewing { background: rgba(245,158,11,0.15); color: #fcd34d; border: 1px solid rgba(245,158,11,0.3); }
+    .status-badge.confirmed { background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3); }
+    .status-badge.in_progress { background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
+    .status-badge.completed { background: rgba(201,169,110,0.15); color: var(--gold); border: 1px solid rgba(201,169,110,0.3); }
+    .status-badge.cancelled { background: rgba(239,68,68,0.1); color: #fca5a5; border: 1px solid rgba(239,68,68,0.2); }
+
+    /* ── Progress bar ── */
+    .status-progress {
+      display: flex; align-items: center; gap: 0; margin: 20px 0 4px;
+    }
+    .status-step {
+      flex: 1; display: flex; flex-direction: column; align-items: center; position: relative;
+    }
+    .status-step-dot {
+      width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border);
+      background: var(--bg3); position: relative; z-index: 1; transition: all 0.3s;
+    }
+    .status-step.done .status-step-dot { background: var(--gold); border-color: var(--gold); }
+    .status-step.active .status-step-dot { background: var(--gold); border-color: var(--gold); box-shadow: 0 0 0 3px rgba(201,169,110,0.2); }
+    .status-step.cancelled-step .status-step-dot { background: #ef4444; border-color: #ef4444; }
+    .status-step-label { font-size: 0.6rem; color: var(--text-dim); margin-top: 6px; text-align: center; white-space: nowrap; letter-spacing: 0.3px; }
+    .status-step.done .status-step-label, .status-step.active .status-step-label { color: var(--gold); }
+    .status-step-line {
+      flex: 1; height: 2px; background: var(--border); margin-bottom: 22px;
+      transition: background 0.3s;
+    }
+    .status-step-line.done { background: var(--gold); }
+
+    /* ── Order detail panel ── */
+    .order-card-body {
+      display: none; padding: 0 24px 24px; border-top: 1px solid var(--border);
+    }
+    .order-card.expanded .order-card-body { display: block; }
+    .order-detail-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0;
+    }
+    @media (max-width: 520px) { .order-detail-grid { grid-template-columns: 1fr; gap: 12px; } }
+    .order-detail-item label {
+      display: block; font-size: 0.65rem; letter-spacing: 1.5px; color: var(--text-dim);
+      text-transform: uppercase; margin-bottom: 4px;
+    }
+    .order-detail-item span { font-size: 0.85rem; color: var(--white); }
+    .order-detail-desc {
+      background: var(--bg3); padding: 14px 16px; font-size: 0.82rem;
+      color: var(--text-muted); line-height: 1.7; margin-bottom: 20px;
+    }
+    .order-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn-repeat {
+      padding: 10px 20px; font-size: 0.78rem; font-weight: 600;
+      border: 1px solid var(--gold); color: var(--gold); background: transparent;
+      cursor: pointer; transition: all var(--transition); text-decoration: none;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-repeat:hover { background: rgba(201,169,110,0.1); }
+    .btn-review {
+      padding: 10px 20px; font-size: 0.78rem; font-weight: 600;
+      background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+      color: var(--bg); border: none; cursor: pointer; transition: opacity var(--transition);
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-review:hover { opacity: 0.85; }
+    .btn-review:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Model chip ── */
+    .order-model-chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(201,169,110,0.07); border: 1px solid rgba(201,169,110,0.2);
+      padding: 6px 12px; font-size: 0.78rem; color: var(--gold); margin-bottom: 16px;
+    }
+
+    /* ── Skeleton ── */
+    .cabinet-skeleton { display: none; }
+    .skeleton-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      padding: 22px 24px; margin-bottom: 14px;
+    }
+    .skel { background: var(--bg3); border-radius: 2px; animation: shimmer 1.4s infinite; }
+    .skel-title { height: 14px; width: 55%; margin-bottom: 10px; }
+    .skel-sub   { height: 11px; width: 35%; }
+    @keyframes shimmer { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+    /* ── Empty state ── */
+    .cabinet-empty { display: none; text-align: center; padding: 60px 24px; }
+    .cabinet-empty-icon { font-size: 2.6rem; margin-bottom: 16px; }
+    .cabinet-empty h3 { font-size: 1.2rem; color: var(--white); margin-bottom: 8px; }
+    .cabinet-empty p { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 24px; }
+
+    /* ── Review modal ── */
+    .review-modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      z-index: 900; display: none; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .review-modal-overlay.open { display: flex; }
+    .review-modal {
+      background: var(--bg2); border: 1px solid var(--border);
+      width: 100%; max-width: 500px; padding: 32px; position: relative;
+    }
+    .review-modal-close {
+      position: absolute; top: 14px; right: 16px; background: none; border: none;
+      color: var(--text-dim); cursor: pointer; font-size: 1.1rem;
+    }
+    .review-modal-close:hover { color: var(--text); }
+    .review-modal h3 { font-size: 1.1rem; color: var(--white); margin-bottom: 6px; }
+    .review-modal p { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 24px; }
+    .star-rating { display: flex; gap: 6px; margin-bottom: 20px; }
+    .star-btn {
+      font-size: 1.6rem; background: none; border: none; cursor: pointer;
+      color: var(--border); transition: color var(--transition); line-height: 1;
+      padding: 0;
+    }
+    .star-btn.active, .star-btn:hover ~ .star-btn { color: var(--gold); }
+    .star-btn.active { color: var(--gold); }
+    .review-textarea {
+      width: 100%; min-height: 110px; padding: 12px 14px; font-size: 0.85rem;
+      background: var(--bg3); border: 1px solid var(--border); color: var(--white);
+      resize: vertical; outline: none; transition: border-color var(--transition);
+      font-family: inherit; line-height: 1.6;
+    }
+    .review-textarea:focus { border-color: var(--gold); }
+    .review-textarea::placeholder { color: var(--text-dim); }
+    .review-submit-btn {
+      width: 100%; margin-top: 14px; padding: 13px;
+      background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+      color: var(--bg); border: none; cursor: pointer; font-size: 0.88rem;
+      font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+      transition: opacity var(--transition);
+    }
+    .review-submit-btn:hover { opacity: 0.88; }
+    .review-submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .review-error {
+      color: #f87171; font-size: 0.78rem; margin-top: 8px; display: none;
+    }
+    .review-success {
+      text-align: center; padding: 20px 0 0;
+    }
+    .review-success-icon { font-size: 2rem; margin-bottom: 10px; }
+    .review-success p { font-size: 0.88rem; color: var(--text-muted); }
+  </style>
+  <!-- Google Analytics 4 -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=GA_MEASUREMENT_ID"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'GA_MEASUREMENT_ID', { anonymize_ip: true });
+  </script>
+  <script src="/js/analytics.js"></script>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+
+  <!-- NAVBAR -->
+  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links" role="list">
+        <a href="/catalog.html">Модели</a>
+        <a href="/#services">Услуги</a>
+        <a href="/about.html">О нас</a>
+        <a href="/faq.html">FAQ</a>
+        <a href="/contact.html">Контакты</a>
+        <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
+        <a href="/cabinet.html" style="color:var(--gold);font-size:0.9rem" title="Мои заявки">👤 Мои заявки</a>
+        <button onclick="DarkMode.toggle()"
+          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
+          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+        </button>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+    </div>
+  </nav>
+
+  <!-- MOBILE MENU -->
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <a href="/catalog.html">Модели</a>
+    <a href="/#services">Услуги</a>
+    <a href="/about.html">О нас</a>
+    <a href="/faq.html">FAQ</a>
+    <a href="/contact.html">Контакты</a>
+    <a href="/favorites.html">❤️ Избранное</a>
+    <a href="/cabinet.html" style="color:var(--gold)">👤 Мои заявки</a>
+    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
+  </nav>
+
+  <main class="cabinet-page" id="main-content" role="main">
+    <div class="cabinet-container">
+
+      <!-- ── Breadcrumb ── -->
+      <nav aria-label="breadcrumb" style="padding-top:12px;margin-bottom:0">
+        <ol style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
+          <li><a href="/" style="color:var(--text-muted);text-decoration:none">Главная</a></li>
+          <li style="color:var(--border)" aria-hidden="true">/</li>
+          <li style="color:var(--gold)" aria-current="page">Мои заявки</li>
+        </ol>
+      </nav>
+
+      <!-- ══════════ LOGIN PANEL ══════════ -->
+      <div class="cabinet-login" id="loginPanel">
+        <div class="cabinet-login-icon">👤</div>
+        <h2>Найти мои заявки</h2>
+        <p>Введите номер телефона, который вы указали при оформлении заявки — мы найдём все ваши обращения.</p>
+        <label for="phoneInput" class="sr-only">Номер телефона</label>
+        <input
+          type="tel"
+          class="cabinet-phone-input"
+          id="phoneInput"
+          placeholder="+7 (999) 000-00-00"
+          inputmode="tel"
+          autocomplete="tel"
+          aria-label="Ваш номер телефона"
+        />
+        <div class="cabinet-login-hint">Формат: +7 (XXX) XXX-XX-XX или 8XXXXXXXXXX</div>
+        <button class="cabinet-login-btn" id="searchBtn" onclick="Cabinet.search()">
+          Найти мои заявки
+        </button>
+        <div class="cabinet-login-error" id="loginError" role="alert"></div>
+      </div>
+
+      <!-- ══════════ SKELETON ══════════ -->
+      <div class="cabinet-skeleton" id="cabinetSkeleton" aria-hidden="true">
+        <div style="height:60px;margin:28px 0 24px;border-bottom:1px solid var(--border)"></div>
+        <div class="skeleton-card"><div class="skel skel-title"></div><div class="skel skel-sub"></div></div>
+        <div class="skeleton-card"><div class="skel skel-title" style="width:45%"></div><div class="skel skel-sub" style="width:30%"></div></div>
+        <div class="skeleton-card"><div class="skel skel-title" style="width:60%"></div><div class="skel skel-sub" style="width:40%"></div></div>
+      </div>
+
+      <!-- ══════════ ORDERS LIST ══════════ -->
+      <div class="cabinet-orders" id="cabinetOrders">
+        <div class="cabinet-header-bar">
+          <div class="cabinet-user-badge">
+            <div class="cabinet-user-avatar" id="userAvatar">?</div>
+            <div class="cabinet-user-info">
+              <div class="cabinet-user-phone" id="userPhone">—</div>
+              <div class="cabinet-user-count" id="userCount">0 заявок</div>
+            </div>
+          </div>
+          <button class="cabinet-logout-btn" onclick="Cabinet.logout()">Сменить номер</button>
+        </div>
+
+        <!-- Empty state -->
+        <div class="cabinet-empty" id="cabinetEmpty">
+          <div class="cabinet-empty-icon">📋</div>
+          <h3>Заявок пока нет</h3>
+          <p>По вашему номеру телефона не найдено ни одной заявки.</p>
+          <a href="/booking.html" class="btn-primary">Оформить заявку</a>
+        </div>
+
+        <!-- Orders container -->
+        <div id="ordersContainer" role="list" aria-label="Список заявок"></div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ══════════ REVIEW MODAL ══════════ -->
+  <div class="review-modal-overlay" id="reviewModal" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle" tabindex="-1">
+    <div class="review-modal">
+      <button class="review-modal-close" onclick="Cabinet.closeReview()" aria-label="Закрыть">✕</button>
+      <div id="reviewModalContent">
+        <h3 id="reviewModalTitle">Оставить отзыв</h3>
+        <p>Расскажите о вашем опыте работы с агентством. Отзыв будет опубликован после проверки.</p>
+        <div class="star-rating" id="starRating" role="group" aria-label="Оценка">
+          <button class="star-btn" data-v="1" onclick="Cabinet.setStar(1)" aria-label="1 звезда">★</button>
+          <button class="star-btn" data-v="2" onclick="Cabinet.setStar(2)" aria-label="2 звезды">★</button>
+          <button class="star-btn" data-v="3" onclick="Cabinet.setStar(3)" aria-label="3 звезды">★</button>
+          <button class="star-btn" data-v="4" onclick="Cabinet.setStar(4)" aria-label="4 звезды">★</button>
+          <button class="star-btn" data-v="5" onclick="Cabinet.setStar(5)" aria-label="5 звёзд">★</button>
+        </div>
+        <textarea
+          class="review-textarea"
+          id="reviewText"
+          placeholder="Поделитесь впечатлениями — минимум 10 символов"
+          maxlength="2000"
+          aria-label="Текст отзыва"
+        ></textarea>
+        <div class="review-error" id="reviewError" role="alert"></div>
+        <button class="review-submit-btn" id="reviewSubmitBtn" onclick="Cabinet.submitReview()">
+          Отправить отзыв
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
+
+  <script src="/js/main.js" defer></script>
+  <script src="/js/darkmode.js"></script>
+
+  <script>
+  (function() {
+    'use strict';
+
+    const EVENT_ICONS = {
+      fashion_show: '👗',
+      photo_shoot:  '📸',
+      event:        '🥂',
+      commercial:   '🎬',
+      runway:       '✦',
+      other:        '📋',
+    };
+
+    const STATUS_LABELS = {
+      new:         'Новая',
+      reviewing:   'На рассмотрении',
+      confirmed:   'Подтверждена',
+      in_progress: 'В работе',
+      completed:   'Завершена',
+      cancelled:   'Отменена',
+    };
+
+    const STATUS_ORDER = ['new', 'confirmed', 'in_progress', 'completed'];
+
+    // State
+    let _phone = '';
+    let _orders = [];
+    let _reviewOrderId = null;
+    let _starRating = 0;
+
+    // ── Phone normalization ───────────────────────────────────────
+    function normalizePhone(raw) {
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length === 11 && (digits[0] === '7' || digits[0] === '8')) return digits.slice(1);
+      if (digits.length === 10) return digits;
+      return null;
+    }
+
+    function formatPhoneDisplay(digits10) {
+      if (!digits10 || digits10.length !== 10) return '+7' + (digits10 || '');
+      return `+7 (${digits10.slice(0,3)}) ${digits10.slice(3,6)}-${digits10.slice(6,8)}-${digits10.slice(8,10)}`;
+    }
+
+    // ── Toast ─────────────────────────────────────────────────────
+    function toast(msg, type = 'info') {
+      const tc = document.getElementById('toastContainer');
+      if (!tc) return;
+      const d = document.createElement('div');
+      d.className = 'toast' + (type === 'error' ? ' toast-error' : '');
+      d.textContent = msg;
+      tc.appendChild(d);
+      setTimeout(() => d.remove(), 4000);
+    }
+
+    // ── Panel switching ───────────────────────────────────────────
+    function showLogin() {
+      document.getElementById('loginPanel').style.display = '';
+      document.getElementById('cabinetSkeleton').style.display = 'none';
+      document.getElementById('cabinetOrders').style.display = 'none';
+      hideError();
+    }
+
+    function showSkeleton() {
+      document.getElementById('loginPanel').style.display = 'none';
+      document.getElementById('cabinetSkeleton').style.display = 'block';
+      document.getElementById('cabinetOrders').style.display = 'none';
+    }
+
+    function showOrders() {
+      document.getElementById('loginPanel').style.display = 'none';
+      document.getElementById('cabinetSkeleton').style.display = 'none';
+      document.getElementById('cabinetOrders').style.display = 'block';
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('loginError');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function hideError() {
+      const el = document.getElementById('loginError');
+      if (el) { el.textContent = ''; el.style.display = 'none'; }
+    }
+
+    // ── Format date ───────────────────────────────────────────────
+    function fmtDate(iso) {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' });
+      } catch { return iso; }
+    }
+
+    // ── Status progress bar ───────────────────────────────────────
+    function buildProgressBar(status) {
+      if (status === 'cancelled') {
+        return `<div style="display:flex;align-items:center;gap:8px;margin:16px 0;font-size:0.78rem;color:#f87171">
+          <span style="font-size:1rem">🚫</span> Заявка отменена
+        </div>`;
+      }
+      const activeIdx = STATUS_ORDER.indexOf(status);
+      let html = '<div class="status-progress" role="progressbar" aria-label="Статус заявки">';
+      STATUS_ORDER.forEach((s, i) => {
+        const isDone   = i < activeIdx;
+        const isActive = i === activeIdx;
+        const cls = isDone ? 'done' : (isActive ? 'active' : '');
+        html += `<div class="status-step ${cls}">
+          <div class="status-step-dot">${isDone ? '<svg width="8" height="6" viewBox="0 0 8 6" fill="none" style="display:block"><path d="M1 3L3 5L7 1" stroke="var(--bg)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}</div>
+          <div class="status-step-label">${STATUS_LABELS[s]}</div>
+        </div>`;
+        if (i < STATUS_ORDER.length - 1) {
+          html += `<div class="status-step-line ${isDone ? 'done' : ''}"></div>`;
+        }
+      });
+      html += '</div>';
+      return html;
+    }
+
+    // ── Build order card HTML ─────────────────────────────────────
+    function buildOrderCard(order, idx) {
+      const icon      = EVENT_ICONS[order.event_type] || '📋';
+      const statusLbl = STATUS_LABELS[order.status] || order.status;
+      const dateStr   = fmtDate(order.created_at);
+      const eventDate = order.event_date ? fmtDate(order.event_date) : null;
+
+      const bookingUrl = `/booking.html?event_type=${encodeURIComponent(order.event_type)}${order.model_id ? '&model=' + order.model_id : ''}`;
+
+      const isCompleted = order.status === 'completed';
+
+      return `
+        <div class="order-card" id="order-card-${order.id}" role="listitem">
+          <div class="order-card-header" onclick="Cabinet.toggleCard(${order.id})" tabindex="0"
+               onkeydown="if(event.key==='Enter'||event.key===' ')Cabinet.toggleCard(${order.id})"
+               role="button" aria-expanded="false" aria-controls="order-body-${order.id}">
+            <div class="order-card-icon">${icon}</div>
+            <div class="order-card-main">
+              <div class="order-card-num">${order.order_number || ('Заявка #' + order.id)}</div>
+              <div class="order-card-title">${order.event_type_ru || order.event_type}</div>
+              <div class="order-card-date">Подана: ${dateStr}</div>
+            </div>
+            <div class="order-card-right">
+              <span class="status-badge ${order.status}">${statusLbl}</span>
+              <span class="order-card-chevron">▼</span>
+            </div>
+          </div>
+
+          <div class="order-card-body" id="order-body-${order.id}">
+            ${order.model_name ? `<div class="order-model-chip" style="margin-top:16px">✦ Модель: <strong>${order.model_name}</strong></div>` : ''}
+
+            ${buildProgressBar(order.status)}
+
+            <div class="order-detail-grid">
+              ${eventDate ? `<div class="order-detail-item"><label>Дата мероприятия</label><span>${eventDate}</span></div>` : ''}
+              ${order.budget ? `<div class="order-detail-item"><label>Бюджет</label><span>${order.budget}</span></div>` : ''}
+              ${order.location ? `<div class="order-detail-item"><label>Место</label><span>${order.location}</span></div>` : ''}
+              <div class="order-detail-item"><label>Тип</label><span>${order.event_type_ru || order.event_type}</span></div>
+            </div>
+
+            ${order.comments ? `<div class="order-detail-desc"><strong style="font-size:0.7rem;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase">Описание</strong><br/>${order.comments}</div>` : ''}
+
+            <div class="order-actions">
+              <a href="${bookingUrl}" class="btn-repeat" title="Создать похожую заявку">
+                🔄 Повторить заявку
+              </a>
+              ${isCompleted ? `<button class="btn-review" onclick="Cabinet.openReview(${order.id})" data-order-id="${order.id}">
+                ⭐ Оставить отзыв
+              </button>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ── Render orders ─────────────────────────────────────────────
+    function renderOrders(orders) {
+      const container = document.getElementById('ordersContainer');
+      const emptyEl   = document.getElementById('cabinetEmpty');
+      const phone10   = normalizePhone(_phone);
+
+      document.getElementById('userPhone').textContent  = formatPhoneDisplay(phone10);
+      document.getElementById('userAvatar').textContent = phone10 ? phone10.slice(-2) : '?';
+      document.getElementById('userCount').textContent  =
+        orders.length === 0 ? 'нет заявок' :
+        orders.length === 1 ? '1 заявка' :
+        orders.length < 5  ? `${orders.length} заявки` : `${orders.length} заявок`;
+
+      if (!orders.length) {
+        emptyEl.style.display = 'block';
+        container.innerHTML   = '';
+        return;
+      }
+
+      emptyEl.style.display = 'none';
+      container.innerHTML = orders.map((o, i) => buildOrderCard(o, i)).join('');
+    }
+
+    // ── Toggle card expand ────────────────────────────────────────
+    function toggleCard(id) {
+      const card   = document.getElementById('order-card-' + id);
+      const header = card.querySelector('.order-card-header');
+      const isOpen = card.classList.contains('expanded');
+      card.classList.toggle('expanded', !isOpen);
+      header.setAttribute('aria-expanded', String(!isOpen));
+    }
+
+    // ── Search ────────────────────────────────────────────────────
+    async function search() {
+      const raw = (document.getElementById('phoneInput').value || '').trim();
+      if (!raw) { showError('Введите номер телефона'); return; }
+      const phone10 = normalizePhone(raw);
+      if (!phone10) { showError('Некорректный формат номера. Укажите 10 цифр.'); return; }
+      _phone = raw;
+      hideError();
+
+      const btn = document.getElementById('searchBtn');
+      btn.disabled = true;
+      btn.textContent = 'Поиск…';
+      showSkeleton();
+
+      try {
+        const r = await fetch(`/api/client/orders?phone=${encodeURIComponent('7' + phone10)}`);
+        const data = await r.json();
+        if (!r.ok) {
+          showLogin();
+          showError(data.error || 'Ошибка сервера');
+          return;
+        }
+        _orders = data.orders || [];
+        // Save to sessionStorage for page reload
+        sessionStorage.setItem('cabinet_phone', raw);
+        showOrders();
+        renderOrders(_orders);
+      } catch (e) {
+        showLogin();
+        showError('Ошибка соединения. Попробуйте позже.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Найти мои заявки';
+      }
+    }
+
+    // ── Logout ────────────────────────────────────────────────────
+    function logout() {
+      sessionStorage.removeItem('cabinet_phone');
+      _phone  = '';
+      _orders = [];
+      document.getElementById('phoneInput').value = '';
+      showLogin();
+    }
+
+    // ── Review modal ──────────────────────────────────────────────
+    function openReview(orderId) {
+      _reviewOrderId = orderId;
+      _starRating    = 0;
+      document.getElementById('reviewText').value   = '';
+      document.getElementById('reviewError').style.display = 'none';
+      document.getElementById('reviewError').textContent   = '';
+      document.getElementById('reviewSubmitBtn').disabled  = false;
+      renderStars(0);
+
+      // Reset to form view
+      document.getElementById('reviewModalContent').innerHTML = `
+        <h3 id="reviewModalTitle">Оставить отзыв</h3>
+        <p>Расскажите о вашем опыте работы с агентством. Отзыв будет опубликован после проверки.</p>
+        <div class="star-rating" id="starRating" role="group" aria-label="Оценка">
+          <button class="star-btn" data-v="1" onclick="Cabinet.setStar(1)" aria-label="1 звезда">★</button>
+          <button class="star-btn" data-v="2" onclick="Cabinet.setStar(2)" aria-label="2 звезды">★</button>
+          <button class="star-btn" data-v="3" onclick="Cabinet.setStar(3)" aria-label="3 звезды">★</button>
+          <button class="star-btn" data-v="4" onclick="Cabinet.setStar(4)" aria-label="4 звезды">★</button>
+          <button class="star-btn" data-v="5" onclick="Cabinet.setStar(5)" aria-label="5 звёзд">★</button>
+        </div>
+        <textarea class="review-textarea" id="reviewText"
+          placeholder="Поделитесь впечатлениями — минимум 10 символов"
+          maxlength="2000" aria-label="Текст отзыва"></textarea>
+        <div class="review-error" id="reviewError" role="alert"></div>
+        <button class="review-submit-btn" id="reviewSubmitBtn" onclick="Cabinet.submitReview()">
+          Отправить отзыв
+        </button>
+      `;
+
+      const modal = document.getElementById('reviewModal');
+      modal.classList.add('open');
+      modal.focus();
+    }
+
+    function closeReview() {
+      document.getElementById('reviewModal').classList.remove('open');
+      _reviewOrderId = null;
+    }
+
+    function setStar(v) {
+      _starRating = v;
+      renderStars(v);
+    }
+
+    function renderStars(active) {
+      const btns = document.querySelectorAll('.star-btn');
+      btns.forEach((b, i) => b.classList.toggle('active', i < active));
+    }
+
+    async function submitReview() {
+      const text   = (document.getElementById('reviewText')?.value || '').trim();
+      const errEl  = document.getElementById('reviewError');
+      const submitBtn = document.getElementById('reviewSubmitBtn');
+
+      if (!_starRating) {
+        errEl.textContent = 'Выберите оценку';
+        errEl.style.display = 'block';
+        return;
+      }
+      if (!text || text.length < 10) {
+        errEl.textContent = 'Отзыв должен содержать минимум 10 символов';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Отправляем…';
+      errEl.style.display = 'none';
+
+      try {
+        const phone10 = normalizePhone(_phone);
+        const r = await fetch('/api/client/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            order_id: _reviewOrderId,
+            phone:    '7' + phone10,
+            rating:   _starRating,
+            text,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          errEl.textContent   = data.error || 'Ошибка отправки';
+          errEl.style.display = 'block';
+          submitBtn.disabled  = false;
+          submitBtn.textContent = 'Отправить отзыв';
+          return;
+        }
+        // Show success inside modal
+        document.getElementById('reviewModalContent').innerHTML = `
+          <div class="review-success">
+            <div class="review-success-icon">⭐</div>
+            <h3 style="color:var(--white);margin-bottom:8px">Спасибо за отзыв!</h3>
+            <p>Ваш отзыв отправлен на модерацию и будет опубликован в ближайшее время.</p>
+            <button class="cabinet-login-btn" onclick="Cabinet.closeReview()" style="margin-top:20px;max-width:200px">
+              Закрыть
+            </button>
+          </div>
+        `;
+        // Disable review button on the card
+        const btn = document.querySelector(`[data-order-id="${_reviewOrderId}"]`);
+        if (btn) { btn.disabled = true; btn.textContent = '✓ Отзыв отправлен'; }
+      } catch {
+        errEl.textContent   = 'Ошибка соединения. Попробуйте позже.';
+        errEl.style.display = 'block';
+        submitBtn.disabled  = false;
+        submitBtn.textContent = 'Отправить отзыв';
+      }
+    }
+
+    // ── Init ──────────────────────────────────────────────────────
+    function init() {
+      // Support ?phone=... in URL (from booking.html redirect)
+      const params = new URLSearchParams(window.location.search);
+      const urlPhone = params.get('phone');
+      const savedPhone = sessionStorage.getItem('cabinet_phone');
+      const initPhone = urlPhone || savedPhone;
+
+      if (initPhone) {
+        document.getElementById('phoneInput').value = initPhone;
+        _phone = initPhone;
+        search();
+      } else {
+        showLogin();
+      }
+
+      // Enter key support on phone input
+      document.getElementById('phoneInput').addEventListener('keydown', e => {
+        if (e.key === 'Enter') search();
+      });
+
+      // Close modal on backdrop click
+      document.getElementById('reviewModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('reviewModal')) closeReview();
+      });
+
+      // Escape key closes modal
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeReview();
+      });
+    }
+
+    // Expose public API
+    window.Cabinet = { search, logout, toggleCard, openReview, closeReview, setStar, submitReview };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+  </script>
+</body>
+</html>

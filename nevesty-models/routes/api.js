@@ -5,8 +5,25 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { query, run, get, generateOrderNumber } = require('../database');
 const auth = require('../middleware/auth');
+const mailer = require('../services/mailer');
+const payment = require('../services/payment');
+const { cache, TTL_CATALOG } = require('../services/cache');
+
+// ─── Contact form rate limiter (3 requests per hour per IP) ──────────────────
+let contactRateLimit = (req, res, next) => next(); // fallback: no-op
+try {
+  const rateLimit = require('express-rate-limit');
+  contactRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много сообщений. Попробуйте через час.' },
+  });
+} catch { /* express-rate-limit not available */ }
 
 let botInstance = null;
 function setBot(bot) { botInstance = bot; }
@@ -244,9 +261,10 @@ router.get('/admin/orders-chart', auth, async (req, res, next) => {
     const rows = await query(
       `SELECT date(created_at) as day, COUNT(*) as count
        FROM orders
-       WHERE created_at >= date('now', '-${days - 1} days')
+       WHERE created_at >= date('now', ? || ' days')
        GROUP BY date(created_at)
-       ORDER BY day ASC`
+       ORDER BY day ASC`,
+      [`-${days - 1}`]
     );
     const countMap = {};
     rows.forEach(r => { countMap[r.day] = r.count; });
@@ -332,9 +350,22 @@ router.post('/admin/notifications/read', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ─── Models (public) ──────────────────────────────────────────────────────────
+// ─── Models (public) — with 2-minute cache keyed on query params ──────────────
 router.get('/models', async (req, res, next) => {
   try {
+    // Build a stable cache key from sorted query params
+    const qHash = crypto.createHash('md5')
+      .update(JSON.stringify(Object.fromEntries(
+        Object.entries(req.query).sort(([a], [b]) => a.localeCompare(b))
+      )))
+      .digest('hex');
+    const cacheKey = `catalog:${qHash}`;
+    const cached = cache.get(cacheKey, TTL_CATALOG);
+    if (cached !== undefined) {
+      res.setHeader('X-Cache', 'HIT');
+      return res.json(cached);
+    }
+
     const { category, hair_color, min_height, max_height, min_age, max_age, city, available, search } = req.query;
     let sql = 'SELECT id, name, age, height, city, category, available, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos FROM models WHERE 1=1';
     const params = [];
@@ -350,7 +381,10 @@ router.get('/models', async (req, res, next) => {
     if (search) { sql += ' AND (name LIKE ? OR bio LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
     sql += ' ORDER BY available DESC, id DESC LIMIT 200';
     const models = await query(sql, params);
-    res.json(models.map(m => ({ ...m, photos: JSON.parse(m.photos || '[]') })));
+    const result = models.map(m => ({ ...m, photos: JSON.parse(m.photos || '[]') }));
+    cache.set(cacheKey, result, TTL_CATALOG);
+    res.setHeader('X-Cache', 'MISS');
+    res.json(result);
   } catch (e) { next(e); }
 });
 
@@ -478,6 +512,7 @@ router.post('/admin/models/json', auth, async (req, res, next) => {
        shoe_size||null, hair_color||null, eye_color||null, bio||null, instagram||null,
        phone||null, category||null, city||null, featured?1:0, available?1:0]
     );
+    cache.delByPrefix('catalog:'); // invalidate catalog cache
     res.json({ id: result.id, success: true });
   } catch (e) {
     res.status(500).json({ error: 'DB error' });
@@ -495,6 +530,7 @@ router.put('/admin/models/:id/json', auth, async (req, res, next) => {
       [name, age||null, height||null, bio||null, instagram||null, phone||null,
        category||null, city||null, featured?1:0, available?1:0, id]
     );
+    cache.delByPrefix('catalog:'); // invalidate catalog cache
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: 'DB error' });
@@ -515,6 +551,7 @@ router.patch('/admin/models/:id', auth, async (req, res, next) => {
     if (!updates.length) return res.status(400).json({ error: 'Nothing to update' });
     params.push(id);
     await run(`UPDATE models SET ${updates.join(',')} WHERE id=?`, params);
+    cache.delByPrefix('catalog:'); // invalidate catalog cache
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: 'DB error' });
@@ -534,6 +571,7 @@ router.post('/admin/models', auth, upload.fields([{ name: 'photo_main', maxCount
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [sanitize(name, 100), +age || null, +height || null, +weight || null, +bust || null, +waist || null, +hips || null, sanitize(shoe_size, 10), sanitize(hair_color, 50), sanitize(eye_color, 50), sanitize(bio, 2000), photo_main, JSON.stringify(photos), sanitize(instagram, 100), category || 'fashion', available === '1' ? 1 : 0]
     );
+    cache.delByPrefix('catalog:'); // invalidate catalog cache
     res.json({ id: result.id });
   } catch (e) { next(e); }
 });
@@ -634,6 +672,16 @@ router.post('/orders', async (req, res, next) => {
 
     if (botInstance) {
       botInstance.notifyNewOrder({ id: result.id, order_number, ...s }).catch(e => console.error('Bot notify error:', e.message));
+    }
+
+    // ─── Email notifications (non-blocking) ──────────────────────────────────
+    const orderForEmail = { id: result.id, order_number, ...s };
+    if (s.client_email) {
+      mailer.sendOrderConfirmation(s.client_email, orderForEmail).catch(e => console.error('[mailer] order confirmation error:', e.message));
+    }
+    const adminEmails = mailer.getAdminEmails();
+    for (const adminEmail of adminEmails) {
+      mailer.sendManagerNotification(adminEmail, orderForEmail).catch(e => console.error('[mailer] manager notification error:', e.message));
     }
 
     res.json({ order_number, id: result.id });
@@ -880,7 +928,9 @@ router.post('/admin/notify', auth, async (req, res, next) => {
     const text = sanitize(req.body.text, 1000);
     if (!text) return res.status(400).json({ error: 'Текст не может быть пустым' });
     if (botInstance?.notifyAdmin) {
-      await botInstance.notifyAdmin(`📢 *${req.admin.username}:*\n${text}`);
+      // Escape both username and text for MarkdownV2 to prevent injection
+      const escMd = s => String(s || '').replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
+      await botInstance.notifyAdmin(`📢 *${escMd(req.admin.username)}:*\n${escMd(text)}`);
     }
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -993,6 +1043,8 @@ router.put('/settings', auth, async (req, res, next) => {
     'wishlist_enabled', 'search_enabled', 'reviews_enabled', 'loyalty_enabled', 'referral_enabled',
     // Appearance / integrations
     'agency_name', 'tagline', 'hero_image', 'webhook_url', 'tg_notif_enabled',
+    // Payment
+    'payment_provider', 'payment_min_amount', 'payment_prepay_percent',
   ];
   try {
     const body = req.body;
@@ -1117,11 +1169,16 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const { status } = req.body;
     if (!ALLOWED_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
-    const order = await get('SELECT id, client_chat_id, order_number, status as prev_status FROM orders WHERE id=?', [id]);
+    const order = await get('SELECT id, client_chat_id, client_email, order_number, status as prev_status, client_name, event_type, event_date, event_duration, location, budget FROM orders WHERE id=?', [id]);
     if (!order) return res.status(404).json({ error: 'Not found' });
     await run(`UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, [status, id]);
     if (botInstance && order.client_chat_id && status !== order.prev_status) {
       botInstance.notifyStatusChange(order.client_chat_id, order.order_number, status).catch(() => {});
+    }
+    // ─── Email notification on status change ─────────────────────────────────
+    if (order.client_email && status !== order.prev_status) {
+      mailer.sendStatusChange(order.client_email, order, order.prev_status, status)
+        .catch(e => console.error('[mailer] status change error:', e.message));
     }
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'DB error' }); }
@@ -1470,6 +1527,159 @@ router.get('/admin/analytics/sources', auth, async (req, res, next) => {
       [since]
     );
     res.json({ sources });
+  } catch (e) { next(e); }
+});
+
+// ─── Client Cabinet ───────────────────────────────────────────────────────────
+// Rate-limit store: { ip: [timestamps] }
+const _clientRateLimits = new Map();
+
+function clientRateLimit(req, res, next) {
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const windowMs = 60 * 60 * 1000; // 1 hour
+  const maxReqs = 10;
+  const timestamps = (_clientRateLimits.get(ip) || []).filter(t => now - t < windowMs);
+  if (timestamps.length >= maxReqs) {
+    return res.status(429).json({ error: 'Слишком много запросов. Попробуйте через час.' });
+  }
+  timestamps.push(now);
+  _clientRateLimits.set(ip, timestamps);
+  next();
+}
+
+function normalizePhone(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const digits = raw.replace(/\D/g, '');
+  // Remove leading 7 or 8 (Russia) to get 10 digits
+  if (digits.length === 11 && (digits[0] === '7' || digits[0] === '8')) {
+    return digits.slice(1);
+  }
+  if (digits.length === 10) return digits;
+  return null;
+}
+
+// GET /api/client/orders?phone=79991234567
+router.get('/client/orders', clientRateLimit, async (req, res, next) => {
+  try {
+    const rawPhone = (req.query.phone || '').trim();
+    const phone10 = normalizePhone(rawPhone);
+    if (!phone10) {
+      return res.status(400).json({ error: 'Укажите корректный номер телефона (10 цифр)' });
+    }
+
+    // Match stored phone against all common formats
+    // Stored phone could be: +79991234567 / 89991234567 / 9991234567 / 79991234567
+    const patterns = [
+      phone10,           // 9991234567
+      '7' + phone10,     // 79991234567
+      '+7' + phone10,    // +79991234567
+      '8' + phone10,     // 89991234567
+    ];
+    const placeholders = patterns.map(() => '?').join(',');
+
+    const EVENT_RU = {
+      fashion_show: 'Показ мод',
+      photo_shoot: 'Фотосессия',
+      event: 'Мероприятие',
+      commercial: 'Коммерческая съёмка',
+      runway: 'Подиум',
+      other: 'Другое'
+    };
+
+    const orders = await query(
+      `SELECT o.id, o.order_number, o.created_at, o.event_type, o.event_date,
+              o.budget, o.status, o.model_id, o.comments, o.location,
+              m.name as model_name, m.photo_main as model_photo
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${placeholders})
+          OR REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${placeholders})
+       GROUP BY o.id
+       ORDER BY o.created_at DESC`,
+      [...patterns, ...patterns]
+    );
+
+    if (!orders.length) {
+      return res.status(404).json({ error: 'Заявки не найдены. Проверьте номер телефона.' });
+    }
+
+    // Add human-readable event type
+    const result = orders.map(o => ({
+      ...o,
+      event_type_ru: EVENT_RU[o.event_type] || o.event_type,
+    }));
+
+    res.json({ orders: result, total: result.length });
+  } catch (e) { next(e); }
+});
+
+// POST /api/client/review
+router.post('/client/review', clientRateLimit, async (req, res, next) => {
+  try {
+    const { order_id, phone, rating, text } = req.body;
+
+    // Validate inputs
+    if (!order_id || !Number.isInteger(parseInt(order_id, 10))) {
+      return res.status(400).json({ error: 'Укажите ID заявки' });
+    }
+    const rawPhone = (phone || '').trim();
+    const phone10 = normalizePhone(rawPhone);
+    if (!phone10) {
+      return res.status(400).json({ error: 'Укажите корректный номер телефона' });
+    }
+    const ratingNum = parseInt(rating, 10);
+    if (!ratingNum || ratingNum < 1 || ratingNum > 5) {
+      return res.status(400).json({ error: 'Оценка должна быть от 1 до 5' });
+    }
+    const reviewText = sanitize(text, 2000);
+    if (!reviewText || reviewText.length < 10) {
+      return res.status(400).json({ error: 'Отзыв должен содержать минимум 10 символов' });
+    }
+
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const placeholders = patterns.map(() => '?').join(',');
+
+    // Fetch the order and verify ownership
+    const orderId = parseInt(order_id, 10);
+    const order = await get(
+      `SELECT o.id, o.status, o.client_name, o.client_phone, o.model_id, o.order_number
+       FROM orders o
+       WHERE o.id = ?
+         AND (REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${placeholders})
+           OR REPLACE(REPLACE(REPLACE(REPLACE(o.client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${placeholders}))`,
+      [orderId, ...patterns, ...patterns]
+    );
+
+    if (!order) {
+      return res.status(403).json({ error: 'Заявка не найдена или не принадлежит этому телефону' });
+    }
+    if (order.status !== 'completed') {
+      return res.status(400).json({ error: 'Отзыв можно оставить только для завершённых заявок' });
+    }
+
+    // Check for duplicate review on same order
+    const existing = await get('SELECT id FROM reviews WHERE order_id = ?', [orderId]).catch(() => null);
+    if (existing) {
+      return res.status(409).json({ error: 'Вы уже оставили отзыв на эту заявку' });
+    }
+
+    // Insert review
+    const result = await run(
+      `INSERT INTO reviews (client_name, rating, text, model_id, approved, order_id)
+       VALUES (?, ?, ?, ?, 0, ?)`,
+      [order.client_name, ratingNum, reviewText, order.model_id || null, orderId]
+    );
+
+    // Notify admin via bot
+    if (botInstance?.notifyAdmin) {
+      const stars = '⭐'.repeat(ratingNum);
+      botInstance.notifyAdmin(
+        `💬 *Новый отзыв* (заявка ${order.order_number})\n${stars}\n_${reviewText.slice(0, 200)}_`
+      ).catch(() => {});
+    }
+
+    res.json({ ok: true, id: result.id });
   } catch (e) { next(e); }
 });
 

@@ -709,6 +709,15 @@
       // Update link to status page with order number
       const statusLink = document.getElementById('statusPageLink');
       if (statusLink) statusLink.href = `/order-status.html?number=${encodeURIComponent(orderNum)}`;
+      // Update cabinet link with client phone for easy access
+      const cabinetLink = document.getElementById('cabinetLink');
+      const cabinetPhoneHint = document.getElementById('cabinetPhoneHint');
+      const cabinetPhoneLink = document.getElementById('cabinetPhoneLink');
+      if (state.client_phone && cabinetLink) {
+        const phoneDigits = state.client_phone.replace(/\D/g, '');
+        cabinetLink.href = `/cabinet.html?phone=${encodeURIComponent(phoneDigits)}`;
+        if (cabinetPhoneLink) cabinetPhoneLink.href = `/cabinet.html?phone=${encodeURIComponent(phoneDigits)}`;
+      }
 
       // Haptic success feedback in Telegram Mini App
       window._tgHaptic?.success();
