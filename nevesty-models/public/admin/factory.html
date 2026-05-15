@@ -73,6 +73,11 @@
           <div class="stat-card-value" id="high-count" style="color:var(--error)">—</div>
           <div class="stat-card-icon">🔴</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-card-label">CEO Health Score</div>
+          <div class="stat-card-value" id="health-score" style="color:var(--success)">—</div>
+          <div class="stat-card-icon">💚</div>
+        </div>
       </div>
 
       <!-- CEO Memo -->
@@ -144,16 +149,26 @@ async function loadData() {
     const settingsResp = await _admin.apiFetch('/admin/settings');
     let memo = 'CEO memo пока не доступен. Запустите цикл Factory.';
     let experiment = null;
-    if (Array.isArray(settingsResp)) {
-      const memoSetting = settingsResp.find(s => s.key === 'ceo_memo');
-      if (memoSetting?.value) memo = memoSetting.value;
-      const expSetting = settingsResp.find(s => s.key === 'ceo_experiment');
-      if (expSetting?.value) { try { experiment = JSON.parse(expSetting.value); } catch {} }
-    } else if (settingsResp) {
-      if (settingsResp.ceo_memo) memo = settingsResp.ceo_memo;
-      if (settingsResp.ceo_experiment) { try { experiment = JSON.parse(settingsResp.ceo_experiment); } catch {} }
+    const getVal = (key) => {
+      if (Array.isArray(settingsResp)) return settingsResp.find(s => s.key === key)?.value || '';
+      return settingsResp?.[key] || '';
+    };
+    const memoVal = getVal('ceo_memo');
+    if (memoVal) memo = memoVal;
+    const expVal = getVal('ceo_experiment');
+    if (expVal) { try { experiment = JSON.parse(expVal); } catch {} }
+
+    const healthVal = getVal('ceo_health_score');
+    if (healthVal) {
+      const el = document.getElementById('health-score');
+      if (el) {
+        el.textContent = healthVal + '%';
+        const n = parseInt(healthVal);
+        el.style.color = n >= 70 ? 'var(--success)' : n >= 40 ? '#f59e0b' : 'var(--error)';
+      }
     }
-    document.getElementById('ceo-memo').textContent = memo;
+    const deptFocus = getVal('ceo_department_focus');
+    document.getElementById('ceo-memo').textContent = memo + (deptFocus ? `\n\n🏢 Фокус следующего цикла: ${deptFocus}` : '');
 
     // Show experiment proposal
     if (experiment) {
