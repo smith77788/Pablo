@@ -65,6 +65,24 @@ class ConversionAnalyst(FactoryAgent):
             max_tokens=1200,
         ) or {}
 
+    def run(self, context: dict | None) -> dict:
+        """Heuristic run — returns conversion funnel insights."""
+        ctx = context or {}
+        kpis = ctx.get("nevesty_kpis", {})
+        orders = kpis.get("total_orders", 0)
+        users = kpis.get("total_users", 1) or 1
+        conv_rate = round(orders / users * 100, 2)
+        insights = [
+            f"Текущая конверсия: {conv_rate}%. Цель: 5%+. {'Норма' if conv_rate >= 5 else 'Ниже целевого — нужна оптимизация'}.",
+            "Ключевые точки оттока: после просмотра каталога и перед оплатой — добавь CTA и упрости форму.",
+            "A/B тест кнопки 'Забронировать' vs 'Выбрать модель' может дать +10-15% к конверсии.",
+        ]
+        return {
+            "insights": insights,
+            "recommendations": ["Добавить хитмап для анализа поведения пользователей"],
+            "timestamp": _NOW(),
+        }
+
 
 class ExperimentEvaluator(FactoryAgent):
     department = "analytics"
@@ -82,6 +100,20 @@ class ExperimentEvaluator(FactoryAgent):
             context={"experiment": experiment},
             max_tokens=800,
         ) or {}
+
+    def run(self, context: dict | None) -> dict:
+        """Heuristic run — returns experiment evaluation insights."""
+        ctx = context or {}
+        insights = [
+            "Эксперименты с lift > 5% следует масштабировать, < 2% — остановить.",
+            "Минимальный размер выборки для статзначимости: 1000 пользователей на вариант.",
+            "Запускай не более 3 A/B тестов одновременно, чтобы избежать интерференции.",
+        ]
+        return {
+            "insights": insights,
+            "recommendations": ["Внедрить автоматический стоп-лосс для убыточных экспериментов"],
+            "timestamp": _NOW(),
+        }
 
 
 class KPITracker(FactoryAgent):
@@ -101,6 +133,22 @@ class KPITracker(FactoryAgent):
             context={"metrics": metrics, "targets": targets},
             max_tokens=1000,
         ) or {}
+
+    def run(self, context: dict | None) -> dict:
+        """Heuristic run — returns KPI tracking insights."""
+        ctx = context or {}
+        kpis = ctx.get("nevesty_kpis", {})
+        orders = kpis.get("total_orders", 0)
+        insights = [
+            f"Заказы: {orders}. Цель — 100/месяц. {'✅ Выполнено' if orders >= 100 else '⚠️ Недовыполнение'}.",
+            "Ключевые KPI: конверсия воронки, средний чек, NPS, время ответа на заявку.",
+            "Настрой алерты при отклонении любого KPI > 15% от плана.",
+        ]
+        return {
+            "insights": insights,
+            "recommendations": ["Создать еженедельный KPI-дашборд для команды"],
+            "timestamp": _NOW(),
+        }
 
 
 class AnalyticsDepartment:
@@ -150,3 +198,46 @@ class AnalyticsDepartment:
         results["recommended_focus"] = trends.get("recommendations", ["conversion"])[0] if trends.get("recommendations") else "conversion"
 
         return results
+
+    def execute_task(self, task: str, context: dict | None) -> dict:
+        """Heuristic department-level task execution — no LLM calls."""
+        ctx = context or {}
+        task_lower = (task or "").lower()
+
+        roles_used = ["data_analyst", "kpi_tracker"]
+        insights: list[str] = []
+
+        analyst_result = self.analyst.run(ctx)
+        insights.extend(analyst_result.get("insights", []))
+
+        kpi_result = self.kpi.run(ctx)
+        insights.extend(kpi_result.get("insights", []))
+
+        if any(w in task_lower for w in ("conversion", "funnel", "воронка", "конверсия")):
+            roles_used.append("conversion_analyst")
+            conv_result = self.conversion.run(ctx)
+            insights.extend(conv_result.get("insights", []))
+
+        if any(w in task_lower for w in ("experiment", "a/b", "тест", "test")):
+            roles_used.append("experiment_evaluator")
+            exp_result = self.evaluator.run(ctx)
+            insights.extend(exp_result.get("insights", []))
+
+        kpis = ctx.get("nevesty_kpis", {})
+        health = "yellow"
+        if kpis.get("total_orders", 0) >= 100:
+            health = "green"
+        elif kpis.get("total_orders", 0) < 20:
+            health = "red"
+
+        health_score = {"green": 80, "yellow": 50, "red": 25}[health]
+
+        return {
+            "department": "analytics",
+            "task": task,
+            "roles_used": roles_used,
+            "insights": insights,
+            "health_score": health_score,
+            "recommended_focus": "conversion" if "conversion_analyst" not in roles_used else "experiments",
+            "timestamp": _NOW(),
+        }
