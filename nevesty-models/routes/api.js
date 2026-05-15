@@ -4838,22 +4838,25 @@ router.patch('/admin/models/bulk', auth, async (req, res, next) => {
 router.get('/admin/models/export', auth, async (req, res, next) => {
   try {
     const models = await query(
-      `SELECT name, age, height, weight, category, city, bio, instagram, params, available, featured
+      `SELECT name, age, height, weight, bust, waist, hips, shoe_size, category, city, bio, instagram, available, featured
        FROM models WHERE archived=0 ORDER BY name`
     );
     const BOM = '\xEF\xBB\xBF';
-    const headerRow = 'Имя;Возраст;Рост;Вес;Категория;Город;Описание;Instagram;Параметры;Доступна;Топ';
+    const headerRow = 'Имя;Возраст;Рост;Вес;Грудь;Талия;Бёдра;Обувь;Категория;Город;Описание;Instagram;Доступна;Топ';
     const rows = models.map(m =>
       [
         m.name,
         m.age || '',
         m.height || '',
         m.weight || '',
+        m.bust || '',
+        m.waist || '',
+        m.hips || '',
+        m.shoe_size || '',
         m.category || '',
         m.city || '',
         (m.bio || '').replace(/;/g, ',').replace(/\r?\n/g, ' '),
         m.instagram || '',
-        m.params || '',
         m.available ? 'Да' : 'Нет',
         m.featured ? 'Да' : 'Нет',
       ].join(';')
@@ -5408,6 +5411,15 @@ router.post('/webhooks/crm/:provider', async (req, res, next) => {
     const validProviders = ['amocrm', 'bitrix24'];
     if (!validProviders.includes(provider)) {
       return res.status(400).json({ error: 'Invalid provider' });
+    }
+    // Shared-secret check: if CRM_WEBHOOK_SECRET is set, validate X-Webhook-Secret header
+    const webhookSecret = process.env.CRM_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const incomingSecret = req.headers['x-webhook-secret'] || req.headers['x-hub-signature-256'] || '';
+      if (incomingSecret !== webhookSecret) {
+        console.warn(`[CRM Webhook] Unauthorized request from ${req.ip} — invalid secret`);
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
     }
     const payload = req.body;
 
@@ -7329,20 +7341,24 @@ router.get('/admin/social/posts', auth, async (req, res, next) => {
 
 router.post('/admin/social/posts', auth, async (req, res, next) => {
   try {
-    const {
-      platform = 'instagram',
-      model_id,
-      content_type = 'post',
-      caption,
-      media_url,
-      hashtags,
-      scheduled_at,
-    } = req.body;
+    const { platform, model_id, content_type, caption, media_url, hashtags, scheduled_at } = req.body;
     if (!caption) return res.status(400).json({ error: 'caption required' });
+    const VALID_PLATFORMS = ['instagram', 'vk', 'telegram', 'facebook', 'youtube'];
+    const VALID_CONTENT_TYPES = ['post', 'story', 'reel', 'video', 'carousel'];
+    const cleanPlatform = VALID_PLATFORMS.includes(platform) ? platform : 'instagram';
+    const cleanContentType = VALID_CONTENT_TYPES.includes(content_type) ? content_type : 'post';
+    const cleanCaption = sanitize(caption, 2000);
+    if (!cleanCaption) return res.status(400).json({ error: 'caption required' });
+    const cleanMediaUrl = media_url ? sanitize(media_url, 500) : null;
+    if (cleanMediaUrl && !/^https?:\/\//i.test(cleanMediaUrl)) {
+      return res.status(400).json({ error: 'media_url must be a valid http(s) URL' });
+    }
+    const cleanHashtags = sanitize(hashtags, 500);
+    const cleanScheduledAt = sanitize(scheduled_at, 30);
     const result = await run(
       `INSERT INTO social_posts (platform, model_id, content_type, caption, media_url, hashtags, scheduled_at, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled')`,
-      [platform, model_id || null, content_type, caption, media_url || null, hashtags || null, scheduled_at || null]
+      [cleanPlatform, model_id || null, cleanContentType, cleanCaption, cleanMediaUrl, cleanHashtags, cleanScheduledAt]
     );
     res.json({ id: result.id, status: 'scheduled' });
   } catch (e) {
