@@ -470,6 +470,87 @@
     let _reviewOrderId = null;
     let _starRating = 0;
 
+    // ── WebSocket real-time monitoring ────────────────────────────────────────
+    let _ws = null;
+    let _wsReconnectTimer = null;
+    let _wsPhone = null;
+
+    const STATUS_LABELS_WS = {
+      new: 'Новая', reviewing: 'На рассмотрении', confirmed: 'Подтверждена',
+      in_progress: 'В работе', completed: 'Завершена', cancelled: 'Отменена',
+    };
+
+    function wsConnect(phone10) {
+      _wsPhone = phone10;
+      if (_ws) { try { _ws.close(); } catch (_e) {} }
+      if (_wsReconnectTimer) { clearTimeout(_wsReconnectTimer); _wsReconnectTimer = null; }
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      _ws = new WebSocket(`${proto}//${location.host}`);
+
+      _ws.onopen = () => {
+        _ws.send(JSON.stringify({ type: 'subscribe', phone: '7' + phone10 }));
+      };
+
+      _ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'order_update') {
+            wsUpdateOrderCard(msg.order_id, msg.status);
+          } else if (msg.type === 'ping') {
+            _ws.send(JSON.stringify({ type: 'pong' }));
+          }
+        } catch (_e) {}
+      };
+
+      _ws.onclose = () => {
+        if (_wsPhone) {
+          _wsReconnectTimer = setTimeout(() => wsConnect(_wsPhone), 3000);
+        }
+      };
+
+      _ws.onerror = () => { try { _ws.close(); } catch (_e) {} };
+    }
+
+    function wsDisconnect() {
+      _wsPhone = null;
+      if (_wsReconnectTimer) { clearTimeout(_wsReconnectTimer); _wsReconnectTimer = null; }
+      if (_ws) { try { _ws.close(); } catch (_e) {} _ws = null; }
+    }
+
+    function wsUpdateOrderCard(orderId, newStatus) {
+      // Update cached orders array
+      const order = _orders.find(o => o.id === orderId);
+      if (!order) return;
+      order.status = newStatus;
+
+      // Update status badge in card header
+      const card = document.getElementById('order-card-' + orderId);
+      if (!card) return;
+      const badge = card.querySelector('.status-badge');
+      if (badge) {
+        badge.className = 'status-badge ' + newStatus;
+        badge.textContent = STATUS_LABELS_WS[newStatus] || newStatus;
+      }
+
+      // Update progress bar inside card body
+      const body = document.getElementById('order-body-' + orderId);
+      if (body) {
+        const progressEl = body.querySelector('.status-progress, [role="progressbar"]');
+        if (progressEl) {
+          progressEl.outerHTML = buildProgressBar(newStatus);
+        }
+      }
+
+      // Flash animation on the card
+      card.style.transition = 'border-color 0.3s';
+      card.style.borderColor = 'rgba(201,169,110,0.6)';
+      setTimeout(() => { card.style.borderColor = ''; }, 1200);
+
+      // Show toast
+      toast(`Статус заявки обновлён: ${STATUS_LABELS_WS[newStatus] || newStatus}`, 'info');
+    }
+
     // ── Phone normalization ───────────────────────────────────────
     function normalizePhone(raw) {
       const digits = raw.replace(/\D/g, '');
@@ -672,6 +753,8 @@
         sessionStorage.setItem('cabinet_phone', raw);
         showOrders();
         renderOrders(_orders);
+        // Start WS monitoring for real-time order updates
+        wsConnect(phone10);
       } catch (e) {
         showLogin();
         showError('Ошибка соединения. Попробуйте позже.');
@@ -683,6 +766,7 @@
 
     // ── Logout ────────────────────────────────────────────────────
     function logout() {
+      wsDisconnect();
       sessionStorage.removeItem('cabinet_phone');
       _phone  = '';
       _orders = [];

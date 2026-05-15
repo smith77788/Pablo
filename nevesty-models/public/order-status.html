@@ -314,6 +314,36 @@
       100% { background-position: 200% 0; }
     }
 
+    /* WS online indicator */
+    .ws-indicator {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      margin-top: 10px;
+      justify-content: center;
+    }
+    .ws-indicator.visible { display: flex; }
+    .ws-indicator .ws-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #4caf8a;
+      animation: wsPulse 2s infinite;
+    }
+    @keyframes wsPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Flash animation when status updated via WS */
+    @keyframes statusFlash {
+      0%   { box-shadow: 0 0 0 0 rgba(201,169,110,0.5); }
+      50%  { box-shadow: 0 0 0 8px rgba(201,169,110,0); }
+      100% { box-shadow: 0 0 0 0 rgba(201,169,110,0); }
+    }
+    .status-flash { animation: statusFlash 0.8s ease-out; }
+
     /* Hint box */
     .status-hint {
       max-width: 560px;
@@ -442,6 +472,12 @@
             <a href="/booking.html" class="btn-outline" style="font-size:0.8rem;padding:12px 24px;">Новая заявка</a>
             <a href="/#contact" class="btn-primary" style="font-size:0.8rem;padding:12px 24px;">Связаться с нами</a>
           </div>
+
+          <!-- WS online indicator -->
+          <div class="ws-indicator" id="wsIndicator">
+            <div class="ws-dot"></div>
+            <span>Онлайн-мониторинг активен</span>
+          </div>
         </div>
       </div>
 
@@ -545,6 +581,12 @@
       errEl.textContent = 'Введите номер заявки';
       return;
     }
+
+    // Disconnect previous WS
+    if (_ws) { try { _ws.close(); } catch (_) {} _ws = null; }
+    _wsOrderId = null;
+    if (_wsReconnectTimer) { clearTimeout(_wsReconnectTimer); _wsReconnectTimer = null; }
+    document.getElementById('wsIndicator').classList.remove('visible');
 
     // Show skeleton
     hintEl.style.display = 'none';
@@ -654,6 +696,107 @@
 
     resultEl.classList.add('visible');
     resultEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Start WS real-time monitoring if order is active
+    if (order.id && order.status !== 'completed' && order.status !== 'cancelled') {
+      connectWS(order.id);
+    } else {
+      // Disconnect any previous WS
+      if (_ws) { try { _ws.close(); } catch (_) {} _ws = null; }
+      _wsOrderId = null;
+      document.getElementById('wsIndicator').classList.remove('visible');
+    }
+  }
+
+  // ─── WebSocket real-time monitoring ─────────────────────────────────────────
+  let _wsOrderId = null;
+  let _ws = null;
+  let _wsReconnectTimer = null;
+
+  function connectWS(orderId) {
+    _wsOrderId = orderId;
+    if (_ws) { try { _ws.close(); } catch (_) {} }
+    if (_wsReconnectTimer) { clearTimeout(_wsReconnectTimer); _wsReconnectTimer = null; }
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    _ws = new WebSocket(`${proto}//${location.host}`);
+
+    _ws.onopen = () => {
+      _ws.send(JSON.stringify({ type: 'subscribe', order_id: orderId }));
+    };
+
+    _ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'subscribed') {
+          document.getElementById('wsIndicator').classList.add('visible');
+        } else if (msg.type === 'order_update' && msg.order_id === _wsOrderId) {
+          // Animate badge flash
+          const badge = document.getElementById('resStatusBadge');
+          badge.classList.remove('status-flash');
+          void badge.offsetWidth; // reflow
+          badge.classList.add('status-flash');
+          // Re-render status
+          updateStatusDisplay(msg.status);
+        } else if (msg.type === 'ping') {
+          _ws.send(JSON.stringify({ type: 'pong' }));
+        }
+      } catch (_) {}
+    };
+
+    _ws.onclose = () => {
+      document.getElementById('wsIndicator').classList.remove('visible');
+      if (_wsOrderId) {
+        _wsReconnectTimer = setTimeout(() => connectWS(_wsOrderId), 3000);
+      }
+    };
+
+    _ws.onerror = () => { try { _ws.close(); } catch (_) {} };
+  }
+
+  function updateStatusDisplay(newStatus) {
+    const STATUS_LABELS_WS = {
+      new:         'Новая заявка',
+      reviewing:   'На рассмотрении',
+      confirmed:   'Подтверждена',
+      in_progress: 'В работе',
+      completed:   'Завершена',
+      cancelled:   'Отменена',
+    };
+    const STATUS_ICONS_WS = {
+      new: '📋', reviewing: '🔍', confirmed: '✅',
+      in_progress: '⚡', completed: '🏁', cancelled: '❌',
+    };
+    // Update badge
+    const badge = document.getElementById('resStatusBadge');
+    badge.className = 'status-badge status-' + (newStatus || 'new');
+    document.getElementById('resStatusText').textContent =
+      (STATUS_ICONS_WS[newStatus] || '') + ' ' + (STATUS_LABELS_WS[newStatus] || newStatus);
+
+    // Update progress bar
+    const isCancelled = newStatus === 'cancelled';
+    const stepsEl = document.getElementById('progressSteps');
+    if (isCancelled) {
+      stepsEl.innerHTML = `<div class="progress-step cancelled-step">
+        <div class="progress-step-circle">✕</div>
+        <div class="progress-step-label">Отменена</div>
+      </div>`;
+    } else {
+      const currentIdx = PROGRESS_STEPS.findIndex(s => s.key === newStatus);
+      stepsEl.innerHTML = PROGRESS_STEPS.map((step, i) => {
+        let cls = '';
+        if (i < currentIdx) cls = 'done';
+        else if (i === currentIdx) cls = 'active';
+        const icon = cls === 'done' ? '✓' : (i + 1);
+        const lineClass = i < currentIdx ? 'done' : '';
+        const line = i < PROGRESS_STEPS.length - 1
+          ? `<div class="progress-line ${lineClass}"></div>` : '';
+        return `<div class="progress-step ${cls}">
+          <div class="progress-step-circle">${icon}</div>
+          <div class="progress-step-label">${step.label}</div>
+        </div>${line}`;
+      }).join('');
+    }
   }
 
   // Check from URL query param on load

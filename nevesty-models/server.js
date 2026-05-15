@@ -7,6 +7,7 @@ try { compression = require('compression'); } catch {}
 const { initDatabase, get: dbGet, closeDatabase } = require('./database');
 const { initBot } = require('./bot');
 const apiRouter = require('./routes/api');
+const { WebSocketServer } = require('ws');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   console.error('FATAL: JWT_SECRET must be set to a strong value (>= 32 chars).');
@@ -34,7 +35,7 @@ try {
         scriptSrc: ["'self'", "'unsafe-inline'", "cdn.tailwindcss.com", "cdnjs.cloudflare.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "cdnjs.cloudflare.com"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", "ws:", "wss:"],
         fontSrc: ["'self'", "cdnjs.cloudflare.com"],
       }
     },
@@ -267,6 +268,102 @@ async function start() {
     console.log(`❤  Health check   →  http://localhost:${PORT}/health\n`);
   });
 
+  // ─── WebSocket для real-time обновлений заявок ────────────────────────────────
+  const wss = new WebSocketServer({ server, path: '/' });
+
+  // Map: orderId → Set<ws>  and  phone → Set<ws>
+  const wsByOrder = new Map();
+  const wsByPhone = new Map();
+
+  function wsSubscribeOrder(ws, orderId) {
+    if (!wsByOrder.has(orderId)) wsByOrder.set(orderId, new Set());
+    wsByOrder.get(orderId).add(ws);
+    if (!ws._orderIds) ws._orderIds = new Set();
+    ws._orderIds.add(orderId);
+  }
+
+  function wsSubscribePhone(ws, phone) {
+    if (!wsByPhone.has(phone)) wsByPhone.set(phone, new Set());
+    wsByPhone.get(phone).add(ws);
+    ws._phone = phone;
+  }
+
+  function wsCleanup(ws) {
+    if (ws._orderIds) {
+      for (const id of ws._orderIds) {
+        const set = wsByOrder.get(id);
+        if (set) { set.delete(ws); if (!set.size) wsByOrder.delete(id); }
+      }
+    }
+    if (ws._phone) {
+      const set = wsByPhone.get(ws._phone);
+      if (set) { set.delete(ws); if (!set.size) wsByPhone.delete(ws._phone); }
+    }
+  }
+
+  function notifyOrderUpdate(orderId, status, phone) {
+    const msg = JSON.stringify({ type: 'order_update', order_id: orderId, status });
+    // Notify by orderId
+    const byId = wsByOrder.get(orderId);
+    if (byId) byId.forEach(ws => { try { if (ws.readyState === ws.OPEN) ws.send(msg); } catch (_) {} });
+    // Notify by phone (cabinet)
+    if (phone) {
+      const byPhone = wsByPhone.get(phone);
+      if (byPhone) byPhone.forEach(ws => { try { if (ws.readyState === ws.OPEN) ws.send(msg); } catch (_) {} });
+    }
+  }
+
+  wss.on('connection', (ws) => {
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('close', () => wsCleanup(ws));
+    ws.on('error', () => wsCleanup(ws));
+
+    ws.on('message', async (rawMsg) => {
+      try {
+        const msg = JSON.parse(rawMsg);
+        if (msg.type === 'subscribe') {
+          if (msg.order_id) {
+            const id = parseInt(msg.order_id);
+            if (Number.isInteger(id) && id > 0) {
+              wsSubscribeOrder(ws, id);
+              try {
+                const { get: dbGetLocal } = require('./database');
+                const order = await dbGetLocal('SELECT status FROM orders WHERE id=?', [id]);
+                if (order) {
+                  ws.send(JSON.stringify({ type: 'subscribed', order_id: id, status: order.status }));
+                }
+              } catch (_) {}
+            }
+          } else if (msg.phone) {
+            const phone = String(msg.phone).replace(/\D/g, '').slice(-10);
+            if (phone.length === 10) {
+              wsSubscribePhone(ws, phone);
+              ws.send(JSON.stringify({ type: 'subscribed', phone }));
+            }
+          }
+        } else if (msg.type === 'pong') {
+          ws.isAlive = true;
+        }
+      } catch (_) {}
+    });
+  });
+
+  // Heartbeat — ping every 30s, terminate dead connections
+  const wsPingInterval = setInterval(() => {
+    wss.clients.forEach(ws => {
+      if (!ws.isAlive) { wsCleanup(ws); return ws.terminate(); }
+      ws.isAlive = false;
+      ws.ping();
+    });
+  }, 30000);
+
+  wss.on('close', () => clearInterval(wsPingInterval));
+
+  // Attach to app so api routes can use it
+  app.set('wsServer', { notifyOrderUpdate });
+  console.log('🔌 WebSocket server attached to HTTP server');
+
   // ─── Graceful shutdown ───────────────────────────────────────────────────
   const shutdown = async (signal) => {
     console.log(`\n${signal} received — shutting down gracefully…`);
@@ -275,6 +372,9 @@ async function start() {
       if (botInstance?.instance?.stopPolling) {
         try { await botInstance.instance.stopPolling({ cancel: true }); console.log('Bot polling stopped.'); } catch (e) { console.warn('stopPolling:', e.message); }
       }
+      clearInterval(wsPingInterval);
+      await new Promise(resolve => wss.close(resolve));
+      console.log('WebSocket server closed.');
       await new Promise(resolve => server.close(resolve));
       console.log('HTTP server closed.');
       if (closeDatabase) await closeDatabase();

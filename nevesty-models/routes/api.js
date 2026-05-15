@@ -619,6 +619,57 @@ router.delete('/admin/models/:id', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Bulk set featured (admin) ───────────────────────────────────────────────
+router.post('/admin/models/bulk-featured', auth, async (req, res, next) => {
+  try {
+    const { model_ids, featured } = req.body;
+    if (!Array.isArray(model_ids) || !model_ids.length) return res.status(400).json({ error: 'Не указаны модели' });
+    const validIds = model_ids.map(Number).filter(n => n > 0);
+    if (!validIds.length) return res.status(400).json({ error: 'Некорректные ID моделей' });
+    const featuredVal = featured ? 1 : 0;
+    await run(`UPDATE models SET featured=? WHERE id IN (${validIds.map(() => '?').join(',')})`, [featuredVal, ...validIds]);
+    cache.delByPrefix('catalog:');
+    res.json({ ok: true, affected: validIds.length });
+  } catch (e) { next(e); }
+});
+
+// ─── Duplicate model (admin) ─────────────────────────────────────────────────
+router.post('/admin/models/:id/duplicate', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const m = await get('SELECT * FROM models WHERE id = ?', [id]);
+    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
+    const result = await run(
+      `INSERT INTO models (name,age,height,weight,bust,waist,hips,shoe_size,hair_color,eye_color,bio,instagram,phone,category,city,featured,available,archived,photo_main,photos)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`,
+      [
+        (m.name || '') + ' (копия)', m.age, m.height, m.weight, m.bust, m.waist, m.hips,
+        m.shoe_size, m.hair_color, m.eye_color, m.bio, m.instagram, m.phone,
+        m.category, m.city, m.featured || 0, 0, m.photo_main, m.photos || '[]'
+      ]
+    );
+    cache.delByPrefix('catalog:');
+    res.json({ id: result.id, ok: true });
+  } catch (e) { next(e); }
+});
+
+// ─── Archived models list (admin) ────────────────────────────────────────────
+router.get('/admin/models/archived', auth, async (req, res, next) => {
+  try {
+    const page = Math.max(0, parseInt(req.query.page) || 0);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 15));
+    const offset = page * limit;
+    const total = (await get('SELECT COUNT(*) as cnt FROM models WHERE archived=1'))?.cnt || 0;
+    const models = await query(
+      `SELECT *, (SELECT COUNT(*) FROM orders WHERE model_id=models.id) as order_count
+       FROM models WHERE archived=1 ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    res.json({ models, total, page });
+  } catch (e) { next(e); }
+});
+
 router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
@@ -903,6 +954,80 @@ router.post('/admin/orders/bulk', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Bulk status change for orders (admin) ───────────────────────────────────
+router.post('/admin/orders/bulk-status', auth, async (req, res, next) => {
+  try {
+    const { order_ids, status } = req.body;
+    if (!Array.isArray(order_ids) || !order_ids.length) return res.status(400).json({ error: 'Не указаны заявки' });
+    if (!ALLOWED_STATUSES.includes(status)) return res.status(400).json({ error: 'Недопустимый статус' });
+    const validIds = order_ids.map(Number).filter(n => n > 0);
+    if (!validIds.length) return res.status(400).json({ error: 'Некорректные ID заявок' });
+    const orders = await query(`SELECT id, client_chat_id, order_number, status FROM orders WHERE id IN (${validIds.map(() => '?').join(',')})`, validIds);
+    await run(`UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id IN (${validIds.map(() => '?').join(',')})`, [status, ...validIds]);
+    if (botInstance) {
+      const toNotify = orders.filter(o => o.status !== status && o.client_chat_id);
+      await Promise.allSettled(toNotify.map(o => botInstance.notifyStatusChange(o.client_chat_id, o.order_number, status)));
+    }
+    res.json({ ok: true, affected: validIds.length });
+  } catch (e) { next(e); }
+});
+
+// ─── Search orders by phone or client name (admin) ───────────────────────────
+router.get('/admin/orders/search', auth, async (req, res, next) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.status(400).json({ error: 'Параметр поиска q обязателен' });
+    const like = `%${q}%`;
+    const orders = await query(
+      `SELECT o.*, m.name as model_name
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE o.client_phone LIKE ? OR o.client_name LIKE ?
+       ORDER BY o.created_at DESC LIMIT 50`,
+      [like, like]
+    );
+    res.json({ orders, total: orders.length });
+  } catch (e) { next(e); }
+});
+
+// ─── Export orders with advanced filters (admin) ─────────────────────────────
+router.get('/admin/export/orders', auth, async (req, res, next) => {
+  try {
+    const { status, from, to, model_id } = req.query;
+    let where = '1=1';
+    const params = [];
+    if (status && ALLOWED_STATUSES.includes(status)) { where += ' AND o.status = ?'; params.push(status); }
+    if (from && validateDate(from)) { where += ' AND date(o.created_at) >= ?'; params.push(from); }
+    if (to && validateDate(to))     { where += ' AND date(o.created_at) <= ?'; params.push(to); }
+    if (model_id && !isNaN(+model_id) && +model_id > 0) { where += ' AND o.model_id = ?'; params.push(+model_id); }
+    const orders = await query(
+      `SELECT o.order_number, o.client_name, o.client_phone, o.client_email, o.client_telegram,
+              o.event_type, o.event_date, o.event_duration, o.location, o.budget, o.comments,
+              o.status, o.admin_notes, m.name as model_name, a.username as manager_name,
+              o.created_at, o.updated_at
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       LEFT JOIN admins a ON o.manager_id = a.id
+       WHERE ${where} ORDER BY o.created_at DESC`,
+      params
+    );
+    const STATUS_RU = { new:'Новая', reviewing:'На рассмотрении', confirmed:'Подтверждена', in_progress:'В процессе', completed:'Завершена', cancelled:'Отменена' };
+    const EVENT_RU  = { fashion_show:'Показ мод', photo_shoot:'Фотосессия', event:'Мероприятие', commercial:'Коммерческая', runway:'Подиум', other:'Другое' };
+    const headers = ['Номер','Клиент','Телефон','Email','Telegram','Мероприятие','Дата','Часов','Место','Бюджет','Комментарий','Статус','Заметки','Модель','Менеджер','Создана','Обновлена'];
+    const csvRow = (cols) => cols.map(csvCell).join(',');
+    const rows = [csvRow(headers), ...orders.map(o => csvRow([
+      o.order_number, o.client_name, o.client_phone, o.client_email || '', o.client_telegram || '',
+      EVENT_RU[o.event_type] || o.event_type, o.event_date || '', o.event_duration,
+      o.location || '', o.budget || '', o.comments || '',
+      STATUS_RU[o.status] || o.status, o.admin_notes || '', o.model_name || '', o.manager_name || '',
+      o.created_at, o.updated_at
+    ]))];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="orders_export_${Date.now()}.csv"`);
+    res.send('﻿' + rows.join('\n')); // BOM for Excel
+  } catch (e) { next(e); }
+});
+
 // ─── Messages ─────────────────────────────────────────────────────────────────
 router.post('/admin/orders/:id/message', auth, async (req, res, next) => {
   try {
@@ -1179,7 +1304,7 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const { status } = req.body;
     if (!ALLOWED_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
-    const order = await get('SELECT id, client_chat_id, client_email, order_number, status as prev_status, client_name, event_type, event_date, event_duration, location, budget FROM orders WHERE id=?', [id]);
+    const order = await get('SELECT id, client_chat_id, client_email, client_phone, order_number, status as prev_status, client_name, event_type, event_date, event_duration, location, budget FROM orders WHERE id=?', [id]);
     if (!order) return res.status(404).json({ error: 'Not found' });
     await run(`UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, [status, id]);
     if (botInstance && order.client_chat_id && status !== order.prev_status) {
@@ -1189,6 +1314,16 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
     if (order.client_email && status !== order.prev_status) {
       mailer.sendStatusChange(order.client_email, order, order.prev_status, status)
         .catch(e => console.error('[mailer] status change error:', e.message));
+    }
+    // ─── WebSocket real-time notification ────────────────────────────────────
+    if (status !== order.prev_status) {
+      const wsServer = req.app.get('wsServer');
+      if (wsServer) {
+        const phone10 = order.client_phone
+          ? String(order.client_phone).replace(/\D/g, '').slice(-10)
+          : null;
+        wsServer.notifyOrderUpdate(id, status, phone10);
+      }
     }
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'DB error' }); }

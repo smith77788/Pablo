@@ -26,7 +26,8 @@
     "node-telegram-bot-api": "^0.64.0",
     "nodemailer": "^8.0.7",
     "sqlite3": "^5.1.6",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "eslint": "^10.3.0",
