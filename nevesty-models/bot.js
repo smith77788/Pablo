@@ -1492,7 +1492,24 @@ async function showAdminOrder(chatId, orderId) {
     if (o.event_date)      text += `📅 ${esc(o.event_date)}\n`;
     if (o.event_duration)  text += `⏱ ${esc(o.event_duration)} ч\\.\n`;
     if (o.location)        text += `📍 ${esc(o.location)}\n`;
-    if (o.model_name)      text += `💃 ${esc(o.model_name)}\n`;
+    // Show all models if multi-model booking
+    if (o.model_ids) {
+      try {
+        const ids = JSON.parse(o.model_ids);
+        if (Array.isArray(ids) && ids.length > 1) {
+          const modelRows = await query(
+            `SELECT id, name FROM models WHERE id IN (${ids.map(() => '?').join(',')})`, ids
+          );
+          const nameMap = Object.fromEntries(modelRows.map(r => [r.id, r.name]));
+          text += `💃 Модели \\(${ids.length}\\):\n`;
+          ids.forEach((id, i) => { text += `  ${i+1}\\. ${esc(nameMap[id] || String(id))}\n`; });
+        } else if (o.model_name) {
+          text += `💃 ${esc(o.model_name)}\n`;
+        }
+      } catch { if (o.model_name) text += `💃 ${esc(o.model_name)}\n`; }
+    } else if (o.model_name) {
+      text += `💃 ${esc(o.model_name)}\n`;
+    }
     if (o.budget)          text += `💰 ${esc(o.budget)}\n`;
     if (o.comments)        text += `💬 ${esc(o.comments)}\n`;
     if (msgs.length) {
@@ -4602,6 +4619,76 @@ function initBot(app) {
       return bkStep4Confirm(chatId, d);
     }
 
+    // ── Booking: add another model (multi-model selection)
+    if (data === 'bk_add_model') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      // Save state as bk_s1_add so we know we're adding, not starting fresh
+      await setSession(chatId, 'bk_s1_add', d);
+      resetSessionTimer(chatId);
+      try {
+        const currentModelIds = Array.isArray(d.model_ids) ? d.model_ids : (d.model_id ? [d.model_id] : []);
+        const models = await query('SELECT id,name,height,hair_color FROM models WHERE available=1 ORDER BY id LIMIT 12');
+        // Exclude already selected models
+        const available = models.filter(m => !currentModelIds.includes(m.id));
+        const btns = available.map(m => [{
+          text: `${m.name}  ·  ${m.height}см  ·  ${m.hair_color||''}`,
+          callback_data: `bk_pick2_${m.id}`
+        }]);
+        if (!btns.length) {
+          return safeSend(chatId,
+            '⚠️ Нет доступных моделей для добавления\\.',
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'bk_s4_back' }]] }
+            }
+          );
+        }
+        return safeSend(chatId,
+          `_Добавить ещё одну модель_\n\nВыберите дополнительную модель:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [
+              ...btns,
+              [{ text: '← Назад к заявке', callback_data: 'bk_s4_back' }],
+            ]}
+          }
+        );
+      } catch (e) { console.error('[Bot] bk_add_model:', e.message); }
+    }
+
+    // ── Booking: pick second/additional model
+    if (data.startsWith('bk_pick2_')) {
+      const modelId = parseInt(data.replace('bk_pick2_',''));
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      const m = await get('SELECT id,name FROM models WHERE id=?', [modelId]).catch(()=>null);
+      if (m) {
+        // Build model_ids array
+        const currentIds = Array.isArray(d.model_ids) ? d.model_ids : (d.model_id ? [d.model_id] : []);
+        const currentNames = Array.isArray(d.model_names) ? d.model_names : (d.model_name ? [d.model_name] : []);
+        if (!currentIds.includes(m.id)) {
+          currentIds.push(m.id);
+          currentNames.push(m.name);
+        }
+        d.model_ids   = currentIds;
+        d.model_names = currentNames;
+        // Keep primary model_id/model_name as first entry
+        if (currentIds.length > 0) {
+          d.model_id   = currentIds[0];
+          d.model_name = currentNames[0];
+        }
+      }
+      return bkStep4Confirm(chatId, d);
+    }
+
+    // ── Booking: back to step 4 (from add-model screen)
+    if (data === 'bk_s4_back') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep4Confirm(chatId, d);
+    }
+
     // ── Booking: submit
     if (data === 'bk_submit') {
       const session = await getSession(chatId);
@@ -5400,12 +5487,43 @@ function initBot(app) {
       return sendBroadcastWithPhoto(chatId, sd.broadcast_photo_id, '');
     }
     if (data === 'adm_reviews')          { if (!isAdmin(chatId)) return; return showAdminReviews(chatId); }
-    if (data === 'adm_reviews_pending')  { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'pending'); }
-    if (data === 'adm_reviews_approved') { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'approved'); }
+    if (data === 'adm_reviews_pending'  || data === 'adm_rev_pending')  { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'pending'); }
+    if (data === 'adm_reviews_approved' || data === 'adm_rev_approved') { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'approved'); }
+    if (data === 'adm_rev_all') { if (!isAdmin(chatId)) return; return showAdminReviewsList(chatId, 'all'); }
+    if (data.startsWith('rev_view_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('rev_view_', ''));
+      try {
+        const r = await get(
+          `SELECT r.*, m.name as model_name
+           FROM reviews r
+           LEFT JOIN orders o ON r.order_id = o.id
+           LEFT JOIN models m ON o.model_id = m.id
+           WHERE r.id=?`, [id]
+        ).catch(()=>null);
+        if (!r) return bot.answerCallbackQuery(q.id, { text: 'Отзыв не найден' }).catch(()=>{});
+        const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 1)));
+        const statusIcon = r.approved ? '✅' : (r.status === 'rejected' ? '❌' : '⏳');
+        const modelLine = r.model_name ? `\nМодель: ${esc(r.model_name)}` : '';
+        const replyLine = r.admin_reply ? `\n\n💬 Ответ: ${esc(r.admin_reply)}` : '';
+        return safeSend(chatId,
+          `📝 *Отзыв \\#${esc(String(r.id))}* ${statusIcon}\n👤 ${esc(r.client_name || 'Клиент')}${modelLine}\n${stars}\n\n${esc(r.text || '')}${replyLine}`,
+          { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [
+            [
+              { text: '✅ Одобрить',  callback_data: `rev_approve_${r.id}` },
+              { text: '❌ Отклонить', callback_data: `rev_reject_${r.id}` },
+              { text: '🗑 Удалить',   callback_data: `rev_delete_${r.id}` }
+            ],
+            [{ text: '← К отзывам', callback_data: 'adm_reviews' }]
+          ]}}
+        );
+      } catch (e) { console.error('[Bot] rev_view:', e.message); }
+    }
     if (data.startsWith('rev_approve_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_approve_', ''));
       await run('UPDATE reviews SET approved=1, status=NULL WHERE id=?', [id]).catch(()=>{});
+      await bot.answerCallbackQuery(q.id, { text: '✅ Отзыв одобрен' }).catch(()=>{});
       // Notify client if linked to an order
       try {
         const rev = await get('SELECT * FROM reviews WHERE id=?', [id]);
@@ -5416,12 +5534,13 @@ function initBot(app) {
           }
         }
       } catch {}
-      return safeSend(chatId, `✅ Отзыв #${id} одобрен.`);
+      return showAdminReviewsList(chatId, 'pending');
     }
     if (data.startsWith('rev_reject_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_reject_', ''));
       await run("UPDATE reviews SET approved=0, status='rejected' WHERE id=?", [id]).catch(()=>{});
+      await bot.answerCallbackQuery(q.id, { text: '❌ Отзыв отклонён' }).catch(()=>{});
       // Notify client if linked to an order
       try {
         const rev = await get('SELECT * FROM reviews WHERE id=?', [id]);
@@ -5432,13 +5551,14 @@ function initBot(app) {
           }
         }
       } catch {}
-      return safeSend(chatId, `❌ Отзыв #${id} отклонён.`);
+      return showAdminReviewsList(chatId, 'pending');
     }
     if (data.startsWith('rev_delete_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_delete_', ''));
       await run('DELETE FROM reviews WHERE id=?', [id]).catch(()=>{});
-      return safeSend(chatId, `🗑 Отзыв #${id} удалён.`);
+      await bot.answerCallbackQuery(q.id, { text: '🗑 Отзыв удалён' }).catch(()=>{});
+      return showAdminReviewsList(chatId, 'all');
     }
     if (data === 'adm_admins')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminManagement(chatId); }
     if (data === 'adm_export')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showExportMenu(chatId); }
