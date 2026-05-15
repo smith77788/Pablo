@@ -430,6 +430,74 @@ class StrategicCore(FactoryAgent):
         logger.info("[CEO] Proposed experiment: %s", experiment.get("name"))
         return experiment
 
+    def generate_weekly_summary(self, db_path: str, dept_results: list) -> dict:
+        """CEO synthesizes department results and DB metrics into weekly strategy.
+
+        Args:
+            db_path: Path to the SQLite database (nevesty-models data.db or factory).
+            dept_results: List of department result dicts from the current cycle.
+        Returns:
+            dict with week_orders, week_completed, completion_rate,
+                  next_focus, decision, dept_highlights.
+        """
+        import sqlite3
+
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT COUNT(*) as orders,
+                       SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed
+                FROM orders WHERE created_at >= datetime('now', '-7 days')
+            """)
+            row = cur.fetchone()
+            conn.close()
+            orders_week = row[0] if row and row[0] else 0
+            completed_week = row[1] if row and row[1] else 0
+        except Exception:
+            orders_week, completed_week = 0, 0
+
+        completion_rate = round(completed_week / max(orders_week, 1) * 100, 1)
+
+        # CEO decision logic: what to focus next based on outcomes
+        if completed_week == 0 and orders_week == 0:
+            focus_dept = "marketing"
+            decision_text = "Нет заявок за неделю — критический фокус на маркетинге"
+        elif completion_rate < 50:
+            focus_dept = "operations"
+            decision_text = f"Выполнено только {completion_rate}% заявок — фокус на операциях"
+        elif orders_week < 3:
+            focus_dept = "marketing"
+            decision_text = f"Мало заявок ({orders_week}) — нужно усилить маркетинг"
+        else:
+            focus_dept = "product"
+            decision_text = f"Выполнено {completed_week}/{orders_week} заявок — фокус на улучшении продукта"
+
+        # Extract dept highlights (top insight per dept)
+        dept_highlights = []
+        for item in (dept_results or []):
+            if isinstance(item, dict):
+                dept = item.get("department") or item.get("dept", "")
+                insight = item.get("insight") or item.get("summary") or item.get("result", "")
+                if dept and insight:
+                    dept_highlights.append({"dept": dept, "insight": str(insight)[:100]})
+
+        summary = {
+            "week_orders": orders_week,
+            "week_completed": completed_week,
+            "completion_rate": completion_rate,
+            "next_focus": focus_dept,
+            "decision": decision_text,
+            "dept_highlights": dept_highlights[:5],
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        logger.info(
+            "[CEO] Weekly summary: orders=%d, completed=%d, focus=%s",
+            orders_week, completed_week, focus_dept,
+        )
+        return summary
+
     def evaluate_experiment(self, experiment: dict) -> str:
         """Evaluate a running experiment and decide scale/iterate/kill."""
         conv_a = experiment.get("conversion_a", 0)

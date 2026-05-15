@@ -774,17 +774,46 @@ class CEOExperimentSystem:
         return "\n".join(lines)
 
 
+_CEO_DELEGATION_STORE_PATH = _pathlib.Path(__file__).parent.parent / "ceo_delegation.json"
+
+
 class CEODelegation:
-    """CEO delegation system — tracks focus departments per cycle."""
+    """CEO delegation system — tracks focus departments per cycle with persistence."""
 
     DEPARTMENTS = [
         'marketing', 'sales', 'product', 'analytics',
         'operations', 'hr', 'tech', 'creative', 'finance',
     ]
 
-    def __init__(self) -> None:
-        self._current_focus: str | None = None
-        self._decisions_history: list[dict] = []
+    def __init__(self, store_path: str | None = None) -> None:
+        self._store_path = _pathlib.Path(store_path) if store_path else _CEO_DELEGATION_STORE_PATH
+        self._store: dict = self._load_store()
+        self._current_focus: str | None = self._store.get("current_focus")
+
+    # ── persistence ──────────────────────────────────────────────────
+
+    def _load_store(self) -> dict:
+        try:
+            if self._store_path.exists():
+                return _json.loads(self._store_path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+        return {"current_focus": None, "decisions_history": [], "task_outcomes": []}
+
+    def _save_store(self) -> None:
+        try:
+            self._store_path.parent.mkdir(parents=True, exist_ok=True)
+            self._store["current_focus"] = self._current_focus
+            # Keep last 50 decisions to avoid unbounded growth
+            self._store["decisions_history"] = self._store.get("decisions_history", [])[-50:]
+            self._store_path.write_text(
+                _json.dumps(self._store, ensure_ascii=False, indent=2),
+                encoding='utf-8',
+            )
+        except Exception:
+            pass
+
+    # ── core API ─────────────────────────────────────────────────────
 
     def delegate_focus(self, kpis: dict | None = None) -> dict:
         """Decide which department to focus on next cycle based on KPIs."""
@@ -792,26 +821,60 @@ class CEODelegation:
         ctx = kpis or {}
         orders_total = ctx.get('orders_total', 0)
         conversion = ctx.get('conversion_rate', 0)
+        health_score = ctx.get('health_score', 50)
 
+        # Priority: fix the worst problem first
         if conversion < 0.3:
             focus = 'sales'
-            reason = 'Low conversion rate — sales needs attention'
+            reason = 'Конверсия критически низкая — фокус на продажах'
         elif orders_total < 10:
             focus = 'marketing'
-            reason = 'Low order volume — marketing needed'
+            reason = 'Мало заявок — нужно усилить маркетинг'
+        elif health_score < 40:
+            focus = 'operations'
+            reason = f'Health score {health_score} — фокус на операционной стабильности'
         else:
-            focus = _random.choice(['product', 'analytics', 'creative'])
-            reason = f'Business healthy — focusing on growth via {focus}'
+            # Rotate between growth departments, avoiding last focus
+            last_focus = self._current_focus
+            options = [d for d in ['product', 'analytics', 'creative', 'tech'] if d != last_focus]
+            focus = _random.choice(options)
+            reason = f'Бизнес стабилен — фокус на росте через {focus}'
 
         decision = {
             "focus_department": focus,
             "reason": reason,
             "cycle": _dt_mod.datetime.now().isoformat(),
+            "kpis_snapshot": {
+                "conversion_rate": conversion,
+                "orders_total": orders_total,
+                "health_score": health_score,
+            },
             "priority_tasks": self._get_priority_tasks(focus),
+            "outcome": None,  # filled in later via mark_outcome()
         }
         self._current_focus = focus
-        self._decisions_history.append(decision)
+        self._store.setdefault("decisions_history", []).append(decision)
+        self._save_store()
         return decision
+
+    def mark_outcome(self, cycle_ts: str, outcome: str, notes: str = "") -> bool:
+        """Mark the outcome of a previous delegation decision.
+
+        Args:
+            cycle_ts: The 'cycle' timestamp string from the delegation record.
+            outcome: 'done', 'partial', or 'missed'.
+            notes: Optional explanation of what was/wasn't done.
+        Returns:
+            True if record was found and updated.
+        """
+        for dec in self._store.get("decisions_history", []):
+            if dec.get("cycle") == cycle_ts:
+                dec["outcome"] = outcome
+                dec["outcome_notes"] = notes
+                dec["outcome_at"] = _dt_mod.datetime.now().isoformat()
+                self._save_store()
+                return True
+        return False
 
     def _get_priority_tasks(self, department: str) -> list[str]:
         tasks = {
@@ -831,14 +894,45 @@ class CEODelegation:
         """Return a human-readable focus report."""
         if not self._current_focus:
             return "Фокус не установлен"
-        return f"🎯 Текущий фокус: {self._current_focus}"
+        history = self._store.get("decisions_history", [])
+        last = history[-1] if history else {}
+        tasks_str = "\n".join(f"  • {t}" for t in last.get("priority_tasks", []))
+        return (
+            f"🎯 Текущий фокус: {self._current_focus}\n"
+            f"📋 Задачи:\n{tasks_str}"
+        )
 
     def check_previous_decisions(self) -> dict:
-        """Check fulfillment of previous decisions."""
-        total = len(self._decisions_history)
+        """Compute real fulfillment rate from persisted decision outcomes.
+
+        Returns:
+            dict with total_decisions, done, partial, missed,
+                  fulfillment_rate (0.0–1.0), summary.
+        """
+        history = self._store.get("decisions_history", [])
+        total = len(history)
+        done = sum(1 for d in history if d.get("outcome") == "done")
+        partial = sum(1 for d in history if d.get("outcome") == "partial")
+        missed = sum(1 for d in history if d.get("outcome") == "missed")
+        untracked = total - done - partial - missed
+
+        # Weighted fulfillment: done=1.0, partial=0.5, missed/untracked=0.0
+        if total > 0:
+            fulfillment_rate = round((done + 0.5 * partial) / total, 2)
+        else:
+            fulfillment_rate = 0.0
+
         return {
             "total_decisions": total,
-            "tracked": total,
-            "fulfillment_rate": 0.75 if total > 0 else 0.0,
-            "summary": f"Принято решений: {total}",
+            "done": done,
+            "partial": partial,
+            "missed": missed,
+            "untracked": untracked,
+            "fulfillment_rate": fulfillment_rate,
+            "summary": (
+                f"Принято решений: {total}. "
+                f"Выполнено: {done}, частично: {partial}, "
+                f"пропущено: {missed}, без статуса: {untracked}. "
+                f"Выполнение: {int(fulfillment_rate * 100)}%"
+            ),
         }
