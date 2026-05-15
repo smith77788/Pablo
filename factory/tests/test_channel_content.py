@@ -190,3 +190,78 @@ class TestContentCalendar:
             assert "week" in item
             assert "format" in item
             assert "recommended_time" in item
+
+
+# ── TelegramChannelAgent new methods (БЛОК 9.1) ──────────────────────────────
+
+class TestTelegramChannelAgent:
+    def setup_method(self):
+        from factory.agents.channel_content import TelegramChannelAgent
+        self.agent = TelegramChannelAgent.__new__(TelegramChannelAgent)
+        self.agent.api_key = None  # use template mode
+
+    def test_generate_model_spotlight(self):
+        result = self.agent.generate_model_spotlight("Анна", {"city": "Москва", "height": 175})
+        assert isinstance(result, dict)
+        assert "text" in result
+        assert len(result["text"]) > 10
+
+    def test_generate_promo_post(self):
+        result = self.agent.generate_promo_post("photo", 20, 5)
+        assert isinstance(result, dict)
+        assert "text" in result
+        assert len(result["text"]) > 10
+
+    def test_generate_faq_post_no_answer(self):
+        result = self.agent.generate_faq_post("Как записаться?")
+        assert isinstance(result, str)
+        assert "Как записаться?" in result or len(result) > 5
+
+    def test_generate_faq_post_with_answer(self):
+        result = self.agent.generate_faq_post("Сколько стоит?", "От 5000 руб/час.")
+        assert isinstance(result, str)
+        assert "Сколько стоит?" in result
+        assert "От 5000 руб/час." in result
+
+    def test_generate_tip_post_photo(self):
+        result = self.agent.generate_tip_post("photo")
+        assert isinstance(result, str)
+        assert len(result) > 10
+
+    def test_generate_tip_post_casting(self):
+        result = self.agent.generate_tip_post("casting")
+        assert isinstance(result, str)
+        assert len(result) > 10
+
+    def test_generate_tip_post_unknown_topic(self):
+        result = self.agent.generate_tip_post("unknown_xyz")
+        assert isinstance(result, str)
+        assert len(result) > 5
+
+    def test_generate_case_post(self):
+        result = self.agent.generate_case_post("Мария", "корпоратив", "Клиент остался доволен!")
+        assert isinstance(result, str)
+        assert "Мария" in result
+        assert "корпоратив" in result
+        assert "Клиент остался доволен!" in result
+
+    def test_generate_weekly_content_plan_has_7_days(self):
+        plan = self.agent.generate_weekly_content_plan()
+        assert len(plan) == 7
+        days = [item["day"] for item in plan]
+        assert days == list(range(1, 8))
+
+    def test_generate_weekly_content_plan_has_types(self):
+        plan = self.agent.generate_weekly_content_plan()
+        types = [item["type"] for item in plan]
+        assert "spotlight" in types
+        assert "tip" in types
+        assert "promo" in types
+        assert "faq" in types
+        assert "event" in types
+
+    def test_generate_weekly_content_plan_content_not_empty(self):
+        plan = self.agent.generate_weekly_content_plan()
+        for item in plan:
+            assert "content" in item
+            assert item["content"] is not None

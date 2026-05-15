@@ -418,6 +418,71 @@ class TelegramChannelAgent(FactoryAgent):
             "source": "llm",
         }
 
+    # ── FAQ post ──────────────────────────────────────────────────────────────
+
+    def generate_faq_post(self, question: str, answer: str | None = None) -> str:
+        """Generate a FAQ post for Telegram channel"""
+        if not answer:
+            # Template-based fallback
+            return (
+                f"❓ <b>Часто спрашивают</b>\n\n"
+                f"<b>{question}</b>\n\n"
+                f"Обратитесь к нашему менеджеру для получения подробной консультации 👇"
+            )
+        return f"❓ <b>{question}</b>\n\n{answer}\n\n✉️ Есть вопросы? Напишите нам!"
+
+    # ── Tips post ─────────────────────────────────────────────────────────────
+
+    def generate_tip_post(self, topic: str) -> str:
+        """Generate a tips post (how to prepare for a shoot, etc.)"""
+        tips: Dict[str, List[str]] = {
+            "photo": [
+                "Позаботьтесь о чистоте кожи за 2-3 дня до съёмки",
+                "Подготовьте несколько образов для смены",
+                "Убедитесь что одежда не помята",
+            ],
+            "casting": [
+                "Приходите с чистыми, уложенными волосами",
+                "Минимум макияжа — пусть видна натуральная красота",
+                "Захватите портфолио или ссылку на него",
+            ],
+        }
+        topic_tips = tips.get(topic, ["Консультируйтесь с профессионалами"])
+        tips_text = "\n".join(f"✅ {t}" for t in topic_tips)
+        return (
+            f"💡 <b>Советы от агентства</b>\n\n"
+            f"Тема: {topic}\n\n"
+            f"{tips_text}\n\n"
+            f"🌟 Наши модели всегда готовы к профессиональной работе!"
+        )
+
+    # ── Case / success story post ─────────────────────────────────────────────
+
+    def generate_case_post(self, model_name: str, event_type: str, result: str) -> str:
+        """Generate a success story / case study post"""
+        return (
+            f"🏆 <b>Кейс агентства</b>\n\n"
+            f"Модель: {model_name}\n"
+            f"Мероприятие: {event_type}\n\n"
+            f"{result}\n\n"
+            f"📌 Хотите также? Напишите нам!"
+        )
+
+    # ── Weekly content plan (7-day) ───────────────────────────────────────────
+
+    def generate_weekly_content_plan(self, db_path: str | None = None) -> list:
+        """Generate a 7-day content plan for the Telegram channel"""
+        plan = [
+            {"day": 1, "type": "spotlight", "content": self.generate_model_spotlight("Наша модель", {})},
+            {"day": 2, "type": "tip", "content": self.generate_tip_post("photo")},
+            {"day": 3, "type": "promo", "content": self.generate_promo_post("seasonal", 15, 7)},
+            {"day": 4, "type": "faq", "content": self.generate_faq_post("Как заказать модель для фотосъёмки?")},
+            {"day": 5, "type": "event", "content": self.generate_event_post("fashion_show", "15.06", "Москва", 5)},
+            {"day": 6, "type": "tip", "content": self.generate_tip_post("casting")},
+            {"day": 7, "type": "spotlight", "content": self.generate_model_spotlight("Топ-модель недели", {})},
+        ]
+        return plan
+
     # ── Convenience: generate a full weekly content batch ────────────────────
 
     def generate_weekly_batch(
