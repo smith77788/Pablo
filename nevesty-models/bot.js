@@ -2027,7 +2027,7 @@ async function showAdminOrder(chatId, orderId) {
       });
       text += `\n💰 *Оплачено:* ${esc(paidDt)}`;
     }
-    keyboard.push([{ text: '← К заявкам', callback_data: 'adm_orders__0' }]);
+    keyboard.push([{ text: STRINGS.btnBackToOrders, callback_data: 'adm_orders__0' }]);
 
     return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } });
   } catch (e) {
@@ -2060,8 +2060,8 @@ async function showOrderStatusHistory(chatId, orderId) {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '← К заявке', callback_data: `adm_order_${orderId}` }],
-          [{ text: '← К заявкам', callback_data: 'adm_orders__0' }],
+          [{ text: STRINGS.btnBackToOrder, callback_data: `adm_order_${orderId}` }],
+          [{ text: STRINGS.btnBackToOrders, callback_data: 'adm_orders__0' }],
         ],
       },
     });
@@ -2123,7 +2123,7 @@ async function showOrganismStatus(chatId) {
 async function showAdminModel(chatId, modelId) {
   try {
     const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
-    if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+    if (!m) return safeSend(chatId, STRINGS.errorModelNotFoundPlain);
 
     // Full order stats
     const [stats] = await query(
@@ -2396,7 +2396,7 @@ async function showAdminSettings(chatId, section) {
             { text: '🕐 Часы работы', callback_data: 'adm_set_mgr_hours' },
             { text: '💬 Авто-ответ', callback_data: 'adm_set_mgr_reply' },
           ],
-          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+          [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
         ],
       },
     });
@@ -2461,7 +2461,7 @@ async function showAdminSettings(chatId, section) {
               callback_data: 'adm_toggle_event_reminders',
             },
           ],
-          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+          [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
         ],
       },
     });
@@ -2508,7 +2508,7 @@ async function showAdminSettings(chatId, section) {
               callback_data: showBadge === '0' ? 'adm_catalog_badge_on' : 'adm_catalog_badge_off',
             },
           ],
-          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+          [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
         ],
       },
     });
@@ -2555,7 +2555,7 @@ async function showAdminSettings(chatId, section) {
             { text: '💰 Мин. бюджет', callback_data: 'adm_set_booking_min_budget' },
             { text: '💬 Сообщение', callback_data: 'adm_set_booking_confirm_msg' },
           ],
-          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+          [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
         ],
       },
     });
@@ -2595,7 +2595,7 @@ async function showAdminSettings(chatId, section) {
             { text: '📝 Приглашение', callback_data: 'adm_set_reviews_prompt' },
           ],
           [{ text: '📋 Управление отзывами', callback_data: 'adm_reviews' }],
-          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+          [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
         ],
       },
     });
@@ -2614,7 +2614,7 @@ async function showAdminSettings(chatId, section) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '✏️ Изменить список городов', callback_data: 'adm_set_cities_list' }],
-          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+          [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
         ],
       },
     });
@@ -2723,7 +2723,7 @@ async function showAdminSettings(chatId, section) {
             { text: '⏱ Интервал сообщений', callback_data: 'adm_set_client_msg_delay' },
             { text: '🔒 Rate limit', callback_data: 'adm_set_api_rate_limit' },
           ],
-          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+          [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
         ],
       },
     });
@@ -2760,7 +2760,7 @@ async function showAdminSettings(chatId, section) {
           ],
           [{ text: '📸 Изменить Instagram', callback_data: 'adm_set_insta' }],
           [{ text: '📸 Очередь постов', callback_data: 'adm_social' }],
-          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+          [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
         ],
       },
     });
@@ -3113,7 +3113,7 @@ async function saveNewModel(chatId, d) {
 async function showModelEditMenu(chatId, modelId) {
   if (!isAdmin(chatId)) return;
   const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
-  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+  if (!m) return safeSend(chatId, STRINGS.errorModelNotFoundPlain);
   return safeSend(chatId, `✏️ *Редактировать: ${m.name}*\n\nВыберите поле:`, {
     reply_markup: {
       inline_keyboard: [
@@ -3273,7 +3273,7 @@ async function showComparison(chatId) {
 async function generateAiBio(chatId, modelId) {
   if (!isAdmin(chatId)) return;
   const m = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(() => null);
-  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+  if (!m) return safeSend(chatId, STRINGS.errorModelNotFoundPlain);
 
   await safeSend(chatId, '🤖 Генерирую AI описание\\.\\.\\. Подождите 10\\-30 секунд\\.', { parse_mode: 'MarkdownV2' });
 
@@ -3331,7 +3331,7 @@ async function generateAiBio(chatId, modelId) {
 async function showPhotoGalleryManager(chatId, modelId) {
   if (!isAdmin(chatId)) return;
   const m = await get('SELECT id, name, photo_main, photos FROM models WHERE id=?', [modelId]);
-  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+  if (!m) return safeSend(chatId, STRINGS.errorModelNotFoundPlain);
   let gallery = [];
   try {
     gallery = JSON.parse(m.photos || '[]');
@@ -3844,7 +3844,7 @@ async function showScheduledBroadcasts(chatId) {
 async function showModelStats(chatId, modelId) {
   if (!isAdmin(chatId)) return;
   const m = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(() => null);
-  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+  if (!m) return safeSend(chatId, STRINGS.errorModelNotFoundPlain);
 
   const [
     totalOrders,
@@ -3951,7 +3951,7 @@ async function showModelStats(chatId, modelId) {
 async function showAdminModelCalendar(chatId, modelId) {
   if (!isAdmin(chatId)) return;
   const m = await get('SELECT id, name FROM models WHERE id=?', [modelId]).catch(() => null);
-  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+  if (!m) return safeSend(chatId, STRINGS.errorModelNotFoundPlain);
 
   // Upcoming 3 months of busy dates
   const threeMonthsLater = new Date();
@@ -4119,7 +4119,7 @@ async function showAllOrderNotes(chatId, orderId, page = 0) {
   if (nav.length) keyboard.push(nav);
   keyboard.push([
     { text: '📝 Добавить заметку', callback_data: `adm_note_${orderId}` },
-    { text: '← К заявке', callback_data: `adm_order_${orderId}` },
+    { text: STRINGS.btnBackToOrder, callback_data: `adm_order_${orderId}` },
   ]);
 
   return safeSend(chatId, text, {
@@ -4242,7 +4242,7 @@ async function showAdminOrdersFilterModel(chatId) {
     if (!models.length) {
       return safeSend(chatId, '📭 Заявок с привязкой к моделям не найдено\\.', {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '← К заявкам', callback_data: 'adm_orders__0' }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnBackToOrders, callback_data: 'adm_orders__0' }]] },
       });
     }
     const btns = models.map(m => [
@@ -4253,7 +4253,7 @@ async function showAdminOrdersFilterModel(chatId) {
     ]);
     return safeSend(chatId, `🔽 *Фильтр по модели*\n\nВыберите модель:`, {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [...btns, [{ text: '← К заявкам', callback_data: 'adm_orders__0' }]] },
+      reply_markup: { inline_keyboard: [...btns, [{ text: STRINGS.btnBackToOrders, callback_data: 'adm_orders__0' }]] },
     });
   } catch (e) {
     console.error('[Bot] showAdminOrdersFilterModel:', e.message);
@@ -4280,7 +4280,7 @@ async function showAdminOrdersByModel(chatId, modelId) {
         reply_markup: {
           inline_keyboard: [
             [{ text: '← Фильтр по модели', callback_data: 'adm_orders_filter_model' }],
-            [{ text: '← К заявкам', callback_data: 'adm_orders__0' }],
+            [{ text: STRINGS.btnBackToOrders, callback_data: 'adm_orders__0' }],
           ],
         },
       });
@@ -4302,7 +4302,7 @@ async function showAdminOrdersByModel(chatId, modelId) {
         inline_keyboard: [
           ...btns,
           [{ text: '← Фильтр по модели', callback_data: 'adm_orders_filter_model' }],
-          [{ text: '← К заявкам', callback_data: 'adm_orders__0' }],
+          [{ text: STRINGS.btnBackToOrders, callback_data: 'adm_orders__0' }],
         ],
       },
     });
@@ -7703,7 +7703,7 @@ function initBot(app) {
       }
       await safeSend(chatId, `✅ Менеджер *${esc(admin?.username || String(adminId))}* назначен на заявку\\.`, {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnBackToOrder, callback_data: `adm_order_${orderId}` }]] },
       });
       return;
     }
@@ -7766,7 +7766,9 @@ function initBot(app) {
         `✅ Модель *${esc(model?.name || String(modelId))}* назначена на заявку\\.${notifiedNote}`,
         {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] },
+          reply_markup: {
+            inline_keyboard: [[{ text: STRINGS.btnBackToOrder, callback_data: `adm_order_${orderId}` }]],
+          },
         }
       );
       return;
@@ -7807,7 +7809,7 @@ function initBot(app) {
       await bot.answerCallbackQuery(q.id, { text: '✅ Заметка добавлена!' }).catch(() => {});
       return safeSend(chatId, `✅ Заметка добавлена\\.`, {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] },
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnBackToOrder, callback_data: `adm_order_${orderId}` }]] },
       });
     }
 
@@ -8830,7 +8832,7 @@ function initBot(app) {
     if (state.startsWith('adm_gallery_')) {
       const modelId = parseInt(state.replace('adm_gallery_', ''));
       const m = await get('SELECT photo_main, photos FROM models WHERE id=?', [modelId]).catch(() => null);
-      if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+      if (!m) return safeSend(chatId, STRINGS.errorModelNotFoundPlain);
       let gallery = [];
       try {
         gallery = JSON.parse(m.photos || '[]');
@@ -9223,7 +9225,9 @@ function initBot(app) {
         await clearSession(chatId);
         return safeSend(chatId, `✅ Заметка добавлена\\.`, {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] },
+          reply_markup: {
+            inline_keyboard: [[{ text: STRINGS.btnBackToOrder, callback_data: `adm_order_${orderId}` }]],
+          },
         });
       }
 
@@ -9239,7 +9243,9 @@ function initBot(app) {
         await clearSession(chatId);
         return safeSend(chatId, `✅ *Заметка сохранена\\!*\n\n${esc(trimmed)}`, {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] },
+          reply_markup: {
+            inline_keyboard: [[{ text: STRINGS.btnBackToOrder, callback_data: `adm_order_${orderId}` }]],
+          },
         });
       }
 
@@ -9434,7 +9440,9 @@ function initBot(app) {
       if (order.client_chat_id) await sendMessageToClient(order.client_chat_id, order.order_number, text);
       await clearSession(chatId);
       return safeSend(chatId, `✅ Сообщение отправлено клиенту ${order.client_name}.`, {
-        reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${d.order_id}` }]] },
+        reply_markup: {
+          inline_keyboard: [[{ text: STRINGS.btnBackToOrder, callback_data: `adm_order_${d.order_id}` }]],
+        },
       });
     }
 
@@ -10987,7 +10995,7 @@ async function showContactManager(chatId) {
 async function showModelContact(chatId, modelId) {
   try {
     const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
-    if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+    if (!m) return safeSend(chatId, STRINGS.errorModelNotFoundPlain);
     const parts = [];
     if (m.phone) parts.push(`📞 Телефон: ${esc(m.phone)}`);
     if (m.instagram) parts.push(`📸 Instagram: @${esc(m.instagram)}`);

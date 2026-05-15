@@ -79,6 +79,7 @@ const STRINGS = {
   errorPhotoTooLarge: '❌ Фото слишком большое\\. Максимум 10 МБ\\.',
   errorInvalidDate: '❌ Неверный формат даты\\. Используйте ДД\\.ММ\\.ГГГГ',
   errorModelNotFound: '❌ Модель не найдена\\.',
+  errorModelNotFoundPlain: '❌ Модель не найдена.',
   errorOrderNotFound: '❌ Заявка не найдена\\.',
 
   // ─── Booking validation errors ─────────────────────────────────────────────
@@ -141,6 +142,7 @@ const STRINGS = {
   btnBackToSearch: '← Назад к поиску',
   btnBackToProfile: '← Профиль',
   btnBackAdmin: '← Меню',
+  btnBackToSettings: '← Настройки',
   btnConfirm: '✅ Подтвердить',
   btnClose: '❌ Закрыть',
   btnDelete: '🗑 Удалить',
