@@ -514,6 +514,37 @@
 
       grid.appendChild(article);
     });
+
+    // Inject dynamic ItemList Schema.org for current filtered list
+    injectCatalogSchema(list);
+  }
+
+  // ── Schema.org: dynamic ItemList for visible models ──────────────────────────
+  function injectCatalogSchema(models) {
+    const existing = document.getElementById('schema-catalog-dynamic');
+    if (existing) existing.remove();
+    if (!models.length) return;
+
+    const baseUrl = window.location.origin;
+    const schema = {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      "name": "Каталог моделей",
+      "url": baseUrl + "/catalog.html",
+      "numberOfItems": models.length,
+      "itemListElement": models.slice(0, 20).map((m, i) => ({
+        "@type": "ListItem",
+        "position": i + 1,
+        "url": `${baseUrl}/model.html?id=${m.id}`,
+        "name": m.name
+      }))
+    };
+
+    const script = document.createElement('script');
+    script.id = 'schema-catalog-dynamic';
+    script.type = 'application/ld+json';
+    script.textContent = JSON.stringify(schema);
+    document.head.appendChild(script);
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────

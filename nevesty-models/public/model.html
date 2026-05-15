@@ -737,6 +737,99 @@
         show('errorView');
       }
 
+      // ── SEO: update meta/OG tags dynamically ──────────────────────────────────
+      function updateMetaTags(model) {
+        const setMeta = (attr, val, content) => {
+          let el = document.querySelector(`meta[${attr}="${val}"]`);
+          if (!el) { el = document.createElement('meta'); el.setAttribute(attr, val); document.head.appendChild(el); }
+          el.setAttribute('content', content);
+        };
+
+        const baseUrl = window.location.origin;
+        const title = `${model.name} — Модель агентства Nevesty Models`;
+        const desc = model.bio
+          ? model.bio.substring(0, 155)
+          : `${model.name}: профессиональная модель${model.city ? ' в ' + model.city : ''}.${model.height ? ' Рост ' + model.height + ' см.' : ''} Бронируйте на Nevesty Models.`;
+        const img = model.photos && model.photos.length > 0
+          ? baseUrl + model.photos[0]
+          : (model.photo_main ? baseUrl + model.photo_main : baseUrl + '/images/og-default.jpg');
+
+        document.title = title;
+        setMeta('name', 'description', desc);
+
+        // Open Graph
+        setMeta('property', 'og:type', 'profile');
+        setMeta('property', 'og:title', title);
+        setMeta('property', 'og:description', desc);
+        setMeta('property', 'og:image', img);
+        setMeta('property', 'og:url', `${baseUrl}/model.html?id=${model.id}`);
+        setMeta('property', 'og:site_name', 'Nevesty Models');
+
+        // Twitter Card
+        setMeta('name', 'twitter:card', 'summary_large_image');
+        setMeta('name', 'twitter:title', title);
+        setMeta('name', 'twitter:description', desc);
+        setMeta('name', 'twitter:image', img);
+
+        // Canonical link
+        let canonicalEl = document.querySelector('link[rel="canonical"]');
+        if (!canonicalEl) {
+          canonicalEl = document.createElement('link');
+          canonicalEl.rel = 'canonical';
+          document.head.appendChild(canonicalEl);
+        }
+        canonicalEl.href = `${baseUrl}/model.html?id=${model.id}`;
+      }
+
+      // ── SEO: inject Schema.org JSON-LD ────────────────────────────────────────
+      function injectSchemaOrg(model) {
+        // Remove any previously injected schema to avoid duplicates on navigation
+        document.querySelectorAll('script[id^="schema-model"]').forEach(s => s.remove());
+
+        const baseUrl = window.location.origin;
+        const img = model.photos && model.photos.length > 0
+          ? baseUrl + model.photos[0]
+          : (model.photo_main ? baseUrl + model.photo_main : baseUrl + '/images/placeholder.jpg');
+
+        const personSchema = {
+          "@context": "https://schema.org",
+          "@type": "Person",
+          "name": model.name,
+          "jobTitle": "Профессиональная модель",
+          "description": model.bio
+            ? model.bio.substring(0, 200)
+            : `Профессиональная модель агентства Nevesty Models.${model.city ? ' Город: ' + model.city + '.' : ''}${model.category ? ' Специализация: ' + model.category + '.' : ''}`,
+          "url": `${baseUrl}/model.html?id=${model.id}`,
+          "image": img,
+          "worksFor": {
+            "@type": "Organization",
+            "name": "Nevesty Models",
+            "url": baseUrl
+          },
+          "knowsAbout": [model.category, "Моделинг", "Модельный бизнес"].filter(Boolean)
+        };
+
+        if (model.city) personSchema.address = { "@type": "PostalAddress", "addressLocality": model.city };
+        if (model.height) personSchema.height = { "@type": "QuantitativeValue", "value": model.height, "unitCode": "CMT" };
+        if (model.instagram) personSchema.sameAs = [`https://instagram.com/${model.instagram.replace(/^@/, '')}`];
+
+        const breadcrumbSchema = {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Главная", "item": baseUrl + "/" },
+            { "@type": "ListItem", "position": 2, "name": "Каталог моделей", "item": baseUrl + "/catalog.html" },
+            { "@type": "ListItem", "position": 3, "name": model.name, "item": `${baseUrl}/model.html?id=${model.id}` }
+          ]
+        };
+
+        const script = document.createElement('script');
+        script.id = 'schema-model-person';
+        script.type = 'application/ld+json';
+        script.textContent = JSON.stringify([personSchema, breadcrumbSchema]);
+        document.head.appendChild(script);
+      }
+
       // ── fetch & render ─────────────────────────────────────────────────────────
       async function loadModel(id) {
         let model;
@@ -750,50 +843,11 @@
           return;
         }
 
-        // Update page title & OG
-        document.title = `${model.name} — Nevesty Models`;
-        document.querySelector('meta[property="og:title"]')?.setAttribute('content', model.name + ' — Nevesty Models');
-        document.querySelector('meta[property="og:description"]')?.setAttribute('content', [model.city, model.height ? model.height + ' см' : '', model.age ? model.age + ' лет' : ''].filter(Boolean).join(', '));
-        document.querySelector('meta[property="og:url"]')?.setAttribute('content', `https://nevesty-models.ru/model.html?id=${id}`);
-        const firstPhoto = (model.photos || [])[0] || model.photo_main;
-        if (firstPhoto) document.querySelector('meta[property="og:image"]')?.setAttribute('content', firstPhoto);
-        const metaDesc = document.querySelector('meta[name="description"]');
-        if (metaDesc) metaDesc.setAttribute('content', `${model.name} — профессиональная модель агентства Nevesty Models. ${model.city ? 'Город: ' + model.city + '.' : ''} Бронирование онлайн.`);
+        // Update page title & meta/OG tags dynamically
+        updateMetaTags(model);
 
-        // Person schema.org
-        const personSchema = {
-          "@context": "https://schema.org",
-          "@type": "Person",
-          "name": model.name,
-          "url": `https://nevesty-models.ru/model.html?id=${id}`,
-          "worksFor": {
-            "@type": "Organization",
-            "name": "Nevesty Models",
-            "url": "https://nevesty-models.ru"
-          }
-        };
-        if (model.city) personSchema.address = { "@type": "PostalAddress", "addressLocality": model.city };
-        if (model.photo_main) { personSchema.image = model.photo_main; const ogImg = document.querySelector('meta[property="og:image"]'); if (ogImg) ogImg.setAttribute('content', model.photo_main); }
-        if (model.instagram) personSchema.sameAs = [`https://instagram.com/${model.instagram.replace(/^@/,'')}`];
-        const schemaScript = document.createElement('script');
-        schemaScript.type = 'application/ld+json';
-        schemaScript.textContent = JSON.stringify(personSchema);
-        document.head.appendChild(schemaScript);
-
-        // BreadcrumbList schema
-        const breadcrumbSchema = {
-          "@context": "https://schema.org",
-          "@type": "BreadcrumbList",
-          "itemListElement": [
-            {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
-            {"@type": "ListItem", "position": 2, "name": "Каталог", "item": "https://nevesty-models.ru/catalog.html"},
-            {"@type": "ListItem", "position": 3, "name": model.name, "item": `https://nevesty-models.ru/model.html?id=${id}`}
-          ]
-        };
-        const breadcrumbScript = document.createElement('script');
-        breadcrumbScript.type = 'application/ld+json';
-        breadcrumbScript.textContent = JSON.stringify(breadcrumbSchema);
-        document.head.appendChild(breadcrumbScript);
+        // Inject Schema.org structured data
+        injectSchemaOrg(model);
 
         renderModel(model);
         loadModelReviews(model.id);
