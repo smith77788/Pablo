@@ -2,6 +2,7 @@ require('dotenv').config();
 const crypto = require('crypto');
 const TelegramBot = require('node-telegram-bot-api');
 const { query, run, get, generateOrderNumber } = require('./database');
+const { RU } = require('./utils/strings');
 const {
   STATUS_LABELS,
   VALID_STATUSES,
@@ -716,8 +717,7 @@ async function showClientOrder(chatId, orderId) {
       [orderId]
     );
     if (!o || o.client_chat_id !== String(chatId)) {
-      return safeSend(chatId, '❌ Заявка не найдена\\.', {
-        parse_mode: 'MarkdownV2',
+      return safeSend(chatId, RU.ORDER_NOT_FOUND, {
         reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] }
       });
     }
@@ -1139,7 +1139,7 @@ async function showAdminOrder(chatId, orderId) {
        WHERE o.id=?`,
       [orderId]
     );
-    if (!o) return safeSend(chatId, '❌ Заявка не найдена.');
+    if (!o) return safeSend(chatId, RU.ORDER_NOT_FOUND);
 
     const [msgs, notes] = await Promise.all([
       query('SELECT * FROM messages WHERE order_id=? ORDER BY created_at DESC LIMIT 3', [orderId]),
@@ -1220,7 +1220,7 @@ async function showOrderStatusHistory(chatId, orderId) {
       get('SELECT order_number FROM orders WHERE id=?', [orderId]),
       query('SELECT * FROM order_status_history WHERE order_id=? ORDER BY created_at ASC', [orderId]),
     ]);
-    if (!order) return safeSend(chatId, '❌ Заявка не найдена.');
+    if (!order) return safeSend(chatId, RU.ORDER_NOT_FOUND);
 
     let text = `*🕐 История статусов*\n*Заявка ${esc(order.order_number)}*\n\n`;
     if (!history.length) {
@@ -2388,7 +2388,7 @@ async function showAllOrderNotes(chatId, orderId, page = 0) {
     query('SELECT * FROM order_notes WHERE order_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?', [orderId, LIMIT, page * LIMIT]).catch(() => []),
     get('SELECT COUNT(*) as n FROM order_notes WHERE order_id=?', [orderId]).catch(() => ({ n: 0 })),
   ]);
-  if (!order) return safeSend(chatId, '❌ Заявка не найдена.');
+  if (!order) return safeSend(chatId, RU.ORDER_NOT_FOUND);
 
   let text = `📝 *Все заметки*\nЗаявка *${esc(order.order_number)}*\n\n`;
   if (!notes.length) {
@@ -3407,7 +3407,7 @@ function initBot(app) {
       const orderId = parseInt(data.replace('pay_order_', ''));
       const ord = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(()=>null);
       if (!ord || ord.client_chat_id !== String(chatId)) {
-        return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
+        return safeSend(chatId, RU.ORDER_NOT_FOUND);
       }
       if (ord.payment_status === 'paid') {
         return safeSend(chatId, '✅ Эта заявка уже оплачена\\.', { parse_mode: 'MarkdownV2' });
@@ -3687,7 +3687,7 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const orderId = parseInt(data.replace('adm_contact_',''));
       const order   = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(()=>null);
-      if (!order) return safeSend(chatId, '❌ Заявка не найдена.');
+      if (!order) return safeSend(chatId, RU.ORDER_NOT_FOUND);
       await setSession(chatId, 'replying', { order_id: orderId, order_number: order.order_number, client_name: order.client_name });
       return safeSend(chatId,
         `💬 Введите сообщение для клиента *${order.client_name}* \\(${esc(order.order_number)}\\):\n\n_/cancel — отменить_`,
@@ -5180,7 +5180,7 @@ function initBot(app) {
     // ── Admin reply to client
     if (isAdmin(chatId) && state === 'replying' && d.order_id) {
       const order = await get('SELECT * FROM orders WHERE id=?', [d.order_id]).catch(()=>null);
-      if (!order) { await clearSession(chatId); return safeSend(chatId, '❌ Заявка не найдена.'); }
+      if (!order) { await clearSession(chatId); return safeSend(chatId, RU.ORDER_NOT_FOUND); }
       const adm = await get('SELECT username FROM admins WHERE telegram_id=?', [String(chatId)]).catch(()=>null);
       await run('INSERT INTO messages (order_id,sender_type,sender_name,content) VALUES (?,?,?,?)',
         [d.order_id, 'admin', adm?.username||'Менеджер', text]);
@@ -6389,8 +6389,7 @@ async function startLeaveReview(chatId, orderId) {
       [orderId, String(chatId)]
     ).catch(() => null);
     if (!order) {
-      return safeSend(chatId, '❌ Заявка не найдена или не принадлежит вам\\.', {
-        parse_mode: 'MarkdownV2',
+      return safeSend(chatId, RU.ORDER_NOT_FOUND, {
         reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
       });
     }
@@ -6440,8 +6439,7 @@ async function repeatOrder(chatId, orderId) {
       [orderId, String(chatId)]
     );
     if (!o) {
-      return safeSend(chatId, '❌ Заявка не найдена\\.', {
-        parse_mode: 'MarkdownV2',
+      return safeSend(chatId, RU.ORDER_NOT_FOUND, {
         reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] }
       });
     }
