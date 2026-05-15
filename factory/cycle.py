@@ -1108,6 +1108,27 @@ def run_cycle() -> dict:
                 f"🔬 Experiments: evaluated={exp_results['evaluated']}, "
                 f"success={exp_results['success']}, fail={exp_results['fail']}"
             )
+
+        # Check running experiments and update with latest Nevesty metrics
+        try:
+            active_exps = tracker.get_active_experiments()
+            metric_updates = []
+            if active_exps and nevesty_kpis:
+                orders_count = float(nevesty_kpis.get("orders_this_month", 0))
+                for exp in active_exps[:3]:  # check top 3 running experiments
+                    if orders_count > 0:
+                        update_res = tracker.record_metric_result(
+                            exp["id"], "orders_month", orders_count
+                        )
+                        metric_updates.append(update_res)
+            logger.info(
+                "[Phase15] Active experiments: %d checked, %d updated with real metrics",
+                len(active_exps), len(metric_updates),
+            )
+            results["phases"]["experiment_tracking"]["active_checked"] = len(active_exps)
+            results["phases"]["experiment_tracking"]["metric_updates"] = metric_updates
+        except Exception as _me:
+            logger.warning("[Phase15] Metric update for experiments skipped: %s", _me)
     except Exception as e:
         results["phases"]["experiment_tracking"] = {"error": str(e)}
         logger.error("Phase 15 experiment tracking error: %s", e)

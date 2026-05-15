@@ -126,6 +126,107 @@ class TestExperimentTracker:
         result = agent.run()
         assert isinstance(result['details'], list)
 
+    # ── New tests for record_metric_result and get_active_experiments ──
+
+    def test_get_active_experiments_returns_list(self):
+        """get_active_experiments() must return a list even when DB is empty."""
+        from factory.agents.experiment_tracker import ExperimentTracker
+        from unittest.mock import patch
+        agent = ExperimentTracker()
+        with patch('factory.db.fetch_all', return_value=[]):
+            result = agent.get_active_experiments()
+        assert isinstance(result, list)
+
+    def test_get_active_experiments_db_error_returns_empty(self):
+        """get_active_experiments() must return [] on DB error."""
+        from factory.agents.experiment_tracker import ExperimentTracker
+        from unittest.mock import patch
+        agent = ExperimentTracker()
+        with patch('factory.db.fetch_all', side_effect=Exception("db unavailable")):
+            result = agent.get_active_experiments()
+        assert result == []
+
+    def test_record_metric_result_not_found(self):
+        """record_metric_result returns error dict when experiment does not exist."""
+        from factory.agents.experiment_tracker import ExperimentTracker
+        from unittest.mock import patch
+        agent = ExperimentTracker()
+        with patch('factory.db.fetch_one', return_value=None):
+            result = agent.record_metric_result(999, 'orders_month', 50.0)
+        assert result.get('error') == 'not found'
+        assert result.get('id') == 999
+
+    def test_record_metric_result_success_status(self):
+        """Improvement ≥5% should produce status='success' and conclude experiment."""
+        from factory.agents.experiment_tracker import ExperimentTracker
+        from unittest.mock import patch, MagicMock
+        agent = ExperimentTracker()
+        fake_exp = {
+            'id': 1, 'name': 'test-exp', 'status': 'running',
+            'conversion_a': 100.0, 'notes': '',
+        }
+        with patch('factory.db.fetch_one', return_value=fake_exp), \
+             patch('factory.db.execute') as mock_exec:
+            result = agent.record_metric_result(1, 'orders_month', 110.0)
+        assert result['status'] == 'success'
+        assert result['metric_before'] == 100.0
+        assert result['metric_after'] == 110.0
+        mock_exec.assert_called_once()
+
+    def test_record_metric_result_failed_status(self):
+        """Drop >10% should produce status='failed'."""
+        from factory.agents.experiment_tracker import ExperimentTracker
+        from unittest.mock import patch
+        agent = ExperimentTracker()
+        fake_exp = {
+            'id': 2, 'name': 'test-exp-2', 'status': 'running',
+            'conversion_a': 100.0, 'notes': '',
+        }
+        with patch('factory.db.fetch_one', return_value=fake_exp), \
+             patch('factory.db.execute'):
+            result = agent.record_metric_result(2, 'orders_month', 85.0)
+        assert result['status'] == 'failed'
+
+    def test_record_metric_result_running_stays(self):
+        """Change between -10% and +5% should keep status='running'."""
+        from factory.agents.experiment_tracker import ExperimentTracker
+        from unittest.mock import patch
+        agent = ExperimentTracker()
+        fake_exp = {
+            'id': 3, 'name': 'test-exp-3', 'status': 'running',
+            'conversion_a': 100.0, 'notes': '',
+        }
+        with patch('factory.db.fetch_one', return_value=fake_exp), \
+             patch('factory.db.execute') as mock_exec:
+            result = agent.record_metric_result(3, 'orders_month', 102.0)
+        assert result['status'] == 'running'
+        # No status change → execute called with only conversion_b update
+        mock_exec.assert_called_once()
+
+    def test_record_metric_result_zero_baseline_nonzero_value(self):
+        """Zero baseline + positive value → success."""
+        from factory.agents.experiment_tracker import ExperimentTracker
+        from unittest.mock import patch
+        agent = ExperimentTracker()
+        fake_exp = {
+            'id': 4, 'name': 'test-exp-4', 'status': 'running',
+            'conversion_a': 0.0, 'notes': '',
+        }
+        with patch('factory.db.fetch_one', return_value=fake_exp), \
+             patch('factory.db.execute'):
+            result = agent.record_metric_result(4, 'orders_month', 10.0)
+        assert result['status'] == 'success'
+
+    def test_record_metric_result_db_error_returns_error_dict(self):
+        """DB error inside record_metric_result should be handled gracefully."""
+        from factory.agents.experiment_tracker import ExperimentTracker
+        from unittest.mock import patch
+        agent = ExperimentTracker()
+        with patch('factory.db.fetch_one', side_effect=Exception("connection lost")):
+            result = agent.record_metric_result(5, 'orders_month', 50.0)
+        assert 'error' in result
+        assert result['id'] == 5
+
 
 class TestSalesDepartment:
     """Tests for Sales department agents."""
