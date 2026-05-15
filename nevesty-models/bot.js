@@ -143,7 +143,8 @@ async function setSetting(key, value) {
 const REPLY_KB_CLIENT = {
   keyboard: [
     [{ text: '⭐ Топ-модели' }, { text: '💃 Каталог' }],
-    [{ text: '📝 Подать заявку' }, { text: '💬 Менеджер' }],
+    [{ text: '📝 Подать заявку' }, { text: '⚡ Быстрая заявка' }],
+    [{ text: '❤️ Избранное' }, { text: '💬 Менеджер' }],
     [{ text: '📋 Мои заявки' }, { text: '🔍 Статус заявки' }],
     [{ text: '💰 Прайс' }, { text: '📞 Контакты' }, { text: '❓ FAQ' }],
   ],
@@ -168,9 +169,12 @@ function buildClientKeyboard() {
     [{ text: '👗 Fashion',              callback_data: 'cat_filter_fashion'  },
      { text: '📷 Commercial',           callback_data: 'cat_filter_commercial'},
      { text: '🎉 Events',              callback_data: 'cat_filter_events'   }],
-    [{ text: '🔍 Поиск по параметрам', callback_data: 'cat_search'          }],
-    [{ text: '📝 Оформить заявку',      callback_data: 'bk_start'           }],
-    [{ text: '💬 Написать менеджеру',   callback_data: 'contact_mgr'        }],
+    [{ text: '🔍 Поиск по параметрам', callback_data: 'cat_search'          },
+     { text: '📏 Поиск по росту',      callback_data: 'search_height_input' }],
+    [{ text: '📝 Оформить заявку',      callback_data: 'bk_start'           },
+     { text: '⚡ Быстрая заявка',       callback_data: 'bk_quick'           }],
+    [{ text: '❤️ Избранное',            callback_data: 'fav_list_0'         },
+     { text: '💬 Написать менеджеру',   callback_data: 'contact_mgr'        }],
     [{ text: '📋 Мои заявки',           callback_data: 'my_orders'          },
      { text: '🔍 Статус заявки',        callback_data: 'check_status'       }],
     [{ text: '⭐ Отзывы',              callback_data: 'show_reviews'        },
@@ -194,14 +198,15 @@ const KB_MAIN_ADMIN = (badge, score) => {
       [{ text: `📋 Заявки${badge}`,          callback_data: 'adm_orders__0'  },
        { text: '💃 Модели',                  callback_data: 'adm_models_0'   }],
       [{ text: '📊 Статистика',              callback_data: 'adm_stats'      },
-       { text: `🤖 Организм${health}`,       callback_data: 'adm_organism'   }],
-      [{ text: '⚙️ Настройки',              callback_data: 'adm_settings'   },
-       { text: '📢 Рассылка',               callback_data: 'adm_broadcast'  }],
-      [{ text: '➕ Добавить модель',         callback_data: 'adm_addmodel'   },
+       { text: '📈 Дашборд',                callback_data: 'adm_dashboard'  }],
+      [{ text: `🤖 Организм${health}`,       callback_data: 'adm_organism'   },
+       { text: '⚙️ Настройки',              callback_data: 'adm_settings'   }],
+      [{ text: '📢 Рассылка',               callback_data: 'adm_broadcast'  },
        { text: '📤 Экспорт заявок',         callback_data: 'adm_export'     }],
-      [{ text: '👑 Администраторы',          callback_data: 'adm_admins'     },
-       { text: '📡 Фид агентов',            callback_data: 'agent_feed_0'   }],
-      [{ text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    },
+      [{ text: '➕ Добавить модель',         callback_data: 'adm_addmodel'   },
+       { text: '👑 Администраторы',          callback_data: 'adm_admins'     }],
+      [{ text: '📡 Фид агентов',            callback_data: 'agent_feed_0'   },
+       { text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    },
        { text: '💬 Обсуждения',            callback_data: 'adm_discussions'}],
       [{ text: '🏭 AI Factory',             callback_data: 'adm_factory'    },
        { text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' }],
@@ -225,6 +230,7 @@ async function showMainMenu(chatId, name) {
   );
   if (greeting) {
     const text = greeting.replace('{name}', name || 'гость');
+    // Greeting is user-edited content — send as plain text to avoid injection
     return safeSend(chatId, text, { reply_markup: buildClientKeyboard() });
   }
   return safeSend(chatId,
@@ -344,6 +350,8 @@ async function showModel(chatId, modelId) {
       inline_keyboard: [
         m.available ? [{ text: '📝 Заказать эту модель', callback_data: `bk_model_${m.id}` }] : [],
         contactBtn,
+        [{ text: '❤️ В избранное', callback_data: `fav_add_${m.id}` },
+         { text: '💔 Убрать',      callback_data: `fav_remove_${m.id}` }],
         [{ text: '← Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Меню', callback_data: 'main_menu' }],
       ].filter(r => r.length)
     };
@@ -873,23 +881,22 @@ async function showAdminOrder(chatId, orderId) {
 
     const msgs = await query('SELECT * FROM messages WHERE order_id=? ORDER BY created_at DESC LIMIT 3', [orderId]);
 
-    const e = s => String(s||'').replace(/[_*`\[\]]/g, '\\$&');
-    let text = `📋 *${o.order_number}*\nСтатус: ${STATUS_LABELS[o.status]||o.status}\n\n`;
-    text += `👤 ${e(o.client_name)}\n📞 ${e(o.client_phone)}\n`;
-    if (o.client_email)    text += `📧 ${e(o.client_email)}\n`;
-    if (o.client_telegram) text += `💬 @${e(o.client_telegram.replace('@',''))}\n`;
-    text += `\n🎭 ${e(EVENT_TYPES[o.event_type]||o.event_type)}\n`;
-    if (o.event_date)      text += `📅 ${e(o.event_date)}\n`;
-    if (o.event_duration)  text += `⏱ ${e(o.event_duration)} ч\\.\n`;
-    if (o.location)        text += `📍 ${e(o.location)}\n`;
-    if (o.model_name)      text += `💃 ${e(o.model_name)}\n`;
-    if (o.budget)          text += `💰 ${e(o.budget)}\n`;
-    if (o.comments)        text += `💬 ${e(o.comments)}\n`;
+    let text = `📋 *${esc(o.order_number)}*\nСтатус: ${esc(STATUS_LABELS[o.status]||o.status)}\n\n`;
+    text += `👤 ${esc(o.client_name)}\n📞 ${esc(o.client_phone)}\n`;
+    if (o.client_email)    text += `📧 ${esc(o.client_email)}\n`;
+    if (o.client_telegram) text += `💬 @${esc(o.client_telegram.replace('@',''))}\n`;
+    text += `\n🎭 ${esc(EVENT_TYPES[o.event_type]||o.event_type)}\n`;
+    if (o.event_date)      text += `📅 ${esc(o.event_date)}\n`;
+    if (o.event_duration)  text += `⏱ ${esc(o.event_duration)} ч\\.\n`;
+    if (o.location)        text += `📍 ${esc(o.location)}\n`;
+    if (o.model_name)      text += `💃 ${esc(o.model_name)}\n`;
+    if (o.budget)          text += `💰 ${esc(o.budget)}\n`;
+    if (o.comments)        text += `💬 ${esc(o.comments)}\n`;
     if (msgs.length) {
       text += `\n📨 Последние сообщения:\n`;
       msgs.reverse().forEach(m => {
         const who = m.sender_type==='admin' ? '👤' : '🙋';
-        text += `${who} ${e(m.content)}\n`;
+        text += `${who} ${esc(m.content)}\n`;
       });
     }
 
@@ -1175,35 +1182,245 @@ async function showAgentDiscussions(chatId, period = '24h', page = 0) {
 
 // ─── Settings menu ────────────────────────────────────────────────────────────
 
-async function showAdminSettings(chatId) {
+async function showAdminSettings(chatId, section) {
   if (!isAdmin(chatId)) return;
-  const [greeting, phone, email, insta, notifNew, notifSt] = await Promise.all([
-    getSetting('greeting'), getSetting('contacts_phone'), getSetting('contacts_email'),
-    getSetting('contacts_insta'), getSetting('notif_new_order'), getSetting('notif_status'),
-  ]);
-  const text = `⚙️ Настройки бота и агентства\n\n` +
-    `📝 Приветствие: ${(greeting||'').slice(0,50)}${(greeting||'').length>50?'...':''}\n` +
-    `📞 Телефон: ${phone||'—'}\n` +
-    `📧 Email: ${email||'—'}\n` +
-    `📸 Instagram: ${insta||'—'}\n` +
-    `🔔 Уведомления о заявках: ${notifNew==='1'?'✅ Вкл':'❌ Выкл'}\n` +
-    `🔔 Уведомления о статусах: ${notifSt==='1'?'✅ Вкл':'❌ Выкл'}`;
-  return safeSend(chatId, text, {
-    reply_markup: { inline_keyboard: [
-      [{ text: '📝 Приветствие', callback_data: 'adm_set_greeting' },
-       { text: 'ℹ️ О нас',      callback_data: 'adm_set_about'    }],
-      [{ text: '📞 Телефон',    callback_data: 'adm_set_phone'   },
-       { text: '📧 Email',      callback_data: 'adm_set_email'   }],
-      [{ text: '📸 Instagram',  callback_data: 'adm_set_insta'   },
-       { text: '📍 Адрес',      callback_data: 'adm_set_addr'    }],
-      [{ text: '💰 Прайс-лист', callback_data: 'adm_set_pricing' }],
-      [{ text: notifNew==='1' ? '🔕 Выкл уведом. заявки' : '🔔 Вкл уведом. заявки',
-         callback_data: notifNew==='1' ? 'adm_notif_new_off' : 'adm_notif_new_on' },
-       { text: notifSt==='1'  ? '🔕 Выкл уведом. статус' : '🔔 Вкл уведом. статус',
-         callback_data: notifSt==='1'  ? 'adm_notif_st_off'  : 'adm_notif_st_on'  }],
-      [{ text: '← Меню', callback_data: 'admin_menu' }],
-    ]}
-  });
+  section = section || 'main';
+
+  // ── Главное меню настроек ──────────────────────────────────────────────────
+  if (section === 'main') {
+    const [notifNew, notifSt, revEnabled, quickEnabled] = await Promise.all([
+      getSetting('notif_new_order'), getSetting('notif_status'),
+      getSetting('reviews_enabled'), getSetting('quick_booking_enabled'),
+    ]);
+    const text =
+      `⚙️ Настройки бота и агентства\n\n` +
+      `🔔 Уведомления: ${notifNew==='1'?'✅':'❌'} заявки  ${notifSt==='1'?'✅':'❌'} статусы\n` +
+      `⭐ Отзывы: ${revEnabled==='0'?'❌ Выкл':'✅ Вкл'}  ⚡ Быстрая заявка: ${quickEnabled==='0'?'❌ Выкл':'✅ Вкл'}`;
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: '💬 Контакты и тексты',  callback_data: 'adm_settings_contacts' },
+         { text: '🔔 Уведомления',        callback_data: 'adm_settings_notifs'   }],
+        [{ text: '📋 Каталог и модели',   callback_data: 'adm_settings_catalog'  },
+         { text: '🛒 Бронирование',       callback_data: 'adm_settings_booking'  }],
+        [{ text: '⭐ Отзывы',             callback_data: 'adm_settings_reviews'  },
+         { text: '🏙 Города',             callback_data: 'adm_settings_cities'   }],
+        [{ text: '🤖 Бот и интерфейс',   callback_data: 'adm_settings_bot'      },
+         { text: '📊 Лимиты и доступ',   callback_data: 'adm_settings_limits'   }],
+        [{ text: '💰 Прайс-лист',         callback_data: 'adm_set_pricing'       }],
+        [{ text: '← Меню',               callback_data: 'admin_menu'            }],
+      ]}
+    });
+  }
+
+  // ── Контакты и тексты ──────────────────────────────────────────────────────
+  if (section === 'contacts') {
+    const [phone, email, insta, addr, greeting, about, mgrHours, mgrReply, wa] = await Promise.all([
+      getSetting('contacts_phone'), getSetting('contacts_email'),
+      getSetting('contacts_insta'), getSetting('contacts_addr'),
+      getSetting('greeting'), getSetting('about'),
+      getSetting('manager_hours'), getSetting('manager_reply'), getSetting('contacts_whatsapp'),
+    ]);
+    const trunc = (s, n=40) => s ? ((s.length>n ? s.slice(0,n)+'…' : s)) : '—';
+    const text =
+      `💬 Контакты и тексты\n\n` +
+      `📞 Телефон: ${phone||'—'}\n` +
+      `📧 Email: ${email||'—'}\n` +
+      `📸 Instagram: ${insta||'—'}\n` +
+      `📱 WhatsApp: ${wa||'—'}\n` +
+      `📍 Адрес: ${trunc(addr)}\n` +
+      `📝 Приветствие: ${trunc(greeting)}\n` +
+      `ℹ️ О нас: ${trunc(about)}\n` +
+      `🕐 Часы менеджера: ${mgrHours||'—'}\n` +
+      `💬 Авто-ответ: ${trunc(mgrReply,30)}`;
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: '📞 Телефон',      callback_data: 'adm_set_phone'     },
+         { text: '📧 Email',        callback_data: 'adm_set_email'     }],
+        [{ text: '📸 Instagram',    callback_data: 'adm_set_insta'     },
+         { text: '📱 WhatsApp',     callback_data: 'adm_set_whatsapp'  }],
+        [{ text: '📍 Адрес',        callback_data: 'adm_set_addr'      },
+         { text: '🌐 Сайт URL',     callback_data: 'adm_set_site_url'  }],
+        [{ text: '📝 Приветствие',  callback_data: 'adm_set_greeting'  },
+         { text: 'ℹ️ О нас',        callback_data: 'adm_set_about'     }],
+        [{ text: '🕐 Часы работы',  callback_data: 'adm_set_mgr_hours' },
+         { text: '💬 Авто-ответ',   callback_data: 'adm_set_mgr_reply' }],
+        [{ text: '← Настройки',     callback_data: 'adm_settings'      }],
+      ]}
+    });
+  }
+
+  // ── Уведомления ───────────────────────────────────────────────────────────
+  if (section === 'notifs') {
+    const [notifNew, notifSt, notifRev, notifMsg] = await Promise.all([
+      getSetting('notif_new_order'), getSetting('notif_status'),
+      getSetting('notif_new_review'), getSetting('notif_new_message'),
+    ]);
+    const on = v => v === '1' ? '✅' : '❌';
+    const text =
+      `🔔 Уведомления\n\n` +
+      `${on(notifNew)} Новые заявки\n` +
+      `${on(notifSt)} Изменения статуса\n` +
+      `${on(notifRev)} Новые отзывы\n` +
+      `${on(notifMsg)} Сообщения клиентов`;
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: notifNew==='1' ? '🔕 Заявки ВЫКЛ'    : '🔔 Заявки ВКЛ',
+           callback_data: notifNew==='1' ? 'adm_notif_new_off'    : 'adm_notif_new_on'    }],
+        [{ text: notifSt==='1'  ? '🔕 Статусы ВЫКЛ'   : '🔔 Статусы ВКЛ',
+           callback_data: notifSt==='1'  ? 'adm_notif_st_off'     : 'adm_notif_st_on'     }],
+        [{ text: notifRev==='1' ? '🔕 Отзывы ВЫКЛ'    : '🔔 Отзывы ВКЛ',
+           callback_data: notifRev==='1' ? 'adm_notif_review_off' : 'adm_notif_review_on' }],
+        [{ text: notifMsg==='1' ? '🔕 Сообщения ВЫКЛ' : '🔔 Сообщения ВКЛ',
+           callback_data: notifMsg==='1' ? 'adm_notif_msg_off'    : 'adm_notif_msg_on'    }],
+        [{ text: '← Настройки', callback_data: 'adm_settings' }],
+      ]}
+    });
+  }
+
+  // ── Каталог и модели ──────────────────────────────────────────────────────
+  if (section === 'catalog') {
+    const [perPage, sort, showCity, showBadge, catTitle] = await Promise.all([
+      getSetting('catalog_per_page'), getSetting('catalog_sort'),
+      getSetting('catalog_show_city'), getSetting('catalog_show_featured_badge'),
+      getSetting('catalog_title'),
+    ]);
+    const text =
+      `📋 Каталог и модели\n\n` +
+      `📄 Моделей на странице: ${perPage||'5'}\n` +
+      `🔃 Сортировка: ${sort==='date'?'По дате':'По рейтингу'}\n` +
+      `🏙 Показывать город: ${showCity==='0'?'❌':'✅'}\n` +
+      `⭐ Бейдж «Топ»: ${showBadge==='0'?'❌':'✅'}\n` +
+      `📌 Заголовок: ${catTitle||'Наши модели'}`;
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: '📄 Кол-во на странице', callback_data: 'adm_set_catalog_per_page'   },
+         { text: '📌 Заголовок',          callback_data: 'adm_set_catalog_title'       }],
+        [{ text: sort==='date' ? '🔃 Сорт: По рейтингу' : '🔃 Сорт: По дате',
+           callback_data: sort==='date' ? 'adm_catalog_sort_featured' : 'adm_catalog_sort_date' }],
+        [{ text: showCity==='0' ? '🏙 Показать город' : '🏙 Скрыть город',
+           callback_data: showCity==='0' ? 'adm_catalog_city_on' : 'adm_catalog_city_off' }],
+        [{ text: showBadge==='0' ? '⭐ Показать бейдж' : '⭐ Скрыть бейдж',
+           callback_data: showBadge==='0' ? 'adm_catalog_badge_on' : 'adm_catalog_badge_off' }],
+        [{ text: '← Настройки', callback_data: 'adm_settings' }],
+      ]}
+    });
+  }
+
+  // ── Бронирование ──────────────────────────────────────────────────────────
+  if (section === 'booking') {
+    const [quickEnabled, autoConfirm, minBudget, bookingMsg, requireEmail] = await Promise.all([
+      getSetting('quick_booking_enabled'), getSetting('booking_auto_confirm'),
+      getSetting('booking_min_budget'), getSetting('booking_confirm_msg'),
+      getSetting('booking_require_email'),
+    ]);
+    const text =
+      `🛒 Бронирование\n\n` +
+      `⚡ Быстрая заявка: ${quickEnabled==='0'?'❌ Выкл':'✅ Вкл'}\n` +
+      `✅ Авто-подтверждение: ${autoConfirm==='1'?'✅ Вкл':'❌ Выкл'}\n` +
+      `💰 Мин. бюджет: ${minBudget||'не задан'}\n` +
+      `📧 Требовать email: ${requireEmail==='1'?'✅':'❌'}\n` +
+      `💬 Сообщение после брони: ${(bookingMsg||'').slice(0,40)||'—'}`;
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: quickEnabled==='0' ? '⚡ Быстрая заявка ВКЛ' : '⚡ Быстрая заявка ВЫКЛ',
+           callback_data: quickEnabled==='0' ? 'adm_booking_quick_on' : 'adm_booking_quick_off' }],
+        [{ text: autoConfirm==='1' ? '✅ Авто-подтвержд. ВЫКЛ' : '✅ Авто-подтвержд. ВКЛ',
+           callback_data: autoConfirm==='1' ? 'adm_booking_autoconfirm_off' : 'adm_booking_autoconfirm_on' }],
+        [{ text: requireEmail==='1' ? '📧 Email необязателен' : '📧 Email обязателен',
+           callback_data: requireEmail==='1' ? 'adm_booking_email_off' : 'adm_booking_email_on' }],
+        [{ text: '💰 Мин. бюджет',      callback_data: 'adm_set_booking_min_budget'  },
+         { text: '💬 Сообщение',        callback_data: 'adm_set_booking_confirm_msg' }],
+        [{ text: '← Настройки', callback_data: 'adm_settings' }],
+      ]}
+    });
+  }
+
+  // ── Отзывы ────────────────────────────────────────────────────────────────
+  if (section === 'reviews') {
+    const [revEnabled, revAuto, revMin, revPrompt] = await Promise.all([
+      getSetting('reviews_enabled'), getSetting('reviews_auto_approve'),
+      getSetting('reviews_min_completed'), getSetting('reviews_prompt_text'),
+    ]);
+    const text =
+      `⭐ Отзывы\n\n` +
+      `💬 Включены: ${revEnabled==='0'?'❌':'✅'}\n` +
+      `✅ Авто-одобрение: ${revAuto==='1'?'✅':'❌'}\n` +
+      `📋 Мин. завершённых заявок: ${revMin||'1'}\n` +
+      `📝 Приглашение: ${(revPrompt||'').slice(0,40)||'—'}`;
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: revEnabled==='0' ? '💬 Отзывы ВКЛ' : '💬 Отзывы ВЫКЛ',
+           callback_data: revEnabled==='0' ? 'adm_reviews_on' : 'adm_reviews_off' }],
+        [{ text: revAuto==='1' ? '✅ Авто-одобр. ВЫКЛ' : '✅ Авто-одобр. ВКЛ',
+           callback_data: revAuto==='1' ? 'adm_reviews_auto_off' : 'adm_reviews_auto_on' }],
+        [{ text: '🔢 Мин. заявок',   callback_data: 'adm_set_reviews_min'    },
+         { text: '📝 Приглашение',   callback_data: 'adm_set_reviews_prompt' }],
+        [{ text: '📋 Управление отзывами', callback_data: 'adm_reviews'      }],
+        [{ text: '← Настройки', callback_data: 'adm_settings' }],
+      ]}
+    });
+  }
+
+  // ── Города ────────────────────────────────────────────────────────────────
+  if (section === 'cities') {
+    const cities = await getSetting('cities_list').catch(() => '');
+    const cityList = cities ? cities.split(',').map(c => `• ${c.trim()}`).join('\n') : 'Не задано — фильтр по городу скрыт';
+    return safeSend(chatId, `🏙 Города\n\nДоступные города для фильтра:\n\n${cityList}`, {
+      reply_markup: { inline_keyboard: [
+        [{ text: '✏️ Изменить список городов', callback_data: 'adm_set_cities_list' }],
+        [{ text: '← Настройки', callback_data: 'adm_settings' }],
+      ]}
+    });
+  }
+
+  // ── Бот и интерфейс ───────────────────────────────────────────────────────
+  if (section === 'bot') {
+    const [welcomePhoto, menuText, wishlistEnabled, searchEnabled, botLang] = await Promise.all([
+      getSetting('welcome_photo_url'), getSetting('main_menu_text'),
+      getSetting('wishlist_enabled'), getSetting('search_enabled'), getSetting('bot_language'),
+    ]);
+    const text =
+      `🤖 Бот и интерфейс\n\n` +
+      `🌐 Язык: ${botLang||'ru'}\n` +
+      `🖼 Фото приветствия: ${welcomePhoto ? '✅ Задано' : '❌ Нет'}\n` +
+      `📋 Текст главного меню: ${(menuText||'').slice(0,40)||'—'}\n` +
+      `❤️ Избранное: ${wishlistEnabled==='0'?'❌ Выкл':'✅ Вкл'}\n` +
+      `🔍 Поиск по росту: ${searchEnabled==='0'?'❌ Выкл':'✅ Вкл'}`;
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: wishlistEnabled==='0' ? '❤️ Избранное ВКЛ' : '❤️ Избранное ВЫКЛ',
+           callback_data: wishlistEnabled==='0' ? 'adm_wishlist_on' : 'adm_wishlist_off' }],
+        [{ text: searchEnabled==='0' ? '🔍 Поиск ВКЛ' : '🔍 Поиск ВЫКЛ',
+           callback_data: searchEnabled==='0' ? 'adm_search_on' : 'adm_search_off' }],
+        [{ text: '🖼 Фото приветствия', callback_data: 'adm_set_welcome_photo'  },
+         { text: '📋 Текст меню',      callback_data: 'adm_set_main_menu_text'  }],
+        [{ text: '← Настройки', callback_data: 'adm_settings' }],
+      ]}
+    });
+  }
+
+  // ── Лимиты и доступ ───────────────────────────────────────────────────────
+  if (section === 'limits') {
+    const [maxPhotos, maxOrders, msgDelay, rateLimit] = await Promise.all([
+      getSetting('model_max_photos'), getSetting('client_max_active_orders'),
+      getSetting('client_msg_delay_sec'), getSetting('api_rate_limit'),
+    ]);
+    const text =
+      `📊 Лимиты и доступ\n\n` +
+      `🖼 Макс. фото у модели: ${maxPhotos||'8'}\n` +
+      `📋 Макс. активных заявок у клиента: ${maxOrders||'3'}\n` +
+      `⏱ Мин. интервал сообщений клиента (сек): ${msgDelay||'10'}\n` +
+      `🔒 API rate limit (req/min): ${rateLimit||'60'}`;
+    return safeSend(chatId, text, {
+      reply_markup: { inline_keyboard: [
+        [{ text: '🖼 Макс. фото',         callback_data: 'adm_set_model_max_photos'   },
+         { text: '📋 Макс. заявок',       callback_data: 'adm_set_client_max_orders'  }],
+        [{ text: '⏱ Интервал сообщений',  callback_data: 'adm_set_client_msg_delay'  },
+         { text: '🔒 Rate limit',          callback_data: 'adm_set_api_rate_limit'    }],
+        [{ text: '← Настройки', callback_data: 'adm_settings' }],
+      ]}
+    });
+  }
 }
 
 // ─── Add Model wizard ─────────────────────────────────────────────────────────
@@ -1395,7 +1612,7 @@ async function sendBroadcast(chatId, text) {
   let sent = 0, failed = 0;
   for (const c of clients) {
     try {
-      await bot.sendMessage(c.client_chat_id, `📢 *Сообщение от Nevesty Models*\n\n${text}`, {});
+      await bot.sendMessage(c.client_chat_id, `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}`, { parse_mode: 'MarkdownV2' });
       sent++;
     } catch { failed++; }
     await new Promise(r => setTimeout(r, 50)); // rate limit
@@ -1751,7 +1968,9 @@ function initBot(app) {
     if (data.startsWith('bk_etype_')) {
       const session = await getSession(chatId);
       const d = sessionData(session);
-      d.event_type = data.replace('bk_etype_','');
+      const etype = data.replace('bk_etype_','');
+      if (!Object.keys(EVENT_TYPES).includes(etype)) return;
+      d.event_type = etype;
       return bkStep2Date(chatId, d);
     }
 
@@ -2032,6 +2251,7 @@ function initBot(app) {
       const parts = data.replace('adm_efc_','').split('_');
       const modelId = parseInt(parts[0]);
       const cat = parts[1];
+      if (!Object.keys(MODEL_CATEGORIES).includes(cat)) return;
       await run('UPDATE models SET category=? WHERE id=?', [cat, modelId]).catch(()=>{});
       return safeSend(chatId, '✅ Категория обновлена!', {
         reply_markup: { inline_keyboard: [[{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${modelId}` }, { text: '← Карточка', callback_data: `adm_model_${modelId}` }]] }
@@ -2145,9 +2365,11 @@ function initBot(app) {
     }
     if (data.startsWith('adm_disc_')) {
       if (!isAdmin(chatId)) return;
-      const parts  = data.replace('adm_disc_', '').split('_');
-      const period = parts.slice(0, -1).join('_'); // '1h', '24h', '7d', '30d'
-      const page   = parseInt(parts[parts.length - 1]) || 0;
+      const parts     = data.replace('adm_disc_', '').split('_');
+      const rawPeriod = parts.slice(0, -1).join('_');
+      const validPeriods = ['1h', '24h', '7d', '30d'];
+      const period    = validPeriods.includes(rawPeriod) ? rawPeriod : '24h';
+      const page      = parseInt(parts[parts.length - 1]) || 0;
       return showAgentDiscussions(chatId, period, page);
     }
 
@@ -2282,19 +2504,21 @@ function initBot(app) {
     if (state === 'idle' || state === 'check_status') {
       // Клиентские кнопки
       if (!isAdmin(chatId)) {
-        if (text === '⭐ Топ-модели')       return showTopModels(chatId, 0);
-        if (text === '💃 Каталог')         return showCatalog(chatId, null, 0);
-        if (text === '📝 Подать заявку')   return bkStep1(chatId);
-        if (text === '💬 Менеджер')        return showContactManager(chatId);
-        if (text === '📋 Мои заявки')      return showMyOrders(chatId);
+        if (text === '⭐ Топ-модели')           return showTopModels(chatId, 0);
+        if (text === '💃 Каталог')             return showCatalog(chatId, null, 0);
+        if (text === '📝 Подать заявку')       return bkStep1(chatId);
+        if (text === '⚡ Быстрая заявка')       return bkQuickStart(chatId);
+        if (text === '❤️ Избранное')            return showFavorites(chatId, 0);
+        if (text === '💬 Менеджер')            return showContactManager(chatId);
+        if (text === '📋 Мои заявки')          return showMyOrders(chatId);
         if (text === '🔍 Статус заявки') {
           await setSession(chatId, 'check_status', {});
           return safeSend(chatId, '🔍 Введите номер заявки (например, НМ-001):');
         }
-        if (text === '💰 Прайс')           return showPricing(chatId);
-        if (text === '❓ FAQ')             return showFaq(chatId);
-        if (text === '👤 Профиль')         return showUserProfile(chatId, msg.from.first_name);
-        if (text === '📞 Контакты')        return showContacts(chatId);
+        if (text === '💰 Прайс')               return showPricing(chatId);
+        if (text === '❓ FAQ')                 return showFaq(chatId);
+        if (text === '👤 Профиль')             return showUserProfile(chatId, msg.from.first_name);
+        if (text === '📞 Контакты')            return showContacts(chatId);
       }
       // Кнопки администратора
       if (isAdmin(chatId)) {
@@ -2565,9 +2789,10 @@ function initBot(app) {
       }
       const adminIds = await getAdminChatIds();
       const header   = order
-        ? `📩 *Сообщение от клиента*\nЗаявка: *${order.order_number}*\nКлиент: ${clientName} ${username}\n\n`
-        : `📩 *Новое сообщение*\n${clientName} ${username}\n\n`;
-      await Promise.allSettled(adminIds.map(id => safeSend(id, header + text, {
+        ? `📩 *Сообщение от клиента*\nЗаявка: *${esc(order.order_number)}*\nКлиент: ${esc(clientName)} ${esc(username)}\n\n`
+        : `📩 *Новое сообщение*\n${esc(clientName)} ${esc(username)}\n\n`;
+      await Promise.allSettled(adminIds.map(id => safeSend(id, header + esc(text), {
+        parse_mode: 'MarkdownV2',
         reply_markup: order ? { inline_keyboard: [[
           { text: '💬 Ответить',   callback_data: `adm_contact_${order.id}` },
           { text: '📋 Заявка',     callback_data: `adm_order_${order.id}`   },
@@ -2579,6 +2804,9 @@ function initBot(app) {
       });
     }
   });
+
+  // Register new features (wishlist, quick booking, height search, dashboard)
+  _registerNewFeatures();
 
   return { notifyAdmin, notifyNewOrder, notifyStatusChange, sendMessageToClient, instance: bot };
 }
@@ -2599,20 +2827,21 @@ async function notifyNewOrder(order) {
     if (m) modelName = m.name;
   }
   const text =
-    `🆕 *Новая заявка!*\n\n` +
-    `📋 *${order.order_number}*\n` +
-    `👤 ${order.client_name}\n📞 ${order.client_phone}\n` +
-    (order.client_email    ? `📧 ${order.client_email}\n`                          : '') +
-    (order.client_telegram ? `💬 @${String(order.client_telegram).replace('@','')}\n` : '') +
-    `\n🎭 ${EVENT_TYPES[order.event_type]||order.event_type}\n` +
-    (order.event_date  ? `📅 ${order.event_date}\n`  : '') +
-    (order.location    ? `📍 ${order.location}\n`    : '') +
-    (order.budget      ? `💰 ${order.budget}\n`      : '') +
-    (modelName         ? `💃 ${modelName}\n`         : '') +
-    (order.comments    ? `\n💬 ${order.comments}`    : '');
+    `🆕 *Новая заявка\\!*\n\n` +
+    `📋 *${esc(order.order_number)}*\n` +
+    `👤 ${esc(order.client_name)}\n📞 ${esc(order.client_phone)}\n` +
+    (order.client_email    ? `📧 ${esc(order.client_email)}\n`                                : '') +
+    (order.client_telegram ? `💬 @${esc(String(order.client_telegram).replace('@',''))}\n`   : '') +
+    `\n🎭 ${esc(EVENT_TYPES[order.event_type]||order.event_type)}\n` +
+    (order.event_date  ? `📅 ${esc(order.event_date)}\n`  : '') +
+    (order.location    ? `📍 ${esc(order.location)}\n`    : '') +
+    (order.budget      ? `💰 ${esc(order.budget)}\n`      : '') +
+    (modelName         ? `💃 ${esc(modelName)}\n`         : '') +
+    (order.comments    ? `\n💬 ${esc(order.comments)}`    : '');
 
   const ids = await getAdminChatIds();
   await Promise.allSettled(ids.map(id => safeSend(id, text, {
+    parse_mode: 'MarkdownV2',
     reply_markup: { inline_keyboard: [
       [
         { text: '✅ Подтвердить', callback_data: `adm_confirm_${order.id}` },
@@ -3356,4 +3585,320 @@ async function startEditProfile(chatId) {
   } catch (e) { console.error('[Bot] startEditProfile:', e.message); }
 }
 
-module.exports = { initBot, notifyAdmin, notifyNewOrder, notifyStatusChange, sendMessageToClient };
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── FEATURE A: Избранные модели (Wishlist) ───────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function getFavoriteIds(chatId) {
+  try {
+    const rows = await query('SELECT model_id FROM favorites WHERE chat_id=?', [String(chatId)]);
+    return rows.map(r => r.model_id);
+  } catch { return []; }
+}
+
+async function showFavorites(chatId, page = 0) {
+  try {
+    const favs = await query(
+      `SELECT f.model_id, m.name, m.height, m.category, m.available
+       FROM favorites f
+       JOIN models m ON m.id = f.model_id
+       WHERE f.chat_id = ?
+       ORDER BY f.created_at DESC`,
+      [String(chatId)]
+    );
+
+    if (!favs.length) {
+      return safeSend(chatId,
+        '❤️ *Избранные модели*\n\nУ вас пока нет избранных моделей\\.\n\nОткройте карточку модели и нажмите ❤️ чтобы добавить\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '💃 Каталог моделей', callback_data: 'cat_cat__0' }],
+            [{ text: '🏠 Главное меню',    callback_data: 'main_menu'  }],
+          ]}
+        }
+      );
+    }
+
+    const perPage = 5;
+    const total   = favs.length;
+    const slice   = favs.slice(page * perPage, page * perPage + perPage);
+
+    let text = `❤️ *Избранные модели* \\(${total}\\)\n\n`;
+    const modelBtns = slice.map(m => {
+      const avail = m.available ? '🟢' : '🔴';
+      text += `${avail} *${esc(m.name)}* — ${m.height || '?'}см, ${esc(m.category || '')}\n`;
+      return [
+        { text: `${avail} ${m.name}`, callback_data: `cat_model_${m.model_id}` },
+        { text: '❌ Убрать',          callback_data: `fav_remove_${m.model_id}` }
+      ];
+    });
+
+    const nav = [];
+    if (page > 0)                      nav.push({ text: '◀️', callback_data: `fav_list_${page - 1}` });
+    if ((page + 1) * perPage < total)  nav.push({ text: '▶️', callback_data: `fav_list_${page + 1}` });
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        ...modelBtns,
+        ...(nav.length ? [nav] : []),
+        [{ text: '📝 Оформить заявку', callback_data: 'bk_start'  }],
+        [{ text: '🏠 Главное меню',    callback_data: 'main_menu' }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showFavorites:', e.message); }
+}
+
+async function addFavorite(chatId, modelId) {
+  try {
+    const m = await get('SELECT id, name FROM models WHERE id=?', [modelId]);
+    if (!m) return safeSend(chatId, '❌ Модель не найдена\\.');
+    await run('INSERT OR IGNORE INTO favorites (chat_id, model_id) VALUES (?,?)', [String(chatId), modelId]);
+    return safeSend(chatId,
+      `❤️ *${esc(m.name)}* добавлена в избранное\\!`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '❤️ Мои избранные', callback_data: 'fav_list_0'           }],
+          [{ text: '← К модели',       callback_data: `cat_model_${modelId}` }],
+        ]}
+      }
+    );
+  } catch (e) { console.error('[Bot] addFavorite:', e.message); }
+}
+
+async function removeFavorite(chatId, modelId) {
+  try {
+    const m = await get('SELECT name FROM models WHERE id=?', [modelId]).catch(() => null);
+    await run('DELETE FROM favorites WHERE chat_id=? AND model_id=?', [String(chatId), modelId]);
+    return safeSend(chatId,
+      `💔 *${esc(m?.name || 'Модель')}* убрана из избранного\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '❤️ Мои избранные', callback_data: 'fav_list_0' }],
+          [{ text: '🏠 Главное меню',   callback_data: 'main_menu'  }],
+        ]}
+      }
+    );
+  } catch (e) { console.error('[Bot] removeFavorite:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── FEATURE B: Быстрая заявка (Quick Booking) ────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function bkQuickStart(chatId) {
+  await setSession(chatId, 'bk_quick_name', {});
+  return safeSend(chatId,
+    `⚡ *Быстрая заявка*\n\nМенеджер свяжется с вами и уточнит все детали\\.\n\n📝 Шаг 1/2 — Введите ваше имя:`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📋 Полная форма', callback_data: 'bk_start'  }],
+        [{ text: '❌ Отменить',     callback_data: 'main_menu' }],
+      ]}
+    }
+  );
+}
+
+async function bkQuickPhone(chatId, data) {
+  await setSession(chatId, 'bk_quick_phone', data);
+  return safeSend(chatId,
+    `⚡ *Быстрая заявка*\n\n✅ Имя: *${esc(data.quick_name)}*\n\n📝 Шаг 2/2 — Введите номер телефона:`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'main_menu' }]] }
+    }
+  );
+}
+
+async function bkQuickSubmit(chatId, data) {
+  try {
+    const orderNum = generateOrderNumber();
+    await run(
+      `INSERT INTO orders (order_number,client_name,client_phone,event_type,comments,client_chat_id,status)
+       VALUES (?,?,?,'other',?,?,'new')`,
+      [orderNum, data.quick_name, data.quick_phone, 'Быстрая заявка — менеджер уточнит детали', String(chatId)]
+    );
+    const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
+    await clearSession(chatId);
+    await safeSend(chatId,
+      `⚡ *Заявка принята\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер позвонит на *${esc(data.quick_phone)}* в ближайшее время\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📋 Мои заявки',  callback_data: 'my_orders'  }],
+          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+        ]}
+      }
+    );
+    if (order) notifyNewOrder(order);
+  } catch (e) {
+    console.error('[Bot] bkQuickSubmit:', e.message);
+    await clearSession(chatId);
+    return safeSend(chatId, '❌ Ошибка при отправке\\.  Попробуйте позже\\.', { parse_mode: 'MarkdownV2' });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── FEATURE D: Поиск по росту — ввод диапазона вручную ──────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function showHeightSearchInput(chatId) {
+  await setSession(chatId, 'search_height', {});
+  return safeSend(chatId,
+    `📏 *Поиск моделей по росту*\n\nВведите диапазон роста в формате:\n*170\\-180* или одно значение *175*\n\n_Или выберите быстрый диапазон:_`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '160–165 см', callback_data: 'cat_search_height_160-165' },
+         { text: '165–170 см', callback_data: 'cat_search_height_165-170' }],
+        [{ text: '170–175 см', callback_data: 'cat_search_height_170-175' },
+         { text: '175–185 см', callback_data: 'cat_search_height_175-185' }],
+        [{ text: '← Поиск',       callback_data: 'cat_search' }],
+        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+      ]}
+    }
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── FEATURE E: Расширенный дашборд администратора ───────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function showAdminDashboard(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const now      = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const weekAgo  = new Date(now - 7  * 86400000).toISOString().slice(0, 10);
+    const monthAgo = new Date(now - 30 * 86400000).toISOString().slice(0, 10);
+
+    const [today, week, month, topModels, newClients, totalDone] = await Promise.all([
+      get(`SELECT COUNT(*) as n FROM orders WHERE date(created_at)=?`, [todayStr]),
+      get(`SELECT COUNT(*) as n FROM orders WHERE date(created_at)>=?`, [weekAgo]),
+      get(`SELECT COUNT(*) as n FROM orders WHERE date(created_at)>=?`, [monthAgo]),
+      query(
+        `SELECT m.name, COUNT(o.id) as cnt
+         FROM models m JOIN orders o ON o.model_id=m.id
+         WHERE o.status NOT IN ('cancelled')
+         GROUP BY m.id ORDER BY cnt DESC LIMIT 3`
+      ),
+      get(
+        `SELECT COUNT(DISTINCT client_chat_id) as n FROM orders
+         WHERE date(created_at)>=? AND client_chat_id IS NOT NULL AND client_chat_id!=''`,
+        [monthAgo]
+      ),
+      get(`SELECT COUNT(*) as n FROM orders WHERE status='completed'`),
+    ]);
+
+    let text = `📊 *Дашборд Nevesty Models*\n\n`;
+    text += `📅 Заявок сегодня: *${today.n}*\n`;
+    text += `📅 За неделю: *${week.n}*\n`;
+    text += `📅 За месяц: *${month.n}*\n`;
+    text += `🏁 Завершено всего: *${totalDone.n}*\n`;
+    text += `👥 Новых клиентов за месяц: *${newClients?.n || 0}*\n\n`;
+
+    if (topModels.length) {
+      text += `🏆 *Топ\\-3 модели по заказам:*\n`;
+      topModels.forEach((m, i) => {
+        text += `  ${i + 1}\\. *${esc(m.name)}* — ${m.cnt} заказов\n`;
+      });
+    } else {
+      text += `_Заказов с привязанными моделями пока нет_\n`;
+    }
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📋 Заявки',     callback_data: 'adm_orders__0' },
+         { text: '📊 Статистика', callback_data: 'adm_stats'     }],
+        [{ text: '← Меню',       callback_data: 'admin_menu'    }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showAdminDashboard:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── Hook new features into the bot after initBot() ──────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function _registerNewFeatures() {
+  if (!bot) return;
+
+  // ── Additional callback_query handlers ─────────────────────────────────────
+  bot.on('callback_query', async (q) => {
+    const chatId = q.message.chat.id;
+    const data   = q.data;
+    try { await bot.answerCallbackQuery(q.id); } catch {}
+
+    // Favorites list
+    if (data.startsWith('fav_list_')) {
+      const page = parseInt(data.replace('fav_list_', '')) || 0;
+      return showFavorites(chatId, page);
+    }
+
+    // Favorites add/remove
+    if (data.startsWith('fav_add_')) {
+      return addFavorite(chatId, parseInt(data.replace('fav_add_', '')));
+    }
+    if (data.startsWith('fav_remove_')) {
+      return removeFavorite(chatId, parseInt(data.replace('fav_remove_', '')));
+    }
+
+    // Quick booking
+    if (data === 'bk_quick') return bkQuickStart(chatId);
+
+    // Height search manual input
+    if (data === 'search_height_input') return showHeightSearchInput(chatId);
+
+    // Admin dashboard
+    if (data === 'adm_dashboard') {
+      if (!isAdmin(chatId)) return;
+      return showAdminDashboard(chatId);
+    }
+  });
+
+  // ── Additional message state handlers ─────────────────────────────────────
+  bot.on('message', async (msg) => {
+    if (!msg.text || msg.text.startsWith('/')) return;
+    const chatId  = msg.chat.id;
+    const text    = msg.text.trim();
+    const session = await getSession(chatId);
+    const state   = session?.state || 'idle';
+    const d       = sessionData(session);
+
+    // Quick booking: collect name
+    if (state === 'bk_quick_name') {
+      if (text.length < 2) return safeSend(chatId, '❌ Введите имя (минимум 2 символа):');
+      d.quick_name = text;
+      return bkQuickPhone(chatId, d);
+    }
+
+    // Quick booking: collect phone
+    if (state === 'bk_quick_phone') {
+      if (!/^[\d\s+\-()]{7,20}$/.test(text)) {
+        return safeSend(chatId, '❌ Введите корректный номер телефона:');
+      }
+      d.quick_phone = text;
+      return bkQuickSubmit(chatId, d);
+    }
+
+    // Height search: manual range input
+    if (state === 'search_height') {
+      const clean = text.replace(/\s/g, '');
+      const rangeMatch  = clean.match(/^(\d{3})-(\d{3})$/);
+      const singleMatch = clean.match(/^(\d{3})$/);
+      if (rangeMatch) {
+        await clearSession(chatId);
+        return showSearchResults(chatId, 'height', `${rangeMatch[1]}-${rangeMatch[2]}`, 0);
+      } else if (singleMatch) {
+        await clearSession(chatId);
+        const h = parseInt(singleMatch[1]);
+        return showSearchResults(chatId, 'height', `${h}-${h}`, 0);
+      } else {
+        return safeSend(chatId,
+          '❌ Неверный формат\\. Введите диапазон, например: *170\\-180* или одно значение *175*',
+          { parse_mode: 'MarkdownV2' }
+        );
+      }
+    }
+  });
+}
+
+module.exports = { initBot, notifyAdmin, notifyNewOrder, notifyStatusChange, sendMessageToClient, _registerNewFeatures };

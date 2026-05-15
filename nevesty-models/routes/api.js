@@ -393,6 +393,55 @@ router.get('/orders/status/:order_number', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Favorites (wishlist) — stored by localStorage key on site, chat_id in bot ─
+// GET  /api/favorites?ids=1,2,3        → public, returns model stubs for given IDs
+// POST /api/favorites/check            → check if model is in DB (validation)
+router.get('/favorites', async (req, res, next) => {
+  try {
+    const rawIds = (req.query.ids || '').split(',').map(x => parseInt(x)).filter(Boolean);
+    if (!rawIds.length) return res.json([]);
+    const placeholders = rawIds.map(() => '?').join(',');
+    const models = await query(
+      `SELECT id, name, height, category, available, photo_main FROM models WHERE id IN (${placeholders})`,
+      rawIds
+    );
+    res.json(models);
+  } catch (e) { next(e); }
+});
+
+// ─── Quick booking (name + phone only) ────────────────────────────────────────
+router.post('/quick-booking', async (req, res, next) => {
+  try {
+    const { client_name, client_phone } = req.body;
+    if (!sanitize(client_name, 100)) return res.status(400).json({ error: 'Укажите имя' });
+    if (!client_phone || !validatePhone(client_phone)) return res.status(400).json({ error: 'Укажите корректный номер телефона' });
+    const result = await run(
+      `INSERT INTO quick_bookings (client_name, client_phone) VALUES (?,?)`,
+      [sanitize(client_name, 100), client_phone.trim().slice(0, 20)]
+    );
+    // Also create a real order so admin sees it
+    const order_number = generateOrderNumber();
+    const ordResult = await run(
+      `INSERT INTO orders (order_number,client_name,client_phone,event_type,comments)
+       VALUES (?,?,?,'other',?)`,
+      [order_number, sanitize(client_name, 100), client_phone.trim().slice(0, 20), 'Быстрая заявка — менеджер уточнит детали']
+    );
+    const order = await get('SELECT * FROM orders WHERE id=?', [ordResult.id]);
+    if (botInstance && order) {
+      botInstance.notifyNewOrder({ ...order, order_number }).catch(e => console.error('Bot notify quick booking:', e.message));
+    }
+    res.json({ ok: true, order_number });
+  } catch (e) { next(e); }
+});
+
+// ─── Admin: quick bookings list ───────────────────────────────────────────────
+router.get('/admin/quick-bookings', auth, async (req, res, next) => {
+  try {
+    const rows = await query('SELECT * FROM quick_bookings ORDER BY created_at DESC LIMIT 100');
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
 // ─── Orders (admin) ───────────────────────────────────────────────────────────
 router.get('/admin/orders', auth, async (req, res, next) => {
   try {

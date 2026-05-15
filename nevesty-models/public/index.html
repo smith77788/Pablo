@@ -196,9 +196,76 @@
       <div class="section-tag">Готовы начать?</div>
       <h2>Создайте незабываемый образ</h2>
       <p>Свяжитесь с нами сегодня и получите персональную консультацию от нашего менеджера</p>
-      <a href="/booking.html" class="btn-primary" style="font-size:0.85rem;padding:18px 48px;">Оформить заявку</a>
+      <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
+        <a href="/booking.html" class="btn-primary" style="font-size:0.85rem;padding:18px 48px;">Оформить заявку</a>
+        <button class="btn-outline" onclick="openQuickBooking()" style="font-size:0.85rem;padding:18px 48px;background:none;cursor:pointer;">⚡ Заказать звонок</button>
+      </div>
     </div>
   </section>
+
+  <!-- QUICK BOOKING MODAL -->
+  <div id="quickBookingModal" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,0.8);backdrop-filter:blur(6px);align-items:center;justify-content:center">
+    <div style="background:var(--bg2);border:1px solid var(--border);padding:40px 32px;max-width:420px;width:90%;position:relative">
+      <button onclick="closeQuickBooking()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-muted);font-size:1.3rem;cursor:pointer">✕</button>
+      <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Быстрая заявка</div>
+      <h3 style="font-size:1.5rem;color:var(--white);margin-bottom:8px">Заказать звонок</h3>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:24px">Оставьте имя и телефон — менеджер свяжется в течение часа</p>
+      <div id="qbForm">
+        <div style="margin-bottom:16px">
+          <label style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);display:block;margin-bottom:6px">Ваше имя *</label>
+          <input type="text" id="qbName" placeholder="Иван Иванов" class="form-control" autocomplete="name" />
+        </div>
+        <div style="margin-bottom:24px">
+          <label style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);display:block;margin-bottom:6px">Телефон *</label>
+          <input type="tel" id="qbPhone" placeholder="+7 (999) 000-00-00" class="form-control" autocomplete="tel" inputmode="tel" />
+        </div>
+        <div id="qbError" style="color:#f44336;font-size:0.8rem;margin-bottom:12px;display:none"></div>
+        <button onclick="submitQuickBooking()" class="btn-primary" style="width:100%;font-size:0.85rem;padding:16px;">Отправить заявку</button>
+      </div>
+      <div id="qbSuccess" style="display:none;text-align:center;padding:20px 0">
+        <div style="font-size:3rem;margin-bottom:16px">✦</div>
+        <h4 style="color:var(--white);margin-bottom:8px">Заявка принята!</h4>
+        <p style="color:var(--text-muted);font-size:0.85rem">Менеджер позвонит вам в течение часа.</p>
+        <div id="qbOrderNum" style="color:var(--gold);font-size:0.9rem;margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+  <script>
+  function openQuickBooking() {
+    const m = document.getElementById('quickBookingModal');
+    m.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    document.getElementById('qbName').focus();
+  }
+  function closeQuickBooking() {
+    document.getElementById('quickBookingModal').style.display = 'none';
+    document.body.style.overflow = '';
+  }
+  document.getElementById('quickBookingModal').addEventListener('click', function(e) {
+    if (e.target === this) closeQuickBooking();
+  });
+  async function submitQuickBooking() {
+    const name  = document.getElementById('qbName').value.trim();
+    const phone = document.getElementById('qbPhone').value.trim();
+    const err   = document.getElementById('qbError');
+    err.style.display = 'none';
+    if (!name || name.length < 2) { err.textContent = 'Введите имя'; err.style.display = 'block'; return; }
+    if (!phone || phone.replace(/\D/g,'').length < 7) { err.textContent = 'Введите корректный номер телефона'; err.style.display = 'block'; return; }
+    try {
+      const r = await fetch('/api/quick-booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_name: name, client_phone: phone })
+      });
+      const d = await r.json();
+      if (!r.ok) { err.textContent = d.error || 'Ошибка. Попробуйте позже.'; err.style.display = 'block'; return; }
+      document.getElementById('qbForm').style.display = 'none';
+      document.getElementById('qbSuccess').style.display = 'block';
+      if (d.order_number) document.getElementById('qbOrderNum').textContent = 'Номер заявки: ' + d.order_number;
+    } catch(e) { err.textContent = 'Ошибка сети. Попробуйте позже.'; err.style.display = 'block'; }
+  }
+  document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeQuickBooking(); });
+  </script>
 
   <!-- PRICING -->
   <section class="pricing-section" id="pricing" data-animate>

@@ -193,6 +193,27 @@ async function initDatabase() {
     await run('INSERT OR IGNORE INTO bot_settings (key,value) VALUES (?,?)', [key, value]);
   }
 
+  // Favorites table — wishlist for Telegram bot users
+  await run(`CREATE TABLE IF NOT EXISTS favorites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    model_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chat_id, model_id),
+    FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE
+  )`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_favorites_chat ON favorites(chat_id)`);
+
+  // Quick bookings table — name + phone only, manager fills the rest
+  await run(`CREATE TABLE IF NOT EXISTS quick_bookings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_name TEXT NOT NULL,
+    client_phone TEXT NOT NULL,
+    chat_id TEXT,
+    status TEXT DEFAULT 'new',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   // Migrations — add columns that may not exist in older DBs
   await run(`ALTER TABLE models ADD COLUMN city TEXT`).catch(() => {});
   await run(`ALTER TABLE models ADD COLUMN featured INTEGER DEFAULT 0`).catch(() => {});
@@ -207,6 +228,7 @@ async function initDatabase() {
   await run(`CREATE INDEX IF NOT EXISTS idx_messages_order ON messages(order_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_models_category ON models(category)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_models_available ON models(available)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_models_featured ON models(featured DESC)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_sessions_updated ON telegram_sessions(updated_at)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_findings_status ON agent_findings(status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_findings_created ON agent_findings(created_at DESC)`);
@@ -221,7 +243,7 @@ async function initDatabase() {
       'INSERT INTO admins (username, email, password_hash, role) VALUES (?, ?, ?, ?)',
       [process.env.ADMIN_USERNAME || 'admin', process.env.AGENCY_EMAIL || 'admin@nevesty-models.ru', hash, 'superadmin']
     );
-    console.log('Admin created: admin / admin123');
+    console.log('Default admin account created. Set ADMIN_USERNAME and ADMIN_PASSWORD in .env');
   }
 
   // Seed demo models if empty

@@ -529,6 +529,9 @@
               <a class="btn-book" id="bookBtn" href="/booking.html">
                 📋 Забронировать
               </a>
+              <button id="favBtn" onclick="toggleFavorite()" style="display:block;width:100%;margin-top:10px;padding:14px 24px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">
+                ❤️ В избранное
+              </button>
               <hr class="model-cta-divider">
               <div class="model-cta-contact">
                 Есть вопросы?<br>
@@ -729,6 +732,44 @@
         if (e.key === 'Escape') window.closeLightbox();
       });
 
+      // ── Favorites (wishlist) ───────────────────────────────────────────────────
+      const FAV_KEY = 'nm_favorites';
+      function getFavIds() {
+        try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; }
+      }
+      function saveFavIds(ids) {
+        try { localStorage.setItem(FAV_KEY, JSON.stringify(ids)); } catch {}
+      }
+      window.toggleFavorite = function() {
+        const id = parseInt(getParam('id'), 10);
+        if (!id) return;
+        const ids = getFavIds();
+        const idx = ids.indexOf(id);
+        const btn = document.getElementById('favBtn');
+        if (idx === -1) {
+          ids.push(id);
+          saveFavIds(ids);
+          if (btn) { btn.textContent = '💔 Убрать из избранного'; btn.style.color = '#e07070'; }
+        } else {
+          ids.splice(idx, 1);
+          saveFavIds(ids);
+          if (btn) { btn.textContent = '❤️ В избранное'; btn.style.color = ''; }
+        }
+      };
+      function updateFavBtn() {
+        const id = parseInt(getParam('id'), 10);
+        if (!id) return;
+        const btn = document.getElementById('favBtn');
+        if (!btn) return;
+        const ids = getFavIds();
+        if (ids.includes(id)) {
+          btn.textContent = '💔 Убрать из избранного';
+          btn.style.color = '#e07070';
+        } else {
+          btn.textContent = '❤️ В избранное';
+        }
+      }
+
       // ── init ───────────────────────────────────────────────────────────────────
       const modelId = getParam('id');
       if (!modelId || isNaN(parseInt(modelId, 10))) {
@@ -739,6 +780,7 @@
       } else {
         document.addEventListener('DOMContentLoaded', function () {
           loadModel(parseInt(modelId, 10));
+          updateFavBtn();
         });
       }
     })();

@@ -377,24 +377,28 @@ if (featuredGrid) {
 const reviewsContainer = document.getElementById('reviews-container');
 if (reviewsContainer) {
   apiFetch('/reviews?approved=1&limit=6')
-    .then(reviews => {
-      if (!Array.isArray(reviews) || !reviews.length) return;
+    .then(data => {
+      // API may return array directly or {reviews:[...]} object
+      const reviews = Array.isArray(data) ? data : (data && Array.isArray(data.reviews) ? data.reviews : []);
+      if (!reviews.length) return;
       reviewsContainer.innerHTML = reviews.slice(0, 6).map((r, i) => {
-        const initials = (r.author_name || 'A')
+        const name = r.client_name || r.author_name || 'Клиент';
+        const initials = name
           .split(' ')
           .map(w => w[0] || '')
           .slice(0, 2)
           .join('')
-          .toUpperCase();
+          .toUpperCase() || 'К';
+        const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 5)));
         return `
           <div class="testimonial-card" style="animation-delay:${i * 0.07}s">
-            <div class="testimonial-stars">${renderStars(r.rating)}</div>
+            <div class="testimonial-stars">${stars}</div>
             <p class="testimonial-text">${r.text ? `«${r.text}»` : ''}</p>
             <div class="testimonial-author">
               <div class="testimonial-avatar">${initials}</div>
               <div>
-                <strong>${r.author_name || 'Клиент'}</strong>
-                ${r.author_title ? `<span>${r.author_title}</span>` : ''}
+                <strong>${name}</strong>
+                ${r.model_name ? `<span>о модели ${r.model_name}</span>` : ''}
               </div>
             </div>
           </div>`;
