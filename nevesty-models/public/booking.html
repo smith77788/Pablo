@@ -11,7 +11,9 @@
   <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
   <meta property="og:url" content="https://nevesty-models.ru/booking.html">
   <meta property="og:site_name" content="Nevesty Models">
+  <meta property="og:locale" content="ru_RU">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@nevesty_models">
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#080808">
   <link rel="canonical" href="https://nevesty-models.ru/booking.html">
@@ -192,7 +194,7 @@
 </head>
 <body>
   <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-  <nav class="navbar scrolled">
+  <nav class="navbar scrolled" role="navigation" aria-label="Главное меню">
     <div class="nav-inner">
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
       <div class="nav-links">
@@ -200,7 +202,7 @@
         <a href="/#services">Услуги</a>
         <a href="/#about">О нас</a>
         <a href="/#contact">Контакты</a>
-        <a href="/cabinet.html" style="font-size:0.9rem" title="Мои заявки">👤 Мои заявки</a>
+        <a href="/cabinet.html" style="font-size:0.9rem" aria-label="Мои заявки"><span aria-hidden="true">👤</span> Мои заявки</a>
         <button onclick="DarkMode.toggle()"
           class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
           aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
@@ -208,20 +210,20 @@
         </button>
         <a href="/booking.html" class="btn-nav" style="color:var(--bg);background:var(--gold);border-color:var(--gold)">Заказать</a>
       </div>
-      <div class="nav-burger" id="burgerBtn">
+      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu">
         <span></span><span></span><span></span>
-      </div>
+      </button>
     </div>
   </nav>
 
   <!-- MOBILE MENU -->
-  <nav class="nav-mobile" id="mobileMenu">
-    <span class="nav-mobile-close" id="mobileClose">✕</span>
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
     <a href="/catalog.html">Модели</a>
     <a href="/#services">Услуги</a>
     <a href="/#about">О нас</a>
     <a href="/#contact">Контакты</a>
-    <a href="/cabinet.html">👤 Мои заявки</a>
+    <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
     <a href="/booking.html" style="color:var(--gold)">Заказать</a>
   </nav>
 
@@ -511,5 +513,51 @@
   <script src="/js/booking.js" defer></script>
   <script src="/js/telegram-webapp.js" defer></script>
   <script src="/js/darkmode.js"></script>
+  <script type="application/ld+json">
+[
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
+      {"@type": "ListItem", "position": 2, "name": "Бронирование", "item": "https://nevesty-models.ru/booking.html"}
+    ]
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Nevesty Models",
+    "url": "https://nevesty-models.ru",
+    "logo": "https://nevesty-models.ru/og-image.jpg",
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "contactType": "customer service",
+      "availableLanguage": "Russian"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Service",
+    "name": "Аренда профессиональных моделей",
+    "provider": {"@type": "Organization", "name": "Nevesty Models"},
+    "areaServed": {"@type": "Country", "name": "Russia"},
+    "offers": [
+      {"@type": "Offer", "name": "Старт", "priceSpecification": {"@type": "PriceSpecification", "minPrice": 8000, "priceCurrency": "RUB"}},
+      {"@type": "Offer", "name": "Мероприятие", "priceSpecification": {"@type": "PriceSpecification", "minPrice": 15000, "priceCurrency": "RUB"}},
+      {"@type": "Offer", "name": "Премиум", "priceSpecification": {"@type": "PriceSpecification", "minPrice": 30000, "priceCurrency": "RUB"}}
+    ]
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Оформить заявку — Nevesty Models",
+    "description": "Забронировать модель в агентстве Nevesty Models. Простая форма заявки — ответим в течение часа.",
+    "url": "https://nevesty-models.ru/booking.html",
+    "isPartOf": {"@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru"},
+    "inLanguage": "ru-RU",
+    "dateModified": "2026-05-15"
+  }
+]
+  </script>
 </body>
 </html>

@@ -447,7 +447,7 @@
 <body>
   <a href="#main-content" class="skip-link">Перейти к содержимому</a>
 
-  <nav class="navbar scrolled" id="navbar">
+  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
     <div class="nav-inner">
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
       <div class="nav-links">
@@ -455,7 +455,7 @@
         <a href="/#services">Услуги</a>
         <a href="/#about">О нас</a>
         <a href="/#contact">Контакты</a>
-        <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
+        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
         <button onclick="DarkMode.toggle()"
           class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
           aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
@@ -469,12 +469,12 @@
         </a>
         <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
-      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
     </div>
   </nav>
 
-  <nav class="nav-mobile" id="mobileMenu">
-    <span class="nav-mobile-close" id="mobileClose">✕</span>
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
     <a href="/catalog.html">Модели</a>
     <a href="/#services">Услуги</a>
     <a href="/#about">О нас</a>
@@ -484,7 +484,7 @@
 
   <div class="model-page" id="main-content">
     <!-- SKELETON while loading -->
-    <div id="skeletonView">
+    <div id="skeletonView" aria-busy="true" aria-label="Загрузка профиля модели">
       <div class="skeleton-hero"></div>
       <div style="max-width:1200px;margin:0 auto;padding:32px 24px 80px">
         <div class="model-stats" style="grid-template-columns:repeat(5,1fr)">
@@ -619,8 +619,8 @@
                 <i class="fas fa-calendar-check" style="margin-right:6px"></i>
                 Быстрое бронирование
               </a>
-              <button id="favBtn" onclick="toggleFavorite()" style="display:block;width:100%;margin-top:10px;padding:14px 24px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">
-                ❤️ В избранное
+              <button id="favBtn" onclick="toggleFavorite()" aria-label="Добавить в избранное" style="display:block;width:100%;margin-top:10px;padding:14px 24px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">
+                <span aria-hidden="true">❤️</span> В избранное
               </button>
               <!-- Social sharing -->
               <div style="display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap">
@@ -658,7 +658,7 @@
   </div>
 
   <!-- Lightbox overlay for gallery -->
-  <div id="lightbox" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.93);backdrop-filter:blur(8px);align-items:center;justify-content:center"
+  <div id="lightbox" role="dialog" aria-modal="true" aria-label="Просмотр фото" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.93);backdrop-filter:blur(8px);align-items:center;justify-content:center"
        onclick="if(event.target===this)closeLightbox()">
     <button onclick="closeLightbox()" aria-label="Закрыть"
       style="position:absolute;top:20px;right:20px;background:var(--bg3);border:none;color:var(--text);width:44px;height:44px;font-size:1.3rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10">✕</button>

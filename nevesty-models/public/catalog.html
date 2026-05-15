@@ -11,7 +11,9 @@
   <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
   <meta property="og:url" content="https://nevesty-models.ru/catalog.html">
   <meta property="og:site_name" content="Nevesty Models">
+  <meta property="og:locale" content="ru_RU">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@nevesty_models">
   <meta name="theme-color" content="#080808">
   <link rel="canonical" href="https://nevesty-models.ru/catalog.html">
   <meta name="robots" content="index, follow">
@@ -64,8 +66,9 @@
         <a href="/about.html">О нас</a>
         <a href="/faq.html">FAQ</a>
         <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
-        <a href="/cabinet.html" style="font-size:0.9rem" title="Мои заявки">👤 Мои заявки</a>
+        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
+        <a href="/compare.html" id="nav-compare-link" aria-label="Сравнение моделей" style="display:none;font-size:0.9rem;color:var(--gold)">⚖️ <span id="nav-compare-count">0</span></a>
+        <a href="/cabinet.html" style="font-size:0.9rem" aria-label="Мои заявки"><span aria-hidden="true">👤</span> Мои заявки</a>
         <button onclick="DarkMode.toggle()"
           class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
           aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
@@ -79,17 +82,18 @@
         </a>
         <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
-      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
     </div>
   </nav>
   <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
     <a href="/catalog.html">Модели</a>
     <a href="/pricing.html">Цены</a>
     <a href="/about.html">О нас</a>
     <a href="/faq.html">FAQ</a>
     <a href="/contact.html">Контакты</a>
     <a href="/favorites.html">❤️ Избранное</a>
+    <a href="/compare.html">⚖️ Сравнение</a>
     <a href="/cabinet.html">👤 Мои заявки</a>
     <a href="/booking.html" style="color:var(--gold)">Заказать</a>
   </nav>
@@ -107,6 +111,9 @@
         <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Наши модели</div>
         <h1>Каталог моделей</h1>
         <p style="color:var(--text-muted);margin-top:8px">Найдите идеальную модель для вашего проекта</p>
+        <div style="margin-top:12px">
+          <a href="/compare.html" style="font-size:0.78rem;color:var(--text-dim);text-decoration:none;transition:color 0.2s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'">⚖️ Сравнить модели</a>
+        </div>
       </div>
       <div class="catalog-layout">
         <!-- FILTERS -->
@@ -211,6 +218,26 @@
 
   <div class="toast-container" id="toastContainer"></div>
 
+  <!-- Floating Compare Bar -->
+  <div id="compareBar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:500;background:rgba(8,8,8,0.97);border-top:1px solid var(--gold);backdrop-filter:blur(12px);padding:14px 24px;transition:transform 0.3s ease">
+    <div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold)">⚖️ Сравнение</span>
+        <span id="compareBarCount" style="font-size:0.85rem;color:var(--text-muted)">Выбрано 0 моделей</span>
+        <div id="compareBarAvatars" style="display:flex;gap:6px"></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <a id="compareBarLink" href="/compare.html" style="padding:10px 24px;background:var(--gold);color:var(--bg);font-size:0.75rem;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;text-decoration:none;transition:background 0.2s"
+           onmouseover="this.style.background='var(--gold-light)'" onmouseout="this.style.background='var(--gold)'">
+          Сравнить
+        </a>
+        <button onclick="clearCompare()" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:10px 18px;cursor:pointer;font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;transition:all 0.2s" onmouseover="this.style.borderColor='var(--text-muted)'" onmouseout="this.style.borderColor='var(--border)'">
+          Очистить
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Floating WhatsApp Button -->
   <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
     <a id="float-wa-link" href="#" target="_blank" rel="noopener"
@@ -236,40 +263,170 @@
   }).catch(()=>{});
   </script>
 
+  <!-- Compare logic (exposed globally for catalog.js) -->
+  <script>
+  (function () {
+    const COMPARE_KEY = 'nm_compare';
+    const MAX_COMPARE = 3;
+
+    function getCompareIds() {
+      try { return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]'); } catch { return []; }
+    }
+    function saveCompareIds(ids) {
+      try { localStorage.setItem(COMPARE_KEY, JSON.stringify(ids)); } catch {}
+    }
+
+    function updateCompareBar() {
+      const ids = getCompareIds();
+      const bar = document.getElementById('compareBar');
+      const countEl = document.getElementById('compareBarCount');
+      const navLink = document.getElementById('nav-compare-link');
+      const navCount = document.getElementById('nav-compare-count');
+      const barLink = document.getElementById('compareBarLink');
+      const avatars = document.getElementById('compareBarAvatars');
+
+      const n = ids.length;
+
+      // Update nav link
+      if (navLink) {
+        navLink.style.display = n > 0 ? 'inline-flex' : 'none';
+        if (navCount) navCount.textContent = n;
+      }
+
+      if (n >= 2) {
+        if (bar) bar.style.display = '';
+        if (countEl) {
+          const txt = n === 1 ? '1 модель' : n === 2 ? '2 модели' : '3 модели';
+          countEl.textContent = `Выбрано ${txt}`;
+        }
+        if (barLink) barLink.href = `/compare.html?ids=${ids.join(',')}`;
+        // update avatars
+        if (avatars) {
+          avatars.innerHTML = ids.map(id => {
+            const m = window._compareModelsCache && window._compareModelsCache[id];
+            if (!m) return `<div style="width:32px;height:40px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:var(--text-dim)">${id}</div>`;
+            if (m.photo_main) return `<img src="${m.photo_main}" alt="${m.name}" style="width:32px;height:40px;object-fit:cover;border:1px solid var(--gold)" loading="lazy">`;
+            return `<div style="width:32px;height:40px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:var(--text-dim)">${(m.name||'?')[0]}</div>`;
+          }).join('');
+        }
+      } else {
+        if (bar) bar.style.display = 'none';
+        if (avatars) avatars.innerHTML = '';
+      }
+    }
+
+    window.toggleCompare = function (modelId, modelData) {
+      const ids = getCompareIds();
+      const idx = ids.indexOf(modelId);
+
+      // cache model data for avatar display
+      if (!window._compareModelsCache) window._compareModelsCache = {};
+      if (modelData) window._compareModelsCache[modelId] = modelData;
+
+      if (idx === -1) {
+        if (ids.length >= MAX_COMPARE) {
+          showCompareToast(`Максимум ${MAX_COMPARE} модели для сравнения`);
+          return false;
+        }
+        ids.push(modelId);
+        saveCompareIds(ids);
+        updateCompareBar();
+        showCompareToast('Добавлено в сравнение ⚖️');
+        return true;
+      } else {
+        ids.splice(idx, 1);
+        saveCompareIds(ids);
+        updateCompareBar();
+        showCompareToast('Убрано из сравнения');
+        return false;
+      }
+    };
+
+    window.isInCompare = function (modelId) {
+      return getCompareIds().includes(modelId);
+    };
+
+    window.clearCompare = function () {
+      saveCompareIds([]);
+      updateCompareBar();
+      // refresh all compare buttons
+      document.querySelectorAll('.btn-compare-card').forEach(btn => {
+        btn.setAttribute('data-active', 'false');
+        btn.title = 'Добавить к сравнению';
+        btn.style.background = 'rgba(0,0,0,0.55)';
+        btn.style.color = 'var(--text-muted)';
+        btn.textContent = '⚖️';
+      });
+      showCompareToast('Сравнение очищено');
+    };
+
+    function showCompareToast(msg) {
+      const c = document.getElementById('toastContainer');
+      if (!c) return;
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.textContent = msg;
+      c.appendChild(t);
+      requestAnimationFrame(() => { requestAnimationFrame(() => { t.classList.add('show'); }); });
+      setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 350); }, 2500);
+    }
+
+    // Init on load
+    document.addEventListener('DOMContentLoaded', updateCompareBar);
+    window._updateCompareBar = updateCompareBar;
+  })();
+  </script>
+
   <script src="/js/main.js" defer></script>
   <script src="/js/catalog.js" defer></script>
   <script src="/js/telegram-webapp.js" defer></script>
   <script src="/js/darkmode.js"></script>
   <script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "CollectionPage",
-  "name": "Каталог моделей — Nevesty Models",
-  "description": "Каталог профессиональных моделей агентства Nevesty Models. Fashion, commercial и event-модели.",
-  "url": "https://nevesty-models.ru/catalog.html",
-  "isPartOf": {
-    "@type": "WebSite",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru"
+[
+  {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    "name": "Каталог моделей — Nevesty Models",
+    "description": "Каталог профессиональных моделей агентства Nevesty Models. Fashion, commercial и event-модели.",
+    "url": "https://nevesty-models.ru/catalog.html",
+    "inLanguage": "ru-RU",
+    "dateModified": "2026-05-15",
+    "isPartOf": {
+      "@type": "WebSite",
+      "name": "Nevesty Models",
+      "url": "https://nevesty-models.ru"
+    },
+    "breadcrumb": {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Главная",
+          "item": "https://nevesty-models.ru/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Каталог моделей",
+          "item": "https://nevesty-models.ru/catalog.html"
+        }
+      ]
+    }
   },
-  "breadcrumb": {
-    "@type": "BreadcrumbList",
-    "itemListElement": [
-      {
-        "@type": "ListItem",
-        "position": 1,
-        "name": "Главная",
-        "item": "https://nevesty-models.ru/"
-      },
-      {
-        "@type": "ListItem",
-        "position": 2,
-        "name": "Каталог моделей",
-        "item": "https://nevesty-models.ru/catalog.html"
-      }
-    ]
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Nevesty Models",
+    "url": "https://nevesty-models.ru",
+    "logo": "https://nevesty-models.ru/og-image.jpg",
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "contactType": "customer service",
+      "availableLanguage": "Russian"
+    }
   }
-}
+]
 </script>
 </body>
 </html>

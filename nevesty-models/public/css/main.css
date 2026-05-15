@@ -78,6 +78,7 @@ img { display: block; max-width: 100%; }
 .nav-links .btn-nav:hover { background: var(--gold); color: var(--bg); }
 .nav-burger {
   display: none; flex-direction: column; gap: 5px; cursor: pointer; padding: 4px;
+  background: none; border: none;
 }
 .nav-burger span { display: block; width: 24px; height: 1px; background: var(--text); transition: var(--transition); }
 .nav-mobile {
@@ -91,6 +92,7 @@ img { display: block; max-width: 100%; }
 .nav-mobile-close {
   position: absolute; top: 24px; right: 24px;
   font-size: 2rem; cursor: pointer; color: var(--text-muted);
+  background: none; border: none; line-height: 1;
 }
 
 /* ─── HERO ───────────────────────────────────────── */

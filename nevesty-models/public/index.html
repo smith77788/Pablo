@@ -13,7 +13,9 @@
   <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
   <meta property="og:url" content="https://nevesty-models.ru/">
   <meta property="og:site_name" content="Nevesty Models">
+  <meta property="og:locale" content="ru_RU">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@nevesty_models">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://nevesty-models.ru/">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -67,8 +69,8 @@
         <a href="/about.html">О нас</a>
         <a href="/faq.html">FAQ</a>
         <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
-        <a href="/cabinet.html" style="font-size:0.9rem" title="Мои заявки">👤 Мои заявки</a>
+        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
+        <a href="/cabinet.html" style="font-size:0.9rem" aria-label="Мои заявки"><span aria-hidden="true">👤</span> Мои заявки</a>
         <button onclick="DarkMode.toggle()"
           class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
           aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
@@ -82,15 +84,15 @@
         </a>
         <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
-      <div class="nav-burger" id="burgerBtn">
+      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu">
         <span></span><span></span><span></span>
-      </div>
+      </button>
     </div>
   </nav>
 
   <!-- MOBILE MENU -->
   <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
     <a href="/catalog.html">Модели</a>
     <a href="/pricing.html">Цены</a>
     <a href="/about.html">О нас</a>
@@ -609,31 +611,45 @@ fetch('/api/settings/public').then(r=>r.json()).then(d=>{
     </a>
   </div>
   <script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "Organization",
-  "name": "Nevesty Models",
-  "url": "https://nevesty-models.ru",
-  "description": "Профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.",
-  "email": "info@nevesty-models.ru",
-  "sameAs": [
-    "https://instagram.com/nevesty_models",
-    "https://t.me/nevesty_models",
-    "https://vk.com/nevesty_models"
-  ],
-  "contactPoint": {
-    "@type": "ContactPoint",
+[
+  {
+    "@context": "https://schema.org",
+    "@type": "LocalBusiness",
+    "name": "Nevesty Models",
+    "url": "https://nevesty-models.ru",
+    "logo": "https://nevesty-models.ru/og-image.jpg",
+    "description": "Профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.",
+    "email": "info@nevesty-models.ru",
     "telephone": "+7-800-555-00-00",
-    "contactType": "customer service",
-    "availableLanguage": "Russian",
-    "hoursAvailable": {
-      "@type": "OpeningHoursSpecification",
-      "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
-      "opens": "09:00",
-      "closes": "22:00"
+    "openingHours": ["Mo-Fr 09:00-21:00", "Sa-Su 10:00-18:00"],
+    "priceRange": "₽₽",
+    "currenciesAccepted": "RUB",
+    "paymentAccepted": "Cash, Credit Card",
+    "areaServed": "RU",
+    "numberOfEmployees": {"@type": "QuantitativeValue", "value": 20},
+    "sameAs": [
+      "https://instagram.com/nevesty_models",
+      "https://t.me/nevesty_models",
+      "https://vk.com/nevesty_models"
+    ],
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "telephone": "+7-800-555-00-00",
+      "contactType": "customer service",
+      "availableLanguage": "Russian"
     }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Nevesty Models — Модельное Агентство",
+    "description": "Модельное агентство Nevesty Models — профессиональные модели для свадеб, корпоративов и фотосессий. Забронируйте модель онлайн.",
+    "url": "https://nevesty-models.ru/",
+    "isPartOf": {"@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru"},
+    "inLanguage": "ru-RU",
+    "dateModified": "2026-05-15"
   }
-}
+]
 </script>
 
   <!-- Dark mode & animation styles -->
@@ -674,15 +690,16 @@ fetch('/api/settings/public').then(r=>r.json()).then(d=>{
   </style>
 
   <!-- Cookie Banner -->
-  <div id="cookie-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:16px;z-index:5000;border-top:1px solid #333">
+  <div id="cookie-banner" role="alertdialog" aria-labelledby="cookie-title" aria-describedby="cookie-desc" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:16px;z-index:5000;border-top:1px solid #333">
     <div style="max-width:1200px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
-      <p style="margin:0;font-size:0.85rem;color:#ccc">
-        🍪 Мы используем cookies для улучшения сервиса и аналитики.
+      <p id="cookie-desc" style="margin:0;font-size:0.85rem;color:#ccc">
+        <span id="cookie-title" style="clip:rect(0,0,0,0);position:absolute;width:1px;height:1px">Уведомление об использовании cookies</span>
+        <span aria-hidden="true">🍪</span> Мы используем cookies для улучшения сервиса и аналитики.
         <a href="/privacy" style="color:#e879a0;text-decoration:underline">Политика конфиденциальности</a>
       </p>
       <div style="display:flex;gap:8px;flex-shrink:0">
-        <button onclick="NM.cookies.reject()" style="padding:8px 18px;font-size:0.8rem;border:1px solid #555;background:none;color:#ccc;cursor:pointer;border-radius:4px">Отказаться</button>
-        <button onclick="NM.cookies.accept()" style="padding:8px 18px;font-size:0.8rem;background:#c9396f;border:none;color:#fff;cursor:pointer;border-radius:4px">Принять</button>
+        <button onclick="NM.cookies.reject()" style="padding:8px 18px;font-size:0.8rem;border:1px solid #555;background:none;color:#ccc;cursor:pointer;border-radius:4px" aria-label="Отказаться от cookies">Отказаться</button>
+        <button onclick="NM.cookies.accept()" style="padding:8px 18px;font-size:0.8rem;background:#c9396f;border:none;color:#fff;cursor:pointer;border-radius:4px" aria-label="Принять cookies">Принять</button>
       </div>
     </div>
   </div>

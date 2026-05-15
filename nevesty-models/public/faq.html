@@ -11,7 +11,9 @@
   <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
   <meta property="og:url" content="https://nevesty-models.ru/faq.html">
   <meta property="og:site_name" content="Nevesty Models">
+  <meta property="og:locale" content="ru_RU">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@nevesty_models">
   <meta name="theme-color" content="#080808">
   <link rel="canonical" href="https://nevesty-models.ru/faq.html">
   <meta name="robots" content="index, follow">
@@ -265,7 +267,7 @@
   <a href="#main-content" class="skip-link">Перейти к содержимому</a>
 
   <!-- NAVBAR -->
-  <nav class="navbar scrolled" id="navbar">
+  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
     <div class="nav-inner">
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
       <div class="nav-links">
@@ -276,13 +278,13 @@
         <a href="/contact.html">Контакты</a>
         <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
-      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
     </div>
   </nav>
 
   <!-- MOBILE MENU -->
-  <nav class="nav-mobile" id="mobileMenu">
-    <span class="nav-mobile-close" id="mobileClose">✕</span>
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
     <a href="/catalog.html">Модели</a>
     <a href="/#services">Услуги</a>
     <a href="/about.html">О нас</a>
@@ -585,10 +587,10 @@
       </div>
       <div class="footer-bottom">
         <p>© 2024 Nevesty Models. Все права защищены.</p>
-        <div class="footer-socials">
-          <a href="https://instagram.com/nevesty_models" target="_blank" title="Instagram">📸</a>
-          <a href="https://t.me/nevesty_models" target="_blank" title="Telegram">✈</a>
-          <a href="https://vk.com/nevesty_models" target="_blank" title="ВКонтакте">V</a>
+        <div class="footer-socials" aria-label="Социальные сети">
+          <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"><span aria-hidden="true">📸</span></a>
+          <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"><span aria-hidden="true">✈</span></a>
+          <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"><span aria-hidden="true">V</span></a>
         </div>
       </div>
     </div>
