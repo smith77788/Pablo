@@ -108,6 +108,34 @@
     .sbadge-in_progress{ background:rgba(139,92,246,0.15);  color:#8b5cf6;  border:1px solid rgba(139,92,246,0.3); }
     .sbadge-completed  { background:rgba(107,114,128,0.15); color:#6b7280;  border:1px solid rgba(107,114,128,0.3); }
     .sbadge-cancelled  { background:rgba(239,68,68,0.15);   color:#ef4444;  border:1px solid rgba(239,68,68,0.3); }
+
+    /* ─── Status timeline ─────────────────────────── */
+    .status-timeline { position: relative; padding-left: 28px; }
+    .status-timeline::before {
+      content: ''; position: absolute; left: 9px; top: 8px; bottom: 8px;
+      width: 2px; background: var(--border);
+    }
+    .timeline-item {
+      position: relative; padding: 8px 0 8px 12px; margin-bottom: 2px;
+    }
+    .timeline-dot {
+      position: absolute; left: -22px; top: 13px;
+      width: 12px; height: 12px; border-radius: 50%;
+      border: 2px solid var(--bg); box-sizing: border-box;
+    }
+    .timeline-dot-new        { background: #3b82f6; }
+    .timeline-dot-reviewing  { background: #f59e0b; }
+    .timeline-dot-confirmed  { background: #10b981; }
+    .timeline-dot-in_progress{ background: #8b5cf6; }
+    .timeline-dot-completed  { background: #6b7280; }
+    .timeline-dot-cancelled  { background: #ef4444; }
+    .timeline-dot-default    { background: var(--gold); }
+    .timeline-ts { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 2px; }
+    .timeline-change {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .timeline-arrow { color: var(--text-dim); font-size: 0.85rem; }
+    .timeline-admin { font-size: 0.72rem; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -131,6 +159,7 @@
       <div class="nav-section-label">Настройки</div>
       <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
       <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+      <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
       <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
     </nav>
     <div class="sidebar-bottom">
@@ -385,12 +414,14 @@
             <div class="section-card-body padded" id="auditLog" style="font-size:0.8rem;color:var(--text-muted)"></div>
           </div>
 
-          <!-- Status history -->
+          <!-- Status history timeline -->
           <div class="section-card" id="statusHistoryCard" style="display:none;margin-top:24px">
             <div class="section-card-header">
-              <div class="section-card-title">📊 История изменений статуса</div>
+              <div class="section-card-title">🕐 Хронология статусов</div>
             </div>
-            <div class="section-card-body padded" id="statusHistoryBody" style="font-size:0.82rem"></div>
+            <div class="section-card-body padded" id="statusHistoryBody" style="font-size:0.82rem">
+              <div class="status-timeline" id="statusTimeline"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -922,23 +953,45 @@ async function loadStatusHistory(orderId) {
   try {
     const history = await _admin.apiFetch(`/admin/orders/${orderId}/history`);
     const card = document.getElementById('statusHistoryCard');
-    const body = document.getElementById('statusHistoryBody');
-    if (!card || !body) return;
+    const timeline = document.getElementById('statusTimeline');
+    if (!card || !timeline) return;
     if (!history || !history.length) { card.style.display = 'none'; return; }
     card.style.display = '';
+
     const STATUS_LABELS = {
       new: '🆕 Нова', reviewing: '🔍 Розгляд', confirmed: '✅ Підтверджена',
       in_progress: '▶️ В роботі', completed: '🏁 Завершена', cancelled: '❌ Відмінена'
     };
-    body.innerHTML = history.map(h => {
-      const d = new Date(h.changed_at).toLocaleString('ru-RU', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      });
-      return `<div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
-        <span style="color:var(--text-dim);min-width:110px">${d}</span>
-        <span>${STATUS_LABELS[h.old_status] || _admin.escapeHtml(h.old_status || '') || '—'} → ${STATUS_LABELS[h.new_status] || _admin.escapeHtml(h.new_status || '')}</span>
-        <span style="color:var(--text-dim)">${_admin.escapeHtml(h.changed_by || '')}</span>
+    const STATUS_BADGE = {
+      new: 'sbadge-new', reviewing: 'sbadge-reviewing', confirmed: 'sbadge-confirmed',
+      in_progress: 'sbadge-in_progress', completed: 'sbadge-completed', cancelled: 'sbadge-cancelled'
+    };
+
+    timeline.innerHTML = history.map(h => {
+      // Support both `created_at` and legacy `changed_at` column names
+      const ts = h.created_at || h.changed_at;
+      let d = '—';
+      try {
+        d = new Date(ts).toLocaleString('ru-RU', {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        });
+      } catch {}
+
+      const newDotClass = STATUS_BADGE[h.new_status] ? h.new_status : 'default';
+      const oldLabel = h.old_status ? (STATUS_LABELS[h.old_status] || _admin.escapeHtml(h.old_status)) : '—';
+      const newLabel = STATUS_LABELS[h.new_status] || _admin.escapeHtml(h.new_status || '—');
+      const adminName = h.admin_username || h.changed_by || '';
+
+      return `<div class="timeline-item">
+        <div class="timeline-dot timeline-dot-${newDotClass}"></div>
+        <div class="timeline-ts">${d}</div>
+        <div class="timeline-change">
+          <span class="sbadge ${STATUS_BADGE[h.old_status] || ''}" style="${!STATUS_BADGE[h.old_status] ? 'background:rgba(107,114,128,0.1);color:var(--text-muted);border:1px solid var(--border)' : ''}">${oldLabel}</span>
+          <span class="timeline-arrow">→</span>
+          <span class="sbadge ${STATUS_BADGE[h.new_status] || ''}" style="${!STATUS_BADGE[h.new_status] ? 'background:rgba(107,114,128,0.1);color:var(--text-muted);border:1px solid var(--border)' : ''}">${newLabel}</span>
+          ${adminName ? `<span class="timeline-admin">👤 ${_admin.escapeHtml(adminName)}</span>` : ''}
+        </div>
       </div>`;
     }).join('');
   } catch { /* status history optional */ }

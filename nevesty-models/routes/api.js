@@ -2577,6 +2577,70 @@ router.get('/admin/factory-monthly', auth, (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Factory CEO decisions (reads factory.db decisions table) ─────────────────
+router.get('/admin/factory-ceo-decisions', auth, (req, res, next) => {
+  try {
+    const Database = require('better-sqlite3');
+    const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
+    let rows = [];
+    if (fs.existsSync(factoryDbPath)) {
+      try {
+        const fdb = new Database(factoryDbPath, { readonly: true });
+        rows = fdb.prepare(`
+          SELECT d.id, d.cycle_id, d.decision_type, d.rationale, d.executed, d.created_at,
+                 c.health_score, c.phase as cycle_phase, c.summary as cycle_summary
+          FROM decisions d
+          LEFT JOIN cycles c ON c.id = d.cycle_id
+          ORDER BY d.created_at DESC LIMIT 10
+        `).all();
+        fdb.close();
+      } catch (_) {}
+    }
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+// ─── Factory health metrics (cycles summary) ──────────────────────────────────
+router.get('/admin/factory-health', auth, (req, res, next) => {
+  try {
+    const Database = require('better-sqlite3');
+    const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
+    const data = { total_cycles: 0, last_cycle_at: null, active_experiments: 0, pending_actions: 0, health_score: null };
+    if (fs.existsSync(factoryDbPath)) {
+      try {
+        const fdb = new Database(factoryDbPath, { readonly: true });
+        const cycleRow = fdb.prepare(`SELECT COUNT(*) as cnt, MAX(finished_at) as last_at FROM cycles WHERE phase='done'`).get();
+        const lastCycle = fdb.prepare(`SELECT health_score FROM cycles WHERE phase='done' ORDER BY finished_at DESC LIMIT 1`).get();
+        const expRow = fdb.prepare(`SELECT COUNT(*) as cnt FROM experiments WHERE status='running'`).get();
+        const actRow = fdb.prepare(`SELECT COUNT(*) as cnt FROM growth_actions WHERE status='pending'`).get();
+        fdb.close();
+        data.total_cycles = cycleRow?.cnt || 0;
+        data.last_cycle_at = cycleRow?.last_at || null;
+        data.active_experiments = expRow?.cnt || 0;
+        data.pending_actions = actRow?.cnt || 0;
+        data.health_score = lastCycle?.health_score ?? null;
+      } catch (_) {}
+    }
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+// ─── Scale experiment ─────────────────────────────────────────────────────────
+router.post('/admin/factory-experiments/:id/scale', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    const Database = require('better-sqlite3');
+    const factoryDbPath = path.join(__dirname, '..', '..', 'factory', 'factory.db');
+    if (!fs.existsSync(factoryDbPath)) return res.status(404).json({ error: 'Factory DB not found' });
+    const fdb = new Database(factoryDbPath);
+    fdb.prepare(`UPDATE experiments SET status='scaling' WHERE id=?`).run(id);
+    fdb.close();
+    logAudit(req, 'scale_experiment', 'experiment', id, null);
+    res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
 // ─── DB stats endpoint ────────────────────────────────────────────────────────
 router.get('/admin/crm-status', auth, (req, res) => {
   res.json({
