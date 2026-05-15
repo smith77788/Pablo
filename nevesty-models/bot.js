@@ -858,6 +858,7 @@ async function bkStep1(chatId, data = {}) {
   }
 
   await setSession(chatId, 'bk_s1', data);
+  resetSessionTimer(chatId);
   try {
     const models = await query('SELECT id,name,height,hair_color FROM models WHERE available=1 ORDER BY id LIMIT 12');
     const btns = models.map(m => [{
@@ -881,6 +882,7 @@ async function bkStep1(chatId, data = {}) {
 // STEP 2a — event type
 async function bkStep2EventType(chatId, data) {
   await setSession(chatId, 'bk_s2_event', data);
+  resetSessionTimer(chatId);
   const btns = Object.entries(EVENT_TYPES).map(([k,v]) => [{ text: v, callback_data: `bk_etype_${k}` }]);
   return safeSend(chatId,
     stepHeader(2,'Детали мероприятия') + 'Выберите тип мероприятия:',
