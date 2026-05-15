@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FAQ — Nevesty Models Admin</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="stylesheet" href="/css/admin.css" />
+  <style>
+    .faq-item {
+      background: var(--bg1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px;
+      margin-bottom: 12px;
+      transition: border-color 0.2s;
+    }
+    .faq-item:hover { border-color: rgba(201,169,110,0.4); }
+    .faq-item.inactive { opacity: 0.5; }
+    .faq-question {
+      font-weight: 600; color: var(--text); font-size: 0.95rem;
+      margin-bottom: 8px;
+    }
+    .faq-answer {
+      font-size: 0.85rem; color: var(--text-muted);
+      line-height: 1.6; padding: 12px; background: var(--bg2);
+      border-radius: 4px;
+    }
+    .faq-meta {
+      display: flex; align-items: center; gap: 12px; margin-top: 12px;
+    }
+    .faq-order {
+      font-size: 0.75rem; color: var(--text-dim);
+    }
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7); z-index: 1000;
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: var(--bg1); border: 1px solid var(--border);
+      border-radius: 8px; padding: 32px; width: 100%;
+      max-width: 560px; max-height: 90vh; overflow-y: auto;
+    }
+    .modal-title { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-bottom: 24px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; }
+    .form-group input, .form-group textarea, .form-group select {
+      width: 100%; background: var(--bg2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 4px; padding: 10px 12px;
+      font-size: 0.85rem; font-family: inherit; box-sizing: border-box;
+    }
+    .form-group textarea { min-height: 120px; resize: vertical; }
+    .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+      border-color: var(--gold); outline: none;
+    }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px; }
+    .drag-handle { cursor: grab; color: var(--text-dim); margin-right: 8px; font-size: 1.1rem; }
+    .empty-state {
+      text-align: center; padding: 60px 20px;
+      color: var(--text-dim); font-size: 0.9rem;
+    }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-text">Nevesty Models</div>
+      <div class="sidebar-logo-sub">Панель управления</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Главная</div>
+      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+      <div class="nav-section-label">Бизнес</div>
+      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки</a>
+      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+      <a href="/admin/faq.html" class="active"><span class="nav-icon">❓</span> FAQ</a>
+      <div class="nav-section-label">AI</div>
+      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+      <div class="nav-section-label">Настройки</div>
+      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+      <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user">
+        <div class="sidebar-avatar sidebar-user-letter">A</div>
+        <div class="sidebar-user-info">
+          <strong class="sidebar-user-name">—</strong>
+          <span class="sidebar-user-role">—</span>
+        </div>
+      </div>
+      <button class="btn-logout" data-action="logout">Выйти</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <div class="topbar-title">❓ FAQ — Часто задаваемые вопросы</div>
+      <div class="topbar-right">
+        <button onclick="openCreateModal()" class="btn btn-md btn-primary">+ Добавить вопрос</button>
+      </div>
+    </header>
+
+    <div class="page-content">
+
+      <div class="section-card" style="margin-bottom:24px">
+        <div class="section-card-header">
+          <div class="section-card-title">Список вопросов и ответов</div>
+          <span style="font-size:0.8rem;color:var(--text-muted)" id="faq-count">Загрузка...</span>
+        </div>
+        <div class="section-card-body" id="faq-list">
+          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Create/Edit modal -->
+<div class="modal-overlay" id="faqModal">
+  <div class="modal-box">
+    <div class="modal-title" id="modalTitle">Добавить вопрос</div>
+    <input type="hidden" id="editId" value="">
+
+    <div class="form-group">
+      <label>Вопрос *</label>
+      <input type="text" id="faqQuestion" placeholder="Введите вопрос..." maxlength="500">
+    </div>
+
+    <div class="form-group">
+      <label>Ответ *</label>
+      <textarea id="faqAnswer" placeholder="Введите развёрнутый ответ..."></textarea>
+    </div>
+
+    <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <label>Порядок (меньше = выше)</label>
+        <input type="number" id="faqOrder" value="0" min="0" max="999">
+      </div>
+      <div>
+        <label>Статус</label>
+        <select id="faqActive">
+          <option value="1">Активен</option>
+          <option value="0">Скрыт</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-md btn-ghost" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-md btn-primary" onclick="saveFaq()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+<script src="/js/admin.js"></script>
+<script>
+let faqItems = [];
+
+async function loadFaq() {
+  try {
+    faqItems = await _admin.apiFetch('/admin/faq') || [];
+    renderFaq();
+  } catch (e) {
+    _admin.toast('Ошибка загрузки: ' + e.message, 'error');
+    document.getElementById('faq-list').innerHTML = '<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки</div>';
+  }
+}
+
+function renderFaq() {
+  const container = document.getElementById('faq-list');
+  document.getElementById('faq-count').textContent = `${faqItems.length} вопросов`;
+
+  if (!faqItems.length) {
+    container.innerHTML = `<div class="empty-state">
+      <div class="icon">❓</div>
+      <div>Вопросов пока нет</div>
+      <div style="margin-top:16px">
+        <button onclick="openCreateModal()" class="btn btn-md btn-primary">Добавить первый вопрос</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  container.innerHTML = faqItems.map(item => `
+    <div class="faq-item ${item.active ? '' : 'inactive'}" data-id="${item.id}">
+      <div class="faq-question">${_admin.escapeHtml(item.question)}</div>
+      <div class="faq-answer">${_admin.escapeHtml(item.answer || '').replace(/\n/g, '<br>')}</div>
+      <div class="faq-meta">
+        <span class="faq-order">Порядок: ${item.sort_order ?? 0}</span>
+        <span class="badge ${item.active ? 'badge-confirmed' : 'badge-cancelled'}" style="font-size:0.7rem">
+          ${item.active ? 'Активен' : 'Скрыт'}
+        </span>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-sm btn-ghost" onclick="openEditModal(${item.id})">✏️ Изм.</button>
+          <button class="btn btn-sm btn-ghost" onclick="toggleActive(${item.id}, ${item.active ? 0 : 1})">
+            ${item.active ? '🙈 Скрыть' : '👁 Показать'}
+          </button>
+          <button class="btn btn-sm btn-danger" onclick="deleteFaq(${item.id})">🗑</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function openCreateModal() {
+  document.getElementById('modalTitle').textContent = 'Добавить вопрос';
+  document.getElementById('editId').value = '';
+  document.getElementById('faqQuestion').value = '';
+  document.getElementById('faqAnswer').value = '';
+  document.getElementById('faqOrder').value = '0';
+  document.getElementById('faqActive').value = '1';
+  document.getElementById('faqModal').classList.add('open');
+  setTimeout(() => document.getElementById('faqQuestion').focus(), 100);
+}
+
+function openEditModal(id) {
+  const item = faqItems.find(f => f.id === id);
+  if (!item) return;
+  document.getElementById('modalTitle').textContent = 'Редактировать вопрос';
+  document.getElementById('editId').value = id;
+  document.getElementById('faqQuestion').value = item.question || '';
+  document.getElementById('faqAnswer').value = item.answer || '';
+  document.getElementById('faqOrder').value = item.sort_order ?? 0;
+  document.getElementById('faqActive').value = item.active ? '1' : '0';
+  document.getElementById('faqModal').classList.add('open');
+  setTimeout(() => document.getElementById('faqQuestion').focus(), 100);
+}
+
+function closeModal() {
+  document.getElementById('faqModal').classList.remove('open');
+}
+
+async function saveFaq() {
+  const id = document.getElementById('editId').value;
+  const question = document.getElementById('faqQuestion').value.trim();
+  const answer = document.getElementById('faqAnswer').value.trim();
+  const sort_order = parseInt(document.getElementById('faqOrder').value) || 0;
+  const active = parseInt(document.getElementById('faqActive').value);
+
+  if (!question || !answer) {
+    _admin.toast('Заполните вопрос и ответ', 'warning');
+    return;
+  }
+
+  try {
+    if (id) {
+      await _admin.apiFetch(`/admin/faq/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ question, answer, sort_order, active })
+      });
+      _admin.toast('Вопрос обновлён', 'success');
+    } else {
+      await _admin.apiFetch('/admin/faq', {
+        method: 'POST',
+        body: JSON.stringify({ question, answer, sort_order })
+      });
+      _admin.toast('Вопрос добавлен', 'success');
+    }
+    closeModal();
+    loadFaq();
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function toggleActive(id, active) {
+  try {
+    await _admin.apiFetch(`/admin/faq/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ active })
+    });
+    _admin.toast(active ? 'Вопрос опубликован' : 'Вопрос скрыт', 'success');
+    loadFaq();
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function deleteFaq(id) {
+  _admin.adminConfirm(
+    'Удалить вопрос',
+    'Это действие необратимо. Вопрос будет удалён.',
+    async () => {
+      try {
+        await _admin.apiFetch(`/admin/faq/${id}`, { method: 'DELETE' });
+        _admin.toast('Вопрос удалён', 'success');
+        loadFaq();
+      } catch (e) {
+        _admin.toast('Ошибка: ' + e.message, 'error');
+      }
+    }
+  );
+}
+
+// Close modal on overlay click
+document.getElementById('faqModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('faqModal')) closeModal();
+});
+
+// Keyboard: Enter in question field → focus answer
+document.getElementById('faqQuestion').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('faqAnswer').focus(); }
+});
+
+// Keyboard: Escape to close modal
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+loadFaq();
+</script>
+</body>
+</html>
