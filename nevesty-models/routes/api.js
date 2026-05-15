@@ -7091,5 +7091,92 @@ router.patch('/admin/social/posts/:id/status', auth, async (req, res, next) => {
   }
 });
 
+// ─── YooKassa payments (БЛОК 10.2) ───────────────────────────────────────────
+
+// POST /api/payments/webhook — receive YooKassa payment events
+// Note: express.raw() must precede bodyParser for raw-body access; if the
+// global body-parser already consumed the body, req.body will be the parsed
+// object — both cases are handled in parseWebhookEvent().
+router.post('/payments/webhook', express.raw({ type: 'application/json' }), async (req, res, next) => {
+  try {
+    const { verifyWebhook, parseWebhookEvent } = require('../services/payments');
+    const ip = (req.headers['x-forwarded-for'] || req.ip || req.connection?.remoteAddress || '').split(',')[0].trim();
+
+    if (!verifyWebhook(req.body, ip)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const event = parseWebhookEvent(req.body);
+    if (!event?.orderId) return res.json({ ok: true });
+
+    if (event.type === 'payment.succeeded') {
+      const ord = await get('SELECT * FROM orders WHERE id=?', [event.orderId]).catch(() => null);
+      if (ord && ord.payment_status !== 'paid') {
+        await run(
+          `UPDATE orders SET payment_status='paid', paid_at=CURRENT_TIMESTAMP,
+           status='confirmed', payment_id=COALESCE(?, payment_id),
+           updated_at=CURRENT_TIMESTAMP WHERE id=? AND payment_status != 'paid'`,
+          [event.paymentId, event.orderId]
+        );
+        await run(
+          'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by, notes) VALUES (?,?,?,?,?)',
+          [event.orderId, ord.status, 'confirmed', 'payments_webhook', `Payment ID: ${event.paymentId}`]
+        ).catch(() => {});
+        // Notify client via bot if available
+        if (ord.client_chat_id) {
+          process.emit('payment:confirmed', {
+            orderId: event.orderId,
+            chatId: ord.client_chat_id,
+            amount: event.amount,
+          });
+        }
+      }
+    }
+
+    if (event.type === 'payment.canceled') {
+      await run(`UPDATE orders SET payment_status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [
+        event.orderId,
+      ]).catch(() => {});
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/payments/create — admin creates a payment link for an order
+router.post('/payments/create', auth, async (req, res, next) => {
+  try {
+    const { createPayment, DEV_MODE } = require('../services/payments');
+    const { orderId } = req.body;
+    if (!orderId) return res.status(400).json({ error: 'orderId required' });
+
+    const order = await get('SELECT * FROM orders WHERE id=?', [parseInt(orderId)]);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    const siteUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
+    const returnUrl = `${siteUrl}/order-status.html?id=${order.id}`;
+
+    const result = await createPayment(order, returnUrl);
+
+    await run('UPDATE orders SET payment_id=?, payment_status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [
+      result.paymentId,
+      'pending',
+      order.id,
+    ]);
+
+    res.json({
+      ok: true,
+      paymentId: result.paymentId,
+      confirmationUrl: result.confirmationUrl,
+      status: result.status,
+      devMode: DEV_MODE,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
 module.exports.setBot = setBot;
