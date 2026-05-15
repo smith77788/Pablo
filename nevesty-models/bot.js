@@ -5330,6 +5330,7 @@ function initBot(app) {
     clearTimeout(sessionTimers.get(chatId));
     sessionTimers.delete(chatId);
     clearSessionWarning(chatId);
+    clearSessionReminder(chatId);
     // Clear any active state/flow
     await clearSession(chatId);
 
@@ -8600,6 +8601,7 @@ function initBot(app) {
         clearTimeout(sessionTimers.get(chatId));
         sessionTimers.delete(chatId);
         clearSessionWarning(chatId);
+        clearSessionReminder(chatId);
         await clearSession(chatId);
         await safeSend(
           chatId,
