@@ -501,11 +501,12 @@ async function showCatalog(chatId, cat, page, filter) {
     const sortPref = catalogSortPrefs.get(String(chatId)) || 'featured';
     const globalSort = await getSetting('catalog_sort').catch(() => 'featured');
     const effectiveSort = (sortPref && sortPref !== 'featured') ? sortPref : (globalSort || 'featured');
-    const orderClause = effectiveSort === 'alpha'
+    // Support both old ('alpha'/'date') and new ('name'/'newest') sort value names
+    const orderClause = (effectiveSort === 'alpha' || effectiveSort === 'name')
       ? 'ORDER BY name ASC'
-      : effectiveSort === 'date'
+      : (effectiveSort === 'date' || effectiveSort === 'newest')
         ? 'ORDER BY id DESC'
-        : 'ORDER BY featured DESC, id DESC';
+        : 'ORDER BY featured DESC, name ASC';
 
     // Build WHERE clause
     const conditions = ['available=1', "COALESCE(archived,0)=0"];
@@ -558,9 +559,20 @@ async function showCatalog(chatId, cat, page, filter) {
       cityRows.push(row);
     }
 
-    // Determine if models span multiple cities for city indicator
+    // Load city and badge display settings in parallel
+    const [showCitySettingRaw, showBadgeSettingRaw] = await Promise.all([
+      getSetting('catalog_show_city').catch(() => null),
+      getSetting('catalog_show_featured_badge').catch(() => null),
+    ]);
+    // Show city: setting-driven (default on if multiple cities in slice)
     const citySet = new Set(slice.map(m => m.city).filter(Boolean));
-    const showCityInCard = citySet.size > 1;
+    const showCityInCard = showCitySettingRaw === '1' || showCitySettingRaw === 'true'
+      ? true
+      : showCitySettingRaw === '0' || showCitySettingRaw === 'false'
+        ? false
+        : citySet.size > 1;
+    // Show featured badge: setting-driven (default on)
+    const showFeaturedBadge = showBadgeSettingRaw !== '0' && showBadgeSettingRaw !== 'false';
 
     // Category short labels for inline display
     const catShortLabels = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
@@ -568,7 +580,7 @@ async function showCatalog(chatId, cat, page, filter) {
     // Model buttons: numbered, featured-first indicator, key stats
     const modelBtns = slice.map((m, i) => {
       const num     = page * perPage + i + 1;
-      const featStar = m.featured ? '⭐' : '·';
+      const featStar = showFeaturedBadge && m.featured ? '⭐' : '·';
       const catShort = catShortLabels[m.category] || m.category || '';
       const cityPart = showCityInCard && m.city ? ` | ${m.city}` : '';
       const agePart  = m.age ? ` | ${m.age} л` : '';
@@ -602,8 +614,9 @@ async function showCatalog(chatId, cat, page, filter) {
       : '';
     const featuredCount = models.filter(mo => mo.featured).length;
     const featuredNote  = featuredCount > 0 ? `\n⭐ — топ\\-модели` : '';
+    const catalogBreadcrumb = `_🏠 Главная › 💃 Каталог_\n\n`;
     return safeSend(chatId,
-      `💃 *Каталог моделей — ${esc(label)}${cityLabel}*${pageInfo}\n\nНайдено: *${total}* ${ru_plural(total,'модель','модели','моделей')}${featuredNote}\n\nВыберите модель:`,
+      `${catalogBreadcrumb}💃 *Каталог моделей — ${esc(label)}${cityLabel}*${pageInfo}\n\nНайдено: *${total}* ${ru_plural(total,'модель','модели','моделей')}${featuredNote}\n\nВыберите модель:`,
       { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
     );
   } catch (e) { console.error('[Bot] showCatalog:', e.message); }
@@ -688,7 +701,7 @@ async function showModel(chatId, modelId) {
     // Caption ≤ 1024 chars (Telegram limit for media)
     const bioEsc  = m.bio ? esc(m.bio) : '';
     const bioFits = bioEsc.slice(0, 180) + (bioEsc.length > 180 ? '…' : '');
-    const breadcrumb = `🏠 Главная › 💃 Каталог › ${esc(m.name)}`;
+    const breadcrumb = `_🏠 Главная › 💃 Каталог › ${esc(m.name)}_`;
     const captionParts = [breadcrumb, `*${esc(catBanner)}*`, `${star}*${esc(m.name)}*`, '', ...lines, '', avail];
     if (bioFits) captionParts.push('', `_${bioFits}_`);
     const caption = captionParts.join('\n').slice(0, 1020);
@@ -840,7 +853,7 @@ async function showMyOrders(chatId, page = 0) {
 
     if (!total) {
       return safeSend(chatId,
-        '📭 *Ваши заявки*\n\nУ вас пока нет заявок\\. Оформите первую прямо сейчас\\!',
+        '_🏠 Главная › 📋 Мои заявки_\n\n📭 *Ваши заявки*\n\nУ вас пока нет заявок\\. Оформите первую прямо сейчас\\!',
         {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [
@@ -858,7 +871,7 @@ async function showMyOrders(chatId, page = 0) {
       [String(chatId), PER_PAGE, page * PER_PAGE]
     );
 
-    let text = `📋 *Ваши заявки* \\(${total}\\):\n\n`;
+    let text = `_🏠 Главная › 📋 Мои заявки_\n\n📋 *Ваши заявки* \\(${total}\\):\n\n`;
     const btns = [];
     for (const o of orders) {
       text += `${STATUS_LABELS[o.status]||o.status} *${esc(o.order_number)}*\n`;
@@ -905,7 +918,8 @@ async function showClientOrder(chatId, orderId) {
       [orderId]
     );
     const timeline = await showOrderTimeline(o);
-    let text = `📋 *Заявка ${esc(o.order_number)}*\n\n`;
+    let text = `_🏠 Главная › 📋 Мои заявки › Заявка \\#${esc(o.order_number)}_\n\n`;
+    text += `📋 *Заявка ${esc(o.order_number)}*\n\n`;
     text += `*Статус заявки:*\n${timeline}\n\n`;
     text += `Мероприятие: *${esc(EVENT_TYPES[o.event_type]||o.event_type)}*\n`;
     if (o.event_date)   text += `Дата: ${esc(o.event_date)}\n`;
@@ -1054,7 +1068,7 @@ async function bkStep1(chatId, data = {}) {
       callback_data: `bk_pick_${m.id}`
     }]);
     return safeSend(chatId,
-      stepHeader(1,'Выберите модель') + 'Выберите из списка или нажмите «Менеджер подберёт»:',
+      `_🏠 Главная › 📝 Бронирование_\n\n` + stepHeader(1,'Выберите модель') + 'Выберите из списка или нажмите «Менеджер подберёт»:',
       {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [
@@ -3804,15 +3818,23 @@ function initBot(app) {
       : '';
     const text = isAdmin(chatId)
       ? `📖 *Команды администратора:*\n\n/start — главное меню\n/cancel — отменить действие\n/help — помощь\n\nДля управления ботом используйте меню 👆`
-      : `📖 *Справка по боту Nevesty Models*\n\nОсновные команды:\n` +
+      : `📖 *Справка по боту Nevesty Models*\n\n` +
+        `*Основные команды:*\n` +
         `/start — главное меню\n` +
         `/catalog — каталог моделей\n` +
-        `/wishlist — избранные модели\n` +
-        `/booking — создать заявку\n` +
+        `/booking — создать заявку на модель\n` +
         `/orders — мои заявки\n` +
-        `/profile — мой профиль\n` +
+        `/profile — мой профиль и баланс\n` +
+        `/wishlist — избранные модели\n` +
+        `/status — проверить статус заявки\n` +
+        `/faq — часто задаваемые вопросы\n` +
         `/cancel — отменить текущее действие\n` +
-        `/help — эта справка` +
+        `/help — эта справка\n\n` +
+        `*Быстрые действия:*\n` +
+        `💃 Выбрать модель → Каталог → нажмите на модель\n` +
+        `📝 Оформить заявку → кнопка «Оформить заявку»\n` +
+        `📋 Следить за заявкой → Мои заявки\n` +
+        `❤️ Сохранить модель → кнопка «В избранное»` +
         managerLine;
     return safeSend(chatId, text, { parse_mode: 'MarkdownV2' });
   });
