@@ -1363,7 +1363,7 @@ router.patch('/models/:id', auth, async (req, res, next) => {
 router.get('/admin/models', auth, async (req, res, next) => {
   try {
     const { page = 0, sort = 'name', limit = 15, archived, search } = req.query;
-    const offset = parseInt(page) * parseInt(limit);
+    const offset = (parseInt(page) || 0) * (parseInt(limit) || 15);
 
     const sortMap = {
       name: 'name ASC',
@@ -1380,9 +1380,10 @@ router.get('/admin/models', auth, async (req, res, next) => {
     const whereAliased = [];
     const params = [];
     if (archived !== undefined) {
+      const archivedVal = archived === '1' ? 1 : 0;
       wherePlain.push('archived=?');
       whereAliased.push('m.archived=?');
-      params.push(parseInt(archived));
+      params.push(archivedVal);
     }
     if (search) {
       wherePlain.push('name LIKE ?');
