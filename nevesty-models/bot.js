@@ -239,6 +239,16 @@ async function logAdminAction(adminChatId, action, entityType = null, entityId =
 // Устраняет зависания когда SQLite занята агентами: чтение всегда из памяти,
 // запись сначала в память, затем асинхронно в SQLite.
 const _sessionCache = new Map(); // chatId → { state, data, updated_at }
+// Evict idle sessions from memory cache every hour to prevent unbounded growth
+// Sessions in 'idle' state with no recent activity are safe to evict (will be re-read from SQLite)
+setInterval(() => {
+  const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(); // 2 hours ago
+  for (const [key, sess] of _sessionCache) {
+    if ((!sess.state || sess.state === 'idle') && sess.updated_at < cutoff) {
+      _sessionCache.delete(key);
+    }
+  }
+}, 60 * 60 * 1000).unref();
 
 async function getSession(chatId) {
   const key = String(chatId);
@@ -2264,6 +2274,10 @@ async function showModelEditMenu(chatId, modelId) {
 
 // In-memory compare lists per chat (up to 3 models)
 const _compareLists = new Map(); // chatId → Set of modelIds
+// Cleanup stale compare lists every 24 hours (users rarely compare for >24h)
+setInterval(() => {
+  _compareLists.clear();
+}, 24 * 60 * 60 * 1000).unref();
 
 async function addToCompare(chatId, modelId) {
   const key = String(chatId);
@@ -8773,6 +8787,8 @@ async function showCatalogByCity(chatId, city, page = 0) {
 // ─── Поиск модели по параметрам (БЛОК 2.4) ───────────────────────────────────
 // In-memory фильтры для каждого пользователя
 const searchFilters = new Map(); // chatId → { height_min, height_max, age_min, age_max, category, city }
+// Cleanup stale search filters every 6 hours to prevent unbounded growth
+setInterval(() => { searchFilters.clear(); }, 6 * 60 * 60 * 1000).unref();
 
 function getSearchFilters(chatId) {
   if (!searchFilters.has(String(chatId))) searchFilters.set(String(chatId), {});

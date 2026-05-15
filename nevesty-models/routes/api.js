@@ -267,9 +267,11 @@ router.get('/csrf-token', (req, res) => {
 
 /** Helper: issue full JWT + refresh token pair for an admin */
 async function issueTokenPair(admin) {
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) throw new Error('JWT_SECRET environment variable is not set');
   const token = jwt.sign(
     { id: admin.id, username: admin.username, role: admin.role },
-    process.env.JWT_SECRET || 'secret',
+    jwtSecret,
     { expiresIn: '15m' }
   );
   const refreshTokenRaw = crypto.randomBytes(48).toString('hex');
@@ -387,9 +389,11 @@ router.post('/auth/refresh', authLimiter, async (req, res, next) => {
       "INSERT INTO refresh_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
       [newHash, admin.id]
     );
+    const jwtSecret2 = process.env.JWT_SECRET;
+    if (!jwtSecret2) throw new Error('JWT_SECRET environment variable is not set');
     const token = jwt.sign(
       { id: admin.id, username: admin.username, role: admin.role },
-      process.env.JWT_SECRET || 'secret',
+      jwtSecret2,
       { expiresIn: '15m' }
     );
     res.json({ token, refresh_token: newRefresh });
@@ -1633,6 +1637,13 @@ router.get('/admin/analytics/model-stats/:id', auth, async (req, res, next) => {
 // ─── Public model view tracking ────────────────────────────────────────────────
 // In-memory rate limit store: "ip:modelId" -> last-seen timestamp
 const _viewRateLimits = new Map();
+// Cleanup _viewRateLimits every hour to prevent unbounded memory growth
+setInterval(() => {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const [key, ts] of _viewRateLimits) {
+    if (ts < cutoff) _viewRateLimits.delete(key);
+  }
+}, 60 * 60 * 1000).unref();
 
 // POST /models/:id/view — increment view_count (public, rate-limited to 1/hour per IP per model)
 router.post('/models/:id/view', async (req, res) => {
@@ -1826,6 +1837,17 @@ router.get('/orders/status', async (req, res, next) => {
 // Rate-limited: reuses clientRateLimit (10/hour per IP), defined below at line ~3423.
 // NOTE: clientRateLimit is defined later in this file; use a simple inline limiter here.
 const _byPhoneLimits = new Map();
+// Cleanup _byPhoneLimits every 15 minutes to prevent unbounded memory growth
+setInterval(() => {
+  const windowMs = 15 * 60 * 1000;
+  const cutoff = Date.now() - windowMs;
+  for (const [ip, timestamps] of _byPhoneLimits) {
+    const fresh = timestamps.filter(t => t > cutoff);
+    if (fresh.length === 0) _byPhoneLimits.delete(ip);
+    else _byPhoneLimits.set(ip, fresh);
+  }
+}, 15 * 60 * 1000).unref();
+
 function byPhoneLimiter(req, res, next) {
   const ip = req.ip || req.connection?.remoteAddress || 'unknown';
   const now = Date.now();
@@ -2186,7 +2208,8 @@ router.put('/admin/orders/:id', auth, async (req, res, next) => {
 // ─── Create payment link for order (admin) ────────────────────────────────────
 router.post('/admin/orders/:id/pay', auth, async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid order ID' });
     const { amount, description, provider = 'yookassa' } = req.body;
     if (!amount || isNaN(amount) || amount < 1) return res.status(400).json({ error: 'amount required (integer RUB)' });
 
@@ -3437,7 +3460,7 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
       } catch {}
     }
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: 'DB error' }); }
+  } catch (e) { next(e); }
 });
 
 // ─── WhatsApp deep-link for order (admin) ─────────────────────────────────────
@@ -4709,9 +4732,11 @@ router.post('/client/verify', clientOtpLimiter, async (req, res, next) => {
     await run("UPDATE client_otp SET used=1 WHERE id=?", [otp.id]);
 
     // Issue short-lived client JWT (1 hour)
+    const clientJwtSecret = process.env.JWT_SECRET;
+    if (!clientJwtSecret) throw new Error('JWT_SECRET environment variable is not set');
     const token = jwt.sign(
       { phone: phone10, type: 'client' },
-      process.env.JWT_SECRET || 'secret',
+      clientJwtSecret,
       { expiresIn: '1h' }
     );
     res.json({ ok: true, token, phone: '+7' + phone10 });
@@ -4722,8 +4747,10 @@ router.post('/client/verify', clientOtpLimiter, async (req, res, next) => {
 function _clientAuth(req, res, next) {
   const header = req.headers.authorization || '';
   if (!header.startsWith('Bearer ')) return res.status(401).json({ error: 'Требуется авторизация' });
+  const verifySecret = process.env.JWT_SECRET;
+  if (!verifySecret) return res.status(500).json({ error: 'JWT_SECRET not configured' });
   try {
-    const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET || 'secret');
+    const payload = jwt.verify(header.slice(7), verifySecret);
     if (payload.type !== 'client') return res.status(401).json({ error: 'Неверный тип токена' });
     req.clientPhone = payload.phone;
     next();
@@ -4962,10 +4989,13 @@ router.post('/orders/:id/pay', async (req, res, next) => {
     let authorized = false;
     const authHeader = req.headers.authorization || '';
     if (authHeader.startsWith('Bearer ')) {
-      try {
-        jwt.verify(authHeader.slice(7), process.env.JWT_SECRET || 'secret');
-        authorized = true;
-      } catch {}
+      const paySecret = process.env.JWT_SECRET;
+      if (paySecret) {
+        try {
+          jwt.verify(authHeader.slice(7), paySecret);
+          authorized = true;
+        } catch {}
+      }
     }
 
     const { phone, return_url } = req.body;
@@ -5030,10 +5060,11 @@ router.post('/webhooks/yookassa', async (req, res, next) => {
         const ord = metaOrderId
           ? await get('SELECT * FROM orders WHERE id=?', [parseInt(metaOrderId)]).catch(() => null)
           : await get('SELECT * FROM orders WHERE payment_id=?', [paymentId]).catch(() => null);
-        if (ord) {
+        if (ord && ord.payment_status !== 'paid') {
+          // Idempotency guard: only process if not already marked paid
           await run(
             `UPDATE orders SET payment_status='paid', paid_at=CURRENT_TIMESTAMP,
-             status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+             status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=? AND payment_status != 'paid'`,
             [ord.id]
           );
           await run(
@@ -5088,13 +5119,15 @@ router.post('/webhooks/stripe', async (req, res, next) => {
 
     const event = Buffer.isBuffer(body) ? JSON.parse(body.toString('utf8')) : body;
 
-    // Helper: mark order as paid and notify
+    // Helper: mark order as paid and notify (idempotent — skips if already paid)
     const markPaid = async (ord, ref) => {
-      await run(
+      if (ord.payment_status === 'paid') return; // idempotency guard
+      const result = await run(
         `UPDATE orders SET payment_status='paid', paid_at=CURRENT_TIMESTAMP,
-         status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+         status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=? AND payment_status != 'paid'`,
         [ord.id]
       );
+      if (!result?.changes) return; // another concurrent webhook already processed this
       await run(
         'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by, notes) VALUES (?,?,?,?,?)',
         [ord.id, ord.status, 'confirmed', 'stripe_webhook', `Ref: ${ref}`]
