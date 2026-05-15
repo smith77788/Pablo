@@ -235,13 +235,14 @@
                 <th>Модель</th>
                 <th>Дата</th>
                 <th>Статус</th>
+                <th>Оплата</th>
                 <th>Изменить статус</th>
                 <th>Создана</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="ordersBody">
-              <tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr>
+              <tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr>
             </tbody>
           </table>
         </div>
@@ -426,10 +427,16 @@ function colorBadge(status) {
   return `<span class="sbadge sbadge-${status}">${label}</span>`;
 }
 
+function paymentBadge(o) {
+  if (o.payment_status === 'paid') return '<span title="Оплачено" style="color:#10b981;font-size:1.1rem">💳✅</span>';
+  if (o.payment_status === 'pending') return '<span title="Ожидает оплаты" style="color:#f59e0b;font-size:1.1rem">💳⏳</span>';
+  return '<span style="color:var(--text-dim);font-size:0.75rem">—</span>';
+}
+
 function renderTable(orders) {
   const tbody = document.getElementById('ordersBody');
   if (!orders.length) {
-    tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
     return;
   }
 
@@ -451,6 +458,7 @@ function renderTable(orders) {
       <td>${o.model_name || '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${colorBadge(o.status)}</td>
+      <td>${paymentBadge(o)}</td>
       <td onclick="event.stopPropagation()">
         <select class="inline-status-select" data-order-id="${o.id}" data-prev="${o.status}"
           onchange="quickStatusChange(${o.id}, this.value, this)">
@@ -683,6 +691,12 @@ function buildDetailHTML(o) {
     o.budget          ? row('Бюджет',   _admin.escapeHtml(o.budget))               : '',
     o.comments        ? row('Комментарий', `<span style="white-space:pre-wrap">${_admin.escapeHtml(o.comments)}</span>`) : '',
     row('Создана',          _admin.formatDateTime(o.created_at)),
+    // Payment info
+    o.payment_id      ? row('ID платежа', `<code style="font-size:0.78rem">${_admin.escapeHtml(o.payment_id)}</code>`) : '',
+    o.payment_status  ? row('Статус оплаты', o.payment_status === 'paid'
+      ? '<span style="color:#10b981;font-weight:600">✅ Оплачено</span>'
+      : `<span style="color:#f59e0b">⏳ ${_admin.escapeHtml(o.payment_status)}</span>`) : '',
+    o.paid_at         ? row('Дата оплаты', _admin.formatDateTime(o.paid_at)) : '',
   ].join('');
 }
 

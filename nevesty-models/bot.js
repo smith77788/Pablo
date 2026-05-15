@@ -633,11 +633,22 @@ async function showClientOrder(chatId, orderId) {
     const reviewBtn = o.status === 'completed'
       ? [{ text: '⭐ Оставить отзыв', callback_data: `leave_review_${o.id}` }]
       : [];
+    // Payment info in message
+    if (o.payment_status === 'paid') {
+      text += `\n💳 *Оплата:* ✅ Оплачено\n`;
+    } else if (o.payment_id && o.payment_status === 'pending') {
+      text += `\n💳 *Оплата:* ⏳ Ожидает оплаты\n`;
+    }
+    // Show Pay button for confirmed orders that are not yet paid
+    const payBtn = (o.status === 'confirmed' && o.payment_status !== 'paid')
+      ? [{ text: '💳 Оплатить', callback_data: `pay_order_${o.id}` }]
+      : [];
 
     const kb = [
       [{ text: '← Мои заявки', callback_data: 'my_orders' }],
       [{ text: '🏠 Меню',      callback_data: 'main_menu' }],
     ];
+    if (payBtn.length)    kb.unshift(payBtn);
     if (repeatBtn.length) kb.unshift(repeatBtn);
     if (reviewBtn.length) kb.unshift(reviewBtn);
 
@@ -3012,6 +3023,58 @@ function initBot(app) {
       return showClientOrder(chatId, id);
     }
 
+    // ── Pay order
+    if (data.startsWith('pay_order_')) {
+      const orderId = parseInt(data.replace('pay_order_', ''));
+      const ord = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(()=>null);
+      if (!ord || ord.client_chat_id !== String(chatId)) {
+        return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
+      }
+      if (ord.payment_status === 'paid') {
+        return safeSend(chatId, '✅ Эта заявка уже оплачена\\.', { parse_mode: 'MarkdownV2' });
+      }
+      // Request payment via API
+      try {
+        const https = require('https');
+        const siteUrl = SITE_URL.replace(/\/$/, '');
+        const url = new URL(`${siteUrl}/api/orders/${orderId}/pay`);
+        const bodyStr = JSON.stringify({ phone: ord.client_phone });
+        const resp = await new Promise((resolve, reject) => {
+          const req = https.request(
+            { hostname: url.hostname, port: url.port || 443, path: url.pathname, method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) } },
+            (res) => { const ch = []; res.on('data', d => ch.push(d)); res.on('end', () => resolve({ status: res.statusCode, data: JSON.parse(Buffer.concat(ch).toString()) })); }
+          );
+          req.on('error', reject);
+          req.write(bodyStr); req.end();
+        });
+        if (resp.data.error) {
+          return safeSend(chatId, `❌ ${esc(resp.data.error)}`, { parse_mode: 'MarkdownV2' });
+        }
+        if (resp.data.payment_url) {
+          return safeSend(chatId,
+            `💳 *Оплата заявки ${esc(ord.order_number)}*\n\nНажмите кнопку ниже для перехода к оплате:`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: { inline_keyboard: [
+                [{ text: '💳 Перейти к оплате', url: resp.data.payment_url }],
+                [{ text: '← Назад к заявке', callback_data: `client_order_${orderId}` }],
+              ]},
+            }
+          );
+        } else {
+          // Stripe: no hosted URL, show client_secret info
+          return safeSend(chatId,
+            `💳 *Оплата инициирована*\n\nID платежа: \`${esc(resp.data.payment_id || '')}\`\n\nОбратитесь к менеджеру для завершения оплаты\\.`,
+            { parse_mode: 'MarkdownV2' }
+          );
+        }
+      } catch (e) {
+        console.error('[Bot] pay_order:', e.message);
+        return safeSend(chatId, '❌ Ошибка при создании платежа\\. Обратитесь к менеджеру\\.', { parse_mode: 'MarkdownV2' });
+      }
+    }
+
     // ── Booking: start
     if (data === 'bk_start')  return bkStep1(chatId, {});
 
@@ -4689,6 +4752,21 @@ async function sendMessageToClient(clientChatId, orderNumber, text) {
   await safeSend(clientChatId, `💬 *Сообщение от менеджера* \\(${esc(orderNumber)}\\):\n\n${esc(text)}`, { parse_mode: 'MarkdownV2' });
 }
 
+async function notifyPaymentSuccess(clientChatId, orderNumber) {
+  if (!bot || !clientChatId) return;
+  await safeSend(
+    clientChatId,
+    `✅ *Оплата получена\\!* Ваша заявка *${esc(orderNumber)}* подтверждена\\.\n\nСпасибо\\! Менеджер свяжется с вами для уточнения деталей\\.`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📋 Мои заявки', callback_data: 'my_orders' }],
+        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+      ]},
+    }
+  );
+}
+
 // ─── FAQ ──────────────────────────────────────────────────────────────────────
 
 const FAQ_ITEMS = [
@@ -5886,4 +5964,4 @@ function _registerNewFeatures() {
   });
 }
 
-module.exports = { initBot, notifyAdmin, notifyNewOrder, notifyStatusChange, sendMessageToClient, _registerNewFeatures };
+module.exports = { initBot, notifyAdmin, notifyNewOrder, notifyStatusChange, sendMessageToClient, notifyPaymentSuccess, _registerNewFeatures };

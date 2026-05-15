@@ -726,6 +726,62 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre>
         </div>
       </div>
 
+      <!-- ═══ TAB: Оплата ══════════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-payment">
+        <div class="section-card" style="max-width:600px">
+          <div class="section-card-header"><div class="section-card-title">💳 Настройки оплаты</div></div>
+          <div class="section-card-body padded">
+
+            <div class="admin-form-group">
+              <label class="admin-label">Провайдер оплаты</label>
+              <select class="admin-input" id="s_payment_provider">
+                <option value="disabled">Отключено</option>
+                <option value="yookassa">ЮKassa</option>
+                <option value="stripe">Stripe</option>
+              </select>
+              <div class="field-note">Выберите систему приёма платежей или отключите оплату</div>
+            </div>
+
+            <div class="admin-form-group" id="payment_yookassa_fields" style="display:none">
+              <label class="admin-label">ЮKassa Shop ID</label>
+              <input class="admin-input" type="text" id="s_yookassa_shop_id" placeholder="Ваш shopId из личного кабинета ЮKassa" />
+              <div class="field-note">Задаётся через env <code>YOOKASSA_SHOP_ID</code> — отображается для справки</div>
+            </div>
+
+            <div class="admin-form-group" id="payment_stripe_fields" style="display:none">
+              <label class="admin-label">Stripe Secret Key</label>
+              <input class="admin-input" type="password" id="s_stripe_secret_key" placeholder="sk_live_... (задаётся в .env)" autocomplete="off" />
+              <div class="field-note">Задаётся через env <code>STRIPE_SECRET_KEY</code></div>
+            </div>
+
+            <div class="admin-form-group">
+              <label class="admin-label">Минимальная сумма для предоплаты (%)</label>
+              <input class="admin-input" type="number" id="s_payment_prepay_percent" min="0" max="100" step="5" placeholder="50" />
+              <div class="field-note">Процент от суммы заявки, который клиент платит авансом. 0 — полная сумма</div>
+            </div>
+
+            <div class="admin-form-group">
+              <label class="admin-label">Минимальная сумма (₽)</label>
+              <input class="admin-input" type="number" id="s_payment_min_amount" min="0" step="100" placeholder="1000" />
+              <div class="field-note">Минимальная сумма платежа в рублях</div>
+            </div>
+
+            <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:14px;margin:16px 0;font-size:0.82rem;color:#856404;line-height:1.6;">
+              <strong>Важно:</strong> Ключи API (<code>YOOKASSA_SECRET_KEY</code>, <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_WEBHOOK_SECRET</code>)
+              задаются в файле <code>.env</code> и не хранятся в базе данных. Настройки выше влияют только на выбор провайдера и параметры предоплаты.
+            </div>
+
+            <div style="background:#e8f5e9;border:1px solid #4caf50;border-radius:8px;padding:14px;margin:16px 0;font-size:0.82rem;color:#2e7d32;line-height:1.6;">
+              <strong>Webhook-адреса для настройки в личном кабинете:</strong><br>
+              <code>ЮKassa:</code> <code id="webhook_yookassa_url">/api/webhooks/yookassa</code><br>
+              <code>Stripe:</code> <code id="webhook_stripe_url">/api/webhooks/stripe</code>
+            </div>
+
+            <button class="btn btn-md btn-gold" id="btnSavePayment" onclick="savePaymentSettings(this)">Сохранить настройки оплаты</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ═══ TAB: Пароль ══════════════════════════════════════════════════════ -->
       <div class="tab-pane" id="pane-password">
         <div class="section-card" style="max-width:520px">
@@ -1287,6 +1343,67 @@ async function sendEmailTest(btn) {
     btn.disabled = false; btn.textContent = 'Отправить тест';
   }
 }
+
+/* ─── Payment settings ─────────────────────────────────────── */
+function onPaymentProviderChange() {
+  const provider = document.getElementById('s_payment_provider').value;
+  const ykFields = document.getElementById('payment_yookassa_fields');
+  const strFields = document.getElementById('payment_stripe_fields');
+  if (ykFields)  ykFields.style.display  = provider === 'yookassa' ? '' : 'none';
+  if (strFields) strFields.style.display = provider === 'stripe'   ? '' : 'none';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('s_payment_provider');
+  if (sel) sel.addEventListener('change', onPaymentProviderChange);
+  // Set webhook URL hints
+  const base = window.location.origin;
+  const ywEl = document.getElementById('webhook_yookassa_url');
+  const swEl = document.getElementById('webhook_stripe_url');
+  if (ywEl) ywEl.textContent = base + '/api/webhooks/yookassa';
+  if (swEl) swEl.textContent = base + '/api/webhooks/stripe';
+});
+
+async function savePaymentSettings(btn) {
+  btn.disabled = true; btn.textContent = 'Сохраняем...';
+  try {
+    const provider    = document.getElementById('s_payment_provider')?.value || 'disabled';
+    const minAmount   = document.getElementById('s_payment_min_amount')?.value || '0';
+    const prepayPct   = document.getElementById('s_payment_prepay_percent')?.value || '0';
+    const resp = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payment_provider: provider, payment_min_amount: minAmount, payment_prepay_percent: prepayPct }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    onPaymentProviderChange();
+    _admin.toast('Настройки оплаты сохранены', 'success');
+  } catch(e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Сохранить настройки оплаты';
+  }
+}
+
+// Load payment settings in loadSettings
+const _origLoadSettings = loadSettings;
+loadSettings = async function() {
+  await _origLoadSettings();
+  try {
+    const resp = await fetch('/api/admin/settings', { headers: h });
+    const data = await resp.json();
+    function val(key) {
+      if (Array.isArray(data)) { const f = data.find(s => s.key === key); return f ? f.value : ''; }
+      return data[key] !== undefined ? data[key] : '';
+    }
+    const provEl = document.getElementById('s_payment_provider');
+    if (provEl) { const v = val('payment_provider'); if (v) provEl.value = v; }
+    const minEl = document.getElementById('s_payment_min_amount');
+    if (minEl) { const v = val('payment_min_amount'); if (v) minEl.value = v; }
+    const pctEl = document.getElementById('s_payment_prepay_percent');
+    if (pctEl) { const v = val('payment_prepay_percent'); if (v) pctEl.value = v; }
+    onPaymentProviderChange();
+  } catch {}
+};
 
 /* ─── Init ────────────────────────────────────────────────── */
 loadSettings();
