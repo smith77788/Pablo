@@ -2,10 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
-let compression;
-try {
-  compression = require('compression');
-} catch {}
+const compression = require('compression');
 const { initDatabase, get: dbGet, closeDatabase } = require('./database');
 const { initBot } = require('./bot');
 const apiRouter = require('./routes/api');
@@ -211,17 +208,16 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // ─── Compression ──────────────────────────────────────────────────────────────
-if (compression)
-  app.use(
-    compression({
-      level: 6, // balanced speed/ratio (default is 6, but explicit is clearer)
-      threshold: 1024, // only compress responses > 1 KB
-      filter: (req, res) => {
-        if (req.headers['x-no-compression']) return false;
-        return compression.filter(req, res);
-      },
-    })
-  );
+app.use(
+  compression({
+    level: 6, // balanced speed/ratio (default is 6, but explicit is clearer)
+    threshold: 1024, // only compress responses > 1 KB
+    filter: (req, res) => {
+      if (req.headers['x-no-compression']) return false;
+      return compression.filter(req, res);
+    },
+  })
+);
 
 // ─── Response-time header (useful for monitoring / APM) ───────────────────────
 app.use((req, res, next) => {
