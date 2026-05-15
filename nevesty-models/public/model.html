@@ -716,12 +716,11 @@
 
         // Update page title & OG
         document.title = `${model.name} — Nevesty Models`;
-        const ogTitle = document.querySelector('meta[property="og:title"]');
-        if (ogTitle) ogTitle.setAttribute('content', `${model.name} — Nevesty Models`);
-        const ogDesc = document.querySelector('meta[property="og:description"]');
-        if (ogDesc && model.bio) ogDesc.setAttribute('content', model.bio.substring(0, 160));
-        const ogUrl = document.querySelector('meta[property="og:url"]');
-        if (ogUrl) ogUrl.setAttribute('content', `https://nevesty-models.ru/model.html?id=${id}`);
+        document.querySelector('meta[property="og:title"]')?.setAttribute('content', model.name + ' — Nevesty Models');
+        document.querySelector('meta[property="og:description"]')?.setAttribute('content', [model.city, model.height ? model.height + ' см' : '', model.age ? model.age + ' лет' : ''].filter(Boolean).join(', '));
+        document.querySelector('meta[property="og:url"]')?.setAttribute('content', `https://nevesty-models.ru/model.html?id=${id}`);
+        const firstPhoto = (model.photos || [])[0] || model.photo_main;
+        if (firstPhoto) document.querySelector('meta[property="og:image"]')?.setAttribute('content', firstPhoto);
         const metaDesc = document.querySelector('meta[name="description"]');
         if (metaDesc) metaDesc.setAttribute('content', `${model.name} — профессиональная модель агентства Nevesty Models. ${model.city ? 'Город: ' + model.city + '.' : ''} Бронирование онлайн.`);
 
@@ -744,6 +743,21 @@
         schemaScript.type = 'application/ld+json';
         schemaScript.textContent = JSON.stringify(personSchema);
         document.head.appendChild(schemaScript);
+
+        // BreadcrumbList schema
+        const breadcrumbSchema = {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
+            {"@type": "ListItem", "position": 2, "name": "Каталог", "item": "https://nevesty-models.ru/catalog.html"},
+            {"@type": "ListItem", "position": 3, "name": model.name, "item": `https://nevesty-models.ru/model.html?id=${id}`}
+          ]
+        };
+        const breadcrumbScript = document.createElement('script');
+        breadcrumbScript.type = 'application/ld+json';
+        breadcrumbScript.textContent = JSON.stringify(breadcrumbSchema);
+        document.head.appendChild(breadcrumbScript);
 
         renderModel(model);
         loadModelReviews(model.id);
