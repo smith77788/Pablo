@@ -2412,6 +2412,7 @@ async function showAdminSettings(chatId, section) {
           [{ text: '🏙 Города', callback_data: 'adm_settings_cities' }],
           [{ text: '🤖 Бот и интерфейс', callback_data: 'adm_settings_bot' }],
           [{ text: '📊 Лимиты и доступ', callback_data: 'adm_settings_limits' }],
+          [{ text: '📱 Соцсети и Instagram', callback_data: 'adm_settings_social' }],
           [{ text: '← Назад', callback_data: 'admin_menu' }],
         ],
       },
@@ -2804,7 +2805,7 @@ async function showAdminSettings(chatId, section) {
     return showAdminSettings(chatId, 'bot');
   }
 
-  // ── Соцсети ───────────────────────────────────────────────────────────────
+  // ── Соцсети и Instagram ───────────────────────────────────────────────────
   if (section === 'social') {
     const [instaEnabled, insta, igToken, igAccountId] = await Promise.all([
       getSetting('instagram_enabled'),
@@ -2819,39 +2820,57 @@ async function showAdminSettings(chatId, section) {
     } catch (_) {}
     const on = v => (v === '0' ? '❌' : '✅');
     const apiConnected = !!(igToken && igAccountId);
-    const apiStatus = apiConnected ? '✅ API подключён' : '❌ API не настроен';
-    const tokenShort = igToken ? `${igToken.slice(0, 8)}…` : '—';
+    const tokenShort = igToken ? `${igToken.slice(0, 10)}…` : '—';
     const accountShort = igAccountId || '—';
-    const text =
-      `*📱 Соцсети и Instagram*\n\n` +
-      `📸 Instagram: ${esc(insta || '—')}\n` +
-      `${on(instaEnabled ?? '1')} Instagram включён\n` +
-      `📋 Постов в очереди: ${esc(String(socialCount))}\n\n` +
-      `*🔌 Подключение Instagram Graph API*\n` +
-      `Статус: ${apiStatus}\n` +
-      `Access Token: \`${esc(tokenShort)}\`\n` +
-      `Account ID: \`${esc(accountShort)}\``;
-    const apiRow = apiConnected
-      ? [{ text: '🔍 Проверить соединение', callback_data: 'adm_ig_test' }]
-      : [{ text: '🔑 Настроить API', callback_data: 'adm_ig_setup' }];
+
+    let text = `*📱 Соцсети и Instagram*\n\n`;
+
+    if (!apiConnected) {
+      text +=
+        `*Статус API: ❌ Не подключён*\n\n` +
+        `Чтобы агенты могли публиковать посты в Instagram, нужно подключить *Instagram Business API*\\.\n\n` +
+        `*Как получить данные:*\n` +
+        `1\\. Зайдите на [developers\\.facebook\\.com](https://developers.facebook.com)\n` +
+        `2\\. Создайте приложение типа Business\n` +
+        `3\\. Добавьте продукт Instagram Basic Display\n` +
+        `4\\. Получите долгосрочный Access Token\n` +
+        `5\\. Скопируйте числовой Instagram Business Account ID\n\n` +
+        `Нажмите кнопку ниже чтобы начать настройку\\.`;
+    } else {
+      text +=
+        `*Статус API: ✅ Подключён*\n\n` +
+        `📸 @username: ${esc(insta || '—')}\n` +
+        `🔑 Token: \`${esc(tokenShort)}\`\n` +
+        `🆔 Account ID: \`${esc(accountShort)}\`\n` +
+        `${on(instaEnabled ?? '1')} Публикация включена\n` +
+        `📋 Постов в очереди: *${esc(String(socialCount))}*`;
+    }
+
+    const keyboard = [];
+
+    if (!apiConnected) {
+      keyboard.push([{ text: '🔌 Подключить Instagram', callback_data: 'adm_ig_connect_step1' }]);
+    } else {
+      keyboard.push([
+        {
+          text: (instaEnabled ?? '1') === '0' ? '✅ Включить публикацию' : '⏸ Приостановить публикацию',
+          callback_data: (instaEnabled ?? '1') === '0' ? 'adm_instagram_on' : 'adm_instagram_off',
+        },
+      ]);
+      keyboard.push([{ text: '🔍 Проверить соединение', callback_data: 'adm_ig_test' }]);
+      keyboard.push([{ text: '📸 Очередь постов', callback_data: 'adm_social' }]);
+      keyboard.push([
+        { text: '🔑 Изменить Token', callback_data: 'adm_set_insta_token' },
+        { text: '🆔 Изменить ID', callback_data: 'adm_set_insta_account_id' },
+      ]);
+      keyboard.push([{ text: '🔌 Отключить Instagram API', callback_data: 'adm_ig_disconnect' }]);
+    }
+
+    keyboard.push([{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }]);
+
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: (instaEnabled ?? '1') === '0' ? '📸 Instagram ВКЛ' : '📸 Instagram ВЫКЛ',
-              callback_data: (instaEnabled ?? '1') === '0' ? 'adm_instagram_on' : 'adm_instagram_off',
-            },
-          ],
-          [{ text: '📸 Изменить Instagram (@username)', callback_data: 'adm_set_insta' }],
-          apiRow,
-          [{ text: '🔑 Изменить Access Token', callback_data: 'adm_set_insta_token' }],
-          [{ text: '🆔 Изменить Account ID', callback_data: 'adm_set_insta_account_id' }],
-          [{ text: '📸 Очередь постов', callback_data: 'adm_social' }],
-          [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
-        ],
-      },
+      reply_markup: { inline_keyboard: keyboard },
     });
   }
 }
@@ -7336,6 +7355,35 @@ function initBot(app) {
         await setSetting('instagram_enabled', '0');
         return showAdminSettings(chatId, 'social');
       }
+      // ── Мастер подключения Instagram (пошаговый) ──────────────────────────
+      if (data === 'adm_ig_connect_step1') {
+        if (!isAdmin(chatId)) return;
+        return safeSend(
+          chatId,
+          `*Шаг 1 из 2 — Access Token*\n\n` +
+            `Введите *Instagram Access Token* — долгосрочный токен из Meta Developer App\\.\n\n` +
+            `Где взять токен:\n` +
+            `• [developers\\.facebook\\.com](https://developers.facebook.com) → Ваше приложение → Instagram → Access Tokens\n` +
+            `• Нужен *долгосрочный* \\(Long\\-Lived\\) токен \\(60 дней\\)\n\n` +
+            `Вставьте токен в следующем сообщении:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings_social' }]] },
+          }
+        );
+      }
+      if (data === 'adm_ig_disconnect') {
+        if (!isAdmin(chatId)) return;
+        await Promise.all([
+          setSetting('instagram_access_token', ''),
+          setSetting('instagram_account_id', ''),
+          setSetting('instagram_enabled', '0'),
+        ]);
+        return safeSend(chatId, '✅ Instagram API отключён\\. Данные очищены\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '← Соцсети', callback_data: 'adm_settings_social' }]] },
+        });
+      }
       // Social posts panel
       if (data === 'adm_social') {
         if (!isAdmin(chatId)) return;
@@ -9897,6 +9945,99 @@ function initBot(app) {
         adm_set_insta_token: ['instagram_access_token', '🔑 Instagram Access Token сохранён!'],
         adm_set_insta_account_id: ['instagram_account_id', '🆔 Instagram Account ID сохранён!'],
       };
+      // ── Instagram Connect Wizard: Step 1 — получить токен, перейти к шагу 2
+      if (state === 'adm_ig_connect_step1') {
+        const token = text.trim();
+        if (!token || token.length < 20) {
+          return safeSend(chatId, '❌ Токен слишком короткий. Вставьте полный Access Token:', {
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings_social' }]] },
+          });
+        }
+        await setSession(chatId, 'adm_ig_connect_step2', { ig_token: token });
+        return safeSend(
+          chatId,
+          `✅ Токен сохранён временно\\.\n\n` +
+            `*Шаг 2 из 2 — Account ID*\n\n` +
+            `Введите числовой *Instagram Business Account ID*\\.\n\n` +
+            `Где взять ID:\n` +
+            `• В Meta Business Suite → Настройки → Аккаунты Instagram\n` +
+            `• Или через Graph API: \`GET /me?fields=id\`\n\n` +
+            `Введите только цифры:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings_social' }]] },
+          }
+        );
+      }
+
+      // ── Instagram Connect Wizard: Step 2 — получить accountId, проверить и сохранить
+      if (state === 'adm_ig_connect_step2') {
+        const accountId = text.trim();
+        if (!/^\d+$/.test(accountId)) {
+          return safeSend(chatId, '❌ Account ID должен содержать только цифры. Попробуйте ещё раз:', {
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings_social' }]] },
+          });
+        }
+        const igToken = d?.ig_token;
+        if (!igToken) {
+          await clearSession(chatId);
+          return safeSend(chatId, '❌ Сессия истекла. Начните подключение заново.', {
+            reply_markup: { inline_keyboard: [[{ text: '← Соцсети', callback_data: 'adm_settings_social' }]] },
+          });
+        }
+        await safeSend(chatId, '🔍 Проверяю соединение с Instagram API\\.\\.\\.', { parse_mode: 'MarkdownV2' });
+        try {
+          const igSvc = require('./services/instagram');
+          const result = await igSvc.validateToken(igToken, accountId);
+          if (result.ok) {
+            await Promise.all([
+              setSetting('instagram_access_token', igToken),
+              setSetting('instagram_account_id', accountId),
+              setSetting('instagram_enabled', '1'),
+            ]);
+            await clearSession(chatId);
+            const followers = result.followers != null ? esc(String(result.followers)) : '—';
+            return safeSend(
+              chatId,
+              `🎉 *Instagram успешно подключён\\!*\n\n` +
+                `👤 Аккаунт: @${esc(result.username || '—')}\n` +
+                `🆔 ID: \`${esc(result.id || accountId)}\`\n` +
+                `👥 Подписчики: ${followers}\n\n` +
+                `Теперь агенты могут публиковать посты через Instagram API\\.`,
+              {
+                parse_mode: 'MarkdownV2',
+                reply_markup: {
+                  inline_keyboard: [[{ text: '📱 К настройкам Instagram', callback_data: 'adm_settings_social' }]],
+                },
+              }
+            );
+          } else {
+            await clearSession(chatId);
+            return safeSend(
+              chatId,
+              `❌ *Ошибка проверки:* ${esc(result.error || 'неизвестная ошибка')}\n\nПроверьте токен и Account ID и попробуйте снова\\.`,
+              {
+                parse_mode: 'MarkdownV2',
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      { text: '🔌 Попробовать снова', callback_data: 'adm_ig_connect_step1' },
+                      { text: '← Отмена', callback_data: 'adm_settings_social' },
+                    ],
+                  ],
+                },
+              }
+            );
+          }
+        } catch (e) {
+          await clearSession(chatId);
+          return safeSend(chatId, `❌ Ошибка: ${esc(e.message)}`, {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '← Соцсети', callback_data: 'adm_settings_social' }]] },
+          });
+        }
+      }
+
       if (settingStates[state]) {
         const [key, okMsg] = settingStates[state];
         if (key === 'instagram_account_id' && !/^\d+$/.test(text.trim())) {
