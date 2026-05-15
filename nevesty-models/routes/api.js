@@ -1402,37 +1402,55 @@ router.get('/admin/orders', auth, async (req, res, next) => {
 
 router.get('/admin/orders/export', auth, async (req, res, next) => {
   try {
-    const { status, search, period } = req.query;
+    const { status, search, period, model_id, event_type } = req.query;
+    const dateFrom = req.query.date_from || req.query.from;
+    const dateTo   = req.query.date_to   || req.query.to;
     let where = '1=1'; const params = [];
     if (status && ALLOWED_STATUSES.includes(status)) { where += ' AND o.status = ?'; params.push(status); }
-    if (search) { where += ' AND (o.client_name LIKE ? OR o.order_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    if (model_id && !isNaN(+model_id) && +model_id > 0) { where += ' AND o.model_id = ?'; params.push(+model_id); }
+    if (event_type && ALLOWED_EVENT_TYPES.includes(event_type)) { where += ' AND o.event_type = ?'; params.push(event_type); }
+    if (search) { where += ' AND (o.client_name LIKE ? OR o.order_number LIKE ? OR o.client_phone LIKE ?)'; params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+    if (dateFrom && validateDate(dateFrom)) { where += ' AND date(o.created_at) >= ?'; params.push(dateFrom); }
+    if (dateTo   && validateDate(dateTo))   { where += ' AND date(o.created_at) <= ?'; params.push(dateTo); }
     if (period === 'today')  { where += " AND date(o.created_at) = date('now')"; }
     if (period === 'week')   { where += " AND o.created_at >= date('now', '-7 days')"; }
     if (period === 'month')  { where += " AND o.created_at >= date('now', '-30 days')"; }
     const orders = await query(
-      `SELECT o.order_number, o.client_name, o.client_phone, o.client_email, o.client_telegram,
-              o.event_type, o.event_date, o.event_duration, o.location, o.budget, o.comments,
-              o.status, o.admin_notes, m.name as model_name, a.username as manager_name,
-              o.created_at, o.updated_at
+      `SELECT o.order_number, o.status, o.created_at, o.event_type, o.event_date,
+              o.event_duration, o.location, o.client_name, o.client_phone, o.client_email,
+              o.client_telegram, m.name as model_name, o.budget, o.comments,
+              o.internal_note, o.paid_at
        FROM orders o
        LEFT JOIN models m ON o.model_id = m.id
-       LEFT JOIN admins a ON o.manager_id = a.id
        WHERE ${where} ORDER BY o.created_at DESC`, params
     );
     const STATUS_RU = { new:'Новая', reviewing:'На рассмотрении', confirmed:'Подтверждена', in_progress:'В процессе', completed:'Завершена', cancelled:'Отменена' };
-    const EVENT_RU = { fashion_show:'Показ мод', photo_shoot:'Фотосессия', event:'Мероприятие', commercial:'Коммерческая', runway:'Подиум', other:'Другое' };
-    const headers = ['Номер','Клиент','Телефон','Email','Telegram','Мероприятие','Дата','Часов','Место','Бюджет','Комментарий','Статус','Заметки','Модель','Менеджер','Создана','Обновлена'];
-    const csvRow = (cols) => cols.map(csvCell).join(',');
-    const rows = [csvRow(headers), ...orders.map(o => csvRow([
-      o.order_number, o.client_name, o.client_phone, o.client_email || '', o.client_telegram || '',
-      EVENT_RU[o.event_type] || o.event_type, o.event_date || '', o.event_duration,
-      o.location || '', o.budget || '', o.comments || '',
-      STATUS_RU[o.status] || o.status, o.admin_notes || '', o.model_name || '', o.manager_name || '',
-      o.created_at, o.updated_at
+    const EVENT_RU  = { fashion_show:'Показ мод', photo_shoot:'Фотосессия', event:'Мероприятие', commercial:'Коммерческая', runway:'Подиум', other:'Другое' };
+    const SEP = ';';
+    const csvCell2 = (v) => { let s = (v == null ? '' : String(v)); if (/^[=+\-@]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
+    const csvRow2  = (cols) => cols.map(csvCell2).join(SEP);
+    const headers  = ['Номер','Статус','Создана','Тип','Дата события','Длит.','Место','Клиент','Телефон','Email','Telegram','Модель','Бюджет','Комментарий','Заметка','Оплачено'];
+    const rows = [headers.join(SEP), ...orders.map(o => csvRow2([
+      o.order_number,
+      STATUS_RU[o.status] || o.status,
+      o.created_at,
+      EVENT_RU[o.event_type] || o.event_type,
+      o.event_date || '',
+      o.event_duration || '',
+      o.location || '',
+      o.client_name,
+      o.client_phone,
+      o.client_email || '',
+      o.client_telegram || '',
+      o.model_name || '',
+      o.budget || '',
+      o.comments || '',
+      o.internal_note || '',
+      o.paid_at || ''
     ]))];
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="orders_${Date.now()}.csv"`);
-    res.send('﻿' + rows.join('\n')); // BOM for Excel
+    res.send('\xEF\xBB\xBF' + rows.join('\n')); // UTF-8 BOM for Excel
   } catch (e) { next(e); }
 });
 
@@ -1615,40 +1633,8 @@ router.patch('/admin/orders/bulk-status', auth, async (req, res, next) => {
 
 // ─── Export orders with advanced filters (admin) ─────────────────────────────
 router.get('/admin/export/orders', auth, async (req, res, next) => {
-  try {
-    const { status, from, to, model_id } = req.query;
-    let where = '1=1';
-    const params = [];
-    if (status && ALLOWED_STATUSES.includes(status)) { where += ' AND o.status = ?'; params.push(status); }
-    if (from && validateDate(from)) { where += ' AND date(o.created_at) >= ?'; params.push(from); }
-    if (to && validateDate(to))     { where += ' AND date(o.created_at) <= ?'; params.push(to); }
-    if (model_id && !isNaN(+model_id) && +model_id > 0) { where += ' AND o.model_id = ?'; params.push(+model_id); }
-    const orders = await query(
-      `SELECT o.order_number, o.client_name, o.client_phone, o.client_email, o.client_telegram,
-              o.event_type, o.event_date, o.event_duration, o.location, o.budget, o.comments,
-              o.status, o.admin_notes, m.name as model_name, a.username as manager_name,
-              o.created_at, o.updated_at
-       FROM orders o
-       LEFT JOIN models m ON o.model_id = m.id
-       LEFT JOIN admins a ON o.manager_id = a.id
-       WHERE ${where} ORDER BY o.created_at DESC`,
-      params
-    );
-    const STATUS_RU = { new:'Новая', reviewing:'На рассмотрении', confirmed:'Подтверждена', in_progress:'В процессе', completed:'Завершена', cancelled:'Отменена' };
-    const EVENT_RU  = { fashion_show:'Показ мод', photo_shoot:'Фотосессия', event:'Мероприятие', commercial:'Коммерческая', runway:'Подиум', other:'Другое' };
-    const headers = ['Номер','Клиент','Телефон','Email','Telegram','Мероприятие','Дата','Часов','Место','Бюджет','Комментарий','Статус','Заметки','Модель','Менеджер','Создана','Обновлена'];
-    const csvRow = (cols) => cols.map(csvCell).join(',');
-    const rows = [csvRow(headers), ...orders.map(o => csvRow([
-      o.order_number, o.client_name, o.client_phone, o.client_email || '', o.client_telegram || '',
-      EVENT_RU[o.event_type] || o.event_type, o.event_date || '', o.event_duration,
-      o.location || '', o.budget || '', o.comments || '',
-      STATUS_RU[o.status] || o.status, o.admin_notes || '', o.model_name || '', o.manager_name || '',
-      o.created_at, o.updated_at
-    ]))];
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="orders_export_${Date.now()}.csv"`);
-    res.send('﻿' + rows.join('\n')); // BOM for Excel
-  } catch (e) { next(e); }
+  // Legacy alias — redirect to enhanced endpoint
+  res.redirect('/api/admin/orders/export?' + new URLSearchParams(req.query).toString());
 });
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
@@ -2773,6 +2759,39 @@ router.get('/admin/analytics/extended', auth, async (req, res, next) => {
       avg_budget: avgBudgetRow?.avg ? Math.round(avgBudgetRow.avg) : null,
     });
   } catch (e) { next(e); }
+});
+
+// ─── Analytics: Revenue by month ─────────────────────────────────────────────
+router.get('/admin/analytics/revenue', auth, async (req, res) => {
+  try {
+    const months = Math.min(24, Math.max(1, parseInt(req.query.months) || 6));
+    const rows = await query(`
+      SELECT
+        strftime('%Y-%m', created_at) as month,
+        SUM(CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','') AS REAL)) as revenue,
+        COUNT(*) as order_count
+      FROM orders
+      WHERE status IN ('confirmed','completed')
+        AND budget GLOB '[0-9]*'
+        AND created_at >= datetime('now','-' || ? || ' months')
+      GROUP BY strftime('%Y-%m', created_at)
+      ORDER BY month DESC
+      LIMIT ?
+    `, [months, months]);
+    res.json({ ok: true, months: rows.reverse(), data: rows });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ─── Analytics: Repeat vs new clients ────────────────────────────────────────
+router.get('/admin/analytics/repeat-clients', auth, async (req, res) => {
+  try {
+    const [total, repeat] = await Promise.all([
+      get(`SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE client_chat_id IS NOT NULL`),
+      get(`SELECT COUNT(*) as n FROM (SELECT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL GROUP BY client_chat_id HAVING COUNT(*) > 1)`),
+    ]);
+    const newClients = (total?.n || 0) - (repeat?.n || 0);
+    res.json({ ok: true, data: { total: total?.n || 0, repeat: repeat?.n || 0, new: newClients } });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
 // ─── Client Cabinet ───────────────────────────────────────────────────────────

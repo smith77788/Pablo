@@ -202,7 +202,8 @@
           <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
           <button class="btn btn-sm btn-ghost" onclick="clearFilters()" title="Сбросить фильтры">✕ Сброс</button>
           <span id="refresh-indicator" class="hidden text-xs text-green-500 animate-pulse" style="display:none;font-size:0.7rem;color:var(--success)">↻ Обновление...</span>
-          <button class="btn-export" onclick="toggleExportPanel()" title="Экспорт в CSV">📥 CSV ▾</button>
+          <button class="btn btn-sm btn-ghost" onclick="exportCSVCurrentFilters()" title="Экспорт с текущими фильтрами в CSV" style="border-color:var(--gold);color:var(--gold)">📊 Экспорт CSV</button>
+          <button class="btn-export" onclick="toggleExportPanel()" title="Расширенный экспорт">📥 CSV ▾</button>
         </div>
 
         <!-- Export panel (hidden by default) -->
@@ -731,39 +732,46 @@ function toggleExportPanel() {
 
 function exportCSV() {
   // Quick export using current list filters
-  const status = document.getElementById('statusFilter').value;
-  const from   = document.getElementById('filterFrom').value;
-  const to     = document.getElementById('filterTo').value;
-  const params = new URLSearchParams();
-  if (status) params.set('status', status);
-  if (from)   params.set('from', from);
-  if (to)     params.set('to', to);
-  _admin.downloadCSV('/admin/export/orders?' + params);
+  exportCSVCurrentFilters();
 }
 
 function exportCSVWithFilters() {
-  const status = document.getElementById('exportStatus').value;
-  const from   = document.getElementById('exportFrom').value;
-  const to     = document.getElementById('exportTo').value;
+  const status     = document.getElementById('exportStatus').value;
+  const from       = document.getElementById('exportFrom').value;
+  const to         = document.getElementById('exportTo').value;
+  const model_id   = document.getElementById('modelFilter').value;
+  const event_type = document.getElementById('eventTypeFilter').value;
+  const search     = document.getElementById('searchInput').value.trim();
   const params = new URLSearchParams();
-  if (status) params.set('status', status);
-  if (from)   params.set('from', from);
-  if (to)     params.set('to', to);
-  _admin.downloadCSV('/admin/export/orders?' + params);
+  if (status)     params.set('status', status);
+  if (from)       params.set('date_from', from);
+  if (to)         params.set('date_to', to);
+  if (model_id)   params.set('model_id', model_id);
+  if (event_type) params.set('event_type', event_type);
+  if (search)     params.set('search', search);
+  _admin.downloadCSV('/admin/orders/export?' + params);
   document.getElementById('exportPanel').style.display = 'none';
   _admin.toast('Экспорт начат...', 'info');
 }
 
 function exportCSVCurrentFilters() {
-  const status = document.getElementById('statusFilter').value;
-  const from   = document.getElementById('filterFrom').value;
-  const to     = document.getElementById('filterTo').value;
+  const status     = document.getElementById('statusFilter').value;
+  const from       = document.getElementById('filterFrom').value;
+  const to         = document.getElementById('filterTo').value;
+  const model_id   = document.getElementById('modelFilter').value;
+  const event_type = document.getElementById('eventTypeFilter').value;
+  const search     = document.getElementById('searchInput').value.trim();
   const params = new URLSearchParams();
-  if (status) params.set('status', status);
-  if (from)   params.set('from', from);
-  if (to)     params.set('to', to);
-  _admin.downloadCSV('/admin/export/orders?' + params);
-  document.getElementById('exportPanel').style.display = 'none';
+  if (status)     params.set('status', status);
+  if (from)       params.set('date_from', from);
+  if (to)         params.set('date_to', to);
+  if (model_id)   params.set('model_id', model_id);
+  if (event_type) params.set('event_type', event_type);
+  if (search)     params.set('search', search);
+  _admin.downloadCSV('/admin/orders/export?' + params);
+  if (document.getElementById('exportPanel').style.display !== 'none') {
+    document.getElementById('exportPanel').style.display = 'none';
+  }
   _admin.toast('Экспорт начат...', 'info');
 }
 
