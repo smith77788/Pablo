@@ -1094,6 +1094,14 @@ async function bkStep2Date(chatId, data) {
 
 // STEP 2c — duration
 async function bkStep2Duration(chatId, data) {
+  // Auto-skip if duration pre-filled (e.g. from calculator)
+  if (data.event_duration && DURATIONS.includes(String(data.event_duration))) {
+    await safeSend(chatId,
+      `✅ Длительность: *${esc(String(data.event_duration))} ч\\.* \\(из калькулятора\\)`,
+      { parse_mode: 'MarkdownV2' }
+    );
+    return bkStep2Location(chatId, data);
+  }
   await setSession(chatId, 'bk_s2_dur', data);
   resetSessionTimer(chatId);
   const row1 = DURATIONS.slice(0,4).map(h => ({ text: `${h} ч.`, callback_data: `bk_dur_${h}` }));
@@ -3352,42 +3360,101 @@ async function showReferralProgram(chatId) {
 
 // ─── Price Calculator ──────────────────────────────────────────────────────────
 
+// Default pricing rates (can be overridden via bot_settings)
+const DEFAULT_RATES = {
+  base_per_hour: 10000,   // per model per hour
+  type_multipliers: {
+    fashion_show: 1.5,
+    photo_shoot:  1.2,
+    event:        1.0,
+    commercial:   1.4,
+    runway:       1.3,
+    other:        1.0,
+  },
+  organization_fee: 15000,  // flat organization fee
+};
+
+// Tier multipliers: Эконом / Стандарт / Премиум
+const CALC_TIERS = {
+  econ:     { label: 'Эконом',   mult: 0.8 },
+  standard: { label: 'Стандарт', mult: 1.0 },
+  premium:  { label: 'Премиум',  mult: 1.35 },
+};
+
+async function getCalcRates() {
+  try {
+    const [bph, orgFee] = await Promise.all([
+      getSetting('calc_base_per_hour').catch(() => null),
+      getSetting('calc_organization_fee').catch(() => null),
+    ]);
+    return {
+      base_per_hour:    bph     ? parseInt(bph)     : DEFAULT_RATES.base_per_hour,
+      organization_fee: orgFee  ? parseInt(orgFee)  : DEFAULT_RATES.organization_fee,
+      type_multipliers: DEFAULT_RATES.type_multipliers,
+    };
+  } catch { return DEFAULT_RATES; }
+}
+
 async function showPriceCalculator(chatId, params = {}) {
   const { models = 1, hours = 4, eventType = 'other' } = params;
 
-  const baseRates = {
-    wedding: 5000, corporate: 4000, fashion: 6000, commercial: 5000, other: 4000
+  // Use EVENT_TYPES labels (from constants) with fallback for calc-specific display
+  const calcEventLabels = {
+    fashion_show: 'Показ мод',
+    photo_shoot:  'Фотосессия',
+    event:        'Корпоратив',
+    commercial:   'Коммерческая съёмка',
+    runway:       'Подиум',
+    other:        'Другое',
   };
-  const baseRate = baseRates[eventType] || 4000;
-  const total = baseRate * models * (hours / 4);
 
-  const eventLabels = {
-    wedding: 'Свадьба', corporate: 'Корпоратив', fashion: 'Показ мод',
-    commercial: 'Коммерческая съёмка', other: 'Другое'
-  };
+  const rates = await getCalcRates();
+  const typeMult = rates.type_multipliers[eventType] ?? 1.0;
+
+  // Base model cost (before tier)
+  const modelCost = rates.base_per_hour * models * hours * typeMult;
+  const orgFee    = rates.organization_fee;
+
+  // Three tiers
+  const tiers = Object.entries(CALC_TIERS).map(([key, tier]) => {
+    const mc    = Math.round(modelCost * tier.mult / 1000) * 1000;
+    const total = mc + orgFee;
+    return { key, label: tier.label, modelCost: mc, total };
+  });
+
+  const econTotal    = tiers[0].total;
+  const premiumTotal = tiers[2].total;
+
+  function fmt(n) { return n.toLocaleString('ru-RU'); }
+
+  const breakdownLines = tiers.map(t =>
+    `  *${esc(t.label)}*: ${esc(fmt(t.modelCost))} \\+ ${esc(fmt(orgFee))} \\= ${esc(fmt(t.total))} ₽`
+  );
 
   const text = [
     `🧮 *Калькулятор стоимости*`,
     ``,
-    `📌 Тип события: *${esc(eventLabels[eventType] || eventType)}*`,
-    `👤 Моделей: *${models}*`,
-    `⏱ Часов: *${hours}*`,
+    `📌 Тип: *${esc(calcEventLabels[eventType] || eventType)}*   👤 Моделей: *${models}*   ⏱ Часов: *${hours}*`,
     ``,
-    `💰 *Примерная стоимость: от ${total.toLocaleString('ru-RU')} ₽*`,
+    `💰 *От ${esc(fmt(econTotal))} до ${esc(fmt(premiumTotal))} ₽*`,
     ``,
-    `_Цена ориентировочная\\. Точная стоимость обсуждается с менеджером\\._`
+    `📊 *Разбивка по уровням:*`,
+    `_Модели \\(${models} × ${hours} ч\\) \\+ организация ${esc(fmt(orgFee))} ₽_`,
+    ...breakdownLines,
+    ``,
+    `_Цена ориентировочная\\. Точная стоимость согласуется с менеджером\\._`
   ].join('\n');
 
   const modelsButtons = [1, 2, 3, 5].map(n => ({
     text: models === n ? `✓ ${n}` : String(n),
     callback_data: `calc_models_${n}_${hours}_${eventType}`
   }));
-  const hoursButtons = [4, 8, 12, 16].map(h => ({
+  const hoursButtons = [2, 4, 8, 16].map(h => ({
     text: hours === h ? `✓ ${h}ч` : `${h}ч`,
     callback_data: `calc_hours_${models}_${h}_${eventType}`
   }));
-  const typeEntries = Object.entries(eventLabels);
-  const typeButtons = typeEntries.slice(0, 3).map(([key, label]) => ({
+  const typeEntries = Object.entries(calcEventLabels);
+  const typeButtons  = typeEntries.slice(0, 3).map(([key, label]) => ({
     text: eventType === key ? `✓ ${label}` : label,
     callback_data: `calc_type_${models}_${hours}_${key}`
   }));
@@ -3395,6 +3462,10 @@ async function showPriceCalculator(chatId, params = {}) {
     text: eventType === key ? `✓ ${label}` : label,
     callback_data: `calc_type_${models}_${hours}_${key}`
   }));
+
+  // Pre-fill booking: map calc event type to booking EVENT_TYPES key
+  const bookingEtype = Object.keys(EVENT_TYPES).includes(eventType) ? eventType : 'other';
+  const bookingDur   = String(Math.min(hours, 12));
 
   return safeSend(chatId, text, {
     parse_mode: 'MarkdownV2',
@@ -3406,8 +3477,12 @@ async function showPriceCalculator(chatId, params = {}) {
       [{ text: '📌 Тип события:', callback_data: 'noop' }],
       typeButtons,
       ...(typeButtons2.length ? [typeButtons2] : []),
-      [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
-      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]
+      [
+        { text: '📋 Оставить заявку', callback_data: `calc_book_${bookingEtype}_${bookingDur}` },
+        { text: '🔄 Пересчитать',     callback_data: 'calculator' },
+      ],
+      [{ text: '💬 Уточнить у менеджера', callback_data: 'msg_manager_start' }],
+      [{ text: '🏠 Главное меню',         callback_data: 'main_menu'         }],
     ]}
   });
 }
@@ -3985,10 +4060,22 @@ function initBot(app) {
     // ── Booking: model selection step 1
     if (data.startsWith('bk_pick_')) {
       const key = data.replace('bk_pick_','');
-      const d   = {};
+      // Preserve any pre-filled session data (e.g. from calculator)
+      const existingSession = await getSession(chatId);
+      const d = { ...sessionData(existingSession) };
       if (key !== 'any') {
         const m = await get('SELECT id,name FROM models WHERE id=?', [parseInt(key)]).catch(()=>null);
         if (m) { d.model_id = m.id; d.model_name = m.name; }
+      } else {
+        d.model_id = null; d.model_name = 'Менеджер подберёт';
+      }
+      // If event_type already pre-filled (from calculator), skip event type step
+      if (d.event_type && Object.keys(EVENT_TYPES).includes(d.event_type)) {
+        await safeSend(chatId,
+          `✅ Тип события: *${esc(EVENT_TYPES[d.event_type])}* \\(из калькулятора\\)`,
+          { parse_mode: 'MarkdownV2' }
+        );
+        return bkStep2Date(chatId, d);
       }
       return bkStep2EventType(chatId, d);
     }
@@ -4009,12 +4096,6 @@ function initBot(app) {
       const d = sessionData(session);
       d.event_duration = data.replace('bk_dur_','');
       return bkStep2Location(chatId, d);
-    }
-
-    // ── Booking: менеджер подберёт модель
-    if (data === 'bk_pick_any') {
-      const d = { model_id: null, model_name: 'Менеджер подберёт' };
-      return bkStep2EventType(chatId, d);
     }
 
     // ── Топ-модели
@@ -4040,12 +4121,22 @@ function initBot(app) {
 
     // ── Калькулятор цен: calc_models_N_H_TYPE | calc_hours_N_H_TYPE | calc_type_N_H_TYPE
     if (data.startsWith('calc_')) {
+      // calc_book_ETYPE_HOURS — start booking pre-filled from calculator
+      const cbm = data.match(/^calc_book_(.+)_(\d+)$/);
+      if (cbm) {
+        const [, etype, durStr] = cbm;
+        const preData = {};
+        if (Object.keys(EVENT_TYPES).includes(etype)) preData.event_type = etype;
+        if (durStr) preData.event_duration = durStr;
+        return bkStep1(chatId, preData);
+      }
+
       const cm = data.match(/^calc_(models|hours|type)_(\d+)_(\d+)_(.+)$/);
       if (cm) {
         const [, , modelsStr, hoursStr, type] = cm;
         const calcModels = parseInt(modelsStr);
         const calcHours  = parseInt(hoursStr);
-        const VALID_CALC_EVENT_TYPES = ['wedding', 'corporate', 'fashion', 'commercial', 'other'];
+        const VALID_CALC_EVENT_TYPES = Object.keys(DEFAULT_RATES.type_multipliers);
         if (!isNaN(calcModels) && !isNaN(calcHours) && VALID_CALC_EVENT_TYPES.includes(type)) {
           return showPriceCalculator(chatId, { models: calcModels, hours: calcHours, eventType: type });
         }
@@ -4059,6 +4150,19 @@ function initBot(app) {
       const page = parseInt(parts.pop()) || 0;
       const city = parts.join('_');
       return showCatalogByCity(chatId, city, page);
+    }
+
+    // ── Booking: budget confirmation (budget below minimum)
+    if (data === 'bk_budget_continue') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep2Comments(chatId, d);
+    }
+    if (data === 'bk_budget_change') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      delete d.budget;
+      return bkStep2Budget(chatId, d);
     }
 
     // ── Booking: skip optional fields
@@ -5473,20 +5577,22 @@ function initBot(app) {
       return showClientNotificationSettings(chatId);
     }
 
-    if (data === 'client_notif_promo') {
-      const prefs = await get('SELECT * FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null) || { notify_promo: 1 };
+    if (data === 'client_notif_marketing') {
+      const prefs = await get('SELECT notify_marketing FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null) || { notify_marketing: 1 };
+      const newVal = (prefs.notify_marketing === 0 || prefs.notify_marketing === false) ? 1 : 0;
       await run(
-        `INSERT INTO client_prefs (chat_id, notify_promo) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET notify_promo=excluded.notify_promo, updated_at=CURRENT_TIMESTAMP`,
-        [chatId, prefs.notify_promo ? 0 : 1]
+        `INSERT INTO client_prefs (chat_id, notify_marketing) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET notify_marketing=excluded.notify_marketing, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, newVal]
       ).catch(() => {});
       return showClientNotificationSettings(chatId);
     }
 
-    if (data === 'client_notif_review') {
-      const prefs = await get('SELECT * FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null) || { notify_review: 1 };
+    if (data === 'client_notif_review_invites') {
+      const prefs = await get('SELECT notify_review_invites FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null) || { notify_review_invites: 1 };
+      const newVal = (prefs.notify_review_invites === 0 || prefs.notify_review_invites === false) ? 1 : 0;
       await run(
-        `INSERT INTO client_prefs (chat_id, notify_review) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET notify_review=excluded.notify_review, updated_at=CURRENT_TIMESTAMP`,
-        [chatId, prefs.notify_review ? 0 : 1]
+        `INSERT INTO client_prefs (chat_id, notify_review_invites) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET notify_review_invites=excluded.notify_review_invites, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, newVal]
       ).catch(() => {});
       return showClientNotificationSettings(chatId);
     }
@@ -6172,9 +6278,33 @@ function initBot(app) {
         d.location = text;
         return bkStep2Budget(chatId, d);
 
-      case 'bk_s2_budget':
+      case 'bk_s2_budget': {
         d.budget = text;
+        // Check against booking_min_budget setting
+        const minBudgetRaw = await getSetting('booking_min_budget').catch(() => null);
+        const minBudget = minBudgetRaw ? parseInt(String(minBudgetRaw).replace(/\D/g, '')) : 0;
+        if (minBudget > 0) {
+          // Extract numeric value from entered budget string
+          const enteredNum = parseInt(String(text).replace(/\D/g, '')) || 0;
+          if (enteredNum > 0 && enteredNum < minBudget) {
+            await setSession(chatId, 'bk_s2_budget', d);
+            return safeSend(chatId,
+              `⚠️ Рекомендуемый бюджет от *${esc(minBudget.toLocaleString('ru-RU'))} ₽*\\.\n\nХотите продолжить с указанным бюджетом?`,
+              {
+                parse_mode: 'MarkdownV2',
+                reply_markup: { inline_keyboard: [
+                  [
+                    { text: '✅ Да, продолжить',  callback_data: 'bk_budget_continue' },
+                    { text: '🔄 Изменить бюджет', callback_data: 'bk_budget_change'  },
+                  ],
+                  [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+                ]}
+              }
+            );
+          }
+        }
         return bkStep2Comments(chatId, d);
+      }
 
       case 'bk_s2_comments':
         d.comments = text;
