@@ -343,10 +343,20 @@ def _load_last_cycle_from_history() -> dict:
         return {}
 
 
-def _format_weekly_report(cycle_results: list) -> str:
-    """Generate a weekly summary from the last 7 cycle results."""
+def _format_weekly_report(cycle_results: list, nevesty_kpis: dict | None = None) -> str:
+    """Generate a weekly summary from the last 7 cycle results.
+
+    Args:
+        cycle_results: List of recent cycle result dicts loaded from history.
+        nevesty_kpis: Current KPIs dict with keys orders_this_week,
+                      orders_this_month, revenue_month, avg_check,
+                      conversion_rate_pct, avg_rating, health_score.
+                      When provided, enriches the report with real business metrics.
+    """
     if not cycle_results:
         return "Нет данных за неделю."
+
+    kpis = nevesty_kpis or {}
 
     total_cycles = len(cycle_results)
     total_phases = sum(len(r.get("phases", {})) for r in cycle_results)
@@ -355,16 +365,74 @@ def _format_weekly_report(cycle_results: list) -> str:
         for v in r.get("phases", {}).values()
         if isinstance(v, dict) and v.get("status") == "error"
     )
+    success_rate = round((1 - errors / max(total_phases, 1)) * 100)
+
+    # Extract health scores from history for trend
+    health_scores = [
+        r.get("health_score")
+        for r in cycle_results[-7:]
+        if isinstance(r.get("health_score"), (int, float))
+    ]
+    avg_health = round(sum(health_scores) / len(health_scores)) if health_scores else None
+    latest_health = health_scores[-1] if health_scores else kpis.get("health_score")
+    health_icon = "🟢" if (latest_health or 0) >= 70 else "🟡" if (latest_health or 0) >= 40 else "🔴"
+
+    # Extract top growth action from last cycle
+    top_action = ""
+    for r in reversed(cycle_results[-7:]):
+        ceo = r.get("phases", {}).get("ceo_synthesis", {})
+        actions = ceo.get("growth_actions", [])
+        if actions and isinstance(actions[0], dict):
+            top_action = actions[0].get("action", "") or actions[0].get("title", "")
+            if top_action:
+                break
+        elif actions and isinstance(actions[0], str):
+            top_action = actions[0]
+            if top_action:
+                break
 
     lines = [
         "📊 ЕЖЕНЕДЕЛЬНЫЙ ОТЧЁТ CEO",
         f"Циклов выполнено: {total_cycles}",
         f"Фаз обработано: {total_phases}",
-        f"Ошибок: {errors}",
-        f"Успешность: {round((1 - errors / max(total_phases, 1)) * 100)}%",
+        f"Ошибок: {errors} | Успешность: {success_rate}%",
         "",
-        "🎯 Ключевые достижения недели:",
     ]
+
+    # Business KPIs section (when real data is available)
+    orders_week = kpis.get("orders_this_week")
+    orders_month = kpis.get("orders_this_month")
+    revenue = kpis.get("revenue_month")
+    avg_check = kpis.get("avg_check")
+    conversion = kpis.get("conversion_rate_pct")
+    avg_rating = kpis.get("avg_rating")
+
+    if any(v is not None and v != 0 for v in [orders_week, revenue, conversion]):
+        lines.append("📋 БИЗНЕС-МЕТРИКИ НЕДЕЛИ:")
+        if orders_week is not None:
+            lines.append(f"  Заявок за 7 дней: {orders_week}")
+        if orders_month is not None:
+            lines.append(f"  Заявок за месяц: {orders_month}")
+        if revenue is not None and revenue != 0:
+            lines.append(f"  Выручка (30д): {int(revenue):,} ₽".replace(",", " "))
+        if avg_check is not None and avg_check != 0:
+            lines.append(f"  Средний чек: {int(avg_check):,} ₽".replace(",", " "))
+        if conversion is not None:
+            lines.append(f"  Конверсия: {conversion}%")
+        if avg_rating is not None and avg_rating != 0:
+            lines.append(f"  Рейтинг моделей: {avg_rating}/5")
+        lines.append("")
+
+    # Factory health score
+    if latest_health is not None:
+        trend_str = ""
+        if avg_health is not None and len(health_scores) > 1:
+            delta = latest_health - health_scores[0]
+            trend_str = f" (тренд: {'↑' if delta > 0 else '↓' if delta < 0 else '→'}{abs(int(delta))})"
+        lines.append(f"{health_icon} Здоровье фабрики: {latest_health}/100{trend_str}")
+        lines.append("")
+
+    lines.append("🎯 Ключевые достижения недели:")
 
     # Collect highlights from each cycle
     highlights: set = set()
@@ -375,6 +443,13 @@ def _format_weekly_report(cycle_results: list) -> str:
 
     lines.extend(list(highlights)[:5])
     lines.append("")
+
+    # Top growth action
+    if top_action:
+        lines.append("🚀 Главное действие:")
+        lines.append(f"  {top_action}")
+        lines.append("")
+
     lines.append("📈 Рекомендации на следующую неделю:")
     lines.append("• Фокус на конверсии заявок")
     lines.append("• Обновление каталога моделей")

@@ -220,7 +220,7 @@
     <section class="pricing-section" aria-labelledby="pricing-heading">
       <h2 id="pricing-heading">Пакеты услуг</h2>
       <p class="sub">Фиксированные пакеты — отправная точка для расчёта</p>
-      <div class="pricing-grid">
+      <div class="pricing-grid" id="pricing-grid">
 
         <div class="pricing-card">
           <div class="pricing-name">Старт</div>
@@ -619,6 +619,45 @@
 
     calc();
     restoreFromUrl();
+
+    // ─── Load pricing tiers from /api/pricing ────────────────────────────────
+    fetch('/api/pricing').then(r => r.json()).then(tiers => {
+      if (!Array.isArray(tiers) || tiers.length === 0) return;
+      const grid = document.getElementById('pricing-grid');
+      if (!grid) return;
+      const fmt = n => n ? Number(n).toLocaleString('ru-RU') : null;
+      grid.innerHTML = tiers.map(t => {
+        const priceTo = t.price_to ? ` — ${fmt(t.price_to)} ₽` : '+';
+        const priceLabel = t.price_to
+          ? `от ${fmt(t.price_from)} <span>₽</span>`
+          : `от ${fmt(t.price_from)} <span>₽</span>`;
+        const badge = t.featured ? `<div class="pricing-badge">Популярное</div>` : '';
+        const features = (t.features || []).map(f => `<div class="pricing-feature">${f}</div>`).join('');
+        return `<div class="pricing-card${t.featured ? ' featured' : ''}">
+          ${badge}
+          <div class="pricing-name">${t.name}</div>
+          <div class="pricing-price">${priceLabel}</div>
+          <div class="pricing-duration">${t.duration || ''}</div>
+          <div class="pricing-divider"></div>
+          ${features}
+          <a href="${t.cta_url || '/booking.html'}" class="btn-gold pricing-cta">Выбрать</a>
+        </div>`;
+      }).join('');
+
+      // Sync calculator BASE rates with new tier minimums
+      if (tiers[0]?.price_from) {
+        TIER_START = tiers[0].price_from;
+        const ratio = TIER_START / 8000;
+        for (const type of Object.keys(BASE)) {
+          for (const h of Object.keys(BASE[type])) {
+            BASE[type][h] = Math.round(BASE[type][h] * ratio);
+          }
+        }
+        calc();
+      }
+      if (tiers[1]?.price_from) TIER_EVENT   = tiers[1].price_from;
+      if (tiers[2]?.price_from) TIER_PREMIUM = tiers[2].price_from;
+    }).catch(() => {}); // silently fall back to static cards
 
     // ─── Load dynamic pricing from settings ──────────────────────────────────
     fetch('/api/settings/public').then(r => r.json()).then(settings => {

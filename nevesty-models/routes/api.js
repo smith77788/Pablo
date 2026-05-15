@@ -2585,6 +2585,69 @@ router.get('/settings/public', async (req, res) => {
   }
 });
 
+// GET /api/pricing — public pricing tiers (no auth required, cached 5 min)
+router.get('/pricing', async (req, res) => {
+  const DEFAULT_PRICING = [
+    {
+      id: 'start',
+      name: 'Старт',
+      price_from: 8000,
+      price_to: 15000,
+      duration: '2 часа',
+      description: 'Фотосессия или рекламная съёмка',
+      features: ['1 модель категории Standard', 'Помощь в выборе образа', 'Менеджер онлайн'],
+      featured: false,
+      cta_url: '/booking.html?package=start',
+    },
+    {
+      id: 'event',
+      name: 'Мероприятие',
+      price_from: 15000,
+      price_to: 40000,
+      duration: '4 часа',
+      description: 'Корпоратив, показ мод или презентация',
+      features: ['1–3 модели на выбор', 'Подготовка и брифинг', 'Менеджер 24/7', 'Замена при форс-мажоре'],
+      featured: true,
+      cta_url: '/booking.html?package=event',
+    },
+    {
+      id: 'premium',
+      name: 'Премиум',
+      price_from: 30000,
+      price_to: null,
+      duration: 'от 6 часов',
+      description: 'Подиум, реклама, VIP-событие',
+      features: ['Топ-модели агентства', 'Сопровождение куратора', 'Приоритетный выбор даты', 'Гарантия по договору'],
+      featured: false,
+      cta_url: '/booking.html?package=premium',
+    },
+  ];
+
+  try {
+    const cacheKey = 'pricing:public';
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) return res.json(cached);
+
+    // Override defaults with values from bot_settings if available
+    const rows = await query(
+      `SELECT key, value FROM bot_settings WHERE key IN (?,?,?)`,
+      ['pricing_start_from', 'pricing_event_from', 'pricing_premium_from']
+    );
+    const settings = {};
+    rows.forEach(r => { settings[r.key] = r.value; });
+
+    const tiers = DEFAULT_PRICING.map(tier => ({ ...tier }));
+    if (settings.pricing_start_from)   tiers[0].price_from = parseInt(settings.pricing_start_from, 10);
+    if (settings.pricing_event_from)   tiers[1].price_from = parseInt(settings.pricing_event_from, 10);
+    if (settings.pricing_premium_from) tiers[2].price_from = parseInt(settings.pricing_premium_from, 10);
+
+    cache.set(cacheKey, tiers);
+    res.json(tiers);
+  } catch (e) {
+    res.json(DEFAULT_PRICING);
+  }
+});
+
 // GET /api/stats/public — public statistics for about page (cached 10 min)
 router.get('/stats/public', async (req, res) => {
   try {
