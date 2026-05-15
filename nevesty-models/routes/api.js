@@ -111,6 +111,7 @@ function deleteFile(urlPath) {
 }
 
 // ─── WebP conversion ─────────────────────────────────────────────────────────
+// eslint-disable-next-line no-unused-vars
 async function convertToWebP(filePath) {
   if (!sharp) return filePath; // sharp not available, skip
   const ext = path.extname(filePath).toLowerCase();
@@ -302,7 +303,7 @@ router.post('/auth/verify-totp', authLimiter, async (req, res, next) => {
     );
     if (!stored) return res.status(401).json({ error: 'Неверный или истёкший токен' });
 
-    // Check attempt limit (3 max)
+    // Check attempt limit (3 max) — must be checked before any further processing
     if (stored.attempts >= 3) {
       await run('DELETE FROM totp_temp_tokens WHERE id=?', [stored.id]);
       return res.status(401).json({ error: 'Превышено количество попыток. Войдите заново.' });
@@ -322,7 +323,13 @@ router.post('/auth/verify-totp', authLimiter, async (req, res, next) => {
     });
 
     if (!valid) {
+      // Atomically increment then re-read; delete token immediately when limit reached
       await run('UPDATE totp_temp_tokens SET attempts=attempts+1 WHERE id=?', [stored.id]);
+      const updated = await get('SELECT attempts FROM totp_temp_tokens WHERE id=?', [stored.id]).catch(() => null);
+      if (!updated || updated.attempts >= 3) {
+        await run('DELETE FROM totp_temp_tokens WHERE id=?', [stored.id]).catch(() => {});
+        return res.status(401).json({ error: 'Превышено количество попыток. Войдите заново.' });
+      }
       return res.status(401).json({ error: 'Неверный код. Проверьте время и попробуйте снова.' });
     }
 
@@ -980,10 +987,11 @@ router.delete('/admin/models/:id', auth, async (req, res, next) => {
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const m = await get('SELECT * FROM models WHERE id = ?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
-    // Delete all photos from disk
+    // Delete all photos and their thumbnails from disk
     deleteFile(m.photo_main);
+    deleteFile(deriveThumbUrl(m.photo_main));
     const photos = JSON.parse(m.photos || '[]');
-    photos.forEach(p => deleteFile(p));
+    photos.forEach(p => { deleteFile(p); deleteFile(deriveThumbUrl(p)); });
     await run('DELETE FROM models WHERE id = ?', [id]);
     cache.delByPrefix('catalog:'); // invalidate catalog cache
     await logAudit(req, 'delete', 'model', id, { name: m.name });
@@ -1052,6 +1060,8 @@ router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
     const photos = JSON.parse(m.photos || '[]').filter(p => p !== photo);
     await run('UPDATE models SET photos = ? WHERE id = ?', [JSON.stringify(photos), id]);
     deleteFile(photo);
+    // Also delete associated thumbnail if it exists
+    deleteFile(deriveThumbUrl(photo));
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
