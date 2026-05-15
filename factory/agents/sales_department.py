@@ -3,6 +3,7 @@ Sales Department — Lead qualification, proposal writing, follow-up, pricing.
 """
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Any
 
 
 class SalesDepartment:
@@ -12,7 +13,7 @@ class SalesDepartment:
     # qualify_lead                                                         #
     # ------------------------------------------------------------------ #
 
-    def qualify_lead(self, order_data: dict) -> dict:
+    def qualify_lead(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze order and return {score, tier, notes}.
 
         Heuristics:
@@ -76,7 +77,7 @@ class SalesDepartment:
     # generate_proposal                                                    #
     # ------------------------------------------------------------------ #
 
-    def generate_proposal(self, order_data: dict) -> str:
+    def generate_proposal(self, order_data: Dict[str, Any]) -> str:
         """Return a template proposal text based on order data."""
         client = order_data.get("client_name") or order_data.get("name") or "Уважаемый клиент"
         event_type = order_data.get("event_type") or "мероприятие"
@@ -107,7 +108,7 @@ class SalesDepartment:
     # get_followup_schedule                                                #
     # ------------------------------------------------------------------ #
 
-    def get_followup_schedule(self, order_id: int, status: str) -> list:
+    def get_followup_schedule(self, order_id: int, status: str) -> List[Dict[str, Any]]:
         """Return list of follow-up dicts {day_offset, message} based on status."""
         now = datetime.now(timezone.utc)
         status = (status or "").lower()
@@ -168,7 +169,7 @@ class SalesDepartment:
     # suggest_pricing                                                      #
     # ------------------------------------------------------------------ #
 
-    def suggest_pricing(self, params: dict) -> dict:
+    def suggest_pricing(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Return {min_price, max_price, recommended} based on event_type and model_count."""
         event_type = (params.get("event_type") or "").lower()
         model_count = max(1, int(params.get("model_count") or 1))

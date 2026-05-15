@@ -3,6 +3,7 @@ Customer Success Department — Onboarding, retention, feedback, upsell.
 """
 from __future__ import annotations
 from datetime import datetime, timezone
+from typing import Dict, List, Any
 
 
 class CustomerSuccessDepartment:
@@ -36,7 +37,7 @@ class CustomerSuccessDepartment:
     # analyze_retention_risk                                               #
     # ------------------------------------------------------------------ #
 
-    def analyze_retention_risk(self, client_history: list) -> dict:
+    def analyze_retention_risk(self, client_history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Analyze retention risk from order history.
 
         Returns {risk_level, days_since_last_order, recommendation}.
@@ -101,7 +102,7 @@ class CustomerSuccessDepartment:
     # generate_review_request                                              #
     # ------------------------------------------------------------------ #
 
-    def generate_review_request(self, order_data: dict) -> str:
+    def generate_review_request(self, order_data: Dict[str, Any]) -> str:
         """Generate a polite review request message."""
         client = order_data.get("client_name") or order_data.get("name") or "Клиент"
         event_type = order_data.get("event_type") or "мероприятие"
@@ -122,7 +123,7 @@ class CustomerSuccessDepartment:
     # suggest_upsell                                                       #
     # ------------------------------------------------------------------ #
 
-    def suggest_upsell(self, order_data: dict) -> dict:
+    def suggest_upsell(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
         """Return {suggestions, reason} based on event type and budget."""
         event_type = (order_data.get("event_type") or "").lower()
         budget = order_data.get("budget") or 0

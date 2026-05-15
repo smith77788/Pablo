@@ -5,16 +5,17 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional, Dict, List, Any
 
 
 class MetricsCollector:
     """Collects key business metrics from the Nevesty Models database."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Find the nevesty DB — prefer env var, then common locations
         db_path_env = os.environ.get('NEVESTY_DB_PATH') or os.environ.get('DB_PATH', '')
         if db_path_env and db_path_env != ':memory:':
-            self.db_path = Path(db_path_env)
+            self.db_path: Optional[Path] = Path(db_path_env)
         else:
             factory_dir = Path(__file__).parent.parent
             candidates = [
@@ -26,7 +27,7 @@ class MetricsCollector:
             ]
             self.db_path = next((p for p in candidates if p.exists()), None)
 
-    def _connect(self):
+    def _connect(self) -> Optional[sqlite3.Connection]:
         """Open a read-only connection to nevesty DB."""
         if not self.db_path or not self.db_path.exists():
             return None
@@ -37,7 +38,7 @@ class MetricsCollector:
         except Exception:
             return None
 
-    def collect_all(self) -> dict:
+    def collect_all(self) -> Dict[str, Any]:
         """Collect all metrics. Returns dict with all KPIs."""
         conn = self._connect()
         if not conn:
@@ -57,7 +58,7 @@ class MetricsCollector:
         finally:
             conn.close()
 
-    def _orders_metrics(self, conn) -> dict:
+    def _orders_metrics(self, conn: sqlite3.Connection) -> Dict[str, Any]:
         """Order-related metrics."""
         now = datetime.utcnow()
         today = now.strftime('%Y-%m-%d')
@@ -88,7 +89,7 @@ class MetricsCollector:
             ),
         }
 
-    def _models_metrics(self, conn) -> dict:
+    def _models_metrics(self, conn: sqlite3.Connection) -> Dict[str, Any]:
         def q(sql, *args):
             row = conn.execute(sql, args).fetchone()
             return row[0] if row and row[0] is not None else 0
@@ -112,7 +113,7 @@ class MetricsCollector:
             'top_models': top_models,
         }
 
-    def _clients_metrics(self, conn) -> dict:
+    def _clients_metrics(self, conn: sqlite3.Connection) -> Dict[str, Any]:
         def q(sql, *args):
             row = conn.execute(sql, args).fetchone()
             return row[0] if row and row[0] is not None else 0
@@ -138,7 +139,7 @@ class MetricsCollector:
             ),
         }
 
-    def _revenue_metrics(self, conn) -> dict:
+    def _revenue_metrics(self, conn: sqlite3.Connection) -> Dict[str, Any]:
         """Revenue from budget field (stored as text like '50000' or '50000₽')."""
         def parse_budget_sql(status_clause):
             """Sum budget field after stripping non-numeric chars."""
@@ -181,7 +182,7 @@ class MetricsCollector:
             'pipeline_value': pipeline_value,
         }
 
-    def _engagement_metrics(self, conn) -> dict:
+    def _engagement_metrics(self, conn: sqlite3.Connection) -> Dict[str, Any]:
         def q(sql, *args):
             row = conn.execute(sql, args).fetchone()
             return row[0] if row and row[0] is not None else 0
@@ -202,7 +203,7 @@ class MetricsCollector:
         ).fetchone()
         return row is not None
 
-    def _empty_metrics(self) -> dict:
+    def _empty_metrics(self) -> Dict[str, Any]:
         return {
             'db_available': False,
             'orders_total': 0,

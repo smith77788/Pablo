@@ -2,6 +2,7 @@
 Creative Department — Copywriting, brand voice, storytelling.
 """
 from __future__ import annotations
+from typing import Dict, Any
 
 
 class CreativeDepartment:
@@ -11,7 +12,7 @@ class CreativeDepartment:
     # generate_model_bio                                                   #
     # ------------------------------------------------------------------ #
 
-    def generate_model_bio(self, model_data: dict) -> str:
+    def generate_model_bio(self, model_data: Dict[str, Any]) -> str:
         """Generate a short 2-3 sentence bio from model params."""
         name = model_data.get("name") or "Модель"
         height = model_data.get("height")
@@ -95,7 +96,7 @@ class CreativeDepartment:
     # get_brand_voice_guidelines                                           #
     # ------------------------------------------------------------------ #
 
-    def get_brand_voice_guidelines(self) -> dict:
+    def get_brand_voice_guidelines(self) -> Dict[str, Any]:
         """Return brand voice guidelines dict."""
         return {
             "tone": "профессиональный, элегантный, доступный",
