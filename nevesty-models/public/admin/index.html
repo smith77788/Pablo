@@ -6,6 +6,8 @@
   <title>Dashboard — Nevesty Models</title>
   <meta name="robots" content="noindex, nofollow">
   <link rel="stylesheet" href="/css/admin.css" />
+  <!-- Chart.js for stats visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
   <style>
     /* ─── Status bar charts ─────────────────────────── */
     .chart-bar-wrap { display:flex; flex-direction:column; gap:8px; }
@@ -287,6 +289,23 @@
     .notif-item-text { font-size:0.72rem; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .notif-item-time { font-size:0.65rem; color:var(--text-dim); white-space:nowrap; }
     .notif-empty { padding:24px 16px; text-align:center; color:var(--text-dim); font-size:0.85rem; }
+
+    /* ─── Chart.js stats charts ─────────────────────────── */
+    .chartjs-row {
+      display:grid; grid-template-columns:1fr 1fr;
+      gap:20px; margin-top:0; margin-bottom:24px;
+    }
+    .chartjs-card {
+      background:var(--bg2); border:1px solid var(--border);
+      border-radius:4px; padding:20px;
+    }
+    .chartjs-title {
+      font-size:0.72rem; font-weight:600; color:var(--text-muted);
+      margin-bottom:16px; text-transform:uppercase; letter-spacing:0.05em;
+    }
+    @media (max-width:768px) {
+      .chartjs-row { grid-template-columns:1fr; }
+    }
   </style>
 </head>
 <body>
@@ -503,6 +522,23 @@
           <div class="stat-card-value" id="s_avg_cycle">—</div>
           <div class="stat-card-icon">⏱️</div>
         </div>
+      </div>
+
+      <!-- ══════════════════ CHART.JS CHARTS ROW ══════════════════ -->
+      <div class="chartjs-row" id="chartjsRow">
+
+        <!-- Orders by status — doughnut chart -->
+        <div class="chartjs-card">
+          <div class="chartjs-title">Заявки по статусу</div>
+          <canvas id="statusChartJs" height="200"></canvas>
+        </div>
+
+        <!-- Orders trend bar chart (prev 7d vs last 7d) -->
+        <div class="chartjs-card">
+          <div class="chartjs-title">Тренд заявок (7 дн)</div>
+          <canvas id="trendChartJs" height="200"></canvas>
+        </div>
+
       </div>
 
       <!-- ══════════════════ TOP MODELS ══════════════════ -->
@@ -915,6 +951,9 @@ async function loadDashboard() {
     // 7-day mini chart
     if (stats.daily_7d) renderMiniChart(stats.daily_7d);
 
+    // Chart.js charts (status doughnut + trend bar)
+    renderStatsCharts(stats);
+
     // Recent orders — 5 rows compact
     const tbody = document.getElementById('recentOrders');
     const recent5 = (stats.recent || []).slice(0, 5);
@@ -933,6 +972,76 @@ async function loadDashboard() {
 
   } catch (e) {
     _admin.toast('Ошибка загрузки: ' + e.message, 'error');
+  }
+}
+
+/* ─── Chart.js stats charts ──────────────────────────── */
+function renderStatsCharts(stats) {
+  if (typeof Chart === 'undefined') return;
+
+  const statusData = {};
+  (stats.by_status || []).forEach(r => { statusData[r.status] = r.count; });
+
+  const statusLabels = {
+    new: 'Новые', confirmed: 'Подтверждённые', in_progress: 'В работе',
+    completed: 'Завершённые', cancelled: 'Отменённые', reviewing: 'На рассмотрении'
+  };
+  const colors = {
+    new: '#3b82f6', confirmed: '#10b981', in_progress: '#8b5cf6',
+    completed: '#6b7280', cancelled: '#ef4444', reviewing: '#f59e0b'
+  };
+
+  // Doughnut: orders by status
+  const statusCtx = document.getElementById('statusChartJs');
+  if (statusCtx && Object.keys(statusData).length) {
+    if (window._statusChartJs) window._statusChartJs.destroy();
+    const keys   = Object.keys(statusData);
+    const labels = keys.map(k => statusLabels[k] || k);
+    const data   = keys.map(k => statusData[k]);
+    const bgColors = keys.map(k => colors[k] || '#888');
+    window._statusChartJs = new Chart(statusCtx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data, backgroundColor: bgColors, borderWidth: 1, borderColor: 'rgba(0,0,0,0.2)' }] },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { size: 11 }, color: '#999', boxWidth: 12, padding: 10 } }
+        }
+      }
+    });
+  }
+
+  // Bar chart: trend (previous 7d vs current 7d)
+  const trendCtx = document.getElementById('trendChartJs');
+  if (trendCtx && stats.orders_trend) {
+    if (window._trendChartJs) window._trendChartJs.destroy();
+    const t = stats.orders_trend;
+    window._trendChartJs = new Chart(trendCtx, {
+      type: 'bar',
+      data: {
+        labels: ['Предыдущие 7 дней', 'Последние 7 дней'],
+        datasets: [{
+          label: 'Заявки',
+          data: [t.previous_7d || 0, t.current_7d || 0],
+          backgroundColor: ['rgba(201,169,110,0.4)', 'rgba(201,169,110,0.9)'],
+          borderColor: ['#c9a96e', '#c9a96e'],
+          borderWidth: 1,
+          borderRadius: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { stepSize: 1, color: '#888', font: { size: 11 } },
+            grid: { color: 'rgba(255,255,255,0.05)' }
+          },
+          x: { ticks: { color: '#888', font: { size: 11 } }, grid: { display: false } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
   }
 }
 
