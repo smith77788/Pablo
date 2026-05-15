@@ -47,7 +47,7 @@ describe('Wave 79 БЛОК 1: JWT hardening — no fallback secrets', () => {
   });
 
   test('issueTokenPair error message mentions JWT_SECRET', () => {
-    expect(code).toContain("JWT_SECRET environment variable is not set");
+    expect(code).toContain('JWT_SECRET environment variable is not set');
   });
 
   test('refresh token route also checks JWT_SECRET (jwtSecret2)', () => {
@@ -75,7 +75,7 @@ describe('Wave 79 БЛОК 1: JWT hardening — no fallback secrets', () => {
   });
 
   test('_clientAuth error body mentions JWT_SECRET not configured', () => {
-    expect(code).toContain("JWT_SECRET not configured");
+    expect(code).toContain('JWT_SECRET not configured');
   });
 
   test('_clientAuth uses verifySecret for jwt.verify', () => {
@@ -93,9 +93,7 @@ describe('Wave 79 БЛОК 1: JWT hardening — no fallback secrets', () => {
   test('no jwt.sign call uses raw string literal as secret', () => {
     // Check that jwt.sign is never called with a bare string literal as second arg
     const signCalls = [...code.matchAll(/jwt\.sign\([^;]+?\)/gs)];
-    const badSign = signCalls.some(m =>
-      /jwt\.sign\(\s*\{[^}]*\}\s*,\s*['"][^'"]+['"]\s*[,)]/s.test(m[0])
-    );
+    const badSign = signCalls.some(m => /jwt\.sign\(\s*\{[^}]*\}\s*,\s*['"][^'"]+['"]\s*[,)]/s.test(m[0]));
     expect(badSign).toBe(false);
   });
 });
@@ -374,7 +372,7 @@ describe('Wave 79 БЛОК 6: Order ID validation in api.js', () => {
   test('POST /admin/orders/:id/pay returns 400 for invalid ID', () => {
     const idx = code.indexOf("router.post('/admin/orders/:id/pay'");
     const snippet = code.slice(idx, idx + 300);
-    expect(snippet).toContain("res.status(400)");
+    expect(snippet).toContain('res.status(400)');
   });
 
   test('POST /admin/orders/:id/pay checks id <= 0 condition', () => {
@@ -417,8 +415,8 @@ describe('Wave 79 БЛОК 7: Error handling via next(e)', () => {
   test('PATCH /admin/orders/:id/status uses next(e) in catch block', () => {
     const idx = code.indexOf("router.patch('/admin/orders/:id/status'");
     expect(idx).toBeGreaterThan(0);
-    // Route is long (SMS, email, WS, CRM handlers), use 4000 chars
-    const snippet = code.slice(idx, idx + 4000);
+    // Route is long (SMS, email, WS, CRM handlers), use 8000 chars
+    const snippet = code.slice(idx, idx + 8000);
     expect(snippet).toContain('next(e)');
   });
 
