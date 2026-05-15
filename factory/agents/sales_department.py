@@ -365,48 +365,6 @@ class PricingNegotiator:
 
 
 class SalesDepartment:
-    """Heuristic Sales Department — coordinates all sales specialist agents."""
-
-    def __init__(self) -> None:
-        self._qualifier = LeadQualifier()
-        self._writer = ProposalWriter()
-        self._followup = FollowUpSpecialist()
-        self._negotiator = PricingNegotiator()
-
-    def execute_task(self, task: str, context: dict | None) -> dict:
-        """Run all relevant agents heuristically and aggregate insights."""
-        ctx = context or {}
-        task_lower = (task or '').lower()
-        all_insights: list[str] = []
-        roles_used: list[str] = []
-
-        # Always run qualifier and negotiator; conditionally run others
-        qualifier_result = self._qualifier.run(ctx)
-        all_insights.extend(qualifier_result.get('insights', []))
-        roles_used.append('lead_qualifier')
-
-        writer_result = self._writer.run(ctx)
-        all_insights.extend(writer_result.get('insights', []))
-        roles_used.append('proposal_writer')
-
-        if any(kw in task_lower for kw in ('follow', 'напомин', 'незакрыт', 'grow', 'рост', 'продаж')):
-            followup_result = self._followup.run(ctx)
-            all_insights.extend(followup_result.get('insights', []))
-            roles_used.append('followup_specialist')
-
-        negotiator_result = self._negotiator.run(ctx)
-        all_insights.extend(negotiator_result.get('insights', []))
-        roles_used.append('pricing_negotiator')
-
-        return {
-            'department': 'sales',
-            'task': task,
-            'insights': all_insights,
-            'roles_used': roles_used,
-            'timestamp': datetime.datetime.now(timezone.utc).isoformat(),
-        }
-
-class SalesDepartment:
     """Unified Sales Department facade — wraps specialist classes."""
 
     BASE_PRICES = {
@@ -529,4 +487,40 @@ class SalesDepartment:
             'max_price': max_price,
             'recommended': recommended,
             'currency': 'RUB',
+        }
+
+    # ── execute_task ──────────────────────────────────────────────────────────
+    def execute_task(self, task: str, context: dict | None) -> dict:
+        """Run all relevant agents heuristically and aggregate insights."""
+        ctx = context or {}
+        task_lower = (task or '').lower()
+        all_insights: list[str] = []
+        roles_used: list[str] = []
+
+        # Always run qualifier and proposal writer
+        qualifier_result = self._qualifier.run(ctx)
+        all_insights.extend(qualifier_result.get('insights', []))
+        roles_used.append('lead_qualifier')
+
+        writer_result = self._writer.run(ctx)
+        all_insights.extend(writer_result.get('insights', []))
+        roles_used.append('proposal_writer')
+
+        # Follow-up specialist for growth/follow-up tasks
+        if any(kw in task_lower for kw in ('follow', 'напомин', 'незакрыт', 'grow', 'рост', 'продаж')):
+            followup_result = self._followup.run(ctx)
+            all_insights.extend(followup_result.get('insights', []))
+            roles_used.append('followup_specialist')
+
+        # Always run negotiator
+        negotiator_result = self._negotiator.run(ctx)
+        all_insights.extend(negotiator_result.get('insights', []))
+        roles_used.append('pricing_negotiator')
+
+        return {
+            'department': 'sales',
+            'task': task,
+            'insights': all_insights,
+            'roles_used': roles_used,
+            'timestamp': datetime.datetime.now(timezone.utc).isoformat(),
         }

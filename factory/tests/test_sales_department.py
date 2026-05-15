@@ -284,3 +284,156 @@ class TestPricingNegotiator:
     def test_applicable_discounts_list(self):
         result = self.pn.calculate_quote(4, 3, is_repeat=True)
         assert isinstance(result['applicable_discounts'], list)
+
+
+# ── department attribute tests ────────────────────────────────────────────────
+
+class TestAgentDepartmentAttribute:
+    def test_lead_qualifier_department(self):
+        assert LeadQualifier().department == "sales"
+
+    def test_proposal_writer_department(self):
+        assert ProposalWriter().department == "sales"
+
+    def test_followup_specialist_department(self):
+        assert FollowUpSpecialist().department == "sales"
+
+    def test_pricing_negotiator_department(self):
+        assert PricingNegotiator().department == "sales"
+
+
+# ── run() method tests for each agent ────────────────────────────────────────
+
+class TestAgentRunMethods:
+    def test_lead_qualifier_run_returns_dict(self):
+        result = LeadQualifier().run({})
+        assert isinstance(result, dict)
+
+    def test_lead_qualifier_run_has_insights(self):
+        result = LeadQualifier().run({})
+        assert "insights" in result
+        assert isinstance(result["insights"], list)
+        assert len(result["insights"]) > 0
+
+    def test_lead_qualifier_run_has_timestamp(self):
+        result = LeadQualifier().run({})
+        assert "timestamp" in result
+        assert isinstance(result["timestamp"], str)
+
+    def test_lead_qualifier_run_with_none(self):
+        result = LeadQualifier().run(None)
+        assert isinstance(result, dict)
+        assert "insights" in result
+
+    def test_lead_qualifier_run_with_kpis(self):
+        ctx = {"nevesty_kpis": {"orders_this_month": 10}}
+        result = LeadQualifier().run(ctx)
+        assert isinstance(result, dict)
+
+    def test_proposal_writer_run_returns_dict(self):
+        result = ProposalWriter().run({})
+        assert isinstance(result, dict)
+
+    def test_proposal_writer_run_has_insights(self):
+        result = ProposalWriter().run({})
+        assert "insights" in result
+        assert len(result["insights"]) > 0
+
+    def test_proposal_writer_run_with_none(self):
+        result = ProposalWriter().run(None)
+        assert isinstance(result, dict)
+
+    def test_proposal_writer_run_with_revenue(self):
+        ctx = {"nevesty_kpis": {"revenue_month": 50000}}
+        result = ProposalWriter().run(ctx)
+        assert isinstance(result, dict)
+        assert "insights" in result
+
+    def test_followup_specialist_run_returns_dict(self):
+        result = FollowUpSpecialist().run({})
+        assert isinstance(result, dict)
+
+    def test_followup_specialist_run_has_insights(self):
+        result = FollowUpSpecialist().run({})
+        assert "insights" in result
+        assert len(result["insights"]) > 0
+
+    def test_followup_specialist_run_with_none(self):
+        result = FollowUpSpecialist().run(None)
+        assert isinstance(result, dict)
+
+    def test_pricing_negotiator_run_returns_dict(self):
+        result = PricingNegotiator().run({})
+        assert isinstance(result, dict)
+
+    def test_pricing_negotiator_run_has_insights(self):
+        result = PricingNegotiator().run({})
+        assert "insights" in result
+        assert len(result["insights"]) > 0
+
+    def test_pricing_negotiator_run_with_none(self):
+        result = PricingNegotiator().run(None)
+        assert isinstance(result, dict)
+
+
+# ── SalesDepartment tests ─────────────────────────────────────────────────────
+
+class TestSalesDepartment:
+    def test_instantiation(self):
+        assert SalesDepartment() is not None
+
+    def test_execute_task_returns_dict(self):
+        dept = SalesDepartment()
+        result = dept.execute_task("qualify leads", {})
+        assert isinstance(result, dict)
+
+    def test_execute_task_has_roles_used(self):
+        result = SalesDepartment().execute_task("qualify", {})
+        assert "roles_used" in result
+        assert len(result["roles_used"]) >= 2
+
+    def test_execute_task_has_insights(self):
+        result = SalesDepartment().execute_task("grow", {})
+        assert "insights" in result
+        assert isinstance(result["insights"], list)
+        assert len(result["insights"]) > 0
+
+    def test_execute_task_has_timestamp(self):
+        result = SalesDepartment().execute_task("test", {})
+        assert "timestamp" in result
+        assert isinstance(result["timestamp"], str)
+
+    def test_execute_task_none_context(self):
+        result = SalesDepartment().execute_task("test", None)
+        assert isinstance(result, dict)
+        assert "insights" in result
+
+    def test_execute_task_with_kpis(self):
+        ctx = {"nevesty_kpis": {"orders_this_month": 10}}
+        result = SalesDepartment().execute_task("grow sales", ctx)
+        assert isinstance(result, dict)
+
+    def test_execute_task_has_department(self):
+        result = SalesDepartment().execute_task("test", {})
+        assert result.get("department") == "sales"
+
+    def test_execute_task_has_task_field(self):
+        result = SalesDepartment().execute_task("my task", {})
+        assert result.get("task") == "my task"
+
+    def test_execute_task_grow_activates_followup(self):
+        result = SalesDepartment().execute_task("grow sales", {})
+        assert "followup_specialist" in result["roles_used"]
+
+    def test_execute_task_always_has_qualifier(self):
+        result = SalesDepartment().execute_task("anything", {})
+        assert "lead_qualifier" in result["roles_used"]
+
+    def test_execute_task_always_has_negotiator(self):
+        result = SalesDepartment().execute_task("anything", {})
+        assert "pricing_negotiator" in result["roles_used"]
+
+    def test_execute_task_empty_task_string(self):
+        result = SalesDepartment().execute_task("", {})
+        assert isinstance(result, dict)
+        assert "insights" in result

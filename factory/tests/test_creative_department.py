@@ -2,16 +2,27 @@
 Tests for factory/agents/creative_department.py — standalone heuristic version.
 
 Covers:
+  - CopywriterAI          : run(), generate_social_caption(), generate_promo_text()
+  - VisualConceptor       : run()
+  - BrandVoiceKeeper      : run(), get_brand_voice_guidelines()
+  - StorytellingAgent     : run()
   - CreativeDepartment.generate_model_bio     : str output, field interpolation, defaults
   - CreativeDepartment.generate_social_caption : str output, known/unknown event types
   - CreativeDepartment.generate_promo_text    : str output, discount clamping, urgency text
   - CreativeDepartment.get_brand_voice_guidelines : dict structure, required keys
+  - CreativeDepartment.execute_task           : dict output, roles_used, insights, timestamp
 """
 from __future__ import annotations
 
 import pytest
 
-from factory.agents.creative_department import CreativeDepartment
+from factory.agents.creative_department import (
+    CopywriterAI,
+    VisualConceptor,
+    BrandVoiceKeeper,
+    StorytellingAgent,
+    CreativeDepartment,
+)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -431,3 +442,259 @@ class TestGetBrandVoiceGuidelines:
         result1 = dept.get_brand_voice_guidelines()
         result2 = dept.get_brand_voice_guidelines()
         assert result1 == result2
+
+
+# ══════════════════════════════════════════════════════════════
+# TestCopywriterAI
+# ══════════════════════════════════════════════════════════════
+
+class TestCopywriterAI:
+    """Tests for CopywriterAI heuristic sub-agent."""
+
+    def test_instantiation(self):
+        assert CopywriterAI() is not None
+
+    def test_department_attribute(self):
+        assert CopywriterAI().department == "creative"
+
+    def test_run_returns_dict(self):
+        assert isinstance(CopywriterAI().run({}), dict)
+
+    def test_run_has_insights(self):
+        result = CopywriterAI().run({})
+        assert "insights" in result
+        assert isinstance(result["insights"], list)
+        assert len(result["insights"]) > 0
+
+    def test_run_has_recommendations(self):
+        result = CopywriterAI().run({})
+        assert "recommendations" in result
+        assert isinstance(result["recommendations"], list)
+
+    def test_run_has_timestamp(self):
+        result = CopywriterAI().run({})
+        assert "timestamp" in result
+        assert isinstance(result["timestamp"], str)
+
+    def test_run_none_context(self):
+        result = CopywriterAI().run(None)
+        assert isinstance(result, dict)
+        assert "insights" in result
+
+    def test_generate_social_caption_returns_str(self):
+        result = CopywriterAI().generate_social_caption("fashion", "Анна")
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_generate_social_caption_contains_model_name(self):
+        result = CopywriterAI().generate_social_caption("корпоратив", "Лена")
+        assert "Лена" in result
+
+    def test_generate_promo_text_returns_str(self):
+        result = CopywriterAI().generate_promo_text(discount=10, validity_days=7)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_generate_promo_text_contains_discount(self):
+        result = CopywriterAI().generate_promo_text(discount=20, validity_days=3)
+        assert "20" in result
+
+
+# ══════════════════════════════════════════════════════════════
+# TestVisualConceptor
+# ══════════════════════════════════════════════════════════════
+
+class TestVisualConceptor:
+    """Tests for VisualConceptor heuristic sub-agent."""
+
+    def test_instantiation(self):
+        assert VisualConceptor() is not None
+
+    def test_department_attribute(self):
+        assert VisualConceptor().department == "creative"
+
+    def test_run_returns_dict(self):
+        assert isinstance(VisualConceptor().run({}), dict)
+
+    def test_run_has_insights(self):
+        result = VisualConceptor().run({})
+        assert "insights" in result
+        assert len(result["insights"]) > 0
+
+    def test_run_has_recommendations(self):
+        result = VisualConceptor().run({})
+        assert "recommendations" in result
+
+    def test_run_has_timestamp(self):
+        result = VisualConceptor().run({})
+        assert "timestamp" in result
+
+    def test_run_none_context(self):
+        result = VisualConceptor().run(None)
+        assert isinstance(result, dict)
+        assert "insights" in result
+
+
+# ══════════════════════════════════════════════════════════════
+# TestBrandVoiceKeeper
+# ══════════════════════════════════════════════════════════════
+
+class TestBrandVoiceKeeper:
+    """Tests for BrandVoiceKeeper heuristic sub-agent."""
+
+    def test_instantiation(self):
+        assert BrandVoiceKeeper() is not None
+
+    def test_department_attribute(self):
+        assert BrandVoiceKeeper().department == "creative"
+
+    def test_run_returns_dict(self):
+        assert isinstance(BrandVoiceKeeper().run({}), dict)
+
+    def test_run_has_insights(self):
+        result = BrandVoiceKeeper().run({})
+        assert "insights" in result
+        assert len(result["insights"]) > 0
+
+    def test_run_none_context(self):
+        result = BrandVoiceKeeper().run(None)
+        assert isinstance(result, dict)
+        assert "insights" in result
+
+    def test_get_brand_voice_guidelines_returns_dict(self):
+        result = BrandVoiceKeeper().get_brand_voice_guidelines()
+        assert isinstance(result, dict)
+
+    def test_get_brand_voice_guidelines_has_tone(self):
+        result = BrandVoiceKeeper().get_brand_voice_guidelines()
+        assert "tone" in result
+        assert isinstance(result["tone"], str)
+
+    def test_get_brand_voice_guidelines_has_keywords(self):
+        result = BrandVoiceKeeper().get_brand_voice_guidelines()
+        assert "keywords" in result
+        assert isinstance(result["keywords"], list)
+        assert len(result["keywords"]) > 0
+
+
+# ══════════════════════════════════════════════════════════════
+# TestStorytellingAgent
+# ══════════════════════════════════════════════════════════════
+
+class TestStorytellingAgent:
+    """Tests for StorytellingAgent heuristic sub-agent."""
+
+    def test_instantiation(self):
+        assert StorytellingAgent() is not None
+
+    def test_department_attribute(self):
+        assert StorytellingAgent().department == "creative"
+
+    def test_run_returns_dict(self):
+        assert isinstance(StorytellingAgent().run({}), dict)
+
+    def test_run_has_insights(self):
+        result = StorytellingAgent().run({})
+        assert "insights" in result
+        assert len(result["insights"]) > 0
+
+    def test_run_has_recommendations(self):
+        result = StorytellingAgent().run({})
+        assert "recommendations" in result
+
+    def test_run_has_timestamp(self):
+        result = StorytellingAgent().run({})
+        assert "timestamp" in result
+
+    def test_run_none_context(self):
+        result = StorytellingAgent().run(None)
+        assert isinstance(result, dict)
+        assert "insights" in result
+
+
+# ══════════════════════════════════════════════════════════════
+# TestCreativeDepartmentExecuteTask
+# ══════════════════════════════════════════════════════════════
+
+class TestCreativeDepartmentExecuteTask:
+    """Tests for CreativeDepartment.execute_task dispatcher."""
+
+    @pytest.fixture
+    def dept(self) -> CreativeDepartment:
+        return CreativeDepartment()
+
+    def test_execute_task_returns_dict(self, dept):
+        result = dept.execute_task("create content", {})
+        assert isinstance(result, dict)
+
+    def test_execute_task_has_roles_used(self, dept):
+        result = dept.execute_task("test task", {})
+        assert "roles_used" in result
+        assert isinstance(result["roles_used"], list)
+
+    def test_execute_task_roles_used_at_least_two(self, dept):
+        result = dept.execute_task("test", {})
+        assert len(result["roles_used"]) >= 2
+
+    def test_execute_task_has_insights(self, dept):
+        result = dept.execute_task("brand", {})
+        assert "insights" in result
+        assert isinstance(result["insights"], list)
+
+    def test_execute_task_has_timestamp(self, dept):
+        result = dept.execute_task("test", {})
+        assert "timestamp" in result
+        assert isinstance(result["timestamp"], str)
+
+    def test_execute_task_has_department(self, dept):
+        result = dept.execute_task("test", {})
+        assert result.get("department") == "creative"
+
+    def test_execute_task_has_task_field(self, dept):
+        result = dept.execute_task("my task", {})
+        assert result.get("task") == "my task"
+
+    def test_execute_task_has_result(self, dept):
+        result = dept.execute_task("test", {})
+        assert "result" in result
+        assert isinstance(result["result"], dict)
+
+    def test_execute_task_none_context(self, dept):
+        result = dept.execute_task("test", None)
+        assert isinstance(result, dict)
+        assert "roles_used" in result
+
+    def test_execute_task_copywriter_keyword(self, dept):
+        result = dept.execute_task("написать текст для соцсетей", {})
+        assert "copywriter" in result["roles_used"]
+
+    def test_execute_task_brand_keyword(self, dept):
+        result = dept.execute_task("аудит бренда и голоса", {})
+        assert "brand_voice" in result["roles_used"]
+
+    def test_execute_task_visual_keyword(self, dept):
+        result = dept.execute_task("визуальная концепция фотосессии", {})
+        assert "visual" in result["roles_used"]
+
+    def test_execute_task_storytelling_keyword(self, dept):
+        result = dept.execute_task("истории успеха клиентов", {})
+        assert "storytelling" in result["roles_used"]
+
+    def test_execute_task_unknown_task_has_two_roles(self, dept):
+        result = dept.execute_task("unknown random task xyz", {})
+        assert len(result["roles_used"]) >= 2
+
+    def test_generate_social_caption_on_dept(self, dept):
+        result = dept.generate_social_caption("fashion", "Київ")
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_generate_promo_text_on_dept(self, dept):
+        result = dept.generate_promo_text(discount=15, validity_days=7)
+        assert isinstance(result, str)
+        assert "15" in result or "%" in result
+
+    def test_get_brand_voice_guidelines_on_dept(self, dept):
+        result = dept.get_brand_voice_guidelines()
+        assert isinstance(result, dict)
+        assert "tone" in result
