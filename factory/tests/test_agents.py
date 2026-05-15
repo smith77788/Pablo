@@ -1548,3 +1548,114 @@ class TestContentGeneratorExtended:
         assert isinstance(result, dict)
         assert "question" in result
         assert "answer" in result
+
+
+class TestMetricsCollector:
+    def test_metrics_collector_import(self):
+        from factory.agents.metrics_collector import MetricsCollector
+        assert MetricsCollector is not None
+
+    def test_collect_all_no_db(self):
+        from factory.agents.metrics_collector import MetricsCollector
+        collector = MetricsCollector()
+        collector.db_path = None  # Force no-DB scenario
+        metrics = collector.collect_all()
+        assert isinstance(metrics, dict)
+        assert 'orders_total' in metrics
+        assert metrics['db_available'] == False
+
+    def test_empty_metrics_shape(self):
+        from factory.agents.metrics_collector import MetricsCollector
+        collector = MetricsCollector()
+        empty = collector._empty_metrics()
+        required_keys = ['orders_total', 'conversion_rate', 'revenue_month', 'avg_check', 'clients_unique', 'avg_rating']
+        for key in required_keys:
+            assert key in empty, f"Missing key: {key}"
+
+    def test_metrics_with_in_memory_db(self, tmp_path):
+        """Test metrics collection with a real SQLite DB."""
+        import sqlite3
+        from factory.agents.metrics_collector import MetricsCollector
+
+        # Create a temp DB with Nevesty schema (matching actual data.db)
+        db_file = tmp_path / "test_nevesty.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("""
+            CREATE TABLE orders (
+                id INTEGER PRIMARY KEY,
+                status TEXT,
+                budget TEXT,
+                client_phone TEXT,
+                model_id INTEGER,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE models (
+                id INTEGER PRIMARY KEY,
+                name TEXT,
+                featured INTEGER DEFAULT 0,
+                archived INTEGER DEFAULT 0,
+                available INTEGER DEFAULT 1,
+                order_count INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE reviews (
+                id INTEGER PRIMARY KEY,
+                rating INTEGER,
+                approved INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE telegram_sessions (
+                chat_id INTEGER PRIMARY KEY,
+                state TEXT,
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("INSERT INTO orders (status, budget, client_phone) VALUES ('completed', '50000', '+79001234567')")
+        conn.execute("INSERT INTO orders (status, budget, client_phone) VALUES ('new', '30000', '+79009876543')")
+        conn.execute("INSERT INTO models (name, featured, available, order_count) VALUES ('Test Model', 1, 1, 1)")
+        conn.execute("INSERT INTO reviews (rating, approved) VALUES (5, 1)")
+        conn.execute("INSERT INTO telegram_sessions (chat_id) VALUES (123456)")
+        conn.commit()
+        conn.close()
+
+        collector = MetricsCollector()
+        collector.db_path = db_file
+        metrics = collector.collect_all()
+
+        assert metrics['db_available'] == True
+        assert metrics['orders_total'] == 2
+        assert metrics['orders_new'] == 1
+        assert metrics['orders_completed'] == 1
+        assert metrics['models_total'] == 1
+        assert metrics['models_featured'] == 1
+        assert metrics['reviews_total'] == 1
+        assert metrics['avg_rating'] == 5.0
+        assert metrics['bot_users_total'] == 1
+        assert metrics['clients_unique'] == 2
+
+    def test_metrics_keys_include_kpis(self, tmp_path):
+        """Verify all KPI keys required by cycle.py are present."""
+        import sqlite3
+        from factory.agents.metrics_collector import MetricsCollector
+
+        db_file = tmp_path / "kpi_test.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT, budget TEXT, client_phone TEXT, created_at TEXT DEFAULT (datetime('now')))")
+        conn.execute("CREATE TABLE models (id INTEGER PRIMARY KEY, name TEXT, featured INTEGER DEFAULT 0, archived INTEGER DEFAULT 0, available INTEGER DEFAULT 1, order_count INTEGER DEFAULT 0)")
+        conn.execute("CREATE TABLE reviews (id INTEGER PRIMARY KEY, rating INTEGER, approved INTEGER DEFAULT 0)")
+        conn.commit()
+        conn.close()
+
+        collector = MetricsCollector()
+        collector.db_path = db_file
+        metrics = collector.collect_all()
+
+        # Keys that cycle.py reads via nevesty_kpis_raw.get(...)
+        for key in ('orders_week', 'orders_month', 'conversion_rate', 'revenue_month',
+                    'avg_check', 'pipeline_value', 'models_total', 'clients_unique',
+                    'clients_repeat', 'avg_rating', 'db_available', 'collected_at'):
+            assert key in metrics, f"Missing KPI key: {key}"

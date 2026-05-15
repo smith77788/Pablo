@@ -132,6 +132,22 @@ def init_db() -> None:
         """)
         conn.commit()
 
+        # Migrate: add metrics_snapshots table if missing (Phase 5.7 — real Nevesty KPIs)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS metrics_snapshots (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            cycle_id    TEXT,
+            data        TEXT,
+            collected_at TEXT,
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+        """)
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_metrics_snapshots_cycle "
+            "ON metrics_snapshots(cycle_id)"
+        )
+        conn.commit()
+
         # Migrate: add agent_reports table if missing
         conn.execute("""
         CREATE TABLE IF NOT EXISTS agent_reports (

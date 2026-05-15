@@ -581,6 +581,44 @@ def run_cycle() -> dict:
         "summary": "Цикл запущен",
     })
 
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 5.7 — NEVESTY METRICS: collect real KPIs from Nevesty DB
+    # ════════════════════════════════════════════════════════════════
+    from factory.agents.metrics_collector import MetricsCollector
+    _mc = MetricsCollector()
+    nevesty_kpis_raw = _mc.collect_all()
+    nevesty_kpis = {
+        'orders_this_week': nevesty_kpis_raw.get('orders_week', 0),
+        'orders_this_month': nevesty_kpis_raw.get('orders_month', 0),
+        'conversion_rate_pct': nevesty_kpis_raw.get('conversion_rate', 0),
+        'revenue_month': nevesty_kpis_raw.get('revenue_month', 0),
+        'avg_check': nevesty_kpis_raw.get('avg_check', 0),
+        'pipeline_value': nevesty_kpis_raw.get('pipeline_value', 0),
+        'models_active': nevesty_kpis_raw.get('models_total', 0),
+        'clients_total': nevesty_kpis_raw.get('clients_unique', 0),
+        'repeat_client_rate': round(
+            nevesty_kpis_raw.get('clients_repeat', 0) /
+            max(nevesty_kpis_raw.get('clients_unique', 1), 1) * 100, 1
+        ),
+        'avg_rating': nevesty_kpis_raw.get('avg_rating', 0),
+        'db_connected': nevesty_kpis_raw.get('db_available', False),
+    }
+    logger.info(
+        "[Phase5.7] Nevesty KPIs: orders_week=%s, conversion=%.1f%%, revenue_month=%s, db=%s",
+        nevesty_kpis['orders_this_week'],
+        nevesty_kpis['conversion_rate_pct'],
+        nevesty_kpis['revenue_month'],
+        nevesty_kpis['db_connected'],
+    )
+    # Save metrics snapshot to factory DB for historical tracking
+    try:
+        db.run(
+            "INSERT OR IGNORE INTO metrics_snapshots (cycle_id, data, collected_at) VALUES (?, ?, ?)",
+            (cycle_id, json.dumps(nevesty_kpis_raw, default=str), nevesty_kpis_raw.get('collected_at', ''))
+        )
+    except Exception:
+        pass  # metrics snapshot is non-critical
+
     results = {
         "cycle_id": cycle_id,
         "timestamp": cycle_id,
@@ -589,6 +627,7 @@ def run_cycle() -> dict:
         "new_actions": 0,
         "experiments_concluded": 0,
         "health_score": 50,
+        "nevesty_kpis": nevesty_kpis,
     }
 
     # ════════════════════════════════════════════════════════════════
@@ -600,6 +639,9 @@ def run_cycle() -> dict:
     try:
         analytics_engine = AnalyticsEngine()
         all_metrics = analytics_engine.collect_all_metrics()
+        # Enrich all_metrics with real Nevesty KPIs from MetricsCollector
+        all_metrics['nevesty_kpis'] = nevesty_kpis
+        all_metrics['nevesty_kpis_raw'] = nevesty_kpis_raw
         raw_insights = analytics_engine.analyze(all_metrics)
         analytics_engine.persist_nevesty_metrics(nevesty_id, all_metrics.get("nevesty_models", {}))
 
