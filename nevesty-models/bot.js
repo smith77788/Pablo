@@ -3467,7 +3467,8 @@ function initBot(app) {
         const [, , modelsStr, hoursStr, type] = cm;
         const calcModels = parseInt(modelsStr);
         const calcHours  = parseInt(hoursStr);
-        if (!isNaN(calcModels) && !isNaN(calcHours)) {
+        const VALID_CALC_EVENT_TYPES = ['wedding', 'corporate', 'fashion', 'commercial', 'other'];
+        if (!isNaN(calcModels) && !isNaN(calcHours) && VALID_CALC_EVENT_TYPES.includes(type)) {
           return showPriceCalculator(chatId, { models: calcModels, hours: calcHours, eventType: type });
         }
       }
@@ -5811,6 +5812,9 @@ async function showSearchMenu(chatId) {
         [{ text: '🎂 Возраст 18–22', callback_data: 'cat_search_age_18-22'     },
          { text: '🎂 Возраст 22–26', callback_data: 'cat_search_age_22-26'     }],
         [{ text: '🎂 Возраст 26–35', callback_data: 'cat_search_age_26-35'     }],
+        [{ text: '👗 Fashion',        callback_data: 'cat_search_cat_fashion'   },
+         { text: '📸 Commercial',     callback_data: 'cat_search_cat_commercial'}],
+        [{ text: '🎉 Events',         callback_data: 'cat_search_cat_events'    }],
         [{ text: '🏠 Главное меню',   callback_data: 'main_menu'               }],
       ]}
     }
@@ -6266,6 +6270,13 @@ function _registerNewFeatures() {
     }
     if (data.startsWith('fav_remove_')) {
       return removeFavorite(chatId, parseInt(data.replace('fav_remove_', '')));
+    }
+
+    // Category search
+    if (data.startsWith('cat_search_cat_')) {
+      const cat = data.replace('cat_search_cat_', '');
+      if (!['fashion', 'commercial', 'events'].includes(cat)) return;
+      return showCatalog(chatId, cat, 0);
     }
 
     // Quick booking
