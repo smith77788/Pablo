@@ -34,14 +34,19 @@ services:
     env_file: .env
     volumes:
       - bot-data:/app/data
+      - bot-backup:/app/backup
     expose:
       - "3000"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 30s
     depends_on:
       factory:
         condition: service_healthy
@@ -66,6 +71,10 @@ services:
     environment:
       FACTORY_CYCLE_HOURS: ${FACTORY_CYCLE_HOURS:-6}
       PYTHONPATH: /app
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     healthcheck:
       test: ["CMD", "python3", "-c", "import os; exit(0 if os.path.exists('/app/factory') else 1)"]
       interval: 60s
@@ -82,4 +91,5 @@ services:
 
 volumes:
   bot-data:
+  bot-backup:
   factory-data:

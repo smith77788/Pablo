@@ -175,11 +175,25 @@ app.use('/api', apiRouter);
 async function buildHealthResponse() {
   const pkg = require('./package.json');
   const mem = process.memoryUsage();
+  const memMb = Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10;
   let dbStatus = 'ok';
   let factoryLastCycle = null;
+  let ordersToday = 0;
+  let activeOrders = 0;
+  let modelsCount = 0;
 
   try {
     await dbGet('SELECT 1 as ok');
+    // Fetch DB metrics in parallel
+    const today = new Date().toISOString().slice(0, 10);
+    const [todayRow, activeRow, modelsRow] = await Promise.all([
+      dbGet('SELECT COUNT(*) as n FROM orders WHERE date(created_at)=?', [today]),
+      dbGet("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','confirmed','in_progress')"),
+      dbGet('SELECT COUNT(*) as n FROM models WHERE available=1'),
+    ]);
+    ordersToday = todayRow?.n || 0;
+    activeOrders = activeRow?.n || 0;
+    modelsCount = modelsRow?.n || 0;
   } catch (e) {
     dbStatus = 'error: ' + e.message;
   }
@@ -196,21 +210,44 @@ async function buildHealthResponse() {
     factoryStatus = out.includes('Last cycle:') ? 'ok' : 'no_cycles';
   } catch (_) { factoryStatus = 'unavailable'; }
 
+  // Cache stats
+  let cacheStats = {};
+  try {
+    const { cache } = require('./services/cache');
+    const stats = cache.stats();
+    cacheStats = { keys: stats.keys, hit_rate: stats.hit_rate };
+  } catch (_) {}
+
   const uptime = Math.floor(process.uptime());
+  const overallStatus = dbStatus === 'ok' ? 'ok' : 'degraded';
   return {
-    status: dbStatus === 'ok' ? 'ok' : 'degraded',
+    status: overallStatus,
+    timestamp: new Date().toISOString(),
     uptime,
     uptimeHuman: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
+    version: pkg.version || '1.0.0',
+    components: {
+      database: dbStatus,
+      bot: botInstance ? 'ok' : 'not_initialized',
+      factory: factoryStatus,
+      factory_last_cycle: factoryLastCycle,
+      cache: cacheStats,
+    },
+    metrics: {
+      memory_mb: memMb,
+      memory_rss_mb: Math.round(mem.rss / 1024 / 1024),
+      orders_today: ordersToday,
+      active_orders: activeOrders,
+      models_count: modelsCount,
+    },
+    // Legacy fields kept for compatibility
     database: dbStatus,
     bot: botInstance ? 'connected' : 'not_initialized',
     memory: {
       rss: Math.round(mem.rss / 1024 / 1024) + 'MB',
       heapUsed: Math.round(mem.heapUsed / 1024 / 1024) + 'MB',
     },
-    memory_mb: Math.round(mem.rss / 1024 / 1024), // legacy field kept for compatibility
-    factory_last_cycle: factoryLastCycle,
-    factory: factoryStatus,
-    version: pkg.version,
+    memory_mb: Math.round(mem.rss / 1024 / 1024),
     ts: new Date().toISOString(),
   };
 }
@@ -371,6 +408,19 @@ async function start() {
 
   wss.on('close', () => clearInterval(wsPingInterval));
 
+  // ─── Memory alert (every 5 minutes) ──────────────────────────────────────────
+  const memAlertInterval = setInterval(async () => {
+    try {
+      const memMb = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+      if (memMb > 500) {
+        const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').filter(Boolean);
+        for (const id of adminIds) {
+          botInstance?.instance?.sendMessage(id, `⚠️ Внимание: потребление памяти ${memMb} MB`).catch(() => {});
+        }
+      }
+    } catch (_) {}
+  }, 5 * 60 * 1000);
+
   // Attach to app so api routes can use it
   app.set('wsServer', { notifyOrderUpdate });
   console.log('🔌 WebSocket server attached to HTTP server');
@@ -384,6 +434,7 @@ async function start() {
         try { await botInstance.instance.stopPolling({ cancel: true }); console.log('Bot polling stopped.'); } catch (e) { console.warn('stopPolling:', e.message); }
       }
       clearInterval(wsPingInterval);
+      clearInterval(memAlertInterval);
       await new Promise(resolve => wss.close(resolve));
       console.log('WebSocket server closed.');
       await new Promise(resolve => server.close(resolve));
