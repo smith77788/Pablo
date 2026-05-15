@@ -224,3 +224,247 @@ class ChannelContentGenerator:
                     "recommended_time": "12:00-14:00" if day_offset == 1 else "18:00-20:00",
                 })
         return calendar[:weeks * 2]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# БЛОК 9.1 — LLM-powered Telegram channel post generator
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TelegramChannelAgent(FactoryAgent):
+    """LLM-powered Telegram channel post generator for Nevesty Models agency.
+
+    Uses the Anthropic SDK (or local claude CLI) when available; falls back to
+    high-quality heuristic templates from ChannelContentGenerator otherwise.
+    """
+
+    name = "TelegramChannelAgent"
+    department = "content"
+    role = "telegram_channel"
+
+    system_prompt = (
+        "Ты — опытный SMM-специалист модельного агентства Nevesty Models. "
+        "Создаёшь яркие, вовлекающие посты для Telegram-канала агентства. "
+        "Стиль: профессиональный, живой, с нотками эксклюзивности. "
+        "Всегда пишешь на русском языке. Используешь эмодзи умеренно (не более 4 на пост). "
+        "Посты должны привлекать внимание с первых слов и заканчиваться чётким призывом к действию."
+    )
+
+    _fallback = ChannelContentGenerator()
+
+    # ── Model spotlight ───────────────────────────────────────────────────────
+
+    def generate_model_spotlight(
+        self,
+        model_name: str,
+        model_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Generate a Telegram post spotlighting a specific model.
+
+        Returns a dict with keys: format, text, char_count, model_name,
+        recommended_time, source ('llm' or 'template').
+        """
+        height = model_params.get("height", "170")
+        city = model_params.get("city", "Москва")
+        category = model_params.get("category", "fashion")
+        order_count = model_params.get("order_count", 0)
+
+        prompt = (
+            f"Создай пост для Telegram-канала модельного агентства Nevesty о модели {model_name}.\n\n"
+            f"Параметры: рост {height} см, город {city}, специализация {category}, "
+            f"выполнено заказов: {order_count}.\n\n"
+            "Пост должен:\n"
+            "- Привлекать внимание с первых слов\n"
+            "- Содержать 2-3 интересных факта или преимущества модели\n"
+            "- Иметь призыв к действию (бронирование через @nevesty_models)\n"
+            "- Использовать 2-3 релевантных хэштега\n"
+            "- Быть не длиннее 300 слов\n"
+            "- Использовать HTML-разметку Telegram (<b>, <i>) где уместно\n\n"
+            "Верни ТОЛЬКО текст поста, без пояснений."
+        )
+
+        text = self.think(prompt, max_tokens=600)
+
+        if not text:
+            result = self._fallback.generate_model_spotlight_post({
+                "name": model_name,
+                "height": height,
+                "city": city,
+                "category": category,
+                "order_count": order_count,
+            })
+            result["source"] = "template"
+            return result
+
+        return {
+            "format": "model_spotlight",
+            "text": text,
+            "char_count": len(text),
+            "model_name": model_name,
+            "recommended_time": "вт/чт 18:00-20:00",
+            "source": "llm",
+        }
+
+    # ── Promo post ────────────────────────────────────────────────────────────
+
+    def generate_promo_post(
+        self,
+        promo_type: str = "seasonal",
+        discount_pct: int = 15,
+        valid_days: int = 7,
+    ) -> Dict[str, Any]:
+        """Generate a promotional post for the Telegram channel.
+
+        promo_type: 'seasonal' | 'flash' | 'referral' | 'new_arrival' | str
+        Returns a dict with keys: format, text, char_count, promo_type,
+        promo_code, recommended_time, source.
+        """
+        seasonal_theme = SEASONAL_THEMES.get(datetime.now(timezone.utc).month, "мероприятий")
+        promo_code = f"CHAN{discount_pct}"
+
+        type_hints: Dict[str, str] = {
+            "seasonal": f"сезонная скидка {discount_pct}% к теме «{seasonal_theme}»",
+            "flash": f"флэш-акция {discount_pct}% — только {valid_days} дней",
+            "referral": "реферальная программа: приведи друга — получи бонус",
+            "new_arrival": "новые модели в каталоге — пригласи первым",
+        }
+        hint = type_hints.get(promo_type, f"промо-акция ({promo_type}), скидка {discount_pct}%")
+
+        prompt = (
+            f"Создай рекламный пост для Telegram-канала модельного агентства Nevesty.\n\n"
+            f"Тип промо: {hint}\n"
+            f"Промокод: {promo_code}\n"
+            f"Срок акции: {valid_days} дней\n\n"
+            "Пост должен:\n"
+            "- Быть убедительным и создавать срочность\n"
+            "- Чётко называть выгоду для клиента\n"
+            "- Содержать призыв написать @nevesty_models и указать промокод\n"
+            "- Быть не длиннее 200 слов\n"
+            "- Использовать HTML-разметку Telegram (<b>, <i>, <code>) где уместно\n\n"
+            "Верни ТОЛЬКО текст поста, без пояснений."
+        )
+
+        text = self.think(prompt, max_tokens=400)
+
+        if not text:
+            result = self._fallback.generate_promotion_post(discount_pct, valid_days)
+            result["source"] = "template"
+            result["promo_type"] = promo_type
+            return result
+
+        return {
+            "format": "promotion",
+            "text": text,
+            "char_count": len(text),
+            "promo_type": promo_type,
+            "promo_code": promo_code,
+            "valid_days": valid_days,
+            "recommended_time": "пт 15:00-17:00",
+            "source": "llm",
+        }
+
+    # ── Event announcement post ───────────────────────────────────────────────
+
+    def generate_event_post(
+        self,
+        event_type: str,
+        date: str = "",
+        city: str = "Москва",
+        model_count: int = 1,
+    ) -> Dict[str, Any]:
+        """Generate an event announcement post.
+
+        event_type: e.g. 'корпоратив', 'показ мод', 'фотосессия', 'промо-акция'
+        Returns a dict with keys: format, text, char_count, event_type,
+        recommended_time, source.
+        """
+        date_str = date or "ближайшие выходные"
+        hashtags = EVENT_TYPE_HASHTAGS.get(event_type.lower(), EVENT_TYPE_HASHTAGS["default"])
+
+        prompt = (
+            f"Создай анонс мероприятия для Telegram-канала агентства Nevesty.\n\n"
+            f"Тип мероприятия: {event_type}\n"
+            f"Дата: {date_str}\n"
+            f"Город: {city}\n"
+            f"Число моделей: {model_count}\n"
+            f"Хэштеги: {' '.join(hashtags[:3])}\n\n"
+            "Анонс должен:\n"
+            "- Создавать ажиотаж и интерес\n"
+            "- Содержать конкретные детали (тип события, дата, место)\n"
+            "- Содержать призыв записаться или написать @nevesty_models\n"
+            "- Быть не длиннее 200 слов\n"
+            "- Использовать HTML-разметку Telegram (<b>, <i>) где уместно\n\n"
+            "Верни ТОЛЬКО текст поста, без пояснений."
+        )
+
+        text = self.think(prompt, max_tokens=400)
+
+        if not text:
+            result = self._fallback.generate_case_study_post({
+                "event_type": event_type,
+                "city": city,
+                "model_count": model_count,
+                "duration_hours": 4,
+            })
+            result["source"] = "template"
+            return result
+
+        return {
+            "format": "event_announcement",
+            "text": text,
+            "char_count": len(text),
+            "event_type": event_type,
+            "date": date_str,
+            "recommended_time": "пн/ср 10:00-12:00",
+            "source": "llm",
+        }
+
+    # ── Convenience: generate a full weekly content batch ────────────────────
+
+    def generate_weekly_batch(
+        self,
+        model_data: Optional[Dict[str, Any]] = None,
+        event_type: str = "корпоратив",
+        promo_type: str = "seasonal",
+    ) -> Dict[str, Any]:
+        """Generate model_spotlight + event + promo posts in one call.
+
+        Returns dict with keys: posts (list), total_chars, calendar (2-week schedule).
+        """
+        md = model_data or {"name": "Мария", "height": "172", "city": "Москва", "category": "fashion"}
+        name = md.get("name", "Мария")
+
+        spotlight = self.generate_model_spotlight(name, md)
+        event = self.generate_event_post(event_type)
+        promo = self.generate_promo_post(promo_type)
+
+        posts = [spotlight, event, promo]
+        calendar = self._fallback.get_content_calendar(weeks=2)
+
+        return {
+            "posts": posts,
+            "total_chars": sum(p["char_count"] for p in posts),
+            "calendar": calendar,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def run(self, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """FactoryAgent entry point — called by cycle.py."""
+        ctx = context or {}
+        batch = self.generate_weekly_batch(
+            model_data=ctx.get("model_data"),
+            event_type=ctx.get("event_type", "корпоратив"),
+            promo_type=ctx.get("promo_type", "seasonal"),
+        )
+        sources = [p.get("source", "template") for p in batch["posts"]]
+        llm_count = sources.count("llm")
+        return {
+            "insights": [
+                f"Generated {len(batch['posts'])} channel posts "
+                f"({llm_count} via LLM, {len(sources) - llm_count} via template)"
+            ],
+            "recommendations": [p["text"] for p in batch["posts"]],
+            "posts": batch["posts"],
+            "calendar": batch["calendar"],
+            "total_chars": batch["total_chars"],
+            "generated_at": batch["generated_at"],
+        }
