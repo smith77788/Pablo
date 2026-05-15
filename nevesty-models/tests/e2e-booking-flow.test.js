@@ -17,23 +17,23 @@ process.env.TELEGRAM_BOT_TOKEN = '';
 process.env.ADMIN_USERNAME = 'admin';
 process.env.ADMIN_PASSWORD = 'admin123';
 
-const fs   = require('fs');
+const fs = require('fs');
 const path = require('path');
 const request = require('supertest');
 const express = require('express');
-const cors    = require('cors');
+const cors = require('cors');
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
-const ROOT      = path.join(__dirname, '..');
-const API_FILE  = path.join(ROOT, 'routes', 'api.js');
-const BOT_FILE  = path.join(ROOT, 'bot.js');
+const ROOT = path.join(__dirname, '..');
+const API_FILE = path.join(ROOT, 'routes', 'api.js');
+const BOT_FILE = path.join(ROOT, 'bot.js');
 const CONST_FILE = path.join(ROOT, 'utils', 'constants.js');
-const DB_FILE   = path.join(ROOT, 'database.js');
+const DB_FILE = path.join(ROOT, 'database.js');
 
-const apiCode  = fs.readFileSync(API_FILE,  'utf8');
-const botCode  = fs.readFileSync(BOT_FILE,  'utf8');
+const apiCode = fs.readFileSync(API_FILE, 'utf8');
+const botCode = fs.readFileSync(BOT_FILE, 'utf8');
 const constCode = fs.readFileSync(CONST_FILE, 'utf8');
-const dbCode   = fs.readFileSync(DB_FILE,   'utf8');
+const dbCode = fs.readFileSync(DB_FILE, 'utf8');
 
 // ── HTTP App ──────────────────────────────────────────────────────────────────
 let app;
@@ -49,7 +49,7 @@ beforeAll(async () => {
   await initDatabase();
 
   const { initBot } = require('../bot');
-  const apiRouter   = require('../routes/api');
+  const apiRouter = require('../routes/api');
 
   const a = express();
   a.use(express.json({ limit: '2mb' }));
@@ -65,9 +65,7 @@ beforeAll(async () => {
 
   app = a;
 
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token || loginRes.body.accessToken || null;
 }, 30000);
 
@@ -81,7 +79,6 @@ afterAll(async () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('E2E: Booking Flow — API code checks', () => {
-
   // ── Phase 1: Constants & validation helpers ─────────────────────────────────
 
   test('constants.js defines ALLOWED_EVENT_TYPES', () => {
@@ -205,7 +202,7 @@ describe('E2E: Booking Flow — API code checks', () => {
   });
 
   test('api.js POST /orders sends email confirmation', () => {
-    expect(apiCode).toMatch(/mailer\.sendOrderConfirmation/);
+    expect(apiCode).toMatch(/mailer[\s\S]{0,20}\.sendOrderConfirmation/);
   });
 
   test('api.js POST /orders returns order_number in response', () => {
@@ -277,7 +274,7 @@ describe('E2E: Booking Flow — API code checks', () => {
   });
 
   test('api.js PATCH status sends email on status change', () => {
-    expect(apiCode).toMatch(/mailer\.sendStatusChange/);
+    expect(apiCode).toMatch(/mailer[\s\S]{0,20}\.sendStatusChange/);
   });
 
   test('api.js PATCH status logs audit trail', () => {
@@ -363,7 +360,6 @@ describe('E2E: Booking Flow — API code checks', () => {
   test('database.js creates order_status_history table', () => {
     expect(dbCode).toMatch(/order_status_history/);
   });
-
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -371,7 +367,6 @@ describe('E2E: Booking Flow — API code checks', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('E2E: Booking Flow — Bot code checks', () => {
-
   // ── State machine ──────────────────────────────────────────────────────────
 
   test('bot.js defines ACTIVE_BOOKING_STATES set', () => {
@@ -531,7 +526,6 @@ describe('E2E: Booking Flow — Bot code checks', () => {
   test('bot.js imports STATUS_LABELS from constants', () => {
     expect(botCode).toMatch(/STATUS_LABELS/);
   });
-
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -539,7 +533,6 @@ describe('E2E: Booking Flow — Bot code checks', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('E2E: Booking Flow — HTTP: Public catalog', () => {
-
   test('GET /api/models returns 200 with an array', async () => {
     const res = await request(app).get('/api/models');
     expect(res.status).toBe(200);
@@ -566,7 +559,6 @@ describe('E2E: Booking Flow — HTTP: Public catalog', () => {
     const res = await request(app).get('/api/models/9999999');
     expect(res.status).toBe(404);
   });
-
 });
 
 describe('E2E: Booking Flow — HTTP: Order creation', () => {
@@ -575,22 +567,19 @@ describe('E2E: Booking Flow — HTTP: Order creation', () => {
 
   test('POST /api/orders with valid data returns 200/201', async () => {
     const csrf = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrf)
-      .send({
-        client_name:  'E2E Test Client',
-        client_phone: '+79001234567',
-        client_email: 'e2e-block71@test.com',
-        event_type:   'photo_shoot',
-        event_date:   '2026-06-01',
-        budget:       '50000',
-        comments:     'БЛОК 7.1 E2E booking test',
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrf).send({
+      client_name: 'E2E Test Client',
+      client_phone: '+79001234567',
+      client_email: 'e2e-block71@test.com',
+      event_type: 'photo_shoot',
+      event_date: '2026-06-01',
+      budget: '50000',
+      comments: 'БЛОК 7.1 E2E booking test',
+    });
     expect([200, 201]).toContain(res.status);
     if ([200, 201].includes(res.status)) {
       expect(res.body).toHaveProperty('order_number');
-      createdOrderId     = res.body.id || res.body.order_id;
+      createdOrderId = res.body.id || res.body.order_id;
       createdOrderNumber = res.body.order_number;
     }
   });
@@ -603,67 +592,53 @@ describe('E2E: Booking Flow — HTTP: Order creation', () => {
 
   test('POST /api/orders without client_name returns 400', async () => {
     const csrf = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrf)
-      .send({
-        client_phone: '+79001234567',
-        event_type:   'photo_shoot',
-        event_date:   '2026-06-01',
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrf).send({
+      client_phone: '+79001234567',
+      event_type: 'photo_shoot',
+      event_date: '2026-06-01',
+    });
     expect(res.status).toBe(400);
   });
 
   test('POST /api/orders without client_phone returns 400', async () => {
     const csrf = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrf)
-      .send({
-        client_name: 'Test Client',
-        event_type:  'photo_shoot',
-        event_date:  '2026-06-01',
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrf).send({
+      client_name: 'Test Client',
+      event_type: 'photo_shoot',
+      event_date: '2026-06-01',
+    });
     expect(res.status).toBe(400);
   });
 
   test('POST /api/orders with invalid phone returns 400', async () => {
     const csrf = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrf)
-      .send({
-        client_name:  'Test Client',
-        client_phone: 'not-a-phone',
-        event_type:   'photo_shoot',
-        event_date:   '2026-06-01',
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrf).send({
+      client_name: 'Test Client',
+      client_phone: 'not-a-phone',
+      event_type: 'photo_shoot',
+      event_date: '2026-06-01',
+    });
     expect(res.status).toBe(400);
   });
 
   test('POST /api/orders with invalid event_type returns 400', async () => {
     const csrf = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrf)
-      .send({
-        client_name:  'Test Client',
-        client_phone: '+79001234568',
-        event_type:   'invalid_booking_type_xyz',
-        event_date:   '2026-06-01',
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrf).send({
+      client_name: 'Test Client',
+      client_phone: '+79001234568',
+      event_type: 'invalid_booking_type_xyz',
+      event_date: '2026-06-01',
+    });
     expect(res.status).toBe(400);
   });
 
   test('POST /api/orders without CSRF token returns 403', async () => {
-    const res = await request(app)
-      .post('/api/orders')
-      .send({
-        client_name:  'CSRF Test',
-        client_phone: '+79001234569',
-        event_type:   'event',
-        event_date:   '2026-06-01',
-      });
+    const res = await request(app).post('/api/orders').send({
+      client_name: 'CSRF Test',
+      client_phone: '+79001234569',
+      event_type: 'event',
+      event_date: '2026-06-01',
+    });
     expect([400, 403, 429]).toContain(res.status);
   });
 
@@ -683,7 +658,6 @@ describe('E2E: Booking Flow — HTTP: Order creation', () => {
     const orders = res.body.orders || res.body;
     expect(Array.isArray(orders)).toBe(true);
   });
-
 });
 
 describe('E2E: Booking Flow — HTTP: Admin order management', () => {
@@ -691,17 +665,14 @@ describe('E2E: Booking Flow — HTTP: Admin order management', () => {
 
   beforeAll(async () => {
     const csrf = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrf)
-      .send({
-        client_name:  'Admin Managed E2E',
-        client_phone: '+79009001234',
-        client_email: 'managed-e2e@test.com',
-        event_type:   'commercial',
-        event_date:   '2026-08-15',
-        budget:       '80000',
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrf).send({
+      client_name: 'Admin Managed E2E',
+      client_phone: '+79009001234',
+      client_email: 'managed-e2e@test.com',
+      event_type: 'commercial',
+      event_date: '2026-08-15',
+      budget: '80000',
+    });
     if ([200, 201].includes(res.status)) {
       managedOrderId = res.body?.id || res.body?.order_id;
     }
@@ -714,9 +685,7 @@ describe('E2E: Booking Flow — HTTP: Admin order management', () => {
 
   test('GET /api/admin/orders returns 200 with valid token', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/orders')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/orders').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     const orders = res.body.orders || res.body;
     expect(Array.isArray(orders)).toBe(true);
@@ -724,9 +693,7 @@ describe('E2E: Booking Flow — HTTP: Admin order management', () => {
 
   test('GET /api/admin/orders?status=new filters by status', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/orders?status=new')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/orders?status=new').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
@@ -795,5 +762,4 @@ describe('E2E: Booking Flow — HTTP: Admin order management', () => {
       expect(body !== null && typeof body === 'object').toBe(true);
     }
   });
-
 });

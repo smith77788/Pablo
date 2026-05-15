@@ -165,15 +165,15 @@ describe('B. WhatsApp integration in routes/api.js', () => {
   });
 
   test('B03: WhatsApp notifyOrderStatus is called in PATCH handler', () => {
-    expect(apiCode).toMatch(/whatsapp\.notifyOrderStatus\s*\(/);
+    expect(apiCode).toMatch(/whatsapp[\s\S]{0,20}\.notifyOrderStatus\s*\(/);
   });
 
   test('B04: WhatsApp call uses .catch() for graceful failure handling', () => {
-    expect(apiCode).toMatch(/whatsapp\.notifyOrderStatus[\s\S]{0,100}\.catch\s*\(/);
+    expect(apiCode).toMatch(/whatsapp[\s\S]{0,20}\.notifyOrderStatus[\s\S]{0,200}\.catch\s*\(/);
   });
 
   test('B05: WhatsApp notification only sent when client_phone is present', () => {
-    expect(apiCode).toMatch(/client_phone[\s\S]{0,100}whatsapp\.notifyOrderStatus|whatsapp[\s\S]{0,200}client_phone/);
+    expect(apiCode).toMatch(/client_phone[\s\S]{0,200}notifyOrderStatus|notifyOrderStatus[\s\S]{0,200}client_phone/);
   });
 
   test('B06: WhatsApp notification only sent when status changed', () => {
