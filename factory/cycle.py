@@ -2835,6 +2835,46 @@ def run_cycle() -> dict:
         results["phases"]["experiment_system"] = {"status": "error", "error": str(e)}
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 9.1 (БЛОК 9.1) — CONTENT GENERATION FACTORY (heuristic, always runs)
+    # ChannelPostGenerator, ModelDescriptionWriter, FAQGenerator
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n✍️ PHASE 9.1: CONTENT GENERATION FACTORY")
+    try:
+        from factory.agents.content_generator import ContentGenerationDepartment as _ContentGenDept
+        _content_dept = _ContentGenDept()
+        _content91_result = _content_dept.execute_task(
+            "generate post channel telegram model description faq question",
+            {"model_name": "Мария", "category": "fashion"},
+        )
+        _posts91 = _content91_result.get("results", {}).get("posts", {})
+        _descs91 = _content91_result.get("results", {}).get("descriptions", {})
+        _faq91 = _content91_result.get("results", {}).get("faq", {})
+        results["phases"]["content_generation_factory"] = {
+            "agents_used": _content91_result.get("agents_used", []),
+            "posts_count": len(_posts91.get("recommendations", [])),
+            "descriptions_count": len(_descs91.get("recommendations", [])),
+            "faq_count": len(_faq91.get("recommendations", [])),
+            "timestamp": _content91_result.get("timestamp"),
+            "status": "ok",
+        }
+        summary_lines.append(
+            f"✍️ Content Factory (Phase 9.1): "
+            f"posts={len(_posts91.get('recommendations', []))}, "
+            f"descriptions={len(_descs91.get('recommendations', []))}, "
+            f"faq={len(_faq91.get('recommendations', []))}"
+        )
+        logger.info(
+            "[Phase9.1] Content Factory: agents=%s, posts=%d, descriptions=%d, faq=%d",
+            _content91_result.get("agents_used", []),
+            len(_posts91.get("recommendations", [])),
+            len(_descs91.get("recommendations", [])),
+            len(_faq91.get("recommendations", [])),
+        )
+    except Exception as e:
+        results["phases"]["content_generation_factory"] = {"status": "error", "error": str(e)}
+        logger.error("Phase 9.1 Content Generation Factory error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 5.3 (БЛОК 5.3) — CEO WEEKLY + MONTHLY REPORTS (heuristic)
     # ════════════════════════════════════════════════════════════════
     logger.info("\n📊 PHASE 5.3: CEO WEEKLY + MONTHLY REPORTS")

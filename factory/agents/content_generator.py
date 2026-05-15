@@ -219,3 +219,191 @@ class FAQGeneratorAgent(FactoryAgent):
             "Можно ли заказать нескольких моделей?",
         ]
         return [self.generate_faq_item(q) for q in questions]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# БЛОК 9.1 — Content Generation Factory (heuristic, no API key required)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ChannelPostGenerator(FactoryAgent):
+    """Generates Telegram channel post templates."""
+    name = "channel_post_generator"
+    department = "creative"
+    role = "content"
+    system_prompt = "You are a creative content writer for a modeling agency."
+
+    POST_TEMPLATES = [
+        "🌟 Знакомьтесь с нашей топ-моделью!\n\n{model_intro}\n\n📞 Забронировать: @nevesty_models_bot",
+        "✨ {promo_text}\n\n💼 Узнайте подробности в нашем каталоге!\n🤖 @nevesty_models_bot",
+        "📸 {event_text}\n\n🎯 Для бронирования: @nevesty_models_bot",
+        "🔥 Акция этой недели!\n\n{offer_text}\n\n⚡ @nevesty_models_bot",
+    ]
+
+    def generate_post(self, context: dict | None = None) -> str:
+        """Returns a Telegram channel post template."""
+        import random
+        ctx = context or {}
+        model_name = ctx.get('model_name', 'Мария')
+        category = ctx.get('category', 'fashion')
+
+        category_texts = {
+            'fashion': 'специализируется на fashion-съёмках и показах',
+            'commercial': 'работает в коммерческой рекламе и промо',
+            'events': 'украшает корпоративные события и выставки',
+        }
+        spec = category_texts.get(category, 'профессиональная модель')
+
+        templates = {
+            'intro': f"{model_name} — {spec}. Опыт работы с ведущими брендами.",
+            'promo': "Ищете модель для вашего проекта? Большой выбор профессионалов!",
+            'event': "Ваше мероприятие будет незабываемым с нашими моделями!",
+            'offer': "Скидка 10% при бронировании на следующую неделю!",
+        }
+
+        template = random.choice(self.POST_TEMPLATES)
+        return template.format(
+            model_intro=templates['intro'],
+            promo_text=templates['promo'],
+            event_text=templates['event'],
+            offer_text=templates['offer'],
+        )
+
+    def run(self, context: dict | None = None) -> dict:
+        import datetime
+        posts = [self.generate_post(context) for _ in range(3)]
+        return {
+            "insights": ["Generated 3 post templates for Telegram channel"],
+            "recommendations": posts,
+            "timestamp": datetime.datetime.now().isoformat(),
+        }
+
+
+class ModelDescriptionWriter(FactoryAgent):
+    """Generates professional model descriptions from parameters."""
+    name = "model_description_writer"
+    department = "creative"
+    role = "copywriter"
+
+    INTROS = [
+        "{name} — профессиональная модель с богатым портфолио.",
+        "Знакомьтесь: {name}, яркий представитель модельного бизнеса.",
+        "{name} — воплощение стиля и профессионализма.",
+    ]
+
+    def generate_description(self, model: dict) -> str:
+        """Generate description from model dict (name, height, age, category, city)."""
+        import random
+        name = model.get('name', 'Модель')
+        height = model.get('height', '')
+        age = model.get('age', '')
+        category = model.get('category', 'fashion')
+        city = model.get('city', 'Москва')
+
+        cat_map = {
+            'fashion': 'fashion-индустрии',
+            'commercial': 'коммерческой рекламе',
+            'events': 'event-индустрии',
+        }
+        cat_text = cat_map.get(category, 'модельном бизнесе')
+
+        intro = random.choice(self.INTROS).format(name=name)
+        params = []
+        if height:
+            params.append(f"рост {height} см")
+        if age:
+            params.append(f"возраст {age} лет")
+        params_str = ", ".join(params)
+
+        desc = f"{intro} Специализируется в {cat_text}."
+        if params_str:
+            desc += f" Параметры: {params_str}."
+        desc += f" Работает в {city}."
+        return desc
+
+    def run(self, context: dict | None = None) -> dict:
+        import datetime
+        ctx = context or {}
+        models = ctx.get('models', [
+            {'name': 'Анна', 'height': 175, 'age': 24, 'category': 'fashion', 'city': 'Москва'}
+        ])
+        descriptions = [self.generate_description(m) for m in models[:5]]
+        return {
+            "insights": [f"Generated {len(descriptions)} model descriptions"],
+            "recommendations": descriptions,
+            "timestamp": datetime.datetime.now().isoformat(),
+        }
+
+
+class FAQGenerator(FactoryAgent):
+    """Generates FAQ answers for the bot."""
+    name = "faq_generator"
+    department = "creative"
+    role = "support"
+
+    FAQ_BASE = {
+        "Как забронировать модель?": (
+            "Нажмите кнопку '📋 Забронировать' в каталоге, выберите модель и заполните форму. "
+            "Наш менеджер свяжется с вами в течение часа."
+        ),
+        "Сколько стоит аренда?": (
+            "Стоимость зависит от типа мероприятия и длительности. "
+            "Ориентировочные цены: от 5000₽/час. Точная стоимость обсуждается с менеджером."
+        ),
+        "Как долго рассматривается заявка?": (
+            "Мы отвечаем на заявки в течение 1-2 часов в рабочее время (10:00-20:00 МСК)."
+        ),
+        "Можно ли отменить бронирование?": (
+            "Да, отмена возможна не позднее чем за 24 часа до начала мероприятия."
+        ),
+        "В каких городах работаете?": (
+            "Основные города: Москва, Санкт-Петербург, Краснодар. "
+            "Выезд в другие города обсуждается индивидуально."
+        ),
+    }
+
+    def generate_faq(self) -> list[dict]:
+        return [{"question": q, "answer": a} for q, a in self.FAQ_BASE.items()]
+
+    def run(self, context: dict | None = None) -> dict:
+        import datetime
+        faq = self.generate_faq()
+        return {
+            "insights": [f"Generated {len(faq)} FAQ entries"],
+            "recommendations": [f"Q: {f['question']}\nA: {f['answer']}" for f in faq],
+            "timestamp": datetime.datetime.now().isoformat(),
+        }
+
+
+class ContentGenerationDepartment:
+    """Orchestrates content generation agents."""
+
+    def __init__(self):
+        self.post_generator = ChannelPostGenerator()
+        self.description_writer = ModelDescriptionWriter()
+        self.faq_generator = FAQGenerator()
+
+    def execute_task(self, task: str, context: dict | None = None) -> dict:
+        import datetime
+        results = {}
+
+        if any(k in task.lower() for k in ['post', 'channel', 'telegram', 'публик']):
+            results['posts'] = self.post_generator.run(context)
+
+        if any(k in task.lower() for k in ['description', 'model', 'опис', 'модел']):
+            results['descriptions'] = self.description_writer.run(context)
+
+        if any(k in task.lower() for k in ['faq', 'question', 'питань', 'вопрос']):
+            results['faq'] = self.faq_generator.run(context)
+
+        if not results:
+            results['posts'] = self.post_generator.run(context)
+            results['descriptions'] = self.description_writer.run(context)
+            results['faq'] = self.faq_generator.run(context)
+
+        return {
+            "department": "content_generation",
+            "task": task,
+            "results": results,
+            "agents_used": list(results.keys()),
+            "timestamp": datetime.datetime.now().isoformat(),
+        }
