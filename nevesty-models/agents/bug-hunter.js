@@ -25,20 +25,28 @@ class BugHunter extends Agent {
       this.addFinding('OK', 'process.exit() в bot.js не обнаружен');
     }
 
-    // 3. Infinite recursion risk — двухпроходная проверка (без backreference bugs)
+    // 3. Infinite recursion risk — двухпроходная проверка с точным извлечением тела функции
+    const fnRe = /async function ([a-zA-Z_]\w*)\s*\(/g;
     const fnNames = [];
     let fnMatch;
-    const fnRe = /async function ([a-zA-Z_]\w*)\s*\(/g;
-    while ((fnMatch = fnRe.exec(botSrc)) !== null) fnNames.push(fnMatch[1]);
+    while ((fnMatch = fnRe.exec(botSrc)) !== null) fnNames.push({ name: fnMatch[1], pos: fnMatch.index });
+
+    const getFnBody = (pos) => {
+      const start = botSrc.indexOf('{', pos);
+      if (start === -1) return '';
+      let depth = 0;
+      for (let i = start; i < Math.min(start + 20000, botSrc.length); i++) {
+        if (botSrc[i] === '{') depth++;
+        else if (botSrc[i] === '}') { depth--; if (depth === 0) return botSrc.slice(start + 1, i); }
+      }
+      return botSrc.slice(start + 1, start + 5000); // fallback
+    };
+
     const recursive = [];
-    for (const name of fnNames) {
-      // Ищем начало функции и проверяем её тело
-      const fnStart = botSrc.indexOf(`async function ${name}`);
-      if (fnStart === -1) continue;
-      // Берём 3000 chars тела функции (обычно достаточно)
-      const body = botSrc.substring(fnStart + `async function ${name}`.length, fnStart + 3000);
-      // Функция рекурсивна если вызывает себя (ищем "name(" но не "function name(")
-      const callRe = new RegExp(`(?<!function )\\b${name}\\s*\\(`, 'g');
+    for (const { name, pos } of fnNames) {
+      const body = getFnBody(pos);
+      // Ищем вызов функции — не определение и не упоминание в строке
+      const callRe = new RegExp(`(?<![.'"/])\\b${name}\\s*\\(`, 'g');
       if (callRe.test(body)) recursive.push(name);
     }
     if (recursive.length > 0) {

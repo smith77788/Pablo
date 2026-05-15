@@ -23,23 +23,20 @@ class SecurityGuard extends Agent {
       this.addFinding('OK', 'SQL запросы используют параметризацию — инъекции не обнаружены');
     }
 
-    // 2. Admin gate — ищем обработчик callback, не определение кнопки
-    // Правильно: ищем pattern `if (data...adm_confirm` а не первое вхождение строки
+    // 2. Admin gate — ищем именно обработчики (if (data.startsWith/=== ...) { isAdmin })
+    // Исключаем button definitions: callback_data: 'adm_...' (там нет обработки)
     const adminCallbacks = ['adm_confirm','adm_reject','adm_review','adm_contact','adm_complete','adm_toggle'];
     const unguarded = [];
     for (const cb of adminCallbacks) {
-      // Ищем место где data сравнивается с cb (обработчик), не где оно определяется как callback_data
-      const handlerPattern = new RegExp(`data[\\s\\S]{0,30}'${cb}`, 'g');
-      const matches = [...botSrc.matchAll(handlerPattern)];
-      for (const m of matches) {
-        const idx = m.index;
-        const context = botSrc.substring(idx, idx + 400);
-        // Обработчик должен иметь isAdmin в ближайшем контексте
-        if (!context.includes('isAdmin') && !context.includes('!admin')) {
-          unguarded.push(cb);
-          break;
-        }
-      }
+      // Только if-обработчики: if (data.startsWith|===|== ... 'adm_cb')
+      const handlerRe = new RegExp(`if\\s*\\(\\s*data(?:\\.startsWith\\(|\\s*===?\\s*)[^{]*'${cb}`, 'g');
+      const matches = [...botSrc.matchAll(handlerRe)];
+      if (matches.length === 0) continue; // нет обработчика — не проверяем
+      const allGuarded = matches.every(m => {
+        const ctx = botSrc.substring(m.index, m.index + 600);
+        return ctx.includes('isAdmin') || ctx.includes('!admin');
+      });
+      if (!allGuarded) unguarded.push(cb);
     }
     if (unguarded.length > 0) {
       this.addFinding('HIGH', `Admin gate отсутствует для: ${unguarded.join(', ')}`);
