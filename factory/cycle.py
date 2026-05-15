@@ -388,6 +388,75 @@ def run_phase_25_channel_publisher(phase24_results: dict) -> dict:
         return {"status": "error", "detail": str(e)}
 
 
+def _generate_heuristic_bio(model: dict) -> str:
+    """Generate a professional model bio from parameters."""
+    name = model.get('name') or 'Модель'
+    city = model.get('city') or 'Москва'
+    category = model.get('category') or 'events'
+    height = model.get('height')
+    age = model.get('age')
+
+    cat_desc = {
+        'fashion': 'подиумной и fashion-съёмке',
+        'commercial': 'коммерческой рекламе и корпоративных мероприятиях',
+        'events': 'мероприятиях и деловых встречах',
+    }.get(category, 'различных мероприятиях')
+
+    parts = [f"{name} — профессиональная модель из {city}, специализирующаяся на {cat_desc}."]
+
+    if height:
+        parts.append(f"Рост: {height} см.")
+    if age:
+        parts.append(f"Имея богатый опыт работы, она привносит профессионализм и элегантность в каждый проект.")
+
+    parts.append(f"Открыта к новым предложениям и сотрудничеству с ведущими брендами и агентствами.")
+
+    return " ".join(parts)
+
+
+def run_phase_26_model_bios(db_path: str) -> dict:
+    """Auto-generate bios for models missing them (heuristic, no API calls)."""
+    import sqlite3
+    import os
+
+    if not os.path.exists(db_path):
+        return {"status": "skipped", "reason": "db_not_found"}
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT id, name, age, height, city, category, hair_color, eye_color
+            FROM models
+            WHERE available=1 AND archived=0
+              AND (bio IS NULL OR bio='' OR LENGTH(bio) < 50)
+            LIMIT 3
+        """)
+        models = cur.fetchall()
+
+        if not models:
+            conn.close()
+            return {"status": "ok", "updated": 0, "message": "All models have bios"}
+
+        updated = 0
+        for m in models:
+            bio = _generate_heuristic_bio(dict(m))
+            cur.execute(
+                "UPDATE models SET bio=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                [bio, m['id']]
+            )
+            updated += 1
+
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "updated": updated}
+    except Exception as e:
+        conn.close()
+        return {"status": "error", "detail": str(e)}
+
+
 # Threshold for auto-apply: variant B must be at least 3% conversion to auto-apply
 SCALE_THRESHOLD_AUTO = 3.0
 
@@ -1013,12 +1082,26 @@ def run_cycle() -> dict:
         _guidelines = _creative_simple.get_brand_voice_guidelines()
         _log_phase = lambda label, msg: logger.info("[Phase6b] %s: %s", label, msg)
         _log_phase('Sales+Creative+CS', f"Brand voice: {_guidelines.get('tone', 'N/A')}")
+
+        # Generate social caption for a recent event
+        _caption_result = _creative_simple.generate_social_caption("fashion", "Москва")
+        _log_phase('CreativeDept', f"Social caption generated ({len(_caption_result)} chars)")
+
+        # Generate promo text for a current promotion
+        _promo_result = _creative_simple.generate_promo_text(discount=15, validity_days=7)
+        _log_phase('CreativeDept', f"Promo text generated ({len(_promo_result)} chars)")
+
         results["phases"]["sales_creative_cs_simple"] = {
             "brand_voice_tone": _guidelines.get("tone", "N/A"),
+            "caption": _caption_result,
+            "caption_len": len(_caption_result),
+            "promo": _promo_result,
+            "promo_len": len(_promo_result),
             "status": "ok",
         }
         summary_lines.append(
-            f"🏭 Sales+Creative+CS heuristic: brand_tone={_guidelines.get('tone', 'N/A')[:40]}"
+            f"🏭 Sales+Creative+CS heuristic: brand_tone={_guidelines.get('tone', 'N/A')[:40]}, "
+            f"caption={len(_caption_result)}chars, promo={len(_promo_result)}chars"
         )
     except Exception as _e6b:
         logger.error("Phase 6b error: %s", _e6b)
@@ -2317,6 +2400,20 @@ def run_cycle() -> dict:
         logger.info("[Phase25] Channel publish result: %s", _phase25_result)
     except Exception as e:
         logger.error("Phase 25 Channel Publisher error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 26 — MODEL BIO GENERATOR: auto-generate bios for models
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n📝 PHASE 26: MODEL BIO GENERATOR")
+    try:
+        _phase26 = run_phase_26_model_bios("/home/user/Pablo/nevesty-models/data.db")
+        results["phases"]["model_bios"] = _phase26
+        summary_lines.append(
+            f"📝 Model Bios (Phase 26): {_phase26.get('status', 'unknown')}, updated={_phase26.get('updated', 0)}"
+        )
+        logger.info("[Phase26] Model bios result: %s", _phase26)
+    except Exception as e:
+        logger.error("Phase 26 Model Bios error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
