@@ -1550,7 +1550,7 @@ async function bkStep2Location(chatId, data) {
   return safeSend(
     chatId,
     stepHeader(2, 'Детали мероприятия') +
-      'Введите место проведения \\(город, адрес\\):\n_Пример: Москва, ул\\. Арбат 15_\n\n_/cancel — отменить_',
+      'Введите место проведения \\(город, адрес\\):\n_Примеры: Москва МКАД, ул\\. Арбат 15, студия в Москве_\n\n_/cancel — отменить_',
     {
       parse_mode: 'MarkdownV2',
       reply_markup: {
@@ -1570,7 +1570,7 @@ async function bkStep2Budget(chatId, data) {
   return safeSend(
     chatId,
     stepHeader(2, 'Детали мероприятия') +
-      'Укажите бюджет \\(необязательно\\):\n💡 Укажите бюджет в рублях, например: 150000',
+      'Укажите бюджет \\(необязательно\\):\n💡 Укажите бюджет в рублях\n_Примеры: 15000, 25000\\-40000, «от 30000»_',
     {
       parse_mode: 'MarkdownV2',
       reply_markup: {
@@ -9279,6 +9279,23 @@ function initBot(app) {
         return bkStep2Budget(chatId, d);
 
       case 'bk_s2_budget': {
+        // If text can't be parsed at all, show format hint
+        const enteredNumCheck = parseInt(String(text).replace(/\D/g, '')) || 0;
+        if (text && text.trim() && enteredNumCheck === 0) {
+          return safeSend(
+            chatId,
+            '❌ Не удалось распознать бюджет\\.\n_Укажите сумму в рублях: например 15000, 25000\\-40000 или «от 30000»_',
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '⏭ Пропустить', callback_data: 'bk_skip_budget' }],
+                  [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+                ],
+              },
+            }
+          );
+        }
         d.budget = text;
         // Check against booking_min_budget setting
         const minBudgetRaw = await getSetting('booking_min_budget').catch(() => null);
@@ -9290,16 +9307,13 @@ function initBot(app) {
             await setSession(chatId, 'bk_s2_budget', d);
             return safeSend(
               chatId,
-              `⚠️ Рекомендуемый бюджет от *${esc(minBudget.toLocaleString('ru-RU'))} ₽*\\.\n\nХотите продолжить с указанным бюджетом?`,
+              `❌ *Бюджет ниже минимального*\n\nМинимальный бюджет для заявки: *${esc(minBudget.toLocaleString('ru-RU'))} ₽*\n\nВведите сумму не менее этой или свяжитесь с менеджером\\.`,
               {
                 parse_mode: 'MarkdownV2',
                 reply_markup: {
                   inline_keyboard: [
-                    [
-                      { text: '✅ Да, продолжить', callback_data: 'bk_budget_continue' },
-                      { text: '🔄 Изменить бюджет', callback_data: 'bk_budget_change' },
-                    ],
-                    [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+                    [{ text: '← Назад', callback_data: 'bk_back_budget' }],
+                    [{ text: '💬 Написать менеджеру', callback_data: 'contact_mgr' }],
                   ],
                 },
               }
