@@ -6928,6 +6928,28 @@ function initBot(app) {
       await clearSession(chatId);
       return showPhotoGalleryManager(chatId, modelId);
     }
+    // ── Broadcast: admin sends photo directly while in text-input state
+    // This lets admin skip the text step and jump straight to photo+caption flow
+    if (state === 'adm_broadcast_msg' || state === 'adm_broadcast_edit_text') {
+      const caption = (msg.caption || '').trim();
+      const segment = d.broadcastSegment || 'all';
+      const clients = await _getBroadcastClients(segment);
+      if (!clients.length) {
+        return safeSend(chatId, '❌ Нет клиентов для рассылки\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+        });
+      }
+      const newSd = {
+        ...d,
+        broadcastRecipients: clients.map(c => c.client_chat_id),
+        broadcastPhotoId: fileId,
+        broadcastText: caption,
+        broadcastSegment: segment,
+      };
+      await setSession(chatId, 'adm_broadcast_preview', newSd);
+      return previewBroadcast(chatId);
+    }
     // ── Broadcast with photo: receive photo
     if (state === 'adm_broadcast_photo_wait') {
       // New flow: text already set, go straight to preview
