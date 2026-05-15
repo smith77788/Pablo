@@ -1,0 +1,128 @@
+Nevesty Models — strings.js Localization Audit Report
+======================================================
+Date: 2026-05-15
+Auditor: Agent: Localization Engineer
+
+SUMMARY
+-------
+strings.js before audit : 47 keys
+strings.js after audit  : 179 keys
+New keys added          : 132
+
+All 626 tests pass after the expansion (npx jest --no-coverage).
+
+
+STRINGS ALREADY CENTRALIZED (before this audit)
+------------------------------------------------
+- Main menu labels (11 keys)
+- Booking flow prompts (5 keys)
+- Quick booking flow (4 keys)
+- Profile edit prompts (3 keys)
+- Status labels — new / reviewing / confirmed / in-progress / completed / cancelled (6 keys)
+- Basic errors — general, send, not-found, access-denied (8 keys)
+- Success messages (4 keys)
+- Navigation buttons — back / cancel / skip / main-menu / my-orders (5 keys)
+- Booking validation errors (6 keys)
+- Review strings (5 keys)
+- Wishlist strings (4 keys)
+- Notification labels (3 keys)
+- Search strings (2 keys)
+- Admin order alert (2 keys)
+- Broadcast sending / done / no-recipients (3 keys)
+
+
+TOP 10 CATEGORIES OF HARDCODED STRINGS STILL IN bot.js
+-------------------------------------------------------
+Strings below are NOT yet replaced with STRINGS.xxx calls in bot.js.
+The keys now exist in strings.js but bot.js still uses literals.
+
+1. NAVIGATION BUTTON LABELS (~198 occurrences)
+   Examples: '← Назад', 'Вперёд →', '🏠 Главное меню', '← К заявке',
+   '← Каталог', '← Меню', '← Профиль', '← Назад в каталог', etc.
+   These appear inline in hundreds of inline_keyboard definitions.
+   Added to strings.js: btnBack, btnForward, btnNext, btnPrev,
+   btnMainMenu (existed), btnMenu, btnBackToMenu, btnBackToOrders,
+   btnBackToOrder, btnBackToCatalog, btnBackToModel, btnBackToSearch,
+   btnBackToProfile, btnBackAdmin, and 15+ more.
+
+2. EMPTY STATE MESSAGES (~54 occurrences)
+   Examples: '👥 Клиентов пока нет', '📭 Моделей по выбранному фильтру нет',
+   '🤖 Фид агентов пуст', '📋 Журнал действий пуст'.
+   Added: emptyClients, emptyOrders, emptyModels, emptyManagers,
+   emptyAgentFeed, emptyActionLog, emptyNoCities, emptyNoPoints.
+
+3. AI / AGENT MESSAGES (~52 occurrences)
+   Examples: 'Ошибка загрузки AI-задач', '🤖 Генерирую AI описание...',
+   '🔄 Запускаю цикл AI Factory...', '🌿 Запускаю проверку организма...'.
+   Added: aiTasksLoadError, aiFactoryStarting, aiHealthCheck,
+   adminAIGenerating, adminAIError.
+
+4. BROADCAST MESSAGES (~36 occurrences)
+   Examples: '❌ Нет клиентов для рассылки', '─────\n📤 Отправить рассылку?',
+   '❌ Рассылка отменена'.
+   Added: broadcastNoClients, broadcastConfirm, broadcastCancelled.
+
+5. ERROR MESSAGES — DOMAIN-SPECIFIC (~40 occurrences)
+   Examples: '❌ Клиент не найден или нет заявок',
+   '❌ Ошибка при создании платежа', '❌ Данные неполные. Начните заново',
+   '❌ Ошибка экспорта: {error}'.
+   Added: clientNotFound, paymentError, orderDataIncomplete, adminExportError.
+
+6. PAYMENT & BILLING MESSAGES (~13 occurrences)
+   Examples: '✅ Эта заявка уже оплачена', '✅ Счёт выставлен клиенту',
+   '💰 Оплата зафиксирована', '⏳ Статус оплаты: ожидаем'.
+   Added: paymentAlreadyPaid, paymentInvoiceSent, paymentConfirmed,
+   paymentPending, paymentError.
+
+7. COMPARISON FEATURE (~8 occurrences)
+   Examples: '⚖️ Эта модель уже в списке сравнения',
+   '⚖️ Можно сравнивать не более 3 моделей', '⚖️ Список сравнения пуст'.
+   Added: compareAlreadyAdded, compareMaxReached, compareEmpty, compareEmptyShort.
+
+8. ORDER / CLIENT MANAGEMENT (~20+ occurrences)
+   Examples: '⚠️ Заявка уже обработана', '❌ Эта заявка уже привязана к другому чату',
+   '⚠️ Превышен лимит активных заявок'.
+   Added: orderActiveLimitReached, orderAlreadyLinked, orderAlreadyProcessed,
+   orderMessageSent, orderMessageSaved, orderThankYou.
+
+9. ADMIN MODEL MANAGEMENT (~20+ occurrences)
+   Examples: '✅ Модель «{name}» добавлена!', '✅ Модель перемещена в архив',
+   '✅ Категория обновлена!', '✅ Отмечено как выполнено'.
+   Added: adminModelAdded, adminModelArchived, adminModelRestored,
+   adminModelCopied, adminCategoryUpdated, adminTaskDone, adminTaskSkipped.
+
+10. INLINE KEYBOARD ACTION BUTTONS (~100+ unique labels)
+    Examples: '✅ Готово', '✅ Одобрить', '❌ Отклонить', '⚡ Быстрая заявка',
+    '📋 Забронировать', '✏️ Редактировать', '🗑 Удалить', '↩️ Восстановить',
+    '📦 В архив', '💳 Перейти к оплате', etc.
+    Added: btnConfirm, btnClose, btnDelete, btnEdit, btnApply, btnReject,
+    btnApprove, btnSend, btnSendOrder, btnBookModel, btnQuickBook,
+    btnManagerBook, btnRepeatOrder, btnResetFilters, btnNewSearch,
+    btnCompare, btnShowComparison, btnClearList, btnAddToFav,
+    btnRemoveFromFav, btnLeaveReview, btnPayNow, btnArchiveModel,
+    btnRestoreModel, btnDeleteModel, btnAddModel, btnGenerateAI,
+    btnSkipCaption, btnSendNow, btnContinue, btnRestart, btnMyProfile,
+    btnMyPoints, btnMyAchievements, btnInviteFriend, btnDeleteAccount.
+
+
+RECOMMENDATIONS
+---------------
+1. PRIORITY: Replace the ~198 navigation button text literals in bot.js with
+   STRINGS.btnBack, STRINGS.btnForward, etc. This eliminates the largest
+   category of duplication and makes nav labels instantly translatable.
+
+2. Use the getString(key, vars) helper for templates containing {name}, {id},
+   {count}, etc. (e.g. STRINGS.adminModelAdded, STRINGS.broadcastSending).
+   These are already parameterized in strings.js.
+
+3. Consider splitting strings.js into domain modules (strings/booking.js,
+   strings/admin.js, strings/catalog.js) once the file grows further — at
+   179 keys it is still manageable as one flat object.
+
+4. The Ukrainian strings scattered in bot.js ('🏠 Головне меню', '❌ Скасувати',
+   '🔍 Пошук', '🔍 Розширений пошук', '✅ Ви вже залишали відгук...') should be
+   moved into a separate STRINGS_UA object (or a uk locale key) to formalize
+   multi-language support.
+
+5. The utils/strings.js (RU object imported separately in bot.js line 5) should
+   eventually be merged or aliased into this file to have a single source of truth.
