@@ -1,6 +1,7 @@
 'use strict';
 const { execFile } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 let _bot;
 let _adminIds;
@@ -201,6 +202,27 @@ async function runWalCheckpointTruncate() {
     console.log('[Scheduler] WAL checkpoint (TRUNCATE) complete');
   } catch (e) {
     console.error('[Scheduler] WAL checkpoint (TRUNCATE) failed:', e.message);
+  }
+}
+
+// WAL file size monitoring — alert + force checkpoint if WAL exceeds 100 MB
+function checkWalSize() {
+  try {
+    const walPath = path.join(__dirname, '..', 'data.db-wal');
+    if (!fs.existsSync(walPath)) return;
+    const stat = fs.statSync(walPath);
+    const sizeMb = stat.size / 1024 / 1024;
+    if (sizeMb > 100) {
+      const msg = `⚠️ WAL файл БД большой: ${sizeMb.toFixed(1)} МБ. Запускаю checkpoint.`;
+      console.warn('[scheduler]', msg);
+      _notify(msg);
+      const { run } = require('../database');
+      run('PRAGMA wal_checkpoint(TRUNCATE)').catch(err => {
+        console.error('[scheduler] WAL checkpoint (TRUNCATE) after size alert failed:', err.message);
+      });
+    }
+  } catch (err) {
+    /* ignore */
   }
 }
 
@@ -446,10 +468,12 @@ function start() {
   scheduleEveryMinutes(checkBotHealth, 'Bot watchdog', 5);
   // Disk space alert: check backup folder size every 6 hours
   scheduleEvery(checkDiskSpace, 'Disk space check (every 6h)', 6);
+  // WAL size monitor: check every hour, alert + force TRUNCATE checkpoint if > 100 MB
+  scheduleEvery(checkWalSize, 'WAL size monitor (every 1h)', 1);
   // Scheduled broadcasts processor: check every minute
   scheduleEveryMinutes(processScheduledBroadcasts, 'Scheduled broadcasts processor', 1);
   console.log(
-    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h), scheduled broadcasts processor (every 1min)'
+    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), WAL size monitor (every 1h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h), scheduled broadcasts processor (every 1min)'
   );
 }
 

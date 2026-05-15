@@ -6725,6 +6725,49 @@ function initBot(app) {
       return showAdminOrderSearch(chatId);
     }
 
+    // ── БЛОК 3.3: Filter aliases — adm_ord_filter_{status}
+    if (data.startsWith('adm_ord_filter_')) {
+      if (!isAdmin(chatId)) return;
+      const filterMap = {
+        adm_ord_filter_new: 'new',
+        adm_ord_filter_confirmed: 'confirmed',
+        adm_ord_filter_completed: 'completed',
+        adm_ord_filter_cancelled: 'cancelled',
+        adm_ord_filter_all: '',
+      };
+      const status = Object.prototype.hasOwnProperty.call(filterMap, data) ? filterMap[data] : '';
+      return showAdminOrders(chatId, status, 0);
+    }
+
+    // ── БЛОК 3.3: Search by order number alias — adm_ord_search
+    if (data === 'adm_ord_search') {
+      if (!isAdmin(chatId)) return;
+      return showAdminOrderSearch(chatId);
+    }
+
+    // ── БЛОК 3.3: Internal note alias — adm_ord_note_{id}
+    if (data.startsWith('adm_ord_note_')) {
+      if (!isAdmin(chatId)) return;
+      const orderId = parseInt(data.replace('adm_ord_note_', ''));
+      if (!orderId || orderId <= 0) return;
+      const order = await get('SELECT * FROM orders WHERE id=?', [orderId]);
+      if (!order) return bot.answerCallbackQuery(q.id, { text: STRINGS.errorOrderNotFound });
+      await setSession(chatId, 'adm_note_order_id', { orderId });
+      return safeSend(
+        chatId,
+        `📝 *Внутренняя заметка для заявки \\#${esc(order.order_number || String(orderId))}*\n\nТекущая: ${order.internal_note ? esc(order.internal_note) : '_нет_'}\n\nВведите внутреннюю заметку \\(только для менеджеров\\):`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🗑 Удалить заметку', callback_data: `adm_order_note_del_${orderId}` }],
+              [{ text: '← К заявке', callback_data: `adm_order_${orderId}` }],
+            ],
+          },
+        }
+      );
+    }
+
     // ── Admin order status history
     if (data.startsWith('adm_order_history_')) {
       if (!isAdmin(chatId)) return;

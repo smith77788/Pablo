@@ -357,23 +357,24 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
     const nav = [];
     if (page > 0) nav.push({ text: '◀️', callback_data: `adm_orders_${activeFilter}_${page - 1}` });
     if ((page + 1) * 8 < total.n) nav.push({ text: '▶️', callback_data: `adm_orders_${activeFilter}_${page + 1}` });
+    // БЛОК 3.3: фильтры через adm_ord_filter_* callbacks
     const filterRow1 = [
-      { text: activeFilter === '' ? '📋 Все ✓' : '📋 Все', callback_data: 'adm_orders__0' },
-      { text: activeFilter === 'new' ? '🆕 Новые ✓' : '🆕 Новые', callback_data: 'adm_orders_new_0' },
+      { text: activeFilter === 'new' ? '📥 Новые ✓' : '📥 Новые', callback_data: 'adm_ord_filter_new' },
       {
-        text: activeFilter === 'confirmed' ? '✅ Подтвержд. ✓' : '✅ Подтвержд.',
-        callback_data: 'adm_orders_confirmed_0',
+        text: activeFilter === 'confirmed' ? '✅ Подтверж. ✓' : '✅ Подтверж.',
+        callback_data: 'adm_ord_filter_confirmed',
+      },
+      {
+        text: activeFilter === 'completed' ? '🏁 Завершённые ✓' : '🏁 Завершённые',
+        callback_data: 'adm_ord_filter_completed',
       },
     ];
     const filterRow2 = [
       {
         text: activeFilter === 'cancelled' ? '❌ Отменённые ✓' : '❌ Отменённые',
-        callback_data: 'adm_orders_cancelled_0',
+        callback_data: 'adm_ord_filter_cancelled',
       },
-      {
-        text: activeFilter === 'completed' ? '🏁 Завершённые ✓' : '🏁 Завершённые',
-        callback_data: 'adm_orders_completed_0',
-      },
+      { text: activeFilter === '' ? '📋 Все заявки ✓' : '📋 Все заявки', callback_data: 'adm_ord_filter_all' },
     ];
     const filterRow3 = [
       { text: '📅 Сегодня', callback_data: 'adm_orders_today' },
@@ -391,7 +392,7 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
           ...(nav.length ? [nav] : []),
           [{ text: '📦 Все новые → В работу', callback_data: 'adm_bulk_new_to_review' }],
           [
-            { text: '🔍 Поиск по №', callback_data: 'adm_order_search' },
+            { text: '🔍 Поиск по №', callback_data: 'adm_ord_search' },
             { text: '🔽 По модели', callback_data: 'adm_orders_filter_model' },
           ],
           [
