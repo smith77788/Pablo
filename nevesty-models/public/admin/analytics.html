@@ -152,6 +152,41 @@
       <div id="monthly-error" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
     </div>
 
+    <!-- Row 3: Extended metrics — cities, repeat clients, avg cycle, rating -->
+    <div class="grid md:grid-cols-2 gap-6">
+      <!-- Top cities -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🏙 Топ городов</h2>
+        <div id="cities-list" class="space-y-3">
+          <div class="skeleton h-6 w-full rounded"></div>
+          <div class="skeleton h-6 w-3/4 rounded"></div>
+          <div class="skeleton h-6 w-1/2 rounded"></div>
+        </div>
+      </div>
+      <!-- Extended KPIs -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📈 Дополнительные метрики</h2>
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-gray-600 dark:text-gray-400">🔄 Повторные клиенты</span>
+            <span id="ext-repeat" class="font-bold text-blue-600">—</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-gray-600 dark:text-gray-400">⏱ Средний цикл сделки</span>
+            <span id="ext-cycle" class="font-bold text-orange-600">—</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-gray-600 dark:text-gray-400">⭐ Средний рейтинг отзывов</span>
+            <span id="ext-rating" class="font-bold text-yellow-600">—</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-gray-600 dark:text-gray-400">💬 Всего отзывов</span>
+            <span id="ext-reviews" class="font-bold text-green-600">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /max-w-7xl -->
 
 <script>
@@ -219,6 +254,39 @@ function exportChart(canvasId, filename) {
   link.click();
 }
 
+async function loadExtended() {
+  try {
+    const ext = await safeJson(fetch(`/api/admin/analytics/extended?days=${currentPeriod}`, {headers:h}).then(r=>r.json()));
+
+    // Top cities bar visualization
+    const citiesEl = document.getElementById('cities-list');
+    if (ext.top_cities && ext.top_cities.length) {
+      const max = ext.top_cities[0].cnt || 1;
+      citiesEl.innerHTML = ext.top_cities.map((c, i) => `
+        <div>
+          <div class="flex justify-between text-sm mb-1">
+            <span class="font-medium text-gray-900 dark:text-white">${i+1}. ${c.city}</span>
+            <span class="text-gray-500 dark:text-gray-400">${c.cnt} заявок</span>
+          </div>
+          <div class="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div class="h-full rounded-full bg-gradient-to-r from-pink-500 to-purple-500" style="width:${Math.round(c.cnt/max*100)}%"></div>
+          </div>
+        </div>`).join('');
+    } else {
+      citiesEl.innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
+    }
+
+    // Extended KPIs
+    document.getElementById('ext-repeat').textContent =
+      ext.repeat_rate != null ? `${ext.repeat_rate}% (${ext.repeat_clients} из ${ext.total_clients})` : '—';
+    document.getElementById('ext-cycle').textContent =
+      ext.avg_cycle_days != null ? `${ext.avg_cycle_days} дн.` : '—';
+    document.getElementById('ext-rating').textContent =
+      ext.avg_rating != null ? `${ext.avg_rating} / 5 ⭐` : '—';
+    document.getElementById('ext-reviews').textContent = ext.reviews_count ?? '—';
+  } catch(e) { console.error('Extended analytics error:', e); }
+}
+
 async function loadAll() {
   setChartDefaults();
   // Reset skeletons
@@ -255,6 +323,8 @@ async function loadAll() {
 
   // ── Sources: doughnut ─────────────────────────────────────────────────────
   renderSourcesChart(sources.sources || []);
+
+  loadExtended();
 }
 
 // ── Funnel horizontal bar chart ──────────────────────────────────────────────

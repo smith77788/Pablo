@@ -1989,6 +1989,57 @@ router.get('/admin/analytics/monthly', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// GET /admin/analytics/extended — top cities, repeat clients rate, avg cycle
+router.get('/admin/analytics/extended', auth, async (req, res, next) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
+    const since = `datetime('now', '-${days} days')`;
+
+    // Top cities by order count
+    const topCities = await query(
+      `SELECT m.city, COUNT(o.id) as cnt
+       FROM orders o JOIN models m ON o.model_id = m.id
+       WHERE m.city IS NOT NULL AND m.city != '' AND o.created_at >= ${since}
+       GROUP BY m.city ORDER BY cnt DESC LIMIT 5`,
+      []
+    );
+
+    // Repeat clients (clients with > 1 order)
+    const repeatRow = await get(
+      `SELECT
+         COUNT(DISTINCT client_chat_id) as repeat_clients,
+         (SELECT COUNT(DISTINCT client_chat_id) FROM orders WHERE client_chat_id IS NOT NULL) as total_clients
+       FROM orders
+       WHERE client_chat_id IN (
+         SELECT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL GROUP BY client_chat_id HAVING COUNT(*) > 1
+       )`
+    );
+    const repeatRate = repeatRow && repeatRow.total_clients > 0
+      ? Math.round((repeatRow.repeat_clients / repeatRow.total_clients) * 100)
+      : 0;
+
+    // Average deal cycle in days (new → completed)
+    const cycleRow = await get(
+      `SELECT AVG(CAST(julianday(updated_at) - julianday(created_at) AS REAL)) as avg_days
+       FROM orders WHERE status='completed' AND updated_at IS NOT NULL AND created_at IS NOT NULL`
+    );
+    const avgCycleDays = cycleRow && cycleRow.avg_days ? Math.round(cycleRow.avg_days * 10) / 10 : null;
+
+    // Rating average from approved reviews
+    const ratingRow = await get(`SELECT AVG(rating) as avg_rating, COUNT(*) as cnt FROM reviews WHERE approved=1`);
+
+    res.json({
+      top_cities: topCities,
+      repeat_rate: repeatRate,
+      repeat_clients: repeatRow?.repeat_clients || 0,
+      total_clients: repeatRow?.total_clients || 0,
+      avg_cycle_days: avgCycleDays,
+      avg_rating: ratingRow?.avg_rating ? Math.round(ratingRow.avg_rating * 10) / 10 : null,
+      reviews_count: ratingRow?.cnt || 0,
+    });
+  } catch (e) { next(e); }
+});
+
 // ─── Client Cabinet ───────────────────────────────────────────────────────────
 // Rate-limit store: { ip: [timestamps] }
 const _clientRateLimits = new Map();
