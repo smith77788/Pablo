@@ -4920,5 +4920,100 @@ router.get('/faq', async (req, res) => {
   }
 });
 
+// ─── Chat rate limiter ────────────────────────────────────────────────────────
+let chatLimiter = (req, res, next) => next();
+try {
+  const rateLimit = require('express-rate-limit');
+  chatLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много сообщений. Попробуйте через час.' },
+  });
+} catch { /* express-rate-limit not available */ }
+
+// ─── FAQ keyword map for rule-based chatbot ───────────────────────────────────
+const CHAT_FAQ = [
+  {
+    pattern: /цена|стоимость|сколько|бюджет/i,
+    answer: 'Стоимость зависит от типа мероприятия и количества моделей. Минимальный бюджет — от 8 000 ₽ за промо-модель. Для точного расчёта используйте форму бронирования.',
+  },
+  {
+    pattern: /заказать|забронировать|бронирование/i,
+    answer: 'Для бронирования перейдите в раздел «Заказать» или нажмите кнопку на странице понравившейся модели.',
+  },
+  {
+    pattern: /контакт|связаться|менеджер|позвонить/i,
+    answer: 'Свяжитесь с менеджером: перейдите в раздел «Контакты» или используйте форму на сайте.',
+  },
+  {
+    pattern: /фото|портфолио|галерея/i,
+    answer: 'Портфолио моделей доступно на их страницах в каталоге.',
+  },
+  {
+    pattern: /доступна|свободна|занята/i,
+    answer: 'Проверьте доступность модели на её странице в разделе «Доступность».',
+  },
+  {
+    pattern: /отзыв|рейтинг/i,
+    answer: 'Отзывы клиентов размещены на странице каждой модели и в разделе «Отзывы».',
+  },
+  {
+    pattern: /оплата|платёж|оплатить/i,
+    answer: 'Мы принимаем оплату по договору. Подробности уточните у менеджера.',
+  },
+];
+const CHAT_DEFAULT = 'Спасибо за вопрос! Для получения подробной информации, пожалуйста, свяжитесь с нашим менеджером через раздел «Контакты» или воспользуйтесь формой бронирования.';
+
+// ─── POST /api/chat/ask — rule-based chatbot ──────────────────────────────────
+router.post('/chat/ask', chatLimiter, async (req, res) => {
+  try {
+    const message = sanitize(req.body?.message, 500);
+    if (!message) {
+      return res.status(400).json({ error: 'Сообщение не может быть пустым.' });
+    }
+
+    // Optionally enrich context from DB FAQ entries
+    let dbFaqContext = '';
+    try {
+      const faqRows = await query(
+        'SELECT question, answer FROM faq WHERE active=1 ORDER BY sort_order ASC, id ASC LIMIT 20'
+      );
+      if (faqRows.length) {
+        for (const row of faqRows) {
+          const qWords = row.question.toLowerCase().replace(/[^\wа-яёА-ЯЁ\s]/g, ' ').split(/\s+/);
+          const msgLower = message.toLowerCase();
+          if (qWords.some(w => w.length > 3 && msgLower.includes(w))) {
+            dbFaqContext = row.answer;
+            break;
+          }
+        }
+      }
+    } catch { /* ignore DB errors */ }
+
+    if (dbFaqContext) {
+      return res.json({ reply: dbFaqContext });
+    }
+
+    // Rule-based matching
+    for (const { pattern, answer } of CHAT_FAQ) {
+      if (pattern.test(message)) {
+        return res.json({ reply: answer });
+      }
+    }
+
+    // Greeting detection
+    if (/привет|здравствуй|добрый|hello|hi\b/i.test(message)) {
+      return res.json({ reply: 'Здравствуйте! Я ассистент агентства. Чем могу помочь? Вы можете спросить о ценах, бронировании, контактах или портфолио моделей.' });
+    }
+
+    return res.json({ reply: CHAT_DEFAULT });
+  } catch (e) {
+    console.error('[Chat] Error:', e.message);
+    res.status(500).json({ error: 'Ошибка сервера. Попробуйте позже.' });
+  }
+});
+
 module.exports = router;
 module.exports.setBot = setBot;
