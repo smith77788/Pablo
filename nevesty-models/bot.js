@@ -1452,7 +1452,13 @@ async function bkStep2EventType(chatId, data) {
   const btns = Object.entries(EVENT_TYPES).map(([k, v]) => [{ text: v, callback_data: `bk_etype_${k}` }]);
   return safeSend(chatId, stepHeader(2, 'Детали мероприятия') + 'Выберите тип мероприятия:', {
     parse_mode: 'MarkdownV2',
-    reply_markup: { inline_keyboard: [...btns, [{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+    reply_markup: {
+      inline_keyboard: [
+        ...btns,
+        [{ text: '← Выбрать модель', callback_data: 'bk_start' }],
+        [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+      ],
+    },
   });
 }
 
@@ -1486,7 +1492,14 @@ async function bkStep2Duration(chatId, data) {
   const row2 = DURATIONS.slice(4).map(h => ({ text: `${h} ч.`, callback_data: `bk_dur_${h}` }));
   return safeSend(chatId, stepHeader(2, 'Детали мероприятия') + 'Выберите продолжительность мероприятия:', {
     parse_mode: 'MarkdownV2',
-    reply_markup: { inline_keyboard: [row1, row2, [{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+    reply_markup: {
+      inline_keyboard: [
+        row1,
+        row2,
+        [{ text: '← Назад', callback_data: 'bk_back_event_type' }],
+        [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+      ],
+    },
   });
 }
 
@@ -1500,7 +1513,12 @@ async function bkStep2Location(chatId, data) {
       'Введите место проведения \\(город, адрес\\):\n_Пример: Москва, ул\\. Арбат 15_\n\n_/cancel — отменить_',
     {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '← Назад', callback_data: 'bk_back_duration' }],
+          [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+        ],
+      },
     }
   );
 }
@@ -1517,6 +1535,7 @@ async function bkStep2Budget(chatId, data) {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
+          [{ text: '← Назад', callback_data: 'bk_back_location' }],
           [{ text: '⏭ Пропустить', callback_data: 'bk_skip_budget' }],
           [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
         ],
@@ -1533,6 +1552,7 @@ async function bkStep2Comments(chatId, data) {
     parse_mode: 'MarkdownV2',
     reply_markup: {
       inline_keyboard: [
+        [{ text: '← Назад', callback_data: 'bk_back_budget' }],
         [{ text: '⏭ Пропустить', callback_data: 'bk_skip_comments' }],
         [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
       ],
@@ -1737,8 +1757,10 @@ async function bkSubmit(chatId, data) {
       await grantAchievement(chatId, 'precise_choice').catch(() => {});
     }
 
-    const confirmMsg =
-      autoConfirm === '1'
+    const customConfirmMsg = autoConfirm === '1' ? await getSetting('booking_confirm_msg').catch(() => null) : null;
+    const confirmMsg = customConfirmMsg
+      ? esc(customConfirmMsg)
+      : autoConfirm === '1'
         ? `🎉 *Заявка подтверждена\\!*\n\nНомер: *${esc(orderNum)}*\n\nВаша заявка автоматически подтверждена\\. Менеджер свяжется с вами для уточнения деталей\\.`
         : `🎉 *Заявка принята\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер свяжется с вами в течение 1 часа для подтверждения\\.\n\nСохраните номер — по нему можно проверить статус в любое время\\.`;
     await safeSend(chatId, confirmMsg, {
@@ -5658,6 +5680,28 @@ function initBot(app) {
       return bkStep2Budget(chatId, d);
     }
 
+    // ── Booking: back navigation
+    if (data === 'bk_back_event_type') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep2EventType(chatId, d);
+    }
+    if (data === 'bk_back_duration') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep2Duration(chatId, d);
+    }
+    if (data === 'bk_back_location') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep2Location(chatId, d);
+    }
+    if (data === 'bk_back_budget') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep2Budget(chatId, d);
+    }
+
     // ── Booking: skip optional fields
     if (data === 'bk_skip_budget') {
       const session = await getSession(chatId);
@@ -8981,6 +9025,23 @@ function initBot(app) {
     switch (state) {
       case 'bk_s2_date': {
         if (!text || text.length < 3) return safeSend(chatId, '❌ Введите дату мероприятия:');
+        {
+          const dmyFmt = text.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+          if (!dmyFmt) {
+            return safeSend(chatId, '❌ Неверный формат\\. Введите дату в виде *ДД\\.ММ\\.ГГГГ*', {
+              parse_mode: 'MarkdownV2',
+              reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+            });
+          }
+          const dv = parseInt(dmyFmt[1]);
+          const mv = parseInt(dmyFmt[2]);
+          if (mv < 1 || mv > 12 || dv < 1 || dv > 31) {
+            return safeSend(chatId, '❌ Неверная дата\\. Проверьте день и месяц\\.', {
+              parse_mode: 'MarkdownV2',
+              reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] },
+            });
+          }
+        }
         // Check if selected model is busy on this date
         if (d.model_id) {
           // Try to parse date entered as dd.mm.yyyy → YYYY-MM-DD for DB lookup
@@ -9009,8 +9070,8 @@ function initBot(app) {
       }
 
       case 'bk_s2_loc':
-        if (!text) return safeSend(chatId, '❌ Введите место проведения:');
-        d.location = text;
+        if (!text || !text.trim()) return safeSend(chatId, '❌ Введите место проведения:');
+        d.location = text.trim();
         return bkStep2Budget(chatId, d);
 
       case 'bk_s2_budget': {
