@@ -1122,6 +1122,15 @@
           return new URLSearchParams(window.location.search).get(name);
         }
 
+        // Get current model ID from query param, body data attribute, or loaded model
+        function getModelId() {
+          const fromParam = parseInt(getParam('id'), 10);
+          if (fromParam > 0) return fromParam;
+          const fromBody = parseInt(document.body?.dataset?.modelId, 10);
+          if (fromBody > 0) return fromBody;
+          return _currentModel ? _currentModel.id : null;
+        }
+
         function show(id) {
           document.getElementById(id).style.display = '';
         }
@@ -1176,7 +1185,7 @@
           setMeta('property', 'og:title', title);
           setMeta('property', 'og:description', desc);
           setMeta('property', 'og:image', img);
-          setMeta('property', 'og:url', `${baseUrl}/model.html?id=${model.id}`);
+          setMeta('property', 'og:url', `${baseUrl}/model/${model.id}`);
           setMeta('property', 'og:site_name', 'Nevesty Models');
 
           // Twitter Card
@@ -1185,14 +1194,14 @@
           setMeta('name', 'twitter:description', desc);
           setMeta('name', 'twitter:image', img);
 
-          // Canonical link
+          // Canonical link — always points to /model/:id (the SEO-canonical URL)
           let canonicalEl = document.querySelector('link[rel="canonical"]');
           if (!canonicalEl) {
             canonicalEl = document.createElement('link');
             canonicalEl.rel = 'canonical';
             document.head.appendChild(canonicalEl);
           }
-          canonicalEl.href = `${baseUrl}/model.html?id=${model.id}`;
+          canonicalEl.href = `${baseUrl}/model/${model.id}`;
         }
 
         // ── SEO: inject Schema.org JSON-LD ────────────────────────────────────────
@@ -1216,7 +1225,7 @@
             description: model.bio
               ? model.bio.substring(0, 200)
               : `Профессиональная модель агентства Nevesty Models.${model.city ? ' Город: ' + model.city + '.' : ''}${model.category ? ' Специализация: ' + model.category + '.' : ''}`,
-            url: `${baseUrl}/model.html?id=${model.id}`,
+            url: `${baseUrl}/model/${model.id}`,
             image: img,
             worksFor: {
               '@type': 'Organization',
@@ -1237,7 +1246,7 @@
             itemListElement: [
               { '@type': 'ListItem', position: 1, name: 'Главная', item: baseUrl + '/' },
               { '@type': 'ListItem', position: 2, name: 'Каталог моделей', item: baseUrl + '/catalog.html' },
-              { '@type': 'ListItem', position: 3, name: model.name, item: `${baseUrl}/model.html?id=${model.id}` },
+              { '@type': 'ListItem', position: 3, name: model.name, item: `${baseUrl}/model/${model.id}` },
             ],
           };
 
@@ -1730,7 +1739,7 @@
           if (badge) badge.textContent = count > 0 ? count : '';
         }
         window.toggleFavorite = function () {
-          const id = parseInt(getParam('id'), 10);
+          const id = getModelId();
           if (!id) return;
           const favs = getFavs();
           const idx = favs.findIndex(f => (typeof f === 'object' ? f.id === id : f === id));
@@ -1771,7 +1780,7 @@
           }
         };
         function updateFavBtn() {
-          const id = parseInt(getParam('id'), 10);
+          const id = getModelId();
           if (!id) return;
           const btn = document.getElementById('favBtn');
           if (!btn) return;
@@ -1805,7 +1814,7 @@
           } catch {}
         }
         window.toggleCompareModel = function () {
-          const id = parseInt(getParam('id'), 10);
+          const id = getModelId();
           if (!id) return;
           const ids = getCompareIds();
           const idx = ids.indexOf(id);
@@ -1835,7 +1844,7 @@
           }
         };
         function updateCompareBtn() {
-          const id = parseInt(getParam('id'), 10);
+          const id = getModelId();
           if (!id) return;
           const btn = document.getElementById('compareBtn');
           if (!btn) return;
@@ -1861,11 +1870,14 @@
         }
 
         // ── init ───────────────────────────────────────────────────────────────────
-        const modelId = getParam('id');
+        // Support two URL patterns:
+        //   1. /model/:id  — server-rendered (data-model-id attribute on <body>)
+        //   2. /model.html?id=:id — client-side navigation
+        const modelId = getParam('id') || document.body?.dataset?.modelId || null;
         if (!modelId || isNaN(parseInt(modelId, 10))) {
           // Wait for DOM
           document.addEventListener('DOMContentLoaded', function () {
-            showError('Не указан ID модели', 'Используйте ссылку вида /model.html?id=123');
+            showError('Не указан ID модели', 'Используйте ссылку вида /model/:id');
           });
         } else {
           document.addEventListener('DOMContentLoaded', function () {
