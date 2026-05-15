@@ -285,6 +285,7 @@
             ${m.photo_main
               ? `<img src="${escHtml(m.photo_main)}" alt="${escHtml(m.name)}" loading="lazy" />`
               : `<div class="model-card-placeholder" aria-hidden="true">${escHtml(m.name[0])}</div>`}
+            ${m.featured ? `<div style="position:absolute;top:8px;left:8px;background:var(--gold);color:#000;font-size:0.7rem;font-weight:700;padding:3px 8px;border-radius:10px;z-index:4;pointer-events:none">⭐ Топ</div>` : ''}
             <div class="model-card-overlay" aria-hidden="true">
               <div class="model-card-tag">${escHtml(catLabel)}</div>
               ${measures ? `<div style="font-size:0.78rem;color:#ccc;margin-top:4px">${escHtml(measures)}</div>` : ''}
