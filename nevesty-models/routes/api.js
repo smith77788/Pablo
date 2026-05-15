@@ -6218,8 +6218,8 @@ router.post('/client/request-code', clientOtpLimiter, async (req, res, next) => 
       .sendSMS(phoneE164, `Ваш код для входа в личный кабинет Nevesty Models: ${code}. Действует 10 минут.`)
       .catch(e => console.log('[OTP] SMS send skipped:', e.message));
 
-    // In dev/test — return code (only if no SMS API configured)
-    const isDev = !process.env.SMS_RU_API_ID;
+    // Only expose OTP code in explicit development environment to prevent accidental production leak
+    const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
     res.json({ ok: true, ...(isDev ? { code_debug: code } : {}) });
   } catch (e) {
     next(e);

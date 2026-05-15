@@ -12075,7 +12075,7 @@ async function showCatalogByCity(chatId, city, page = 0) {
       : await query('SELECT * FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id');
 
     if (!models.length) {
-      return safeSend(chatId, `📭 Моделей в городе «${city}» нет\\.`, {
+      return safeSend(chatId, `📭 Моделей в городе «${esc(city)}» нет\\.`, {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [[{ text: '💃 Все модели', callback_data: 'cat_cat__0' }]] },
       });
