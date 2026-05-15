@@ -142,14 +142,16 @@ describe('Factory type hints', () => {
     const fs = require('fs');
     const path = require('path');
     const content = fs.readFileSync(path.join(__dirname, '../../factory/agents/sales_department.py'), 'utf8');
-    expect(content).toContain('Dict[str, Any]');
+    // Accept both old-style Dict[str, Any] and modern dict[str, Any] (Python 3.10+)
+    expect(content).toMatch(/[Dd]ict\[str/);
   });
 
   it('creative_department.py has type hints', () => {
     const fs = require('fs');
     const path = require('path');
     const content = fs.readFileSync(path.join(__dirname, '../../factory/agents/creative_department.py'), 'utf8');
-    expect(content).toContain('Dict[str, Any]');
+    // Accept both old-style Dict[str, Any] and modern dict[str, Any] (Python 3.10+)
+    expect(content).toMatch(/[Dd]ict\[str/);
   });
 });
 
