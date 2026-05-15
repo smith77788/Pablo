@@ -5096,6 +5096,7 @@ async function showLoyaltyLeaderboard(chatId) {
 }
 
 async function showLoyaltyProfile(chatId) {
+  const referralEnabled = await getSetting('referral_enabled').catch(() => '1');
   const lp = await get(`SELECT * FROM loyalty_points WHERE chat_id=?`, [chatId]);
   if (!lp) {
     return safeSend(chatId, '💫 У вас пока нет баллов лояльности\\.\n\nЗаработайте баллы, оформив первую заявку\\!', {
@@ -5136,13 +5137,15 @@ async function showLoyaltyProfile(chatId) {
   const discountLine =
     level.discount > 0 ? `Скидка на услуги: *${level.discount}%*` : `_Повышайте уровень для получения скидок\\._`;
 
-  // Referral link
+  // Referral link (only when referral program is enabled)
   let refLinkLine = '';
-  try {
-    const botInfo = await bot.getMe();
-    const refLink = `https://t.me/${botInfo.username}?start=ref${chatId}`;
-    refLinkLine = `🔗 Ваша реф\\-ссылка:\n\`${esc(refLink)}\``;
-  } catch (_) {}
+  if (referralEnabled !== '0') {
+    try {
+      const botInfo = await bot.getMe();
+      const refLink = `https://t.me/${botInfo.username}?start=ref${chatId}`;
+      refLinkLine = `🔗 Ваша реф\\-ссылка:\n\`${esc(refLink)}\``;
+    } catch (_) {}
+  }
 
   const lines = [
     `💫 *Ваши бонусные баллы*`,
@@ -5163,15 +5166,20 @@ async function showLoyaltyProfile(chatId) {
 
   const text = lines.filter(l => l !== '').join('\n');
 
+  const loyaltyProfileButtons = [];
+  if (referralEnabled !== '0') {
+    loyaltyProfileButtons.push([{ text: '🎁 Пригласить друга', callback_data: 'referral' }]);
+  }
+  loyaltyProfileButtons.push(
+    [{ text: '🏆 Мои достижения', callback_data: 'my_achievements' }],
+    [{ text: '🏆 Топ клиентов', callback_data: 'loyalty_leaderboard' }],
+    [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]
+  );
+
   return safeSend(chatId, text, {
     parse_mode: 'MarkdownV2',
     reply_markup: {
-      inline_keyboard: [
-        [{ text: '🎁 Пригласить друга', callback_data: 'referral' }],
-        [{ text: '🏆 Мои достижения', callback_data: 'my_achievements' }],
-        [{ text: '🏆 Топ клиентов', callback_data: 'loyalty_leaderboard' }],
-        [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
-      ],
+      inline_keyboard: loyaltyProfileButtons,
     },
   });
 }
@@ -10981,6 +10989,7 @@ async function showFaq(chatId) {
 
 async function showUserProfile(chatId, firstName) {
   try {
+    const referralEnabledProfile = await getSetting('referral_enabled').catch(() => '1');
     const [orders, lastOrderFull, prefs] = await Promise.all([
       query(
         `SELECT o.id, o.status, o.created_at, o.order_number, m.name AS model_name FROM orders o
@@ -11132,6 +11141,8 @@ async function showUserProfile(chatId, firstName) {
       },
     ]);
 
+    const profileReferralBtn =
+      referralEnabledProfile !== '0' ? [[{ text: '📤 Пригласить друга', callback_data: 'referral' }]] : [];
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: {
@@ -11142,7 +11153,7 @@ async function showUserProfile(chatId, firstName) {
             { text: '🏆 Достижения', callback_data: 'my_achievements' },
             { text: '💫 Баллы', callback_data: 'loyalty' },
           ],
-          [{ text: '📤 Пригласить друга', callback_data: 'referral' }],
+          ...profileReferralBtn,
           ...profileEditButtons,
           [{ text: '📝 Новая заявка', callback_data: 'bk_start' }],
           [{ text: '← Назад', callback_data: 'main_menu' }],
