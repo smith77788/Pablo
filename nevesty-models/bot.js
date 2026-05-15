@@ -605,6 +605,13 @@ async function showModel(chatId, modelId) {
     const orderCountRow = await get('SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status="completed"', [m.id]).catch(() => ({ n: 0 }));
     const completedOrders = orderCountRow ? (orderCountRow.n || 0) : 0;
 
+    // Upcoming busy dates (next 3)
+    const upcomingBusy = await query(
+      `SELECT busy_date FROM model_busy_dates WHERE model_id=? AND busy_date >= date('now') ORDER BY busy_date LIMIT 10`,
+      [m.id]
+    ).catch(() => []);
+    const busyRanges = groupBusyDatesIntoRanges(upcomingBusy);
+
     const lines = [];
     if (m.featured)                    lines.push(`⭐ Топ\\-модель`);
     if (m.age)                         lines.push(`📅 Возраст: *${m.age}* лет`);
@@ -622,7 +629,19 @@ async function showModel(chatId, modelId) {
     const viewCount = (m.view_count || 0) + 1; // +1 for the just-incremented count
     if (viewCount > 0)                 lines.push(`👁 Просмотров: *${viewCount}*`);
 
-    const avail   = m.available ? '🟢 Доступна для заказа' : '🔴 Временно недоступна';
+    let avail;
+    if (!m.available) {
+      avail = '🔴 Временно недоступна';
+    } else if (busyRanges.length > 0) {
+      const rangeStrs = busyRanges.slice(0, 3).map(r =>
+        r.start === r.end
+          ? formatDateShort(r.start)
+          : `${formatDateShort(r.start)}–${formatDateShort(r.end)}`
+      );
+      avail = `⚠️ Занята: ${rangeStrs.join(', ')}`;
+    } else {
+      avail = '✅ Доступна для бронирования';
+    }
     const star    = m.featured ? '⭐ ' : '';
     // Caption ≤ 1024 chars (Telegram limit for media)
     const bioEsc  = m.bio ? esc(m.bio) : '';
@@ -710,6 +729,40 @@ function ru_plural(n, one, few, many) {
   if (m10 === 1) return one;
   if (m10 >= 2 && m10 <= 4) return few;
   return many;
+}
+
+// ── Calendar / availability helpers ───────────────────────────────────────────
+const MONTHS_RU = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+function formatDateShort(dateStr) {
+  // dateStr is YYYY-MM-DD
+  const [, m, d] = dateStr.split('-');
+  return `${parseInt(d)} ${MONTHS_RU[parseInt(m)-1]}`;
+}
+
+/** Group consecutive busy_date rows into ranges for compact display */
+function groupBusyDatesIntoRanges(rows) {
+  // rows: [{busy_date: 'YYYY-MM-DD', reason: '...'}] sorted ascending
+  if (!rows.length) return [];
+  const ranges = [];
+  let start = rows[0].busy_date;
+  let end   = rows[0].busy_date;
+  let reason = rows[0].reason || '';
+  for (let i = 1; i < rows.length; i++) {
+    const prev = new Date(end);
+    const cur  = new Date(rows[i].busy_date);
+    prev.setDate(prev.getDate() + 1);
+    const sameReason = (rows[i].reason || '') === reason;
+    if (cur.toISOString().slice(0,10) === prev.toISOString().slice(0,10) && sameReason) {
+      end = rows[i].busy_date;
+    } else {
+      ranges.push({ start, end, reason });
+      start = rows[i].busy_date;
+      end   = rows[i].busy_date;
+      reason = rows[i].reason || '';
+    }
+  }
+  ranges.push({ start, end, reason });
+  return ranges;
 }
 
 // ── My orders ─────────────────────────────────────────────────────────────────
@@ -1434,7 +1487,8 @@ async function showAdminModel(chatId, modelId) {
        { text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${m.id}` }],
       [{ text: '📋 Дублировать', callback_data: `adm_duplicate_${m.id}` },
        { text: '⭐ ' + (m.featured ? 'Убрать из топа' : 'В топ'), callback_data: `adm_featured_${m.id}` }],
-      [{ text: '📊 Статистика модели', callback_data: `adm_model_stats_${m.id}` }],
+      [{ text: '📊 Статистика модели', callback_data: `adm_model_stats_${m.id}` },
+       { text: '📅 Расписание', callback_data: `adm_model_cal_${m.id}` }],
       [archiveBtn],
       [{ text: '← К моделям', callback_data: 'adm_models_p_0_name_0' }],
     ]};
@@ -2502,6 +2556,63 @@ async function showModelStats(chatId, modelId) {
       [{ text: '← Модели', callback_data: 'adm_models_0' }],
     ]}
   });
+}
+
+// ─── Admin: Model Calendar ────────────────────────────────────────────────────
+
+async function showAdminModelCalendar(chatId, modelId) {
+  if (!isAdmin(chatId)) return;
+  const m = await get('SELECT id, name FROM models WHERE id=?', [modelId]).catch(() => null);
+  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+
+  // Upcoming 3 months of busy dates
+  const threeMonthsLater = new Date();
+  threeMonthsLater.setMonth(threeMonthsLater.getMonth() + 3);
+  const dateTo = threeMonthsLater.toISOString().slice(0, 10);
+
+  const busyRows = await query(
+    `SELECT id, busy_date, reason FROM model_busy_dates
+     WHERE model_id=? AND busy_date >= date('now') AND busy_date <= ?
+     ORDER BY busy_date`,
+    [modelId, dateTo]
+  ).catch(() => []);
+
+  let text = `📅 *Расписание: ${esc(m.name)}*\n\n`;
+
+  const busyButtons = [];
+
+  if (busyRows.length === 0) {
+    text += '✅ Свободна в ближайшие 3 месяца';
+  } else {
+    const ranges = groupBusyDatesIntoRanges(busyRows);
+    for (const r of ranges) {
+      const rangeStr = r.start === r.end
+        ? formatDateShort(r.start)
+        : `${formatDateShort(r.start)}–${formatDateShort(r.end)}`;
+      const reasonPart = r.reason ? `: ${esc(r.reason)}` : '';
+      text += `🔴 ${rangeStr}${reasonPart}\n`;
+      // Add delete button for the start date of the range (deletes that date entry)
+      // Find matching row id for start date
+      const startRow = busyRows.find(row => row.busy_date === r.start);
+      if (startRow) {
+        busyButtons.push([{
+          text: `🗑 Удалить: ${formatDateShort(r.start)}`,
+          callback_data: `adm_del_busy_${modelId}_${r.start}`
+        }]);
+      }
+    }
+    text += '\n✅ Свободна в остальные дни';
+  }
+
+  const keyboard = {
+    inline_keyboard: [
+      ...busyButtons,
+      [{ text: '➕ Добавить период', callback_data: `adm_add_busy_${modelId}` }],
+      [{ text: '← Назад', callback_data: `adm_model_${modelId}` }],
+    ]
+  };
+
+  return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
 }
 
 // ─── Quick Replies ────────────────────────────────────────────────────────────
@@ -4274,6 +4385,41 @@ function initBot(app) {
       return showModelStats(chatId, modelId);
     }
 
+    // ── Admin model calendar
+    if (data.startsWith('adm_model_cal_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_model_cal_', ''));
+      return showAdminModelCalendar(chatId, modelId);
+    }
+
+    // ── Admin: add busy period (start state)
+    if (data.startsWith('adm_add_busy_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_add_busy_', ''));
+      await setSession(chatId, `adm_add_busy_${modelId}`, { modelId });
+      return safeSend(chatId,
+        `📅 *Добавить занятый период*\n\nВведите дату или диапазон дат и причину через пробел:\n\n` +
+        `_Примеры:_\n\`15\\.05\\.2026 Съёмка Nike\`\n\`15\\.05\\.2026\\-20\\.05\\.2026 Мероприятие\``,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: `adm_model_cal_${modelId}` }]] }
+        }
+      );
+    }
+
+    // ── Admin: delete busy date
+    if (data.startsWith('adm_del_busy_')) {
+      if (!isAdmin(chatId)) return;
+      // format: adm_del_busy_{modelId}_{YYYY-MM-DD}
+      const rest = data.replace('adm_del_busy_', '');
+      const underIdx = rest.indexOf('_');
+      const modelId = parseInt(rest.slice(0, underIdx));
+      const busyDate = rest.slice(underIdx + 1);
+      await run('DELETE FROM model_busy_dates WHERE model_id=? AND busy_date=?', [modelId, busyDate]).catch(() => {});
+      await bot.answerCallbackQuery(q.id, { text: '🗑 Дата удалена' }).catch(() => {});
+      return showAdminModelCalendar(chatId, modelId);
+    }
+
     // ── All order notes (paginated)
     if (data.startsWith('adm_notes_')) {
       if (!isAdmin(chatId)) return;
@@ -5633,6 +5779,73 @@ function initBot(app) {
       }
     }
 
+    // ── Admin: add busy period input
+    if (isAdmin(chatId) && state.startsWith('adm_add_busy_')) {
+      const modelId = parseInt(state.replace('adm_add_busy_', ''));
+      await clearSession(chatId);
+      if (!modelId) return;
+
+      // Parse input: "dd.mm.yyyy[-dd.mm.yyyy] [reason]"
+      // e.g. "15.05.2026-20.05.2026 Съёмка Nike" or "15.05.2026 Съёмка"
+      const match = text.trim().match(/^(\d{2}\.\d{2}\.\d{4})(?:-(\d{2}\.\d{2}\.\d{4}))?\s*(.*)?$/);
+      if (!match) {
+        return safeSend(chatId,
+          '❌ Неверный формат\\. Введите дату в виде: `15\\.05\\.2026` или `15\\.05\\.2026\\-20\\.05\\.2026 Причина`',
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '← Отмена', callback_data: `adm_model_cal_${modelId}` }]] }
+          }
+        );
+      }
+
+      function parseDMY(str) {
+        const [dd, mm, yyyy] = str.split('.');
+        return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+      }
+
+      const dateFrom = parseDMY(match[1]);
+      const dateTo   = match[2] ? parseDMY(match[2]) : dateFrom;
+      const reason   = (match[3] || '').trim() || null;
+
+      // Validate dates
+      const fromD = new Date(dateFrom);
+      const toD   = new Date(dateTo);
+      if (isNaN(fromD.getTime()) || isNaN(toD.getTime()) || fromD > toD) {
+        return safeSend(chatId,
+          '❌ Неверные даты\\. Проверьте формат и порядок дат\\.',
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: `adm_model_cal_${modelId}` }]] }
+          }
+        );
+      }
+
+      // Insert all dates in range
+      let inserted = 0;
+      const cur = new Date(fromD);
+      while (cur <= toD) {
+        const dateStr = cur.toISOString().slice(0, 10);
+        await run(
+          'INSERT OR IGNORE INTO model_busy_dates (model_id, busy_date, reason) VALUES (?,?,?)',
+          [modelId, dateStr, reason]
+        ).catch(() => {});
+        inserted++;
+        cur.setDate(cur.getDate() + 1);
+      }
+
+      const rangeStr = dateFrom === dateTo
+        ? formatDateShort(dateFrom)
+        : `${formatDateShort(dateFrom)}–${formatDateShort(dateTo)}`;
+      await safeSend(chatId,
+        `✅ Добавлено *${inserted}* ${inserted === 1 ? 'дата' : 'дней'}: *${rangeStr}*${reason ? `\nПричина: ${esc(reason)}` : ''}`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '📅 К расписанию', callback_data: `adm_model_cal_${modelId}` }]] }
+        }
+      );
+      return;
+    }
+
     // ── Admin: add model text inputs
     if (isAdmin(chatId) && state.startsWith('adm_mdl_')) {
       const step = state.replace('adm_mdl_', '');
@@ -5838,10 +6051,35 @@ function initBot(app) {
 
     // ── Booking text inputs
     switch (state) {
-      case 'bk_s2_date':
+      case 'bk_s2_date': {
         if (!text || text.length < 3) return safeSend(chatId, '❌ Введите дату мероприятия:');
+        // Check if selected model is busy on this date
+        if (d.model_id) {
+          // Try to parse date entered as dd.mm.yyyy → YYYY-MM-DD for DB lookup
+          const dmyMatch = text.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+          if (dmyMatch) {
+            const isoDate = `${dmyMatch[3]}-${dmyMatch[2].padStart(2,'0')}-${dmyMatch[1].padStart(2,'0')}`;
+            const busyRow = await get(
+              'SELECT id FROM model_busy_dates WHERE model_id=? AND busy_date=?',
+              [d.model_id, isoDate]
+            ).catch(() => null);
+            if (busyRow) {
+              return safeSend(chatId,
+                '⚠️ Модель занята в этот день\\. Выберите другую дату или другую модель\\.',
+                {
+                  parse_mode: 'MarkdownV2',
+                  reply_markup: { inline_keyboard: [
+                    [{ text: '← Выбрать другую модель', callback_data: 'bk_start' }],
+                    [{ text: '❌ Отменить', callback_data: 'bk_cancel' }],
+                  ]}
+                }
+              );
+            }
+          }
+        }
         d.event_date = text;
         return bkStep2Duration(chatId, d);
+      }
 
       case 'bk_s2_loc':
         if (!text) return safeSend(chatId, '❌ Введите место проведения:');

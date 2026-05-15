@@ -1,0 +1,2 @@
+cd /home/user/Pablo/nevesty-models
+npm run lint:staged

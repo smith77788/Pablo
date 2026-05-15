@@ -49,7 +49,14 @@ module.exports = [
         isNaN: 'readonly',
         isFinite: 'readonly',
         encodeURIComponent: 'readonly',
-        decodeURIComponent: 'readonly'
+        decodeURIComponent: 'readonly',
+        fetch: 'readonly',
+        AbortController: 'readonly',
+        AbortSignal: 'readonly',
+        FormData: 'readonly',
+        Headers: 'readonly',
+        Request: 'readonly',
+        Response: 'readonly'
       }
     },
     rules: {

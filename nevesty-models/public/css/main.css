@@ -52,6 +52,7 @@ img { display: block; max-width: 100%; }
   backdrop-filter: blur(12px);
   padding: 14px 0;
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 20px rgba(0,0,0,0.3);
 }
 .nav-inner {
   display: flex; align-items: center; justify-content: space-between;
@@ -1198,3 +1199,189 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   opacity: 1;
   transform: translateY(0);
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   DARK MODE — CSS CUSTOM PROPERTIES (prefers-color-scheme)
+   The site is dark-by-default. Light mode applies when user
+   explicitly prefers light AND no manual override is saved.
+   Manual override via html.dark (forced dark) or html.light.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Light mode via system preference */
+@media (prefers-color-scheme: light) {
+  :root:not(.dark) {
+    --bg:  #f8f5f0;
+    --bg2: #f0ece4;
+    --bg3: #e8e2d8;
+    --border: #d4c9b8;
+    --text: #1a1814;
+    --text-muted: #5a5040;
+    --text-dim: #8a7860;
+    --white: #1a1814;
+  }
+
+  :root:not(.dark) body {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  /* Nav */
+  :root:not(.dark) .navbar {
+    background: rgba(248,245,240,0.9);
+    border-bottom: 1px solid var(--border);
+  }
+  :root:not(.dark) .navbar.scrolled {
+    background: rgba(248,245,240,0.97);
+  }
+  :root:not(.dark) .nav-mobile {
+    background: var(--bg);
+  }
+
+  /* Cards */
+  :root:not(.dark) .model-card,
+  :root:not(.dark) .service-card,
+  :root:not(.dark) .pricing-card,
+  :root:not(.dark) .testimonial-card,
+  :root:not(.dark) .booking-section,
+  :root:not(.dark) .filters-panel {
+    background: var(--bg3);
+    border-color: var(--border);
+  }
+
+  /* Forms */
+  :root:not(.dark) .form-control,
+  :root:not(.dark) .filter-search,
+  :root:not(.dark) .range-row input {
+    background: var(--bg2);
+    border-color: var(--border);
+    color: var(--text);
+  }
+
+  /* Modal */
+  :root:not(.dark) .modal {
+    background: var(--bg2);
+  }
+
+  /* Footer */
+  :root:not(.dark) .footer {
+    background: var(--bg2);
+    border-color: var(--border);
+  }
+
+  /* Section headings */
+  :root:not(.dark) .section-header h2,
+  :root:not(.dark) .hero h1,
+  :root:not(.dark) .modal-info h2 {
+    color: var(--text);
+  }
+
+  /* Skeleton shimmer in light mode */
+  :root:not(.dark) .model-card-skeleton::after {
+    background: linear-gradient(90deg, transparent 0%, rgba(201,169,110,0.15) 50%, transparent 100%);
+  }
+  :root:not(.dark) .model-card-skeleton {
+    background: var(--bg3);
+  }
+  :root:not(.dark) .skeleton {
+    background: linear-gradient(90deg, var(--bg3) 0%, var(--bg2) 40%, rgba(201,169,110,0.1) 50%, var(--bg2) 60%, var(--bg3) 100%);
+    background-size: 600px 100%;
+  }
+
+  /* Toast */
+  :root:not(.dark) .toast {
+    background: var(--bg2);
+    border-color: var(--border);
+    color: var(--text);
+  }
+
+  /* Stats bar */
+  :root:not(.dark) .stats-bar,
+  :root:not(.dark) .services {
+    background: var(--bg2);
+  }
+}
+
+/* Forced dark via html.dark class (manual toggle) */
+html.dark {
+  --bg:  #080808;
+  --bg2: #111111;
+  --bg3: #1a1a1a;
+  --border: #2a2a2a;
+  --text: #f0ede8;
+  --text-muted: #888;
+  --text-dim: #555;
+  --white: #ffffff;
+}
+
+/* ─── SKELETON CARD (catalog-specific class) ─────────────── */
+.skeleton-card {
+  background: linear-gradient(90deg, var(--bg3) 25%, var(--bg2) 50%, var(--bg3) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: 2px;
+  aspect-ratio: 3/4;
+  position: relative;
+  overflow: hidden;
+}
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── COOKIE BANNER (gold accent) ────────────────────────── */
+.cookie-banner {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 9998;
+  background: rgba(10,10,10,0.97);
+  border-top: 1px solid rgba(201,169,110,0.3);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  backdrop-filter: blur(12px);
+  transform: translateY(100%);
+  transition: transform 0.35s ease;
+}
+.cookie-banner.visible {
+  transform: translateY(0);
+}
+.cookie-banner p {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.cookie-banner a {
+  color: var(--gold);
+  text-decoration: underline;
+}
+.cookie-banner-btns {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.cookie-btn-accept {
+  padding: 9px 22px;
+  background: var(--gold);
+  color: #000;
+  border: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.cookie-btn-accept:hover { background: var(--gold-light); }
+.cookie-btn-more {
+  padding: 9px 16px;
+  background: transparent;
+  border: 1px solid rgba(201,169,110,0.4);
+  color: var(--gold);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.cookie-btn-more:hover { background: rgba(201,169,110,0.08); }

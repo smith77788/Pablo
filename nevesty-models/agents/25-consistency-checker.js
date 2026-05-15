@@ -34,7 +34,7 @@ class ConsistencyChecker extends Agent {
     const validStatuses = (validBlock.match(/'([^']+)'/g)||[]).map(s=>s.replace(/'/g,''));
     // Also accept VALID_STATUSES defined inline
     const validFull = validStatuses.length > 0 ? validStatuses :
-      (src.match(/VALID_STATUSES\s*=\s*\[([^\]]+)\]/)?.[1] || '').match(/'([^']+)'/g)?.map(s=>s.replace(/'/g,'')) || [];
+      (botSrc.match(/VALID_STATUSES\s*=\s*\[([^\]]+)\]/)?.[1] || '').match(/'([^']+)'/g)?.map(s=>s.replace(/'/g,'')) || [];
     const missingValid = expectedStatuses.filter(s => !validFull.includes(s));
     if (missingValid.length > 0 && validFull.length > 0) {
       this.addFinding('MEDIUM', `VALID_STATUSES неполный, не хватает: ${missingValid.join(', ')}`);

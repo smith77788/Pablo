@@ -793,17 +793,18 @@ fetch('/api/settings/public').then(r => r.json()).then(d => {
     html.dark input, html.dark textarea, html.dark select { background-color: #374151; border-color: #4b5563; color: #f9fafb; }
   </style>
 
-  <!-- Cookie Banner -->
-  <div id="cookie-banner" role="alertdialog" aria-labelledby="cookie-title" aria-describedby="cookie-desc" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:16px;z-index:5000;border-top:1px solid #333">
+  <!-- Cookie Banner (gold-accented, GDPR) -->
+  <div id="cookie-banner" role="alertdialog" aria-labelledby="cookie-title" aria-describedby="cookie-desc"
+       style="display:none;position:fixed;bottom:0;left:0;right:0;background:rgba(10,10,10,0.97);padding:16px 24px;z-index:9998;border-top:1px solid rgba(201,169,110,0.3);backdrop-filter:blur(12px);">
     <div style="max-width:1200px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
-      <p id="cookie-desc" style="margin:0;font-size:0.85rem;color:#ccc">
-        <span id="cookie-title" style="clip:rect(0,0,0,0);position:absolute;width:1px;height:1px">Уведомление об использовании cookies</span>
-        <span aria-hidden="true">🍪</span> Мы используем cookies для улучшения сервиса и аналитики.
-        <a href="/privacy" style="color:#e879a0;text-decoration:underline">Политика конфиденциальности</a>
+      <p id="cookie-desc" style="margin:0;font-size:0.85rem;color:var(--text-muted);flex:1;min-width:200px;line-height:1.5">
+        <span id="cookie-title" class="sr-only">Уведомление об использовании cookies</span>
+        Мы используем cookies для улучшения сайта.
+        <a href="/privacy.html" style="color:var(--gold);text-decoration:underline">Подробнее →</a>
       </p>
-      <div style="display:flex;gap:8px;flex-shrink:0">
-        <button onclick="NM.cookies.reject()" style="padding:8px 18px;font-size:0.8rem;border:1px solid #555;background:none;color:#ccc;cursor:pointer;border-radius:4px" aria-label="Отказаться от cookies">Отказаться</button>
-        <button onclick="NM.cookies.accept()" style="padding:8px 18px;font-size:0.8rem;background:#c9396f;border:none;color:#fff;cursor:pointer;border-radius:4px" aria-label="Принять cookies">Принять</button>
+      <div style="display:flex;gap:10px;flex-shrink:0">
+        <button onclick="NM.cookies.reject()" style="padding:9px 16px;font-size:0.82rem;border:1px solid rgba(201,169,110,0.4);background:transparent;color:var(--gold);cursor:pointer;" aria-label="Только необходимые cookies">Только нужные</button>
+        <button onclick="NM.cookies.accept()" style="padding:9px 22px;font-size:0.82rem;background:var(--gold);border:none;color:#000;cursor:pointer;font-weight:600;" aria-label="Принять все cookies">Принять</button>
       </div>
     </div>
   </div>
@@ -812,16 +813,23 @@ fetch('/api/settings/public').then(r => r.json()).then(d => {
   NM.cookies = {
     accept() {
       localStorage.setItem("cookie_consent", "accepted");
-      document.getElementById("cookie-banner").style.display = "none";
+      const b = document.getElementById("cookie-banner");
+      if (b) { b.style.transition = 'transform 0.3s ease'; b.style.transform = 'translateY(100%)'; setTimeout(() => b.style.display = 'none', 350); }
     },
     reject() {
       localStorage.setItem("cookie_consent", "rejected");
-      document.getElementById("cookie-banner").style.display = "none";
+      const b = document.getElementById("cookie-banner");
+      if (b) { b.style.transition = 'transform 0.3s ease'; b.style.transform = 'translateY(100%)'; setTimeout(() => b.style.display = 'none', 350); }
     }
   };
   document.addEventListener("DOMContentLoaded", () => {
     if (!localStorage.getItem("cookie_consent")) {
-      setTimeout(() => { document.getElementById("cookie-banner").style.display = "block"; }, 1000);
+      const b = document.getElementById("cookie-banner");
+      if (b) {
+        b.style.display = 'block';
+        b.style.transform = 'translateY(100%)';
+        setTimeout(() => { b.style.transition = 'transform 0.35s ease'; b.style.transform = 'translateY(0)'; }, 1000);
+      }
     }
   });
   </script>

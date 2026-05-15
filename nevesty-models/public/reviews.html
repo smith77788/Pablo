@@ -122,6 +122,7 @@
   </style>
 </head>
 <body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
 <header class="header" id="header">
   <div class="header-container">
     <a href="/" class="logo" aria-label="Nevesty Models — главная">
@@ -145,7 +146,7 @@
   </div>
 </header>
 
-<main class="reviews-page">
+<main class="reviews-page" id="main-content" role="main">
   <div class="reviews-container">
 
     <!-- Hero -->
@@ -195,28 +196,40 @@
       <p>Работали с нашим агентством? Поделитесь впечатлением — это помогает другим клиентам сделать выбор.<br>
       Для отправки отзыва потребуется номер телефона и номер заявки.</p>
 
-      <div class="write-review-form">
+      <div class="write-review-form" role="form" aria-label="Форма отзыва">
         <div class="form-row-2">
-          <input type="text" id="rw_name" placeholder="Ваше имя *" maxlength="100" />
-          <input type="tel" id="rw_phone" placeholder="Телефон * (+7 999 …)" maxlength="20" />
+          <div>
+            <label for="rw_name" class="sr-only">Ваше имя (обязательно)</label>
+            <input type="text" id="rw_name" placeholder="Ваше имя *" maxlength="100" aria-required="true" autocomplete="name" />
+          </div>
+          <div>
+            <label for="rw_phone" class="sr-only">Телефон (обязательно)</label>
+            <input type="tel" id="rw_phone" placeholder="Телефон * (+7 999 …)" maxlength="20" aria-required="true" autocomplete="tel" inputmode="tel" />
+          </div>
         </div>
-        <input type="text" id="rw_order" placeholder="Номер заявки * (NM-XXXXXX)" maxlength="30" />
+        <div>
+          <label for="rw_order" class="sr-only">Номер заявки (обязательно)</label>
+          <input type="text" id="rw_order" placeholder="Номер заявки * (NM-XXXXXX)" maxlength="30" aria-required="true" />
+        </div>
 
         <div>
-          <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:8px">Оценка *</div>
-          <div class="rating-selector" id="ratingSelector">
-            <input type="radio" name="rating" id="r5" value="5"><label for="r5">★</label>
-            <input type="radio" name="rating" id="r4" value="4"><label for="r4">★</label>
-            <input type="radio" name="rating" id="r3" value="3"><label for="r3">★</label>
-            <input type="radio" name="rating" id="r2" value="2"><label for="r2">★</label>
-            <input type="radio" name="rating" id="r1" value="1"><label for="r1">★</label>
+          <div id="rating-label" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:8px">Оценка *</div>
+          <div class="rating-selector" id="ratingSelector" role="radiogroup" aria-labelledby="rating-label" aria-required="true">
+            <input type="radio" name="rating" id="r5" value="5"><label for="r5" aria-label="5 звёзд">★</label>
+            <input type="radio" name="rating" id="r4" value="4"><label for="r4" aria-label="4 звезды">★</label>
+            <input type="radio" name="rating" id="r3" value="3"><label for="r3" aria-label="3 звезды">★</label>
+            <input type="radio" name="rating" id="r2" value="2"><label for="r2" aria-label="2 звезды">★</label>
+            <input type="radio" name="rating" id="r1" value="1"><label for="r1" aria-label="1 звезда">★</label>
           </div>
         </div>
 
-        <textarea id="rw_text" placeholder="Ваш отзыв * (минимум 20 символов)" maxlength="2000"></textarea>
+        <div>
+          <label for="rw_text" class="sr-only">Текст отзыва (обязательно, минимум 20 символов)</label>
+          <textarea id="rw_text" placeholder="Ваш отзыв * (минимум 20 символов)" maxlength="2000" aria-required="true"></textarea>
+        </div>
 
-        <button class="btn btn-gold" onclick="submitReview()" id="submitReviewBtn">Отправить отзыв</button>
-        <div id="rwStatus" style="font-size:0.82rem;color:var(--text-dim)"></div>
+        <button class="btn btn-gold" onclick="submitReview()" id="submitReviewBtn" aria-label="Отправить отзыв">Отправить отзыв</button>
+        <div id="rwStatus" role="alert" aria-live="polite" style="font-size:0.82rem;color:var(--text-dim)"></div>
       </div>
     </div>
 
@@ -240,6 +253,8 @@
 </footer>
 
 <script src="/js/main.js" defer></script>
+<script src="/js/darkmode.js"></script>
+<script src="/js/cookie-consent.js" defer></script>
 <script>
 let allReviews = [];
 let currentRating = '';

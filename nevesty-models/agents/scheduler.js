@@ -10,7 +10,8 @@
  * Telegram → 💬 Обсуждения или 📡 Фид агентов.
  */
 'use strict';
-require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 let runCheck;
 try {
@@ -29,7 +30,7 @@ let cycleNumber   = 0;
 let lastScore     = null;
 let totalFixed    = 0;
 let totalCycles   = 0;
-let startupTime   = Date.now();
+const startupTime   = Date.now();
 let cycleRunning  = false;  // circuit breaker: skip if prev cycle still running
 
 // ─── Детальная запись каждого цикла ──────────────────────────────────────────
