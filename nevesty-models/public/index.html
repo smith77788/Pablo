@@ -158,7 +158,7 @@
     <div class="container">
       <div class="stats-grid">
         <div class="stat-item">
-          <span class="stat-num" data-count="200">0</span>
+          <span class="stat-num" data-count="200" id="live-model-count">0</span>
           <div class="stat-label">Моделей в базе</div>
         </div>
         <div class="stat-item">
@@ -173,6 +173,21 @@
           <span class="stat-num" data-count="150">0</span>
           <div class="stat-label">Клиентов</div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PARTNERS -->
+  <section class="partners-section" aria-label="Наши партнёры">
+    <div class="container">
+      <p class="partners-label">Работаем с брендами</p>
+      <div class="partners-list" aria-hidden="true">
+        <span>L'Oréal</span>
+        <span>Mercedes-Benz</span>
+        <span>Sberbank</span>
+        <span>Yandex</span>
+        <span>Samsung</span>
+        <span>MTC</span>
       </div>
     </div>
   </section>
@@ -279,6 +294,11 @@
       <div class="section-tag">Готовы начать?</div>
       <h2>Создайте незабываемый образ</h2>
       <p>Свяжитесь с нами сегодня и получите персональную консультацию от нашего менеджера</p>
+      <div class="trust-badges">
+        <span>&#10003; Быстрый ответ 15 мин</span>
+        <span>&#10003; Опыт с 2014 года</span>
+        <span>&#10003; 500+ успешных проектов</span>
+      </div>
       <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
         <a href="/booking.html" class="btn-primary" style="font-size:0.85rem;padding:18px 48px;">Оформить заявку</a>
         <button class="btn-outline" onclick="openQuickBooking()" style="font-size:0.85rem;padding:18px 48px;background:none;cursor:pointer;" aria-label="Заказать звонок"><span aria-hidden="true">⚡</span> Заказать звонок</button>
@@ -549,6 +569,9 @@
     </div>
   </section>
 
+  <!-- SCROLL TO TOP -->
+  <button id="scroll-top" aria-label="Вернуться наверх" title="Вернуться наверх">&#8679;</button>
+
   <!-- FOOTER -->
   <footer class="footer" role="contentinfo">
     <div class="container">
@@ -767,6 +790,23 @@ fetch('/api/settings/public').then(r => r.json()).then(d => {
   <style>
     html { scroll-behavior: smooth; }
 
+    /* ── Partners section ── */
+    .partners-section { padding: 36px 0; background: var(--bg3); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); text-align: center; }
+    .partners-label { font-size: 0.65rem; letter-spacing: 3px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 20px; }
+    .partners-list { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: center; align-items: center; }
+    .partners-list span { font-size: 0.95rem; font-weight: 600; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; opacity: 0.55; transition: opacity 0.2s; }
+    .partners-list span:hover { opacity: 1; }
+
+    /* ── Trust badges ── */
+    .trust-badges { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content: center; margin-bottom: 28px; }
+    .trust-badges span { font-size: 0.82rem; color: var(--text-muted); }
+    .trust-badges span::first-letter { color: var(--gold); }
+
+    /* ── Scroll-to-top ── */
+    #scroll-top { position: fixed; bottom: 90px; right: 24px; z-index: 500; width: 44px; height: 44px; background: var(--gold); color: #000; border: none; border-radius: 50%; font-size: 1.4rem; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.3s ease, transform 0.2s ease; pointer-events: none; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    #scroll-top.visible { opacity: 1; pointer-events: auto; }
+    #scroll-top:hover { transform: translateY(-2px); }
+
     /* Fade-in animation */
     @keyframes fadeInUp {
       from { opacity: 0; transform: translateY(20px); }
@@ -859,5 +899,50 @@ fetch('/api/settings/public').then(r => r.json()).then(d => {
   }
   </script>
   <script src="/js/cookie-consent.js" defer></script>
+  <script>
+  // ── Animated stat counters (IntersectionObserver) ──
+  (function animateCounters() {
+    const counters = document.querySelectorAll('.stat-num[data-count]');
+    if (!counters.length || !window.IntersectionObserver) return;
+    const observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (!entry.isIntersecting) return;
+        const el = entry.target;
+        const target = parseInt(el.dataset.count, 10);
+        if (!target) return;
+        let current = 0;
+        const step = Math.max(1, Math.ceil(target / 60));
+        const timer = setInterval(function() {
+          current = Math.min(current + step, target);
+          el.textContent = current + (el.dataset.suffix || '+');
+          if (current >= target) clearInterval(timer);
+        }, 30);
+        observer.unobserve(el);
+      });
+    }, { threshold: 0.5 });
+    counters.forEach(function(c) { observer.observe(c); });
+  })();
+
+  // ── Live model count from API ──
+  fetch('/api/models?limit=1').then(function(r) { return r.json(); }).then(function(d) {
+    var countEl = document.getElementById('live-model-count');
+    if (countEl && d && d.total) {
+      countEl.dataset.count = d.total;
+    }
+  }).catch(function() {});
+
+  // ── Scroll-to-top button ──
+  (function() {
+    var btn = document.getElementById('scroll-top');
+    if (!btn) return;
+    window.addEventListener('scroll', function() {
+      if (window.scrollY > 400) { btn.classList.add('visible'); }
+      else { btn.classList.remove('visible'); }
+    }, { passive: true });
+    btn.addEventListener('click', function() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  })();
+  </script>
 </body>
 </html>
