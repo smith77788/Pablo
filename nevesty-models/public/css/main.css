@@ -1385,3 +1385,23 @@ html.dark {
   transition: all 0.2s;
 }
 .cookie-btn-more:hover { background: rgba(201,169,110,0.08); }
+
+/* ─── QUICK BOOKING MODAL ────────────────────────── */
+.qb-modal { display: none; position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; }
+.qb-modal.open { display: flex; }
+.qb-modal-box { background: var(--bg2); border: 1px solid var(--gold); padding: 32px; max-width: 480px; width: calc(100% - 32px); }
+.qb-modal-title { font-size: 1.4rem; color: var(--gold); margin-bottom: 4px; }
+.qb-modal-sub { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 24px; }
+.qb-input { width: 100%; padding: 12px 16px; background: var(--bg3); border: 1px solid var(--border); color: var(--white); font-size: 1rem; margin-bottom: 12px; }
+.qb-input:focus { outline: none; border-color: var(--gold); }
+.qb-btn { width: 100%; padding: 14px; background: var(--gold); color: #000; font-weight: 700; border: none; cursor: pointer; font-size: 1rem; }
+.qb-btn:hover { background: #c9a00e; }
+.qb-close { float: right; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.4rem; line-height: 1; margin-top: -8px; }
+.qb-success { display: none; text-align: center; padding: 20px 0; }
+.qb-success .qb-success-icon { font-size: 3rem; }
+.qb-success p { color: var(--text-muted); margin-top: 12px; }
+
+/* ─── FLOATING CTA BUTTON ────────────────────────── */
+.floating-cta { position: fixed; bottom: 80px; right: 20px; background: var(--gold); color: #000; border: none; padding: 14px 20px; font-weight: 700; cursor: pointer; z-index: 100; box-shadow: 0 4px 20px rgba(212,175,55,0.4); transition: background 0.2s, transform 0.2s; }
+.floating-cta:hover { background: #c9a00e; transform: scale(1.05); }
+@media (max-width: 480px) { .floating-cta { bottom: 90px; right: 12px; padding: 12px 16px; font-size: 0.9rem; } }
