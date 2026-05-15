@@ -1092,6 +1092,25 @@ async function showAdminStats(chatId) {
       });
     }
 
+    // Top-5 models by view count
+    let topViewed = [];
+    try {
+      topViewed = await query(`
+        SELECT name, view_count,
+          (SELECT COUNT(*) FROM orders WHERE model_id=models.id AND status NOT IN ('cancelled')) as order_count
+        FROM models
+        ORDER BY view_count DESC
+        LIMIT 5
+      `);
+    } catch {}
+
+    if (topViewed.length) {
+      text += `\n*👁 Топ\\-5 по просмотрам:*\n`;
+      topViewed.forEach((m, i) => {
+        text += `  ${i+1}\\. ${esc(m.name)} — 👁 ${esc(String(m.view_count || 0))} просм\\., 📋 ${esc(String(m.order_count || 0))} заявок\n`;
+      });
+    }
+
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [

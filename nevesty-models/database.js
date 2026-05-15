@@ -247,6 +247,11 @@ async function initDatabase() {
   await run(`ALTER TABLE models ADD COLUMN order_count INTEGER DEFAULT 0`).catch(() => {});
   await run(`ALTER TABLE models ADD COLUMN view_count INTEGER DEFAULT 0`).catch(() => {});
 
+  // UTM tracking columns on orders
+  await run(`ALTER TABLE orders ADD COLUMN utm_source TEXT DEFAULT ''`).catch(() => {});
+  await run(`ALTER TABLE orders ADD COLUMN utm_medium TEXT DEFAULT ''`).catch(() => {});
+  await run(`ALTER TABLE orders ADD COLUMN utm_campaign TEXT DEFAULT ''`).catch(() => {});
+
   // Indexes for frequent queries
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_model_id ON orders(model_id)`);
