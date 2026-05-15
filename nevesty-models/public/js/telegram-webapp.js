@@ -77,7 +77,7 @@ class TelegramApp {
    * @param {'home'|'catalog'|'booking'|'faq'} page
    */
   navigate(page) {
-    const validPages = ['home', 'catalog', 'booking', 'faq'];
+    const validPages = ['home', 'catalog', 'booking', 'faq', 'orders'];
     if (!validPages.includes(page)) return;
 
     // Switch active page
@@ -109,8 +109,13 @@ class TelegramApp {
     // Page-specific logic
     if (page === 'booking') {
       this._setupBookingPage();
+    } else if (page === 'faq') {
+      this._loadFAQ();
+      this.hideMainButton();
+    } else if (page === 'orders') {
+      this._setupOrdersPage();
+      this.hideMainButton();
     } else {
-      // Hide MainButton when leaving booking
       this.hideMainButton();
     }
 
@@ -359,6 +364,95 @@ class TelegramApp {
 
     this.showMainButton('✅ Отправить заявку', () => this.submitBooking());
     if (!filled) this.tg?.MainButton?.disable();
+  }
+
+  // ── loadOrders ────────────────────────────────────────────────────────────
+
+  async loadOrders(phone) {
+    const list = document.getElementById('orders-list');
+    if (!list) return;
+    if (!phone || phone.replace(/\D/g, '').length < 10) {
+      list.innerHTML = '<div class="orders-empty">Введите номер телефона</div>';
+      return;
+    }
+    list.innerHTML = '<div class="orders-loading"><div class="spinner"></div></div>';
+    try {
+      const r = await fetch(`/api/orders/by-phone?phone=${encodeURIComponent(phone)}`);
+      const d = await r.json();
+      const orders = d.orders || [];
+      if (!orders.length) {
+        list.innerHTML = '<div class="orders-empty">Заявки не найдены</div>';
+        return;
+      }
+      list.innerHTML = orders.map(o => this._orderCardHTML(o)).join('');
+    } catch {
+      list.innerHTML = '<div class="orders-empty">Ошибка загрузки. Попробуйте позже.</div>';
+    }
+  }
+
+  _setupOrdersPage() {
+    const phone = document.getElementById('orders-phone');
+    if (!phone) return;
+    // Pre-fill from Telegram user data if available
+    const tgPhone = this.tg?.initDataUnsafe?.user?.phone_number;
+    if (tgPhone && !phone.value) {
+      phone.value = tgPhone;
+      this.loadOrders(tgPhone);
+    } else if (phone.value) {
+      this.loadOrders(phone.value);
+    }
+  }
+
+  _orderCardHTML(o) {
+    const statusLabels = {
+      new: '🆕 Новая', confirmed: '✅ Подтверждена', in_progress: '⚙️ В работе',
+      completed: '🎉 Завершена', cancelled: '❌ Отменена', reviewing: '👀 На рассмотрении'
+    };
+    const statusClass = { new: 'new', confirmed: 'confirmed', in_progress: 'progress',
+      completed: 'done', cancelled: 'cancelled', reviewing: 'new' };
+    const status = o.status || 'new';
+    const label = statusLabels[status] || status;
+    const cls = statusClass[status] || 'new';
+    const date = o.event_date ? new Date(o.event_date).toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+    return `
+      <div class="order-card order-status-${cls}">
+        <div class="order-card-header">
+          <span class="order-number">#${this._esc(o.order_number || '')}</span>
+          <span class="order-badge badge-${cls}">${this._esc(label)}</span>
+        </div>
+        <div class="order-card-row">📅 ${this._esc(date)}</div>
+        <div class="order-card-row">🎭 ${this._esc(o.event_type || '—')}</div>
+      </div>`;
+  }
+
+  // ── _loadFAQ ──────────────────────────────────────────────────────────────
+
+  async _loadFAQ() {
+    const list = document.querySelector('#page-faq .faq-list');
+    if (!list || list.dataset.loaded) return;
+    try {
+      const r = await fetch('/api/faq');
+      const items = await r.json();
+      if (!Array.isArray(items) || !items.length) return;
+      list.innerHTML = items.map(item => {
+        const q = this._esc(item.question || item.q || '');
+        const a = this._esc(item.answer || item.a || '');
+        return `
+          <div class="faq-item">
+            <button class="faq-question">${q}<span class="faq-arrow">⌄</span></button>
+            <div class="faq-answer">${a}</div>
+          </div>`;
+      }).join('');
+      list.dataset.loaded = '1';
+      list.querySelectorAll('.faq-question').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const item = btn.closest('.faq-item');
+          const isOpen = item.classList.contains('open');
+          list.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+          if (!isOpen) item.classList.add('open');
+        });
+      });
+    } catch {}
   }
 
   _onBookingSuccess(orderNumber) {

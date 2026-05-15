@@ -488,6 +488,36 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ── Orders page ─────────────────────────────────── */
+    .orders-search-wrap { padding: 0 16px 16px; }
+    #orders-list { padding: 0 16px 24px; display: flex; flex-direction: column; gap: 12px; }
+    .orders-empty { text-align: center; color: var(--tg-hint); padding: 32px 0; font-size: 0.9rem; }
+    .orders-loading { display: flex; justify-content: center; padding: 32px 0; }
+    .order-card {
+      background: var(--tg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .order-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .order-number { font-weight: 600; font-size: 0.9rem; color: var(--tg-text); }
+    .order-badge {
+      font-size: 0.75rem;
+      padding: 3px 10px;
+      border-radius: 12px;
+    }
+    .badge-new { background: rgba(100,149,237,0.2); color: #6495ED; }
+    .badge-confirmed { background: rgba(201,169,110,0.2); color: var(--gold); }
+    .badge-progress { background: rgba(255,165,0,0.2); color: orange; }
+    .badge-done { background: rgba(50,205,50,0.2); color: limegreen; }
+    .badge-cancelled { background: rgba(220,20,60,0.15); color: crimson; }
+    .order-card-row { font-size: 0.82rem; color: var(--tg-hint); margin-top: 4px; }
+
     /* ── Toast notification ──────────────────────────── */
     #toast {
       position: fixed;
@@ -740,6 +770,27 @@
       </div>
     </section>
 
+    <!-- ORDERS PAGE -->
+    <section id="page-orders" class="page">
+      <div class="page-header">
+        <div class="page-title">Мои заявки</div>
+        <div class="page-subtitle">Введите телефон для поиска заявок</div>
+      </div>
+
+      <div class="orders-search-wrap">
+        <div class="form-group">
+          <label class="form-label" for="orders-phone">Номер телефона</label>
+          <input class="form-input" id="orders-phone" type="tel"
+            placeholder="+7 (___) ___-__-__" autocomplete="tel" />
+        </div>
+        <button class="booking-submit-btn" style="margin-top:8px" id="orders-search-btn">
+          🔍 Найти заявки
+        </button>
+      </div>
+
+      <div id="orders-list"></div>
+    </section>
+
   </div><!-- /#pages -->
 
   <!-- ── Bottom navigation ──────────────────────────────── -->
@@ -760,6 +811,10 @@
       <button class="nav-tab" data-nav="faq">
         <span class="tab-icon">❓</span>
         <span>FAQ</span>
+      </button>
+      <button class="nav-tab" data-nav="orders">
+        <span class="tab-icon">📋</span>
+        <span>Заявки</span>
       </button>
     </div>
   </nav>
@@ -811,6 +866,23 @@
         if (!isOpen) item.classList.add('open');
       });
     });
+
+    // ── Orders search
+    const ordersSearchBtn = document.getElementById('orders-search-btn');
+    if (ordersSearchBtn) {
+      ordersSearchBtn.addEventListener('click', () => {
+        const phone = document.getElementById('orders-phone')?.value || '';
+        App.loadOrders(phone);
+      });
+    }
+    const ordersPhone = document.getElementById('orders-phone');
+    if (ordersPhone) {
+      ordersPhone.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          App.loadOrders(ordersPhone.value);
+        }
+      });
+    }
 
     // ── Booking form
     const bookingForm = document.getElementById('webapp-booking-form');
