@@ -1131,6 +1131,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   }
 }
 
+/* ─── REVIEWS SECTION ────────────────────────────── */
+.reviews-section { padding: 80px 0; background: var(--bg2, #111); }
+.review-card { background: var(--bg2, #1a1a1a); border-radius: 12px; padding: 24px; border: 1px solid var(--border, #2a2a2a); }
+.review-stars { color: #f0b429; font-size: 1.2rem; margin-bottom: 12px; }
+.review-text { color: var(--text-muted, #aaa); font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px; }
+.review-author { font-weight: 600; color: var(--white, #fff); font-size: 0.875rem; }
+.review-model { color: var(--gold, #f0b429); font-size: 0.8rem; }
+
 /* ─── REVIEWS GRID (dynamic) ─────────────────────── */
 .reviews-grid {
   display: grid;

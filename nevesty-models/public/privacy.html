@@ -14,65 +14,181 @@
   <meta property="og:locale" content="ru_RU">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@nevesty_models">
-  <meta name="robots" content="index, follow">
+  <meta name="robots" content="noindex">
   <link rel="canonical" href="https://nevesty-models.ru/privacy.html">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
+  <link rel="stylesheet" href="/css/main.css">
 </head>
-<body class="bg-gray-50">
-  <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-pink-600 text-white px-4 py-2 rounded z-50">
-    Перейти к содержимому
-  </a>
-  <div id="main-content" class="max-w-4xl mx-auto px-4 py-12">
-    <h1 class="text-3xl font-bold text-gray-900 mb-8">Политика конфиденциальности</h1>
+<body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
 
-    <div class="bg-white rounded-2xl shadow-sm p-8 space-y-6 text-gray-700">
+  <!-- NAVBAR -->
+  <nav class="navbar" id="navbar" role="navigation" aria-label="Главное меню">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links" role="list">
+        <a href="/catalog.html">Модели</a>
+        <a href="/pricing.html">Цены</a>
+        <a href="/cases.html">Кейсы</a>
+        <a href="/about.html">О нас</a>
+        <a href="/faq.html">FAQ</a>
+        <a href="/contact.html">Контакты</a>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- MOBILE MENU -->
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+    <a href="/catalog.html">Модели</a>
+    <a href="/pricing.html">Цены</a>
+    <a href="/cases.html">Кейсы</a>
+    <a href="/about.html">О нас</a>
+    <a href="/faq.html">FAQ</a>
+    <a href="/contact.html">Контакты</a>
+    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
+  </nav>
+
+  <main id="main-content" tabindex="-1" style="max-width:800px;margin:100px auto 80px;padding:0 24px">
+    <div class="section-tag" style="margin-bottom:16px">Юридическая информация</div>
+    <h1 style="font-size:2rem;color:var(--white);margin-bottom:8px">Политика конфиденциальности</h1>
+    <p style="color:var(--text-muted);margin-bottom:48px;font-size:0.875rem">Последнее обновление: май 2026</p>
+
+    <div style="display:flex;flex-direction:column;gap:36px">
+
       <section aria-labelledby="section-collect">
-        <h2 id="section-collect" class="text-xl font-semibold text-gray-900 mb-3">Какие данные мы собираем</h2>
-        <ul class="list-disc list-inside space-y-2">
-          <li>Имя и контактные данные при заполнении заявки</li>
-          <li>История заявок и взаимодействий с сервисом</li>
-          <li>Технические данные: IP-адрес, тип браузера (через аналитику)</li>
+        <h2 id="section-collect" style="font-size:1.25rem;color:var(--gold);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)">1. Сбор данных</h2>
+        <p style="color:var(--text);line-height:1.7;margin-bottom:12px">Мы собираем следующие данные при работе с сайтом и Telegram-ботом:</p>
+        <ul style="color:var(--text-muted);line-height:1.8;padding-left:20px">
+          <li>Имя, телефон, email — для обработки заявок на бронирование</li>
+          <li>Telegram ID и имя пользователя — для работы через Telegram-бота</li>
+          <li>IP-адрес и тип браузера — через системы аналитики</li>
+          <li>Параметры посещения сайта (через Google Analytics и Яндекс.Метрику — при наличии согласия)</li>
         </ul>
       </section>
 
       <section aria-labelledby="section-use">
-        <h2 id="section-use" class="text-xl font-semibold text-gray-900 mb-3">Как мы используем данные</h2>
-        <ul class="list-disc list-inside space-y-2">
-          <li>Для обработки и выполнения ваших заявок</li>
-          <li>Для связи с вами по вопросам заявки</li>
-          <li>Для улучшения качества сервиса (аналитика)</li>
+        <h2 id="section-use" style="font-size:1.25rem;color:var(--gold);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)">2. Использование данных</h2>
+        <p style="color:var(--text);line-height:1.7;margin-bottom:12px">Собранные данные используются исключительно для:</p>
+        <ul style="color:var(--text-muted);line-height:1.8;padding-left:20px">
+          <li>Обработки и исполнения заявок на бронирование моделей</li>
+          <li>Связи с клиентами по вопросам их заявок</li>
+          <li>Улучшения качества сервиса (аналитика)</li>
         </ul>
       </section>
 
       <section aria-labelledby="section-cookies">
-        <h2 id="section-cookies" class="text-xl font-semibold text-gray-900 mb-3">Cookies</h2>
-        <p>Мы используем cookies для аналитики (Google Analytics, Яндекс.Метрика) и улучшения сервиса. Вы можете отказаться от cookies через баннер на сайте.</p>
+        <h2 id="section-cookies" style="font-size:1.25rem;color:var(--gold);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)">3. Cookies</h2>
+        <p style="color:var(--text);line-height:1.7;margin-bottom:12px">Мы используем следующие типы cookies:</p>
+        <ul style="color:var(--text-muted);line-height:1.8;padding-left:20px">
+          <li><strong style="color:var(--text)">Необходимые:</strong> хранение согласия на использование cookies (nm_cookie_consent)</li>
+          <li><strong style="color:var(--text)">Аналитические:</strong> Google Analytics и Яндекс.Метрика для понимания использования сайта (только с согласия)</li>
+        </ul>
+        <p style="color:var(--text-muted);line-height:1.7;margin-top:12px">Вы можете изменить настройки cookies в любое время через баннер на сайте.</p>
+      </section>
+
+      <section aria-labelledby="section-third-party">
+        <h2 id="section-third-party" style="font-size:1.25rem;color:var(--gold);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)">4. Передача данных третьим лицам</h2>
+        <p style="color:var(--text);line-height:1.7;margin-bottom:12px">Мы не продаём и не передаём ваши персональные данные третьим лицам, за исключением:</p>
+        <ul style="color:var(--text-muted);line-height:1.8;padding-left:20px">
+          <li>Google Analytics (аналитика, только при согласии)</li>
+          <li>Яндекс.Метрика (аналитика, только при согласии)</li>
+          <li>Telegram (при использовании бота — данные хранятся согласно политике Telegram)</li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="section-storage">
+        <h2 id="section-storage" style="font-size:1.25rem;color:var(--gold);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)">5. Хранение данных</h2>
+        <p style="color:var(--text-muted);line-height:1.7">Данные хранятся на защищённых серверах. Срок хранения данных заявок — 3 года с момента создания. После истечения срока данные удаляются.</p>
       </section>
 
       <section aria-labelledby="section-rights">
-        <h2 id="section-rights" class="text-xl font-semibold text-gray-900 mb-3">Ваши права</h2>
-        <p>Вы можете запросить удаление ваших данных, написав нам на email: <a href="mailto:info@nevesty-models.ru" class="text-pink-600 hover:underline">info@nevesty-models.ru</a></p>
+        <h2 id="section-rights" style="font-size:1.25rem;color:var(--gold);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)">6. Ваши права</h2>
+        <p style="color:var(--text);line-height:1.7;margin-bottom:12px">Вы имеете право:</p>
+        <ul style="color:var(--text-muted);line-height:1.8;padding-left:20px">
+          <li>Запросить копию своих данных</li>
+          <li>Потребовать исправления неточных данных</li>
+          <li>Потребовать удаления данных</li>
+          <li>Отозвать согласие на обработку данных в любой момент</li>
+        </ul>
+        <p style="color:var(--text-muted);line-height:1.7;margin-top:12px">Для реализации этих прав свяжитесь с нами через <a href="/contact.html" style="color:var(--gold);text-decoration:underline">форму обратной связи</a>.</p>
       </section>
+
+      <section aria-labelledby="section-security">
+        <h2 id="section-security" style="font-size:1.25rem;color:var(--gold);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)">7. Безопасность</h2>
+        <p style="color:var(--text-muted);line-height:1.7">Мы применяем технические и организационные меры для защиты ваших данных: шифрование передаваемых данных (HTTPS), ограниченный доступ к базе данных, регулярное резервное копирование.</p>
+      </section>
+
+      <section aria-labelledby="section-contact">
+        <h2 id="section-contact" style="font-size:1.25rem;color:var(--gold);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)">8. Контакты</h2>
+        <p style="color:var(--text-muted);line-height:1.7">По вопросам конфиденциальности обращайтесь:</p>
+        <p style="color:var(--text-muted);line-height:1.7">
+          <strong style="color:var(--text)">Nevesty Models</strong>, Москва<br>
+          Email: <a href="mailto:info@nevesty-models.ru" style="color:var(--gold)">info@nevesty-models.ru</a><br>
+          Telegram: <a href="https://t.me/nevesty_models" target="_blank" rel="noopener" style="color:var(--gold)">@nevesty_models</a>
+        </p>
+      </section>
+
     </div>
 
-    <div class="mt-8 text-center">
-      <a href="/" class="text-pink-600 hover:underline">← На главную</a>
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border)">
+      <a href="/" style="color:var(--gold);text-decoration:none;font-size:0.875rem">← На главную</a>
     </div>
-  </div>
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="footer" role="contentinfo">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="nav-logo" style="font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--gold)">NEVESTY <span style="color:var(--text)">MODELS</span></div>
+          <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Агентство</h4>
+          <a href="/catalog.html">Каталог моделей</a>
+          <a href="/pricing.html">Цены</a>
+          <a href="/cases.html">Кейсы</a>
+          <a href="/about.html">О нас</a>
+          <a href="/contact.html">Контакты</a>
+        </div>
+        <div class="footer-col">
+          <h4>Клиентам</h4>
+          <a href="/booking.html">Оформить заявку</a>
+          <a href="/cabinet.html">Мои заявки</a>
+          <a href="/faq.html">FAQ</a>
+          <a href="/privacy.html" aria-current="page" style="color:var(--gold)">Конфиденциальность</a>
+        </div>
+        <div class="footer-col">
+          <h4>Связаться</h4>
+          <a href="tel:+78005550000">+7 (800) 555-00-00</a>
+          <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
+          <a href="https://t.me/nevesty_models" target="_blank" rel="noopener">Telegram</a>
+          <a href="https://instagram.com/nevesty_models" target="_blank" rel="noopener">Instagram</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>© 2026 Nevesty Models. Все права защищены.</p>
+        <div class="footer-socials" aria-label="Социальные сети">
+          <a href="https://instagram.com/nevesty_models" target="_blank" rel="noopener" aria-label="Instagram"><span aria-hidden="true">📸</span></a>
+          <a href="https://t.me/nevesty_models" target="_blank" rel="noopener" aria-label="Telegram"><span aria-hidden="true">✈</span></a>
+          <a href="https://vk.com/nevesty_models" target="_blank" rel="noopener" aria-label="ВКонтакте"><span aria-hidden="true">V</span></a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/js/main.js" defer></script>
+  <script src="/js/darkmode.js"></script>
+  <script src="/js/cookie-consent.js" defer></script>
+
   <script type="application/ld+json">
 [
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru",
-    "logo": "https://nevesty-models.ru/og-image.jpg",
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "contactType": "customer service",
-      "availableLanguage": "Russian"
-    }
-  },
   {
     "@context": "https://schema.org",
     "@type": "WebPage",

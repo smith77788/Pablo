@@ -1308,6 +1308,24 @@ router.get('/reviews', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Reviews (public, explicit endpoint) ──────────────────────────────────────
+router.get('/reviews/public', async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 6, 20);
+    const rows = await query(
+      `SELECT r.id, r.rating, r.text, r.client_name as author_name, r.created_at,
+              m.name as model_name
+       FROM reviews r
+       LEFT JOIN models m ON m.id = r.model_id
+       WHERE r.approved = 1
+       ORDER BY r.created_at DESC
+       LIMIT ?`,
+      [limit]
+    );
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
 // ─── Reviews (admin) ──────────────────────────────────────────────────────────
 router.get('/admin/reviews', auth, async (req, res, next) => {
   try {
