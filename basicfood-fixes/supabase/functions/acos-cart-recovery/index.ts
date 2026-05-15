@@ -197,65 +197,80 @@ Deno.serve(async (req) => {
       for (const p of products ?? []) productNameMap.set(p.id, p.name);
     }
 
-    let sent = 0;
-    let orphanedCodes = 0;
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-    for (const [userId, cart] of userCartMap.entries()) {
-      const chatId = tgMap.get(userId);
-      if (!chatId) continue;
+    // Parallel send: each user's flow is independent
+    type SendResult =
+      | { type: "sent"; userId: string; productId: string | null; code: string; chatId: number }
+      | { type: "failed"; userId: string; productId: string | null; code: string; chatId: number }
+      | { type: "skip" };
 
-      const productName = (cart.product_id && productNameMap.get(cart.product_id)) || "ваші ласощі";
+    const sendResults: SendResult[] = await Promise.all(
+      [...userCartMap.entries()].map(async ([userId, cart]): Promise<SendResult> => {
+        const chatId = tgMap.get(userId);
+        if (!chatId) return { type: "skip" };
 
-      // Create single-use promo code
-      const code = generateCode();
-      const { error: pcErr } = await supabase.from("promo_codes").insert({
-        code,
-        discount_type: "percent",
-        discount_value: 10,
-        max_uses: 1,
-        min_order_amount: 200,
-        is_active: true,
-        ends_at: expiresAt,
-      });
-      if (pcErr) {
-        console.error("[cart-recovery] promo insert failed:", pcErr.message, "user:", userId);
-        continue;
-      }
+        const productName = (cart.product_id && productNameMap.get(cart.product_id)) || "ваші ласощі";
+        const code = generateCode();
 
-      const text =
-        `🛒 <b>Ваш кошик чекає!</b>\n\n` +
-        `Ви залишили <b>${productName}</b> у кошику.\n\n` +
-        `Тримайте знижку <b>-10%</b> на завершення замовлення:\n` +
-        `<code>${code}</code>\n\n` +
-        `⏰ Промокод діє <b>24 години</b>.\n` +
-        `🛍 Мін. сума: 200₴\n\n` +
-        `<a href="https://basic-food.shop/checkout">Завершити замовлення →</a>`;
+        const { error: pcErr } = await supabase.from("promo_codes").insert({
+          code,
+          discount_type: "percent",
+          discount_value: 10,
+          max_uses: 1,
+          min_order_amount: 200,
+          is_active: true,
+          ends_at: expiresAt,
+        });
+        if (pcErr) {
+          console.error("[cart-recovery] promo insert failed:", pcErr.message, "user:", userId);
+          return { type: "skip" };
+        }
 
-      const ok = await sendTelegram(chatId, text);
-      if (!ok) {
-        // Promo code created but message not sent — track orphan
-        orphanedCodes++;
-        console.error("[cart-recovery] telegram failed for chat_id:", chatId, "promo:", code);
-        await supabase.from("events").insert({
-          event_type: "cart_recovery_failed",
-          user_id: userId,
-          product_id: cart.product_id,
-          source: "acos",
-          metadata: { promo_code: code, chat_id: chatId, reason: "telegram_send_failed" },
-        }).catch(() => {});
-        continue;
-      }
+        const text =
+          `🛒 <b>Ваш кошик чекає!</b>\n\n` +
+          `Ви залишили <b>${productName}</b> у кошику.\n\n` +
+          `Тримайте знижку <b>-10%</b> на завершення замовлення:\n` +
+          `<code>${code}</code>\n\n` +
+          `⏰ Промокод діє <b>24 години</b>.\n` +
+          `🛍 Мін. сума: 200₴\n\n` +
+          `<a href="https://basic-food.shop/checkout">Завершити замовлення →</a>`;
 
-      // Log cooldown event
-      await supabase.from("events").insert({
+        const ok = await sendTelegram(chatId, text);
+        if (!ok) {
+          console.error("[cart-recovery] telegram failed for chat_id:", chatId, "promo:", code);
+          // Deactivate orphaned promo — nobody received the code
+          await supabase.from("promo_codes").update({ is_active: false }).eq("code", code).catch(() => {});
+          return { type: "failed", userId, productId: cart.product_id, code, chatId };
+        }
+        return { type: "sent", userId, productId: cart.product_id, code, chatId };
+      }),
+    );
+
+    const sentItems = sendResults.filter((r): r is Extract<SendResult, { type: "sent" }> => r.type === "sent");
+    const failedItems = sendResults.filter((r): r is Extract<SendResult, { type: "failed" }> => r.type === "failed");
+    const sent = sentItems.length;
+    const orphanedCodes = failedItems.length;
+
+    // Batch insert all events in two calls
+    const eventRows = [
+      ...sentItems.map((r) => ({
         event_type: "cart_recovery_sent",
-        user_id: userId,
-        product_id: cart.product_id,
+        user_id: r.userId,
+        product_id: r.productId,
         source: "acos",
-        metadata: { promo_code: code, chat_id: chatId },
-      });
-      sent++;
+        metadata: { promo_code: r.code, chat_id: r.chatId },
+      })),
+      ...failedItems.map((r) => ({
+        event_type: "cart_recovery_failed",
+        user_id: r.userId,
+        product_id: r.productId,
+        source: "acos",
+        metadata: { promo_code: r.code, chat_id: r.chatId, reason: "telegram_send_failed" },
+      })),
+    ];
+    if (eventRows.length > 0) {
+      await supabase.from("events").insert(eventRows).catch(() => {});
     }
 
     // 6. Log insight summary

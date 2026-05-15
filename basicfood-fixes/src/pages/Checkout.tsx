@@ -592,6 +592,8 @@ const Checkout = () => {
           p_access_token: order.access_token ?? null,
         }).then(({ error }: any) => {
           if (error) console.warn("[checkout] apply_promo_code failed:", error.message);
+        }).catch((e: Error) => {
+          console.warn("[checkout] apply_promo_code threw:", e.message);
         });
       }
 
