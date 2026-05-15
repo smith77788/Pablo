@@ -117,16 +117,85 @@ async function convertToWebP(filePath) {
   if (ext === '.webp') return filePath; // already WebP
   const webpPath = filePath.replace(new RegExp(ext.replace('.', '\\.') + '$'), '.webp');
   try {
+    const sizeBefore = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
     await sharp(filePath)
       .resize(1200, 1600, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 85 })
+      .webp({ quality: 85, effort: 4 })
       .toFile(webpPath);
+    const sizeAfter = fs.existsSync(webpPath) ? fs.statSync(webpPath).size : 0;
+    console.log('[sharp] converted', filePath, '→', webpPath, sizeBefore, '→', sizeAfter, 'bytes');
     fs.unlink(filePath, () => {}); // delete original after successful conversion
     return webpPath;
   } catch (e) {
     console.error('[WebP] conversion error:', e.message);
     return filePath; // return original if conversion fails
   }
+}
+
+// ─── WebP conversion with thumbnail generation ────────────────────────────────
+// Returns { full: webpPath, thumb: thumbPath } — both are absolute filesystem paths.
+// On failure falls back gracefully: full = original, thumb = null.
+async function convertToWebPWithThumb(filePath) {
+  if (!sharp) return { full: filePath, thumb: null };
+  const ext = path.extname(filePath).toLowerCase();
+  const baseNoExt = path.basename(filePath, ext);
+  const dir = path.dirname(filePath);
+
+  // Full-size WebP path (same directory, .webp extension)
+  const webpPath = ext === '.webp' ? filePath : path.join(dir, baseNoExt + '.webp');
+
+  // Thumbnail: <uploads_dir>/thumbs/<basename>.webp
+  const thumbsDir = path.join(dir, 'thumbs');
+  if (!fs.existsSync(thumbsDir)) fs.mkdirSync(thumbsDir, { recursive: true });
+  const thumbPath = path.join(thumbsDir, baseNoExt + '.webp');
+
+  let fullResult = filePath;
+  let thumbResult = null;
+
+  try {
+    const sizeBefore = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+
+    // Generate full-size WebP
+    if (ext !== '.webp') {
+      await sharp(filePath)
+        .resize(1200, 1600, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 85, effort: 4 })
+        .toFile(webpPath);
+      const sizeAfter = fs.existsSync(webpPath) ? fs.statSync(webpPath).size : 0;
+      console.log('[sharp] converted', filePath, '→', webpPath, sizeBefore, '→', sizeAfter, 'bytes');
+      fs.unlink(filePath, () => {}); // delete original non-WebP file
+      fullResult = webpPath;
+    }
+  } catch (e) {
+    console.error('[WebP] full conversion error:', e.message);
+    // fullResult stays as original filePath — graceful fallback
+  }
+
+  try {
+    // Generate thumbnail (400x600 max, quality 80)
+    const thumbSrc = fullResult !== filePath ? fullResult : filePath;
+    await sharp(thumbSrc)
+      .resize(400, 600, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80, effort: 4 })
+      .toFile(thumbPath);
+    const thumbSize = fs.existsSync(thumbPath) ? fs.statSync(thumbPath).size : 0;
+    console.log('[sharp] thumbnail', thumbPath, thumbSize, 'bytes');
+    thumbResult = thumbPath;
+  } catch (e) {
+    console.error('[WebP] thumbnail error:', e.message);
+    // thumbResult stays null — graceful fallback, upload still succeeds
+  }
+
+  return { full: fullResult, thumb: thumbResult };
+}
+
+// ─── Derive thumb URL from a stored photo URL ─────────────────────────────────
+// e.g. /uploads/model_123.webp → /uploads/thumbs/model_123.webp
+function deriveThumbUrl(photoUrl) {
+  if (!photoUrl || typeof photoUrl !== 'string') return null;
+  const basename = path.basename(photoUrl);
+  const dir = path.dirname(photoUrl); // e.g. /uploads
+  return `${dir}/thumbs/${basename}`;
 }
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
@@ -1175,9 +1244,10 @@ router.get('/admin/orders', auth, async (req, res, next) => {
   try {
     const { status, search } = req.query;
     // Support both from/to (legacy) and date_from/date_to (new)
-    const from     = req.query.date_from || req.query.from;
-    const to       = req.query.date_to   || req.query.to;
-    const model_id = req.query.model_id;
+    const from       = req.query.date_from || req.query.from;
+    const to         = req.query.date_to   || req.query.to;
+    const model_id   = req.query.model_id;
+    const event_type = req.query.event_type;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
     const offset = (page - 1) * limit;
@@ -1185,6 +1255,7 @@ router.get('/admin/orders', auth, async (req, res, next) => {
     const params = [];
     if (status && ALLOWED_STATUSES.includes(status)) { where += ' AND o.status = ?'; params.push(status); }
     if (model_id && !isNaN(+model_id) && +model_id > 0) { where += ' AND o.model_id = ?'; params.push(+model_id); }
+    if (event_type && ALLOWED_EVENT_TYPES.includes(event_type)) { where += ' AND o.event_type = ?'; params.push(event_type); }
     if (search) {
       where += ' AND (o.client_name LIKE ? OR o.order_number LIKE ? OR o.client_phone LIKE ?)';
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
