@@ -204,6 +204,23 @@ async function runWalCheckpointTruncate() {
   }
 }
 
+async function checkDiskSpace() {
+  try {
+    const { execSync } = require('child_process');
+    const backupDir = path.join(__dirname, '../backups');
+    const output = execSync(`du -sb "${backupDir}" 2>/dev/null || echo "0\t"`, { encoding: 'utf8' });
+    const bytes = parseInt(output.split('\t')[0]) || 0;
+    const GB = 1024 * 1024 * 1024;
+    if (bytes > GB) {
+      const msg = `⚠️ Backup папка занимает ${(bytes / GB).toFixed(1)} GB. Очистите старые файлы.`;
+      console.warn(`[scheduler] ${msg}`);
+      _notify(msg);
+    }
+  } catch (e) {
+    console.error('[scheduler] checkDiskSpace error:', e.message);
+  }
+}
+
 function runBackup() {
   const script = path.join(__dirname, '../scripts/backup.sh');
   execFile('bash', [script], { timeout: 60000 }, (err, stdout) => {
@@ -298,8 +315,10 @@ function start() {
   scheduleEveryMinutes(checkFactoryStaleness, 'Factory staleness check (30min)', 30);
   // Bot watchdog: check bot polling every 5 minutes
   scheduleEveryMinutes(checkBotHealth, 'Bot watchdog', 5);
+  // Disk space alert: check backup folder size every 6 hours
+  scheduleEvery(checkDiskSpace, 'Disk space check (every 6h)', 6);
   console.log(
-    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min)'
+    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h)'
   );
 }
 
