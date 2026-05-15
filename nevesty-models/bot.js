@@ -6909,7 +6909,7 @@ function initBot(app) {
       });
       return safeSend(
         chatId,
-        `💬 Введите сообщение для клиента *${order.client_name}* \\(${esc(order.order_number)}\\):\n\n_/cancel — отменить_`,
+        `💬 Введите сообщение для клиента *${esc(order.client_name)}* \\(${esc(order.order_number)}\\):\n\n_/cancel — отменить_`,
         { parse_mode: 'MarkdownV2' }
       );
     }

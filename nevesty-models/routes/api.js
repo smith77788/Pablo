@@ -29,6 +29,7 @@ let authLimiter = (req, res, next) => next(); // fallback: no-op
 let aiMatchLimiter = (req, res, next) => next(); // fallback: no-op
 let bookingLimiter = (req, res, next) => next(); // fallback: no-op — 5/hour for /orders
 let wishlistLimiter = (req, res, next) => next(); // fallback: no-op — 60/15min for wishlist
+let publicSettingsLimiter = (req, res, next) => next(); // fallback: no-op — 60/min for /settings/public
 try {
   const rateLimit = require('express-rate-limit');
   // Contact form: 3 requests per hour per IP
@@ -78,6 +79,14 @@ try {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Слишком много запросов к избранному. Попробуйте позже.' },
+  });
+  // Public settings: 60 requests per minute per IP (public endpoint, cached, but guard against hammering)
+  publicSettingsLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много запросов. Попробуйте позже.' },
   });
 } catch {
   /* express-rate-limit not available */
@@ -3292,7 +3301,7 @@ router.get('/admin/managers/:id/stats', auth, async (req, res) => {
 });
 
 // GET /api/settings/public — public read-only settings (no auth required, cached 5 min)
-router.get('/settings/public', async (req, res) => {
+router.get('/settings/public', publicSettingsLimiter, async (req, res) => {
   try {
     const SAFE_KEYS = [
       'contacts_phone',
