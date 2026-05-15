@@ -224,7 +224,8 @@ const KB_MAIN_ADMIN = (badge, score) => {
        { text: '🏭 AI Factory',             callback_data: 'adm_factory'          }],
       [{ text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' },
        { text: '🎯 AI Задачи',             callback_data: 'adm_factory_tasks'  }],
-      [{ text: '📋 Журнал',                 callback_data: 'adm_audit_log'       }],
+      [{ text: '👥 Клиенты',                callback_data: 'adm_clients'         },
+       { text: '📋 Журнал',                 callback_data: 'adm_audit_log'       }],
       ...(SITE_URL.startsWith('https://') ? [[
         { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } },
         { text: '🌐 Сайт', url: SITE_URL },
@@ -255,6 +256,98 @@ async function showMainMenu(chatId, name) {
     `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\n${esc(greetingText)}`,
     { parse_mode: 'MarkdownV2', reply_markup: buildClientKeyboard() }
   );
+}
+
+// ─── Admin: Client Management ─────────────────────────────────────────────────
+
+async function showAdminClients(chatId, page = 0) {
+  if (!isAdmin(chatId)) return;
+  const LIMIT = 8;
+  const clients = await query(`
+    SELECT
+      o.client_chat_id as chat_id,
+      MAX(o.client_name) as name,
+      MAX(o.client_phone) as phone,
+      COUNT(*) as total_orders,
+      SUM(CASE WHEN o.status='completed' THEN 1 ELSE 0 END) as completed,
+      MAX(o.created_at) as last_order
+    FROM orders o
+    WHERE o.client_chat_id IS NOT NULL AND o.client_chat_id != '' AND CAST(o.client_chat_id AS INTEGER) > 0
+    GROUP BY o.client_chat_id
+    ORDER BY last_order DESC
+    LIMIT ? OFFSET ?`, [LIMIT, page * LIMIT]);
+
+  const total = (await get(`SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND CAST(client_chat_id AS INTEGER) > 0`))?.cnt || 0;
+
+  if (!clients.length) return safeSend(chatId, '👥 Клиентов пока нет\\.', { parse_mode: 'MarkdownV2' });
+
+  const keyboard = clients.map(c => [{
+    text: `${c.name || 'Без имени'} (${c.total_orders} зак.)`,
+    callback_data: `adm_client_${c.chat_id}`
+  }]);
+
+  // Pagination
+  const nav = [];
+  if (page > 0) nav.push({ text: '← Назад', callback_data: `adm_clients_${page - 1}` });
+  if ((page + 1) * LIMIT < total) nav.push({ text: 'Вперёд →', callback_data: `adm_clients_${page + 1}` });
+  if (nav.length) keyboard.push(nav);
+  keyboard.push([{ text: '🔙 Admin панель', callback_data: 'adm_panel' }]);
+
+  await safeSend(chatId, `👥 *Клиенты* \\(${total} всего\\)\nСтраница ${page + 1}`, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+async function showAdminClientCard(chatId, clientId) {
+  if (!isAdmin(chatId)) return;
+
+  const orders = await query(`SELECT * FROM orders WHERE client_chat_id=? ORDER BY created_at DESC LIMIT 10`, [String(clientId)]);
+  if (!orders.length) return safeSend(chatId, '❌ Клиент не найден или нет заявок\\.', { parse_mode: 'MarkdownV2' });
+
+  const client = orders[0];
+  const stats = await get(`SELECT
+    COUNT(*) as total,
+    SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+    SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled
+  FROM orders WHERE client_chat_id=?`, [String(clientId)]);
+
+  const isBlocked = !!(await get(`SELECT chat_id FROM blocked_clients WHERE chat_id=?`, [clientId]).catch(()=>null));
+  const loyalty = await get(`SELECT points, total_earned, level FROM loyalty_points WHERE chat_id=?`, [clientId]).catch(()=>null);
+
+  const recentOrders = orders.slice(0, 5).map(o =>
+    `• #${esc(o.order_number || String(o.id))} — ${esc(o.status)}`
+  ).join('\n');
+
+  const text = [
+    `👤 *Клиент: ${esc(client.client_name || 'Без имени')}*`,
+    `📞 ${esc(client.client_phone || '—')}`,
+    client.client_email ? `📧 ${esc(client.client_email)}` : null,
+    `🆔 Chat ID: \`${clientId}\``,
+    ``,
+    `📊 *Статистика:*`,
+    `Заявок всего: *${stats.total}*`,
+    `✅ Завершено: *${stats.completed}*`,
+    `❌ Отменено: *${stats.cancelled}*`,
+    loyalty ? `💫 Баллов: *${loyalty.points}* \\(${loyalty.total_earned} всего\\)` : null,
+    ``,
+    `📋 *Последние заявки:*`,
+    recentOrders,
+    ``,
+    isBlocked ? `⛔ *Клиент ЗАБЛОКИРОВАН*` : null,
+  ].filter(Boolean).join('\n');
+
+  await safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '✉️ Написать клиенту', callback_data: `adm_msg_client_${clientId}` }],
+      [{
+        text: isBlocked ? '✅ Разблокировать' : '⛔ Заблокировать',
+        callback_data: isBlocked ? `adm_unblock_${clientId}` : `adm_block_${clientId}`
+      }],
+      [{ text: '← Список клиентов', callback_data: 'adm_clients' }]
+    ]}
+  });
 }
 
 async function showAdminMenu(chatId, name) {
@@ -3176,6 +3269,47 @@ function initBot(app) {
     if (data === 'adm_export')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return exportOrders(chatId); }
     if (data === 'adm_addmodel')  { if (!isAdmin(chatId)) return; return showAddModelStep(chatId, { _step: 'name' }); }
 
+    // ── Admin: client management
+    if (data === 'adm_clients') { if (!isAdmin(chatId)) return; return showAdminClients(chatId, 0); }
+    if (data === 'adm_panel')   { if (!isAdmin(chatId)) return; return showAdminMenu(chatId, q.from.first_name); }
+    if (data.startsWith('adm_clients_')) {
+      if (!isAdmin(chatId)) return;
+      const page = parseInt(data.replace('adm_clients_', '')) || 0;
+      return showAdminClients(chatId, page);
+    }
+    if (data.startsWith('adm_client_') && !data.startsWith('adm_clients_')) {
+      if (!isAdmin(chatId)) return;
+      const clientId = parseInt(data.replace('adm_client_', ''));
+      if (!isNaN(clientId)) return showAdminClientCard(chatId, clientId);
+    }
+
+    // ── Admin: block/unblock client
+    if (data.startsWith('adm_block_')) {
+      if (!isAdmin(chatId)) return;
+      const clientId = parseInt(data.replace('adm_block_', ''));
+      await run(`INSERT OR REPLACE INTO blocked_clients (chat_id, blocked_by) VALUES (?,?)`, [clientId, chatId]);
+      await bot.answerCallbackQuery(q.id, { text: '⛔ Клиент заблокирован' }).catch(()=>{});
+      return showAdminClientCard(chatId, clientId);
+    }
+    if (data.startsWith('adm_unblock_')) {
+      if (!isAdmin(chatId)) return;
+      const clientId = parseInt(data.replace('adm_unblock_', ''));
+      await run(`DELETE FROM blocked_clients WHERE chat_id=?`, [clientId]);
+      await bot.answerCallbackQuery(q.id, { text: '✅ Клиент разблокирован' }).catch(()=>{});
+      return showAdminClientCard(chatId, clientId);
+    }
+
+    // ── Admin: send personal message to client
+    if (data.startsWith('adm_msg_client_')) {
+      if (!isAdmin(chatId)) return;
+      const clientId = parseInt(data.replace('adm_msg_client_', ''));
+      await setSession(chatId, `adm_personal_msg_${clientId}`, {});
+      return safeSend(chatId, `📝 Введите сообщение для клиента \\(ID: ${clientId}\\):\n\n_Сообщение будет отправлено от имени бота_`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: `adm_client_${clientId}` }]] }
+      });
+    }
+
     // ── Export period filters
     if (data === 'adm_export_today') { if (!isAdmin(chatId)) return; return doExportOrders(chatId, 'today'); }
     if (data === 'adm_export_week')  { if (!isAdmin(chatId)) return; return doExportOrders(chatId, 'week');  }
@@ -3739,6 +3873,11 @@ function initBot(app) {
     if (!msg.text || msg.text.startsWith('/')) return;
     const chatId  = msg.chat.id;
     const text    = msg.text.trim();
+
+    // ── Block check: silently ignore messages from blocked users ─────────────
+    const isBlockedUser = !isAdmin(chatId) && !!(await get(`SELECT chat_id FROM blocked_clients WHERE chat_id=?`, [chatId]).catch(()=>null));
+    if (isBlockedUser) return;
+
     const session = await getSession(chatId);
     const state   = session?.state || 'idle';
     const d       = sessionData(session);
@@ -3791,6 +3930,7 @@ function initBot(app) {
         if (text === '⚙️ Настройки')      return showAdminSettings(chatId);
         if (text === '📢 Рассылка')        return showBroadcast(chatId);
         if (text === '📤 Экспорт')         return exportOrders(chatId);
+        if (text === '👥 Клиенты')         return showAdminClients(chatId, 0);
       }
     }
 
@@ -3886,6 +4026,19 @@ function initBot(app) {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] }
         });
+      }
+
+      // ── Personal message to client
+      if (state.startsWith('adm_personal_msg_')) {
+        const clientId = parseInt(state.replace('adm_personal_msg_', ''));
+        await clearSession(chatId);
+        try {
+          await bot.sendMessage(clientId, `📨 *Сообщение от агентства:*\n\n${esc(text)}`, { parse_mode: 'MarkdownV2' });
+          await safeSend(chatId, `✅ Сообщение отправлено клиенту ${clientId}\\.`, { parse_mode: 'MarkdownV2' });
+        } catch {
+          await safeSend(chatId, `❌ Не удалось отправить \\(клиент мог заблокировать бота\\)\\.`, { parse_mode: 'MarkdownV2' });
+        }
+        return;
       }
     }
 

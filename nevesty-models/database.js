@@ -302,6 +302,24 @@ async function initDatabase() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  // A/B experiments — synced from AI Factory ExperimentDesigner
+  await run(`CREATE TABLE IF NOT EXISTS ab_experiments (
+    id TEXT PRIMARY KEY,
+    hypothesis TEXT NOT NULL,
+    type TEXT DEFAULT 'both',
+    metric TEXT,
+    variant_a TEXT,
+    variant_b TEXT,
+    effort TEXT DEFAULT 'medium',
+    expected_lift TEXT,
+    status TEXT DEFAULT 'proposed',
+    recommendation TEXT,
+    eval_reason TEXT,
+    department TEXT DEFAULT 'experiments',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(()=>{});
+
   // Migrations — add columns that may not exist in older DBs
   await run(`ALTER TABLE models ADD COLUMN city TEXT`).catch(() => {});
   await run(`ALTER TABLE models ADD COLUMN featured INTEGER DEFAULT 0`).catch(() => {});
