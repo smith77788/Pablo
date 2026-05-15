@@ -1688,6 +1688,158 @@ async function showModelEditMenu(chatId, modelId) {
   });
 }
 
+// ─── Model Comparison ─────────────────────────────────────────────────────────
+
+// In-memory compare lists per chat (up to 3 models)
+const _compareLists = new Map(); // chatId → Set of modelIds
+
+async function addToCompare(chatId, modelId) {
+  const key = String(chatId);
+  if (!_compareLists.has(key)) _compareLists.set(key, new Set());
+  const list = _compareLists.get(key);
+  if (list.has(modelId)) {
+    return safeSend(chatId, '⚖️ Эта модель уже в списке сравнения\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '⚖️ Показать сравнение', callback_data: 'compare_show' }],
+        [{ text: '💃 Каталог', callback_data: 'cat_cat__0' }],
+      ]}
+    });
+  }
+  if (list.size >= 3) {
+    return safeSend(chatId, '⚖️ Можно сравнивать не более 3 моделей\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '⚖️ Показать сравнение', callback_data: 'compare_show' }],
+        [{ text: '🗑 Очистить список',     callback_data: 'compare_clear' }],
+      ]}
+    });
+  }
+  list.add(modelId);
+  const m = await get('SELECT name FROM models WHERE id=?', [modelId]).catch(() => null);
+  return safeSend(chatId,
+    `✅ *${esc(m?.name || String(modelId))}* добавлена в сравнение \\(${list.size}/3\\)`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '⚖️ Показать сравнение', callback_data: 'compare_show' }],
+        [{ text: '💃 Продолжить каталог',  callback_data: 'cat_cat__0'   }],
+        [{ text: '🗑 Очистить список',     callback_data: 'compare_clear' }],
+      ]}
+    }
+  );
+}
+
+async function showComparison(chatId) {
+  const key = String(chatId);
+  const list = _compareLists.get(key);
+  if (!list || list.size === 0) {
+    return safeSend(chatId, '⚖️ Список сравнения пуст\\. Добавьте модели из каталога\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] }
+    });
+  }
+  const modelIds = [...list];
+  const models = await Promise.all(modelIds.map(id => get('SELECT * FROM models WHERE id=?', [id]).catch(() => null)));
+  const valid = models.filter(Boolean);
+  if (!valid.length) {
+    _compareLists.delete(key);
+    return safeSend(chatId, '⚖️ Список сравнения пуст\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] }
+    });
+  }
+
+  const catMap = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
+  const pad = (s, n) => { const str = String(s ?? '—'); return str.length >= n ? str.slice(0, n) : str + ' '.repeat(n - str.length); };
+  const COL = 11;
+  const LABEL = 11;
+
+  let table = '';
+  table += pad('', LABEL);
+  for (const m of valid) table += pad(m.name.split(' ')[0], COL);
+  table += '\n';
+  table += pad('Рост:', LABEL);
+  for (const m of valid) table += pad(m.height ? m.height + ' см' : '—', COL);
+  table += '\n';
+  table += pad('Возраст:', LABEL);
+  for (const m of valid) table += pad(m.age ? m.age + ' г' : '—', COL);
+  table += '\n';
+  table += pad('Параметры:', LABEL);
+  for (const m of valid) table += pad((m.bust && m.waist && m.hips) ? `${m.bust}/${m.waist}/${m.hips}` : '—', COL);
+  table += '\n';
+  table += pad('Категория:', LABEL);
+  for (const m of valid) table += pad(catMap[m.category] || m.category || '—', COL);
+  table += '\n';
+  table += pad('Статус:', LABEL);
+  for (const m of valid) table += pad(m.available ? 'Свободна' : 'Занята', COL);
+
+  const text = `⚖️ *Сравнение моделей*\n\n\`\`\`\n${table}\n\`\`\``;
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      valid.map(m => ({ text: m.name.split(' ')[0], callback_data: `cat_model_${m.id}` })),
+      [{ text: '🗑 Очистить список', callback_data: 'compare_clear' }],
+      [{ text: '💃 Каталог',         callback_data: 'cat_cat__0'   }],
+    ]}
+  });
+}
+
+// ─── AI Bio Generator ──────────────────────────────────────────────────────────
+
+async function generateAiBio(chatId, modelId) {
+  if (!isAdmin(chatId)) return;
+  const m = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(() => null);
+  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+
+  await safeSend(chatId, '🤖 Генерирую AI описание\\.\\.\\. Подождите 10\\-30 секунд\\.', { parse_mode: 'MarkdownV2' });
+
+  const prompt = `Напиши профессиональное описание для модели агентства. Данные: имя ${m.name}, возраст ${m.age} лет, рост ${m.height} см, параметры ${m.bust}/${m.waist}/${m.hips}, категория ${m.category}. Напиши 2-3 предложения красиво и профессионально. Только текст описания, без заголовков.`;
+
+  const { spawn } = require('child_process');
+  let output = '';
+  let errorOut = '';
+
+  const proc = spawn('claude', ['-p', prompt, '--output-format', 'text'], {
+    cwd: '/home/user/Pablo/nevesty-models',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  proc.stdout.on('data', d => { output += d.toString(); });
+  proc.stderr.on('data', d => { errorOut += d.toString(); });
+
+  proc.on('close', async (code) => {
+    const bio = output.trim();
+    if (!bio || code !== 0) {
+      console.error('[Bot] AI bio error:', errorOut);
+      return safeSend(chatId, '❌ Ошибка генерации AI описания\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '← Редактировать', callback_data: `adm_editmodel_${modelId}` }]] }
+      });
+    }
+    await setSession(chatId, `adm_ai_bio_preview_${modelId}`, { ai_bio: bio });
+    return safeSend(chatId,
+      `🤖 *AI описание для ${esc(m.name)}:*\n\n_${esc(bio)}_\n\nПрименить это описание?`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '✅ Применить', callback_data: `adm_ai_bio_apply_${modelId}` }],
+          [{ text: '🔄 Сгенерировать ещё', callback_data: `adm_ai_bio_${modelId}` }],
+          [{ text: '← Отмена', callback_data: `adm_editmodel_${modelId}` }],
+        ]}
+      }
+    );
+  });
+
+  proc.on('error', async (err) => {
+    console.error('[Bot] AI bio spawn error:', err.message);
+    return safeSend(chatId, `❌ Не удалось запустить AI: ${esc(err.message)}`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← Редактировать', callback_data: `adm_editmodel_${modelId}` }]] }
+    });
+  });
+}
+
 // ─── Photo Gallery Manager ─────────────────────────────────────────────────────
 
 async function showPhotoGalleryManager(chatId, modelId) {
@@ -3682,6 +3834,51 @@ async function showFactoryExperiments(chatId) {
   });
 }
 
+// ─── Factory Tasks (CEO growth_actions synced from factory) ──────────────────
+
+async function showFactoryTasks(chatId, page) {
+  if (!isAdmin(chatId)) return;
+  if (!page) page = 0;
+  const LIMIT = 6;
+  const offset = page * LIMIT;
+  try {
+    const [tasks, totalRow] = await Promise.all([
+      query("SELECT * FROM factory_tasks WHERE status='pending' ORDER BY priority DESC, created_at DESC LIMIT ? OFFSET ?", [LIMIT, offset]),
+      get("SELECT COUNT(*) as n FROM factory_tasks WHERE status='pending'"),
+    ]);
+    const total = totalRow ? totalRow.n : 0;
+    if (!tasks || !tasks.length) {
+      return safeSend(chatId, '🎯 Нет активных AI-задач.\n\nЗапустите цикл Factory чтобы сгенерировать новые задачи.', {
+        reply_markup: { inline_keyboard: [[{ text: '🔄 Запустить цикл', callback_data: 'adm_factory_run' }], [{ text: '← Factory', callback_data: 'adm_factory' }]] }
+      });
+    }
+    const priIcon = function (p) { return p >= 8 ? '🔴' : p >= 5 ? '🟡' : '🟢'; };
+    const dIcons = { marketing: '📣', sales: '💼', product: '📦', tech: '🛠', hr: '👥', operations: '⚙', creative: '🎨', finance: '💰', research: '🔬', analytics: '📊' };
+    for (const t of tasks) {
+      const dept = t.department || '';
+      const dicon = dIcons[dept] || '🎯';
+      const parts = [dicon + ' AI-задача #' + t.id, '', priIcon(t.priority || 5) + ' Приоритет: ' + (t.priority || 5) + '/10'];
+      if (dept) parts.push('🏢 Отдел: ' + dept);
+      if (t.expected_impact) parts.push('📈 Эффект: ' + t.expected_impact);
+      parts.push('', (t.action || '').slice(0, 400));
+      await safeSend(chatId, parts.join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '✅ Выполнено', callback_data: 'factory_task_done_' + t.id }, { text: '🗑 Пропустить', callback_data: 'factory_task_skip_' + t.id }]] }
+      });
+    }
+    const nav = [];
+    if (page > 0) nav.push({ text: '◀ Назад', callback_data: 'adm_factory_tasks_' + (page - 1) });
+    if (offset + LIMIT < total) nav.push({ text: 'Ещё ▶', callback_data: 'adm_factory_tasks_' + (page + 1) });
+    return safeSend(chatId, 'Показано ' + (offset + 1) + '–' + Math.min(offset + LIMIT, total) + ' из ' + total, {
+      reply_markup: { inline_keyboard: [...(nav.length ? [nav] : []), [{ text: '← Factory', callback_data: 'adm_factory' }]] }
+    });
+  } catch (e) {
+    console.error('[Bot] showFactoryTasks:', e.message);
+    return safeSend(chatId, 'Ошибка загрузки AI-задач.', {
+      reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
+    });
+  }
+}
+
 // ─── Admin Reviews ────────────────────────────────────────────────────────────
 
 async function showAdminReviews(chatId) {
@@ -4413,6 +4610,51 @@ function _registerNewFeatures() {
     if (data === 'adm_dashboard') {
       if (!isAdmin(chatId)) return;
       return showAdminDashboard(chatId);
+    }
+
+    // ── Model comparison
+    if (data.startsWith('compare_add_')) {
+      const modelId = parseInt(data.replace('compare_add_', ''));
+      return addToCompare(chatId, modelId);
+    }
+    if (data === 'compare_show') {
+      return showComparison(chatId);
+    }
+    if (data === 'compare_clear') {
+      _compareLists.delete(String(chatId));
+      return safeSend(chatId, '🗑 Список сравнения очищен\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] }
+      });
+    }
+
+    // ── AI bio generator
+    if (data.startsWith('adm_ai_bio_apply_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_ai_bio_apply_', ''));
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      const bio = d?.ai_bio;
+      if (!bio) {
+        return safeSend(chatId, '❌ Описание не найдено\. Сгенерируйте заново\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '🤖 Сгенерировать', callback_data: `adm_ai_bio_${modelId}` }]] }
+        });
+      }
+      await run('UPDATE models SET bio=? WHERE id=?', [bio, modelId]).catch(() => {});
+      await clearSession(chatId);
+      return safeSend(chatId, '✅ Описание сохранено\!', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${modelId}` }],
+          [{ text: '← Карточка',       callback_data: `adm_model_${modelId}`      }],
+        ]}
+      });
+    }
+    if (data.startsWith('adm_ai_bio_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_ai_bio_', ''));
+      return generateAiBio(chatId, modelId);
     }
   });
 
