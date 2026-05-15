@@ -348,6 +348,12 @@
             <div class="section-card-header"><div class="section-card-title">💃 Модель</div></div>
             <div class="section-card-body padded" id="modelInfo"></div>
           </div>
+
+          <!-- Audit log for this order -->
+          <div class="section-card" id="auditCard" style="display:none;margin-top:24px">
+            <div class="section-card-header"><div class="section-card-title">📋 История изменений</div></div>
+            <div class="section-card-body padded" id="auditLog" style="font-size:0.8rem;color:var(--text-muted)"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -389,6 +395,11 @@
       </div>
       <!-- Notes history -->
       <div id="modal-notes-history" class="space-y-2"></div>
+      <!-- Messages thread -->
+      <div>
+        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Переписка с клиентом</label>
+        <div id="order-messages" style="max-height:220px;overflow-y:auto;margin-top:8px"></div>
+      </div>
     </div>
     <div class="p-6 border-t border-gray-100 dark:border-gray-700 flex gap-3">
       <button id="modal-tg-btn" class="flex-1 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium hidden">
@@ -744,7 +755,11 @@ async function openDetail(id) {
       loadManagers()
     ]);
 
-    document.getElementById('detailTitle').textContent = `Заявка ${o.order_number}`;
+    document.getElementById('detailTitle').innerHTML =
+      `Заявка ${_admin.escapeHtml(o.order_number)}` +
+      ` <button onclick="_admin.copyToClipboard && _admin.copyToClipboard('${_admin.escapeHtml(o.order_number)}')" ` +
+      `title="Копировать номер заявки" style="background:none;border:none;cursor:pointer;color:var(--gold);font-size:0.85rem;vertical-align:middle;padding:0 4px">📋</button>` +
+      ` <a href="${window.location.pathname}?id=${o.id}" style="color:var(--text-dim);font-size:0.8rem;vertical-align:middle" title="Прямая ссылка">🔗</a>`;
     document.getElementById('pageTitle').textContent   = `Заявка ${o.order_number}`;
 
     document.getElementById('statusSelect').innerHTML = _admin.STATUS_OPTIONS;
@@ -772,6 +787,7 @@ async function openDetail(id) {
     }
 
     startChatPoll();
+    loadOrderAudit(id);
   } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
 }
 
@@ -808,6 +824,31 @@ function buildModelHTML(o) {
       <br><a href="/admin/models.html?id=${o.model_id}" class="btn btn-sm btn-ghost" style="margin-top:8px">Профиль →</a>
     </div>
   </div>`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   ORDER AUDIT LOG
+═══════════════════════════════════════════════════════ */
+async function loadOrderAudit(orderId) {
+  try {
+    const rows = await _admin.apiFetch(`/admin/audit-log?limit=50`);
+    const orderRows = (rows || []).filter(r => r.entity_type === 'order' && r.entity_id === orderId);
+    const card = document.getElementById('auditCard');
+    const cont = document.getElementById('auditLog');
+    if (!card || !cont) return;
+    if (!orderRows.length) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    cont.innerHTML = orderRows.map(r => {
+      const det = r.details ? (() => { try { return JSON.parse(r.details); } catch { return {}; } })() : {};
+      const desc = det.from && det.to
+        ? `${_admin.STATUS_LABELS[det.from] || det.from} → ${_admin.STATUS_LABELS[det.to] || det.to}`
+        : (r.action || '');
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:baseline">
+        <span style="color:var(--text-dim);flex-shrink:0;font-size:0.72rem">${_admin.formatDateTime(r.created_at)}</span>
+        <span>${_admin.escapeHtml(desc)}</span>
+      </div>`;
+    }).join('');
+  } catch { /* audit log optional */ }
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -1009,6 +1050,30 @@ async function loadModelFilterOptions() {
 }
 
 /* ═══════════════════════════════════════════════════════
+   ORDER MESSAGES THREAD (for modal)
+═══════════════════════════════════════════════════════ */
+async function loadOrderMessages(orderId) {
+  try {
+    const messages = await _admin.apiFetch(`/admin/orders/${orderId}/messages`);
+    const cont = document.getElementById('order-messages');
+    if (!cont) return;
+    if (!messages || !messages.length) {
+      cont.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:8px 0">Нет сообщений</div>';
+      return;
+    }
+    cont.innerHTML = messages.map(m => `
+      <div class="msg-bubble" style="margin:6px 0;padding:8px 12px;border-radius:10px;font-size:0.82rem;
+        background:${m.sender_type === 'admin' ? 'rgba(201,169,110,0.1)' : 'var(--bg2, #1a1a1a)'};
+        text-align:${m.sender_type === 'admin' ? 'right' : 'left'}">
+        <div style="color:var(--text-muted,#888);font-size:0.7rem;margin-bottom:4px">
+          ${m.sender_type === 'admin' ? '👤 Менеджер' : '👤 Клиент'} · ${_admin.formatDateTime(m.created_at)}
+        </div>
+        <div>${_admin.escapeHtml(m.content || '')}</div>
+      </div>`).join('');
+  } catch { /* messages section optional */ }
+}
+
+/* ═══════════════════════════════════════════════════════
    ORDER DETAIL MODAL
 ═══════════════════════════════════════════════════════ */
 let _modalOrderId = null;
@@ -1018,8 +1083,12 @@ async function openOrderModal(orderId) {
   try {
     const order = await _admin.apiFetch(`/admin/orders/${orderId}`);
 
-    document.getElementById('modal-order-num').textContent =
-      `Заявка ${order.order_number || '#' + orderId}`;
+    const orderNum = order.order_number || '#' + orderId;
+    document.getElementById('modal-order-num').innerHTML =
+      `Заявка ${_admin.escapeHtml(orderNum)} ` +
+      `<button onclick="_admin.copyToClipboard && _admin.copyToClipboard('${_admin.escapeHtml(orderNum)}')" ` +
+      `title="Копировать номер заявки" style="background:none;border:none;cursor:pointer;color:#c9a96e;font-size:0.85rem;vertical-align:middle;padding:0 4px">📋</button>` +
+      `<a href="/admin/orders.html?id=${orderId}" title="Прямая ссылка на заявку" style="color:#888;font-size:0.8rem;vertical-align:middle;text-decoration:none">🔗</a>`;
     document.getElementById('modal-order-date').textContent =
       new Date(order.created_at).toLocaleString('ru-RU');
 
@@ -1092,6 +1161,9 @@ async function openOrderModal(orderId) {
             </div>`).join('')
         : '';
     } catch { /* notes table may not exist yet */ }
+
+    // Load messages thread
+    loadOrderMessages(orderId);
 
     document.getElementById('order-modal').classList.remove('hidden');
     document.getElementById('order-modal').style.display = 'flex';

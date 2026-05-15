@@ -1368,6 +1368,19 @@ router.get('/admin/audit-log', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// ─── Order messages list (admin) ─────────────────────────────────────────────
+router.get('/admin/orders/:id/messages', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const messages = await query(
+      `SELECT id, sender_type, sender_name, content, created_at FROM messages WHERE order_id = ? ORDER BY created_at ASC`,
+      [id]
+    );
+    res.json(messages);
+  } catch (e) { next(e); }
+});
+
 // ─── Order detail (admin, with model join) ───────────────────────────────────
 router.get('/admin/orders/:id/detail', auth, async (req, res, next) => {
   try {
@@ -1459,6 +1472,15 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
       const { notifyCRM } = require('../services/crm');
       const updatedOrder = await get('SELECT o.*, m.name as model_name FROM orders o LEFT JOIN models m ON o.model_id=m.id WHERE o.id=?', [id]);
       notifyCRM('order.status_changed', updatedOrder, getSetting).catch(() => {});
+    }
+    // ─── Notify manager(s) via email when order is confirmed ─────────────────
+    if (status === 'confirmed' && status !== order.prev_status) {
+      try {
+        const adminEmails = mailer.getAdminEmails();
+        for (const email of adminEmails) {
+          mailer.sendManagerNotification(email, { ...order, id }).catch(() => {});
+        }
+      } catch {}
     }
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'DB error' }); }
