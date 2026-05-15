@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Контакты — Nevesty Models</title>
+  <meta name="description" content="Свяжитесь с модельным агентством Nevesty Models. Телефон, WhatsApp, Telegram, адрес офиса и часы работы менеджера.">
+  <meta property="og:title" content="Контакты — Nevesty Models">
+  <meta property="og:description" content="Свяжитесь с модельным агентством Nevesty Models. Телефон, WhatsApp, Telegram, адрес.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
+  <meta property="og:url" content="https://nevesty-models.ru/contact.html">
+  <meta property="og:site_name" content="Nevesty Models">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#080808">
+  <link rel="canonical" href="https://nevesty-models.ru/contact.html">
+  <meta name="robots" content="index, follow">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/css/main.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "LocalBusiness",
+    "name": "Nevesty Models",
+    "@id": "https://nevesty-models.ru",
+    "url": "https://nevesty-models.ru",
+    "telephone": "+7-800-555-00-00",
+    "email": "info@nevesty-models.ru",
+    "priceRange": "₽₽",
+    "description": "Профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.",
+    "sameAs": [
+      "https://instagram.com/nevesty_models",
+      "https://t.me/nevesty_models",
+      "https://vk.com/nevesty_models"
+    ],
+    "openingHoursSpecification": [{
+      "@type": "OpeningHoursSpecification",
+      "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
+      "opens": "09:00",
+      "closes": "21:00"
+    }]
+  }
+  </script>
+  <style>
+    /* ─── CONTACT PAGE ──────────────────────────────────── */
+    .contact-hero {
+      padding: 140px 0 80px;
+      background: linear-gradient(135deg, #080808 0%, #0f0a06 50%, #080808 100%);
+      position: relative;
+      overflow: hidden;
+      text-align: center;
+    }
+    .contact-hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 60%, rgba(201,169,110,0.07) 0%, transparent 65%);
+      pointer-events: none;
+    }
+    .contact-hero-inner {
+      position: relative;
+      z-index: 1;
+    }
+    .contact-hero h1 {
+      font-size: clamp(2.2rem, 5vw, 4rem);
+      color: var(--white);
+      margin-bottom: 16px;
+    }
+    .contact-hero h1 em {
+      color: var(--gold);
+      font-style: italic;
+    }
+    .contact-hero p {
+      color: var(--text-muted);
+      font-size: 1rem;
+      max-width: 520px;
+      margin: 0 auto;
+      line-height: 1.8;
+    }
+
+    /* ─── MAIN LAYOUT ──────────────────────────────────── */
+    .contact-main {
+      padding: 80px 0 100px;
+    }
+    .contact-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: start;
+    }
+    @media (max-width: 768px) {
+      .contact-grid { grid-template-columns: 1fr; gap: 40px; }
+      .contact-hero { padding: 120px 0 60px; }
+    }
+
+    /* ─── CONTACT INFO ITEMS ──────────────────────────── */
+    .contact-info-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .contact-info-item:last-child { border-bottom: none; }
+    .contact-icon-box {
+      width: 44px;
+      height: 44px;
+      border: 1px solid rgba(201,169,110,0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--gold);
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+    .contact-info-label {
+      font-size: 0.7rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .contact-info-value {
+      color: var(--text);
+      font-size: 0.95rem;
+      font-weight: 500;
+    }
+    .contact-info-value a {
+      color: var(--text);
+      text-decoration: none;
+      transition: color var(--transition);
+    }
+    .contact-info-value a:hover { color: var(--gold); }
+
+    /* ─── QUICK CONTACT BUTTONS ──────────────────────── */
+    .contact-btn-wa {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 18px 24px;
+      background: #25D366;
+      color: #fff;
+      text-decoration: none;
+      border-radius: var(--radius);
+      font-weight: 600;
+      transition: background 0.2s, transform 0.2s;
+      margin-bottom: 12px;
+    }
+    .contact-btn-wa:hover { background: #1da851; transform: translateY(-1px); }
+    .contact-btn-tg {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 18px 24px;
+      background: #2AABEE;
+      color: #fff;
+      text-decoration: none;
+      border-radius: var(--radius);
+      font-weight: 600;
+      transition: background 0.2s, transform 0.2s;
+    }
+    .contact-btn-tg:hover { background: #1e96d6; transform: translateY(-1px); }
+    .contact-btn-icon { font-size: 1.5rem; flex-shrink: 0; }
+    .contact-btn-title { font-size: 0.95rem; font-weight: 600; }
+    .contact-btn-sub { font-size: 0.78rem; opacity: 0.85; margin-top: 2px; }
+
+    /* ─── HOURS BOX ──────────────────────────────────── */
+    .hours-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 24px;
+      border-radius: var(--radius);
+      margin-top: 24px;
+    }
+    .hours-box h3 {
+      font-size: 0.85rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 12px;
+    }
+    .hours-box p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+
+    /* ─── MAP PLACEHOLDER ────────────────────────────── */
+    .map-placeholder {
+      width: 100%;
+      height: 200px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      margin-top: 24px;
+      overflow: hidden;
+    }
+    .map-placeholder-icon { font-size: 2.5rem; }
+
+    /* ─── CONTACT FORM ───────────────────────────────── */
+    .contact-form-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 40px;
+      border-radius: var(--radius);
+    }
+    @media (max-width: 480px) { .contact-form-box { padding: 24px; } }
+    .contact-form-box h2 {
+      font-size: 1.5rem;
+      color: var(--white);
+      margin-bottom: 24px;
+    }
+    .form-field {
+      margin-bottom: 20px;
+    }
+    .form-field label {
+      display: block;
+      font-size: 0.7rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+    .form-field input,
+    .form-field textarea {
+      width: 100%;
+      padding: 14px 18px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.9rem;
+      border-radius: var(--radius);
+      outline: none;
+      transition: border-color var(--transition);
+      box-sizing: border-box;
+    }
+    .form-field input:focus,
+    .form-field textarea:focus {
+      border-color: rgba(201,169,110,0.5);
+    }
+    .form-field textarea { resize: none; }
+    .cf-success {
+      display: none;
+      text-align: center;
+      padding: 40px 20px;
+    }
+    .cf-success-icon { font-size: 3rem; margin-bottom: 16px; }
+    .cf-success h3 { color: var(--white); font-size: 1.3rem; margin-bottom: 8px; }
+    .cf-success p { color: var(--text-muted); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+
+  <!-- NAVBAR -->
+  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links" role="list">
+        <a href="/catalog.html">Модели</a>
+        <a href="/#services">Услуги</a>
+        <a href="/about.html">О нас</a>
+        <a href="/faq.html">FAQ</a>
+        <a href="/contact.html" style="color:var(--gold)">Контакты</a>
+        <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
+        <button onclick="DarkMode.toggle()"
+          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
+          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+        </button>
+        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
+           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
+           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
+          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+          <span>WhatsApp</span>
+        </a>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+    </div>
+  </nav>
+
+  <!-- MOBILE MENU -->
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <a href="/catalog.html">Модели</a>
+    <a href="/#services">Услуги</a>
+    <a href="/about.html">О нас</a>
+    <a href="/faq.html">FAQ</a>
+    <a href="/contact.html" style="color:var(--gold)">Контакты</a>
+    <a href="/favorites.html">❤️ Избранное</a>
+    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
+  </nav>
+
+  <!-- HERO -->
+  <section class="contact-hero" id="main-content" tabindex="-1">
+    <div class="contact-hero-inner container">
+      <div class="section-tag" style="margin-bottom:20px">Связаться с нами</div>
+      <h1>Мы на <em>связи</em></h1>
+      <p>Наши менеджеры готовы ответить на ваши вопросы и помочь с выбором модели для любого мероприятия</p>
+    </div>
+  </section>
+
+  <!-- MAIN CONTENT -->
+  <main class="contact-main" id="contact-content">
+    <div class="container">
+      <div class="contact-grid">
+
+        <!-- LEFT: Contact Info -->
+        <div>
+          <!-- Dynamic info from API -->
+          <div id="contact-info-list">
+            <!-- Placeholder items shown before API loads -->
+            <div class="contact-info-item">
+              <div class="contact-icon-box">📞</div>
+              <div>
+                <div class="contact-info-label">Телефон</div>
+                <div class="contact-info-value"><a href="tel:+78005550000">+7 (800) 555-00-00</a></div>
+              </div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-icon-box">✉️</div>
+              <div>
+                <div class="contact-info-label">Email</div>
+                <div class="contact-info-value"><a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a></div>
+              </div>
+            </div>
+            <div class="contact-info-item">
+              <div class="contact-icon-box">📸</div>
+              <div>
+                <div class="contact-info-label">Instagram</div>
+                <div class="contact-info-value"><a href="https://instagram.com/nevesty_models" target="_blank">@nevesty_models</a></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick contact buttons -->
+          <div style="margin-top:32px">
+            <a id="wa-contact-btn" href="#" target="_blank" rel="noopener" class="contact-btn-wa" style="display:none">
+              <span class="contact-btn-icon">💬</span>
+              <div>
+                <div class="contact-btn-title">Написать в WhatsApp</div>
+                <div class="contact-btn-sub">Быстрый ответ за 5 минут</div>
+              </div>
+            </a>
+            <a href="https://t.me/verdiktnikbot" target="_blank" rel="noopener" class="contact-btn-tg">
+              <span class="contact-btn-icon">✈</span>
+              <div>
+                <div class="contact-btn-title">Telegram бот</div>
+                <div class="contact-btn-sub">Каталог и бронирование онлайн</div>
+              </div>
+            </a>
+          </div>
+
+          <!-- Hours -->
+          <div class="hours-box">
+            <h3>Часы работы</h3>
+            <p id="manager-hours-text">Ежедневно 9:00 – 21:00</p>
+          </div>
+
+          <!-- Map placeholder -->
+          <div class="map-placeholder" id="map-block">
+            <div class="map-placeholder-icon">📍</div>
+            <div id="agency-address">Адрес офиса загружается...</div>
+          </div>
+        </div>
+
+        <!-- RIGHT: Contact Form -->
+        <div class="contact-form-box">
+          <h2>Задать вопрос</h2>
+          <form id="contact-form" onsubmit="sendContactForm(event)">
+            <div class="form-field">
+              <label for="cf-name">Ваше имя *</label>
+              <input type="text" id="cf-name" required autocomplete="name" placeholder="Как к вам обращаться?">
+            </div>
+            <div class="form-field">
+              <label for="cf-phone">Телефон *</label>
+              <input type="tel" id="cf-phone" required autocomplete="tel" inputmode="tel" placeholder="+7 (999) 123-45-67">
+            </div>
+            <div class="form-field">
+              <label for="cf-message">Сообщение *</label>
+              <textarea id="cf-message" required rows="5" placeholder="Опишите ваш вопрос или запрос..."></textarea>
+            </div>
+            <div id="cf-error" role="alert" style="display:none;color:#f44336;font-size:0.8rem;margin-bottom:12px"></div>
+            <button type="submit" id="cf-submit" class="btn-primary" style="width:100%;font-size:0.88rem;padding:16px;">
+              Отправить сообщение
+            </button>
+          </form>
+          <div class="cf-success" id="cf-success">
+            <div class="cf-success-icon">✦</div>
+            <h3>Сообщение отправлено!</h3>
+            <p>Мы ответим в течение часа в рабочее время</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="footer" role="contentinfo">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="nav-logo" style="font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--gold)">NEVESTY <span style="color:var(--text)">MODELS</span></div>
+          <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Агентство</h4>
+          <a href="/catalog.html">Каталог моделей</a>
+          <a href="/#services">Услуги</a>
+          <a href="/about.html">О нас</a>
+          <a href="/contact.html">Контакты</a>
+        </div>
+        <div class="footer-col">
+          <h4>Клиентам</h4>
+          <a href="/booking.html">Оформить заявку</a>
+          <a href="/order-status.html">Статус заявки</a>
+          <a href="/catalog.html">Выбрать модель</a>
+          <a href="/faq.html">FAQ</a>
+          <a href="/privacy.html">Конфиденциальность</a>
+        </div>
+        <div class="footer-col">
+          <h4>Связаться</h4>
+          <a href="tel:+78005550000">+7 (800) 555-00-00</a>
+          <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
+          <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
+          <a href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>© 2024 Nevesty Models. Все права защищены.</p>
+        <div class="footer-socials" aria-label="Социальные сети">
+          <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"><span aria-hidden="true">📸</span></a>
+          <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"><span aria-hidden="true">✈</span></a>
+          <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"><span aria-hidden="true">V</span></a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="/js/main.js" defer></script>
+  <script src="/js/darkmode.js"></script>
+  <script src="/js/analytics.js" defer></script>
+  <script>
+  // Load contact info from public settings API
+  fetch('/api/settings/public').then(r => r.json()).then(d => {
+    const list = document.getElementById('contact-info-list');
+    const items = [];
+
+    if (d.contacts_phone) {
+      items.push(`<div class="contact-info-item">
+        <div class="contact-icon-box">📞</div>
+        <div>
+          <div class="contact-info-label">Телефон</div>
+          <div class="contact-info-value"><a href="tel:${d.contacts_phone.replace(/[^+\d]/g,'')}">${d.contacts_phone}</a></div>
+        </div>
+      </div>`);
+    }
+    if (d.contacts_email) {
+      items.push(`<div class="contact-info-item">
+        <div class="contact-icon-box">✉️</div>
+        <div>
+          <div class="contact-info-label">Email</div>
+          <div class="contact-info-value"><a href="mailto:${d.contacts_email}">${d.contacts_email}</a></div>
+        </div>
+      </div>`);
+    }
+    if (d.contacts_instagram) {
+      items.push(`<div class="contact-info-item">
+        <div class="contact-icon-box">📸</div>
+        <div>
+          <div class="contact-info-label">Instagram</div>
+          <div class="contact-info-value"><a href="https://instagram.com/${d.contacts_instagram}" target="_blank">@${d.contacts_instagram}</a></div>
+        </div>
+      </div>`);
+    }
+    if (d.contacts_address) {
+      items.push(`<div class="contact-info-item">
+        <div class="contact-icon-box">📍</div>
+        <div>
+          <div class="contact-info-label">Адрес</div>
+          <div class="contact-info-value">${d.contacts_address}</div>
+        </div>
+      </div>`);
+      document.getElementById('agency-address').textContent = d.contacts_address;
+    } else {
+      document.getElementById('agency-address').textContent = 'Адрес уточняйте у менеджера';
+    }
+
+    if (items.length) list.innerHTML = items.join('');
+
+    // WhatsApp button
+    if (d.contacts_whatsapp) {
+      const waNum = d.contacts_whatsapp.replace(/\D/g, '');
+      const waBtn = document.getElementById('wa-contact-btn');
+      waBtn.href = `https://wa.me/${waNum}`;
+      waBtn.style.display = 'flex';
+      // Also set navbar button
+      const navWa = document.getElementById('whatsapp-btn');
+      if (navWa) { navWa.href = `https://wa.me/${waNum}`; navWa.style.display = 'flex'; }
+    }
+
+    // Hours
+    if (d.manager_hours) {
+      document.getElementById('manager-hours-text').textContent = d.manager_hours;
+    }
+  }).catch(() => {});
+
+  // Contact form submit
+  async function sendContactForm(e) {
+    e.preventDefault();
+    const btn = document.getElementById('cf-submit');
+    const err = document.getElementById('cf-error');
+    err.style.display = 'none';
+
+    const name    = document.getElementById('cf-name').value.trim();
+    const phone   = document.getElementById('cf-phone').value.trim();
+    const message = document.getElementById('cf-message').value.trim();
+
+    if (!name || name.length < 2) {
+      err.textContent = 'Введите ваше имя'; err.style.display = 'block'; return;
+    }
+    if (!phone || phone.replace(/\D/g, '').length < 7) {
+      err.textContent = 'Введите корректный номер телефона'; err.style.display = 'block'; return;
+    }
+    if (!message || message.length < 5) {
+      err.textContent = 'Напишите сообщение'; err.style.display = 'block'; return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Отправка...';
+
+    try {
+      const resp = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_name:  name,
+          client_phone: phone,
+          description:  message,
+          event_type:   'other',
+          source:       'contact_form'
+        })
+      });
+      if (!resp.ok) throw new Error('server_error');
+
+      document.getElementById('contact-form').style.display = 'none';
+      document.getElementById('cf-success').style.display = 'block';
+
+      if (window.NM && NM.analytics) NM.analytics.event('contact_form_submitted');
+    } catch {
+      btn.disabled = false;
+      btn.textContent = 'Отправить сообщение';
+      err.textContent = 'Ошибка отправки. Попробуйте позже или напишите нам напрямую.';
+      err.style.display = 'block';
+    }
+  }
+  </script>
+
+  <!-- Floating WhatsApp Button -->
+  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
+    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
+       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
+       onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
+      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Написать в WhatsApp
+    </a>
+  </div>
+</body>
+</html>
