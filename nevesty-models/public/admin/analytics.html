@@ -120,13 +120,17 @@
 
       <!-- Воронка заявок — horizontal bar (Chart.js) -->
       <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🎯 Воронка заявок</h2>
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white">🎯 Воронка конверсии</h2>
+          <span id="funnel-conv-badge" style="display:none;font-size:0.8rem;padding:2px 10px;border-radius:12px;background:rgba(34,197,94,0.15);color:#22c55e;font-weight:600"></span>
+        </div>
         <button class="chart-export-btn" onclick="exportChart('chart-funnel', 'funnel.png')" title="Скачать PNG"><i class="fas fa-download"></i></button>
         <div id="funnel-chart-wrap" class="relative h-56">
           <div id="funnel-skeleton" class="skeleton h-full w-full rounded-lg"></div>
           <canvas id="chart-funnel" class="hidden"></canvas>
           <div id="funnel-error" class="chart-error hidden">Нет данных</div>
         </div>
+        <div id="funnel-cancelled-row" style="display:none;font-size:0.78rem;color:#6b7280;margin-top:8px">❌ Отклонено: <span id="funnel-cancelled-count">0</span></div>
       </div>
 
       <!-- Типы событий — doughnut (Chart.js) -->
@@ -146,7 +150,10 @@
 
       <!-- Топ моделей — horizontal bar (Chart.js) -->
       <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">⭐ Топ моделей</h2>
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white">⭐ Топ моделей по заказам</h2>
+          <span style="font-size:0.75rem;color:#9ca3af">завершённые · всего</span>
+        </div>
         <button class="chart-export-btn" onclick="exportChart('chart-models', 'top-models.png')" title="Скачать PNG"><i class="fas fa-download"></i></button>
         <div id="models-chart-wrap" class="relative h-64">
           <div id="models-skeleton" class="skeleton h-full w-full rounded-lg"></div>
@@ -474,7 +481,7 @@ async function loadAll() {
   renderDailyChart(days);
 
   // ── Funnel: horizontal bar ─────────────────────────────────────────────────
-  renderFunnelChart(funnel.stages || []);
+  renderFunnelChart(funnel.stages || [], funnel);
 
   // ── Event types: doughnut ──────────────────────────────────────────────────
   renderEventsChart(eventTypes.types || []);
@@ -489,9 +496,23 @@ async function loadAll() {
 }
 
 // ── Funnel horizontal bar chart ──────────────────────────────────────────────
-function renderFunnelChart(stages) {
+function renderFunnelChart(stages, meta) {
   destroyChart('funnel');
   if (!stages.length) { showError('funnel'); return; }
+
+  // Show conversion rate badge
+  const badge = document.getElementById('funnel-conv-badge');
+  if (badge && meta?.conversion_rate != null) {
+    badge.textContent = `Конверсия ${meta.conversion_rate}%`;
+    badge.style.display = '';
+  }
+  // Show cancelled row
+  const cancelledRow = document.getElementById('funnel-cancelled-row');
+  const cancelledCount = document.getElementById('funnel-cancelled-count');
+  if (cancelledRow && meta?.cancelled != null) {
+    cancelledCount.textContent = meta.cancelled;
+    cancelledRow.style.display = '';
+  }
 
   const funnelColors = {
     new:        { bg: 'rgba(59,130,246,0.75)',  border: '#3b82f6' },
@@ -606,8 +627,8 @@ function renderModelsChart(models) {
 
   const top = models.slice(0, 10);
   const labels = top.map(m => m.name);
-  const orders = top.map(m => m.orders);
-  const views  = top.map(m => m.views || 0);
+  const orders    = top.map(m => m.orders || 0);
+  const completed = top.map(m => m.completed || 0);
 
   showChart('models');
   const ctx = document.getElementById('chart-models').getContext('2d');
@@ -617,22 +638,20 @@ function renderModelsChart(models) {
       labels,
       datasets: [
         {
-          label: 'Заявок',
+          label: 'Завершено',
+          data: completed,
+          backgroundColor: 'rgba(34,197,94,0.8)',
+          borderColor: '#22c55e',
+          borderWidth: 1.5,
+          borderRadius: 5,
+        },
+        {
+          label: 'Всего заявок',
           data: orders,
-          backgroundColor: 'rgba(236,72,153,0.75)',
+          backgroundColor: 'rgba(236,72,153,0.35)',
           borderColor: '#ec4899',
           borderWidth: 1.5,
           borderRadius: 5,
-          yAxisID: 'y',
-        },
-        {
-          label: 'Просмотров',
-          data: views,
-          backgroundColor: 'rgba(59,130,246,0.35)',
-          borderColor: '#3b82f6',
-          borderWidth: 1.5,
-          borderRadius: 5,
-          yAxisID: 'y1',
         }
       ]
     },
@@ -644,7 +663,16 @@ function renderModelsChart(models) {
         legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
         tooltip: {
           callbacks: {
-            label: ctx => ctx.dataset.label + ': ' + ctx.parsed.x
+            afterBody: (items) => {
+              const idx = items[0]?.dataIndex;
+              if (idx == null) return '';
+              const m = top[idx];
+              const parts = [];
+              if (m.avg_budget) parts.push(`Средний бюджет: ${m.avg_budget.toLocaleString('ru')} ₽`);
+              if (m.city) parts.push(`Город: ${m.city}`);
+              return parts;
+            },
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.x}`
           }
         }
       },
@@ -657,10 +685,6 @@ function renderModelsChart(models) {
         y: {
           grid: { display: false },
           ticks: { font: { size: 11 } }
-        },
-        y1: {
-          display: false,
-          beginAtZero: true,
         }
       }
     }

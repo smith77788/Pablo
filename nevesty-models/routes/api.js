@@ -2576,12 +2576,19 @@ router.get('/admin/analytics/funnel', auth, async (req, res, next) => {
       in_progress: '🔄 В работе',
       completed: '🏁 Завершены'
     };
-    const stages = await Promise.all(statuses.map(async s => ({
-      label: labelMap[s],
-      status: s,
-      count: (await get(`SELECT COUNT(*) as cnt FROM orders WHERE status=? AND created_at >= ?`, [s, since]))?.cnt || 0
-    })));
-    res.json({ stages });
+    const [stages, cancelledRow] = await Promise.all([
+      Promise.all(statuses.map(async s => ({
+        label: labelMap[s],
+        status: s,
+        count: (await get(`SELECT COUNT(*) as cnt FROM orders WHERE status=? AND created_at >= ?`, [s, since]))?.cnt || 0
+      }))),
+      get(`SELECT COUNT(*) as cnt FROM orders WHERE status='cancelled' AND created_at >= ?`, [since]),
+    ]);
+    const cancelled = cancelledRow?.cnt || 0;
+    const total = stages.reduce((s, st) => s + st.count, 0) + cancelled;
+    const completed = stages.find(s => s.status === 'completed')?.count || 0;
+    const conversion_rate = total > 0 ? Math.round((completed / total) * 100) : 0;
+    res.json({ stages, cancelled, total, conversion_rate });
   } catch (e) { next(e); }
 });
 
@@ -2592,14 +2599,17 @@ router.get('/admin/analytics/top-models', auth, async (req, res, next) => {
     const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 5));
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     const models = await query(`
-      SELECT m.name, m.view_count as views, COUNT(o.id) as orders
+      SELECT m.id, m.name, m.city, m.category, m.view_count as views,
+        COUNT(o.id) AS orders,
+        SUM(CASE WHEN o.status='completed' THEN 1 ELSE 0 END) AS completed,
+        AVG(COALESCE(CAST(REPLACE(REPLACE(o.budget,'₽',''),' ','') AS INTEGER), 0)) AS avg_budget
       FROM models m
       LEFT JOIN orders o ON m.id = o.model_id AND o.created_at >= ?
       WHERE m.archived = 0
       GROUP BY m.id
-      ORDER BY orders DESC, views DESC
+      ORDER BY completed DESC, orders DESC, views DESC
       LIMIT ?`, [since, limit]);
-    res.json({ models });
+    res.json({ models: models.map(m => ({ ...m, avg_budget: Math.round(m.avg_budget || 0) })) });
   } catch (e) { next(e); }
 });
 
