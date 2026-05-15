@@ -224,6 +224,7 @@ const KB_MAIN_ADMIN = (badge, score) => {
        { text: '🏭 AI Factory',             callback_data: 'adm_factory'          }],
       [{ text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' },
        { text: '🎯 AI Задачи',             callback_data: 'adm_factory_tasks'  }],
+      [{ text: '📋 Журнал',                 callback_data: 'adm_audit_log'       }],
       ...(SITE_URL.startsWith('https://') ? [[
         { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } },
         { text: '🌐 Сайт', url: SITE_URL },
@@ -294,7 +295,7 @@ async function showCatalog(chatId, cat, page) {
       });
     }
 
-    const perPage = 5;
+    const perPage = parseInt(await getSetting('catalog_per_page') || '5');
     const total   = models.length;
     const slice   = models.slice(page * perPage, page * perPage + perPage);
 
@@ -1187,7 +1188,10 @@ async function showAdminModels(chatId, page, opts = {}) {
     let text = `${title} \\(всего: ${total}\\)\n\n`;
     const btns = slice.map(m => {
       text += `${m.available ? '🟢' : '🔴'}${m.archived ? ' 📦' : ''} *${esc(m.name)}* — ${m.height}см, ${esc(m.category)}\n`;
-      return [{ text: `${m.available?'🟢':'🔴'} ${m.name}`, callback_data: `adm_model_${m.id}` }];
+      return [
+        { text: `${m.name}`, callback_data: `adm_model_${m.id}` },
+        { text: m.available ? '🟢' : '🔴', callback_data: `adm_toggle_avail_${m.id}` },
+      ];
     });
 
     const nav = [];
@@ -1559,26 +1563,35 @@ async function showAdminSettings(chatId, section) {
 
   // ── Бот и интерфейс ───────────────────────────────────────────────────────
   if (section === 'bot') {
-    const [welcomePhoto, menuText, wishlistEnabled, searchEnabled, botLang] = await Promise.all([
+    const [welcomePhoto, menuText, wishlistEnabled, searchEnabled, botLang,
+           quickBooking, reviewsEnabled, loyaltyEnabled, referralEnabled, modelStatsEnabled] = await Promise.all([
       getSetting('welcome_photo_url'), getSetting('main_menu_text'),
       getSetting('wishlist_enabled'), getSetting('search_enabled'), getSetting('bot_language'),
+      getSetting('quick_booking_enabled'), getSetting('reviews_enabled'),
+      getSetting('loyalty_enabled'), getSetting('referral_enabled'), getSetting('model_stats_enabled'),
     ]);
+    const onOff = v => v === '0' ? '❌' : '✅';
     const text =
       `🤖 Бот и интерфейс\n\n` +
       `🌐 Язык: ${botLang||'ru'}\n` +
       `🖼 Фото приветствия: ${welcomePhoto ? '✅ Задано' : '❌ Нет'}\n` +
       `📋 Текст главного меню: ${(menuText||'').slice(0,40)||'—'}\n` +
-      `❤️ Избранное: ${wishlistEnabled==='0'?'❌ Выкл':'✅ Вкл'}\n` +
-      `🔍 Поиск по росту: ${searchEnabled==='0'?'❌ Выкл':'✅ Вкл'}`;
+      `⚡ Быстрая заявка: ${onOff(quickBooking)}  ❤️ Wishlist: ${onOff(wishlistEnabled)}\n` +
+      `🔍 Поиск: ${onOff(searchEnabled)}  ⭐ Отзывы: ${onOff(reviewsEnabled)}\n` +
+      `💫 Баллы: ${onOff(loyaltyEnabled)}  🎁 Реферальная: ${onOff(referralEnabled)}\n` +
+      `📊 Статистика моделей: ${onOff(modelStatsEnabled)}`;
     return safeSend(chatId, text, {
       reply_markup: { inline_keyboard: [
-        [{ text: wishlistEnabled==='0' ? '❤️ Избранное ВКЛ' : '❤️ Избранное ВЫКЛ',
-           callback_data: wishlistEnabled==='0' ? 'adm_wishlist_on' : 'adm_wishlist_off' }],
-        [{ text: searchEnabled==='0' ? '🔍 Поиск ВКЛ' : '🔍 Поиск ВЫКЛ',
-           callback_data: searchEnabled==='0' ? 'adm_search_on' : 'adm_search_off' }],
+        [{ text: `⚡ Быстрая заявка: ${onOff(quickBooking)}`, callback_data: 'adm_toggle_quick_booking' }],
+        [{ text: `❤️ Wishlist: ${onOff(wishlistEnabled)}`,    callback_data: 'adm_toggle_wishlist'      }],
+        [{ text: `🔍 Поиск: ${onOff(searchEnabled)}`,        callback_data: 'adm_toggle_search'         }],
+        [{ text: `⭐ Отзывы: ${onOff(reviewsEnabled)}`,      callback_data: 'adm_toggle_reviews'        }],
+        [{ text: `💫 Баллы лояльности: ${onOff(loyaltyEnabled)}`,      callback_data: 'adm_toggle_loyalty'    }],
+        [{ text: `🎁 Реферальная: ${onOff(referralEnabled)}`,          callback_data: 'adm_toggle_referral'   }],
+        [{ text: `📊 Статистика моделей: ${onOff(modelStatsEnabled)}`, callback_data: 'adm_toggle_model_stats'}],
         [{ text: '🖼 Фото приветствия', callback_data: 'adm_set_welcome_photo'  },
          { text: '📋 Текст меню',      callback_data: 'adm_set_main_menu_text'  }],
-        [{ text: '← Настройки', callback_data: 'adm_settings' }],
+        [{ text: '🔙 Назад', callback_data: 'adm_settings_main' }],
       ]}
     });
   }
@@ -1711,6 +1724,7 @@ async function saveNewModel(chatId, d) {
        d.shoe_size||null, d.hair_color||null, d.eye_color||null, d.bio||null, d.instagram||null,
        d.category||'fashion', d.photo_file_id||null]
     );
+    await logAdminAction(chatId, 'add_model', 'model', res.id, { name: d.name });
     await clearSession(chatId);
     return safeSend(chatId, `✅ Модель «${d.name}» добавлена!\n\nID: ${res.id}`, {
       reply_markup: { inline_keyboard: [
@@ -1938,7 +1952,7 @@ async function showAuditLog(chatId, page = 0) {
     LEFT JOIN admins a ON al.admin_chat_id = a.chat_id
     ORDER BY al.created_at DESC LIMIT 10 OFFSET ?`, [page * 10]).catch(()=>[]);
 
-  if (!logs.length) return safeSend(chatId, '📋 Журнал действий пуст\\.', { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_panel' }]] } });
+  if (!logs.length) return safeSend(chatId, '📋 Журнал действий пуст\\.', { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'admin_menu' }]] } });
 
   const actionLabels = {
     'change_order_status': '🔄 Статус заявки',
@@ -1960,7 +1974,7 @@ async function showAuditLog(chatId, page = 0) {
   await safeSend(chatId, `📋 *Журнал действий*\n\n${lines.join('\n')}`, {
     parse_mode: 'MarkdownV2',
     reply_markup: { inline_keyboard: [
-      [{ text: '← Назад', callback_data: 'adm_panel' }]
+      [{ text: '← Назад', callback_data: 'admin_menu' }]
     ]}
   });
 }
@@ -1987,19 +2001,60 @@ async function showBroadcast(chatId) {
   );
 }
 
+async function _getBroadcastClients(segment) {
+  let q = "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''";
+  if (segment === 'completed') q += " AND status='completed'";
+  return query(q).catch(()=>[]);
+}
+
+async function previewBroadcast(chatId, text, photoId = null) {
+  const sess = await getSession(chatId);
+  const sd   = sessionData(sess);
+  const clientCount = (sd.broadcastRecipients || []).length;
+
+  await safeSend(chatId, `📋 *Предпросмотр рассылки*\n\nПолучателей: *${clientCount}*`, { parse_mode: 'MarkdownV2' });
+
+  if (photoId) {
+    await safePhoto(chatId, photoId, { caption: text.slice(0, 1020), parse_mode: 'MarkdownV2' }).catch(()=>{});
+  } else {
+    await safeSend(chatId, text, { parse_mode: 'MarkdownV2' }).catch(()=>{});
+  }
+
+  return safeSend(chatId, '📤 Отправить рассылку?', {
+    reply_markup: { inline_keyboard: [
+      [{ text: `✅ Да, отправить ${clientCount} получателям`, callback_data: 'adm_broadcast_confirm' }],
+      [{ text: '❌ Отмена', callback_data: 'adm_broadcast' }]
+    ]}
+  });
+}
+
 async function sendBroadcast(chatId, text) {
-  const clients = await query("SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>[]);
+  const sess = await getSession(chatId);
+  const sd   = sessionData(sess);
+  const segment = sd.broadcastSegment || 'all';
+  const clients = await _getBroadcastClients(segment);
   if (!clients.length) return safeSend(chatId, '❌ Нет клиентов для рассылки.', {
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
   });
+  const newSd = { ...sd, broadcastRecipients: clients.map(c => c.client_chat_id), broadcastText: text };
+  await setSession(chatId, 'adm_broadcast_preview', newSd);
+  return previewBroadcast(chatId, `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}`);
+}
+
+async function doSendBroadcast(chatId) {
+  const sess = await getSession(chatId);
+  const sd   = sessionData(sess);
+  const recipients = sd.broadcastRecipients || [];
+  const text = sd.broadcastText || '';
   let sent = 0, failed = 0;
-  for (const c of clients) {
+  for (const cid of recipients) {
     try {
-      await bot.sendMessage(c.client_chat_id, `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}`, { parse_mode: 'MarkdownV2' });
+      await bot.sendMessage(cid, `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}`, { parse_mode: 'MarkdownV2' });
       sent++;
     } catch { failed++; }
     await new Promise(r => setTimeout(r, 50)); // rate limit
   }
+  await logAdminAction(chatId, 'broadcast', null, null, { recipients: sent });
   await clearSession(chatId);
   return safeSend(chatId, `✅ *Рассылка завершена*\n\nОтправлено: ${sent}\nОшибок: ${failed}`, {
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
@@ -2007,14 +2062,28 @@ async function sendBroadcast(chatId, text) {
 }
 
 async function sendBroadcastWithPhoto(chatId, photoFileId, caption) {
-  const clients = await query("SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>[]);
+  const sess = await getSession(chatId);
+  const sd   = sessionData(sess);
+  const segment = sd.broadcastSegment || 'all';
+  const clients = await _getBroadcastClients(segment);
   if (!clients.length) return safeSend(chatId, '❌ Нет клиентов для рассылки.', {
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
   });
+  const newSd = { ...sd, broadcastRecipients: clients.map(c => c.client_chat_id), broadcastPhotoId: photoFileId, broadcastCaption: caption };
+  await setSession(chatId, 'adm_broadcast_photo_preview', newSd);
+  return previewBroadcast(chatId, caption ? `📢 *Сообщение от Nevesty Models*\n\n${esc(caption)}` : '📢 *Nevesty Models*', photoFileId);
+}
+
+async function doSendBroadcastWithPhoto(chatId) {
+  const sess = await getSession(chatId);
+  const sd   = sessionData(sess);
+  const recipients = sd.broadcastRecipients || [];
+  const photoFileId = sd.broadcastPhotoId || sd.broadcast_photo_id;
+  const caption = sd.broadcastCaption || '';
   let sent = 0, failed = 0;
-  for (const c of clients) {
+  for (const cid of recipients) {
     try {
-      await bot.sendPhoto(c.client_chat_id, photoFileId, {
+      await bot.sendPhoto(cid, photoFileId, {
         caption: caption ? `📢 *Сообщение от Nevesty Models*\n\n${esc(caption)}` : '📢 *Nevesty Models*',
         parse_mode: 'MarkdownV2',
       });
@@ -2022,6 +2091,7 @@ async function sendBroadcastWithPhoto(chatId, photoFileId, caption) {
     } catch { failed++; }
     await new Promise(r => setTimeout(r, 60)); // rate limit
   }
+  await logAdminAction(chatId, 'broadcast', null, null, { recipients: sent });
   await clearSession(chatId);
   return safeSend(chatId, `✅ *Рассылка с фото завершена*\n\nОтправлено: ${sent}\nОшибок: ${failed}`, {
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
@@ -2368,8 +2438,19 @@ async function adminChangeStatus(chatId, orderId, newStatus) {
       [orderId, oldStatus, newStatus, String(chatId)]
     ).catch(e => console.warn('[Bot] history log:', e.message));
 
+    // Audit log
+    await logAdminAction(chatId, 'change_order_status', 'order', orderId, { from: oldStatus, to: newStatus });
+
     const order = await get('SELECT * FROM orders WHERE id=?', [orderId]);
     if (order?.client_chat_id) notifyStatusChange(order.client_chat_id, order.order_number, newStatus);
+
+    // Send custom booking confirmation message from settings
+    if (newStatus === 'confirmed' && order?.client_chat_id) {
+      const confirmMsg = await getSetting('booking_confirm_msg');
+      if (confirmMsg) {
+        await bot.sendMessage(order.client_chat_id, esc(confirmMsg), { parse_mode: 'MarkdownV2' }).catch(()=>{});
+      }
+    }
 
     // Award loyalty points on order completion
     if (newStatus === 'completed' && order?.client_chat_id) {
@@ -2867,6 +2948,7 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('adm_archive_', ''));
       await run('UPDATE models SET archived=1, available=0 WHERE id=?', [id]);
+      await logAdminAction(chatId, 'archive_model', 'model', id);
       await bot.answerCallbackQuery(q.id, { text: '📦 Модель перемещена в архив' }).catch(()=>{});
       return showAdminModels(chatId, 0, {});
     }
@@ -2874,6 +2956,7 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('adm_restore_', ''));
       await run('UPDATE models SET archived=0 WHERE id=?', [id]);
+      await logAdminAction(chatId, 'restore_model', 'model', id);
       await bot.answerCallbackQuery(q.id, { text: '✅ Модель восстановлена из архива' }).catch(()=>{});
       return showAdminModels(chatId, 0, { archived: true });
     }
@@ -2941,11 +3024,65 @@ function initBot(app) {
     if (data === 'adm_wishlist_off') { if (!isAdmin(chatId)) return; await setSetting('wishlist_enabled','0'); return showAdminSettings(chatId,'bot'); }
     if (data === 'adm_search_on')    { if (!isAdmin(chatId)) return; await setSetting('search_enabled','1');   return showAdminSettings(chatId,'bot'); }
     if (data === 'adm_search_off')   { if (!isAdmin(chatId)) return; await setSetting('search_enabled','0');   return showAdminSettings(chatId,'bot'); }
+    // adm_settings_main — alias for adm_settings (go to main settings menu)
+    if (data === 'adm_settings_main') { if (!isAdmin(chatId)) return; return showAdminSettings(chatId, 'main'); }
+    // Unified feature toggle handler for bot section (adm_toggle_{feature})
+    if (data.startsWith('adm_toggle_') && isAdmin(chatId)) {
+      const TOGGLE_FEATURES = {
+        'quick_booking': 'quick_booking_enabled',
+        'wishlist':      'wishlist_enabled',
+        'search':        'search_enabled',
+        'reviews':       'reviews_enabled',
+        'loyalty':       'loyalty_enabled',
+        'referral':      'referral_enabled',
+        'model_stats':   'model_stats_enabled',
+      };
+      const featureKey = data.replace('adm_toggle_', '');
+      const settingKey = TOGGLE_FEATURES[featureKey];
+      if (settingKey) {
+        const current = await getSetting(settingKey);
+        const newVal = current === '0' ? '1' : '0';
+        await setSetting(settingKey, newVal);
+        await bot.answerCallbackQuery(q.id, { text: newVal === '1' ? '✅ Включено' : '🔕 Выключено' }).catch(()=>{});
+        return showAdminSettings(chatId, 'bot');
+      }
+    }
     if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; return showBroadcast(chatId); }
+    // ── Audit log
+    if (data === 'adm_audit_log') { if (!isAdmin(chatId)) return; return showAuditLog(chatId, 0); }
+    // ── Broadcast segment selection
+    if (data === 'adm_broadcast_all') {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      await setSession(chatId, sess.state || 'idle', { ...sd, broadcastSegment: 'all' });
+      await bot.answerCallbackQuery(q.id, { text: '👥 Выбрано: все клиенты' }).catch(()=>{});
+      return showBroadcast(chatId);
+    }
+    if (data === 'adm_broadcast_completed') {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      await setSession(chatId, sess.state || 'idle', { ...sd, broadcastSegment: 'completed' });
+      await bot.answerCallbackQuery(q.id, { text: '✅ Выбрано: завершившие заявку' }).catch(()=>{});
+      return showBroadcast(chatId);
+    }
+    // ── Broadcast confirm (send after preview)
+    if (data === 'adm_broadcast_confirm') {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      if (sess.state === 'adm_broadcast_photo_preview') {
+        return doSendBroadcastWithPhoto(chatId);
+      }
+      return doSendBroadcast(chatId);
+    }
     // ── Broadcast type selection
     if (data === 'adm_broadcast_text') {
       if (!isAdmin(chatId)) return;
-      await setSession(chatId, 'adm_broadcast_msg', {});
+      const sess2 = await getSession(chatId);
+      const sd2   = sessionData(sess2);
+      await setSession(chatId, 'adm_broadcast_msg', { broadcastSegment: sd2.broadcastSegment || 'all' });
       return safeSend(chatId,
         `📝 *Рассылка — текст*\n\nВведите текст сообщения для рассылки:`,
         {
@@ -2956,7 +3093,9 @@ function initBot(app) {
     }
     if (data === 'adm_broadcast_photo') {
       if (!isAdmin(chatId)) return;
-      await setSession(chatId, 'adm_broadcast_photo_wait', {});
+      const sess3 = await getSession(chatId);
+      const sd3   = sessionData(sess3);
+      await setSession(chatId, 'adm_broadcast_photo_wait', { broadcastSegment: sd3.broadcastSegment || 'all' });
       return safeSend(chatId,
         `🖼 *Рассылка — фото*\n\nОтправьте фото для рассылки:`,
         {
@@ -2964,6 +3103,18 @@ function initBot(app) {
           reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] }
         }
       );
+    }
+    // ── Quick toggle model availability
+    if (data.startsWith('adm_toggle_avail_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_toggle_avail_', ''));
+      const m  = await get('SELECT available FROM models WHERE id=?', [id]).catch(()=>null);
+      if (!m) return;
+      const newVal = m.available ? 0 : 1;
+      await run('UPDATE models SET available=? WHERE id=?', [newVal, id]);
+      await logAdminAction(chatId, 'toggle_availability', 'model', id, { available: newVal });
+      await bot.answerCallbackQuery(q.id, { text: newVal ? '🟢 Модель доступна' : '🔴 Модель недоступна' }).catch(()=>{});
+      return showAdminModels(chatId, 0, {});
     }
     // ── Admin search order
     if (data === 'adm_search_order') { if (!isAdmin(chatId)) return; return showAdminSearchOrder(chatId); }
@@ -3258,6 +3409,7 @@ function initBot(app) {
       const id = parseInt(data.replace('adm_del_confirm_',''));
       const m = await get('SELECT name FROM models WHERE id=?', [id]).catch(()=>null);
       await run('DELETE FROM models WHERE id=?', [id]).catch(()=>{});
+      await logAdminAction(chatId, 'delete_model', 'model', id, { name: m?.name });
       return safeSend(chatId, `✅ Модель «${m?.name||id}» удалена.`, {
         reply_markup: { inline_keyboard: [[{ text: '← К моделям', callback_data: 'adm_models_0' }]] }
       });
@@ -3673,6 +3825,7 @@ function initBot(app) {
       if (settingStates[state]) {
         const [key, okMsg] = settingStates[state];
         await setSetting(key, text);
+        await logAdminAction(chatId, 'update_setting', 'setting', null, { key });
         await clearSession(chatId);
         return safeSend(chatId, `✅ ${okMsg}`, {
           reply_markup: { inline_keyboard: [[{ text: '⚙️ К настройкам', callback_data: 'adm_settings' }]] }
@@ -4618,7 +4771,7 @@ _Цены ориентировочные\\. Точная стоимость со
 
 async function showCatalogByCity(chatId, city, page = 0) {
   try {
-    const perPage = 5;
+    const perPage = parseInt(await getSetting('catalog_per_page') || '5');
     const models = city
       ? await query('SELECT * FROM models WHERE available=1 AND city=? ORDER BY id', [city])
       : await query('SELECT * FROM models WHERE available=1 ORDER BY id');
