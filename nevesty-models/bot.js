@@ -4457,11 +4457,6 @@ async function showExportMenu(chatId) {
   });
 }
 
-// Keep legacy alias for existing KB_MAIN_ADMIN button
-async function exportOrders(chatId) {
-  return showExportMenu(chatId);
-}
-
 async function showExportOrdersMenu(chatId) {
   if (!isAdmin(chatId)) return;
   return safeSend(chatId, `📋 *Экспорт заявок*\n\nВыберите период:`, {
@@ -8966,19 +8961,8 @@ function initBot(app) {
         if (text === '📞 Контакты') return showContacts(chatId);
         if (text === '📋 Тех. задание') return startTechSpec(chatId);
       }
-      // Кнопки администратора
-      if (isAdmin(chatId)) {
-        if (text === '📋 Заявки') return showAdminOrders(chatId, '', 0);
-        if (text === '💃 Модели') return showAdminModels(chatId, 0);
-        if (text === '📊 Статистика') return showAdminStats(chatId);
-        if (text === '🤖 Организм') return showOrganismStatus(chatId);
-        if (text === '📡 Фид агентов') return showAgentFeed(chatId, 0);
-        if (text === '💬 Обсуждения') return showAgentDiscussions(chatId);
-        if (text === '⚙️ Настройки') return showAdminSettings(chatId);
-        if (text === '📢 Рассылка') return showBroadcast(chatId);
-        if (text === '📤 Экспорт') return exportOrders(chatId);
-        if (text === '👥 Клиенты') return showAdminClients(chatId, 0);
-      }
+      // NOTE: Legacy REPLY_KB_ADMIN text handlers removed — admin reply keyboard was
+      // eliminated in the menu restructuring. Admins now use inline-only KB_MAIN_ADMIN.
     }
 
     // ── Admin: settings text inputs
