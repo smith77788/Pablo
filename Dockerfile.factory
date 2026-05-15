@@ -1,13 +1,34 @@
+# Build stage — install deps
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN pip install --no-cache-dir --upgrade pip
+
+COPY factory/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt --target=/app/deps
+
+# Runtime stage — smaller final image
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Create non-root user
+RUN groupadd -r factory && useradd -r -g factory factory
 
-# Copy factory code
+# Copy installed dependencies
+COPY --from=builder /app/deps /app/deps
+ENV PYTHONPATH=/app/deps
+
+# Copy source code
 COPY factory/ ./factory/
 COPY factory_main.py .
+
+# Healthcheck — verify factory DB is accessible
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+  CMD python3 -c "import os; p='/app/factory'; exit(0 if os.path.isdir(p) else 1)"
+
+USER factory
 
 CMD ["python3", "factory_main.py"]

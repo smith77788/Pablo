@@ -42,7 +42,7 @@ services:
         limits:
           memory: 512m
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get(\"status\")==\"ok\" else 1)'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -76,11 +76,11 @@ services:
         limits:
           memory: 256m
     healthcheck:
-      test: ["CMD", "python3", "-c", "import os; exit(0 if os.path.exists('/app/factory') else 1)"]
+      test: ["CMD", "python3", "-c", "import sys; import sqlite3; conn=sqlite3.connect('/app/factory/factory.db'); conn.execute('SELECT 1'); conn.close(); print('OK')"]
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     networks:
       - app-network
     logging:

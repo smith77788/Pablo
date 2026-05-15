@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+let sharp;
+try { sharp = require('sharp'); } catch { sharp = null; }
 const crypto = require('crypto');
 const { query, run, get, generateOrderNumber, getSetting } = require('../database');
 const auth = require('../middleware/auth');
@@ -101,6 +103,25 @@ function deleteFile(urlPath) {
     }
     if (fs.existsSync(abs)) fs.unlinkSync(abs);
   } catch (e) { console.warn('deleteFile error:', e.message); }
+}
+
+// ─── WebP conversion ─────────────────────────────────────────────────────────
+async function convertToWebP(filePath) {
+  if (!sharp) return filePath; // sharp not available, skip
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.webp') return filePath; // already WebP
+  const webpPath = filePath.replace(new RegExp(ext.replace('.', '\\.') + '$'), '.webp');
+  try {
+    await sharp(filePath)
+      .resize(1200, 1600, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 85 })
+      .toFile(webpPath);
+    fs.unlink(filePath, () => {}); // delete original after successful conversion
+    return webpPath;
+  } catch (e) {
+    console.error('[WebP] conversion error:', e.message);
+    return filePath; // return original if conversion fails
+  }
 }
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
@@ -636,8 +657,14 @@ router.post('/admin/models', auth, upload.fields([{ name: 'photo_main', maxCount
     const { name, age, height, weight, bust, waist, hips, shoe_size, hair_color, eye_color, bio, instagram, category, available } = req.body;
     if (!name) return res.status(400).json({ error: 'Укажите имя модели' });
     if (category && !ALLOWED_CATEGORIES.includes(category)) return res.status(400).json({ error: 'Недопустимая категория' });
-    const photo_main = req.files?.photo_main?.[0] ? `/uploads/${req.files.photo_main[0].filename}` : null;
-    const photos = (req.files?.photos || []).map(f => `/uploads/${f.filename}`);
+    let photo_main = null;
+    if (req.files?.photo_main?.[0]) {
+      const converted = await convertToWebP(req.files.photo_main[0].path);
+      photo_main = `/uploads/${path.basename(converted)}`;
+    }
+    const photoFiles = req.files?.photos || [];
+    const convertedPhotos = await Promise.all(photoFiles.map(f => convertToWebP(f.path)));
+    const photos = convertedPhotos.map(p => `/uploads/${path.basename(p)}`);
     const result = await run(
       `INSERT INTO models (name,age,height,weight,bust,waist,hips,shoe_size,hair_color,eye_color,bio,photo_main,photos,instagram,category,available)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -660,11 +687,13 @@ router.put('/admin/models/:id', auth, upload.fields([{ name: 'photo_main', maxCo
     let photo_main = existing.photo_main;
     if (req.files?.photo_main?.[0]) {
       deleteFile(existing.photo_main);
-      photo_main = `/uploads/${req.files.photo_main[0].filename}`;
+      const converted = await convertToWebP(req.files.photo_main[0].path);
+      photo_main = `/uploads/${path.basename(converted)}`;
     }
     let photos = JSON.parse(existing.photos || '[]');
     if (req.files?.photos?.length) {
-      photos = [...photos, ...req.files.photos.map(f => `/uploads/${f.filename}`)];
+      const convertedPhotos = await Promise.all(req.files.photos.map(f => convertToWebP(f.path)));
+      photos = [...photos, ...convertedPhotos.map(p => `/uploads/${path.basename(p)}`)];
     }
     await run(
       `UPDATE models SET name=?,age=?,height=?,weight=?,bust=?,waist=?,hips=?,shoe_size=?,hair_color=?,eye_color=?,bio=?,photo_main=?,photos=?,instagram=?,category=?,available=? WHERE id=?`,
