@@ -8,7 +8,7 @@ entry-point that orchestrates them all.
 """
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Dict, List, Any
+from typing import Any
 
 
 class CustomerSuccessDepartment:
@@ -42,7 +42,7 @@ class CustomerSuccessDepartment:
     # analyze_retention_risk                                               #
     # ------------------------------------------------------------------ #
 
-    def analyze_retention_risk(self, client_history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def analyze_retention_risk(self, client_history: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze retention risk from order history.
 
         Returns {risk_level, days_since_last_order, recommendation}.
@@ -107,7 +107,7 @@ class CustomerSuccessDepartment:
     # generate_review_request                                              #
     # ------------------------------------------------------------------ #
 
-    def generate_review_request(self, order_data: Dict[str, Any]) -> str:
+    def generate_review_request(self, order_data: dict[str, Any]) -> str:
         """Generate a polite review request message."""
         client = order_data.get("client_name") or order_data.get("name") or "Клиент"
         event_type = order_data.get("event_type") or "мероприятие"
@@ -128,7 +128,7 @@ class CustomerSuccessDepartment:
     # suggest_upsell                                                       #
     # ------------------------------------------------------------------ #
 
-    def suggest_upsell(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
+    def suggest_upsell(self, order_data: dict[str, Any]) -> dict[str, Any]:
         """Return {suggestions, reason} based on event type and budget."""
         event_type = (order_data.get("event_type") or "").lower()
         budget = order_data.get("budget") or 0
@@ -173,13 +173,13 @@ class CustomerSuccessDepartment:
     # execute_task — agent-style orchestrator entry point                  #
     # ------------------------------------------------------------------ #
 
-    def execute_task(self, task: str, context: Dict[str, Any] | None) -> Dict[str, Any]:
+    def execute_task(self, task: str, context: dict[str, Any] | None) -> dict[str, Any]:
         """Orchestrate all CS specialist roles for a given task.
 
         Returns a combined result with insights from every specialist,
         a list of roles_used, and a UTC timestamp.
         """
-        ctx: Dict[str, Any] = context or {}
+        ctx: dict[str, Any] = context or {}
         task_lower = (task or "").lower()
 
         # Run all specialists and collect their insights
@@ -193,7 +193,7 @@ class CustomerSuccessDepartment:
         feedback_result = feedback.run(ctx)
         upsell_result = upsell.run(ctx)
 
-        all_insights: List[str] = []
+        all_insights: list[str] = []
         for r in (onboarding_result, retention_result, feedback_result, upsell_result):
             insights = r.get("insights", [])
             if isinstance(insights, list):
@@ -232,7 +232,7 @@ class _BaseCSAgent:
     department: str = "customer_success"
     role: str = "cs_agent"
 
-    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:  # pragma: no cover
+    def run(self, context: dict[str, Any] | None) -> dict[str, Any]:  # pragma: no cover
         raise NotImplementedError
 
     # ------------------------------------------------------------------
@@ -240,7 +240,7 @@ class _BaseCSAgent:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _safe_ctx(context: Dict[str, Any] | None) -> Dict[str, Any]:
+    def _safe_ctx(context: dict[str, Any] | None) -> dict[str, Any]:
         return context or {}
 
     @staticmethod
@@ -253,12 +253,12 @@ class OnboardingSpecialist(_BaseCSAgent):
 
     role: str = "onboarding_specialist"
 
-    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:
+    def run(self, context: dict[str, Any] | None) -> dict[str, Any]:
         ctx = self._safe_ctx(context)
         kpis = ctx.get("nevesty_kpis", {}) or {}
         clients_total = kpis.get("clients_total", 0)
 
-        insights: List[str] = [
+        insights: list[str] = [
             "Відправити вітальне повідомлення нового клієнту протягом 1 години після заявки.",
             "Призначити персонального менеджера для супроводу клієнта.",
         ]
@@ -279,12 +279,12 @@ class RetentionAnalyst(_BaseCSAgent):
 
     role: str = "retention_analyst"
 
-    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:
+    def run(self, context: dict[str, Any] | None) -> dict[str, Any]:
         ctx = self._safe_ctx(context)
         kpis = ctx.get("nevesty_kpis", {}) or {}
         repeat_rate = kpis.get("repeat_client_rate", None)
 
-        insights: List[str] = [
+        insights: list[str] = [
             "Проаналізувати клієнтів, що не замовляли понад 90 днів.",
             "Запустити реактиваційну кампанію з персональними пропозиціями.",
         ]
@@ -306,12 +306,12 @@ class FeedbackCollector(_BaseCSAgent):
 
     role: str = "feedback_collector"
 
-    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:
+    def run(self, context: dict[str, Any] | None) -> dict[str, Any]:
         ctx = self._safe_ctx(context)
         kpis = ctx.get("nevesty_kpis", {}) or {}
         orders_month = kpis.get("orders_this_month", 0)
 
-        insights: List[str] = [
+        insights: list[str] = [
             "Надіслати запит на відгук через 24 години після заходу.",
             "Збирати NPS-оцінки для відстеження задоволеності клієнтів.",
         ]
@@ -332,12 +332,12 @@ class UpsellAdvisor(_BaseCSAgent):
 
     role: str = "upsell_advisor"
 
-    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:
+    def run(self, context: dict[str, Any] | None) -> dict[str, Any]:
         ctx = self._safe_ctx(context)
         kpis = ctx.get("nevesty_kpis", {}) or {}
         avg_check = kpis.get("avg_check", 0)
 
-        insights: List[str] = [
+        insights: list[str] = [
             "Пропонуйте пакет «Все включено» клієнтам з бюджетом понад 30 000 грн.",
             "Рекомендуйте додаткового фотографа або стиліста при корпоративних подіях.",
         ]

@@ -157,7 +157,7 @@ class QATester(FactoryAgent):
 class TechDepartment:
     """Координатор технического департамента."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.backend = BackendDeveloper()
         self.frontend = FrontendBuilder()
         self.api = APIEngineer()

@@ -2,7 +2,6 @@
 from __future__ import annotations
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
 
 from factory.agents.base import FactoryAgent
 from factory import db
@@ -28,14 +27,14 @@ class CandidateScreener(FactoryAgent):
             max_tokens=800,
         ) or {}
 
-    def run(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def run(self, context: dict | None = None) -> dict:
         """Heuristic candidate screening based on context data."""
         ctx = context or {}
         candidate = ctx.get("candidate", {})
         experience = candidate.get("experience_years", 0)
         rating = float(candidate.get("rating", 0))
 
-        insights: List[str] = []
+        insights: list[str] = []
         verdict = "maybe"
 
         if experience >= 3 and rating >= 4.0:
@@ -78,14 +77,14 @@ class PortfolioEvaluator(FactoryAgent):
             max_tokens=800,
         ) or {}
 
-    def run(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def run(self, context: dict | None = None) -> dict:
         """Heuristic portfolio evaluation based on context data."""
         ctx = context or {}
         model = ctx.get("model", {})
         photo_count = int(model.get("photo_count", 0))
         categories = model.get("categories", [])
 
-        insights: List[str] = []
+        insights: list[str] = []
 
         if photo_count >= 30:
             photo_quality = "high"
@@ -131,14 +130,14 @@ class RankingSystem(FactoryAgent):
             max_tokens=1500,
         ) or []
 
-    def run(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def run(self, context: dict | None = None) -> dict:
         """Heuristic model ranking based on context data."""
         ctx = context or {}
         models = ctx.get("models", [])
         metrics = ctx.get("metrics", {})
 
-        insights: List[str] = []
-        ranked: List[Dict[str, Any]] = []
+        insights: list[str] = []
+        ranked: list[dict] = []
 
         if not models:
             insights.append("No models provided for ranking — using empty dataset")
@@ -172,7 +171,7 @@ class RankingSystem(FactoryAgent):
 class HRDepartment:
     """Координатор HR-департамента."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.screener = CandidateScreener()
         self.portfolio = PortfolioEvaluator()
         self.ranker = RankingSystem()
@@ -213,7 +212,7 @@ class HRDepartment:
         logger.info("[HR Dept] Сгенерировано %d action items по моделям", len(saved_actions))
         return saved_actions
 
-    def execute_task(self, task: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def execute_task(self, task: str, context: dict | None = None) -> dict:
         """Execute an HR task using all department agents in heuristic mode."""
         ctx = context or {}
 
@@ -221,7 +220,7 @@ class HRDepartment:
         portfolio_result = self.portfolio.run(ctx)
         ranker_result = self.ranker.run(ctx)
 
-        all_insights: List[str] = (
+        all_insights: list[str] = (
             screener_result.get("insights", [])
             + portfolio_result.get("insights", [])
             + ranker_result.get("insights", [])

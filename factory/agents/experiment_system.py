@@ -546,7 +546,7 @@ class CEOExperimentSystem:
             "end_date": (now + _dt_mod.timedelta(days=chosen['duration_days'])).isoformat(),
         }
 
-    def get_active_experiments(self) -> list:
+    def get_active_experiments(self) -> list[dict]:
         """Load active experiments from JSON file."""
         try:
             if _EXPERIMENTS_DB_PATH.exists():
@@ -595,9 +595,9 @@ class CEODelegation:
         'operations', 'hr', 'tech', 'creative', 'finance',
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._current_focus: str | None = None
-        self._decisions_history: list = []
+        self._decisions_history: list[dict] = []
 
     def delegate_focus(self, kpis: dict | None = None) -> dict:
         """Decide which department to focus on next cycle based on KPIs."""
@@ -626,7 +626,7 @@ class CEODelegation:
         self._decisions_history.append(decision)
         return decision
 
-    def _get_priority_tasks(self, department: str) -> list:
+    def _get_priority_tasks(self, department: str) -> list[str]:
         tasks = {
             'sales': ['Improve follow-up messages', 'Reduce response time', 'Add pricing info'],
             'marketing': ['Post to Telegram channel', 'Update model descriptions', 'SEO improvements'],

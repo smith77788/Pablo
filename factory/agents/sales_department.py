@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import random
 from datetime import timezone, timedelta
-from typing import Any, Dict, List
+from typing import Any
 
 
 class LeadQualifier:
@@ -19,7 +19,7 @@ class LeadQualifier:
         'is_repeat_client': 25,
     }
 
-    def score_lead(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
+    def score_lead(self, order_data: dict[str, Any]) -> dict[str, Any]:
         """Score a lead 0-100 and return tier."""
         score = 0
         reasons = []

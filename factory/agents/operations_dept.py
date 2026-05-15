@@ -153,7 +153,7 @@ class SystemOptimizer(FactoryAgent):
 class OperationsDepartment:
     """Координатор операционного департамента."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.workflow = WorkflowManager()
         self.automation = AutomationBuilder()
         self.crm = CRMSpecialist()

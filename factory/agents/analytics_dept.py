@@ -154,7 +154,7 @@ class KPITracker(FactoryAgent):
 class AnalyticsDepartment:
     """Координатор аналитического департамента."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.analyst = DataAnalyst()
         self.conversion = ConversionAnalyst()
         self.evaluator = ExperimentEvaluator()

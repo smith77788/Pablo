@@ -107,7 +107,7 @@ class GrowthHacker(FactoryAgent):
 class MarketingDepartment:
     """Координатор маркетинг-департамента — запускает нужные роли."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.content = ContentStrategist()
         self.viral = ViralEngineer()
         self.seo = SEOSpecialist()

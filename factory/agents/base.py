@@ -27,7 +27,7 @@ if os.getenv("ANTHROPIC_API_KEY") and not _USE_SDK:
     )
 
 
-def _make_sdk_client():
+def _make_sdk_client() -> object | None:
     """Создаёт Anthropic SDK клиент если есть API ключ."""
     try:
         import anthropic

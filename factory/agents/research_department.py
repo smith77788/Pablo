@@ -3,20 +3,20 @@ Research Department — Market research, competitor analysis, trend spotting, in
 """
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 
 class MarketResearcher:
     """Researches market conditions and sizing for modeling agency."""
 
-    MARKET_SEGMENTS: Dict[str, Dict[str, Any]] = {
+    MARKET_SEGMENTS: dict[str, dict[str, Any]] = {
         "fashion": {"size_rub": 2_500_000_000, "growth_pct": 8.5, "competition": "high"},
         "commercial": {"size_rub": 1_800_000_000, "growth_pct": 12.0, "competition": "medium"},
         "events": {"size_rub": 3_200_000_000, "growth_pct": 6.0, "competition": "high"},
         "promo": {"size_rub": 900_000_000, "growth_pct": 15.0, "competition": "low"},
     }
 
-    def analyze_market_segment(self, segment: str) -> Dict[str, Any]:
+    def analyze_market_segment(self, segment: str) -> dict[str, Any]:
         """Return market size, growth rate and competition level for a segment."""
         seg = segment.lower().strip()
         data = self.MARKET_SEGMENTS.get(seg, self.MARKET_SEGMENTS["commercial"])
@@ -29,16 +29,16 @@ class MarketResearcher:
             "analyzed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    def _opportunity_score(self, data: Dict[str, Any]) -> int:
+    def _opportunity_score(self, data: dict[str, Any]) -> int:
         competition_scores = {"low": 30, "medium": 20, "high": 10}
         base = competition_scores.get(data["competition"], 15)
         growth_bonus = min(int(data["growth_pct"] * 2), 40)
         size_bonus = min(int(data["size_rub"] / 100_000_000), 30)
         return min(base + growth_bonus + size_bonus, 100)
 
-    def estimate_addressable_market(self, city: str, segment: str) -> Dict[str, Any]:
+    def estimate_addressable_market(self, city: str, segment: str) -> dict[str, Any]:
         """Estimate total addressable market (TAM) for a city and segment."""
-        city_multipliers: Dict[str, float] = {
+        city_multipliers: dict[str, float] = {
             "москва": 1.0,
             "санкт-петербург": 0.55,
             "екатеринбург": 0.20,
@@ -63,14 +63,14 @@ class MarketResearcher:
 class CompetitorAnalyst:
     """Analyzes competitor landscape for modeling agency market."""
 
-    COMPETITOR_PROFILES: List[Dict[str, Any]] = [
+    COMPETITOR_PROFILES: list[dict[str, Any]] = [
         {"name": "TopModels Agency", "strength": "fashion", "pricing": "premium", "market_share": 0.12},
         {"name": "City Events Models", "strength": "events", "pricing": "mid", "market_share": 0.08},
         {"name": "PromoGirls", "strength": "promo", "pricing": "budget", "market_share": 0.05},
         {"name": "Elite Models Moscow", "strength": "fashion", "pricing": "luxury", "market_share": 0.18},
     ]
 
-    def identify_competitive_gaps(self, our_strengths: List[str]) -> List[Dict[str, Any]]:
+    def identify_competitive_gaps(self, our_strengths: list[str]) -> list[dict[str, Any]]:
         """Find segments where competition is weak and we can grow."""
         all_strengths = {c["strength"] for c in self.COMPETITOR_PROFILES}
         gaps = []
@@ -88,9 +88,9 @@ class CompetitorAnalyst:
             })
         return sorted(gaps, key=lambda x: x["available_share"], reverse=True)
 
-    def benchmark_pricing(self, our_price: float, event_type: str) -> Dict[str, Any]:
+    def benchmark_pricing(self, our_price: float, event_type: str) -> dict[str, Any]:
         """Compare our pricing against market benchmarks."""
-        benchmarks: Dict[str, Dict[str, float]] = {
+        benchmarks: dict[str, dict[str, float]] = {
             "fashion": {"budget": 10_000, "mid": 25_000, "premium": 60_000, "luxury": 150_000},
             "events": {"budget": 8_000, "mid": 20_000, "premium": 50_000, "luxury": 100_000},
             "promo": {"budget": 5_000, "mid": 12_000, "premium": 30_000, "luxury": 60_000},
@@ -116,7 +116,7 @@ class CompetitorAnalyst:
 class TrendSpotter:
     """Identifies and evaluates industry trends."""
 
-    CURRENT_TRENDS: List[Dict[str, Any]] = [
+    CURRENT_TRENDS: list[dict[str, Any]] = [
         {
             "name": "AI-assisted model selection",
             "impact": "high",
@@ -161,7 +161,7 @@ class TrendSpotter:
         },
     ]
 
-    def get_actionable_trends(self, focus_area: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_actionable_trends(self, focus_area: str | None = None) -> list[dict[str, Any]]:
         """Return trends filtered by relevance area, sorted by impact."""
         trends = self.CURRENT_TRENDS
         if focus_area:
@@ -170,7 +170,7 @@ class TrendSpotter:
         priority_order = {"high": 0, "medium": 1, "low": 2}
         return sorted(trends, key=lambda t: priority_order.get(t["impact"], 3))
 
-    def score_trend_relevance(self, trend_name: str, business_context: Dict[str, Any]) -> Dict[str, Any]:
+    def score_trend_relevance(self, trend_name: str, business_context: dict[str, Any]) -> dict[str, Any]:
         """Score how relevant a specific trend is to our current business."""
         trend = next((t for t in self.CURRENT_TRENDS if trend_name.lower() in t["name"].lower()), None)
         if not trend:
@@ -194,11 +194,11 @@ class InsightSynthesizer:
 
     def synthesize_insights(
         self,
-        market_data: Dict[str, Any],
-        competitor_gaps: List[Dict[str, Any]],
-        trends: List[Dict[str, Any]],
-        performance_data: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        market_data: dict[str, Any],
+        competitor_gaps: list[dict[str, Any]],
+        trends: list[dict[str, Any]],
+        performance_data: dict[str, Any],
+    ) -> dict[str, Any]:
         """Combine all research inputs into actionable strategic insights."""
         top_gap = max(competitor_gaps, key=lambda g: g["available_share"]) if competitor_gaps else {}
         top_trend = trends[0] if trends else {}
@@ -225,7 +225,7 @@ class InsightSynthesizer:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    def generate_weekly_insight_report(self, data: Dict[str, Any]) -> str:
+    def generate_weekly_insight_report(self, data: dict[str, Any]) -> str:
         """Generate a formatted weekly insight report text."""
         orders_this_week = data.get("orders_this_week", 0)
         conversion = data.get("conversion_rate", 0)

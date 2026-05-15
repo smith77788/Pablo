@@ -84,7 +84,7 @@ class ContentGenerator(FactoryAgent):
         result = self.think_json(prompt, max_tokens=1024)
         return result if isinstance(result, dict) else {}
 
-    def generate_weekly_content_plan(self) -> list:
+    def generate_weekly_content_plan(self) -> list[dict]:
         """Generate a 7-post weekly content plan."""
         stats = self._get_recent_stats()
 
@@ -142,7 +142,7 @@ class TelegramPostAgent(FactoryAgent):
 Стиль: профессиональный, но живой. Без лишних эмодзи (max 3 на пост).
 Длина поста: 150-300 символов. Всегда заканчивай CTA (призыв к действию)."""
 
-    def generate_post(self, post_type: str = "promo", context: dict = None) -> dict:
+    def generate_post(self, post_type: str = "promo", context: dict | None = None) -> dict:
         """Generate a Telegram post of a specific type."""
         post_types = {
             "promo": "Промо пост про услуги агентства и бронирование моделей",
@@ -170,7 +170,7 @@ class TelegramPostAgent(FactoryAgent):
             }
         return result
 
-    def generate_weekly_content_plan(self, context: dict = None) -> list[dict]:
+    def generate_weekly_content_plan(self, context: dict | None = None) -> list[dict]:
         """Generate a 7-post weekly content plan."""
         prompt = """Составь план на 7 постов для Telegram-канала модельного агентства.
 Чередуй типы: promo, model_spotlight, event_case, tips, announcement.
@@ -195,7 +195,7 @@ class FAQGeneratorAgent(FactoryAgent):
 Создаёшь чёткие, информативные ответы на вопросы клиентов.
 Тон: профессиональный, дружелюбный."""
 
-    def generate_faq_item(self, question: str, context: dict = None) -> dict:
+    def generate_faq_item(self, question: str, context: dict | None = None) -> dict:
         """Generate a FAQ answer for a given question."""
         prompt = f"""Напиши ответ на вопрос клиента: "{question}"
 Контекст агентства: {context or {}}
@@ -377,7 +377,7 @@ class FAQGenerator(FactoryAgent):
 class ContentGenerationDepartment:
     """Orchestrates content generation agents."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.post_generator = ChannelPostGenerator()
         self.description_writer = ModelDescriptionWriter()
         self.faq_generator = FAQGenerator()

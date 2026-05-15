@@ -160,7 +160,7 @@ class LandingBuilder(FactoryAgent):
 class ProductDepartment:
     """Координатор продуктового департамента."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.strategist = ProductStrategist()
         self.ux = UXDesigner()
         self.funnel = FunnelArchitect()

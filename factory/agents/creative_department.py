@@ -5,7 +5,7 @@ Heuristic (no API calls) version with sub-agent classes.
 """
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Any
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ class BrandVoiceKeeper:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    def get_brand_voice_guidelines(self) -> Dict[str, Any]:
+    def get_brand_voice_guidelines(self) -> dict[str, Any]:
         """Return brand voice guidelines dict."""
         return _get_brand_voice_guidelines()
 
@@ -173,7 +173,7 @@ def _generate_promo_text(discount: int, validity_days: int) -> str:
     )
 
 
-def _get_brand_voice_guidelines() -> Dict[str, Any]:
+def _get_brand_voice_guidelines() -> dict[str, Any]:
     return {
         "tone": "профессиональный, элегантный, доступный",
         "style": "краткий и ёмкий, без клише, с лёгкой интригой",
@@ -211,7 +211,7 @@ def _get_brand_voice_guidelines() -> Dict[str, Any]:
 class CreativeDepartment:
     """Creative Department with template-based methods (no API calls)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.copywriter = CopywriterAI()
         self.visual = VisualConceptor()
         self.brand_voice = BrandVoiceKeeper()
@@ -225,7 +225,7 @@ class CreativeDepartment:
         """Dispatch task to sub-agents based on keywords; always uses at least 2 roles."""
         ctx = context or {}
         task_lower = (task or "").lower()
-        result_data: Dict[str, Any] = {}
+        result_data: dict[str, Any] = {}
         roles_used: list[str] = []
 
         if any(kw in task_lower for kw in ("copy", "текст", "пост", "описан", "caption", "соцсет", "копирайт")):
@@ -272,7 +272,7 @@ class CreativeDepartment:
     # generate_model_bio                                                   #
     # ------------------------------------------------------------------ #
 
-    def generate_model_bio(self, model_data: Dict[str, Any]) -> str:
+    def generate_model_bio(self, model_data: dict[str, Any]) -> str:
         """Generate a short 2-3 sentence bio from model params."""
         name = model_data.get("name") or "Модель"
         height = model_data.get("height")
@@ -311,6 +311,6 @@ class CreativeDepartment:
     # get_brand_voice_guidelines                                           #
     # ------------------------------------------------------------------ #
 
-    def get_brand_voice_guidelines(self) -> Dict[str, Any]:
+    def get_brand_voice_guidelines(self) -> dict[str, Any]:
         """Return brand voice guidelines dict."""
         return _get_brand_voice_guidelines()

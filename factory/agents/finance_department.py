@@ -10,7 +10,7 @@ Agents:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,9 @@ class RevenueForecaster:
 
     def forecast_monthly_revenue(
         self,
-        orders_history: List[Dict[str, Any]],
+        orders_history: list[dict[str, Any]],
         months_ahead: int = 1,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Forecast revenue for next N months based on trends.
 
         Returns:
@@ -46,7 +46,7 @@ class RevenueForecaster:
             }
 
         # Extract monthly revenue totals; each entry may have 'revenue' or 'amount'
-        monthly_revenues: List[float] = []
+        monthly_revenues: list[float] = []
         for entry in orders_history:
             rev = entry.get("revenue") or entry.get("amount") or 0.0
             try:
@@ -92,7 +92,7 @@ class RevenueForecaster:
             "basis_months": basis_months,
         }
 
-    def calculate_growth_rate(self, monthly_revenues: List[float]) -> float:
+    def calculate_growth_rate(self, monthly_revenues: list[float]) -> float:
         """Calculate average month-over-month growth rate.
 
         Returns 0.0 if fewer than 2 data points.
@@ -100,7 +100,7 @@ class RevenueForecaster:
         if len(monthly_revenues) < 2:
             return 0.0
 
-        growth_rates: List[float] = []
+        growth_rates: list[float] = []
         for i in range(1, len(monthly_revenues)):
             prev = monthly_revenues[i - 1]
             curr = monthly_revenues[i]
@@ -125,8 +125,8 @@ class CostOptimizer:
     HIGH_SPEND_THRESHOLD_PCT = 0.35
 
     def analyze_cost_structure(
-        self, expenses: Dict[str, float]
-    ) -> Dict[str, Any]:
+        self, expenses: dict[str, float]
+    ) -> dict[str, Any]:
         """Analyze expense categories and find optimization opportunities.
 
         Returns:
@@ -140,8 +140,8 @@ class CostOptimizer:
         if total == 0:
             return {"total": 0.0, "breakdown": {}, "suggestions": []}
 
-        breakdown: Dict[str, Dict[str, Any]] = {}
-        suggestions: List[str] = []
+        breakdown: dict[str, dict[str, Any]] = {}
+        suggestions: list[str] = []
 
         for category, amount in expenses.items():
             pct = amount / total
@@ -172,8 +172,8 @@ class CostOptimizer:
         }
 
     def suggest_pricing_adjustments(
-        self, model_stats: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+        self, model_stats: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """Suggest price adjustments per model based on demand.
 
         Each entry in model_stats should contain:
@@ -182,7 +182,7 @@ class CostOptimizer:
         Returns list of adjustment dicts:
             { name: str, current_rate: float, suggested_rate: float, rationale: str }
         """
-        adjustments: List[Dict[str, Any]] = []
+        adjustments: list[dict[str, Any]] = []
 
         if not model_stats:
             return adjustments
@@ -234,7 +234,7 @@ class PricingStrategist:
     """Sets dynamic pricing strategies."""
 
     # Base price ranges (min, max) per event type in RUB
-    _EVENT_BASE_PRICES: Dict[str, tuple[int, int]] = {
+    _EVENT_BASE_PRICES: dict[str, tuple[int, int]] = {
         "corporate": (15_000, 35_000),
         "корпоратив": (15_000, 35_000),
         "wedding": (20_000, 50_000),
@@ -251,9 +251,9 @@ class PricingStrategist:
     def calculate_optimal_price(
         self,
         event_type: str,
-        model_data: Dict[str, Any],
-        market_data: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        model_data: dict[str, Any],
+        market_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Calculate optimal price for a booking.
 
         Returns:
@@ -318,7 +318,7 @@ class PricingStrategist:
           Dec–Jan (New Year/Christmas), Feb (Valentine's), May (spring events),
           Jun–Jul (summer weddings).
         """
-        multipliers: Dict[int, float] = {
+        multipliers: dict[int, float] = {
             1: 1.20,   # January — post NY premium
             2: 1.15,   # February — Valentine's
             3: 1.05,
@@ -354,8 +354,8 @@ class BudgetPlanner:
     def create_monthly_budget(
         self,
         revenue_forecast: float,
-        fixed_costs: Dict[str, float],
-    ) -> Dict[str, Any]:
+        fixed_costs: dict[str, float],
+    ) -> dict[str, Any]:
         """Create a monthly budget plan.
 
         Returns:
@@ -370,7 +370,7 @@ class BudgetPlanner:
         # Allocatable budget = revenue_forecast minus fixed costs
         allocatable = max(0.0, revenue_forecast - total_fixed)
 
-        allocations: Dict[str, float] = {}
+        allocations: dict[str, float] = {}
 
         # Include fixed costs as their own line items
         for category, amount in fixed_costs.items():
@@ -392,9 +392,9 @@ class BudgetPlanner:
 
     def evaluate_budget_variance(
         self,
-        planned: Dict[str, float],
-        actual: Dict[str, float],
-    ) -> Dict[str, Any]:
+        planned: dict[str, float],
+        actual: dict[str, float],
+    ) -> dict[str, Any]:
         """Compare planned vs actual spend.
 
         Returns:
@@ -405,7 +405,7 @@ class BudgetPlanner:
             }
         """
         all_categories = set(planned.keys()) | set(actual.keys())
-        variances: Dict[str, Dict[str, Any]] = {}
+        variances: dict[str, dict[str, Any]] = {}
 
         for cat in all_categories:
             p = float(planned.get(cat, 0.0))
@@ -450,7 +450,7 @@ class FinanceDepartment:
         self.pricing = PricingStrategist()
         self.planner = BudgetPlanner()
 
-    def execute_task(self, task: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def execute_task(self, task: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Execute a finance task using all department agents.
 
         Adapts the context dict (may include nevesty_kpis) into run_analysis format.
@@ -489,7 +489,7 @@ class FinanceDepartment:
             },
         }
 
-    def run_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def run_analysis(self, data: dict[str, Any]) -> dict[str, Any]:
         """Run full financial analysis cycle.
 
         Args:
@@ -501,10 +501,10 @@ class FinanceDepartment:
             Aggregated analysis results.
         """
         revenue_history_raw: list = data.get('revenue_history', [])
-        costs: Dict[str, float] = data.get('costs', {})
+        costs: dict[str, float] = data.get('costs', {})
 
         # Normalize revenue history to list-of-dicts format expected by forecaster
-        orders_history: List[Dict[str, Any]] = []
+        orders_history: list[dict[str, Any]] = []
         for entry in revenue_history_raw:
             if isinstance(entry, dict):
                 orders_history.append(entry)
