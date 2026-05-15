@@ -90,6 +90,7 @@ function isActiveInputState(state) {
   if (state.startsWith('adm_ef_')) return true;
   if (state.startsWith('adm_note_input_')) return true;
   if (state.startsWith('adm_personal_msg_')) return true;
+  if (state.startsWith('adm_rev_reply_text_')) return true;
   if (
     [
       'adm_broadcast_msg',
@@ -7447,6 +7448,7 @@ function initBot(app) {
                   { text: '❌ Отклонить', callback_data: `rev_reject_${r.id}` },
                   { text: '🗑 Удалить', callback_data: `rev_delete_${r.id}` },
                 ],
+                [{ text: '💬 Ответить', callback_data: `rev_reply_${r.id}` }],
                 [{ text: '← К отзывам', callback_data: 'adm_reviews' }],
               ],
             },
@@ -7500,6 +7502,29 @@ function initBot(app) {
       await run('DELETE FROM reviews WHERE id=?', [id]).catch(() => {});
       await bot.answerCallbackQuery(q.id, { text: '🗑️ Удалён' }).catch(() => {});
       return showAdminReviewsPanel(chatId, 'all', 0);
+    }
+    if (data.startsWith('rev_reply_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('rev_reply_', ''));
+      if (!id) return bot.answerCallbackQuery(q.id, { text: 'Ошибка' }).catch(() => {});
+      await bot.answerCallbackQuery(q.id).catch(() => {});
+      // Fetch review text for context
+      const rev = await get(
+        'SELECT r.*, m.name as model_name FROM reviews r LEFT JOIN models m ON r.model_id = m.id WHERE r.id=?',
+        [id]
+      ).catch(() => null);
+      const contextLine = rev
+        ? `\nОтзыв #${id}${rev.model_name ? ` (${rev.model_name})` : ''}: _${esc((rev.text || '').slice(0, 80))}${(rev.text || '').length > 80 ? '…' : ''}_`
+        : '';
+      await setSession(chatId, `adm_rev_reply_text_${id}`, {});
+      return safeSend(
+        chatId,
+        `💬 *Введите ответ на отзыв \\#${esc(String(id))}*${contextLine}\n\n_Этот ответ будет сохранён и может быть показан клиенту\\._`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_reviews' }]] },
+        }
+      );
     }
     if (data === 'adm_admins') {
       if (!isAdmin(chatId)) {
@@ -9327,6 +9352,44 @@ function initBot(app) {
             inline_keyboard: [[{ text: STRINGS.btnBackToOrder, callback_data: `adm_order_${orderId}` }]],
           },
         });
+      }
+
+      // ── Admin reply to review
+      if (state.startsWith('adm_rev_reply_text_')) {
+        const reviewId = parseInt(state.replace('adm_rev_reply_text_', ''));
+        await clearSession(chatId);
+        if (!reviewId) return;
+        const trimmed = text.slice(0, 1000);
+        await run('UPDATE reviews SET admin_reply=?, reply_at=datetime("now") WHERE id=?', [trimmed, reviewId]).catch(
+          e => console.error('[Bot] rev_reply save:', e.message)
+        );
+        // Notify client if linked to an order
+        try {
+          const rev = await get(
+            'SELECT r.*, o.client_chat_id FROM reviews r LEFT JOIN orders o ON r.order_id = o.id WHERE r.id=?',
+            [reviewId]
+          );
+          if (rev?.client_chat_id) {
+            await safeSend(rev.client_chat_id, `💬 *Агентство ответило на ваш отзыв:*\n\n${esc(trimmed)}`, {
+              parse_mode: 'MarkdownV2',
+            }).catch(() => {});
+          }
+        } catch {}
+        return safeSend(
+          chatId,
+          `✅ *Ответ на отзыв \\#${esc(String(reviewId))} сохранён\\.` + `*\n\n_${esc(trimmed)}_`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '👁 Просмотр отзыва', callback_data: `rev_view_${reviewId}` },
+                  { text: '← К отзывам', callback_data: 'adm_reviews' },
+                ],
+              ],
+            },
+          }
+        );
       }
 
       // ── Personal message to client
@@ -11681,7 +11744,7 @@ async function runAiMatch(chatId, userDesc) {
       })
       .join('\n');
 
-    const promptContent = `Ты — AI-ассистент модельного агентства Nevesty. Клиент описал задачу: "${userDesc}"\n\nДоступные модели:\n${modelList}\n\nПодбери 3 наиболее подходящих модели. Учитывай: тип мероприятия, город, внешность, категорию.\n\nОтветь строго в JSON:\n{"picks": [{"num": номер, "reason": "1-2 предложения почему подходит"}, {"num": номер, "reason": "..."}, {"num": номер, "reason": "..."}]}\nТолько JSON, без других слов.`;
+    const systemPrompt = `Ты — AI-ассистент модельного агентства Nevesty. Подбери 3 наиболее подходящих модели под задачу клиента. Учитывай: тип мероприятия, город, внешность, категорию.\n\nДоступные модели:\n${modelList}\n\nОтветь строго в JSON:\n{"picks": [{"num": номер, "reason": "1-2 предложения почему подходит"}, {"num": номер, "reason": "..."}, {"num": номер, "reason": "..."}]}\nТолько JSON, без других слов.`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -11693,7 +11756,8 @@ async function runAiMatch(chatId, userDesc) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 600,
-        messages: [{ role: 'user', content: promptContent }],
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userDesc.slice(0, 500) }],
       }),
     });
 
