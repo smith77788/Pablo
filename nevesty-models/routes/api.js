@@ -6814,6 +6814,99 @@ router.post('/client/ai-match', aiMatchLimiter, async (req, res) => {
   }
 });
 
+// ─── AI Budget Estimation by Description (БЛОК 12.2) ─────────────────────────
+// POST /api/client/ai-budget — estimate budget from free-text event description
+
+router.post('/client/ai-budget', aiMatchLimiter, async (req, res) => {
+  const { description } = req.body;
+  if (!description || description.length < 10)
+    return res.json({ ok: false, error: 'Опишите мероприятие подробнее (минимум 10 символов)' });
+  if (description.length > 600)
+    return res.json({ ok: false, error: 'Описание слишком длинное (максимум 600 символов)' });
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    // Fallback: use rule-based estimate
+    return res.json({
+      ok: true,
+      ai: false,
+      estimate: { min: 15000, max: 50000, currency: 'RUB' },
+      notes: 'AI недоступен, приведена базовая оценка. Свяжитесь с менеджером для точного расчёта.',
+    });
+  }
+
+  try {
+    const systemPrompt = [
+      'Ты — эксперт по бюджетированию модельного агентства Nevesty Models (Россия).',
+      'Проанализируй описание мероприятия и верни оценку бюджета строго в JSON.',
+      '',
+      'Базовые ставки: 10 000 ₽/модель/час, организационный взнос 15 000 ₽.',
+      'Уровни: Эконом ×0.8, Стандарт ×1.0, Премиум ×1.35.',
+      'Тип: фотосессия ×1.2, показ мод ×1.5, подиум ×1.3, коммерция ×1.4, мероприятие ×1.0.',
+      '',
+      'Верни ТОЛЬКО JSON:',
+      '{"event_type":"тип","models":N,"hours":N,"tier":"Эконом|Стандарт|Премиум",',
+      '"min":число,"max":число,"confidence":"низкая|средняя|высокая",',
+      '"notes":"1-2 предложения — совет клиенту"}',
+    ].join('\n');
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: description.slice(0, 600) }],
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      return res.status(502).json({ ok: false, error: 'AI API error', details: err.slice(0, 200) });
+    }
+
+    const data = await response.json();
+    const rawText = data.content?.[0]?.text || '';
+    const match = rawText.match(/\{[\s\S]*\}/);
+    if (!match) return res.json({ ok: false, error: 'Не удалось разобрать ответ AI. Попробуйте ещё раз.' });
+
+    let result;
+    try {
+      result = JSON.parse(match[0]);
+    } catch (_) {
+      return res.json({ ok: false, error: 'Ошибка разбора ответа AI.' });
+    }
+
+    if (!result.min || !result.max) {
+      return res.json({ ok: false, error: 'AI вернул неполные данные. Уточните описание.' });
+    }
+
+    res.json({
+      ok: true,
+      ai: true,
+      estimate: {
+        event_type: result.event_type || null,
+        models: result.models || null,
+        hours: result.hours || null,
+        tier: result.tier || 'Стандарт',
+        min: result.min,
+        max: result.max,
+        confidence: result.confidence || 'средняя',
+        currency: 'RUB',
+      },
+      notes: result.notes || null,
+    });
+  } catch (e) {
+    console.error('[AI Budget API] Error:', e.message);
+    res.status(500).json({ ok: false, error: 'Внутренняя ошибка сервера' });
+  }
+});
+
 // ─── FAQ (public) ─────────────────────────────────────────────────────────────
 
 // GET /api/faq/categories — returns distinct categories with counts
@@ -7172,6 +7265,150 @@ router.post('/payments/create', auth, async (req, res, next) => {
       confirmationUrl: result.confirmationUrl,
       status: result.status,
       devMode: DEV_MODE,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── BI Dashboard Analytics (БЛОК 12.4) ──────────────────────────────────────
+
+// GET /api/admin/analytics/overview — dashboard summary
+router.get('/admin/analytics/overview', auth, async (req, res, next) => {
+  try {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().split('T')[0];
+    const monthAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().split('T')[0];
+
+    const [
+      todayOrders,
+      weekOrders,
+      monthOrders,
+      totalOrders,
+      weekRevenue,
+      monthRevenue,
+      totalRevenue,
+      pendingOrders,
+      activeOrders,
+      completedOrders,
+      totalModels,
+      activeModels,
+      featuredModels,
+      totalClients,
+      weekClients,
+    ] = await Promise.all([
+      get("SELECT COUNT(*) as c FROM orders WHERE date(created_at,'localtime')=date('now','localtime')"),
+      get("SELECT COUNT(*) as c FROM orders WHERE date(created_at,'localtime')>=?", [weekAgo]),
+      get("SELECT COUNT(*) as c FROM orders WHERE date(created_at,'localtime')>=?", [monthAgo]),
+      get('SELECT COUNT(*) as c FROM orders'),
+      get(
+        "SELECT COALESCE(SUM(CAST(budget AS REAL)),0) as s FROM orders WHERE status IN ('confirmed','completed') AND date(created_at,'localtime')>=?",
+        [weekAgo]
+      ),
+      get(
+        "SELECT COALESCE(SUM(CAST(budget AS REAL)),0) as s FROM orders WHERE status IN ('confirmed','completed') AND date(created_at,'localtime')>=?",
+        [monthAgo]
+      ),
+      get("SELECT COALESCE(SUM(CAST(budget AS REAL)),0) as s FROM orders WHERE status IN ('confirmed','completed')"),
+      get("SELECT COUNT(*) as c FROM orders WHERE status='new'"),
+      get("SELECT COUNT(*) as c FROM orders WHERE status='confirmed'"),
+      get("SELECT COUNT(*) as c FROM orders WHERE status='completed'"),
+      get('SELECT COUNT(*) as c FROM models WHERE archived=0'),
+      get('SELECT COUNT(*) as c FROM models WHERE archived=0 AND available=1'),
+      get('SELECT COUNT(*) as c FROM models WHERE archived=0 AND featured=1'),
+      get('SELECT COUNT(DISTINCT client_chat_id) as c FROM orders WHERE client_chat_id IS NOT NULL'),
+      get(
+        "SELECT COUNT(DISTINCT client_chat_id) as c FROM orders WHERE client_chat_id IS NOT NULL AND date(created_at,'localtime')>=?",
+        [weekAgo]
+      ),
+    ]);
+
+    res.json({
+      ok: true,
+      orders: {
+        today: todayOrders.c,
+        week: weekOrders.c,
+        month: monthOrders.c,
+        total: totalOrders.c,
+        pending: pendingOrders.c,
+        active: activeOrders.c,
+        completed: completedOrders.c,
+      },
+      revenue: { week: weekRevenue.s, month: monthRevenue.s, total: totalRevenue.s },
+      models: { total: totalModels.c, active: activeModels.c, featured: featuredModels.c },
+      clients: { total: totalClients.c, weekNew: weekClients.c },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/analytics/top-models?limit=5
+router.get('/admin/analytics/top-models', auth, async (req, res, next) => {
+  const limit = Math.min(parseInt(req.query.limit) || 5, 20);
+  try {
+    const models = await query(
+      `SELECT m.id, m.name, m.photo_main, m.category,
+              COUNT(o.id) as order_count,
+              COALESCE(SUM(CASE WHEN o.status IN ('completed','confirmed') THEN CAST(o.budget AS REAL) ELSE 0 END), 0) as total_revenue,
+              AVG(r.rating) as avg_rating
+       FROM models m
+       LEFT JOIN orders o ON o.model_id = m.id
+       LEFT JOIN reviews r ON r.model_id = m.id AND r.approved = 1
+       WHERE m.archived = 0
+       GROUP BY m.id
+       ORDER BY order_count DESC, total_revenue DESC
+       LIMIT ?`,
+      [limit]
+    );
+    res.json({ ok: true, models });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/analytics/revenue-chart?period=30
+router.get('/admin/analytics/revenue-chart', auth, async (req, res, next) => {
+  const days = Math.min(parseInt(req.query.period) || 30, 365);
+  try {
+    const data = await query(
+      `SELECT date(created_at,'localtime') as date,
+              COUNT(*) as orders,
+              COALESCE(SUM(CASE WHEN status IN ('completed','confirmed') THEN CAST(budget AS REAL) ELSE 0 END), 0) as revenue
+       FROM orders
+       WHERE date(created_at,'localtime') >= date('now', ?)
+       GROUP BY date(created_at,'localtime')
+       ORDER BY date`,
+      [`-${days} days`]
+    );
+    res.json({ ok: true, data, period: days });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/analytics/conversion
+router.get('/admin/analytics/conversion', auth, async (req, res, next) => {
+  try {
+    const stats = await get(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status='new' THEN 1 ELSE 0 END) as new_count,
+        SUM(CASE WHEN status='confirmed' THEN 1 ELSE 0 END) as confirmed_count,
+        SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed_count,
+        SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled_count
+      FROM orders
+    `);
+    const conversionRate = stats.total > 0 ? Math.round((stats.completed_count / stats.total) * 100) : 0;
+    res.json({
+      ok: true,
+      total: stats.total,
+      conversion_rate: conversionRate,
+      funnel: {
+        new: stats.new_count,
+        confirmed: stats.confirmed_count,
+        completed: stats.completed_count,
+        cancelled: stats.cancelled_count,
+      },
     });
   } catch (e) {
     next(e);
