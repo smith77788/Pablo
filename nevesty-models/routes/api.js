@@ -1396,6 +1396,13 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
     const { notifyCRM } = require('../services/crm');
     notifyCRM('order.created', { ...s, order_number, id: result.id }, getSetting).catch(() => {});
 
+    // ─── SMS booking confirmation (non-blocking) ──────────────────────────────
+    if (s.client_phone) {
+      const { sendBookingConfirmationSms } = require('../services/sms');
+      sendBookingConfirmationSms(s.client_phone, order_number)
+        .catch(e => console.error('[SMS] Failed:', e.message));
+    }
+
     res.json({ order_number, id: result.id });
   } catch (e) { next(e); }
 });
@@ -2786,6 +2793,31 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
     }
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'DB error' }); }
+});
+
+// ─── WhatsApp deep-link for order (admin) ─────────────────────────────────────
+router.post('/admin/orders/:id/whatsapp', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+
+    const order = await get('SELECT id, order_number, client_name, client_phone FROM orders WHERE id = ?', [id]);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    const phone = (order.client_phone || '').replace(/\D/g, '');
+    // Normalize Russian 8-prefix
+    const normalized = phone.length === 11 && phone.startsWith('8') ? '7' + phone.slice(1) : phone;
+    if (!normalized || normalized.length < 10) {
+      return res.status(400).json({ error: 'No valid phone for order' });
+    }
+
+    const { message } = req.body;
+    const text = message || `Здравствуйте, ${order.client_name}! Это Nevesty Models по заявке ${order.order_number}. Менеджер на связи!`;
+    const encoded = encodeURIComponent(text);
+    const whatsapp_url = `https://wa.me/${normalized}?text=${encoded}`;
+
+    res.json({ ok: true, whatsapp_url, phone: `+${normalized}` });
+  } catch (e) { next(e); }
 });
 
 // ─── Order notes (admin) ──────────────────────────────────────────────────────
