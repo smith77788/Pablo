@@ -458,6 +458,10 @@ async function initDatabase() {
   await run(`CREATE INDEX IF NOT EXISTS idx_bot_bcast_started ON bot_broadcasts(started_at DESC)`).catch(() => {});
   await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (17, 'bot_broadcasts table for direct Telegram admin broadcasts')`).catch(() => {});
 
+  // Schema v18 — FAQ category column
+  await run(`ALTER TABLE faq ADD COLUMN category TEXT DEFAULT 'general'`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (18, 'faq category column')`).catch(() => {});
+
   // Schema v16 — TOTP 2FA for admins
   await run(`ALTER TABLE admins ADD COLUMN totp_secret TEXT DEFAULT NULL`).catch(() => {});
   await run(`ALTER TABLE admins ADD COLUMN totp_enabled INTEGER DEFAULT 0`).catch(() => {});
@@ -678,6 +682,17 @@ async function initDatabase() {
     }, delay).unref(); // allow process to exit cleanly if no other work remains
   }
   scheduleVacuum();
+
+  // WAL checkpoint (PASSIVE) every 6 hours to keep WAL file from growing
+  const WAL_INTERVAL = 6 * 60 * 60 * 1000;
+  const walTimer = setInterval(async () => {
+    try {
+      await run('PRAGMA wal_checkpoint(PASSIVE)');
+    } catch (e) {
+      console.error('[DB] WAL checkpoint error:', e.message);
+    }
+  }, WAL_INTERVAL);
+  walTimer.unref();
 
   // Automated DB backup every 6 hours
   scheduleBackups();

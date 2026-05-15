@@ -4931,11 +4931,11 @@ router.get('/admin/faq', auth, async (req, res, next) => {
 // POST /admin/faq — create FAQ item
 router.post('/admin/faq', auth, async (req, res, next) => {
   try {
-    const { question, answer, sort_order = 0 } = req.body;
+    const { question, answer, sort_order = 0, category = 'general' } = req.body;
     if (!question || !answer) return res.status(400).json({ error: 'question and answer required' });
     const result = await run(
-      'INSERT INTO faq (question, answer, sort_order) VALUES (?, ?, ?)',
-      [question.slice(0, 500), answer.slice(0, 2000), parseInt(sort_order) || 0]
+      'INSERT INTO faq (question, answer, sort_order, category) VALUES (?, ?, ?, ?)',
+      [question.slice(0, 500), answer.slice(0, 2000), parseInt(sort_order) || 0, (category || 'general').slice(0, 50)]
     );
     res.json({ ok: true, id: result.lastID });
   } catch (e) { next(e); }
@@ -4948,14 +4948,15 @@ router.put('/admin/faq/:id', auth, async (req, res, next) => {
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
     const existing = await get('SELECT * FROM faq WHERE id=?', [id]);
     if (!existing) return res.status(404).json({ error: 'Not found' });
-    const { question, answer, sort_order, active } = req.body;
+    const { question, answer, sort_order, active, category } = req.body;
     await run(
-      'UPDATE faq SET question=?, answer=?, sort_order=?, active=? WHERE id=?',
+      'UPDATE faq SET question=?, answer=?, sort_order=?, active=?, category=? WHERE id=?',
       [
         question !== undefined ? question.slice(0, 500) : existing.question,
         answer !== undefined ? answer.slice(0, 2000) : existing.answer,
         sort_order !== undefined ? (parseInt(sort_order) || 0) : existing.sort_order,
         active !== undefined ? (active ? 1 : 0) : existing.active,
+        category !== undefined ? (category || 'general').slice(0, 50) : (existing.category || 'general'),
         id
       ]
     );
@@ -5069,13 +5070,35 @@ router.post('/client/ai-match', aiMatchLimiter, async (req, res) => {
 });
 
 // ─── FAQ (public) ─────────────────────────────────────────────────────────────
-// GET /api/faq — returns active FAQ items from the faq table (managed via admin CRUD)
-// Response shape: [{id, q, a}] — maps question/answer to q/a for faq.html compatibility
-router.get('/faq', async (req, res) => {
+
+// GET /api/faq/categories — returns distinct categories with counts
+router.get('/faq/categories', async (req, res, next) => {
   try {
     const rows = await query(
-      'SELECT id, question AS q, answer AS a FROM faq WHERE active=1 ORDER BY sort_order ASC, id ASC'
+      `SELECT DISTINCT COALESCE(category, 'general') as category, COUNT(*) as count
+       FROM faq WHERE active=1
+       GROUP BY category
+       ORDER BY category ASC`
     );
+    res.json({ categories: rows });
+  } catch (e) { next(e); }
+});
+
+// GET /api/faq — returns active FAQ items from the faq table (managed via admin CRUD)
+// Response shape: [{id, q, a, category}] — maps question/answer to q/a for faq.html compatibility
+// Optional ?category= filter
+router.get('/faq', async (req, res) => {
+  try {
+    const { category } = req.query;
+    let sql = `SELECT id, question AS q, answer AS a, COALESCE(category, 'general') AS category
+               FROM faq WHERE active=1`;
+    const params = [];
+    if (category) {
+      sql += ` AND COALESCE(category, 'general') = ?`;
+      params.push(category);
+    }
+    sql += ' ORDER BY sort_order ASC, id ASC';
+    const rows = await query(sql, params);
     res.json(rows);
   } catch (e) {
     res.json([]);
