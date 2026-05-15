@@ -132,6 +132,22 @@ def init_db() -> None:
         """)
         conn.commit()
 
+        # Migrate: add nevesty_experiments table if missing
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS nevesty_experiments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hypothesis TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            baseline REAL,
+            target REAL,
+            status TEXT DEFAULT 'proposed',
+            result TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+        """)
+        conn.commit()
+
         # Migrate existing growth_actions table — add experiment columns if missing
         _existing = [r[1] for r in conn.execute("PRAGMA table_info(growth_actions)").fetchall()]
         _new_cols = {

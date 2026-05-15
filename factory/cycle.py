@@ -1386,6 +1386,34 @@ def run_cycle() -> dict:
         logger.error("Phase 19 Research weekly error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 20: EXPERIMENT SYSTEM (Mondays)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🧪 PHASE 20: EXPERIMENT SYSTEM (Mondays)")
+    try:
+        import datetime as _dt20
+        _today20 = _dt20.date.today()
+        weekday = _today20.weekday()
+        if weekday == 0:  # Monday
+            logger.info("Phase 20: Experiment System")
+            try:
+                from factory.agents.experiments import ExperimentProposer, ExperimentTracker, ResultAnalyzer
+                for AgentClass in [ExperimentProposer, ExperimentTracker, ResultAnalyzer]:
+                    _agent20 = AgentClass()
+                    _result20 = _agent20.run()
+                    results.setdefault('experiments', []).append({
+                        'role': AgentClass.role,
+                        'result': (_result20[:200] if _result20 else ''),
+                    })
+                logger.info("Phase 20 complete: Experiment System")
+                summary_lines.append(f"🧪 Experiment System (Phase 20): 3 агента")
+            except Exception as _e20_inner:
+                logger.error("Phase 20 inner error: %s", _e20_inner)
+        else:
+            logger.info("[Phase20] Skipping Experiment System (not Monday, weekday=%d)", weekday)
+    except Exception as e:
+        logger.error("Phase 20 error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)

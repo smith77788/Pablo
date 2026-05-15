@@ -357,3 +357,33 @@ class TestResearchDept:
         assert isinstance(result, dict)
         assert result.get("role") == "InsightSynthesizer"
         assert "data" in result
+
+
+class TestExperimentSystem:
+    def test_experiment_proposer_instantiates(self):
+        from factory.agents.experiments import ExperimentProposer
+        agent = ExperimentProposer()
+        assert agent.department == "experiments"
+
+    def test_experiment_tracker_instantiates(self):
+        from factory.agents.experiments import ExperimentTracker
+        agent = ExperimentTracker()
+        assert agent.role == "experiment_tracker"
+
+    def test_result_analyzer_instantiates(self):
+        from factory.agents.experiments import ResultAnalyzer
+        agent = ResultAnalyzer()
+        assert agent.department == "experiments"
+
+    def test_experiment_proposer_think(self):
+        from factory.agents.experiments import ExperimentProposer
+        agent = ExperimentProposer()
+        prompt = agent.think()
+        assert isinstance(prompt, str)
+        assert len(prompt) > 10
+
+    def test_experiment_tracker_think(self):
+        from factory.agents.experiments import ExperimentTracker
+        agent = ExperimentTracker()
+        prompt = agent.think()
+        assert isinstance(prompt, str)
