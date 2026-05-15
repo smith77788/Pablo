@@ -2727,11 +2727,153 @@ async function showAdminSettings(chatId, section) {
             },
           ],
           [{ text: '📸 Изменить Instagram', callback_data: 'adm_set_insta' }],
+          [{ text: '📸 Очередь постов', callback_data: 'adm_social' }],
           [{ text: '← Настройки', callback_data: 'adm_settings' }],
         ],
       },
     });
   }
+}
+
+// ─── Social Posts Panel ───────────────────────────────────────────────────────
+
+async function showSocialPostsPanel(chatId, page = 0, filter = 'all') {
+  if (!isAdmin(chatId)) return;
+  const LIMIT = 5;
+  const offset = page * LIMIT;
+
+  const whereClause =
+    filter === 'pending'
+      ? "WHERE sp.status IN ('pending','scheduled')"
+      : filter === 'published'
+        ? "WHERE sp.status='published'"
+        : filter === 'failed'
+          ? "WHERE sp.status='failed'"
+          : '';
+
+  let posts = [];
+  let total = 0;
+  try {
+    posts = await query(
+      `SELECT sp.id, sp.platform, sp.content_type, sp.caption, sp.status, sp.scheduled_at, sp.created_at,
+              m.name as model_name
+       FROM social_posts sp
+       LEFT JOIN models m ON m.id = sp.model_id
+       ${whereClause}
+       ORDER BY sp.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [LIMIT, offset]
+    );
+    const countRow = await get(`SELECT COUNT(*) as cnt FROM social_posts sp ${whereClause}`);
+    total = countRow ? countRow.cnt : 0;
+  } catch (e) {
+    console.warn('[Bot] showSocialPostsPanel:', e.message);
+  }
+
+  const STATUS_ICON = { pending: '⏳', scheduled: '🗓', published: '✅', failed: '❌', draft: '📝' };
+  const PLATFORM_ICON = { instagram: '📸', tiktok: '🎵', vk: '🔵' };
+
+  let text = `*📸 Очередь Instagram\\-постов*\n`;
+  text += `Всего: ${esc(String(total))} \\| Страница ${esc(String(page + 1))}\n\n`;
+
+  if (!posts.length) {
+    text += '_Постов нет_';
+  } else {
+    for (const p of posts) {
+      const icon = PLATFORM_ICON[p.platform] || '📱';
+      const st = STATUS_ICON[p.status] || '❓';
+      const cap = p.caption ? esc(p.caption.slice(0, 80)) + (p.caption.length > 80 ? '…' : '') : '_—_';
+      const modelPart = p.model_name ? ` \\| ${esc(p.model_name)}` : '';
+      text += `${icon} *\\#${esc(String(p.id))}* ${st} \`${esc(p.status)}\`${modelPart}\n`;
+      text += `${cap}\n\n`;
+    }
+  }
+
+  const keyboard = [];
+
+  // Filter tabs
+  keyboard.push([
+    { text: filter === 'pending' ? '⏳ Ожидает ✓' : '⏳ Ожидает', callback_data: 'adm_social_f_pending_0' },
+    { text: filter === 'published' ? '✅ Опубл. ✓' : '✅ Опубл.', callback_data: 'adm_social_f_published_0' },
+    { text: filter === 'failed' ? '❌ Ошибки ✓' : '❌ Ошибки', callback_data: 'adm_social_f_failed_0' },
+  ]);
+
+  // Post action buttons
+  for (const p of posts) {
+    const row = [];
+    if (p.status !== 'published') {
+      row.push({ text: `✅ Опубл. #${p.id}`, callback_data: `adm_ig_pub_${p.id}` });
+    }
+    row.push({ text: `🗑 Удалить #${p.id}`, callback_data: `adm_ig_del_${p.id}` });
+    keyboard.push(row);
+  }
+
+  // Pagination
+  const nav = [];
+  if (page > 0) nav.push({ text: '← Назад', callback_data: `adm_social_f_${filter}_${page - 1}` });
+  if ((page + 1) * LIMIT < total) nav.push({ text: 'Вперёд →', callback_data: `adm_social_f_${filter}_${page + 1}` });
+  if (nav.length) keyboard.push(nav);
+
+  keyboard.push([{ text: '🤖 Сгенерировать пост', callback_data: 'adm_ig_generate' }]);
+  keyboard.push([{ text: '← Соцсети', callback_data: 'adm_settings_social' }]);
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard },
+  });
+}
+
+async function generateInstagramPost(chatId) {
+  if (!isAdmin(chatId)) return;
+  let model = null;
+  try {
+    model = await get(
+      `SELECT id, name, age, height, city FROM models
+       WHERE available=1 AND photo_main IS NOT NULL AND COALESCE(archived,0)=0
+       ORDER BY RANDOM() LIMIT 1`
+    );
+  } catch (e) {
+    console.warn('[Bot] generateInstagramPost query:', e.message);
+  }
+
+  if (!model) {
+    return safeSend(chatId, '❌ Нет доступных моделей с фото\\.', { parse_mode: 'MarkdownV2' });
+  }
+
+  const parts = [];
+  if (model.height) parts.push(`Рост: ${model.height} см`);
+  if (model.age) parts.push(`Возраст: ${model.age} лет`);
+  if (model.city) parts.push(model.city);
+  const params = parts.join(' · ');
+
+  const caption =
+    `✨ ${model.name}\n` +
+    (params ? `${params}\n` : '') +
+    `📩 Забронировать: @nevesty_agency\n` +
+    `#невестымодели #модель`;
+
+  try {
+    await run(
+      `INSERT INTO social_posts (platform, model_id, content_type, caption, status)
+       VALUES ('instagram', ?, 'post', ?, 'pending')`,
+      [model.id, caption]
+    );
+  } catch (e) {
+    console.warn('[Bot] generateInstagramPost insert:', e.message);
+    return safeSend(chatId, '❌ Ошибка при создании поста\\.', { parse_mode: 'MarkdownV2' });
+  }
+
+  const preview = `✅ *Пост создан\\!*\n\n` + `📸 Модель: ${esc(model.name)}\n\n` + `*Подпись:*\n${esc(caption)}`;
+
+  return safeSend(chatId, preview, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📋 Очередь', callback_data: 'adm_social' }],
+        [{ text: '← Соцсети', callback_data: 'adm_settings_social' }],
+      ],
+    },
+  });
 }
 
 // ─── Add Model wizard ─────────────────────────────────────────────────────────
@@ -6515,6 +6657,51 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       await setSetting('instagram_enabled', '0');
       return showAdminSettings(chatId, 'social');
+    }
+    // Social posts panel
+    if (data === 'adm_social') {
+      if (!isAdmin(chatId)) return;
+      return showSocialPostsPanel(chatId, 0, 'all');
+    }
+    if (data.startsWith('adm_social_f_')) {
+      if (!isAdmin(chatId)) return;
+      // format: adm_social_f_{filter}_{page}
+      const parts = data.replace('adm_social_f_', '').split('_');
+      const pageNum = parseInt(parts[parts.length - 1], 10) || 0;
+      const filterStr = parts.slice(0, parts.length - 1).join('_') || 'all';
+      return showSocialPostsPanel(chatId, pageNum, filterStr);
+    }
+    if (data.startsWith('adm_social_p_')) {
+      if (!isAdmin(chatId)) return;
+      const pageNum = parseInt(data.replace('adm_social_p_', ''), 10) || 0;
+      return showSocialPostsPanel(chatId, pageNum, 'all');
+    }
+    if (data === 'adm_ig_generate') {
+      if (!isAdmin(chatId)) return;
+      return generateInstagramPost(chatId);
+    }
+    if (data.startsWith('adm_ig_pub_')) {
+      if (!isAdmin(chatId)) return;
+      const postId = parseInt(data.replace('adm_ig_pub_', ''), 10);
+      if (!postId) return;
+      try {
+        await run(`UPDATE social_posts SET status='published', published_at=datetime('now') WHERE id=?`, [postId]);
+        await safeSend(chatId, `✅ Пост \\#${esc(String(postId))} опубликован\\.`, { parse_mode: 'MarkdownV2' });
+      } catch (e) {
+        await safeSend(chatId, '❌ Ошибка при обновлении поста\\.', { parse_mode: 'MarkdownV2' });
+      }
+      return showSocialPostsPanel(chatId, 0, 'all');
+    }
+    if (data.startsWith('adm_ig_del_')) {
+      if (!isAdmin(chatId)) return;
+      const postId = parseInt(data.replace('adm_ig_del_', ''), 10);
+      if (!postId) return;
+      try {
+        await run(`DELETE FROM social_posts WHERE id=?`, [postId]);
+        return safeSend(chatId, `🗑 Пост \\#${esc(String(postId))} удалён ✓`, { parse_mode: 'MarkdownV2' });
+      } catch (e) {
+        return safeSend(chatId, '❌ Ошибка при удалении поста\\.', { parse_mode: 'MarkdownV2' });
+      }
     }
     // Toggle налаштування каталогу
     if (data === 'adm_catalog_sort_date') {
