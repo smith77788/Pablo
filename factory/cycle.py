@@ -174,6 +174,36 @@ def _sync_growth_actions_to_bot_db(growth_actions: list, bot_db_path: str) -> No
         logger.error("Failed to sync growth actions: %s", e)
 
 
+def _save_ceo_memo_to_settings(
+    memo: str, health: int, dept_focus: str, experiment: dict, bot_db_path: str
+) -> None:
+    """Saves CEO memo and related fields to nevesty-models settings table."""
+    import os
+    import sqlite3 as _sqlite3
+    import json as _json
+
+    if not os.path.exists(bot_db_path):
+        return
+    try:
+        conn = _sqlite3.connect(bot_db_path)
+        updates = {
+            "ceo_memo": memo or "",
+            "ceo_health_score": str(health or ""),
+            "ceo_department_focus": dept_focus or "",
+            "ceo_experiment": _json.dumps(experiment, ensure_ascii=False) if experiment else "",
+        }
+        for key, value in updates.items():
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [key, value]
+            )
+        conn.commit()
+        conn.close()
+        logger.info("Saved CEO memo to settings (health=%s, dept=%s)", health, dept_focus)
+    except Exception as e:
+        logger.error("Failed to save CEO memo to settings: %s", e)
+
+
 def _save_cycle_to_history(results: dict) -> None:
     """Save this cycle's results to JSON history file."""
     import json
@@ -941,6 +971,10 @@ def run_cycle() -> dict:
             final_health = ceo_synthesis.get("health_score", results["health_score"])
             bot_db = "/home/user/Pablo/nevesty-models/data.db"
             _sync_growth_actions_to_bot_db(growth_actions_list, bot_db)
+            _save_ceo_memo_to_settings(
+                memo_text, final_health, department_focus,
+                experiment_proposal, bot_db
+            )
             _send_ceo_memo_to_telegram(memo_text, final_health, growth_actions_list)
     except Exception as e:
         logger.error("CEO Synthesis phase error: %s", e)
