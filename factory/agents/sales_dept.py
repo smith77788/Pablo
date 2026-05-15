@@ -233,6 +233,13 @@ class PricingNegotiator(FactoryAgent):
             return {"insights": [], "recommendations": [], "priority": 8}
 
 
+# Aliases matching the standard *Agent naming convention
+LeadQualifierAgent = LeadQualifier
+ProposalWriterAgent = ProposalWriter
+FollowUpSpecialistAgent = FollowUpSpecialist
+PricingNegotiatorAgent = PricingNegotiator
+
+
 class SalesDepartment:
     """Координатор отдела продаж."""
 
@@ -287,3 +294,34 @@ class SalesDepartment:
 
         logger.info("[SalesDept] Задача '%s' выполнена. Ролей задействовано: %d", task, len(roles_used))
         return output
+
+    def run_cycle(self, context: dict | None = None) -> dict:
+        """Запускает полный цикл всех агентов отдела продаж и возвращает сводный отчёт."""
+        ctx = context or {}
+        results: dict[str, Any] = {}
+        all_insights: list[str] = []
+        all_recommendations: list[str] = []
+
+        for agent, key in [
+            (self.qualifier, "lead_qualification"),
+            (self.proposal, "proposals"),
+            (self.followup, "followup"),
+            (self.pricing, "pricing"),
+        ]:
+            try:
+                result = agent.run(ctx)
+                results[key] = result
+                all_insights.extend(result.get("insights", []))
+                all_recommendations.extend(result.get("recommendations", []))
+            except Exception as e:
+                logger.error("[SalesDept] run_cycle agent %s error: %s", key, e)
+                results[key] = {}
+
+        return {
+            "department": "sales",
+            "cycle": "full",
+            "results": results,
+            "insights": all_insights,
+            "recommendations": all_recommendations,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }

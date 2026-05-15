@@ -230,6 +230,13 @@ class BudgetPlanner(FactoryAgent):
             return {}
 
 
+# Aliases matching the standard *Agent naming convention
+RevenueForecasterAgent = RevenueForecaster
+CostOptimizerAgent = CostOptimizer
+PricingStrategistAgent = PricingStrategist
+BudgetPlannerAgent = BudgetPlanner
+
+
 class FinanceDepartment:
     """Координатор финансового департамента."""
 
@@ -284,3 +291,34 @@ class FinanceDepartment:
 
         logger.info("[FinanceDept] Задача '%s' выполнена. Ролей задействовано: %d", task, len(roles_used))
         return output
+
+    def run_cycle(self, context: dict | None = None) -> dict:
+        """Запускает полный цикл всех агентов финансового департамента и возвращает сводный отчёт."""
+        ctx = context or {}
+        results: dict = {}
+        all_insights: list[str] = []
+        all_recommendations: list[str] = []
+
+        for agent, key in [
+            (self.forecaster, "revenue_forecast"),
+            (self.optimizer, "cost_optimization"),
+            (self.pricing, "pricing_strategy"),
+            (self.planner, "budget_plan"),
+        ]:
+            try:
+                result = agent.run(ctx)
+                results[key] = result
+                all_insights.extend(result.get("insights", []))
+                all_recommendations.extend(result.get("recommendations", []))
+            except Exception as e:
+                logger.error("[FinanceDept] run_cycle agent %s error: %s", key, e)
+                results[key] = {}
+
+        return {
+            "department": "finance",
+            "cycle": "full",
+            "results": results,
+            "insights": all_insights,
+            "recommendations": all_recommendations,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }

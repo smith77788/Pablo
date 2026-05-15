@@ -251,7 +251,41 @@
           <a href="/contact.html">Контакты</a>
           <a href="/booking.html" class="btn-nav">Заказать</a>
         </div>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+          onclick="
+            const m = document.getElementById('mobileMenu');
+            const open = m.classList.toggle('open');
+            this.setAttribute('aria-expanded', open);
+            this.setAttribute('aria-label', open ? 'Закрыть меню' : 'Открыть меню');
+          "
+        >
+          <span></span><span></span><span></span>
+        </button>
       </div>
+    </nav>
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button
+        class="nav-mobile-close"
+        id="mobileClose"
+        aria-label="Закрыть меню"
+        onclick="
+          document.getElementById('mobileMenu').classList.remove('open');
+          document.getElementById('burgerBtn').setAttribute('aria-expanded', 'false');
+          document.getElementById('burgerBtn').setAttribute('aria-label', 'Открыть меню');
+        "
+      >
+        ✕
+      </button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/pricing.html">Цены</a>
+      <a href="/about.html">О нас</a>
+      <a href="/contact.html">Контакты</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
     </nav>
 
     <main class="page-404" id="main-content" role="main" tabindex="-1">
