@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Нет подключения — Nevesty Models</title>
+  <meta name="theme-color" content="#080808">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #080808;
+      color: #e8e0d5;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: #C9A96E;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+    }
+
+    .icon {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 24px;
+      opacity: 0.6;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 12px;
+    }
+
+    p {
+      font-size: 0.95rem;
+      color: #999;
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+
+    .btn-retry {
+      display: inline-block;
+      padding: 14px 36px;
+      background: #C9A96E;
+      color: #080808;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: background 0.2s;
+      margin-bottom: 40px;
+    }
+
+    .btn-retry:hover {
+      background: #d4b87e;
+    }
+
+    .recent-section {
+      text-align: left;
+      border-top: 1px solid #222;
+      padding-top: 28px;
+    }
+
+    .recent-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 14px;
+    }
+
+    .recent-list {
+      list-style: none;
+    }
+
+    .recent-list li {
+      border-bottom: 1px solid #181818;
+    }
+
+    .recent-list a {
+      display: block;
+      padding: 10px 0;
+      color: #C9A96E;
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.2s;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .recent-list a:hover {
+      color: #d4b87e;
+    }
+
+    .no-recent {
+      font-size: 0.85rem;
+      color: #555;
+      font-style: italic;
+    }
+
+    .footer-note {
+      margin-top: 32px;
+      font-size: 0.75rem;
+      color: #444;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">Nevesty Models</div>
+
+    <svg class="icon" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="36" cy="36" r="34" stroke="#C9A96E" stroke-width="2" stroke-dasharray="6 4"/>
+      <path d="M22 50 Q36 20 50 50" stroke="#C9A96E" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <circle cx="36" cy="28" r="2.5" fill="#C9A96E"/>
+      <line x1="28" y1="42" x2="44" y2="42" stroke="#555" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+
+    <h1>Нет подключения к сети</h1>
+    <p>Проверьте интернет-соединение и попробуйте снова.<br>Ранее просмотренные страницы доступны ниже.</p>
+
+    <button class="btn-retry" onclick="window.location.reload()">Повторить</button>
+
+    <div class="recent-section" id="recent-section" style="display:none">
+      <p class="recent-title">Недавно просмотренные</p>
+      <ul class="recent-list" id="recent-list"></ul>
+    </div>
+
+    <p class="no-recent" id="no-recent" style="display:none">История просмотров пуста.</p>
+
+    <p class="footer-note">© 2024 Nevesty Models</p>
+  </div>
+
+  <script>
+    (function () {
+      try {
+        const raw = localStorage.getItem('nm_recent_pages');
+        const pages = raw ? JSON.parse(raw) : [];
+
+        if (pages.length > 0) {
+          const section = document.getElementById('recent-section');
+          const list = document.getElementById('recent-list');
+          section.style.display = 'block';
+
+          pages.slice(0, 5).forEach(({ url, title }) => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = url;
+            a.textContent = title || url;
+            a.title = title || url;
+            li.appendChild(a);
+            list.appendChild(li);
+          });
+        } else {
+          document.getElementById('no-recent').style.display = 'block';
+        }
+      } catch (e) {
+        document.getElementById('no-recent').style.display = 'block';
+      }
+    })();
+  </script>
+</body>
+</html>

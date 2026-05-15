@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <rect width="192" height="192" rx="24" fill="#080808"/>
+  <rect width="192" height="192" rx="24" fill="url(#grad)" opacity="0.15"/>
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="192" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C9A96E"/>
+      <stop offset="100%" stop-color="#8B6A3A"/>
+    </linearGradient>
+  </defs>
+  <text
+    x="96"
+    y="118"
+    text-anchor="middle"
+    font-family="'Segoe UI', Arial, sans-serif"
+    font-size="72"
+    font-weight="700"
+    letter-spacing="4"
+    fill="#C9A96E"
+  >NM</text>
+</svg>

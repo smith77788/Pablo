@@ -1,0 +1,22 @@
+{
+  "name": "Nevesty Models",
+  "short_name": "Nevesty",
+  "description": "Модельное агентство — аренда моделей для мероприятий",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080808",
+  "theme_color": "#C9A96E",
+  "lang": "ru",
+  "orientation": "portrait-primary",
+  "icons": [
+    {"src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml"},
+    {"src": "/icons/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml"},
+    {"src": "/icons/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable"}
+  ],
+  "categories": ["business", "lifestyle"],
+  "shortcuts": [
+    {"name": "Каталог", "url": "/catalog.html", "icons": [{"src": "/icons/icon-192.svg", "sizes": "192x192"}]},
+    {"name": "Забронировать", "url": "/booking.html", "icons": [{"src": "/icons/icon-192.svg", "sizes": "192x192"}]},
+    {"name": "Мои заявки", "url": "/cabinet.html", "icons": [{"src": "/icons/icon-192.svg", "sizes": "192x192"}]}
+  ]
+}

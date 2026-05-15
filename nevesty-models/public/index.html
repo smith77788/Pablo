@@ -18,6 +18,8 @@
   <meta name="twitter:site" content="@nevesty_models">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://nevesty-models.ru/">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdn.tailwindcss.com">
@@ -724,6 +726,24 @@ fetch('/api/settings/public').then(r=>r.json()).then(d=>{
       setTimeout(() => { document.getElementById("cookie-banner").style.display = "block"; }, 1000);
     }
   });
+  </script>
+  <script>
+  // Track recently visited pages for offline fallback
+  (function () {
+    try {
+      var pages = JSON.parse(localStorage.getItem('nm_recent_pages') || '[]');
+      var cur = { url: location.pathname + location.search, title: document.title };
+      pages = pages.filter(function(p) { return p.url !== cur.url; });
+      pages.unshift(cur);
+      localStorage.setItem('nm_recent_pages', JSON.stringify(pages.slice(0, 10)));
+    } catch(e) {}
+  })();
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('/sw.js')
+        .catch(function(e) { console.log('SW reg failed:', e); });
+    });
+  }
   </script>
 </body>
 </html>
