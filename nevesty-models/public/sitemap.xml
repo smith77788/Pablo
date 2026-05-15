@@ -67,44 +67,32 @@
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>http://localhost:3000/model/1</loc>
-    <lastmod>2026-05-15 17:18:51</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
     <loc>http://localhost:3000/model/2</loc>
-    <lastmod>2026-05-15 17:18:51</lastmod>
+    <lastmod>2026-05-15 17:19:31</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>http://localhost:3000/model/3</loc>
-    <lastmod>2026-05-15 17:18:51</lastmod>
+    <lastmod>2026-05-15 17:19:31</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>http://localhost:3000/model/4</loc>
-    <lastmod>2026-05-15 17:18:51</lastmod>
+    <lastmod>2026-05-15 17:19:31</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>http://localhost:3000/model/5</loc>
-    <lastmod>2026-05-15 17:18:51</lastmod>
+    <lastmod>2026-05-15 17:19:31</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>http://localhost:3000/model/6</loc>
-    <lastmod>2026-05-15 17:18:51</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>http://localhost:3000/model/7</loc>
-    <lastmod>2026-05-15 17:18:52</lastmod>
+    <lastmod>2026-05-15 17:19:31</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
