@@ -65,6 +65,17 @@ function bookingProgress(step, total = 4) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// ─── UTM link helper ──────────────────────────────────────────────────────────
+function siteUrl(path, utmParams = {}) {
+  const base = SITE_URL.replace(/\/$/, '') + path;
+  const params = new URLSearchParams({
+    utm_source: 'telegram',
+    utm_medium: 'bot',
+    ...utmParams
+  });
+  return `${base}?${params.toString()}`;
+}
+
 function esc(s) {
   if (s == null) return '';
   return String(s).replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
@@ -237,6 +248,7 @@ async function buildClientKeyboard() {
   if (SITE_URL.startsWith('https://')) {
     const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
     rows.unshift([{ text: '📱 Открыть Mini App', web_app: { url: webappUrl } }]);
+    rows.push([{ text: '🌐 Наш сайт', url: siteUrl('/', { utm_campaign: 'main_menu' }) }]);
   }
   return { inline_keyboard: rows };
 }
@@ -268,7 +280,7 @@ const KB_MAIN_ADMIN = (badge, score) => {
        { text: '📋 Журнал',                 callback_data: 'adm_audit_log'       }],
       ...(SITE_URL.startsWith('https://') ? [[
         { text: '📱 Mini App', web_app: { url: SITE_URL.replace(/\/$/, '') + '/webapp.html' } },
-        { text: '🌐 Сайт', url: SITE_URL },
+        { text: '🌐 Сайт', url: siteUrl('/', { utm_campaign: 'admin_menu' }) },
       ]] : []),
     ]
   };
@@ -563,6 +575,8 @@ async function showModel(chatId, modelId) {
     const contactBtn = m.phone || m.instagram
       ? [{ text: '📱 Получить контакт', callback_data: `model_contact_${m.id}` }]
       : [];
+    const profileUrl = siteUrl(`/model/${m.id}`, { utm_campaign: 'model_card', utm_content: String(m.id) });
+    const shareUrl  = `https://t.me/share/url?url=${encodeURIComponent(siteUrl('/model/' + m.id, { utm_campaign: 'share' }))}&text=${encodeURIComponent('Посмотри эту модель: ' + m.name)}`;
     const keyboard = {
       inline_keyboard: [
         m.available ? [{ text: '📝 Заказать эту модель', callback_data: `bk_model_${m.id}` }] : [],
@@ -571,6 +585,8 @@ async function showModel(chatId, modelId) {
         [{ text: '❤️ В избранное', callback_data: `fav_add_${m.id}` },
          { text: '💔 Убрать',      callback_data: `fav_remove_${m.id}` }],
         [{ text: '⚖️ Сравнить', callback_data: `compare_add_${m.id}` }],
+        [{ text: '🌐 Профиль', url: profileUrl },
+         { text: '📤 Поделиться', url: shareUrl }],
         [{ text: '← Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Меню', callback_data: 'main_menu' }],
       ].filter(r => r.length)
     };
