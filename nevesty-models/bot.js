@@ -2234,23 +2234,22 @@ async function showAdminSettings(chatId, section) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '💬 Контакты и тексты', callback_data: 'adm_settings_contacts' },
+            { text: '💬 Контакты', callback_data: 'adm_settings_contacts' },
             { text: '🔔 Уведомления', callback_data: 'adm_settings_notifs' },
           ],
           [
-            { text: '📋 Каталог и модели', callback_data: 'adm_settings_catalog' },
+            { text: '📋 Каталог', callback_data: 'adm_settings_catalog' },
             { text: '🛒 Бронирование', callback_data: 'adm_settings_booking' },
           ],
           [
             { text: '⭐ Отзывы', callback_data: 'adm_settings_reviews' },
-            { text: '🏙 Города', callback_data: 'adm_settings_cities' },
+            { text: '🤖 Интерфейс', callback_data: 'adm_settings_ui' },
           ],
           [
-            { text: '🤖 Бот и интерфейс', callback_data: 'adm_settings_bot' },
-            { text: '📊 Лимиты и доступ', callback_data: 'adm_settings_limits' },
+            { text: '📊 Лимиты', callback_data: 'adm_settings_limits' },
+            { text: '📱 Соцсети', callback_data: 'adm_settings_social' },
           ],
-          [{ text: '💰 Прайс-лист', callback_data: 'adm_set_pricing' }],
-          [{ text: '← Меню', callback_data: 'admin_menu' }],
+          [{ text: '← Назад', callback_data: 'admin_menu' }],
         ],
       },
     });
