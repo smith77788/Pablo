@@ -75,6 +75,7 @@ const ACTIVE_BOOKING_STATES = new Set([
   'ai_match_desc',
   'techspec_input',
   'ai_budget_desc',
+  'ai_chat_input',
 ]);
 
 // States that have active user input in progress (booking + admin flows)
@@ -430,16 +431,25 @@ const REPLY_KB_CLIENT = {
 };
 
 async function buildClientKeyboard() {
-  const [calcEnabled, wishlistEnabled, quickBookingEnabled, searchEnabled, reviewsEnabled, loyaltyEnabled, faqEnabled] =
-    await Promise.all([
-      getSetting('calc_enabled').catch(() => null),
-      getSetting('wishlist_enabled', '1').catch(() => '1'),
-      getSetting('quick_booking_enabled', '1').catch(() => '1'),
-      getSetting('search_enabled', '1').catch(() => '1'),
-      getSetting('reviews_enabled', '1').catch(() => '1'),
-      getSetting('loyalty_enabled').catch(() => '1'),
-      getSetting('faq_enabled').catch(() => '1'),
-    ]);
+  const [
+    calcEnabled,
+    wishlistEnabled,
+    quickBookingEnabled,
+    searchEnabled,
+    reviewsEnabled,
+    loyaltyEnabled,
+    faqEnabled,
+    aiChatEnabled,
+  ] = await Promise.all([
+    getSetting('calc_enabled').catch(() => null),
+    getSetting('wishlist_enabled', '1').catch(() => '1'),
+    getSetting('quick_booking_enabled', '1').catch(() => '1'),
+    getSetting('search_enabled', '1').catch(() => '1'),
+    getSetting('reviews_enabled', '1').catch(() => '1'),
+    getSetting('loyalty_enabled').catch(() => '1'),
+    getSetting('faq_enabled').catch(() => '1'),
+    getSetting('ai_chat_enabled', '1').catch(() => '1'),
+  ]);
 
   // Row 1: discovery
   const rows = [
@@ -470,6 +480,11 @@ async function buildClientKeyboard() {
   }
   if (calcEnabled === '1') searchRow.push({ text: '🧮 Калькулятор', callback_data: 'calculator' });
   if (searchRow.length) rows.push(searchRow);
+
+  // Row 4b: AI chat assistant (gated)
+  if (aiChatEnabled !== '0') {
+    rows.push([{ text: '🤖 AI помощник', callback_data: 'ai_chat_start' }]);
+  }
 
   // Row 5: reviews + FAQ + loyalty (all gated)
   const infoRow = [];
@@ -5502,6 +5517,30 @@ async function runAiBudgetEstimate(chatId, description) {
   }
 }
 
+// ─── AI Chat Assistant (БЛОК 12.2) ────────────────────────────────────────────
+
+async function showAIChatHelp(chatId) {
+  await bot.sendMessage(
+    chatId,
+    esc(
+      '🤖 *AI помощник Nevesty Models*\n\n' +
+        'Задайте любой вопрос об агентстве:\n' +
+        '• Цены и условия\n' +
+        '• Как выбрать модель\n' +
+        '• Как оформить заявку\n' +
+        '• Время работы и контакты\n\n' +
+        '_Введите ваш вопрос или /cancel для выхода_'
+    ),
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [[{ text: '◀️ Назад', callback_data: 'main_menu' }]],
+      },
+    }
+  );
+  await setSession(chatId, 'state', 'ai_chat_input');
+}
+
 // ─── Order Timeline ────────────────────────────────────────────────────────────
 
 async function showOrderTimeline(order) {
@@ -6153,6 +6192,7 @@ function initBot(app) {
       await setSession(chatId, 'state', 'ai_budget_desc');
       return showAiBudgetEstimate(chatId);
     }
+    if (data === 'ai_chat_start') return showAIChatHelp(chatId);
     if (data === 'noop') return; // label-only buttons
     if (data === 'my_orders') return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
@@ -10324,7 +10364,7 @@ function initBot(app) {
       return runAiMatch(chatId, desc);
     }
 
-    // ── AI оценка бюджета: описание мероприятия (БЛОК 12.2)
+    // ── AI оценка бюджета: описание мероприятия
     if (state === 'ai_budget_desc') {
       const desc = text ? text.trim() : '';
       if (desc.length < 10)
@@ -10336,6 +10376,72 @@ function initBot(app) {
 
       await clearSession(chatId);
       return runAiBudgetEstimate(chatId, desc);
+    }
+
+    // ── AI чат-ассистент: вопрос клиента (БЛОК 12.2)
+    if (state === 'ai_chat_input') {
+      const question = text ? text.trim() : '';
+      if (!question || question.startsWith('/')) {
+        await clearSession(chatId);
+        return showMainMenu(chatId);
+      }
+
+      const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+      if (!ANTHROPIC_API_KEY) {
+        await clearSession(chatId);
+        return safeSend(chatId, esc('❌ AI помощник временно недоступен.'), { parse_mode: 'MarkdownV2' });
+      }
+
+      await safeSend(chatId, esc('⏳ Думаю\\.\\.\\.'), { parse_mode: 'MarkdownV2' });
+
+      try {
+        const [faqRows, contactsPhone] = await Promise.all([
+          query('SELECT question, answer FROM faq WHERE active=1 LIMIT 10').catch(() => []),
+          getSetting('contacts_phone').catch(() => ''),
+        ]);
+        const faqContext = faqRows.map(f => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n');
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 300,
+            system: `Ты помощник агентства моделей Nevesty Models. Отвечай кратко (2-3 предложения). Телефон: ${contactsPhone}.\n\nFAQ агентства:\n${faqContext}\n\nЕсли вопрос не по теме — вежливо перенаправь к менеджеру.`,
+            messages: [{ role: 'user', content: question.slice(0, 500) }],
+          }),
+        });
+
+        if (!response.ok) throw new Error(`Anthropic API ${response.status}`);
+
+        const aiData = await response.json();
+        const answer = aiData.content?.[0]?.text || '';
+        await clearSession(chatId);
+        await safeSend(chatId, esc(answer), {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔁 Задать ещё вопрос', callback_data: 'ai_chat_start' }],
+              [{ text: '📞 Написать менеджеру', callback_data: 'msg_manager_start' }],
+              [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
+            ],
+          },
+        });
+      } catch (e) {
+        console.error('[Bot] ai_chat_input:', e.message);
+        await clearSession(chatId);
+        await safeSend(chatId, esc('❌ Не удалось получить ответ\\. Попробуйте позже или напишите менеджеру\\.'), {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [[{ text: '📞 Написать менеджеру', callback_data: 'msg_manager_start' }]],
+          },
+        });
+      }
+      return;
     }
 
     // ── Edit profile name
