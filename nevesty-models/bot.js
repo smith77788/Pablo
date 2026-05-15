@@ -310,6 +310,7 @@ const KB_MAIN_ADMIN = (badge, score) => {
        { text: '⭐ Отзывы',                 callback_data: 'adm_reviews'    },
        { text: '💬 Обсуждения',            callback_data: 'adm_discussions'}],
       [{ text: '🔍 Найти заявку',           callback_data: 'adm_search_order'     },
+       { text: '🔍 Заметки',              callback_data: 'adm_search_notes'     },
        { text: '🏭 AI Factory',             callback_data: 'adm_factory'          }],
       [{ text: '💡 Growth Actions',         callback_data: 'adm_factory_growth' },
        { text: '🎯 AI Задачи',             callback_data: 'adm_factory_tasks'  }],
@@ -2516,6 +2517,41 @@ async function showQuickReplies(chatId, clientChatId) {
   });
 }
 
+// ─── Quick note templates ─────────────────────────────────────────────────────
+
+const QUICK_NOTE_TEMPLATES = {
+  call:      '📞 Связались с клиентом',
+  budget:    '💰 Уточнение бюджета',
+  date:      '🗓 Дата мероприятия согласована',
+  logistics: '🚗 Логистика и расположение обсуждены',
+};
+
+async function showQuickNoteTemplates(chatId, orderId) {
+  if (!isAdmin(chatId)) return;
+  return safeSend(chatId,
+    `📝 *Быстрые заметки* — выберите шаблон:`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [
+          { text: '📞 Связались с клиентом', callback_data: `adm_qnote_${orderId}_call`      },
+          { text: '💰 Уточняем бюджет',      callback_data: `adm_qnote_${orderId}_budget`    },
+        ],
+        [
+          { text: '🗓 Дата согласована',     callback_data: `adm_qnote_${orderId}_date`      },
+          { text: '🚗 Логистика',            callback_data: `adm_qnote_${orderId}_logistics` },
+        ],
+        [
+          { text: '✏️ Своя заметка',         callback_data: `adm_qnote_${orderId}_custom`   },
+        ],
+        [
+          { text: '❌ Отмена', callback_data: `adm_order_${orderId}` },
+        ],
+      ]}
+    }
+  );
+}
+
 // ─── All order notes (paginated) ──────────────────────────────────────────────
 
 // Format date for note display: "15 мая 14:30"
@@ -2629,6 +2665,67 @@ async function searchAdminOrders(chatId, query_text) {
       ]}
     });
   } catch (e) { console.error('[Bot] searchAdminOrders:', e.message); }
+}
+
+// ─── Note search ──────────────────────────────────────────────────────────────
+
+async function showAdminSearchNotes(chatId) {
+  if (!isAdmin(chatId)) return;
+  await setSession(chatId, 'adm_search_notes_input', {});
+  return safeSend(chatId,
+    `🔍 *Поиск по заметкам*\n\nВведите текст для поиска в заметках:`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_orders__0' }]] }
+    }
+  );
+}
+
+async function searchAdminNotes(chatId, searchText) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const q = searchText.trim();
+    if (!q) {
+      await clearSession(chatId);
+      return showAdminSearchNotes(chatId);
+    }
+    const rows = await query(
+      `SELECT n.id, n.admin_note, n.created_at, o.id as order_id, o.order_number, o.client_name
+       FROM order_notes n
+       JOIN orders o ON n.order_id = o.id
+       WHERE n.admin_note LIKE ?
+       ORDER BY n.created_at DESC LIMIT 15`,
+      [`%${q}%`]
+    );
+    await clearSession(chatId);
+    if (!rows.length) {
+      return safeSend(chatId,
+        `🔍 По запросу *«${esc(q)}»* заметок не найдено\\.`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '🔍 Искать снова', callback_data: 'adm_search_notes' }],
+            [{ text: '← Заявки',        callback_data: 'adm_orders__0'    }],
+          ]}
+        }
+      );
+    }
+    let text = `🔍 *Поиск по заметкам «${esc(q)}»*\nНайдено: ${esc(String(rows.length))}\n\n`;
+    const btns = rows.map(n => {
+      const dt = formatNoteDate(n.created_at);
+      const preview = n.admin_note.length > 60 ? n.admin_note.slice(0, 60) + '…' : n.admin_note;
+      text += `📋 *${esc(n.order_number)}* — ${esc(n.client_name)}\n_${esc(dt)}_\n${esc(preview)}\n\n`;
+      return [{ text: `${n.order_number} · ${n.client_name}`, callback_data: `adm_order_${n.order_id}` }];
+    });
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        ...btns,
+        [{ text: '🔍 Новый поиск', callback_data: 'adm_search_notes' },
+         { text: '← Заявки',       callback_data: 'adm_orders__0'    }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] searchAdminNotes:', e.message); }
 }
 
 // ─── Admin management ─────────────────────────────────────────────────────────
@@ -4281,6 +4378,8 @@ function initBot(app) {
     }
     // ── Admin search order
     if (data === 'adm_search_order') { if (!isAdmin(chatId)) return; return showAdminSearchOrder(chatId); }
+    // ── Admin search notes
+    if (data === 'adm_search_notes') { if (!isAdmin(chatId)) return; return showAdminSearchNotes(chatId); }
     // ── My orders pagination
     if (data.startsWith('my_orders_page_')) {
       const pg = parseInt(data.replace('my_orders_page_', '')) || 0;
@@ -4504,15 +4603,58 @@ function initBot(app) {
       return;
     }
 
-    // ── Order note: start input
-    if (data.startsWith('adm_note_') && !data.startsWith('adm_note_input_')) {
+    // ── Quick note templates: adm_qnote_{orderId}_{template}
+    if (data.startsWith('adm_qnote_')) {
+      if (!isAdmin(chatId)) return;
+      const rest = data.slice('adm_qnote_'.length);
+      const lastUnderscore = rest.lastIndexOf('_');
+      const orderId = parseInt(rest.slice(0, lastUnderscore));
+      const tplKey  = rest.slice(lastUnderscore + 1);
+      if (!orderId) return;
+
+      if (tplKey === 'custom') {
+        // Enter custom note state
+        await setSession(chatId, `adm_note_input_${orderId}`, {});
+        return safeSend(chatId, `📝 *Введите заметку к заявке:*`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: `adm_order_${orderId}` }]] }
+        });
+      }
+
+      // Save template note with timestamp
+      const tplText = QUICK_NOTE_TEMPLATES[tplKey];
+      if (!tplText) return;
+      const now = new Date().toLocaleString('ru', {
+        timeZone: 'Europe/Moscow', day: 'numeric', month: 'long',
+        hour: '2-digit', minute: '2-digit',
+      }).replace(' г.', '');
+      const noteText = `${tplText} [${now}]`;
+      await run('INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)', [orderId, noteText]);
+      await bot.answerCallbackQuery(q.id, { text: '✅ Заметка добавлена!' }).catch(() => {});
+      return safeSend(chatId, `✅ Заметка добавлена\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] }
+      });
+    }
+
+    // ── Note delete: adm_note_del_{noteId}_{orderId}_{page}
+    if (data.startsWith('adm_note_del_')) {
+      if (!isAdmin(chatId)) return;
+      const parts = data.slice('adm_note_del_'.length).split('_');
+      const noteId  = parseInt(parts[0]);
+      const orderId = parseInt(parts[1]);
+      const page    = parseInt(parts[2]) || 0;
+      if (!noteId || !orderId) return;
+      await run('DELETE FROM order_notes WHERE id=?', [noteId]);
+      await bot.answerCallbackQuery(q.id, { text: '🗑 Заметка удалена' }).catch(() => {});
+      return showAllOrderNotes(chatId, orderId, page);
+    }
+
+    // ── Order note: start input (shows quick templates)
+    if (data.startsWith('adm_note_') && !data.startsWith('adm_note_input_') && !data.startsWith('adm_note_del_')) {
       if (!isAdmin(chatId)) return;
       const orderId = parseInt(data.replace('adm_note_', ''));
-      await setSession(chatId, `adm_note_input_${orderId}`, {});
-      return safeSend(chatId, `📝 *Введите заметку к заявке:*`, {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: `adm_order_${orderId}` }]] }
-      });
+      return showQuickNoteTemplates(chatId, orderId);
     }
 
     // ── Settings inputs — set session and ask for text
@@ -5357,6 +5499,11 @@ function initBot(app) {
       // ── Admin search order input
       if (state === 'adm_search_order_input') {
         return searchAdminOrders(chatId, text);
+      }
+
+      // ── Admin search notes input
+      if (state === 'adm_search_notes_input') {
+        return searchAdminNotes(chatId, text);
       }
 
       // ── Admin search model input

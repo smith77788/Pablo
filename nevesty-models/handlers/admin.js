@@ -214,8 +214,8 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
         ? get('SELECT COUNT(*) as n FROM orders WHERE status=?', [safe])
         : get('SELECT COUNT(*) as n FROM orders'),
       safe
-        ? query('SELECT o.*,m.name as model_name FROM orders o LEFT JOIN models m ON o.model_id=m.id WHERE o.status=? ORDER BY o.created_at DESC LIMIT 8 OFFSET ?', [safe, page*8])
-        : query('SELECT o.*,m.name as model_name FROM orders o LEFT JOIN models m ON o.model_id=m.id ORDER BY o.created_at DESC LIMIT 8 OFFSET ?', [page*8])
+        ? query('SELECT o.*,m.name as model_name, (SELECT COUNT(*) FROM order_notes WHERE order_id=o.id) as note_count FROM orders o LEFT JOIN models m ON o.model_id=m.id WHERE o.status=? ORDER BY o.created_at DESC LIMIT 8 OFFSET ?', [safe, page*8])
+        : query('SELECT o.*,m.name as model_name, (SELECT COUNT(*) FROM order_notes WHERE order_id=o.id) as note_count FROM orders o LEFT JOIN models m ON o.model_id=m.id ORDER BY o.created_at DESC LIMIT 8 OFFSET ?', [page*8])
     ]);
 
     if (!orders.length) {
@@ -230,8 +230,10 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
 
     const btns = orders.map(o => {
       const icon = STATUS_LABELS[o.status]?.split(' ')[0]||'';
-      text += `${icon} *${o.order_number}* — ${esc(o.client_name)}\n`;
-      const row = [{ text: `${o.order_number}  ·  ${o.client_name}`, callback_data: `adm_order_${o.id}` }];
+      const noteBadge = o.note_count > 0 ? ` \\(📝 ${esc(String(o.note_count))}\\)` : '';
+      text += `${icon} *${esc(o.order_number)}* — ${esc(o.client_name)}${noteBadge}\n`;
+      const noteLabel = o.note_count > 0 ? ` (📝 ${o.note_count})` : '';
+      const row = [{ text: `${o.order_number}  ·  ${o.client_name}${noteLabel}`, callback_data: `adm_order_${o.id}` }];
       if (o.status === 'new')       row.push({ text: '✅ Принять',   callback_data: `adm_quick_confirm_${o.id}` });
       if (o.status === 'confirmed') row.push({ text: '🏁 Завершить', callback_data: `adm_quick_complete_${o.id}` });
       return row;
