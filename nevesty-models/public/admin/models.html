@@ -46,10 +46,12 @@
       <!-- Sort -->
       <select id="sort-select" onchange="loadModels()"
         class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:bg-gray-800 dark:text-white">
-        <option value="name">По алфавиту</option>
-        <option value="orders">По заказам</option>
-        <option value="views">По просмотрам</option>
         <option value="created">По дате добавления</option>
+        <option value="name">По алфавиту</option>
+        <option value="order_count">По заказам</option>
+        <option value="reviews_count">По отзывам</option>
+        <option value="avg_rating">По рейтингу</option>
+        <option value="views">По просмотрам</option>
       </select>
     </div>
 
@@ -81,11 +83,12 @@
             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden lg:table-cell">Город</th>
             <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Статус</th>
             <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden sm:table-cell">Заявок</th>
+            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden md:table-cell">Отзывы</th>
             <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Действия</th>
           </tr>
         </thead>
         <tbody id="models-tbody">
-          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Загрузка...</td></tr>
+          <tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">Загрузка...</td></tr>
         </tbody>
       </table>
 
@@ -231,7 +234,7 @@ async function loadModels() {
 
     const tbody = document.getElementById('models-tbody');
     if (!models.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Нет моделей</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">Нет моделей</td></tr>';
       return;
     }
 
@@ -263,8 +266,13 @@ async function loadModels() {
             <button onclick="toggleAvailable(${m.id}, ${m.available ? 1 : 0})" title="Переключить доступность"
               class="text-lg">${m.available ? '🟢' : '🔴'}</button>
           </td>
-          <td class="px-4 py-3 text-center text-sm text-gray-600 dark:text-gray-400 hidden sm:table-cell">
-            ${m.order_count || 0}
+          <td class="px-4 py-3 text-center hidden sm:table-cell">
+            <span class="text-sm font-medium ${(m.order_count || 0) > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-400'}">${m.order_count || 0}</span>
+          </td>
+          <td class="px-4 py-3 text-center hidden md:table-cell">
+            ${m.reviews_count > 0
+              ? `<span class="text-sm text-gray-700 dark:text-gray-300">${m.avg_rating} ⭐ <span class="text-xs text-gray-400">(${m.reviews_count})</span></span>`
+              : `<span class="text-xs text-gray-400">—</span>`}
           </td>
           <td class="px-4 py-3 text-right">
             <div class="flex items-center justify-end gap-2">
@@ -318,14 +326,20 @@ async function duplicateModel(id) {
   try {
     const resp = await fetch(`/api/admin/models/${id}/duplicate`, { method: 'POST', headers });
     const data = await resp.json();
-    if (data.id) {
-      alert(`Модель скопирована (ID: ${data.id}). Название добавлен суффикс " (копия)".`);
+    if (data.ok && data.id) {
+      const msg = `Модель скопирована (ID: ${data.id}) с суффиксом " (копия)".`;
+      if (window._admin?.toast) _admin.toast(msg, 'success');
+      else alert(msg);
       loadModels();
     } else {
-      alert('Ошибка дублирования');
+      const err = 'Ошибка дублирования: ' + (data.error || 'unknown');
+      if (window._admin?.toast) _admin.toast(err, 'error');
+      else alert(err);
     }
   } catch(e) {
-    alert('Ошибка: ' + e.message);
+    const err = 'Ошибка: ' + e.message;
+    if (window._admin?.toast) _admin.toast(err, 'error');
+    else alert(err);
   }
 }
 

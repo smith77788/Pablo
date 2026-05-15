@@ -47,6 +47,15 @@ try {
 let botInstance = null;
 function setBot(bot) { botInstance = bot; }
 
+// ─── Audit log helper ─────────────────────────────────────────────────────────
+async function logAudit(req, action, entity, entityId, details) {
+  try {
+    const user = req.admin?.username || 'unknown';
+    await run('INSERT INTO audit_log (admin_username, action, entity, entity_id, details, ip) VALUES (?,?,?,?,?,?)',
+      [user, action, entity, entityId || null, details ? JSON.stringify(details) : null, req.ip || '']);
+  } catch {} // silently ignore audit failures
+}
+
 // ─── Validation helpers ───────────────────────────────────────────────────────
 const ALLOWED_EVENT_TYPES = ['fashion_show', 'photo_shoot', 'event', 'commercial', 'runway', 'other'];
 const ALLOWED_IMG_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
@@ -129,6 +138,13 @@ router.get('/config', (req, res) => {
     agency_phone: process.env.AGENCY_PHONE || '',
     agency_email: process.env.AGENCY_EMAIL || '',
   });
+});
+
+// ─── CSRF token ───────────────────────────────────────────────────────────────
+router.get('/csrf-token', (req, res) => {
+  const ip = req.ip || '';
+  const { generateToken } = require('../middleware/csrf');
+  res.json({ token: generateToken(ip) });
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -505,7 +521,15 @@ router.get('/admin/models', auth, async (req, res, next) => {
     const { page = 0, sort = 'name', limit = 15, archived, search } = req.query;
     const offset = parseInt(page) * parseInt(limit);
 
-    const sortMap = { name: 'name ASC', orders: 'order_count DESC', views: 'view_count DESC', created: 'id DESC' };
+    const sortMap = {
+      name: 'name ASC',
+      orders: 'order_count DESC',
+      order_count: 'order_count DESC',
+      reviews_count: 'reviews_count DESC',
+      avg_rating: 'avg_rating DESC',
+      views: 'view_count DESC',
+      created: 'id DESC'
+    };
     const orderBy = sortMap[sort] || 'name ASC';
 
     let where = [];
@@ -516,7 +540,10 @@ router.get('/admin/models', auth, async (req, res, next) => {
 
     const total = (await get(`SELECT COUNT(*) as cnt FROM models ${whereStr}`, params))?.cnt || 0;
     const models = await query(
-      `SELECT *, (SELECT COUNT(*) FROM orders WHERE model_id=models.id) as order_count
+      `SELECT *,
+         (SELECT COUNT(*) FROM orders WHERE model_id=models.id) as order_count,
+         (SELECT COUNT(*) FROM reviews WHERE model_id=models.id AND approved=1) as reviews_count,
+         (SELECT ROUND(AVG(rating),1) FROM reviews WHERE model_id=models.id AND approved=1) as avg_rating
        FROM models ${whereStr} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
       [...params, parseInt(limit), offset]
     );
@@ -712,6 +739,12 @@ router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
 // ─── Orders (public) ──────────────────────────────────────────────────────────
 router.post('/orders', strictLimiter, async (req, res, next) => {
   try {
+    const csrfToken = req.headers['x-csrf-token'] || req.body._csrf;
+    const { validateToken } = require('../middleware/csrf');
+    if (!validateToken(csrfToken, req.ip || '')) {
+      return res.status(403).json({ error: 'Invalid CSRF token' });
+    }
+
     const { client_name, client_phone, client_email, client_telegram, client_chat_id,
             model_id, event_type, event_date, event_duration, location, budget, comments,
             utm_source, utm_medium, utm_campaign } = req.body;
@@ -815,6 +848,12 @@ router.get('/favorites', async (req, res, next) => {
 // ─── Quick booking (name + phone only) ────────────────────────────────────────
 router.post('/quick-booking', strictLimiter, async (req, res, next) => {
   try {
+    const csrfToken = req.headers['x-csrf-token'] || req.body._csrf;
+    const { validateToken } = require('../middleware/csrf');
+    if (!validateToken(csrfToken, req.ip || '')) {
+      return res.status(403).json({ error: 'Invalid CSRF token' });
+    }
+
     const { client_name, client_phone } = req.body;
     if (!sanitize(client_name, 100)) return res.status(400).json({ error: 'Укажите имя' });
     if (!client_phone || !validatePhone(client_phone)) return res.status(400).json({ error: 'Укажите корректный номер телефона' });
@@ -1380,6 +1419,7 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
         wsServer.notifyOrderUpdate(id, status, phone10);
       }
     }
+    await logAudit(req, 'status_change', 'order', id, { from: order.prev_status, to: status });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'DB error' }); }
 });
