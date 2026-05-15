@@ -54,9 +54,46 @@
 
     /* ── Step indicator enhancements ── */
     .booking-step-num { font-weight: 600; }
-    .booking-step.done .booking-step-num::after {
-      content: '✓'; position: absolute;
+    /* Done steps show a checkmark instead of the number */
+    .booking-step.done .booking-step-num {
+      font-size: 0;           /* hide the number text */
+      position: relative;
     }
+    .booking-step.done .booking-step-num::after {
+      content: '✓';
+      font-size: 1rem;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    /* ── Step badge (model/service count) ── */
+    .booking-step-badge {
+      position: absolute; top: -6px; right: -6px;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--gold); color: var(--bg);
+      font-size: 0.6rem; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      line-height: 1; animation: badgeIn 0.2s ease;
+    }
+    @keyframes badgeIn {
+      from { transform: scale(0); } to { transform: scale(1); }
+    }
+
+    /* ── Mini selected-models bar (shown in step 3+) ── */
+    #miniModelBar {
+      display: none; margin-bottom: 16px;
+      padding: 10px 14px;
+      background: rgba(201,169,110,0.07); border-left: 3px solid var(--gold);
+      font-size: 0.8rem; color: var(--text-muted);
+      animation: stepSlideIn 0.25s ease forwards;
+    }
+    #miniModelBar strong { color: var(--gold); }
+    #miniModelBar .mini-bar-edit {
+      margin-left: 8px; color: var(--text-dim); cursor: pointer;
+      font-size: 0.75rem; text-decoration: underline;
+    }
+    #miniModelBar .mini-bar-edit:hover { color: var(--gold); }
 
     /* ── Prefilled model card ── */
     #prefilledModelCard { display: none; margin-bottom: 20px; }
@@ -329,6 +366,9 @@
         <p style="color:var(--text-muted)">Заполните форму — менеджер свяжется с вами в течение 1 часа</p>
       </div>
 
+      <!-- ARIA live region for screen reader step announcements -->
+      <div id="stepAnnouncement" role="status" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
       <!-- Selected model banner (shown when coming from model.html via ?model_name=) -->
       <div id="selected-model-banner" style="max-width:640px;margin:0 auto 24px;background:rgba(201,169,110,0.08);border:1px solid var(--gold);padding:14px 20px;font-size:0.85rem;font-weight:500;color:var(--gold);display:none"></div>
 
@@ -364,6 +404,9 @@
       <div class="booking-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Прогресс оформления">
         <div class="booking-progress-fill" id="progressFill"></div>
       </div>
+
+      <!-- Mini bar: shown on steps 3-5 to remind user of selected event + models -->
+      <div id="miniModelBar" role="region" aria-label="Выбранные параметры" style="max-width:640px;margin:0 auto;"></div>
 
       <div class="booking-form-wrap">
 

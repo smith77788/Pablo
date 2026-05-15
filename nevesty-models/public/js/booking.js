@@ -542,6 +542,15 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  /* ─── Step labels for ARIA announcements ─── */
+  const STEP_LABELS = {
+    1: 'Шаг 1 из 5: Тип события',
+    2: 'Шаг 2 из 5: Выбор модели',
+    3: 'Шаг 3 из 5: Дата и бюджет',
+    4: 'Шаг 4 из 5: Контактные данные',
+    5: 'Шаг 5 из 5: Подтверждение заявки',
+  };
+
   /* ─── Update step indicator dots and progress bar ─── */
   function updateStepIndicators(n) {
     document.querySelectorAll('.booking-step').forEach(s => {
@@ -553,19 +562,81 @@
       if (sn === n) s.setAttribute('aria-current', 'step');
     });
 
-    // Progress bar: (n-1)/(TOTAL_STEPS-1) fills across 5 steps
-    const pct = Math.min(((n - 1) / (TOTAL_STEPS - 1)) * 100, 100);
+    // Progress bar: show at least 10% on step 1 for visual feedback, scale to 100% at step 5
+    const MIN_PCT = 10;
+    const rawPct = ((n - 1) / (TOTAL_STEPS - 1)) * 100;
+    const pct = n === 1 ? MIN_PCT : Math.min(rawPct, 100);
     const progressFill = document.getElementById('progressFill');
     if (progressFill) {
       progressFill.style.width = pct + '%';
       const bar = progressFill.parentElement;
-      if (bar) bar.setAttribute('aria-valuenow', Math.round(pct));
+      if (bar) bar.setAttribute('aria-valuenow', Math.round(rawPct));
     }
 
     // Connector lines — there are 4 lines (line1–line4)
     for (let i = 1; i <= 4; i++) {
       const line = document.getElementById(`line${i}`);
       if (line) line.classList.toggle('done', i < n);
+    }
+
+    // ARIA live region announcement for screen readers
+    const announcementEl = document.getElementById('stepAnnouncement');
+    if (announcementEl && STEP_LABELS[n]) {
+      announcementEl.textContent = STEP_LABELS[n];
+    }
+
+    // Update model count badge on step 2 indicator
+    updateStep2Badge();
+
+    // Show/hide mini model bar on steps 3+
+    renderMiniModelBar(n);
+  }
+
+  /* ─── Step 2 badge: shows number of selected models ─── */
+  function updateStep2Badge() {
+    const step2El = document.querySelector('.booking-step[data-step="2"] .booking-step-num');
+    if (!step2El) return;
+    step2El.querySelector('.booking-step-badge')?.remove();
+    if (state.selected_models.length > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'booking-step-badge';
+      badge.setAttribute('aria-label', `Выбрано моделей: ${state.selected_models.length}`);
+      badge.textContent = state.selected_models.length;
+      step2El.appendChild(badge);
+    }
+  }
+
+  /* ─── Mini model bar: compact summary shown on steps 3-5 ─── */
+  function renderMiniModelBar(n) {
+    const bar = document.getElementById('miniModelBar');
+    if (!bar) return;
+
+    if (n < 3) {
+      bar.style.display = 'none';
+      bar.innerHTML = '';
+      return;
+    }
+
+    const parts = [];
+    if (state.event_type) {
+      const icon = EVENT_ICONS[state.event_type] || '';
+      const label = EVENT_LABELS[state.event_type] || state.event_type;
+      parts.push(`${icon} ${escHtml(label)}`);
+    }
+    if (state.selected_models.length > 0) {
+      const names = state.selected_models.map(m => escHtml(m.name)).join(', ');
+      parts.push(`<strong>${names}</strong>`);
+    } else {
+      parts.push('<span style="color:var(--text-dim)">Модель не выбрана</span>');
+    }
+
+    if (parts.length > 0) {
+      bar.innerHTML = parts.join(' &bull; ') +
+        ` <span class="mini-bar-edit" role="button" tabindex="0"
+            onclick="window._booking.goToStepPublic(${state.selected_models.length > 0 ? 2 : 1})"
+            onkeydown="if(event.key==='Enter')window._booking.goToStepPublic(${state.selected_models.length > 0 ? 2 : 1})"
+            aria-label="Изменить выбор">изменить ✎</span>`;
+      bar.style.display = 'block';
     }
   }
 
