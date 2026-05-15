@@ -522,10 +522,43 @@ CEO_EXPERIMENT_IDEAS = [
 ]
 
 
+_CEO_EXP_STORE_PATH = _pathlib.Path(__file__).parent.parent / "ceo_experiments.json"
+
+
 class CEOExperimentSystem:
     """CEO experiment proposals and tracking system (heuristic, no DB required)."""
 
     EXPERIMENT_IDEAS = CEO_EXPERIMENT_IDEAS
+
+    # Thresholds matching StrategicCore / ExperimentSystem rules
+    SCALE_THRESHOLD = 5.0   # improvement_pct > 5 → scale (variant wins)
+    KILL_THRESHOLD  = -2.0  # improvement_pct < -2 → kill (control wins)
+
+    def __init__(self, store_path: str | None = None) -> None:
+        self._store_path = _pathlib.Path(store_path) if store_path else _CEO_EXP_STORE_PATH
+        self._store: dict = self._load_store()
+
+    # ── persistence ──────────────────────────────────────────────────
+
+    def _load_store(self) -> dict:
+        try:
+            if self._store_path.exists():
+                return _json.loads(self._store_path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+        return {"active": [], "results": [], "history": []}
+
+    def _save_store(self) -> None:
+        try:
+            self._store_path.parent.mkdir(parents=True, exist_ok=True)
+            self._store_path.write_text(
+                _json.dumps(self._store, ensure_ascii=False, indent=2),
+                encoding='utf-8',
+            )
+        except Exception:
+            pass
+
+    # ── core API ─────────────────────────────────────────────────────
 
     def propose_experiment(self, context: dict | None = None) -> dict:
         """Propose next experiment to run based on what is not yet active."""
@@ -546,31 +579,181 @@ class CEOExperimentSystem:
             "end_date": (now + _dt_mod.timedelta(days=chosen['duration_days'])).isoformat(),
         }
 
-    def get_active_experiments(self) -> list[dict]:
-        """Load active experiments from JSON file."""
-        try:
-            if _EXPERIMENTS_DB_PATH.exists():
-                data = _json.loads(_EXPERIMENTS_DB_PATH.read_text(encoding='utf-8'))
-                return data.get('active', [])
-        except Exception:
-            pass
-        return []
+    def propose_hypothesis(self, context: dict | None = None) -> dict:
+        """Propose a concrete A/B hypothesis based on context KPIs.
+
+        Args:
+            context: dict with optional keys: conversion_rate, avg_check,
+                     orders_total, repeat_rate, top_problem.
+        Returns:
+            dict with keys: id, hypothesis, metric, variant_a, variant_b,
+                            duration_days, expected_lift_pct, status.
+        """
+        ctx = context or {}
+        conversion = ctx.get('conversion_rate', 0)
+        orders = ctx.get('orders_total', 0)
+        repeat = ctx.get('repeat_rate', 0)
+        problem = ctx.get('top_problem', '')
+
+        # Rule-based hypothesis selection
+        if conversion < 2:
+            idea = {
+                "id": f"hyp_{_dt_mod.datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "hypothesis": "Добавление кнопки 'Быстрая заявка' на главный экран увеличит конверсию",
+                "metric": "booking_completion_rate",
+                "variant_a": "Текущая форма заявки (6 полей)",
+                "variant_b": "Сокращённая форма (имя + телефон + дата)",
+                "duration_days": 14,
+                "expected_lift_pct": 25,
+                "status": "proposed",
+            }
+        elif orders < 5:
+            idea = {
+                "id": f"hyp_{_dt_mod.datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "hypothesis": "Показ ответного времени '⚡ Ответим за 1 час' увеличит начало заявок",
+                "metric": "booking_start_rate",
+                "variant_a": "Без обещания ответа",
+                "variant_b": "С баннером '⚡ Ответим за 1 час'",
+                "duration_days": 7,
+                "expected_lift_pct": 15,
+                "status": "proposed",
+            }
+        elif repeat < 0.1:
+            idea = {
+                "id": f"hyp_{_dt_mod.datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "hypothesis": "Email-напоминание через 30 дней повысит повторные заказы",
+                "metric": "repeat_rate",
+                "variant_a": "Без напоминания",
+                "variant_b": "Email на 30-й день после заказа",
+                "duration_days": 30,
+                "expected_lift_pct": 12,
+                "status": "proposed",
+            }
+        else:
+            idea = {
+                "id": f"hyp_{_dt_mod.datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "hypothesis": "Показ цены 'от X₽' в каталоге моделей снизит отказы от бронирования",
+                "metric": "booking_completion_rate",
+                "variant_a": "Цена раскрывается в конце формы",
+                "variant_b": "Цена 'от 5000₽' показана в карточке модели",
+                "duration_days": 14,
+                "expected_lift_pct": 8,
+                "status": "proposed",
+            }
+
+        if problem:
+            idea["context_problem"] = problem
+
+        # Persist to store
+        self._store.setdefault("history", []).append({
+            "type": "proposed_hypothesis",
+            "idea": idea,
+            "timestamp": _dt_mod.datetime.now().isoformat(),
+        })
+        self._save_store()
+        return idea
+
+    def track_result(self, experiment_id: str, metric: str, value: float) -> dict:
+        """Record a metric value for an experiment variant.
+
+        Args:
+            experiment_id: The experiment ID string.
+            metric: Metric name, e.g. 'a_rate' or 'b_rate'.
+            value: Observed metric value (e.g. conversion %).
+        Returns:
+            dict with experiment_id, metric, value, timestamp.
+        """
+        record = {
+            "experiment_id": experiment_id,
+            "metric": metric,
+            "value": value,
+            "timestamp": _dt_mod.datetime.now().isoformat(),
+        }
+        self._store.setdefault("results", []).append(record)
+        self._save_store()
+        return record
+
+    def get_winning_variant(self, experiment_id: str) -> dict:
+        """Determine winning variant for a given experiment.
+
+        Looks up all tracked results for this experiment_id, computes
+        improvement_pct, and returns scale/iterate/kill recommendation.
+
+        Returns:
+            dict with keys: experiment_id, winner (A|B|inconclusive),
+                            improvement_pct, recommendation (scale|iterate|kill),
+                            a_rate, b_rate.
+        """
+        results = [r for r in self._store.get("results", []) if r["experiment_id"] == experiment_id]
+        a_vals = [r["value"] for r in results if r["metric"] == "a_rate"]
+        b_vals = [r["value"] for r in results if r["metric"] == "b_rate"]
+
+        a_rate = sum(a_vals) / len(a_vals) if a_vals else 0.0
+        b_rate = sum(b_vals) / len(b_vals) if b_vals else 0.0
+
+        if a_rate > 0:
+            improvement_pct = round((b_rate - a_rate) / a_rate * 100, 1)
+        else:
+            improvement_pct = 0.0
+
+        if improvement_pct > self.SCALE_THRESHOLD:
+            winner = "B"
+            recommendation = "scale"
+        elif improvement_pct < self.KILL_THRESHOLD:
+            winner = "A"
+            recommendation = "kill"
+        else:
+            winner = "inconclusive"
+            recommendation = "iterate"
+
+        return {
+            "experiment_id": experiment_id,
+            "winner": winner,
+            "improvement_pct": improvement_pct,
+            "recommendation": recommendation,
+            "a_rate": a_rate,
+            "b_rate": b_rate,
+            "samples": {"a": len(a_vals), "b": len(b_vals)},
+        }
 
     def track_results(self, experiment_id: str, metrics: dict) -> dict:
-        """Track experiment results and determine winner."""
+        """Track experiment results and determine winner (legacy + persist).
+
+        Args:
+            experiment_id: Experiment ID string.
+            metrics: dict with keys a_rate, b_rate (conversion percentages).
+        Returns:
+            dict with winner, improvement, recommendation.
+        """
         a_rate = metrics.get("a_rate", 0)
         b_rate = metrics.get("b_rate", 0)
+
+        # Persist individual readings
+        if a_rate:
+            self.track_result(experiment_id, "a_rate", a_rate)
+        if b_rate:
+            self.track_result(experiment_id, "b_rate", b_rate)
+
+        winner_info = self.get_winning_variant(experiment_id)
         return {
             "experiment_id": experiment_id,
             "metrics": metrics,
-            "winner": "B" if b_rate > a_rate else "A",
+            "winner": winner_info["winner"],
             "improvement": abs(b_rate - a_rate),
+            "improvement_pct": winner_info["improvement_pct"],
+            "recommendation": winner_info["recommendation"],
             "timestamp": _dt_mod.datetime.now().isoformat(),
         }
+
+    def get_active_experiments(self) -> list[dict]:
+        """Load active experiments from JSON file."""
+        self._store = self._load_store()  # refresh from disk
+        return self._store.get('active', [])
 
     def generate_report(self, context: dict | None = None) -> str:
         """Generate experiment status report."""
         active = self.get_active_experiments()
+        results = self._store.get("results", [])
         ideas = self.EXPERIMENT_IDEAS[:3]
 
         lines = ["📊 *ЭКСПЕРИМЕНТЫ*\n"]
@@ -579,6 +762,10 @@ class CEOExperimentSystem:
             lines.append(f"Активных: {len(active)}")
         else:
             lines.append("Активных экспериментов: 0")
+
+        if results:
+            exp_ids = list({r["experiment_id"] for r in results})
+            lines.append(f"\n📈 Данные по {len(exp_ids)} экспериментам")
 
         lines.append("\n💡 Предложения:")
         for idea in ideas:
