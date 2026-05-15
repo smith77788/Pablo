@@ -1502,19 +1502,22 @@
           }
         }
 
+        const SAFE_STATUSES = new Set(['new', 'reviewing', 'confirmed', 'in_progress', 'completed', 'cancelled']);
+
         function wsUpdateOrderCard(orderId, newStatus) {
+          const safeStatus = SAFE_STATUSES.has(newStatus) ? newStatus : 'new';
           // Update cached orders array
           const order = _orders.find(o => o.id === orderId);
           if (!order) return;
-          order.status = newStatus;
+          order.status = safeStatus;
 
           // Update status badge in card header
           const card = document.getElementById('order-card-' + orderId);
           if (!card) return;
           const badge = card.querySelector('.status-badge');
           if (badge) {
-            badge.className = 'status-badge ' + newStatus;
-            badge.textContent = STATUS_LABELS_WS[newStatus] || newStatus;
+            badge.className = 'status-badge ' + safeStatus;
+            badge.textContent = STATUS_LABELS_WS[safeStatus] || safeStatus;
           }
 
           // Update progress bar inside card body

@@ -7693,7 +7693,7 @@ function requireClientAuth(req, res, next) {
   const auth = (req.headers.authorization || '').trim();
   if (!auth) return res.status(401).json({ ok: false, error: 'Unauthorized' });
   try {
-    const decoded = jwt.verify(auth.replace(/^Bearer\s+/i, ''), process.env.JWT_SECRET);
+    const decoded = jwt.verify(auth.replace(/^Bearer\s+/i, ''), process.env.JWT_SECRET, { algorithms: ['HS256'] });
     if (decoded.type !== 'client') return res.status(403).json({ ok: false, error: 'Forbidden' });
     if (!decoded.phone || !/^\d{10}$/.test(decoded.phone)) {
       return res.status(400).json({ ok: false, error: 'Invalid token payload' });
@@ -7738,11 +7738,10 @@ router.post('/cabinet/login', authLimiter, async (req, res, next) => {
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) return res.status(500).json({ ok: false, error: 'Server configuration error' });
 
-    const token = jwt.sign(
-      { type: 'client', phone: phone10, chat_id: client.client_chat_id || null, name: client.client_name || null },
-      jwtSecret,
-      { expiresIn: '7d' }
-    );
+    const token = jwt.sign({ type: 'client', phone: phone10, chat_id: client.client_chat_id || null }, jwtSecret, {
+      algorithm: 'HS256',
+      expiresIn: '7d',
+    });
 
     res.json({ ok: true, token, client_name: client.client_name || null });
   } catch (e) {
@@ -7871,6 +7870,30 @@ router.patch('/cabinet/profile', requireClientAuth, async (req, res, next) => {
       [...params, ...patterns, ...patterns]
     );
 
+    // Sync to client_prefs for fast profile lookup
+    const chatId = req.clientChatId;
+    if (chatId) {
+      await run(`INSERT INTO client_prefs (chat_id) VALUES (?) ON CONFLICT(chat_id) DO NOTHING`, [
+        String(chatId),
+      ]).catch(() => {});
+      const prefUpdates = [];
+      const prefParams = [];
+      if (name !== undefined) {
+        prefUpdates.push('name=?');
+        prefParams.push(name.trim());
+      }
+      if (email !== undefined) {
+        prefUpdates.push('email=?');
+        prefParams.push(email.trim());
+      }
+      if (prefUpdates.length) {
+        await run(`UPDATE client_prefs SET ${prefUpdates.join(', ')} WHERE chat_id=?`, [
+          ...prefParams,
+          String(chatId),
+        ]).catch(() => {});
+      }
+    }
+
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -7878,7 +7901,7 @@ router.patch('/cabinet/profile', requireClientAuth, async (req, res, next) => {
 });
 
 // POST /api/cabinet/orders/:id/repeat — repeat an existing order (prefill from previous)
-router.post('/cabinet/orders/:id/repeat', requireClientAuth, async (req, res, next) => {
+router.post('/cabinet/orders/:id/repeat', requireClientAuth, bookingLimiter, async (req, res, next) => {
   try {
     const srcId = parseInt(req.params.id);
     if (!Number.isInteger(srcId) || srcId <= 0) return res.status(400).json({ ok: false, error: 'Invalid order ID' });
@@ -7889,7 +7912,8 @@ router.post('/cabinet/orders/:id/repeat', requireClientAuth, async (req, res, ne
 
     // Verify the source order belongs to this client
     const src = await get(
-      `SELECT * FROM orders
+      `SELECT id, status, event_type, client_name, client_phone, client_email,
+              model_id, budget, location, comments FROM orders
        WHERE id=?
          AND (REPLACE(REPLACE(REPLACE(REPLACE(client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
            OR REPLACE(REPLACE(REPLACE(REPLACE(client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph}))`,
@@ -7923,10 +7947,18 @@ router.post('/cabinet/orders/:id/repeat', requireClientAuth, async (req, res, ne
         src.comments || null,
         'new',
       ]
-    );
+    ).catch(e => {
+      if (e.message && e.message.includes('UNIQUE')) {
+        const err = new Error('Duplicate order number, please retry');
+        err.status = 409;
+        throw err;
+      }
+      throw e;
+    });
 
     res.status(201).json({ ok: true, id: result.id, order_number: orderNumber });
   } catch (e) {
+    if (e.status === 409) return res.status(409).json({ ok: false, error: e.message });
     next(e);
   }
 });
