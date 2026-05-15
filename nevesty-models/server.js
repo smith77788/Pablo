@@ -39,9 +39,20 @@ try {
         fontSrc: ["'self'", "cdnjs.cloudflare.com"],
       }
     },
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   }));
+  app.use(helmet.noSniff());
+  app.use(helmet.hidePoweredBy());
+  app.use(helmet.frameguard({ action: 'sameorigin' }));
 } catch {}
+
+// ─── Admin route security headers ────────────────────────────────────────────
+app.use('/admin', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Frame-Options', 'DENY');
+  next();
+});
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 try {

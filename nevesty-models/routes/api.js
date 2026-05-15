@@ -12,16 +12,35 @@ const mailer = require('../services/mailer');
 const payment = require('../services/payment');
 const { cache, TTL_CATALOG } = require('../services/cache');
 
-// ─── Contact form rate limiter (3 requests per hour per IP) ──────────────────
+// ─── Rate limiters ────────────────────────────────────────────────────────────
 let contactRateLimit = (req, res, next) => next(); // fallback: no-op
+let strictLimiter   = (req, res, next) => next(); // fallback: no-op
+let authLimiter     = (req, res, next) => next(); // fallback: no-op
 try {
   const rateLimit = require('express-rate-limit');
+  // Contact form: 3 requests per hour per IP
   contactRateLimit = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
     max: 3,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Слишком много сообщений. Попробуйте через час.' },
+  });
+  // Strict limit for booking/contact forms: 10 per hour
+  strictLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Превышен лимит заявок, попробуйте через час' },
+  });
+  // Auth limit: 20 attempts per 15 minutes
+  authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много попыток входа' },
   });
 } catch { /* express-rate-limit not available */ }
 
@@ -43,17 +62,23 @@ function validateEmail(e) { return !e || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((e ||
 function validateDate(d) { return !d || (/^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))); }
 
 // ─── Input sanitization middleware ───────────────────────────────────────────
-// Strip null bytes and control chars from all string body inputs
-router.use((req, res, next) => {
-  if (req.body && typeof req.body === 'object') {
-    for (const [key, val] of Object.entries(req.body)) {
-      if (typeof val === 'string') {
-        req.body[key] = val.replace(/\x00/g, '').trim();
-      }
+// Strip null bytes from all string body inputs (deep: handles nested objects & arrays)
+function sanitizeInput(req, res, next) {
+  function clean(val) {
+    if (typeof val === 'string') {
+      // Remove null bytes, limit length
+      return val.replace(/\0/g, '').trim().slice(0, 10000);
     }
+    if (Array.isArray(val)) return val.map(clean);
+    if (val && typeof val === 'object') {
+      return Object.fromEntries(Object.entries(val).map(([k, v]) => [k, clean(v)]));
+    }
+    return val;
   }
+  if (req.body) req.body = clean(req.body);
   next();
-});
+}
+router.use(sanitizeInput);
 
 // ─── File utilities ───────────────────────────────────────────────────────────
 function deleteFile(urlPath) {
@@ -107,7 +132,7 @@ router.get('/config', (req, res) => {
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-router.post('/admin/login', async (req, res, next) => {
+router.post('/admin/login', authLimiter, async (req, res, next) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Укажите логин и пароль' });
@@ -685,7 +710,7 @@ router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
 });
 
 // ─── Orders (public) ──────────────────────────────────────────────────────────
-router.post('/orders', async (req, res, next) => {
+router.post('/orders', strictLimiter, async (req, res, next) => {
   try {
     const { client_name, client_phone, client_email, client_telegram, client_chat_id,
             model_id, event_type, event_date, event_duration, location, budget, comments,
@@ -788,7 +813,7 @@ router.get('/favorites', async (req, res, next) => {
 });
 
 // ─── Quick booking (name + phone only) ────────────────────────────────────────
-router.post('/quick-booking', async (req, res, next) => {
+router.post('/quick-booking', strictLimiter, async (req, res, next) => {
   try {
     const { client_name, client_phone } = req.body;
     if (!sanitize(client_name, 100)) return res.status(400).json({ error: 'Укажите имя' });
