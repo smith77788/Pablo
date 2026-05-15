@@ -380,11 +380,34 @@ async function showAdminMenu(chatId, name) {
 
 // ── Catalog with category filter ──────────────────────────────────────────────
 
-async function showCatalog(chatId, cat, page) {
+// Per-user sort preferences for catalog (in-memory)
+const catalogSortPrefs = new Map(); // chatId → 'featured' | 'alpha'
+
+async function showCatalog(chatId, cat, page, filter) {
   try {
-    const models = cat
-      ? await query('SELECT * FROM models WHERE available=1 AND category=? ORDER BY id', [cat])
-      : await query('SELECT * FROM models WHERE available=1 ORDER BY id');
+    // Normalise: support showCatalog(chatId, page, filter) new-style calls
+    if (typeof cat === 'number' && (typeof page === 'object' || page === undefined)) {
+      filter = page || {};
+      page   = cat;
+      cat    = filter.category || '';
+    }
+    if (!filter) filter = {};
+    if (!cat) cat = filter.category || '';
+    page = page || 0;
+
+    // Per-user sort preference
+    const sortPref = catalogSortPrefs.get(String(chatId)) || 'featured';
+    const orderClause = sortPref === 'alpha'
+      ? 'ORDER BY name ASC'
+      : 'ORDER BY featured DESC, id ASC';
+
+    // Build WHERE clause
+    const conditions = ['available=1', "COALESCE(archived,0)=0"];
+    const params = [];
+    if (cat) { conditions.push('category=?'); params.push(cat); }
+    if (filter.city) { conditions.push('city=?'); params.push(filter.city); }
+    const where = conditions.join(' AND ');
+    const models = await query(`SELECT * FROM models WHERE ${where} ${orderClause}`, params);
 
     if (!models.length) {
       return safeSend(chatId, '📭 Моделей по выбранному фильтру нет\\.', {
@@ -397,22 +420,40 @@ async function showCatalog(chatId, cat, page) {
     const total   = models.length;
     const slice   = models.slice(page * perPage, page * perPage + perPage);
 
-    // Category filter row
-    const catRow = Object.entries(CATEGORIES).map(([k, v]) => ({
-      text: (k === cat ? '✅ ' : '') + v,
-      callback_data: `cat_cat_${k}_0`
-    }));
+    // Category filter buttons (fashion / commercial / events)
+    const catFilterRow = [
+      { text: (cat === 'fashion'    ? '✅ ' : '') + '💄 Фэшн',        callback_data: 'cat_filter_fashion'    },
+      { text: (cat === 'commercial' ? '✅ ' : '') + '📸 Коммерческая', callback_data: 'cat_filter_commercial' },
+      { text: (cat === 'events'     ? '✅ ' : '') + '🎉 Мероприятия',  callback_data: 'cat_filter_events'     },
+    ];
 
-    // Dynamic city buttons from settings
+    // Sort row
+    const sortRow = [
+      { text: (sortPref === 'featured' ? '✅ ' : '') + '⭐ Сначала топ', callback_data: 'cat_sort_featured' },
+      { text: (sortPref === 'alpha'    ? '✅ ' : '') + '🔤 По алфавиту', callback_data: 'cat_sort_alpha'    },
+    ];
+
+    // Dynamic city buttons from settings, fallback to DB distinct cities
     const citiesSetting = await getSetting('cities_list').catch(() => '');
-    const cityButtons = citiesSetting
-      ? citiesSetting.split(',').map(c => c.trim()).filter(Boolean).slice(0, 4)
-        .map(city => ({ text: `🏙 ${city}`, callback_data: `cat_city_${city}_0` }))
+    let cityList = citiesSetting
+      ? citiesSetting.split(',').map(c => c.trim()).filter(Boolean).slice(0, 8)
       : [];
+    if (!cityList.length) {
+      const cityRows2 = await query(
+        "SELECT DISTINCT city FROM models WHERE available=1 AND city IS NOT NULL AND city != '' ORDER BY city LIMIT 8"
+      ).catch(() => []);
+      cityList = cityRows2.map(r => r.city);
+    }
+    const cityRows = [];
+    for (let i = 0; i < cityList.length; i += 2) {
+      const row = [{ text: '🏙 ' + cityList[i], callback_data: 'cat_city_' + encodeURIComponent(cityList[i]) + '_0' }];
+      if (cityList[i+1]) row.push({ text: '🏙 ' + cityList[i+1], callback_data: 'cat_city_' + encodeURIComponent(cityList[i+1]) + '_0' });
+      cityRows.push(row);
+    }
 
-    // Model buttons
+    // Model buttons (show ⭐ for featured models)
     const modelBtns = slice.map(m => [{
-      text: `${m.available ? '🟢' : '🔴'} ${m.name}  ·  ${m.height}см  ·  ${m.hair_color || ''}`,
+      text: `${m.available ? '🟢' : '🔴'}${m.featured ? '⭐' : ''} ${m.name}  ·  ${m.height}см  ·  ${m.hair_color || ''}`,
       callback_data: `cat_model_${m.id}`
     }]);
 
@@ -422,17 +463,20 @@ async function showCatalog(chatId, cat, page) {
     if ((page+1)*perPage < total)         nav.push({ text: '▶️',  callback_data: `cat_cat_${cat}_${page+1}` });
 
     const keyboard = [
-      catRow,
-      ...(cityButtons.length ? [cityButtons] : []),
+      catFilterRow,
+      sortRow,
+      ...cityRows,
       ...modelBtns,
       ...(nav.length ? [nav] : []),
-      [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }],
-      [{ text: '🏠 Главное меню',    callback_data: 'main_menu' }],
+      [{ text: '🔍 Поиск',           callback_data: 'cat_search' },
+       { text: '📝 Оформить заявку',  callback_data: 'bk_start'  }],
+      [{ text: '🏠 Главное меню',     callback_data: 'main_menu' }],
     ];
 
     const label = CATEGORIES[cat] || 'Все';
+    const cityLabel = filter.city ? ` — 🏙 ${esc(filter.city)}` : '';
     return safeSend(chatId,
-      `💃 *Каталог моделей — ${esc(label)}*\n\nНайдено: ${total} ${ru_plural(total,'модель','модели','моделей')}\n\nВыберите модель для просмотра:`,
+      `💃 *Каталог моделей — ${esc(label)}${cityLabel}*\n\nНайдено: ${total} ${ru_plural(total,'модель','модели','моделей')}\n\nВыберите модель для просмотра:`,
       { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
     );
   } catch (e) { console.error('[Bot] showCatalog:', e.message); }
@@ -449,19 +493,25 @@ async function showModel(chatId, modelId) {
     // Increment view counter (fire-and-forget)
     run('UPDATE models SET view_count = COALESCE(view_count,0) + 1 WHERE id=?', [modelId]).catch(() => {});
 
+    // Reviews count
+    const reviewRow = await get('SELECT COUNT(*) as cnt FROM reviews WHERE model_id=? AND approved=1', [modelId]).catch(() => null);
+    const reviewCount = reviewRow ? (reviewRow.cnt || 0) : 0;
+
     const lines = [];
-    if (m.age)                       lines.push(`📅 Возраст: *${m.age}* лет`);
-    if (m.height)                    lines.push(`📏 Рост: *${m.height}* см`);
-    if (m.weight)                    lines.push(`⚖️ Вес: *${m.weight}* кг`);
-    if (m.bust && m.waist && m.hips) lines.push(`📐 Параметры: *${m.bust}/${m.waist}/${m.hips}*`);
-    if (m.shoe_size)                 lines.push(`👟 Обувь: *${esc(m.shoe_size)}*`);
-    if (m.hair_color)                lines.push(`💇 Волосы: *${esc(m.hair_color)}*`);
-    if (m.eye_color)                 lines.push(`👁 Глаза: *${esc(m.eye_color)}*`);
-    if (m.category)                  lines.push(`🏷 Категория: *${esc(m.category)}*`);
-    if (m.city)                      lines.push(`🏙 Город: *${esc(m.city)}*`);
-    if (m.instagram)                 lines.push(`📸 @${esc(m.instagram)}`);
+    if (m.featured)                    lines.push(`⭐ Топ\\-модель`);
+    if (m.age)                         lines.push(`📅 Возраст: *${m.age}* лет`);
+    if (m.height)                      lines.push(`📏 Рост: *${m.height}* см`);
+    if (m.weight)                      lines.push(`⚖️ Вес: *${m.weight}* кг`);
+    if (m.bust && m.waist && m.hips)   lines.push(`📐 Параметры: *${m.bust}/${m.waist}/${m.hips}*`);
+    if (m.shoe_size)                   lines.push(`👟 Обувь: *${esc(m.shoe_size)}*`);
+    if (m.hair_color)                  lines.push(`💇 Волосы: *${esc(m.hair_color)}*`);
+    if (m.eye_color)                   lines.push(`👁 Глаза: *${esc(m.eye_color)}*`);
+    if (m.category)                    lines.push(`🏷 Категория: *${esc(m.category)}*`);
+    if (m.city)                        lines.push(`🏙 Город: *${esc(m.city)}*`);
+    if (m.instagram)                   lines.push(`📸 @${esc(m.instagram)}`);
+    if (reviewCount > 0)               lines.push(`⭐ Отзывов: *${reviewCount}*`);
     const viewCount = (m.view_count || 0) + 1; // +1 for the just-incremented count
-    if (viewCount > 0)               lines.push(`👁 Просмотров: *${viewCount}*`);
+    if (viewCount > 0)                 lines.push(`👁 Просмотров: *${viewCount}*`);
 
     const avail   = m.available ? '🟢 Доступна для заказа' : '🔴 Временно недоступна';
     const star    = m.featured ? '⭐ ' : '';
@@ -4381,9 +4431,19 @@ function initBot(app) {
     }
 
     // ── Категории каталога (быстрые фильтры)
-    if (data === 'cat_filter_fashion')     return showCatalog(chatId, 'fashion',    0);
-    if (data === 'cat_filter_commercial')  return showCatalog(chatId, 'commercial', 0);
-    if (data === 'cat_filter_events')      return showCatalog(chatId, 'events',     0);
+    if (data === 'cat_filter_fashion')     return showCatalog(chatId, 'fashion',    0, { category: 'fashion'    });
+    if (data === 'cat_filter_commercial')  return showCatalog(chatId, 'commercial', 0, { category: 'commercial' });
+    if (data === 'cat_filter_events')      return showCatalog(chatId, 'events',     0, { category: 'events'     });
+
+    // ── Сортировка каталога
+    if (data === 'cat_sort_featured') {
+      catalogSortPrefs.set(String(chatId), 'featured');
+      return showCatalog(chatId, '', 0);
+    }
+    if (data === 'cat_sort_alpha') {
+      catalogSortPrefs.set(String(chatId), 'alpha');
+      return showCatalog(chatId, '', 0);
+    }
 
     // ── Поиск модели по параметрам (мульти-фильтр, БЛОК 2.4)
     if (data === 'cat_search') return showSearchMenu(chatId);
