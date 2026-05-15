@@ -72,6 +72,10 @@ async function safeSend(chatId, text, opts = {}) {
 }
 
 async function safePhoto(chatId, photo, opts = {}) {
+  // Telegram caption limit is 1024 chars
+  if (opts.caption && opts.caption.length > 1024) {
+    opts = { ...opts, caption: opts.caption.slice(0, 1021) + '…' };
+  }
   try { return await bot.sendPhoto(chatId, photo, opts); }
   catch { return safeSend(chatId, opts.caption || '📷', { parse_mode: opts.parse_mode }); }
 }
@@ -159,17 +163,22 @@ const REPLY_KB_ADMIN = {
 
 function buildClientKeyboard() {
   const rows = [
-    [{ text: '⭐ Топ-модели',           callback_data: 'cat_top_0'    },
-     { text: '💃 Все модели',           callback_data: 'cat_cat__0'   }],
-    [{ text: '📝 Оформить заявку',      callback_data: 'bk_start'     }],
-    [{ text: '💬 Написать менеджеру',   callback_data: 'contact_mgr'  }],
-    [{ text: '📋 Мои заявки',           callback_data: 'my_orders'    },
-     { text: '🔍 Статус заявки',        callback_data: 'check_status' }],
-    [{ text: '💰 Прайс-лист',          callback_data: 'pricing'      },
-     { text: 'ℹ️ О нас',               callback_data: 'about_us'     }],
-    [{ text: '📞 Контакты',             callback_data: 'contacts'     },
-     { text: '❓ FAQ',                  callback_data: 'faq'          }],
-    [{ text: '👤 Мой профиль',          callback_data: 'profile'      }],
+    [{ text: '⭐ Топ-модели',           callback_data: 'cat_top_0'          },
+     { text: '💃 Все модели',           callback_data: 'cat_cat__0'         }],
+    [{ text: '👗 Fashion',              callback_data: 'cat_filter_fashion'  },
+     { text: '📷 Commercial',           callback_data: 'cat_filter_commercial'},
+     { text: '🎉 Events',              callback_data: 'cat_filter_events'   }],
+    [{ text: '🔍 Поиск по параметрам', callback_data: 'cat_search'          }],
+    [{ text: '📝 Оформить заявку',      callback_data: 'bk_start'           }],
+    [{ text: '💬 Написать менеджеру',   callback_data: 'contact_mgr'        }],
+    [{ text: '📋 Мои заявки',           callback_data: 'my_orders'          },
+     { text: '🔍 Статус заявки',        callback_data: 'check_status'       }],
+    [{ text: '⭐ Отзывы',              callback_data: 'show_reviews'        },
+     { text: '💰 Прайс-лист',          callback_data: 'pricing'            }],
+    [{ text: 'ℹ️ О нас',               callback_data: 'about_us'           },
+     { text: '📞 Контакты',             callback_data: 'contacts'           },
+     { text: '❓ FAQ',                  callback_data: 'faq'                }],
+    [{ text: '👤 Мой профиль',          callback_data: 'profile'            }],
   ];
   if (SITE_URL.startsWith('https://')) {
     const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
@@ -308,19 +317,25 @@ async function showModel(chatId, modelId) {
     });
 
     const lines = [];
-    if (m.age)                             lines.push(`Возраст: *${m.age}* лет`);
-    if (m.height)                          lines.push(`Рост: *${m.height}* см`);
-    if (m.weight)                          lines.push(`Вес: *${m.weight}* кг`);
-    if (m.bust && m.waist && m.hips)       lines.push(`Параметры: *${m.bust}/${m.waist}/${m.hips}*`);
-    if (m.shoe_size)                       lines.push(`Обувь: *${esc(m.shoe_size)}*`);
-    if (m.hair_color)                      lines.push(`Волосы: *${esc(m.hair_color)}*`);
-    if (m.eye_color)                       lines.push(`Глаза: *${esc(m.eye_color)}*`);
-    if (m.category)                        lines.push(`Категория: *${esc(m.category)}*`);
-    if (m.instagram)                       lines.push(`Instagram: @${esc(m.instagram)}`);
+    if (m.age)                       lines.push(`📅 Возраст: *${m.age}* лет`);
+    if (m.height)                    lines.push(`📏 Рост: *${m.height}* см`);
+    if (m.weight)                    lines.push(`⚖️ Вес: *${m.weight}* кг`);
+    if (m.bust && m.waist && m.hips) lines.push(`📐 Параметры: *${m.bust}/${m.waist}/${m.hips}*`);
+    if (m.shoe_size)                 lines.push(`👟 Обувь: *${esc(m.shoe_size)}*`);
+    if (m.hair_color)                lines.push(`💇 Волосы: *${esc(m.hair_color)}*`);
+    if (m.eye_color)                 lines.push(`👁 Глаза: *${esc(m.eye_color)}*`);
+    if (m.category)                  lines.push(`🏷 Категория: *${esc(m.category)}*`);
+    if (m.city)                      lines.push(`🏙 Город: *${esc(m.city)}*`);
+    if (m.instagram)                 lines.push(`📸 @${esc(m.instagram)}`);
 
-    const bio   = m.bio   ? `\n\n_${esc(m.bio)}_` : '';
-    const avail = m.available ? '🟢 Доступна для заказа' : '🔴 Временно недоступна';
-    const caption = `💃 *${esc(m.name)}*\n${lines.join(' \\| ')}${bio}\n\n${avail}`;
+    const avail   = m.available ? '🟢 Доступна для заказа' : '🔴 Временно недоступна';
+    const star    = m.featured ? '⭐ ' : '';
+    // Caption ≤ 1024 chars (Telegram limit for media)
+    const bioEsc  = m.bio ? esc(m.bio) : '';
+    const bioFits = bioEsc.slice(0, 180) + (bioEsc.length > 180 ? '…' : '');
+    const captionParts = [`💃 ${star}*${esc(m.name)}*`, '', ...lines, '', avail];
+    if (bioFits) captionParts.push('', `_${bioFits}_`);
+    const caption = captionParts.join('\n').slice(0, 1020);
 
     const contactBtn = m.phone || m.instagram
       ? [{ text: '📱 Получить контакт', callback_data: `model_contact_${m.id}` }]
@@ -333,7 +348,7 @@ async function showModel(chatId, modelId) {
       ].filter(r => r.length)
     };
 
-    // Собираем все фото: photo_main + галерея из поля photos
+    // Собираем все фото: photo_main + галерея
     let galleryUrls = [];
     try { galleryUrls = JSON.parse(m.photos || '[]'); } catch {}
     if (m.photo_main && !galleryUrls.includes(m.photo_main)) {
@@ -341,29 +356,37 @@ async function showModel(chatId, modelId) {
     }
 
     if (galleryUrls.length >= 2) {
-      // Отправляем медиагруппу (до 10 фото), последнее фото несёт caption
+      // Медиагруппа — caption только на первом фото (лимит 1024 chars)
       const media = galleryUrls.slice(0, 8).map((url, i) => {
         const item = { type: 'photo', media: url };
-        if (i === galleryUrls.slice(0, 8).length - 1) {
-          item.caption        = caption;
-          item.parse_mode     = 'MarkdownV2';
-        }
+        if (i === 0) { item.caption = caption; item.parse_mode = 'MarkdownV2'; }
         return item;
       });
       try {
         await bot.sendMediaGroup(chatId, media);
       } catch (e) {
-        console.warn('[Bot] sendMediaGroup failed, fallback to single photo:', e.message);
+        console.warn('[Bot] sendMediaGroup failed, fallback:', e.message);
         await safePhoto(chatId, galleryUrls[0], { caption, parse_mode: 'MarkdownV2' });
       }
-      // Кнопки шлём отдельным сообщением (медиагруппы не поддерживают reply_markup)
-      return safeSend(chatId, `📸 Фотогалерея: ${galleryUrls.length} фото`, { reply_markup: keyboard });
+      // Если bio обрезалось — показываем полностью
+      if (bioEsc.length > 180) {
+        await safeSend(chatId, `📝 *Описание:*\n\n_${bioEsc}_`, { parse_mode: 'MarkdownV2' });
+      }
+      // Кнопки отдельным сообщением (медиагруппы не поддерживают reply_markup)
+      return safeSend(chatId, `📸 Фото: ${galleryUrls.length} шт\\.`, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
     }
 
     if (m.photo_main) {
-      return safePhoto(chatId, m.photo_main, { caption, parse_mode: 'MarkdownV2', reply_markup: keyboard });
+      await safePhoto(chatId, m.photo_main, { caption, parse_mode: 'MarkdownV2', reply_markup: keyboard });
+      if (bioEsc.length > 180) {
+        await safeSend(chatId, `📝 *Описание:*\n\n_${bioEsc}_`, { parse_mode: 'MarkdownV2' });
+      }
+      return;
     }
-    return safeSend(chatId, caption, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
+    // Нет фото — полная карточка текстом (лимит 4096)
+    const fullCaption = [`💃 ${star}*${esc(m.name)}*`, '', ...lines, '', avail,
+      ...(bioEsc ? ['', `📝 *Описание:*\n_${bioEsc}_`] : [])].join('\n');
+    return safeSend(chatId, fullCaption, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
   } catch (e) { console.error('[Bot] showModel:', e.message); }
 }
 
@@ -444,12 +467,23 @@ async function showClientOrder(chatId, orderId) {
         text += `${who}: ${esc(m.content)}\n`;
       });
     }
+    const repeatBtn = (o.status === 'completed' || o.status === 'cancelled')
+      ? [{ text: '🔁 Повторить заявку', callback_data: `repeat_order_${o.id}` }]
+      : [];
+    const reviewBtn = o.status === 'completed'
+      ? [{ text: '⭐ Оставить отзыв', callback_data: `leave_review_${o.id}` }]
+      : [];
+
+    const kb = [
+      [{ text: '← Мои заявки', callback_data: 'my_orders' }],
+      [{ text: '🏠 Меню',      callback_data: 'main_menu' }],
+    ];
+    if (repeatBtn.length) kb.unshift(repeatBtn);
+    if (reviewBtn.length) kb.unshift(reviewBtn);
+
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [
-        [{ text: '← Мои заявки', callback_data: 'my_orders'  }],
-        [{ text: '🏠 Меню',      callback_data: 'main_menu'  }],
-      ]}
+      reply_markup: { inline_keyboard: kb }
     });
   } catch (e) { console.error('[Bot] showClientOrder:', e.message); }
 }
@@ -2116,6 +2150,74 @@ function initBot(app) {
       const page   = parseInt(parts[parts.length - 1]) || 0;
       return showAgentDiscussions(chatId, period, page);
     }
+
+    // ── Категории каталога (быстрые фильтры)
+    if (data === 'cat_filter_fashion')     return showCatalog(chatId, 'fashion',    0);
+    if (data === 'cat_filter_commercial')  return showCatalog(chatId, 'commercial', 0);
+    if (data === 'cat_filter_events')      return showCatalog(chatId, 'events',     0);
+
+    // ── Поиск модели по параметрам
+    if (data === 'cat_search') return showSearchMenu(chatId);
+    if (data.startsWith('cat_search_height_')) {
+      const range = data.replace('cat_search_height_', '');
+      return showSearchResults(chatId, 'height', range, 0);
+    }
+    if (data.startsWith('cat_search_age_')) {
+      const range = data.replace('cat_search_age_', '');
+      return showSearchResults(chatId, 'age', range, 0);
+    }
+    if (data.startsWith('cat_search_res_')) {
+      // cat_search_res_{type}_{range}_{page}
+      const rest  = data.replace('cat_search_res_', '');
+      const parts = rest.split('_');
+      const page2 = parseInt(parts.pop()) || 0;
+      const range = parts.pop();
+      const type  = parts.join('_');
+      return showSearchResults(chatId, type, range, page2);
+    }
+
+    // ── Отзывы (публичные)
+    if (data === 'show_reviews')           return showPublicReviews(chatId, 0);
+    if (data.startsWith('show_reviews_')) {
+      const page = parseInt(data.replace('show_reviews_', '')) || 0;
+      return showPublicReviews(chatId, page);
+    }
+
+    // ── Оставить отзыв
+    if (data.startsWith('leave_review_')) {
+      const orderId = parseInt(data.replace('leave_review_', ''));
+      return startLeaveReview(chatId, orderId);
+    }
+    if (data.startsWith('review_rating_')) {
+      // review_rating_{orderId}_{rating}
+      const parts = data.replace('review_rating_', '').split('_');
+      const rating = parseInt(parts.pop());
+      const orderId = parseInt(parts.join('_'));
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      d.review_order_id = orderId;
+      d.review_rating   = rating;
+      await setSession(chatId, 'leave_review_text', d);
+      return safeSend(chatId,
+        `⭐ Оценка: ${'⭐'.repeat(rating)}\n\nТеперь напишите текст отзыва:`,
+        { reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'main_menu' }]] } }
+      );
+    }
+
+    // ── Повторить заявку
+    if (data.startsWith('repeat_order_')) {
+      const orderId = parseInt(data.replace('repeat_order_', ''));
+      return repeatOrder(chatId, orderId);
+    }
+
+    // ── Профиль: изменить контакты
+    if (data === 'profile_edit_contacts') return startEditProfile(chatId);
+    if (data === 'profile_edit_phone') {
+      await setSession(chatId, 'profile_edit_phone', {});
+      return safeSend(chatId, '📞 Введите новый номер телефона:', {
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'profile' }]] }
+      });
+    }
   });
 
   // ── Photo handler (для загрузки фото модели через бот) ──────────────────
@@ -2319,6 +2421,50 @@ function initBot(app) {
       await clearSession(chatId);
       return safeSend(chatId, `✅ Сообщение отправлено клиенту ${order.client_name}.`, {
         reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${d.order_id}` }]] }
+      });
+    }
+
+    // ── Leave review: text input
+    if (state === 'leave_review_text') {
+      if (!text || text.length < 5) {
+        return safeSend(chatId, '❌ Отзыв слишком короткий. Напишите хотя бы несколько слов:');
+      }
+      const orderId = d.review_order_id;
+      const rating  = d.review_rating || 5;
+      let clientName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || 'Клиент';
+      try {
+        const ord = await get('SELECT client_name FROM orders WHERE id=?', [orderId]);
+        if (ord?.client_name) clientName = ord.client_name;
+      } catch {}
+      await run('INSERT INTO reviews (client_name, rating, text, model_id, approved) VALUES (?,?,?,?,0)',
+        [clientName, rating, text, null]).catch(e => console.error('[Bot] insert review:', e.message));
+      await clearSession(chatId);
+      const adminIds2 = await getAdminChatIds();
+      await Promise.allSettled(adminIds2.map(id => safeSend(id,
+        `⭐ Новый отзыв от *${esc(clientName)}*\nОценка: ${'⭐'.repeat(rating)}\n\n${esc(text)}`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '✅ Модерация отзывов', callback_data: 'adm_reviews' }]] }
+        }
+      )));
+      return safeSend(chatId,
+        '✅ Спасибо за отзыв\\!\n\nОн появится после модерации\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+        }
+      );
+    }
+
+    // ── Edit profile phone
+    if (state === 'profile_edit_phone') {
+      if (!/^[\d\s+\-()]{7,20}$/.test(text)) {
+        return safeSend(chatId, '❌ Введите корректный номер телефона:');
+      }
+      await run('UPDATE orders SET client_phone=? WHERE client_chat_id=?', [text, String(chatId)]).catch(()=>{});
+      await clearSession(chatId);
+      return safeSend(chatId, `✅ Телефон обновлён: *${esc(text)}*`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '👤 Мой профиль', callback_data: 'profile' }]] }
       });
     }
 
