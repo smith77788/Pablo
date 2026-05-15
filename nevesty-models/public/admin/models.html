@@ -344,6 +344,7 @@ async function loadModels() {
             <div class="flex flex-col items-center gap-0.5 text-sm">
               <div class="flex items-center gap-1">${ordersLabel}<span class="text-gray-300 dark:text-gray-600 text-xs">заявок</span></div>
               <div class="flex items-center gap-1">${ratingLabel}</div>
+              ${(m.view_count||0) > 0 ? `<div class="flex items-center gap-1 text-xs text-cyan-500 opacity-80" title="Просмотров"><span>👁</span><span>${(m.view_count||0).toLocaleString('ru')}</span></div>` : ''}
             </div>
           </td>
           <td class="px-4 py-3 text-right">
