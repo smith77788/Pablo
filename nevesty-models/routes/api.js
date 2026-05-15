@@ -5827,13 +5827,9 @@ router.get('/admin/analytics/client-segments', auth, async (req, res, next) => {
   try {
     const [vip, active, dormant, oneTime] = await Promise.all([
       // VIP: 3+ completed orders
-      get(`SELECT COUNT(DISTINCT client_chat_id) as n FROM orders
-           WHERE client_chat_id IS NOT NULL AND status='completed'
-           GROUP BY client_chat_id HAVING COUNT(*)>=3`).then(() =>
-        get(`SELECT COUNT(*) as n FROM (
+      get(`SELECT COUNT(*) as n FROM (
           SELECT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND status='completed'
-          GROUP BY client_chat_id HAVING COUNT(*)>=3)`)
-      ),
+          GROUP BY client_chat_id HAVING COUNT(*)>=3)`),
       // Active: ordered in last 60 days, < 3 completed orders
       get(`SELECT COUNT(DISTINCT client_chat_id) as n FROM orders
            WHERE client_chat_id IS NOT NULL
@@ -6736,9 +6732,6 @@ router.delete('/admin/faq/:id', auth, async (req, res, next) => {
 // POST /admin/faq/seed — populate FAQ with default questions if table is empty
 router.post('/admin/faq/seed', auth, async (req, res, next) => {
   try {
-    const count = await get('SELECT COUNT(*) as n FROM faq WHERE active=1');
-    if (count.n > 0) return res.json({ ok: true, seeded: 0, message: 'FAQ already has entries' });
-
     const defaults = [
       {
         q: 'Как забронировать модель?',
@@ -6782,18 +6775,17 @@ router.post('/admin/faq/seed', auth, async (req, res, next) => {
       },
     ];
 
-    let seeded = 0;
-    for (const item of defaults) {
-      await run(`INSERT INTO faq (question, answer, category, active, sort_order) VALUES (?,?,?,1,?)`, [
-        item.q,
-        item.a,
-        item.cat,
-        seeded,
-      ]);
-      seeded++;
-    }
+    // Use INSERT OR IGNORE with question uniqueness to make this idempotent and safe
+    // under concurrent calls — no separate check-then-insert race condition.
+    const placeholders = defaults.map(() => `(?, ?, ?, 1, ?)`).join(', ');
+    const values = defaults.flatMap((item, idx) => [item.q, item.a, item.cat, idx]);
+    const result = await run(
+      `INSERT OR IGNORE INTO faq (question, answer, category, active, sort_order) VALUES ${placeholders}`,
+      values
+    );
+    const seeded = result?.changes ?? 0;
 
-    res.json({ ok: true, seeded });
+    res.json({ ok: true, seeded, message: seeded === 0 ? 'FAQ already has entries' : undefined });
   } catch (e) {
     next(e);
   }
@@ -7390,12 +7382,14 @@ router.post('/payments/webhook', express.raw({ type: 'application/json' }), asyn
     if (event.type === 'payment.succeeded') {
       const ord = await get('SELECT * FROM orders WHERE id=?', [event.orderId]).catch(() => null);
       if (ord && ord.payment_status !== 'paid') {
-        await run(
+        const updateResult = await run(
           `UPDATE orders SET payment_status='paid', paid_at=CURRENT_TIMESTAMP,
            status='confirmed', payment_id=COALESCE(?, payment_id),
            updated_at=CURRENT_TIMESTAMP WHERE id=? AND payment_status != 'paid'`,
           [event.paymentId, event.orderId]
         );
+        // Idempotency guard: only proceed if this webhook was the one that made the change
+        if (!updateResult?.changes) return res.json({ ok: true });
         await run(
           'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by, notes) VALUES (?,?,?,?,?)',
           [event.orderId, ord.status, 'confirmed', 'payments_webhook', `Payment ID: ${event.paymentId}`]
