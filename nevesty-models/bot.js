@@ -8615,6 +8615,7 @@ function initBot(app) {
         if (!isAdmin(chatId)) return;
         await setSession(chatId, data, {});
         return safeSend(chatId, settingPrompts[data], {
+          parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings' }]] },
         });
       }
@@ -11106,7 +11107,7 @@ async function showUserProfile(chatId, firstName) {
     for (const st of statusOrder) {
       if (counts[st]) {
         const label = STATUS_LABELS[st] || st;
-        text += `  ${label}: ${counts[st]}\n`;
+        text += `  ${esc(label)}: ${counts[st]}\n`;
       }
     }
 
