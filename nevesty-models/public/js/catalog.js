@@ -487,6 +487,7 @@
               ${experienceBadge(m)}
               <span class="model-status-badge ${statusClass}">${statusText}</span>
               ${m.order_count > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.7" title="Завершённых заказов">📋 ${m.order_count} заказов</span>` : ''}
+              ${(m.view_count || 0) > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.6" title="Просмотров">👁 ${(m.view_count||0).toLocaleString('ru')}</span>` : ''}
             </div>
             <a href="/model.html?id=${m.id}"
                class="btn-book-model"

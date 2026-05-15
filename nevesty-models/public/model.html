@@ -161,6 +161,30 @@
       box-shadow: 0 0 6px currentColor;
     }
 
+    /* ─── BREADCRUMBS ───────────────────────────────── */
+    .breadcrumbs {
+      padding: 12px 0 4px;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+    .breadcrumbs-list {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      flex-wrap: wrap;
+    }
+    .breadcrumbs-list a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color var(--transition);
+    }
+    .breadcrumbs-list a:hover { color: var(--gold); }
+    .breadcrumbs-sep { color: var(--border); }
+    .breadcrumbs-list [aria-current="page"] { color: var(--gold); }
+
     /* ─── BACK LINK ──────────────────────────────────── */
     .model-back {
       display: inline-flex;
@@ -560,13 +584,13 @@
 
       <!-- Profile body -->
       <div class="model-profile">
-        <nav aria-label="breadcrumb" style="padding-top:8px;margin-bottom:4px">
-          <ol class="breadcrumb" style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
-            <li class="breadcrumb-item"><a href="/" style="color:var(--text-muted);text-decoration:none">Главная</a></li>
-            <li style="color:var(--border)" aria-hidden="true">/</li>
-            <li class="breadcrumb-item"><a href="/catalog.html" style="color:var(--text-muted);text-decoration:none">Каталог</a></li>
-            <li style="color:var(--border)" aria-hidden="true">/</li>
-            <li class="breadcrumb-item active" id="breadcrumbModelName" aria-current="page" style="color:var(--gold)">Модель</li>
+        <nav class="breadcrumbs" aria-label="Хлебные крошки">
+          <ol class="breadcrumbs-list">
+            <li><a href="/">Главная</a></li>
+            <li class="breadcrumbs-sep" aria-hidden="true">›</li>
+            <li><a href="/catalog.html">Каталог</a></li>
+            <li class="breadcrumbs-sep" aria-hidden="true">›</li>
+            <li aria-current="page" id="breadcrumbModelName">Модель</li>
           </ol>
         </nav>
         <a href="/catalog.html" class="model-back">← Назад в каталог</a>
@@ -592,6 +616,10 @@
           <div class="model-stat">
             <span class="model-stat-label">Статус</span>
             <span class="model-stat-value" id="statStatus" style="font-size:1rem"></span>
+          </div>
+          <div class="model-stat" id="statViewsWrap" style="display:none">
+            <span class="model-stat-label">Просмотры</span>
+            <span class="model-stat-value" id="statViews" style="font-size:1rem">—</span>
           </div>
         </div>
 
@@ -922,6 +950,13 @@
         setText('statCategory', catLabel);
         el('statStatus').textContent = m.available ? 'Свободна' : 'Занята';
         el('statStatus').style.color = m.available ? '#4caf50' : '#f44336';
+        // Views count
+        const vc = m.view_count || 0;
+        if (vc > 0) {
+          setText('statViews', vc.toLocaleString('ru'));
+          const wrap = el('statViewsWrap');
+          if (wrap) wrap.style.display = '';
+        }
 
         // Bio
         if (m.bio && m.bio.trim()) {

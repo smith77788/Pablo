@@ -32,6 +32,10 @@ let bot = null;
 // ─── Session timers (in-memory, cleared on restart) ───────────────────────────
 const sessionTimers = new Map();
 
+// ─── Session soft-reminder timers (booking-only, 15 min proactive nudge) ─────
+const SESSION_REMINDER_MS = 15 * 60 * 1000; // 15 minutes — fires before hard timeout
+const sessionReminderTimers = {};
+
 const ACTIVE_BOOKING_STATES = new Set([
   'bk_s1', 'bk_s1_add', 'bk_s2_event', 'bk_s2_date', 'bk_s2_dur', 'bk_s2_loc',
   'bk_s2_budget', 'bk_s2_comments', 'bk_s3_name', 'bk_s3_phone',
@@ -70,7 +74,9 @@ function isActiveInputState(state) {
 
 function resetSessionTimer(chatId) {
   clearTimeout(sessionTimers.get(chatId));
+  setSessionReminder(chatId); // schedule soft nudge at SESSION_REMINDER_MS
   const timer = setTimeout(async () => {
+    clearSessionReminder(chatId); // cancel soft reminder when hard timeout fires
     try {
       const sess = await getSession(chatId);
       const state = sess?.state;
@@ -124,6 +130,41 @@ function resetSessionTimer(chatId) {
     sessionTimers.delete(chatId);
   }, SESSION_TIMEOUT_MS);
   sessionTimers.set(chatId, timer);
+}
+
+// ─── Booking soft-reminder helpers ────────────────────────────────────────────
+function clearSessionReminder(chatId) {
+  if (sessionReminderTimers[chatId]) {
+    clearTimeout(sessionReminderTimers[chatId]);
+    delete sessionReminderTimers[chatId];
+  }
+}
+
+function setSessionReminder(chatId) {
+  clearSessionReminder(chatId);
+  const t = setTimeout(async () => {
+    try {
+      const sess = await getSession(chatId);
+      if (sess?.state && sess.state.startsWith('bk_')) {
+        await bot.sendMessage(
+          chatId,
+          esc('⏰ Вы начали бронирование, но не завершили.\n\nПродолжить? Ваши данные сохранены.'),
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '✅ Продолжить', callback_data: 'bk_resume' }],
+                [{ text: '❌ Отмена',     callback_data: 'bk_cancel_session' }],
+              ],
+            },
+          }
+        );
+      }
+    } catch { /* bot may be offline or session already cleared */ }
+    delete sessionReminderTimers[chatId];
+  }, SESSION_REMINDER_MS);
+  if (t?.unref) t.unref();
+  sessionReminderTimers[chatId] = t;
 }
 
 // ─── Booking progress helper ──────────────────────────────────────────────────
@@ -4751,8 +4792,36 @@ function initBot(app) {
     if (data === 'bk_cancel') {
       clearTimeout(sessionTimers.get(chatId));
       sessionTimers.delete(chatId);
+      clearSessionReminder(chatId);
       await clearSession(chatId);
       return isAdmin(chatId) ? showAdminMenu(chatId, q.from.first_name) : showMainMenu(chatId, q.from.first_name);
+    }
+
+    // ── Booking soft-reminder: resume or cancel session
+    if (data === 'bk_resume') {
+      const sess = await getSession(chatId);
+      const st   = sess?.state;
+      resetSessionTimer(chatId); // reset hard timeout + soft reminder
+      if (!st || !st.startsWith('bk_') || st === 'bk_quick_name') {
+        // No active booking session or session expired — send back to menu
+        await clearSession(chatId);
+        return showMainMenu(chatId, q.from.first_name);
+      }
+      return safeSend(chatId,
+        '✅ *Продолжаем бронирование\\!*\n\nОтвечайте на последний вопрос\\.',
+        { parse_mode: 'MarkdownV2' }
+      );
+    }
+    if (data === 'bk_cancel_session') {
+      clearTimeout(sessionTimers.get(chatId));
+      sessionTimers.delete(chatId);
+      clearSessionReminder(chatId);
+      await clearSession(chatId);
+      await safeSend(chatId,
+        '❌ *Бронирование отменено\\.*',
+        { parse_mode: 'MarkdownV2' }
+      );
+      return showMainMenu(chatId, q.from.first_name);
     }
 
     // ── Session: continue / restart
@@ -4765,6 +4834,7 @@ function initBot(app) {
     if (data === 'session_restart') {
       clearTimeout(sessionTimers.get(chatId));
       sessionTimers.delete(chatId);
+      clearSessionReminder(chatId);
       await clearSession(chatId);
       return safeSend(chatId,
         '🔄 Начинаем заново\\. Используйте кнопки меню для навигации\\.',

@@ -700,6 +700,9 @@ app.get('*', (req, res) => {
 
 // ─── Explicit 404 handler (catches unmatched routes after all middleware) ──────
 app.use((req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
   res.status(404).sendFile(path.join(__dirname, 'public', '404.html'), err => {
     if (err) res.status(404).send('Not found');
   });
