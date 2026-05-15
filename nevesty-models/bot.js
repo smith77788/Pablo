@@ -2699,17 +2699,24 @@ async function showFaq(chatId) {
 
 async function showUserProfile(chatId, firstName) {
   try {
-    const orders = await query(
-      `SELECT o.status, o.created_at FROM orders o
-       WHERE o.client_chat_id = ?
-       ORDER BY o.created_at ASC LIMIT 50`,
-      [String(chatId)]
-    );
+    const [orders, lastOrderFull] = await Promise.all([
+      query(
+        `SELECT o.id, o.status, o.created_at, o.order_number FROM orders o
+         WHERE o.client_chat_id = ?
+         ORDER BY o.created_at DESC LIMIT 50`,
+        [String(chatId)]
+      ),
+      get(
+        `SELECT client_name, client_phone, client_email FROM orders WHERE client_chat_id=? ORDER BY created_at DESC LIMIT 1`,
+        [String(chatId)]
+      ).catch(()=>null),
+    ]);
 
     if (!orders.length) {
       return safeSend(chatId,
-        `Ваш профиль\n\nИмя: ${firstName || 'Гость'}\n\nУ вас пока нет заявок. Оформите первую прямо сейчас и начните сотрудничество с Nevesty Models!`,
+        `👤 *Мой профиль*\n\nИмя: *${esc(firstName || 'Гость')}*\n\nУ вас пока нет заявок\\. Оформите первую прямо сейчас\\!`,
         {
+          parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [
             [{ text: '📝 Оформить заявку', callback_data: 'bk_start'  }],
             [{ text: '🏠 Главное меню',    callback_data: 'main_menu' }],
@@ -2724,15 +2731,21 @@ async function showUserProfile(chatId, firstName) {
       counts[o.status] = (counts[o.status] || 0) + 1;
     }
 
-    const firstDate = orders[0].created_at
+    const firstDate = orders[orders.length - 1]?.created_at
+      ? new Date(orders[orders.length - 1].created_at).toLocaleDateString('ru')
+      : 'неизвестно';
+    const lastDate = orders[0]?.created_at
       ? new Date(orders[0].created_at).toLocaleDateString('ru')
       : 'неизвестно';
 
-    let text = `Ваш профиль\n\n`;
-    text += `Имя: ${firstName || 'Гость'}\n`;
-    text += `Всего заявок: ${orders.length}\n`;
-    text += `Первая заявка: ${firstDate}\n\n`;
-    text += `По статусам:\n`;
+    let text = `👤 *Мой профиль*\n\n`;
+    text += `Имя: *${esc(firstName || lastOrderFull?.client_name || 'Гость')}*\n`;
+    if (lastOrderFull?.client_phone) text += `📞 Телефон: ${esc(lastOrderFull.client_phone)}\n`;
+    if (lastOrderFull?.client_email) text += `📧 Email: ${esc(lastOrderFull.client_email)}\n`;
+    text += `\n📋 *История заявок:*\n`;
+    text += `Всего: ${orders.length}\n`;
+    text += `Первая: ${esc(firstDate)}\n`;
+    text += `Последняя: ${esc(lastDate)}\n\n`;
 
     const statusOrder = ['new','reviewing','confirmed','in_progress','completed','cancelled'];
     for (const st of statusOrder) {
@@ -2742,11 +2755,20 @@ async function showUserProfile(chatId, firstName) {
       }
     }
 
+    // Last 3 orders for quick access
+    const recentBtns = orders.slice(0, 3).map(o => [{
+      text: `${o.order_number}  ${STATUS_LABELS[o.status]||o.status}`,
+      callback_data: `client_order_${o.id}`
+    }]);
+
     return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
-        [{ text: '📋 Мои заявки',    callback_data: 'my_orders'  }],
-        [{ text: '📝 Новая заявка',  callback_data: 'bk_start'   }],
-        [{ text: '🏠 Главное меню',  callback_data: 'main_menu'  }],
+        ...recentBtns,
+        [{ text: '📋 Все заявки',        callback_data: 'my_orders'             }],
+        [{ text: '✏️ Изменить контакты', callback_data: 'profile_edit_contacts' }],
+        [{ text: '📝 Новая заявка',       callback_data: 'bk_start'             }],
+        [{ text: '🏠 Главное меню',       callback_data: 'main_menu'            }],
       ]}
     });
   } catch (e) { console.error('[Bot] showUserProfile:', e.message); }
@@ -3116,6 +3138,222 @@ async function showCatalogByCity(chatId, city, page = 0) {
       }
     );
   } catch (e) { console.error('[Bot] showCatalogByCity:', e.message); }
+}
+
+// ─── Поиск модели по параметрам ──────────────────────────────────────────────
+
+async function showSearchMenu(chatId) {
+  return safeSend(chatId,
+    `🔍 *Поиск модели по параметрам*\n\nВыберите критерий поиска:`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📏 Рост 160–165',  callback_data: 'cat_search_height_160-165' },
+         { text: '📏 Рост 165–170',  callback_data: 'cat_search_height_165-170' }],
+        [{ text: '📏 Рост 170–175',  callback_data: 'cat_search_height_170-175' },
+         { text: '📏 Рост 175–185',  callback_data: 'cat_search_height_175-185' }],
+        [{ text: '🎂 Возраст 18–22', callback_data: 'cat_search_age_18-22'     },
+         { text: '🎂 Возраст 22–26', callback_data: 'cat_search_age_22-26'     }],
+        [{ text: '🎂 Возраст 26–35', callback_data: 'cat_search_age_26-35'     }],
+        [{ text: '🏠 Главное меню',   callback_data: 'main_menu'               }],
+      ]}
+    }
+  );
+}
+
+async function showSearchResults(chatId, type, range, page) {
+  try {
+    page = parseInt(page) || 0;
+    const [minStr, maxStr] = range.split('-');
+    const minVal = parseInt(minStr) || 0;
+    const maxVal = parseInt(maxStr) || 999;
+    const perPage = 5;
+
+    const col = type === 'height' ? 'height' : 'age';
+    const models = await query(
+      `SELECT * FROM models WHERE available=1 AND ${col} >= ? AND ${col} <= ? ORDER BY ${col}`,
+      [minVal, maxVal]
+    );
+
+    const label = type === 'height' ? `рост ${range} см` : `возраст ${range} лет`;
+
+    if (!models.length) {
+      return safeSend(chatId,
+        `🔍 По запросу «${esc(label)}» ничего не найдено\\.`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '🔍 Изменить поиск', callback_data: 'cat_search'  }],
+            [{ text: '💃 Все модели',      callback_data: 'cat_cat__0' }],
+          ]}
+        }
+      );
+    }
+
+    const total = models.length;
+    const slice = models.slice(page * perPage, page * perPage + perPage);
+    const modelBtns = slice.map(m => [{
+      text: `${m.name}  ·  ${m.height}см  ·  ${m.age || '?'}л`,
+      callback_data: `cat_model_${m.id}`
+    }]);
+
+    const nav = [];
+    if (page > 0) nav.push({ text: '◀️', callback_data: `cat_search_res_${type}_${range}_${page-1}` });
+    if ((page+1)*perPage < total) nav.push({ text: '▶️', callback_data: `cat_search_res_${type}_${range}_${page+1}` });
+
+    return safeSend(chatId,
+      `🔍 *Результаты: ${esc(label)}*\n\nНайдено: ${total} ${ru_plural(total,'модель','модели','моделей')}`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          ...modelBtns,
+          ...(nav.length ? [nav] : []),
+          [{ text: '🔍 Новый поиск',  callback_data: 'cat_search'  }],
+          [{ text: '🏠 Главное меню', callback_data: 'main_menu'   }],
+        ]}
+      }
+    );
+  } catch (e) { console.error('[Bot] showSearchResults:', e.message); }
+}
+
+// ─── Публичные отзывы ─────────────────────────────────────────────────────────
+
+async function showPublicReviews(chatId, page) {
+  page = parseInt(page) || 0;
+  try {
+    const perPage = 5;
+    const totalRow = await get('SELECT COUNT(*) as n FROM reviews WHERE approved=1').catch(()=>({n:0}));
+    const total = totalRow.n;
+
+    if (!total) {
+      return safeSend(chatId,
+        '📭 Пока нет опубликованных отзывов\\.\n\nБудьте первым\\!', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '⭐ Оставить отзыв', callback_data: 'leave_review_0' }],
+            [{ text: '🏠 Главное меню',    callback_data: 'main_menu'      }],
+          ]}
+        }
+      );
+    }
+
+    const reviews = await query(
+      'SELECT * FROM reviews WHERE approved=1 ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      [perPage, page * perPage]
+    ).catch(()=>[]);
+
+    let text = `⭐ *Отзывы клиентов Nevesty Models*\n\n`;
+    reviews.forEach((r, i) => {
+      const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 5)));
+      const date  = r.created_at ? new Date(r.created_at).toLocaleDateString('ru') : '';
+      text += `${page * perPage + i + 1}\\. *${esc(r.client_name)}* ${stars}`;
+      if (date) text += ` \\(${esc(date)}\\)`;
+      text += `\n_${esc(r.text)}_\n\n`;
+    });
+
+    const nav = [];
+    if (page > 0) nav.push({ text: '◀️', callback_data: `show_reviews_${page-1}` });
+    if ((page+1)*perPage < total) nav.push({ text: '▶️', callback_data: `show_reviews_${page+1}` });
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        ...(nav.length ? [nav] : []),
+        [{ text: '⭐ Оставить отзыв', callback_data: 'leave_review_0' }],
+        [{ text: '🏠 Главное меню',    callback_data: 'main_menu'      }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showPublicReviews:', e.message); }
+}
+
+// ─── Оставить отзыв ───────────────────────────────────────────────────────────
+
+async function startLeaveReview(chatId, orderId) {
+  orderId = parseInt(orderId) || 0;
+  const text = orderId
+    ? `⭐ *Оставить отзыв о заявке*\n\nОцените работу агентства по 5\\-балльной шкале:`
+    : `⭐ *Оставить отзыв*\n\nОцените работу агентства Nevesty Models\\!`;
+
+  const ratingRow = [1,2,3,4,5].map(n => ({
+    text: '⭐'.repeat(n),
+    callback_data: `review_rating_${orderId}_${n}`
+  }));
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      ratingRow,
+      [{ text: '❌ Отмена', callback_data: 'main_menu' }],
+    ]}
+  });
+}
+
+// ─── Повторить заявку ─────────────────────────────────────────────────────────
+
+async function repeatOrder(chatId, orderId) {
+  try {
+    const o = await get(
+      'SELECT * FROM orders WHERE id=? AND client_chat_id=?',
+      [orderId, String(chatId)]
+    );
+    if (!o) {
+      return safeSend(chatId, '❌ Заявка не найдена\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '📋 Мои заявки', callback_data: 'my_orders' }]] }
+      });
+    }
+
+    const prefill = {
+      client_name:     o.client_name,
+      client_phone:    o.client_phone,
+      client_email:    o.client_email || null,
+      client_telegram: o.client_telegram || null,
+    };
+    if (o.model_id) {
+      const m = await get('SELECT id,name,available FROM models WHERE id=?', [o.model_id]).catch(()=>null);
+      if (m?.available) {
+        prefill.model_id   = m.id;
+        prefill.model_name = m.name;
+      }
+    }
+
+    await setSession(chatId, 'bk_s1', prefill);
+    await safeSend(chatId,
+      `🔁 *Повторная заявка*\n\nКонтактные данные предзаполнены из предыдущей заявки\\.`,
+      { parse_mode: 'MarkdownV2' }
+    );
+    return bkStep2EventType(chatId, prefill);
+  } catch (e) { console.error('[Bot] repeatOrder:', e.message); }
+}
+
+// ─── Редактировать профиль ────────────────────────────────────────────────────
+
+async function startEditProfile(chatId) {
+  try {
+    const lastOrder = await get(
+      'SELECT client_name, client_phone, client_email FROM orders WHERE client_chat_id=? ORDER BY created_at DESC LIMIT 1',
+      [String(chatId)]
+    ).catch(()=>null);
+
+    let text = `✏️ *Редактировать контакты*\n\n`;
+    if (lastOrder) {
+      text += `Текущие данные:\n`;
+      text += `👤 ${esc(lastOrder.client_name)}\n`;
+      text += `📞 ${esc(lastOrder.client_phone)}\n`;
+      if (lastOrder.client_email) text += `📧 ${esc(lastOrder.client_email)}\n`;
+      text += `\n_Изменение телефона обновит данные во всех ваших заявках_`;
+    } else {
+      text += `_У вас пока нет заявок\\. Данные сохранятся автоматически при первой заявке\\._`;
+    }
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📞 Изменить телефон', callback_data: 'profile_edit_phone' }],
+        [{ text: '← Профиль',           callback_data: 'profile'            }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] startEditProfile:', e.message); }
 }
 
 module.exports = { initBot, notifyAdmin, notifyNewOrder, notifyStatusChange, sendMessageToClient };
