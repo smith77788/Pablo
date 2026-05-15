@@ -38,6 +38,8 @@
         })
       );
     } catch (_) {}
+    // Mirror to sessionStorage for current-tab progress (cleared on tab close)
+    saveSessionProgress();
   }
 
   function loadDraft() {
@@ -59,6 +61,42 @@
   function clearDraft() {
     try {
       localStorage.removeItem(DRAFT_KEY);
+    } catch (_) {}
+    clearSessionProgress();
+  }
+
+  /* ─── sessionStorage: lightweight current-session progress ─── */
+  const SESSION_KEY = 'nm_booking_session';
+
+  function saveSessionProgress() {
+    try {
+      sessionStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({
+          step: state.step,
+          model_id: state.model_id,
+          model_ids: state.model_ids,
+          model_name: state.model_name,
+          model_photo: state.model_photo,
+          selected_models: state.selected_models,
+          event_type: state.event_type,
+          event_date: state.event_date,
+          event_duration: state.event_duration,
+          location: state.location,
+          budget: state.budget,
+          comments: state.comments,
+          client_name: state.client_name,
+          client_phone: state.client_phone,
+          client_email: state.client_email,
+          client_telegram: state.client_telegram,
+        })
+      );
+    } catch (_) {}
+  }
+
+  function clearSessionProgress() {
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
     } catch (_) {}
   }
 

@@ -1227,16 +1227,21 @@
     </main>
 
     <div class="toast-container" id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
-    <!-- Booking localStorage autosave: key constant, save/load/clear helpers -->
+    <!-- Booking autosave: localStorage (24h TTL) + sessionStorage (current tab) helpers -->
     <script>
       (function () {
         var BOOKING_STORAGE = 'nm_booking_progress';
+        var SESSION_STORAGE = 'nm_booking_session';
         var DRAFT_TTL = 24 * 60 * 60 * 1000;
 
         function saveBookingProgress(data) {
           try {
             data.timestamp = Date.now();
             localStorage.setItem(BOOKING_STORAGE, JSON.stringify(data));
+          } catch (_) {}
+          // Mirror to sessionStorage (tab-scoped, no TTL needed)
+          try {
+            sessionStorage.setItem(SESSION_STORAGE, JSON.stringify(data));
           } catch (_) {}
         }
 
@@ -1259,10 +1264,14 @@
           try {
             localStorage.removeItem(BOOKING_STORAGE);
           } catch (_) {}
+          try {
+            sessionStorage.removeItem(SESSION_STORAGE);
+          } catch (_) {}
         }
 
         window._bookingLS = {
           key: BOOKING_STORAGE,
+          sessionKey: SESSION_STORAGE,
           save: saveBookingProgress,
           load: loadBookingProgress,
           clear: clearBookingProgress,
