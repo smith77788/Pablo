@@ -301,13 +301,13 @@
   function showFavorites() {
     const favs = getFavs();
     if (favs.length === 0) {
-      alert('Ваш список обраних порожній. Натисніть ❤ на картці моделі, щоб додати.');
+      alert('Ваш список избранных пуст. Нажмите ❤️ на карточке модели, чтобы добавить.');
       return;
     }
     const favIds = new Set(favs.map(f => (typeof f === 'object' ? f.id : f)));
     const favModels = allModels.filter(m => favIds.has(m.id));
     if (favModels.length === 0) {
-      alert(`У вас ${favs.length} обраних моделей. Зачекайте завантаження каталогу та спробуйте ще раз.`);
+      alert(`У вас ${favs.length} избранных моделей. Дождитесь загрузки каталога и попробуйте снова.`);
       return;
     }
     // Store original rendered list
@@ -324,7 +324,7 @@
     const backBtn = document.createElement('button');
     backBtn.id = 'fav-back-btn';
     backBtn.className = 'btn-filter-reset';
-    backBtn.textContent = '← Показати всіх';
+    backBtn.textContent = '← Показать всех';
     backBtn.style.cssText = 'margin: 0 auto 16px auto; display: block;';
     backBtn.onclick = () => {
       backBtn.remove();
