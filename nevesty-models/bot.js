@@ -3,9 +3,10 @@ const crypto = require('crypto');
 const TelegramBot = require('node-telegram-bot-api');
 const { query, run, get, generateOrderNumber } = require('./database');
 const { RU } = require('./utils/strings');
+const STRINGS = require('./strings');
 const {
   STATUS_LABELS,
-  VALID_STATUSES,
+  VALID_STATUSES: _VALID_STATUSES,
   EVENT_TYPES,
   CATEGORIES,
   MODEL_CATEGORIES,
@@ -1166,7 +1167,7 @@ async function bkStep3Name(chatId, data) {
   await setSession(chatId, 'bk_s3_name', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\nВведите ваше имя и фамилию:\n💡 Например: Алексей Смирнов`,
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\n${STRINGS.bookingAskName}`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] }
@@ -1179,7 +1180,7 @@ async function bkStep3Phone(chatId, data) {
   await setSession(chatId, 'bk_s3_phone', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(2, 4))}_\n\nВведите номер телефона:\n💡 Формат: \\+7 999 123\\-45\\-67`,
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(2, 4))}_\n\n${STRINGS.bookingAskPhone}`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
@@ -1195,7 +1196,7 @@ async function bkStep3Email(chatId, data) {
   await setSession(chatId, 'bk_s3_email', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(3, 4))}_\n\nВведите email \\(необязательно\\):\n💡 Например: client@mail\\.ru`,
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(3, 4))}_\n\n${STRINGS.bookingAskEmail}`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
@@ -2549,11 +2550,6 @@ async function sendBroadcastWithPhoto(chatId, photoFileId, caption) {
   const newSd = { ...sd, broadcastRecipients: clients.map(c => c.client_chat_id), broadcastPhotoId: photoFileId, broadcastText: caption };
   await setSession(chatId, 'adm_broadcast_preview', newSd);
   return previewBroadcast(chatId);
-}
-
-async function doSendBroadcastWithPhoto(chatId) {
-  // Delegate to unified doSendBroadcast
-  return doSendBroadcast(chatId);
 }
 
 // ─── Scheduled Broadcasts ────────────────────────────────────────────────────
@@ -4731,7 +4727,6 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const sess = await getSession(chatId);
       const sd   = sessionData(sess);
-      const segment = sd.broadcastSegment || 'all';
       await setSession(chatId, 'adm_broadcast_msg', { ...sd });
       return safeSend(chatId,
         `✏️ *Изменить текст рассылки*\n\nВведите новый текст:`,
@@ -5717,19 +5712,19 @@ function initBot(app) {
     if (data === 'profile_edit_contacts') return startEditProfile(chatId);
     if (data === 'profile_edit_name') {
       await setSession(chatId, 'profile_edit_name', {});
-      return safeSend(chatId, '✏️ Введите ваше имя:', {
+      return safeSend(chatId, STRINGS.profileEditName, {
         reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'profile' }]] }
       });
     }
     if (data === 'profile_edit_phone') {
       await setSession(chatId, 'profile_edit_phone', {});
-      return safeSend(chatId, '📱 Введите номер телефона:', {
+      return safeSend(chatId, STRINGS.profileEditPhone, {
         reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'profile' }]] }
       });
     }
     if (data === 'profile_edit_email') {
       await setSession(chatId, 'profile_edit_email', {});
-      return safeSend(chatId, '📧 Введите новый email:', {
+      return safeSend(chatId, STRINGS.profileEditEmail, {
         reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'profile' }]] }
       });
     }
@@ -6461,10 +6456,10 @@ function initBot(app) {
     // ── Edit profile name
     if (state === 'profile_edit_name') {
       if (!text || text.trim().length < 2) {
-        return safeSend(chatId, '❌ Введите ваше имя (минимум 2 символа):');
+        return safeSend(chatId, STRINGS.errorInvalidName);
       }
       if (text.trim().length > 50) {
-        return safeSend(chatId, '❌ Имя слишком длинное (максимум 50 символов):');
+        return safeSend(chatId, STRINGS.errorNameTooLong);
       }
       const newName = text.trim().slice(0, 50);
       await run(
@@ -6479,7 +6474,7 @@ function initBot(app) {
     // ── Edit profile phone
     if (state === 'profile_edit_phone') {
       if (!text || !/^[\d\s+\-()]{7,20}$/.test(text.trim())) {
-        return safeSend(chatId, '❌ Введите корректный номер телефона (7-20 символов):');
+        return safeSend(chatId, STRINGS.errorInvalidPhone);
       }
       const newPhone = text.trim().slice(0, 20);
       await run(
@@ -6494,7 +6489,7 @@ function initBot(app) {
     // ── Edit profile email
     if (state === 'profile_edit_email') {
       if (!text || !text.trim().includes('@')) {
-        return safeSend(chatId, '❌ Введите корректный email (например: name@example.com):');
+        return safeSend(chatId, STRINGS.errorInvalidEmail);
       }
       const newEmail = text.trim().slice(0, 200);
       await run(
@@ -7082,7 +7077,7 @@ async function showClientSettings(chatId) {
 const FACTORY_DB_PATH = require('path').join(__dirname, '..', 'factory', 'factory.db');
 
 function factoryDbGet(sql, params = []) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _reject) => {
     const sqlite3 = require('sqlite3').verbose();
     const fdb = new sqlite3.Database(FACTORY_DB_PATH, sqlite3.OPEN_READONLY, err => {
       if (err) return resolve(null);
@@ -7092,7 +7087,7 @@ function factoryDbGet(sql, params = []) {
 }
 
 function factoryDbAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _reject) => {
     const sqlite3 = require('sqlite3').verbose();
     const fdb = new sqlite3.Database(FACTORY_DB_PATH, sqlite3.OPEN_READONLY, err => {
       if (err) return resolve([]);
@@ -7596,7 +7591,6 @@ async function showModelContact(chatId, modelId) {
 async function showAboutUs(chatId) {
   const about   = await getSetting('about').catch(() => 'Мы работаем с 2018 года. Более 200 моделей в базе.');
   const phone   = await getSetting('contacts_phone').catch(() => '');
-  const pricing = await getSetting('pricing').catch(() => '');
   return safeSend(chatId,
     `ℹ️ *О нас — Nevesty Models*\n\n${esc(about)}\n\n` +
     `💎 *Почему мы:*\n` +
@@ -8484,7 +8478,7 @@ async function bkQuickStart(chatId) {
   await setSession(chatId, 'bk_quick_name', {});
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    `⚡ *Быстрая заявка*\n\nМенеджер свяжется с вами и уточнит все детали\\.\n\n📝 Шаг 1/2 — Введите ваше имя:`, {
+    `${STRINGS.quickBookingTitle}\n\n${STRINGS.quickBookingIntro}\n\n${STRINGS.quickBookingStep1}`, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         [{ text: '📋 Полная форма', callback_data: 'bk_start'  }],
@@ -8498,7 +8492,7 @@ async function bkQuickPhone(chatId, data) {
   await setSession(chatId, 'bk_quick_phone', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    `⚡ *Быстрая заявка*\n\n✅ Имя: *${esc(data.quick_name)}*\n\n📝 Шаг 2/2 — Введите номер телефона:\n_Пример: \\+7\\(999\\)123\\-45\\-67_`, {
+    `${STRINGS.quickBookingTitle}\n\n✅ Имя: *${esc(data.quick_name)}*\n\n${STRINGS.quickBookingStep2}`, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'main_menu' }]] }
     }
@@ -8528,7 +8522,7 @@ async function bkQuickSubmit(chatId, data) {
   } catch (e) {
     console.error('[Bot] bkQuickSubmit:', e.message);
     await clearSession(chatId);
-    return safeSend(chatId, '❌ Ошибка при отправке\\.  Попробуйте позже\\.', { parse_mode: 'MarkdownV2' });
+    return safeSend(chatId, STRINGS.errorSend, { parse_mode: 'MarkdownV2' });
   }
 }
 
