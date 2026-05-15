@@ -455,14 +455,21 @@ router.post('/auth/refresh', authLimiter, async (req, res, next) => {
     if (!stored) return res.status(401).json({ error: 'Invalid or expired refresh token' });
     const admin = await get('SELECT id, username, role FROM admins WHERE id=?', [stored.admin_id]);
     if (!admin) return res.status(401).json({ error: 'Admin not found' });
-    // Rotate: revoke old token, issue new pair
-    await run('UPDATE refresh_tokens SET revoked=1 WHERE id=?', [stored.id]);
+    // Rotate atomically: revoke old token and insert new one in a single transaction
     const newRefresh = crypto.randomBytes(48).toString('hex');
     const newHash = crypto.createHash('sha256').update(newRefresh).digest('hex');
-    await run(
-      "INSERT INTO refresh_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
-      [newHash, admin.id]
-    );
+    await run('BEGIN');
+    try {
+      await run('UPDATE refresh_tokens SET revoked=1 WHERE id=?', [stored.id]);
+      await run(
+        "INSERT INTO refresh_tokens (token_hash, admin_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
+        [newHash, admin.id]
+      );
+      await run('COMMIT');
+    } catch (txErr) {
+      await run('ROLLBACK').catch(() => {});
+      throw txErr;
+    }
     const jwtSecret2 = process.env.JWT_SECRET;
     if (!jwtSecret2) throw new Error('JWT_SECRET environment variable is not set');
     const token = jwt.sign({ id: admin.id, username: admin.username, role: admin.role }, jwtSecret2, {
