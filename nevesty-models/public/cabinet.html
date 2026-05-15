@@ -1386,6 +1386,17 @@
 
         const STATUS_ORDER = ['new', 'confirmed', 'in_progress', 'completed'];
 
+        // ── XSS-safe HTML escape ──────────────────────────────────────
+        function escapeHtml(str) {
+          if (str == null) return '';
+          return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        }
+
         // State
         let _phone = '';
         let _orders = [];
@@ -1756,59 +1767,62 @@
         // ── Build order card HTML ─────────────────────────────────────
         function buildOrderCard(order, idx) {
           const icon = EVENT_ICONS[order.event_type] || '📋';
-          const statusLbl = STATUS_LABELS[order.status] || order.status;
+          const statusLbl = STATUS_LABELS[order.status] || escapeHtml(order.status);
           const dateStr = fmtDate(order.created_at);
           const eventDate = order.event_date ? fmtDate(order.event_date) : null;
 
-          const bookingUrl = `/booking.html?event_type=${encodeURIComponent(order.event_type)}${order.model_id ? '&model=' + order.model_id : ''}`;
+          // order.id must be a safe integer for use in onclick/href
+          const safeId = parseInt(order.id, 10) || 0;
+
+          const bookingUrl = `/booking.html?event_type=${encodeURIComponent(order.event_type)}${order.model_id ? '&model=' + encodeURIComponent(order.model_id) : ''}`;
 
           const isCompleted = order.status === 'completed';
 
           return `
-        <div class="order-card" id="order-card-${order.id}" role="listitem">
-          <div class="order-card-header" onclick="Cabinet.toggleCard(${order.id})" tabindex="0"
-               onkeydown="if(event.key==='Enter'||event.key===' ')Cabinet.toggleCard(${order.id})"
-               role="button" aria-expanded="false" aria-controls="order-body-${order.id}">
+        <div class="order-card" id="order-card-${safeId}" role="listitem">
+          <div class="order-card-header" onclick="Cabinet.toggleCard(${safeId})" tabindex="0"
+               onkeydown="if(event.key==='Enter'||event.key===' ')Cabinet.toggleCard(${safeId})"
+               role="button" aria-expanded="false" aria-controls="order-body-${safeId}">
             <div class="order-card-icon">${icon}</div>
             <div class="order-card-main">
-              <div class="order-card-num">${order.order_number || 'Заявка #' + order.id}</div>
-              <div class="order-card-title">${order.event_type_ru || order.event_type}</div>
-              <div class="order-card-date">Подана: ${dateStr}</div>
+              <div class="order-card-num">${escapeHtml(order.order_number) || 'Заявка #' + safeId}</div>
+              <div class="order-card-title">${escapeHtml(order.event_type_ru || order.event_type)}</div>
+              <div class="order-card-date">Подана: ${escapeHtml(dateStr)}</div>
             </div>
             <div class="order-card-right">
-              <span class="status-badge ${order.status}">${statusLbl}</span>
+              <span class="status-badge ${escapeHtml(order.status)}">${statusLbl}</span>
               <span class="order-card-chevron">▼</span>
             </div>
           </div>
 
-          <div class="order-card-body" id="order-body-${order.id}">
-            ${order.model_name ? `<div class="order-model-chip" style="margin-top:16px">✦ Модель: <strong>${order.model_name}</strong></div>` : ''}
+          <div class="order-card-body" id="order-body-${safeId}">
+            ${order.model_name ? `<div class="order-model-chip" style="margin-top:16px">✦ Модель: <strong>${escapeHtml(order.model_name)}</strong></div>` : ''}
 
             ${buildProgressBar(order.status)}
 
             <div class="order-detail-grid">
-              ${eventDate ? `<div class="order-detail-item"><label>Дата мероприятия</label><span>${eventDate}</span></div>` : ''}
-              ${order.budget ? `<div class="order-detail-item"><label>Бюджет</label><span>${order.budget}</span></div>` : ''}
-              ${order.location ? `<div class="order-detail-item"><label>Место</label><span>${order.location}</span></div>` : ''}
-              <div class="order-detail-item"><label>Тип</label><span>${order.event_type_ru || order.event_type}</span></div>
+              ${eventDate ? `<div class="order-detail-item"><label>Дата мероприятия</label><span>${escapeHtml(eventDate)}</span></div>` : ''}
+              ${order.budget ? `<div class="order-detail-item"><label>Бюджет</label><span>${escapeHtml(order.budget)}</span></div>` : ''}
+              ${order.location ? `<div class="order-detail-item"><label>Место</label><span>${escapeHtml(order.location)}</span></div>` : ''}
+              <div class="order-detail-item"><label>Тип</label><span>${escapeHtml(order.event_type_ru || order.event_type)}</span></div>
             </div>
 
-            ${order.comments ? `<div class="order-detail-desc"><strong style="font-size:0.7rem;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase">Описание</strong><br/>${order.comments}</div>` : ''}
+            ${order.comments ? `<div class="order-detail-desc"><strong style="font-size:0.7rem;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase">Описание</strong><br/>${escapeHtml(order.comments)}</div>` : ''}
 
             <div class="order-actions">
               ${
                 order.status === 'completed' || order.status === 'cancelled'
-                  ? `<button class="btn-repeat" onclick="Cabinet.repeatOrder(${order.id}, this)" title="Создать похожую заявку">
+                  ? `<button class="btn-repeat" onclick="Cabinet.repeatOrder(${safeId}, this)" title="Создать похожую заявку">
                 🔄 Повторить заявку
               </button>`
                   : ''
               }
-              <a href="https://t.me/Verdiktnikbot?start=support_${order.id}" class="btn-repeat" target="_blank" rel="noopener">
+              <a href="https://t.me/Verdiktnikbot?start=support_${safeId}" class="btn-repeat" target="_blank" rel="noopener">
                 💬 Написать менеджеру
               </a>
               ${
                 isCompleted
-                  ? `<button class="btn-review" onclick="Cabinet.openReview(${order.id})" data-order-id="${order.id}">
+                  ? `<button class="btn-review" onclick="Cabinet.openReview(${safeId})" data-order-id="${safeId}">
                 ⭐ Оставить отзыв
               </button>`
                   : ''
@@ -2359,19 +2373,19 @@
           <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
             ${
               m.photos && m.photos[0]
-                ? `<img src="${m.photos[0]}" alt="${m.name || ''}" loading="lazy"
+                ? `<img src="${escapeHtml(m.photos[0])}" alt="${escapeHtml(m.name || '')}" loading="lazy"
                       style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:1px solid var(--border);flex-shrink:0">`
                 : `<div style="width:44px;height:44px;border-radius:50%;background:var(--bg3);border:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--gold)">✦</div>`
             }
             <div style="flex:1;min-width:0">
-              <a href="/model.html?id=${m.id}"
+              <a href="/model.html?id=${encodeURIComponent(m.id)}"
                  style="color:var(--white);text-decoration:none;font-size:0.9rem;font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
                  onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--white)'">
-                ${m.name || 'Модель'}
+                ${escapeHtml(m.name) || 'Модель'}
               </a>
-              ${m.city ? `<span style="font-size:0.75rem;color:var(--text-dim)">${m.city}</span>` : ''}
+              ${m.city ? `<span style="font-size:0.75rem;color:var(--text-dim)">${escapeHtml(m.city)}</span>` : ''}
             </div>
-            <a href="/booking.html?model=${m.id}" title="Забронювати"
+            <a href="/booking.html?model=${encodeURIComponent(m.id)}" title="Забронювати"
                style="font-size:0.78rem;color:var(--gold);border:1px solid rgba(201,169,110,0.4);padding:5px 10px;text-decoration:none;flex-shrink:0;transition:background 0.2s"
                onmouseover="this.style.background='rgba(201,169,110,0.1)'" onmouseout="this.style.background='transparent'">
               Бронювати
