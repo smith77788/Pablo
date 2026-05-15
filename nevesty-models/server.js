@@ -493,7 +493,6 @@ app.get('/api/metrics', async (req, res) => {
   try {
     const health = await buildHealthResponse();
     const s = health.stats || {};
-    const m = health.metrics || {};
     const obs = health._ordersByStatus || {};
     const uptime = health.uptime_seconds || 0;
     const mem = health.memory || {};
@@ -567,7 +566,6 @@ app.use((req, res) => {
 });
 
 // ─── Global error handler ─────────────────────────────────────────────────────
-// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('[ERROR]', err.message, err.stack);
   if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Файл слишком большой (макс. 10 МБ)' });
@@ -584,7 +582,6 @@ async function start() {
 
   // ─── Task scheduler ───────────────────────────────────────────────────────────
   const scheduler = require('./services/scheduler');
-  const { get: dbGetSched } = require('./database');
   scheduler.init({
     db: { run: require('./database').run },
     bot: botInstance?.instance,

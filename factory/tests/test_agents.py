@@ -387,3 +387,13 @@ class TestExperimentSystem:
         agent = ExperimentTracker()
         prompt = agent.think()
         assert isinstance(prompt, str)
+
+
+class TestCyclePhase21:
+    """Tests for Phase 21: CEO Weekly Summary."""
+
+    def test_phase_21_weekly_report_in_cycle(self):
+        """Phase 21 exists in cycle module."""
+        import factory.cycle as cycle
+        src = open(cycle.__file__).read()
+        assert 'Phase 21' in src

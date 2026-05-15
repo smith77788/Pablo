@@ -498,7 +498,7 @@ router.get('/models/search', async (req, res, next) => {
 router.get('/models/related', async (req, res) => {
   try {
     const { category, city, limit = 4, exclude } = req.query;
-    let where = ['archived=0', 'available=1'];
+    const where = ['archived=0', 'available=1'];
     const params = [];
     if (exclude) { where.push('id != ?'); params.push(parseInt(exclude)); }
     if (category) { where.push('category = ?'); params.push(category); }
@@ -572,7 +572,7 @@ router.get('/admin/models', auth, async (req, res, next) => {
     };
     const orderBy = sortMap[sort] || 'name ASC';
 
-    let where = [];
+    const where = [];
     const params = [];
     if (archived !== undefined) { where.push('archived=?'); params.push(parseInt(archived)); }
     if (search) { where.push('name LIKE ?'); params.push(`%${search}%`); }
@@ -911,7 +911,7 @@ router.post('/quick-booking', strictLimiter, async (req, res, next) => {
     const { client_name, client_phone } = req.body;
     if (!sanitize(client_name, 100)) return res.status(400).json({ error: 'Укажите имя' });
     if (!client_phone || !validatePhone(client_phone)) return res.status(400).json({ error: 'Укажите корректный номер телефона' });
-    const result = await run(
+    await run(
       `INSERT INTO quick_bookings (client_name, client_phone) VALUES (?,?)`,
       [sanitize(client_name, 100), client_phone.trim().slice(0, 20)]
     );

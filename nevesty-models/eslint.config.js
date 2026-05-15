@@ -6,7 +6,10 @@ module.exports = [
       'node_modules/**',
       'public/**',
       'data/**',
-      '**/*.min.js'
+      'tests/**',
+      'coverage/**',
+      '**/*.min.js',
+      '**/*.test.js'
     ]
   },
   {
@@ -22,25 +25,51 @@ module.exports = [
         process: 'readonly',
         console: 'readonly',
         Buffer: 'readonly',
+        global: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         setInterval: 'readonly',
         clearInterval: 'readonly',
+        setImmediate: 'readonly',
+        clearImmediate: 'readonly',
         Promise: 'readonly',
         URL: 'readonly',
-        URLSearchParams: 'readonly'
+        URLSearchParams: 'readonly',
+        Error: 'readonly',
+        JSON: 'readonly',
+        Math: 'readonly',
+        Date: 'readonly',
+        Array: 'readonly',
+        Object: 'readonly',
+        Map: 'readonly',
+        Set: 'readonly',
+        RegExp: 'readonly',
+        parseInt: 'readonly',
+        parseFloat: 'readonly',
+        isNaN: 'readonly',
+        isFinite: 'readonly',
+        encodeURIComponent: 'readonly',
+        decodeURIComponent: 'readonly'
       }
     },
     rules: {
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-unused-vars': ['warn', {
+        argsIgnorePattern: '^_|^next$|^err$',
+        caughtErrorsIgnorePattern: '^_|^e$|^err$|^error$',
+        varsIgnorePattern: '^_'
+      }],
       'no-undef': 'error',
       'no-console': 'off',
-      'semi': ['error', 'always'],
-      'no-var': 'error',
+      'eqeqeq': ['warn', 'always', { 'null': 'ignore' }],
+      'no-var': 'warn',
       'prefer-const': 'warn',
-      'eqeqeq': ['warn', 'always'],
       'no-duplicate-case': 'error',
-      'no-unreachable': 'error'
+      'no-unreachable': 'warn',
+      'no-empty': ['warn', { allowEmptyCatch: true }],
+      'no-constant-condition': 'warn',
+      'no-eval': 'error',
+      'no-implied-eval': 'error',
+      'no-new-func': 'error'
     }
   }
 ];

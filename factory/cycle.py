@@ -1414,6 +1414,81 @@ def run_cycle() -> dict:
         logger.error("Phase 20 error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 21: CEO WEEKLY SUMMARY (Fridays)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n📊 PHASE 21: CEO WEEKLY SUMMARY (Fridays)")
+    try:
+        import datetime as _dt21
+        import sqlite3 as _sqlite3_21
+        _today21 = _dt21.date.today()
+        _weekday21 = _today21.weekday()
+        if _weekday21 == 4:  # Friday
+            logger.info("Phase 21: CEO Weekly Summary")
+            try:
+                # Get week stats from data.db
+                weekly_stats = {}
+                try:
+                    _bot_db_21 = "/home/user/Pablo/nevesty-models/data.db"
+                    if os.path.exists(_bot_db_21):
+                        _conn21 = _sqlite3_21.connect(_bot_db_21)
+                        _c21 = _conn21.cursor()
+                        _c21.execute("""
+                            SELECT
+                                COUNT(*) as total,
+                                SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+                                SUM(CASE WHEN status='new' THEN 1 ELSE 0 END) as new_orders
+                            FROM orders WHERE created_at >= datetime('now', '-7 days')
+                        """)
+                        _r21 = _c21.fetchone()
+                        if _r21:
+                            weekly_stats = {
+                                'total': _r21[0] or 0,
+                                'completed': _r21[1] or 0,
+                                'new': _r21[2] or 0,
+                            }
+                        _conn21.close()
+                except Exception as _e21_db:
+                    logger.warning("[Phase21] Could not read data.db: %s", _e21_db)
+
+                class _WeeklyCEOAgent(FactoryAgent):
+                    department = "ceo"
+                    role = "ceo_weekly"
+                    name = "ceo_weekly"
+                    system_prompt = (
+                        "Ты — CEO агентства моделей Nevesty Models. "
+                        "Генерируешь еженедельный стратегический отчёт. "
+                        "Будь краток и actionable. Пиши на русском."
+                    )
+
+                _weekly_ceo = _WeeklyCEOAgent()
+                _ceo_prompt21 = (
+                    f"Weekly report for Nevesty Models modeling agency.\n"
+                    f"This week: {weekly_stats.get('total', 0)} total orders, "
+                    f"{weekly_stats.get('completed', 0)} completed, "
+                    f"{weekly_stats.get('new', 0)} new.\n"
+                    f"Provide a brief strategic assessment and 3 priorities for next week. "
+                    f"Be concise and actionable."
+                )
+                _weekly_summary21 = _weekly_ceo.think(_ceo_prompt21)
+
+                # Store in factory.db via db module
+                db.execute(
+                    "INSERT INTO agent_reports (agent_name, department, report_type, summary, cycle_id, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                    ('StrategicCore', 'ceo', 'weekly_summary',
+                     str(_weekly_summary21)[:2000], cycle_id)
+                )
+                results['weekly_ceo_summary'] = str(_weekly_summary21)[:500]
+                summary_lines.append("📊 CEO Weekly Summary (Phase 21): готово")
+                logger.info("Phase 21 complete: CEO Weekly Summary")
+            except Exception as _e21_inner:
+                logger.error("Phase 21 inner error: %s", _e21_inner)
+        else:
+            logger.info("[Phase21] Skipping CEO Weekly Summary (not Friday, weekday=%d)", _weekday21)
+    except Exception as e:
+        logger.error("Phase 21 error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)
@@ -1465,4 +1540,44 @@ def run_cycle() -> dict:
     logger.info("✅ CYCLE DONE: %.1fs | Score=%s%%", elapsed, results["health_score"])
     notify(tg_report)
     _save_cycle_to_history(results)
+
+    # Notify admin via bot after cycle completes (supplementary direct API call)
+    try:
+        import json as _json_notify
+        import re as _re_notify
+        import urllib.request as _urllib_notify
+        _bot_token_notify = os.getenv('BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
+        _admin_ids_raw_notify = os.getenv('ADMIN_TELEGRAM_IDS', '')
+        if _bot_token_notify and _admin_ids_raw_notify:
+            _admin_ids_notify = [x.strip() for x in _admin_ids_raw_notify.split(',') if x.strip()]
+            _dept_count_notify = len([
+                k for k in results
+                if k not in ('cycle_id', 'started_at', 'completed_at', 'weekly_ceo_summary',
+                             'experiments', 'phases', 'health_score', 'elapsed_s',
+                             'duration_seconds', 'summary', 'ceo_department_focus')
+            ])
+            _summary_lines_notify = [
+                f"🏭 Factory цикл завершено",
+                f"Health: {results.get('health_score', 0)}% | {elapsed}с",
+            ]
+            if 'weekly_ceo_summary' in results:
+                _ceo_excerpt = results['weekly_ceo_summary'][:200]
+                _summary_lines_notify.append(f"CEO: {_ceo_excerpt}")
+            _msg_notify = '\n'.join(_summary_lines_notify)
+            for _admin_id_notify in _admin_ids_notify:
+                try:
+                    _req_notify = _urllib_notify.Request(
+                        f'https://api.telegram.org/bot{_bot_token_notify}/sendMessage',
+                        data=_json_notify.dumps({
+                            'chat_id': _admin_id_notify,
+                            'text': _msg_notify[:4096],
+                        }).encode(),
+                        headers={'Content-Type': 'application/json'},
+                    )
+                    _urllib_notify.urlopen(_req_notify, timeout=5)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     return results

@@ -132,6 +132,20 @@ def init_db() -> None:
         """)
         conn.commit()
 
+        # Migrate: add agent_reports table if missing
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_reports (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_name  TEXT NOT NULL,
+            department  TEXT NOT NULL,
+            report_type TEXT NOT NULL,
+            summary     TEXT,
+            cycle_id    INTEGER,
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+        """)
+        conn.commit()
+
         # Migrate: add nevesty_experiments table if missing
         conn.execute("""
         CREATE TABLE IF NOT EXISTS nevesty_experiments (
