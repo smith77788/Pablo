@@ -724,6 +724,16 @@
                 <span class="toggle-slider"></span>
               </label>
             </div>
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">SMS-уведомления клиентам</div>
+                <div class="toggle-row-desc">Отправлять SMS при смене статуса заявки (требует SMS.ru)</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="sms_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
             <div class="sticky-save-bar">
               <button class="btn btn-md btn-gold" id="btnSaveNotif" onclick="saveNotif(this)">Сохранить</button>
             </div>
@@ -1025,7 +1035,7 @@ async function loadSettings() {
     const toggleFields = [
       'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email',
       'catalog_show_city', 'catalog_badge_top',
-      'notify_new_order', 'notify_status_change', 'notify_review', 'notify_message',
+      'notify_new_order', 'notify_status_change', 'notify_review', 'notify_message', 'sms_enabled',
       'wishlist_enabled', 'search_enabled', 'reviews_enabled', 'loyalty_enabled', 'referral_enabled',
       'faq_enabled', 'calc_enabled', 'reviews_auto_approve',
     ];
@@ -1332,6 +1342,7 @@ async function saveNotif(btn) {
         notify_status_change: document.getElementById('notify_status_change').checked ? '1' : '0',
         notify_review:       document.getElementById('notify_review').checked       ? '1' : '0',
         notify_message:      document.getElementById('notify_message').checked      ? '1' : '0',
+        sms_enabled:         document.getElementById('sms_enabled').checked         ? '1' : '0',
       })
     });
     _admin.toast('Настройки уведомлений сохранены', 'success');

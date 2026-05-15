@@ -1342,6 +1342,16 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
       mailer.sendStatusChange(order.client_email, order, order.prev_status, status)
         .catch(e => console.error('[mailer] status change error:', e.message));
     }
+    // ─── SMS notification on status change ───────────────────────────────────
+    if (order.client_phone && status !== order.prev_status) {
+      try {
+        const smsRow = await get('SELECT value FROM bot_settings WHERE key=?', ['sms_enabled']).catch(() => null);
+        if (smsRow && smsRow.value === '1') {
+          const { sendStatusChangeSMS } = require('../services/sms');
+          await sendStatusChangeSMS(order.client_phone, order.order_number, status).catch(() => {});
+        }
+      } catch {}
+    }
     // ─── WebSocket real-time notification ────────────────────────────────────
     if (status !== order.prev_status) {
       const wsServer = req.app.get('wsServer');
