@@ -1913,7 +1913,9 @@ router.post('/admin/broadcasts', auth, async (req, res, next) => {
     const text = sanitize(req.body.text, 4096);
     if (!text) return res.status(400).json({ error: 'Текст не может быть пустым' });
 
-    const segment = ['all', 'completed', 'active'].includes(req.body.segment) ? req.body.segment : 'all';
+    const rawSegment = req.body.segment || 'all';
+    const segment = (['all', 'completed', 'active', 'new'].includes(rawSegment) || /^city_[a-zA-Zа-яА-ЯёЁ0-9\s\-]+$/.test(rawSegment))
+      ? rawSegment : 'all';
     const photoUrl = req.body.photo_url ? sanitize(String(req.body.photo_url), 500) : null;
 
     let scheduledAt;
@@ -1931,6 +1933,38 @@ router.post('/admin/broadcasts', auth, async (req, res, next) => {
       [text, photoUrl, segment, scheduledAt, req.admin.username]
     );
     res.json({ id: result.id, scheduled_at: scheduledAt });
+  } catch (e) { next(e); }
+});
+
+// GET /api/admin/broadcasts/count?segment= — count recipients for a segment (for preview)
+router.get('/admin/broadcasts/count', auth, async (req, res, next) => {
+  try {
+    const seg = req.query.segment || 'all';
+    let rows = [];
+    if (seg === 'completed') {
+      rows = await query(
+        "SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND status='completed'"
+      );
+    } else if (seg === 'active') {
+      rows = await query(
+        "SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND created_at >= datetime('now', '-30 days')"
+      );
+    } else if (seg === 'new') {
+      rows = await query(
+        "SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND client_chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE status IN ('confirmed','in_progress','completed') AND client_chat_id IS NOT NULL AND client_chat_id != '')"
+      );
+    } else if (/^city_/.test(seg)) {
+      const city = seg.slice(5);
+      rows = await query(
+        `SELECT COUNT(DISTINCT o.client_chat_id) as cnt FROM orders o JOIN models m ON o.model_id=m.id WHERE o.client_chat_id IS NOT NULL AND o.client_chat_id != '' AND m.city=?`,
+        [city]
+      );
+    } else {
+      rows = await query(
+        "SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''"
+      );
+    }
+    res.json({ count: rows[0]?.cnt || 0 });
   } catch (e) { next(e); }
 });
 

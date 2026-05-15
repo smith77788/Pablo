@@ -50,8 +50,12 @@
       </div>
 
       <!-- Search -->
-      <input type="text" id="search-input" placeholder="Поиск по имени..." oninput="debounceSearch()"
-        class="px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:bg-gray-800 dark:text-white flex-1 min-w-48">
+      <div class="relative flex-1 min-w-48">
+        <input type="text" id="search-input" placeholder="Поиск по имени..." oninput="debounceSearch()"
+          class="w-full px-4 py-2 pr-9 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:bg-gray-800 dark:text-white">
+        <button id="search-clear-btn" onclick="clearSearch()" title="Очистить поиск"
+          class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none">×</button>
+      </div>
 
       <!-- Sort -->
       <select id="sort-select" onchange="loadModels()"
@@ -104,13 +108,12 @@
             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden md:table-cell">Параметры</th>
             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden lg:table-cell">Город</th>
             <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Статус</th>
-            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden sm:table-cell">Заявок</th>
-            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden md:table-cell">Отзывы</th>
+            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden sm:table-cell">Заказы&nbsp;|&nbsp;Рейтинг</th>
             <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Действия</th>
           </tr>
         </thead>
         <tbody id="models-tbody">
-          <tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">Загрузка...</td></tr>
+          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Загрузка...</td></tr>
         </tbody>
       </table>
 
@@ -130,9 +133,13 @@
   <!-- Add/Edit Modal -->
   <div id="model-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-screen overflow-y-auto">
-      <div class="p-6 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-        <h2 id="modal-title" class="text-lg font-bold text-gray-900 dark:text-white">Добавить модель</h2>
-        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+      <div class="p-6 border-b border-gray-100 dark:border-gray-700">
+        <div class="flex items-center justify-between mb-2">
+          <h2 id="modal-title" class="text-lg font-bold text-gray-900 dark:text-white">Добавить модель</h2>
+          <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+        <!-- Stats chips (shown only when editing an existing model) -->
+        <div id="modal-stats-chips" class="hidden flex flex-wrap gap-2 mt-2"></div>
       </div>
       <form id="model-form" onsubmit="saveModel(event)" class="p-6 space-y-4">
         <input type="hidden" id="model-id">
@@ -235,7 +242,23 @@ let selectedModelIds = new Set();
 function debounceSearch() {
   clearTimeout(searchTimeout);
   searchQuery = document.getElementById('search-input').value;
+  const clearBtn = document.getElementById('search-clear-btn');
+  if (clearBtn) {
+    if (searchQuery) clearBtn.classList.remove('hidden');
+    else clearBtn.classList.add('hidden');
+  }
   searchTimeout = setTimeout(() => { currentPage = 0; loadModels(); }, 300);
+}
+
+function clearSearch() {
+  const input = document.getElementById('search-input');
+  const clearBtn = document.getElementById('search-clear-btn');
+  input.value = '';
+  searchQuery = '';
+  if (clearBtn) clearBtn.classList.add('hidden');
+  currentPage = 0;
+  loadModels();
+  input.focus();
 }
 
 function setFilter(f) {
@@ -275,7 +298,7 @@ async function loadModels() {
 
     const tbody = document.getElementById('models-tbody');
     if (!models.length) {
-      tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">Нет моделей</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Нет моделей</td></tr>';
       return;
     }
 
@@ -283,8 +306,18 @@ async function loadModels() {
       const photos = tryParseJSON(m.photos, []);
       const photo = m.photo_main || photos[0] || '';
       const checked = selectedModelIds.has(m.id) ? 'checked' : '';
+      // Combined stats cell: orders | rating
+      const ordersLabel = (m.order_count || 0) > 0
+        ? `<span class="font-semibold text-yellow-600 dark:text-yellow-400">${m.order_count}</span>`
+        : `<span class="text-gray-400">0</span>`;
+      const ratingLabel = m.reviews_count > 0
+        ? `<span class="text-gray-700 dark:text-gray-300">${Number(m.avg_rating||0).toFixed(1)}⭐</span><span class="text-gray-400 text-xs">(${m.reviews_count})</span>`
+        : `<span class="text-gray-400 text-xs">—</span>`;
+      const archivedBadge = m.archived
+        ? `<span class="ml-1 text-xs px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded font-medium">📦 архив</span>`
+        : '';
       return `
-        <tr class="border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30">
+        <tr class="border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30${m.archived ? ' opacity-70' : ''}">
           <td class="px-4 py-3">
             <input type="checkbox" class="model-check w-4 h-4 accent-pink-600 cursor-pointer" data-id="${m.id}"
               ${checked} onchange="toggleModelRow(${m.id}, this.checked)">
@@ -294,7 +327,7 @@ async function loadModels() {
               ${photo ? `<img src="${photo}" alt="${escHtml(m.name)}" class="w-10 h-10 rounded-lg object-cover bg-gray-100" loading="lazy">`
                       : `<div class="w-10 h-10 rounded-lg bg-pink-100 dark:bg-pink-900 flex items-center justify-center text-pink-500 font-bold">${(m.name||'?')[0]}</div>`}
               <div>
-                <div class="font-medium text-gray-900 dark:text-white">${m.featured ? '⭐ ' : ''}${escHtml(m.name)}</div>
+                <div class="font-medium text-gray-900 dark:text-white flex items-center gap-1">${m.featured ? '⭐ ' : ''}${escHtml(m.name)}${archivedBadge}</div>
                 <div class="text-xs text-gray-400">${m.category || '—'}</div>
               </div>
             </div>
@@ -308,19 +341,17 @@ async function loadModels() {
               class="text-lg">${m.available ? '🟢' : '🔴'}</button>
           </td>
           <td class="px-4 py-3 text-center hidden sm:table-cell">
-            <span class="text-sm font-medium ${(m.order_count || 0) > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-400'}">${m.order_count || 0}</span>
-          </td>
-          <td class="px-4 py-3 text-center hidden md:table-cell">
-            ${m.reviews_count > 0
-              ? `<span class="text-sm text-gray-700 dark:text-gray-300">${m.avg_rating} ⭐ <span class="text-xs text-gray-400">(${m.reviews_count})</span></span>`
-              : `<span class="text-xs text-gray-400">—</span>`}
+            <div class="flex flex-col items-center gap-0.5 text-sm">
+              <div class="flex items-center gap-1">${ordersLabel}<span class="text-gray-300 dark:text-gray-600 text-xs">заявок</span></div>
+              <div class="flex items-center gap-1">${ratingLabel}</div>
+            </div>
           </td>
           <td class="px-4 py-3 text-right">
-            <div class="flex items-center justify-end gap-2">
+            <div class="flex items-center justify-end gap-1 flex-wrap">
               <button onclick="editModel(${m.id})" title="Редактировать" class="text-blue-500 hover:text-blue-700 text-sm px-2 py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20">
                 <i class="fas fa-edit"></i>
               </button>
-              <button onclick="duplicateModel(${m.id})" title="Дублировать"
+              <button onclick="duplicateModel(${m.id})" title="📋 Копировать модель"
                 class="text-green-500 hover:text-green-700 text-sm px-2 py-1 rounded hover:bg-green-50 dark:hover:bg-green-900/20">
                 <i class="fas fa-copy"></i>
               </button>
@@ -329,8 +360,8 @@ async function loadModels() {
                 <i class="fas fa-star"></i>
               </button>
               <button onclick="archiveModel(${m.id}, ${m.archived ? 1 : 0})"
-                title="${m.archived ? 'Восстановить из архива' : 'Архивировать — модель будет скрыта из каталога и сохранена в архиве'}"
-                class="${m.archived ? 'text-green-500 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'} text-sm px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700">
+                title="${m.archived ? '🗄 Восстановить из архива' : '🗄 Архивировать — модель будет скрыта из каталога'}"
+                class="${m.archived ? 'text-teal-500 hover:text-teal-700' : 'text-gray-400 hover:text-gray-600'} text-sm px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700">
                 <i class="fas fa-${m.archived ? 'undo' : 'archive'}"></i>
               </button>
               ${m.archived ? `<button onclick="deleteModelPermanent(${m.id})" title="Удалить навсегда"
@@ -512,6 +543,35 @@ async function editModel(id) {
   document.getElementById('busyDatesGroup').style.display = 'block';
   loadBusyDates(m.id);
   openModal();
+  // Load and display stats chips in modal header
+  loadModalStatsChips(m.id);
+}
+
+async function loadModalStatsChips(modelId) {
+  const chipsEl = document.getElementById('modal-stats-chips');
+  if (!chipsEl) return;
+  chipsEl.classList.remove('hidden');
+  chipsEl.innerHTML = '<span class="text-xs text-gray-400 animate-pulse">Загрузка статистики…</span>';
+  try {
+    const resp = await fetch(`/api/admin/models/${modelId}/stats`, { headers });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const s = await resp.json();
+    const chips = [
+      { icon: '📋', label: 'Заказов', value: s.total_orders || 0, color: '#6366f1' },
+      { icon: '✅', label: 'Выполнено', value: s.completed_orders || 0, color: '#22c55e' },
+      { icon: '⭐', label: 'Рейтинг', value: s.avg_rating ? Number(s.avg_rating).toFixed(1) : '—', color: '#f59e0b' },
+      { icon: '👁', label: 'Просмотров', value: (s.view_count || 0).toLocaleString('ru'), color: '#06b6d4' },
+      { icon: '💰', label: 'Выручка', value: s.revenue_total > 0 ? Math.round(s.revenue_total).toLocaleString('ru') + ' ₽' : '—', color: '#ec4899' },
+    ];
+    chipsEl.innerHTML = chips.map(c =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:99px;background:${c.color}20;border:1px solid ${c.color}50;font-size:0.72rem;color:${c.color};font-weight:600" title="${c.label}">
+        ${c.icon} ${c.value}
+        <span style="font-weight:400;opacity:0.7;font-size:0.68rem">${c.label}</span>
+      </span>`
+    ).join('');
+  } catch(e) {
+    chipsEl.innerHTML = '<span class="text-xs text-red-400">Ошибка загрузки статистики</span>';
+  }
 }
 
 async function loadBusyDates(modelId) {
@@ -601,6 +661,10 @@ function openAddModal() {
   document.getElementById('modal-title').textContent = 'Добавить модель';
   document.getElementById('model-form').reset();
   document.getElementById('model-id').value = '';
+  // Hide stats chips for new model
+  const chipsEl = document.getElementById('modal-stats-chips');
+  if (chipsEl) { chipsEl.classList.add('hidden'); chipsEl.innerHTML = ''; }
+  document.getElementById('busyDatesGroup').style.display = 'none';
   openModal();
 }
 function openModal() { document.getElementById('model-modal').classList.replace('hidden','flex'); }
