@@ -2695,6 +2695,26 @@ router.get('/admin/orders', auth, async (req, res, next) => {
   }
 });
 
+// ─── Search orders by phone or client name (admin) — must be before /:id ──────
+router.get('/admin/orders/search', auth, async (req, res, next) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.status(400).json({ error: 'Параметр поиска q обязателен' });
+    const like = `%${q}%`;
+    const orders = await query(
+      `SELECT o.*, m.name as model_name
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE o.client_phone LIKE ? OR o.client_name LIKE ? OR o.order_number LIKE ?
+       ORDER BY o.created_at DESC LIMIT 50`,
+      [like, like, like]
+    );
+    res.json({ orders, total: orders.length });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/admin/orders/export', auth, async (req, res, next) => {
   try {
     const { status, search, period, model_id, event_type } = req.query;
@@ -3022,25 +3042,7 @@ router.post('/admin/orders/bulk-status', auth, async (req, res, next) => {
   }
 });
 
-// ─── Search orders by phone or client name (admin) ───────────────────────────
-router.get('/admin/orders/search', auth, async (req, res, next) => {
-  try {
-    const q = (req.query.q || '').trim();
-    if (!q) return res.status(400).json({ error: 'Параметр поиска q обязателен' });
-    const like = `%${q}%`;
-    const orders = await query(
-      `SELECT o.*, m.name as model_name
-       FROM orders o
-       LEFT JOIN models m ON o.model_id = m.id
-       WHERE o.client_phone LIKE ? OR o.client_name LIKE ? OR o.order_number LIKE ?
-       ORDER BY o.created_at DESC LIMIT 50`,
-      [like, like, like]
-    );
-    res.json({ orders, total: orders.length });
-  } catch (e) {
-    next(e);
-  }
-});
+// Search route is registered further above (before /:id) to avoid route shadowing
 
 // ─── PATCH /admin/orders/bulk-status — bulk status update (REST alias) ───────
 router.patch('/admin/orders/bulk-status', auth, async (req, res, next) => {
