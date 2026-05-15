@@ -48,17 +48,98 @@
     });
   }
 
-  /* ─── Phone auto-format ─────────────────────────── */
+  /* ─── Phone mask: +7 (xxx) xxx-xx-xx ───────────── */
   const phoneEl = document.getElementById('client_phone');
   if (phoneEl) {
+    function formatPhone(val) {
+      // Strip everything except digits and leading +
+      let digits = val.replace(/\D/g, '');
+      // Normalize: 8 → 7, ensure 7 prefix
+      if (digits.startsWith('8')) digits = '7' + digits.slice(1);
+      if (!digits.startsWith('7')) digits = '7' + digits;
+      // Keep at most 11 digits
+      digits = digits.slice(0, 11);
+      const d = digits.slice(1); // digits after country code
+      let result = '+7';
+      if (d.length > 0) result += ' (' + d.slice(0, 3);
+      if (d.length >= 3) result += ') ' + d.slice(3, 6);
+      if (d.length >= 6) result += '-' + d.slice(6, 8);
+      if (d.length >= 8) result += '-' + d.slice(8, 10);
+      return result;
+    }
+
     phoneEl.addEventListener('focus', () => {
-      if (!phoneEl.value) phoneEl.value = '+7 ';
+      if (!phoneEl.value.trim()) phoneEl.value = '+7 (';
     });
-    phoneEl.addEventListener('input', () => {
-      let v = phoneEl.value.replace(/[^\d+]/g, '');
-      if (v.startsWith('8') && v.length === 1) v = '+7';
-      if (v.startsWith('7') && !v.startsWith('+7')) v = '+7' + v.slice(1);
-      phoneEl.value = v;
+
+    phoneEl.addEventListener('input', (e) => {
+      const selStart = phoneEl.selectionStart;
+      const oldVal = phoneEl.value;
+      const newVal = formatPhone(oldVal);
+      phoneEl.value = newVal;
+      // Keep cursor near its position
+      const diff = newVal.length - oldVal.length;
+      try { phoneEl.setSelectionRange(selStart + diff, selStart + diff); } catch {}
+    });
+
+    phoneEl.addEventListener('keydown', (e) => {
+      // Allow backspace to delete formatted chars naturally
+      if (e.key === 'Backspace' && phoneEl.value.length <= 4) {
+        phoneEl.value = '';
+        e.preventDefault();
+      }
+    });
+
+    phoneEl.addEventListener('blur', () => {
+      if (phoneEl.value === '+7 (' || phoneEl.value === '+7') phoneEl.value = '';
+    });
+  }
+
+  /* ─── Real-time email validation ────────────────── */
+  const emailEl = document.getElementById('client_email');
+  if (emailEl) {
+    let emailTimeout;
+    const emailHint = document.createElement('div');
+    emailHint.style.cssText = 'font-size:0.72rem;margin-top:5px;line-height:1.5;';
+    emailEl.parentNode.appendChild(emailHint);
+
+    emailEl.addEventListener('input', () => {
+      clearTimeout(emailTimeout);
+      emailTimeout = setTimeout(() => {
+        const val = emailEl.value.trim();
+        if (!val) {
+          emailHint.textContent = '';
+          emailEl.style.borderColor = '';
+          return;
+        }
+        const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+        if (valid) {
+          emailHint.style.color = 'var(--gold)';
+          emailHint.textContent = '✓ Email корректный';
+          emailEl.style.borderColor = 'rgba(201,169,110,0.4)';
+        } else {
+          emailHint.style.color = '#e05c5c';
+          emailHint.textContent = '✕ Проверьте формат email (например: name@mail.ru)';
+          emailEl.style.borderColor = 'var(--error, #e05c5c)';
+        }
+      }, 400);
+    });
+
+    emailEl.addEventListener('blur', () => {
+      clearTimeout(emailTimeout);
+      const val = emailEl.value.trim();
+      if (val && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+        emailHint.style.color = '#e05c5c';
+        emailHint.textContent = '✕ Проверьте формат email';
+        emailEl.style.borderColor = 'var(--error, #e05c5c)';
+      } else if (val) {
+        emailHint.style.color = 'var(--gold)';
+        emailHint.textContent = '✓ Email корректный';
+        emailEl.style.borderColor = 'rgba(201,169,110,0.4)';
+      } else {
+        emailHint.textContent = '';
+        emailEl.style.borderColor = '';
+      }
     });
   }
 

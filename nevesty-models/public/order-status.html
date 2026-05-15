@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Статус заявки — Nevesty Models</title>
+  <meta name="description" content="Проверьте статус вашей заявки в агентстве Nevesty Models по номеру заказа.">
+  <meta name="robots" content="noindex, follow">
+  <meta name="theme-color" content="#080808">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    .status-page {
+      min-height: 100vh;
+      padding: 120px 0 80px;
+    }
+
+    .status-hero {
+      text-align: center;
+      margin-bottom: 56px;
+    }
+    .status-hero .section-tag {
+      margin-bottom: 12px;
+    }
+    .status-hero h1 {
+      font-size: clamp(2rem, 5vw, 3rem);
+      margin-bottom: 12px;
+    }
+    .status-hero p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    /* Search form */
+    .status-search-wrap {
+      max-width: 560px;
+      margin: 0 auto 48px;
+    }
+    .status-search-box {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      transition: border-color 0.2s;
+    }
+    .status-search-box:focus-within {
+      border-color: rgba(201,169,110,0.5);
+    }
+    .status-search-box input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      padding: 16px 20px;
+      font-size: 1rem;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      letter-spacing: 1px;
+    }
+    .status-search-box input::placeholder {
+      color: var(--text-dim);
+      letter-spacing: 0;
+    }
+    .status-search-box button {
+      padding: 16px 28px;
+      background: var(--gold);
+      color: var(--bg);
+      border: none;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      transition: background 0.2s, opacity 0.2s;
+      white-space: nowrap;
+      font-family: 'Inter', sans-serif;
+    }
+    .status-search-box button:hover { background: var(--gold-dark); }
+    .status-search-box button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .status-error {
+      text-align: center;
+      color: #f44336;
+      font-size: 0.85rem;
+      margin-top: 12px;
+      min-height: 20px;
+    }
+
+    /* Result card */
+    .status-result {
+      max-width: 640px;
+      margin: 0 auto;
+      display: none;
+    }
+    .status-result.visible { display: block; }
+
+    .order-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 32px;
+      position: relative;
+      overflow: hidden;
+    }
+    .order-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--gold-dark), var(--gold));
+    }
+
+    .order-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .order-num {
+      font-size: 0.7rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 4px;
+    }
+    .order-client-name {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.4rem;
+      color: var(--text);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      border: 1px solid;
+      white-space: nowrap;
+    }
+    .status-badge .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-new      { color: #64b5f6; border-color: rgba(100,181,246,0.3); background: rgba(100,181,246,0.06); }
+    .status-new .dot { background: #64b5f6; }
+    .status-reviewing      { color: #ffb74d; border-color: rgba(255,183,77,0.3); background: rgba(255,183,77,0.06); }
+    .status-reviewing .dot { background: #ffb74d; }
+    .status-confirmed      { color: var(--gold); border-color: rgba(201,169,110,0.3); background: rgba(201,169,110,0.06); }
+    .status-confirmed .dot { background: var(--gold); }
+    .status-in_progress      { color: #ab47bc; border-color: rgba(171,71,188,0.3); background: rgba(171,71,188,0.06); }
+    .status-in_progress .dot { background: #ab47bc; }
+    .status-completed      { color: #4caf8a; border-color: rgba(76,175,138,0.3); background: rgba(76,175,138,0.06); }
+    .status-completed .dot { background: #4caf8a; }
+    .status-cancelled      { color: var(--text-dim); border-color: rgba(120,120,120,0.3); background: rgba(120,120,120,0.06); }
+    .status-cancelled .dot { background: var(--text-dim); }
+
+    /* Progress bar */
+    .status-progress {
+      margin: 28px 0;
+    }
+    .progress-steps {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      position: relative;
+    }
+    .progress-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+      position: relative;
+      z-index: 1;
+    }
+    .progress-step-circle {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      transition: all 0.3s;
+      position: relative;
+      z-index: 2;
+    }
+    .progress-step.done .progress-step-circle {
+      background: var(--gold);
+      border-color: var(--gold);
+      color: var(--bg);
+      font-size: 0.7rem;
+    }
+    .progress-step.active .progress-step-circle {
+      border-color: var(--gold);
+      background: rgba(201,169,110,0.12);
+      color: var(--gold);
+      box-shadow: 0 0 0 4px rgba(201,169,110,0.1);
+    }
+    .progress-step.cancelled-step .progress-step-circle {
+      border-color: rgba(120,120,120,0.3);
+      background: rgba(120,120,120,0.08);
+      color: var(--text-dim);
+    }
+    .progress-step-label {
+      font-size: 0.65rem;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-top: 6px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .progress-step.done .progress-step-label,
+    .progress-step.active .progress-step-label {
+      color: var(--gold);
+    }
+    .progress-line {
+      flex: 1;
+      height: 2px;
+      background: var(--border);
+      margin: 0 -1px;
+      position: relative;
+      top: -10px;
+      z-index: 0;
+      transition: background 0.3s;
+    }
+    .progress-line.done {
+      background: var(--gold);
+    }
+
+    @media (max-width: 480px) {
+      .progress-step-label { display: none; }
+      .progress-step-circle { width: 22px; height: 22px; font-size: 0.6rem; }
+      .progress-line { top: -8px; }
+    }
+
+    /* Order details */
+    .order-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+    }
+    @media (max-width: 480px) {
+      .order-details { grid-template-columns: 1fr; gap: 12px; }
+    }
+
+    .order-detail-item label {
+      display: block;
+      font-size: 0.65rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .order-detail-item span {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .order-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 28px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Skeleton loader */
+    .status-skeleton {
+      max-width: 640px;
+      margin: 0 auto;
+      display: none;
+    }
+    .status-skeleton.visible { display: block; }
+    .skeleton-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 32px;
+    }
+    .skeleton-line {
+      height: 14px;
+      background: linear-gradient(90deg, var(--bg3) 25%, var(--bg2) 50%, var(--bg3) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: 2px;
+      margin-bottom: 12px;
+    }
+    .skeleton-line.short { width: 40%; }
+    .skeleton-line.medium { width: 65%; }
+    .skeleton-line.full { width: 100%; }
+    .skeleton-line.tall { height: 20px; margin-bottom: 20px; }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    /* Hint box */
+    .status-hint {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 20px 24px;
+      border: 1px solid var(--border);
+      background: rgba(201,169,110,0.04);
+    }
+    .status-hint p {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin: 0;
+      line-height: 1.7;
+    }
+    .status-hint strong { color: var(--gold); }
+  </style>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+  <nav class="navbar scrolled">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links">
+        <a href="/catalog.html">Модели</a>
+        <a href="/#services">Услуги</a>
+        <a href="/#about">О нас</a>
+        <a href="/#contact">Контакты</a>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+      <div class="nav-burger" id="burgerBtn">
+        <span></span><span></span><span></span>
+      </div>
+    </div>
+  </nav>
+  <nav class="nav-mobile" id="mobileMenu">
+    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <a href="/catalog.html">Модели</a>
+    <a href="/#services">Услуги</a>
+    <a href="/#about">О нас</a>
+    <a href="/#contact">Контакты</a>
+    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
+  </nav>
+
+  <main class="status-page" id="main-content">
+    <div class="container">
+
+      <div class="status-hero">
+        <div class="section-tag">Статус заявки</div>
+        <h1>Проверить статус</h1>
+        <div class="gold-line" style="margin:16px auto 20px"></div>
+        <p>Введите номер заявки, чтобы узнать её текущий статус</p>
+      </div>
+
+      <!-- Search -->
+      <div class="status-search-wrap">
+        <div class="status-search-box">
+          <input type="text" id="orderInput" placeholder="NM-2024-1234"
+                 aria-label="Номер заявки"
+                 autocomplete="off"
+                 onkeydown="if(event.key==='Enter') checkOrderStatus()" />
+          <button id="searchBtn" onclick="checkOrderStatus()">Проверить</button>
+        </div>
+        <div class="status-error" id="statusError" aria-live="polite"></div>
+      </div>
+
+      <!-- Hint -->
+      <div class="status-hint" id="statusHint">
+        <p>Номер заявки был отправлен вам при оформлении бронирования. Формат: <strong>NM-2024-1234</strong>. Если вы потеряли номер — <a href="/#contact" style="color:var(--gold)">свяжитесь с нами</a>.</p>
+      </div>
+
+      <!-- Skeleton -->
+      <div class="status-skeleton" id="statusSkeleton">
+        <div class="skeleton-card">
+          <div class="skeleton-line short"></div>
+          <div class="skeleton-line medium tall"></div>
+          <div class="skeleton-line full" style="height:40px;margin-bottom:28px"></div>
+          <div class="skeleton-line full"></div>
+          <div class="skeleton-line medium"></div>
+          <div class="skeleton-line short"></div>
+        </div>
+      </div>
+
+      <!-- Result -->
+      <div class="status-result" id="statusResult" aria-live="polite">
+        <div class="order-card">
+          <div class="order-header">
+            <div>
+              <div class="order-num" id="resOrderNum"></div>
+              <div class="order-client-name" id="resClientName"></div>
+            </div>
+            <div class="status-badge" id="resStatusBadge">
+              <div class="dot"></div>
+              <span id="resStatusText"></span>
+            </div>
+          </div>
+
+          <!-- Progress bar -->
+          <div class="status-progress" id="progressWrap">
+            <div class="progress-steps" id="progressSteps">
+              <!-- Injected by JS -->
+            </div>
+          </div>
+
+          <!-- Details -->
+          <div class="order-details">
+            <div class="order-detail-item" id="resEventWrap">
+              <label>Тип мероприятия</label>
+              <span id="resEvent"></span>
+            </div>
+            <div class="order-detail-item" id="resDateWrap">
+              <label>Дата мероприятия</label>
+              <span id="resDate"></span>
+            </div>
+            <div class="order-detail-item" id="resModelWrap">
+              <label>Модель</label>
+              <span id="resModel"></span>
+            </div>
+            <div class="order-detail-item">
+              <label>Дата подачи</label>
+              <span id="resCreated"></span>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="order-actions">
+            <a href="/booking.html" class="btn-outline" style="font-size:0.8rem;padding:12px 24px;">Новая заявка</a>
+            <a href="/#contact" class="btn-primary" style="font-size:0.8rem;padding:12px 24px;">Связаться с нами</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="nav-logo" style="font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--gold)">NEVESTY <span style="color:var(--text)">MODELS</span></div>
+          <p>Профессиональное модельное агентство.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Агентство</h4>
+          <a href="/catalog.html">Каталог моделей</a>
+          <a href="/#services">Услуги</a>
+          <a href="/#about">О нас</a>
+        </div>
+        <div class="footer-col">
+          <h4>Клиентам</h4>
+          <a href="/booking.html">Оформить заявку</a>
+          <a href="/order-status.html">Статус заявки</a>
+        </div>
+        <div class="footer-col">
+          <h4>Связаться</h4>
+          <a href="tel:+78005550000">+7 (800) 555-00-00</a>
+          <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
+          <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>© 2024 Nevesty Models. Все права защищены.</p>
+      </div>
+    </div>
+  </footer>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="/js/main.js" defer></script>
+  <script>
+  const STATUS_LABELS = {
+    new:         'Новая заявка',
+    reviewing:   'На рассмотрении',
+    confirmed:   'Подтверждена',
+    in_progress: 'В работе',
+    completed:   'Завершена',
+    cancelled:   'Отменена',
+  };
+  const STATUS_ICONS = {
+    new:         '📋',
+    reviewing:   '🔍',
+    confirmed:   '✅',
+    in_progress: '⚡',
+    completed:   '🏁',
+    cancelled:   '❌',
+  };
+  const EVENT_LABELS = {
+    fashion_show: 'Показ мод',
+    photo_shoot:  'Фотосессия',
+    event:        'Мероприятие',
+    commercial:   'Коммерческая съёмка',
+    runway:       'Подиум',
+    other:        'Другое',
+  };
+
+  // Progress steps (excluding cancelled)
+  const PROGRESS_STEPS = [
+    { key: 'new',         label: 'Новая' },
+    { key: 'reviewing',   label: 'Проверка' },
+    { key: 'confirmed',   label: 'Одобрена' },
+    { key: 'in_progress', label: 'В работе' },
+    { key: 'completed',   label: 'Готово' },
+  ];
+
+  async function checkOrderStatus() {
+    const input = document.getElementById('orderInput');
+    const number = (input.value || '').trim().toUpperCase();
+    const errEl = document.getElementById('statusError');
+    const hintEl = document.getElementById('statusHint');
+    const skelEl = document.getElementById('statusSkeleton');
+    const resultEl = document.getElementById('statusResult');
+    const btn = document.getElementById('searchBtn');
+
+    errEl.textContent = '';
+    if (!number) {
+      errEl.textContent = 'Введите номер заявки';
+      return;
+    }
+
+    // Show skeleton
+    hintEl.style.display = 'none';
+    resultEl.classList.remove('visible');
+    skelEl.classList.add('visible');
+    btn.disabled = true;
+
+    try {
+      const res = await fetch(`/api/orders/status?number=${encodeURIComponent(number)}`);
+      const data = await res.json();
+
+      skelEl.classList.remove('visible');
+      btn.disabled = false;
+
+      if (!res.ok) {
+        errEl.textContent = data.error || 'Заявка не найдена';
+        hintEl.style.display = '';
+        return;
+      }
+
+      renderResult(data);
+    } catch (e) {
+      skelEl.classList.remove('visible');
+      btn.disabled = false;
+      errEl.textContent = 'Ошибка сети. Попробуйте позже.';
+      hintEl.style.display = '';
+    }
+  }
+
+  function renderResult(order) {
+    const resultEl = document.getElementById('statusResult');
+    const isCancelled = order.status === 'cancelled';
+
+    // Order number & client name
+    document.getElementById('resOrderNum').textContent = order.order_number;
+    document.getElementById('resClientName').textContent = order.client_name || '';
+
+    // Status badge
+    const badge = document.getElementById('resStatusBadge');
+    badge.className = 'status-badge status-' + (order.status || 'new');
+    badge.querySelector('.dot').style.background = '';
+    document.getElementById('resStatusText').textContent =
+      (STATUS_ICONS[order.status] || '') + ' ' + (STATUS_LABELS[order.status] || order.status);
+
+    // Progress bar
+    const stepsEl = document.getElementById('progressSteps');
+    if (isCancelled) {
+      stepsEl.innerHTML = `<div class="progress-step cancelled-step">
+        <div class="progress-step-circle">✕</div>
+        <div class="progress-step-label">Отменена</div>
+      </div>`;
+    } else {
+      const currentIdx = PROGRESS_STEPS.findIndex(s => s.key === order.status);
+      stepsEl.innerHTML = PROGRESS_STEPS.map((step, i) => {
+        let cls = '';
+        if (i < currentIdx) cls = 'done';
+        else if (i === currentIdx) cls = 'active';
+        const icon = cls === 'done' ? '✓' : (i + 1);
+        const lineClass = i < currentIdx ? 'done' : '';
+        const line = i < PROGRESS_STEPS.length - 1
+          ? `<div class="progress-line ${lineClass}"></div>` : '';
+        return `<div class="progress-step ${cls}">
+          <div class="progress-step-circle">${icon}</div>
+          <div class="progress-step-label">${step.label}</div>
+        </div>${line}`;
+      }).join('');
+    }
+
+    // Event type
+    const eventEl = document.getElementById('resEvent');
+    const eventWrap = document.getElementById('resEventWrap');
+    if (order.event_type) {
+      eventEl.textContent = EVENT_LABELS[order.event_type] || order.event_type;
+      eventWrap.style.display = '';
+    } else {
+      eventWrap.style.display = 'none';
+    }
+
+    // Event date
+    const dateEl = document.getElementById('resDate');
+    const dateWrap = document.getElementById('resDateWrap');
+    if (order.event_date) {
+      dateEl.textContent = new Date(order.event_date).toLocaleDateString('ru-RU', {
+        day: 'numeric', month: 'long', year: 'numeric'
+      });
+      dateWrap.style.display = '';
+    } else {
+      dateWrap.style.display = 'none';
+    }
+
+    // Model
+    const modelEl = document.getElementById('resModel');
+    const modelWrap = document.getElementById('resModelWrap');
+    if (order.model_name) {
+      modelEl.textContent = order.model_name;
+      modelWrap.style.display = '';
+    } else {
+      modelWrap.style.display = 'none';
+    }
+
+    // Created at
+    document.getElementById('resCreated').textContent = order.created_at
+      ? new Date(order.created_at).toLocaleDateString('ru-RU', {
+          day: 'numeric', month: 'long', year: 'numeric'
+        })
+      : '—';
+
+    resultEl.classList.add('visible');
+    resultEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // Check from URL query param on load
+  window.addEventListener('DOMContentLoaded', () => {
+    const params = new URLSearchParams(window.location.search);
+    const num = params.get('number') || params.get('n');
+    if (num) {
+      document.getElementById('orderInput').value = num.toUpperCase();
+      checkOrderStatus();
+    }
+
+    // Mobile menu
+    const burgerBtn = document.getElementById('burgerBtn');
+    const mobileMenu = document.getElementById('mobileMenu');
+    const mobileClose = document.getElementById('mobileClose');
+    if (burgerBtn) {
+      burgerBtn.addEventListener('click', () => mobileMenu.classList.add('open'));
+      mobileClose?.addEventListener('click', () => mobileMenu.classList.remove('open'));
+    }
+  });
+  </script>
+</body>
+</html>
