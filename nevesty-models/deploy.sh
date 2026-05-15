@@ -23,7 +23,7 @@ echo ""
 # 0. Git — pull latest changes from the current branch
 # --------------------------------------------------------------------------
 CURRENT_BRANCH="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD)"
-echo "[ 0/9 ] Pulling latest changes (branch: ${CURRENT_BRANCH})..."
+echo "[ 1/10 ] Pulling latest changes (branch: ${CURRENT_BRANCH})..."
 git -C "$SCRIPT_DIR" fetch origin
 git -C "$SCRIPT_DIR" pull origin "$CURRENT_BRANCH"
 echo "   ✔ Repository up to date ($(git -C "$SCRIPT_DIR" rev-parse --short HEAD))"
@@ -32,7 +32,7 @@ echo ""
 # --------------------------------------------------------------------------
 # 1. Check .env
 # --------------------------------------------------------------------------
-echo "[ 1/9 ] Checking .env file..."
+echo "[ 2/10 ] Checking .env file..."
 if [ ! -f ".env" ]; then
   echo "⚠️  WARNING: .env file not found!"
   echo "   Copy .env.example and fill in your values:"
@@ -47,35 +47,35 @@ fi
 # --------------------------------------------------------------------------
 # 2. npm install --production
 # --------------------------------------------------------------------------
-echo "[ 2/9 ] Installing production dependencies..."
+echo "[ 3/10 ] Installing production dependencies..."
 npm ci --omit=dev
 echo "   ✔ Dependencies installed"
 
 # --------------------------------------------------------------------------
 # 3. Create logs/ directory
 # --------------------------------------------------------------------------
-echo "[ 3/9 ] Ensuring logs/ directory exists..."
-mkdir -p logs
-echo "   ✔ logs/ ready"
+echo "[ 4/10 ] Ensuring runtime directories exist..."
+mkdir -p logs data backups uploads/thumbs uploads/models
+echo "   ✔ logs/ data/ backups/ uploads/ ready"
 
 # --------------------------------------------------------------------------
 # 4. Initialize database
 # --------------------------------------------------------------------------
-echo "[ 4/9 ] Initializing database..."
+echo "[ 5/10 ] Initializing database..."
 node database.js
 echo "   ✔ Database initialized"
 
 # --------------------------------------------------------------------------
 # 5. Run model seeder
 # --------------------------------------------------------------------------
-echo "[ 5/9 ] Seeding models..."
+echo "[ 6/10 ] Seeding models..."
 node tools/seed-models.js
 echo "   ✔ Models seeded"
 
 # --------------------------------------------------------------------------
 # 6. Check / install PM2
 # --------------------------------------------------------------------------
-echo "[ 6/9 ] Checking PM2..."
+echo "[ 7/10 ] Checking PM2..."
 if ! command -v pm2 &>/dev/null; then
   echo "   PM2 not found — installing globally..."
   npm install -g pm2
@@ -88,7 +88,7 @@ fi
 # --------------------------------------------------------------------------
 # 7. Start or reload via PM2
 # --------------------------------------------------------------------------
-echo "[ 7/9 ] Starting / reloading application..."
+echo "[ 8/10 ] Starting / reloading application..."
 # Check if any process from ecosystem.config.js is already managed by PM2
 if pm2 describe nevesty-models &>/dev/null 2>&1; then
   echo "   App already running in PM2 — reloading..."
@@ -103,7 +103,7 @@ fi
 # --------------------------------------------------------------------------
 # 8. Save PM2 process list
 # --------------------------------------------------------------------------
-echo "[ 8/9 ] Saving PM2 process list..."
+echo "[ 9/10 ] Saving PM2 process list..."
 pm2 save
 echo "   ✔ Process list saved"
 
@@ -143,7 +143,7 @@ echo ""
 # --------------------------------------------------------------------------
 # 9. PM2 startup hint
 # --------------------------------------------------------------------------
-echo "[ 9/9 ] PM2 startup configuration..."
+echo "[ 10/10 ] PM2 startup configuration..."
 echo ""
 echo "   To enable PM2 to auto-start on system reboot, run the command"
 echo "   printed by:"

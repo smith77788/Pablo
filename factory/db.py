@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DB_PATH = Path(__file__).parent / "factory.db"
+DB_PATH = Path(os.environ.get("FACTORY_DB_PATH", str(Path(__file__).parent / "factory.db")))
 
 
 def _now() -> str:
