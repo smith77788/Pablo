@@ -1519,3 +1519,32 @@ class TestExperimentSystemExtended:
         exp = {"conversion_a": 3.0, "conversion_b": 3.5, "created_at": "2024-01-01T00:00:00"}
         result = sys._rule_based_eval(exp)
         assert result is None
+
+
+class TestContentGeneratorExtended:
+    def test_telegram_post_agent_imports(self):
+        from factory.agents.content_generator import TelegramPostAgent
+        agent = TelegramPostAgent()
+        assert agent.name == "TelegramPostAgent"
+
+    def test_generate_post_fallback(self, mocker):
+        from factory.agents.content_generator import TelegramPostAgent
+        agent = TelegramPostAgent()
+        mocker.patch.object(agent, 'think_json', return_value="invalid")
+        result = agent.generate_post("promo")
+        assert isinstance(result, dict)
+        assert "text" in result
+
+    def test_faq_generator_imports(self):
+        from factory.agents.content_generator import FAQGeneratorAgent
+        agent = FAQGeneratorAgent()
+        assert agent is not None
+
+    def test_generate_faq_item_fallback(self, mocker):
+        from factory.agents.content_generator import FAQGeneratorAgent
+        agent = FAQGeneratorAgent()
+        mocker.patch.object(agent, 'think_json', return_value={})
+        result = agent.generate_faq_item("Test question?")
+        assert isinstance(result, dict)
+        assert "question" in result
+        assert "answer" in result
