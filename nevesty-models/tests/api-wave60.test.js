@@ -130,13 +130,15 @@ describe('GET /api/admin/models/:id/availability (admin)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('Admin endpoint: non-existent model ID returns 200 with empty busy_dates', async () => {
+  it('Admin endpoint: non-existent model ID returns 404', async () => {
+    // Updated Wave 62: endpoint now returns 404 for non-existent models instead of
+    // silently returning an empty busy_dates list, which was misleading.
     if (!adminToken) return;
     const res = await request(app)
       .get('/api/admin/models/999999/availability')
       .set('Authorization', `Bearer ${adminToken}`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body.busy_dates)).toBe(true);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Model not found');
   });
 });
 

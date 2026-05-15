@@ -9327,11 +9327,30 @@ function _registerNewFeatures() {
       // Build a LIKE-search covering all variants
       const whereClauses = phoneVariants.map(() => 'phone LIKE ?').join(' OR ');
       const likeParams   = phoneVariants.map(p => `%${p}%`);
-      const model = await get(`SELECT id, name FROM models WHERE (${whereClauses}) LIMIT 1`, likeParams).catch(() => null);
+      const model = await get(`SELECT id, name, telegram_chat_id FROM models WHERE (${whereClauses}) LIMIT 1`, likeParams).catch(() => null);
       if (!model) {
         await clearSession(chatId);
         return safeSend(chatId,
           '❌ *Телефон не найден в базе моделей\\.*\n\nОбратитесь к администратору агентства\\.',
+          { parse_mode: 'MarkdownV2' }
+        );
+      }
+      // Guard against one user silently overwriting another user's linked account.
+      // If the model already has a DIFFERENT telegram_chat_id, block re-registration
+      // and notify admins so they can resolve the conflict manually.
+      if (model.telegram_chat_id && String(model.telegram_chat_id) !== String(chatId)) {
+        await clearSession(chatId);
+        const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+        for (const adminId of adminIds) {
+          safeSend(adminId,
+            `⚠️ Попытка повторной регистрации модели *${esc(model.name)}*\\.\n` +
+            `Новый chatId: \`${chatId}\`, уже привязан: \`${model.telegram_chat_id}\`\\.\n` +
+            `Если это законный запрос — сбросьте вручную через панель администратора\\.`,
+            { parse_mode: 'MarkdownV2' }
+          ).catch(() => {});
+        }
+        return safeSend(chatId,
+          '⚠️ *Этот номер уже привязан к другому аккаунту Telegram\\.*\n\nОбратитесь к администратору агентства для смены привязки\\.',
           { parse_mode: 'MarkdownV2' }
         );
       }

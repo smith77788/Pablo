@@ -686,7 +686,9 @@ const _notifReadSet = new Set(); // lightweight: reset on restart
 
 router.get('/admin/notifications', auth, async (req, res, next) => {
   try {
-    const statusFilter = req.query.status || 'all'; // 'unread' | 'read' | 'all'
+    // Whitelist status values to avoid arbitrary strings flowing through the handler.
+    const VALID_STATUS = ['unread', 'read', 'all'];
+    const statusFilter = VALID_STATUS.includes(req.query.status) ? req.query.status : 'all';
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
 
     const [newOrders, pendingReviews, unreadOrders] = await Promise.all([
@@ -759,16 +761,9 @@ router.post('/admin/notifications/read', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// PATCH /api/admin/notifications/:id/read — mark single notification as read
-router.patch('/admin/notifications/:id/read', auth, async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    _notifReadSet.add(id);
-    res.json({ success: true });
-  } catch (e) { next(e); }
-});
-
 // PATCH /api/admin/notifications/read-all — mark all notifications as read
+// IMPORTANT: this route must be registered BEFORE /:id/read so Express doesn't
+// shadow it with the dynamic segment (id = "read-all").
 router.patch('/admin/notifications/read-all', auth, async (req, res, next) => {
   try {
     // Fetch current notifications to get all IDs, then mark them all
@@ -792,6 +787,20 @@ router.patch('/admin/notifications/read-all', auth, async (req, res, next) => {
     unreadOrders.forEach(o => _notifReadSet.add(`msg_${o.id}`));
     const count = newOrders.length + pendingReviews.length + unreadOrders.length;
     res.json({ success: true, count });
+  } catch (e) { next(e); }
+});
+
+// PATCH /api/admin/notifications/:id/read — mark single notification as read
+router.patch('/admin/notifications/:id/read', auth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    // Validate that id looks like a known notification id prefix to prevent
+    // arbitrary strings from polluting the in-memory read-set.
+    if (!id || !/^(order_new_|review_|msg_)\d+$/.test(id)) {
+      return res.status(400).json({ error: 'Invalid notification id' });
+    }
+    _notifReadSet.add(id);
+    res.json({ success: true });
   } catch (e) { next(e); }
 });
 
@@ -1316,9 +1325,20 @@ router.get('/admin/models/:id/availability', auth, async (req, res, next) => {
       return res.status(400).json({ error: 'month must be YYYY-MM' });
     }
     const [yr, mo] = targetMonth.split('-').map(Number);
+    // Validate month is a real calendar month (01-12); JavaScript Date overflows
+    // silently for values like 2024-13, producing wrong lastDay and empty results.
+    if (mo < 1 || mo > 12) {
+      return res.status(400).json({ error: 'month value must be between 01 and 12' });
+    }
     const firstDay = `${targetMonth}-01`;
     const lastDay = new Date(yr, mo, 0);
     const lastDayStr = `${targetMonth}-${String(lastDay.getDate()).padStart(2, '0')}`;
+
+    // Check that the model exists before returning (avoids silently treating
+    // a non-existent model as one with no busy dates).
+    const modelExists = await get('SELECT id FROM models WHERE id=?', [modelId]);
+    if (!modelExists) return res.status(404).json({ error: 'Model not found' });
+
     const rows = await query(
       `SELECT busy_date, reason FROM model_busy_dates WHERE model_id=? AND busy_date BETWEEN ? AND ? ORDER BY busy_date`,
       [modelId, firstDay, lastDayStr]
@@ -1592,6 +1612,11 @@ router.get('/models/:id/availability', async (req, res, next) => {
         return res.status(400).json({ error: 'month must be YYYY-MM' });
       }
       const [yr, mo] = targetMonth.split('-').map(Number);
+      // Reject out-of-range months (e.g. 2024-13, 2024-00) — JS Date overflows
+      // silently and would produce an invalid lastDay string.
+      if (mo < 1 || mo > 12) {
+        return res.status(400).json({ error: 'month value must be between 01 and 12' });
+      }
       const firstDay = `${targetMonth}-01`;
       const lastDay = new Date(yr, mo, 0); // last day of month
       const lastDayStr = `${targetMonth}-${String(lastDay.getDate()).padStart(2, '0')}`;
@@ -1608,7 +1633,9 @@ router.get('/models/:id/availability', async (req, res, next) => {
     }
     const busy  = await get('SELECT id FROM model_busy_dates WHERE model_id=? AND busy_date=?', [modelId, date]);
     const model = await get('SELECT available FROM models WHERE id=?', [modelId]);
-    res.json({ available: !busy && model && model.available === 1 });
+    // If model doesn't exist return 404 rather than { available: false } which is misleading.
+    if (!model) return res.status(404).json({ error: 'Model not found' });
+    res.json({ available: !busy && model.available === 1 });
   } catch (e) { next(e); }
 });
 
@@ -4089,6 +4116,65 @@ router.get('/admin/analytics/repeat-clients', auth, async (req, res) => {
     const newClients = (total?.n || 0) - (repeat?.n || 0);
     res.json({ ok: true, data: { total: total?.n || 0, repeat: repeat?.n || 0, new: newClients } });
   } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ─── Analytics: Heatmap (orders per day) ─────────────────────────────────────
+router.get('/admin/analytics/heatmap', auth, async (req, res, next) => {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const rows = await query(
+      `SELECT strftime('%Y-%m-%d', created_at) as day, COUNT(*) as cnt
+       FROM orders
+       WHERE strftime('%Y', created_at) = ?
+       GROUP BY day`,
+      [String(year)]
+    );
+    const heatmap = {};
+    rows.forEach(r => { heatmap[r.day] = r.cnt; });
+    res.json({ ok: true, heatmap, year });
+  } catch (e) { next(e); }
+});
+
+// ─── Analytics: Client LTV (top clients by total budget) ─────────────────────
+router.get('/admin/analytics/client-ltv', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
+    const clients = await query(`
+      SELECT
+        client_name as name,
+        client_phone as phone,
+        COUNT(*) as total_orders,
+        SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN budget GLOB '[0-9]*' THEN CAST(REPLACE(REPLACE(budget,'₽',''),' ','') AS REAL) ELSE 0 END) as total_budget
+      FROM orders
+      WHERE client_name IS NOT NULL AND client_name != ''
+      GROUP BY LOWER(TRIM(client_phone))
+      HAVING total_orders > 0
+      ORDER BY total_budget DESC, total_orders DESC
+      LIMIT ?
+    `, [limit]);
+    res.json({ ok: true, top_clients: clients.map(c => ({ ...c, total_budget: Math.round(c.total_budget || 0) })) });
+  } catch (e) { next(e); }
+});
+
+// ─── Analytics: Hourly distribution of orders ────────────────────────────────
+router.get('/admin/analytics/hourly', auth, async (req, res, next) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 90));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const rows = await query(
+      `SELECT CAST(strftime('%H', created_at) AS INTEGER) as hour, COUNT(*) as cnt
+       FROM orders
+       WHERE created_at >= ?
+       GROUP BY hour
+       ORDER BY hour ASC`,
+      [since]
+    );
+    // Fill all 24 hours
+    const hours = Array.from({ length: 24 }, (_, i) => ({ hour: i, cnt: 0 }));
+    rows.forEach(r => { if (r.hour >= 0 && r.hour < 24) hours[r.hour].cnt = r.cnt; });
+    res.json({ ok: true, hours, days });
+  } catch (e) { next(e); }
 });
 
 // ─── Client Cabinet ───────────────────────────────────────────────────────────
