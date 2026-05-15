@@ -2117,33 +2117,45 @@ function _bcSegmentLabel(segment) {
   if (segment === 'all')       return 'Все клиенты';
   if (segment === 'completed') return 'Завершённые заявки';
   if (segment === 'new')       return 'Новые (без заявок)';
+  if (segment === 'active')    return 'Активные (30 дней)';
   if (segment && segment.startsWith('city:')) return `Город: ${segment.slice(5)}`;
   return 'Все клиенты';
 }
 
+// Filter out admin IDs from broadcast recipients
+function _filterAdminRecipients(clients) {
+  return clients.filter(c => !ADMIN_IDS.includes(String(c.client_chat_id)));
+}
+
 async function _getBroadcastClients(segment) {
   try {
+    let rows = [];
     if (segment === 'completed') {
-      return await query(
+      rows = await query(
         "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND status='completed'"
       ).catch(() => []);
-    }
-    if (segment && segment.startsWith('city:')) {
+    } else if (segment === 'active') {
+      // Clients who had any order in the last 30 days
+      rows = await query(
+        "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND created_at >= datetime('now', '-30 days')"
+      ).catch(() => []);
+    } else if (segment && segment.startsWith('city:')) {
       const city = segment.slice(5);
-      return await query(
+      rows = await query(
         "SELECT DISTINCT o.client_chat_id FROM orders o JOIN models m ON o.model_id=m.id WHERE m.city=? AND o.client_chat_id IS NOT NULL AND o.client_chat_id != ''",
         [city]
       ).catch(() => []);
-    }
-    if (segment === 'new') {
-      return await query(
+    } else if (segment === 'new') {
+      rows = await query(
         "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND client_chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE status IN ('confirmed','in_progress','completed') AND client_chat_id IS NOT NULL AND client_chat_id != '')"
       ).catch(() => []);
+    } else {
+      // default: all
+      rows = await query(
+        "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''"
+      ).catch(() => []);
     }
-    // default: all
-    return await query(
-      "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''"
-    ).catch(() => []);
+    return _filterAdminRecipients(rows);
   } catch { return []; }
 }
 
@@ -2154,9 +2166,10 @@ async function _bcCountRecipients(segment) {
 
 async function showBroadcast(chatId) {
   if (!isAdmin(chatId)) return;
-  const [allCount, completedCount, newCount] = await Promise.all([
+  const [allCount, completedCount, activeCount, newCount] = await Promise.all([
     _bcCountRecipients('all'),
     _bcCountRecipients('completed'),
+    _bcCountRecipients('active'),
     _bcCountRecipients('new'),
   ]);
 
@@ -2166,12 +2179,15 @@ async function showBroadcast(chatId) {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         [
-          { text: `👥 Всем клиентам (${allCount})`,     callback_data: 'adm_bc_seg_all'       },
-          { text: `✅ Завершённые (${completedCount})`,  callback_data: 'adm_bc_seg_completed' },
+          { text: `👥 Всем клиентам (${allCount})`,      callback_data: 'adm_bc_seg_all'       },
+          { text: `✅ Завершённые (${completedCount})`,   callback_data: 'adm_bc_seg_completed' },
         ],
         [
-          { text: '🏙 По городу',                       callback_data: 'adm_bc_seg_city'      },
-          { text: `🆕 Новые (${newCount})`,              callback_data: 'adm_bc_seg_new'       },
+          { text: `🕐 Активные 30д (${activeCount})`,    callback_data: 'adm_bc_seg_active'    },
+          { text: `🆕 Новые (${newCount})`,               callback_data: 'adm_bc_seg_new'       },
+        ],
+        [
+          { text: '🏙 По городу',                        callback_data: 'adm_bc_seg_city'      },
         ],
         [{ text: '← Назад', callback_data: 'admin_menu' }],
       ]}
@@ -2284,28 +2300,50 @@ async function sendBroadcast(chatId, text) {
   return _askBroadcastPhoto(chatId);
 }
 
+async function _sendOneBroadcastMsg(cid, photoId, text) {
+  const caption = text
+    ? `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}`
+    : '📢 *Nevesty Models*';
+  const MAX_RETRIES = 3;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      if (photoId) {
+        await bot.sendPhoto(cid, photoId, { caption: caption.slice(0, 1020), parse_mode: 'MarkdownV2' });
+      } else {
+        await bot.sendMessage(cid, caption, { parse_mode: 'MarkdownV2' });
+      }
+      return 'ok';
+    } catch (err) {
+      // Handle Telegram 429 Too Many Requests — wait retry_after seconds then retry
+      const retryAfter = err?.response?.parameters?.retry_after
+        || (err?.message && /retry after (\d+)/i.test(err.message) ? parseInt(err.message.match(/retry after (\d+)/i)[1]) : null);
+      if (retryAfter && attempt < MAX_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, (retryAfter + 1) * 1000));
+        continue;
+      }
+      return 'fail';
+    }
+  }
+  return 'fail';
+}
+
 async function doSendBroadcast(chatId) {
   const sess = await getSession(chatId);
   const sd   = sessionData(sess);
   const recipients = sd.broadcastRecipients || [];
   const text = sd.broadcastText || '';
   const photoId = sd.broadcastPhotoId || null;
+
+  // Notify admin that sending started
+  await safeSend(chatId, `📤 Начинаю рассылку для *${recipients.length}* получателей\\.\\.\\.`, { parse_mode: 'MarkdownV2' }).catch(() => {});
+
   let sent = 0, failed = 0;
   for (const cid of recipients) {
-    try {
-      if (photoId) {
-        await bot.sendPhoto(cid, photoId, {
-          caption: text ? `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}` : '📢 *Nevesty Models*',
-          parse_mode: 'MarkdownV2',
-        });
-      } else {
-        await bot.sendMessage(cid, `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}`, { parse_mode: 'MarkdownV2' });
-      }
-      sent++;
-    } catch { failed++; }
-    await new Promise(r => setTimeout(r, 60)); // rate limit
+    const result = await _sendOneBroadcastMsg(cid, photoId, text);
+    if (result === 'ok') sent++; else failed++;
+    await new Promise(r => setTimeout(r, 10)); // 10ms delay between sends
   }
-  await logAdminAction(chatId, 'broadcast', null, null, { recipients: sent });
+  await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, segment: sd.broadcastSegment });
   await clearSession(chatId);
   return safeSend(chatId,
     `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*`,
