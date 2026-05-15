@@ -1304,6 +1304,16 @@ async function showAdminOrder(chatId, orderId) {
     if (o.client_chat_id) {
       keyboard.push([{ text: '⚡ Быстрые ответы', callback_data: `adm_qr_${o.client_chat_id}` }]);
     }
+    // Invoice button — shown for confirmed orders with a client chat ID
+    if (o.status === 'confirmed' && o.client_chat_id) {
+      const invoiceLabel = o.invoice_sent_at ? '💳 Счёт выставлен повторно' : '💳 Выставить счёт';
+      keyboard.push([{ text: invoiceLabel, callback_data: `adm_invoice_${orderId}` }]);
+    }
+    // Paid badge row for paid orders
+    if (o.paid_at) {
+      const paidDt = new Date(o.paid_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      text += `\n💰 *Оплачено:* ${esc(paidDt)}`;
+    }
     keyboard.push([{ text: '← К заявкам', callback_data: 'adm_orders__0' }]);
 
     return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } });
@@ -3319,6 +3329,23 @@ async function adminChangeStatus(chatId, orderId, newStatus) {
       await checkAndGrantAchievements(order.client_chat_id).catch(()=>{});
     }
 
+    // When completing a confirmed order, ask about payment status
+    if (newStatus === 'completed' && oldStatus === 'confirmed') {
+      try {
+        await safeSend(chatId,
+          `✅ Заявка №${esc(order?.order_number || String(orderId))} завершена\\.\n\n*Получена ли оплата?*`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[
+              { text: '✅ Да, оплачено',  callback_data: `adm_paid_${orderId}`      },
+              { text: '⏳ Ждём оплаты',   callback_data: `adm_await_pay_${orderId}` },
+            ]] }
+          }
+        );
+        return;
+      } catch {}
+    }
+
     return showAdminOrder(chatId, orderId);
   } catch (e) { console.error('[Bot] adminChangeStatus:', e.message); }
 }
@@ -3710,7 +3737,7 @@ function initBot(app) {
     }
     if (data.startsWith('my_order_')) {
       const id = parseInt(data.replace('my_order_', ''));
-      await bot.answerCallbackQuery(callbackQuery.id).catch(() => {});
+      await bot.answerCallbackQuery(q.id).catch(() => {});
       return showClientOrder(chatId, id);
     }
 
@@ -3994,6 +4021,50 @@ function initBot(app) {
     if (data.startsWith('adm_review_'))   { if (!isAdmin(chatId)) return; return adminChangeStatus(chatId, parseInt(data.replace('adm_review_','')), 'reviewing'); }
     if (data.startsWith('adm_reject_'))   { if (!isAdmin(chatId)) return; return adminChangeStatus(chatId, parseInt(data.replace('adm_reject_','')), 'cancelled'); }
     if (data.startsWith('adm_complete_')) { if (!isAdmin(chatId)) return; return adminChangeStatus(chatId, parseInt(data.replace('adm_complete_','')), 'completed'); }
+
+    // ── Invoice: send payment info to client
+    if (data.startsWith('adm_invoice_')) {
+      if (!isAdmin(chatId)) return;
+      try {
+        const orderId = parseInt(data.replace('adm_invoice_', ''));
+        const order = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(() => null);
+        if (!order) return safeSend(chatId, '❌ Заявка не найдена');
+        if (!order.client_chat_id) return safeSend(chatId, '❌ У клиента нет Telegram чата');
+        const budgetStr = order.budget ? String(order.budget) : 'уточняется';
+        const invoiceText =
+          `💳 *Счёт на оплату*\n\n` +
+          `Заявка №${esc(order.order_number)}\n` +
+          `Сумма: ${esc(budgetStr)} ₽\n\n` +
+          `Для оплаты свяжитесь с менеджером или оплатите по реквизитам:\n` +
+          `📞 \\+7 \\(999\\) 123\\-45\\-67\n` +
+          `💳 Карта: 1234 5678 9012 3456\n\n` +
+          `После оплаты статус заявки будет изменён\\.`;
+        await bot.sendMessage(order.client_chat_id, invoiceText, { parse_mode: 'MarkdownV2' }).catch(() => {});
+        await run('UPDATE orders SET invoice_sent_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?', [orderId]).catch(() => {});
+        return safeSend(chatId, '✅ Счёт выставлен клиенту');
+      } catch (e) { console.error('[Bot] adm_invoice_:', e.message); }
+    }
+
+    // ── Payment confirmation: mark as paid
+    if (data.startsWith('adm_paid_')) {
+      if (!isAdmin(chatId)) return;
+      try {
+        const orderId = parseInt(data.replace('adm_paid_', ''));
+        await run('UPDATE orders SET paid_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?', [orderId]).catch(() => {});
+        await safeSend(chatId, '💰 Оплата зафиксирована\\.', { parse_mode: 'MarkdownV2' });
+        return showAdminOrder(chatId, orderId);
+      } catch (e) { console.error('[Bot] adm_paid_:', e.message); }
+    }
+
+    // ── Payment confirmation: still awaiting
+    if (data.startsWith('adm_await_pay_')) {
+      if (!isAdmin(chatId)) return;
+      try {
+        const orderId = parseInt(data.replace('adm_await_pay_', ''));
+        await safeSend(chatId, '⏳ Статус оплаты: ожидаем\\.', { parse_mode: 'MarkdownV2' });
+        return showAdminOrder(chatId, orderId);
+      } catch (e) { console.error('[Bot] adm_await_pay_:', e.message); }
+    }
 
     if (data.startsWith('adm_contact_')) {
       if (!isAdmin(chatId)) return;

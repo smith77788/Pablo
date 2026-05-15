@@ -2092,6 +2092,25 @@ router.patch('/admin/orders/:id/note', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Order payment status patch ───────────────────────────────────────────────
+router.patch('/admin/orders/:id/payment', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const { paid } = req.body;
+    if (paid !== true && paid !== false) return res.status(400).json({ error: 'paid must be boolean' });
+    const order = await get('SELECT id FROM orders WHERE id=?', [id]);
+    if (!order) return res.status(404).json({ error: 'Not found' });
+    if (paid) {
+      await run(`UPDATE orders SET paid_at=datetime('now'), updated_at=CURRENT_TIMESTAMP WHERE id=?`, [id]);
+    } else {
+      await run(`UPDATE orders SET paid_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`, [id]);
+    }
+    const updated = await get('SELECT id, paid_at FROM orders WHERE id=?', [id]);
+    res.json({ ok: true, paid_at: updated.paid_at });
+  } catch (e) { next(e); }
+});
+
 // ─── Order status patch ────────────────────────────────────────────────────────
 router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
   try {

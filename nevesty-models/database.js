@@ -447,6 +447,9 @@ async function initDatabase() {
   await run(`ALTER TABLE orders ADD COLUMN payment_url TEXT DEFAULT NULL`).catch(() => {});
   await run(`ALTER TABLE orders ADD COLUMN payment_amount INTEGER DEFAULT NULL`).catch(() => {});
 
+  // Invoice sent tracking column (migration v8c)
+  await run(`ALTER TABLE orders ADD COLUMN invoice_sent_at TEXT DEFAULT NULL`).catch(() => {});
+
   // Internal note column for quick manager notes (migration v9)
   await run(`ALTER TABLE orders ADD COLUMN internal_note TEXT`).catch(err => { if (err && !err.message.includes('duplicate')) console.error(err); });
 
