@@ -251,6 +251,14 @@ async function initDatabase() {
     await run('INSERT OR IGNORE INTO bot_settings (key,value) VALUES (?,?)', [key, value]);
   }
 
+  // Blocked clients
+  await run(`CREATE TABLE IF NOT EXISTS blocked_clients (
+    chat_id INTEGER PRIMARY KEY,
+    reason TEXT,
+    blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    blocked_by INTEGER
+  )`).catch(()=>{});
+
   // Client notification preferences
   await run(`CREATE TABLE IF NOT EXISTS client_prefs (
     chat_id INTEGER PRIMARY KEY,
