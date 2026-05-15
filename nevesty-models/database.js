@@ -434,7 +434,7 @@ async function initDatabase() {
 
   // Additional performance indexes
   const perfIndexes = [
-    ['idx_orders_chat_id',          'CREATE INDEX IF NOT EXISTS idx_orders_chat_id ON orders(chat_id)'],
+    ['idx_orders_chat_id',          'CREATE INDEX IF NOT EXISTS idx_orders_chat_id ON orders(client_chat_id)'],
     ['idx_orders_created_at',       'CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC)'],
     ['idx_orders_status_created',   'CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at DESC)'],
     ['idx_models_category_active',  'CREATE INDEX IF NOT EXISTS idx_models_category_active ON models(category) WHERE archived=0'],
