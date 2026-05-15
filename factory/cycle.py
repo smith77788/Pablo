@@ -1341,6 +1341,17 @@ def run_cycle() -> dict:
         "nevesty_kpis": nevesty_kpis,
     }
 
+    # Define db_path and db_conn for use throughout run_cycle
+    db_path = "/home/user/Pablo/nevesty-models/data.db"
+    db_conn = None
+    try:
+        import sqlite3 as _sqlite3_main
+        if os.path.exists(db_path):
+            db_conn = _sqlite3_main.connect(db_path)
+            db_conn.row_factory = _sqlite3_main.Row
+    except Exception as _dbc_err:
+        logger.warning("[Cycle] Could not open db_conn: %s", _dbc_err)
+
     # Phase 5.7 — METRICS COLLECTION via MetricsCollectorAgent
     try:
         from factory.agents.metrics_collector import MetricsCollectorAgent
@@ -1541,6 +1552,7 @@ def run_cycle() -> dict:
             summary_lines.append(f"⚙️ Operations: {', '.join(ops_result.get('roles_used', []))}")
     except Exception as e:
         logger.error("Operations dept phase error: %s", e)
+        results["phases"].setdefault("operations", {"error": str(e)})
 
     # Tech Department
     try:
@@ -1559,6 +1571,7 @@ def run_cycle() -> dict:
             summary_lines.append(f"🛠️ Tech: {', '.join(tech_result.get('roles_used', []))}")
     except Exception as e:
         logger.error("Tech dept phase error: %s", e)
+        results["phases"].setdefault("tech", {"error": str(e)})
 
     # ════════════════════════════════════════════════════════════════
     # PHASE 6 — SALES + CREATIVE + CUSTOMER SUCCESS DEPARTMENTS
@@ -1582,6 +1595,7 @@ def run_cycle() -> dict:
             summary_lines.append(f"💼 Sales: {', '.join(sales_result.get('roles_used', []))}")
     except Exception as e:
         logger.error("Sales dept phase error: %s", e)
+        results["phases"].setdefault("sales", {"error": str(e)})
 
     # Creative Department
     try:
@@ -1600,6 +1614,7 @@ def run_cycle() -> dict:
             summary_lines.append(f"🎨 Creative: {', '.join(creative_result.get('roles_used', []))}")
     except Exception as e:
         logger.error("Creative dept phase error: %s", e)
+        results["phases"].setdefault("creative", {"error": str(e)})
 
     # Customer Success Department
     try:
@@ -1618,6 +1633,7 @@ def run_cycle() -> dict:
             summary_lines.append(f"🤝 CustomerSuccess: {', '.join(cs_result.get('roles_used', []))}")
     except Exception as e:
         logger.error("Customer Success dept phase error: %s", e)
+        results["phases"].setdefault("customer_success", {"error": str(e)})
 
     results["new_actions"] = total_new_actions
     results["phases"]["departments"] = {
@@ -1689,6 +1705,7 @@ def run_cycle() -> dict:
             summary_lines.append(f"💰 Finance: {', '.join(finance_result.get('roles_used', []))}")
     except Exception as e:
         logger.error("Finance dept phase error: %s", e)
+        results["phases"].setdefault("finance", {"error": str(e)})
 
     # Research Department
     try:
@@ -1705,6 +1722,7 @@ def run_cycle() -> dict:
             summary_lines.append(f"🔬 Research: {', '.join(research_result.get('roles_used', []))}")
     except Exception as e:
         logger.error("Research dept phase error: %s", e)
+        results["phases"].setdefault("research", {"error": str(e)})
 
     # ════════════════════════════════════════════════════════════════
     # PHASE 7b — FINANCE + RESEARCH DEPARTMENTS (heuristic, always runs)
@@ -3351,6 +3369,66 @@ def run_cycle() -> dict:
     except Exception as e:
         results["phases"]["content_dept"] = {"status": "error", "error": str(e)}
         logger.error("Phase 30 Content Dept error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 31 — DEEP RESEARCH ANALYSIS (run_phase_research standalone)
+    # Runs every cycle; uses MarketResearcher/CompetitorAnalyst/TrendSpotter/InsightSynthesizer
+    # Supplements Phase 23 (inline research) with a full DB-driven analysis.
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🔬 PHASE 31: DEEP RESEARCH ANALYSIS")
+    try:
+        _phase31_result = run_phase_research(db_path)
+        results["phases"]["research_deep"] = _phase31_result
+        if _phase31_result.get("status") == "ok":
+            summary_lines.append(
+                f"🔬 Deep Research (Phase 31): segment={_phase31_result.get('top_segment')}, "
+                f"opp_score={_phase31_result.get('market_opportunity_score', 0)}, "
+                f"alerts={len(_phase31_result.get('strategic_alerts', []))}"
+            )
+            logger.info(
+                "[Phase31] Deep Research: segment=%s, opp_score=%s, alerts=%d, conf=%s",
+                _phase31_result.get("top_segment"),
+                _phase31_result.get("market_opportunity_score", 0),
+                len(_phase31_result.get("strategic_alerts", [])),
+                _phase31_result.get("confidence"),
+            )
+        else:
+            logger.warning("[Phase31] Deep Research returned error: %s", _phase31_result.get("error"))
+    except Exception as e:
+        results["phases"]["research_deep"] = {"status": "error", "error": str(e)}
+        logger.error("Phase 31 Deep Research error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 32 — DEEP FINANCE ANALYSIS (run_phase_finance standalone)
+    # Runs every cycle; uses FinanceDepartment with full DB revenue history.
+    # Supplements Phase 22 (inline finance) with a DB-driven forecast.
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n💰 PHASE 32: DEEP FINANCE ANALYSIS")
+    try:
+        _phase32_result = run_phase_finance(db_path)
+        results["phases"]["finance_deep"] = _phase32_result
+        if _phase32_result.get("status") == "ok":
+            summary_lines.append(
+                f"💰 Deep Finance (Phase 32): trend={_phase32_result.get('trend')}, "
+                f"confidence={_phase32_result.get('confidence')}"
+            )
+            logger.info(
+                "[Phase32] Deep Finance: trend=%s, confidence=%s",
+                _phase32_result.get("trend"),
+                _phase32_result.get("confidence"),
+            )
+        else:
+            logger.warning("[Phase32] Deep Finance returned error: %s", _phase32_result.get("error"))
+    except Exception as e:
+        results["phases"]["finance_deep"] = {"status": "error", "error": str(e)}
+        logger.error("Phase 32 Deep Finance error: %s", e)
+
+    # Close shared db_conn if it was opened
+    try:
+        if db_conn:
+            db_conn.close()
+    except Exception:
+        pass
 
     # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
