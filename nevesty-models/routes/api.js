@@ -7258,13 +7258,18 @@ router.post('/payments/webhook', express.raw({ type: 'application/json' }), asyn
           'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by, notes) VALUES (?,?,?,?,?)',
           [event.orderId, ord.status, 'confirmed', 'payments_webhook', `Payment ID: ${event.paymentId}`]
         ).catch(() => {});
-        // Notify client via bot if available
-        if (ord.client_chat_id) {
-          process.emit('payment:confirmed', {
-            orderId: event.orderId,
-            chatId: ord.client_chat_id,
-            amount: event.amount,
-          });
+        // Notify client and admin via bot if available
+        if (botInstance && ord.client_chat_id && typeof botInstance.notifyPaymentSuccess === 'function') {
+          botInstance.notifyPaymentSuccess(ord.client_chat_id, ord.order_number).catch(() => {});
+        }
+        if (botInstance?.notifyAdmin) {
+          const _escMd = s => String(s).replace(/[_*[\]()~`>#+=|{}.!\-\\]/g, '\\$&');
+          botInstance
+            .notifyAdmin(
+              `💳 *Оплата получена\\!* Заявка ${_escMd(ord.order_number)}\nКлиент: ${_escMd(ord.client_name)}`,
+              { parse_mode: 'MarkdownV2' }
+            )
+            .catch(() => {});
         }
       }
     }
@@ -7475,7 +7480,8 @@ function requireClientAuth(req, res, next) {
 }
 
 // POST /api/cabinet/login — direct phone login (no OTP), returns 7-day JWT
-router.post('/cabinet/login', byPhoneLimiter, async (req, res, next) => {
+// Uses authLimiter (5 attempts per 15 min) instead of byPhoneLimiter for proper brute-force protection
+router.post('/cabinet/login', authLimiter, async (req, res, next) => {
   try {
     const raw = (req.body.phone || '').trim();
     if (!raw) return res.status(400).json({ ok: false, error: 'Phone required' });

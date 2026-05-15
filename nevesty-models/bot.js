@@ -6880,7 +6880,7 @@ function initBot(app) {
       return adminChangeStatus(chatId, parseInt(data.replace('adm_complete_', '')), 'completed');
     }
 
-    // ── Invoice: send payment info to client
+    // ── Invoice: send payment link to client (admin action)
     if (data.startsWith('adm_invoice_')) {
       if (!isAdmin(chatId)) return;
       try {
@@ -6889,21 +6889,51 @@ function initBot(app) {
         if (!order) return safeSend(chatId, '❌ Заявка не найдена');
         if (!order.client_chat_id) return safeSend(chatId, '❌ У клиента нет Telegram чата');
         const budgetStr = order.budget ? String(order.budget) : 'уточняется';
-        const invoiceText =
-          `💳 *Счёт на оплату*\n\n` +
-          `Заявка №${esc(order.order_number)}\n` +
-          `Сумма: ${esc(budgetStr)} ₽\n\n` +
-          `Для оплаты свяжитесь с менеджером или оплатите по реквизитам:\n` +
-          `📞 \\+7 \\(999\\) 123\\-45\\-67\n` +
-          `💳 Карта: 1234 5678 9012 3456\n\n` +
-          `После оплаты статус заявки будет изменён\\.`;
-        await bot.sendMessage(order.client_chat_id, invoiceText, { parse_mode: 'MarkdownV2' }).catch(() => {});
-        await run('UPDATE orders SET invoice_sent_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?', [
-          orderId,
-        ]).catch(() => {});
-        return safeSend(chatId, '✅ Счёт выставлен клиенту');
+
+        // Create payment link via YooKassa (or dev mock)
+        const { createPayment } = require('./services/payments');
+        const returnUrl = `${SITE_URL.replace(/\/$/, '')}/order-status.html?id=${order.id}`;
+        const result = await createPayment(order, returnUrl);
+
+        // Save payment ID to DB
+        await run(
+          'UPDATE orders SET payment_id=?, payment_status=?, invoice_sent_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+          [result.paymentId, 'pending', orderId]
+        ).catch(() => {});
+
+        if (result.confirmationUrl) {
+          // Send payment link to client
+          const invoiceText =
+            `💳 *Счёт на оплату*\n\n` +
+            `Заявка №${esc(order.order_number)}\n` +
+            `Сумма: ${esc(budgetStr)} ₽\n\n` +
+            `Нажмите кнопку ниже для оплаты\\.`;
+          await bot
+            .sendMessage(order.client_chat_id, invoiceText, {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [[{ text: '💳 Оплатить', url: result.confirmationUrl }]],
+              },
+            })
+            .catch(() => {});
+          return safeSend(chatId, `✅ Счёт выставлен клиенту\\. Ссылка отправлена\\.`, {
+            parse_mode: 'MarkdownV2',
+          });
+        } else {
+          // No payment URL — send plain invoice
+          const invoiceText =
+            `💳 *Счёт на оплату*\n\n` +
+            `Заявка №${esc(order.order_number)}\n` +
+            `Сумма: ${esc(budgetStr)} ₽\n\n` +
+            `Для оплаты свяжитесь с менеджером\\.`;
+          await bot.sendMessage(order.client_chat_id, invoiceText, { parse_mode: 'MarkdownV2' }).catch(() => {});
+          return safeSend(chatId, '✅ Счёт выставлен клиенту');
+        }
       } catch (e) {
         console.error('[Bot] adm_invoice_:', e.message);
+        return safeSend(chatId, '❌ Ошибка при создании ссылки оплаты\\. Проверьте настройки YooKassa\\.', {
+          parse_mode: 'MarkdownV2',
+        });
       }
     }
 

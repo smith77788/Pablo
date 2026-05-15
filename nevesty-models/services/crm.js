@@ -89,14 +89,14 @@ async function exportToAmoCrm(order) {
 function registerWebhooks(router) {
   // POST /api/crm/webhook/bitrix24 — incoming Bitrix24 webhooks
   router.post('/crm/webhook/bitrix24', (req, res) => {
-    console.log('[CRM] Bitrix24 webhook received:', req.body?.event);
+    console.log('[CRM] Bitrix24 webhook from IP:', req.ip, 'event:', req.body?.event);
     // TODO: Handle Bitrix24 events (deal status change, etc.)
     res.json({ ok: true });
   });
 
   // POST /api/crm/webhook/amocrm — incoming AmoCRM webhooks
   router.post('/crm/webhook/amocrm', (req, res) => {
-    console.log('[CRM] AmoCRM webhook received');
+    console.log('[CRM] AmoCRM webhook from IP:', req.ip, 'event:', req.body?.event);
     res.json({ ok: true });
   });
 }
