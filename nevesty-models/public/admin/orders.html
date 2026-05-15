@@ -344,6 +344,20 @@
                 <button class="btn btn-sm btn-ghost" onclick="quickStatus('completed')">🏁 Завершить</button>
                 <button class="btn btn-sm btn-danger" onclick="quickStatus('cancelled')">❌ Отменить</button>
               </div>
+
+              <!-- Payment section -->
+              <div id="paymentSection" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+                <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Оплата</div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input type="number" id="paymentAmount" placeholder="Сумма (руб)" min="1" style="width:140px" class="admin-input" />
+                  <button class="btn btn-sm btn-gold" onclick="createPaymentLink()">💳 Создать ссылку на оплату</button>
+                  <span id="paymentLinkResult" style="font-size:0.8rem;color:var(--success)"></span>
+                </div>
+                <div id="existingPaymentLink" style="margin-top:8px;font-size:0.82rem;display:none">
+                  💳 Ссылка на оплату: <a id="paymentLinkAnchor" href="#" target="_blank" style="color:var(--gold)">открыть</a>
+                  <span id="paymentStatus" style="margin-left:8px;color:var(--text-muted)"></span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -797,6 +811,17 @@ async function openDetail(id) {
       document.getElementById('modelCard').style.display = 'none';
     }
 
+    // Show existing payment link if present
+    document.getElementById('paymentLinkResult').innerHTML = '';
+    document.getElementById('paymentAmount').value = o.payment_amount || '';
+    if (o.payment_url) {
+      document.getElementById('existingPaymentLink').style.display = '';
+      document.getElementById('paymentLinkAnchor').href = o.payment_url;
+      document.getElementById('paymentStatus').textContent = o.payment_status ? `(${o.payment_status})` : '';
+    } else {
+      document.getElementById('existingPaymentLink').style.display = 'none';
+    }
+
     startChatPoll();
     loadOrderAudit(id);
     loadStatusHistory(id);
@@ -953,6 +978,30 @@ document.getElementById('chatInput').addEventListener('keydown', e => {
 /* ═══════════════════════════════════════════════════════
    SAVE / QUICK STATUS
 ═══════════════════════════════════════════════════════ */
+async function createPaymentLink() {
+  const orderId = currentOrderId;
+  const amount = parseInt(document.getElementById('paymentAmount').value);
+  if (!orderId || !amount || amount < 1) {
+    _admin.toast('Введите сумму оплаты', 'error');
+    return;
+  }
+  try {
+    const result = await _admin.apiFetch(`/admin/orders/${orderId}/pay`, {
+      method: 'POST',
+      body: JSON.stringify({ amount })
+    });
+    if (result.payment_url) {
+      document.getElementById('paymentLinkResult').innerHTML =
+        `✅ <a href="${result.payment_url}" target="_blank" style="color:var(--gold)">Открыть ссылку</a>`;
+      document.getElementById('existingPaymentLink').style.display = '';
+      document.getElementById('paymentLinkAnchor').href = result.payment_url;
+      document.getElementById('paymentStatus').textContent = '(pending)';
+    }
+  } catch (e) {
+    document.getElementById('paymentLinkResult').textContent = '⚠️ ' + (e.message || 'ЮKassa не настроена');
+  }
+}
+
 async function saveOrder() {
   const managerId = document.getElementById('managerSelect').value;
   try {

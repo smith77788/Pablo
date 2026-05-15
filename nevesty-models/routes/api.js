@@ -1124,6 +1124,32 @@ router.put('/admin/orders/:id', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Create payment link for order (admin) ────────────────────────────────────
+router.post('/admin/orders/:id/pay', auth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { amount, description } = req.body;
+    if (!amount || isNaN(amount) || amount < 1) return res.status(400).json({ error: 'amount required (integer RUB)' });
+
+    const order = await get('SELECT * FROM orders WHERE id=?', [id]);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    const siteUrl = process.env.SITE_URL || 'https://example.com';
+    const returnUrl = `${siteUrl}/order-status.html?order=${order.order_number}`;
+    const desc = description || `Оплата заявки #${order.order_number} — ${order.event_type || 'Модель'}`;
+
+    const result = await payment.createYooKassaPayment(id, parseInt(amount), desc, returnUrl);
+    if (result.error) return res.status(400).json({ error: result.error });
+
+    await run(
+      'UPDATE orders SET payment_status=?, payment_id=?, payment_url=?, payment_amount=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+      ['pending', result.payment_id, result.payment_url, parseInt(amount), id]
+    );
+
+    res.json({ payment_url: result.payment_url, payment_id: result.payment_id });
+  } catch (e) { next(e); }
+});
+
 // ─── Bulk actions ─────────────────────────────────────────────────────────────
 router.post('/admin/orders/bulk', auth, async (req, res, next) => {
   try {
@@ -2530,6 +2556,10 @@ router.post('/webhooks/yookassa', async (req, res, next) => {
              status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
             [ord.id]
           );
+          await run(
+            'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by, notes) VALUES (?,?,?,?,?)',
+            [ord.id, ord.status, 'confirmed', 'yookassa_webhook', `Payment ID: ${paymentId}`]
+          ).catch(() => {});
           if (botInstance && ord.client_chat_id && typeof botInstance.notifyPaymentSuccess === 'function') {
             botInstance.notifyPaymentSuccess(ord.client_chat_id, ord.order_number).catch(() => {});
           }
@@ -2542,6 +2572,23 @@ router.post('/webhooks/yookassa', async (req, res, next) => {
         }
       }
     }
+
+    if (event?.event === 'payment.canceled') {
+      const paymentId   = event?.object?.id;
+      const metaOrderId = event?.object?.metadata?.order_id;
+      if (paymentId) {
+        const ord = metaOrderId
+          ? await get('SELECT * FROM orders WHERE id=?', [parseInt(metaOrderId)]).catch(() => null)
+          : await get('SELECT * FROM orders WHERE payment_id=?', [paymentId]).catch(() => null);
+        if (ord) {
+          await run(
+            `UPDATE orders SET payment_status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+            [ord.id]
+          );
+        }
+      }
+    }
+
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

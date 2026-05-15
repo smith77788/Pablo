@@ -415,6 +415,9 @@ async function initDatabase() {
   await run(`ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT NULL`).catch(() => {});
   await run(`ALTER TABLE orders ADD COLUMN paid_at DATETIME DEFAULT NULL`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_payment_id ON orders(payment_id)`).catch(() => {});
+  // Payment URL and amount columns (migration v8b)
+  await run(`ALTER TABLE orders ADD COLUMN payment_url TEXT DEFAULT NULL`).catch(() => {});
+  await run(`ALTER TABLE orders ADD COLUMN payment_amount INTEGER DEFAULT NULL`).catch(() => {});
 
   // Internal note column for quick manager notes (migration v9)
   await run(`ALTER TABLE orders ADD COLUMN internal_note TEXT`).catch(err => { if (err && !err.message.includes('duplicate')) console.error(err); });
