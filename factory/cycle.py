@@ -2862,16 +2862,18 @@ def run_cycle() -> dict:
         logger.error("Phase 23 Research Department error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
-    # Phase 24: Channel Content Generation
+    # Phase 24: Channel Content Generation (БЛОК 9.1)
     # ════════════════════════════════════════════════════════════════
     try:
-        from factory.agents.channel_content import ChannelContentGenerator
+        from factory.agents.channel_content import ChannelContentGenerator, TelegramChannelAgent
         _channel24 = ChannelContentGenerator()
+        _llm_channel24 = TelegramChannelAgent()
 
         # Pick monthly stats from earlier phases if available
         _phase_stats24 = results.get("phases", {})
         _orders_count24 = 0
         _models_count24 = 0
+        _top_model24: dict = {}
         try:
             if db_conn:
                 _ord_row = db_conn.execute(
@@ -2882,6 +2884,15 @@ def run_cycle() -> dict:
                 ).fetchone()
                 _orders_count24 = _ord_row["cnt"] if _ord_row else 0
                 _models_count24 = _mod_row["cnt"] if _mod_row else 0
+                # Fetch top model for spotlight
+                _top_model_row = db_conn.execute(
+                    "SELECT m.name, m.height, m.city, m.category, COUNT(o.id) as order_count "
+                    "FROM models m LEFT JOIN orders o ON o.model_id = m.id "
+                    "WHERE m.available=1 AND m.archived=0 "
+                    "GROUP BY m.id ORDER BY order_count DESC LIMIT 1"
+                ).fetchone()
+                if _top_model_row:
+                    _top_model24 = dict(_top_model_row)
         except Exception:
             pass
 
@@ -2894,16 +2905,45 @@ def run_cycle() -> dict:
         _tips_post24 = _channel24.generate_tips_post("choosing_model")
         _calendar24 = _channel24.get_content_calendar(weeks=2)
 
+        # LLM-powered posts (БЛОК 9.1): spotlight + event + promo
+        _spotlight_model_name24 = _top_model24.get("name", "Мария") if _top_model24 else "Мария"
+        _spotlight_params24 = {
+            "height": _top_model24.get("height", "170") if _top_model24 else "170",
+            "city": _top_model24.get("city", "Москва") if _top_model24 else "Москва",
+            "category": _top_model24.get("category", "fashion") if _top_model24 else "fashion",
+            "order_count": _top_model24.get("order_count", 0) if _top_model24 else 0,
+        }
+        _spotlight24 = _llm_channel24.generate_model_spotlight(_spotlight_model_name24, _spotlight_params24)
+        _event_post24 = _llm_channel24.generate_event_post("корпоратив")
+        _promo_post24 = _llm_channel24.generate_promo_post("seasonal")
+
+        _llm_sources24 = [
+            p.get("source", "template") for p in [_spotlight24, _event_post24, _promo_post24]
+        ]
+        _llm_count24 = _llm_sources24.count("llm")
+
         results["phases"]["channel_content"] = {
             "stats_post_chars": _stats_post24["char_count"],
             "tips_post_chars": _tips_post24["char_count"],
             "tips_post": _tips_post24["text"],
             "calendar_posts_scheduled": len(_calendar24),
             "next_post_format": _calendar24[0]["format"] if _calendar24 else "model_spotlight",
+            # БЛОК 9.1 — LLM-generated posts
+            "llm_spotlight_post": _spotlight24.get("text", ""),
+            "llm_spotlight_chars": _spotlight24.get("char_count", 0),
+            "llm_spotlight_source": _spotlight24.get("source", "template"),
+            "llm_event_post": _event_post24.get("text", ""),
+            "llm_event_source": _event_post24.get("source", "template"),
+            "llm_promo_post": _promo_post24.get("text", ""),
+            "llm_promo_code": _promo_post24.get("promo_code", ""),
+            "llm_promo_source": _promo_post24.get("source", "template"),
+            "llm_posts_generated": 3,
+            "llm_posts_via_api": _llm_count24,
         }
         summary_lines.append(
             f"📢 Channel Content (Phase 24): {len(_calendar24)} posts scheduled, "
-            f"next={_calendar24[0]['format'] if _calendar24 else 'n/a'}"
+            f"next={_calendar24[0]['format'] if _calendar24 else 'n/a'}, "
+            f"llm_posts={_llm_count24}/3"
         )
     except Exception as e:
         logger.error("Phase 24 Channel Content error: %s", e)
