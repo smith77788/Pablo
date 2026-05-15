@@ -204,6 +204,135 @@ async function runWalCheckpointTruncate() {
   }
 }
 
+// ─── Scheduled Broadcast Processor ───────────────────────────────────────────
+async function processScheduledBroadcasts() {
+  try {
+    const { query, run } = require('../database');
+
+    // Find broadcasts due to be sent (scheduled_at <= now, status = 'pending')
+    const pending = await query(
+      "SELECT * FROM scheduled_broadcasts WHERE status='pending' AND datetime(scheduled_at) <= datetime('now')"
+    ).catch(() => []);
+
+    if (!pending.length) return;
+
+    for (const bcast of pending) {
+      // Mark as 'sending' first to prevent duplicate runs
+      const updated = await run("UPDATE scheduled_broadcasts SET status='sending' WHERE id=? AND status='pending'", [
+        bcast.id,
+      ]).catch(() => null);
+      // If another process already claimed it (0 rows changed), skip
+      if (!updated || updated.changes === 0) continue;
+
+      console.log(`[scheduler] Processing scheduled broadcast #${bcast.id}, segment=${bcast.segment}`);
+
+      try {
+        // Build recipient list using same logic as bot.js _getBroadcastClients
+        const segment = bcast.segment || 'all';
+        let rows = [];
+        if (segment === 'completed') {
+          rows = await query(
+            "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND status='completed'"
+          ).catch(() => []);
+        } else if (segment === 'active') {
+          rows = await query(
+            "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND created_at >= datetime('now', '-30 days')"
+          ).catch(() => []);
+        } else if (segment === 'new') {
+          rows = await query(
+            "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND client_chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE status IN ('confirmed','in_progress','completed') AND client_chat_id IS NOT NULL AND client_chat_id != '')"
+          ).catch(() => []);
+        } else if (segment && (segment.startsWith('city:') || segment.startsWith('city_'))) {
+          const city = segment.startsWith('city:') ? segment.slice(5) : segment.slice(5);
+          rows = await query(
+            `SELECT DISTINCT o.client_chat_id FROM orders o JOIN models m ON o.model_id = m.id WHERE o.client_chat_id IS NOT NULL AND o.client_chat_id != '' AND m.city = ?`,
+            [city]
+          ).catch(() => []);
+        } else {
+          rows = await query(
+            "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''"
+          ).catch(() => []);
+        }
+
+        // Filter out admin IDs
+        const adminIdList = (_adminIds || []).map(String);
+        const recipients = rows.map(r => r.client_chat_id).filter(id => id && !adminIdList.includes(String(id)));
+
+        let sent = 0;
+        let errorCount = 0;
+        const photoId = bcast.photo_url || null;
+        const text = bcast.text || '';
+        const caption = text ? `📢 *Сообщение от Nevesty Models*\n\n${text}` : '📢 *Nevesty Models*';
+
+        for (const cid of recipients) {
+          try {
+            if (photoId) {
+              await _bot.sendPhoto(cid, photoId, { caption: caption.slice(0, 1020), parse_mode: 'MarkdownV2' });
+            } else {
+              await _bot.sendMessage(cid, caption.slice(0, 4096), { parse_mode: 'MarkdownV2' });
+            }
+            sent++;
+          } catch (err) {
+            // Handle 429 Too Many Requests
+            const retryAfter =
+              err?.response?.parameters?.retry_after ||
+              (err?.message && /retry after (\d+)/i.test(err.message)
+                ? parseInt(err.message.match(/retry after (\d+)/i)[1])
+                : null);
+            if (retryAfter) {
+              await new Promise(r => setTimeout(r, (retryAfter + 1) * 1000));
+              try {
+                if (photoId) {
+                  await _bot.sendPhoto(cid, photoId, { caption: caption.slice(0, 1020), parse_mode: 'MarkdownV2' });
+                } else {
+                  await _bot.sendMessage(cid, caption.slice(0, 4096), { parse_mode: 'MarkdownV2' });
+                }
+                sent++;
+              } catch {
+                errorCount++;
+              }
+            } else {
+              errorCount++;
+            }
+          }
+          // 50ms delay between sends (rate limit safety)
+          await new Promise(r => setTimeout(r, 50));
+        }
+
+        // Mark as sent with stats
+        await run(
+          "UPDATE scheduled_broadcasts SET status='sent', sent_count=?, error_count=?, sent_at=datetime('now') WHERE id=?",
+          [sent, errorCount, bcast.id]
+        ).catch(() => {});
+
+        console.log(
+          `[scheduler] Scheduled broadcast #${bcast.id} done: sent=${sent}, errors=${errorCount}, recipients=${recipients.length}`
+        );
+
+        // Notify admins about completion
+        const segLabels = {
+          all: 'Все клиенты',
+          completed: 'Завершённые',
+          active: 'Активные 30д',
+          new: 'Новые',
+        };
+        const segLabel = segLabels[segment] || (segment.startsWith('city') ? `Город: ${segment.slice(5)}` : segment);
+        _notify(
+          `📢 Запланированная рассылка #${bcast.id} отправлена!\n✅ ${sent} доставлено, ❌ ${errorCount} ошибок\nАудитория: ${segLabel}`
+        );
+      } catch (sendErr) {
+        console.error(`[scheduler] Scheduled broadcast #${bcast.id} failed:`, sendErr.message);
+        await run("UPDATE scheduled_broadcasts SET status='error', error_count=? WHERE id=?", [1, bcast.id]).catch(
+          () => {}
+        );
+        _notify(`❌ Ошибка запланированной рассылки #${bcast.id}: ${sendErr.message}`);
+      }
+    }
+  } catch (e) {
+    console.error('[scheduler] processScheduledBroadcasts error:', e.message);
+  }
+}
+
 async function checkDiskSpace() {
   try {
     const { execSync } = require('child_process');
@@ -317,8 +446,10 @@ function start() {
   scheduleEveryMinutes(checkBotHealth, 'Bot watchdog', 5);
   // Disk space alert: check backup folder size every 6 hours
   scheduleEvery(checkDiskSpace, 'Disk space check (every 6h)', 6);
+  // Scheduled broadcasts processor: check every minute
+  scheduleEveryMinutes(processScheduledBroadcasts, 'Scheduled broadcasts processor', 1);
   console.log(
-    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h)'
+    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h), scheduled broadcasts processor (every 1min)'
   );
 }
 

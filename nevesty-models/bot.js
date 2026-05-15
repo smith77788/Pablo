@@ -1249,6 +1249,76 @@ async function showMyOrders(chatId, page = 0) {
   }
 }
 
+// ── Model personal cabinet (БЛОК 12.3) ─────────────────────────────────────
+async function _showModelCabinet(chatId, page = 0) {
+  try {
+    page = parseInt(page) || 0;
+    const model = await get('SELECT id, name FROM models WHERE telegram_chat_id=? AND archived=0', [
+      String(chatId),
+    ]).catch(() => null);
+    if (!model) {
+      return safeSend(
+        chatId,
+        '❌ *Ваш аккаунт не привязан к профилю модели\\.*\n\n' +
+          'Используйте /register\\_model для привязки по номеру телефона или обратитесь к администратору\\.',
+        { parse_mode: 'MarkdownV2' }
+      );
+    }
+
+    const PER_PAGE = 5;
+    const totalRow = await get(
+      `SELECT COUNT(*) as n FROM orders
+       WHERE (model_id=? OR (model_ids IS NOT NULL AND model_ids LIKE ?))
+         AND status != 'cancelled'`,
+      [model.id, `%${model.id}%`]
+    ).catch(() => ({ n: 0 }));
+    const total = totalRow.n;
+
+    if (!total) {
+      return safeSend(chatId, `💃 *Кабинет модели: ${esc(model.name)}*\n\n📭 Заявок пока нет\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: {
+          inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]],
+        },
+      });
+    }
+
+    const orders = await query(
+      `SELECT o.id, o.order_number, o.event_type, o.event_date, o.status, o.budget, o.client_name, o.location
+       FROM orders o
+       WHERE (o.model_id=? OR (o.model_ids IS NOT NULL AND o.model_ids LIKE ?))
+         AND o.status != 'cancelled'
+       ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
+      [model.id, `%${model.id}%`, PER_PAGE, page * PER_PAGE]
+    );
+
+    let text = `💃 *Кабинет модели: ${esc(model.name)}*\n`;
+    text += `_Всего заявок: ${total}_\n\n`;
+
+    for (const o of orders) {
+      const statusLabel = STATUS_LABELS[o.status] || o.status;
+      text += `*${esc(o.order_number)}* — ${esc(EVENT_TYPES[o.event_type] || o.event_type)}\n`;
+      if (o.event_date) text += `📅 ${esc(o.event_date)}\n`;
+      text += `${statusLabel}\n`;
+      if (o.budget) text += `💰 ${esc(String(o.budget))} ₽\n`;
+      text += '\n';
+    }
+
+    const nav = [];
+    if (page > 0) nav.push({ text: '◀️', callback_data: `model_cab_page_${page - 1}` });
+    if ((page + 1) * PER_PAGE < total) nav.push({ text: '▶️', callback_data: `model_cab_page_${page + 1}` });
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [...(nav.length ? [nav] : []), [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]],
+      },
+    });
+  } catch (e) {
+    console.error('[Bot] _showModelCabinet:', e.message);
+  }
+}
+
 async function showClientOrder(chatId, orderId) {
   try {
     const o = await get(
@@ -3774,7 +3844,7 @@ async function showScheduledBroadcasts(chatId) {
           })
         : '—';
       const statusEmoji = b.status === 'sent' ? '✅' : b.status === 'cancelled' ? '❌' : '⏳';
-      const segLabel = b.segment === 'completed' ? 'Завершившие' : b.segment === 'active' ? 'Активные' : 'Все';
+      const segLabel = _bcSegmentLabel(b.segment || 'all');
       const stats = b.sent_count ? ` ✅${b.sent_count}` : '';
       const errStats = b.error_count ? ` ❌${b.error_count}` : '';
       text += `${statusEmoji} *${esc(dt)}* \\[${esc(segLabel)}\\]${esc(stats)}${esc(errStats)}\n${esc(String(b.text || '').slice(0, 60))}${(b.text || '').length > 60 ? '…' : ''}\n\n`;
@@ -5647,9 +5717,60 @@ function initBot(app) {
     return showMyOrders(msg.chat.id);
   });
 
-  // ── /myorders (alias for /orders) ──────────────────────────────────────────
-  bot.onText(/\/myorders/, async msg => {
-    return showMyOrders(msg.chat.id);
+  // ── /myorders — routes to model cabinet if linked, else client orders ────────
+  bot.onText(/^\/myorders$/, async msg => {
+    const chatId = msg.chat.id;
+    const linkedModel = await get('SELECT id FROM models WHERE telegram_chat_id=? AND archived=0', [
+      String(chatId),
+    ]).catch(() => null);
+    if (linkedModel) return _showModelCabinet(chatId);
+    return showMyOrders(chatId);
+  });
+
+  // ── /model_cabinet — direct model cabinet command ─────────────────────────
+  bot.onText(/^\/model_cabinet$/, async msg => {
+    return _showModelCabinet(msg.chat.id);
+  });
+
+  // ── /link_N — link Telegram account to model by ID (admin-generated token) ─
+  bot.onText(/^\/link_(\d+)$/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const modelId = parseInt(match[1]);
+    if (!modelId || isNaN(modelId)) return;
+
+    const model = await get('SELECT id, name, telegram_chat_id FROM models WHERE id=? AND archived=0', [modelId]).catch(
+      () => null
+    );
+
+    if (!model) {
+      return safeSend(chatId, '❌ Модель не найдена или удалена\\.', { parse_mode: 'MarkdownV2' });
+    }
+
+    // Guard: if already linked to a different account
+    if (model.telegram_chat_id && String(model.telegram_chat_id) !== String(chatId)) {
+      const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+      for (const adminId of adminIds) {
+        safeSend(
+          adminId,
+          `⚠️ Попытка повторной привязки модели *${esc(model.name)}*\\.\n` +
+            `Новый chatId: \`${chatId}\`, уже привязан: \`${model.telegram_chat_id}\`\\.`,
+          { parse_mode: 'MarkdownV2' }
+        ).catch(() => {});
+      }
+      return safeSend(
+        chatId,
+        '⚠️ *Этот профиль уже привязан к другому аккаунту Telegram\\.*\n\nОбратитесь к администратору\\.',
+        { parse_mode: 'MarkdownV2' }
+      );
+    }
+
+    await run('UPDATE models SET telegram_chat_id=? WHERE id=?', [String(chatId), model.id]).catch(() => {});
+    return safeSend(
+      chatId,
+      `✅ *Аккаунт привязан к профилю: ${esc(model.name)}*\n\n` +
+        `Используйте /myorders для просмотра ваших заявок или /model\\_cabinet для личного кабинета\\.`,
+      { parse_mode: 'MarkdownV2' }
+    );
   });
 
   // ── /contacts ──────────────────────────────────────────────────────────────
@@ -7295,10 +7416,60 @@ function initBot(app) {
       await setSession(chatId, 'broadcast_schedule_time', { ...sd });
       return safeSend(
         chatId,
-        `🕐 *Запланировать рассылку*\n\nВведите дату и время в формате:\n\`ДД\\.ММ\\.ГГГГ ЧЧ:ММ\`\n\nПример: \`20\\.05\\.2026 14:00\``,
+        `🕐 *Запланировать рассылку*\n\nВыберите время или введите дату вручную в формате:\n\`ДД\\.ММ\\.ГГГГ ЧЧ:ММ\`\n\nПример: \`20\\.05\\.2026 14:00\``,
         {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_bc_cancel_preview' }]] },
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '⏰ Через 1 час', callback_data: 'adm_bc_sched_1h' },
+                { text: '⏰ Через 3 часа', callback_data: 'adm_bc_sched_3h' },
+              ],
+              [
+                { text: '⏰ Через 24 часа', callback_data: 'adm_bc_sched_24h' },
+                { text: '⏰ Через 48 часов', callback_data: 'adm_bc_sched_48h' },
+              ],
+              [{ text: '❌ Отмена', callback_data: 'adm_bc_cancel_preview' }],
+            ],
+          },
+        }
+      );
+    }
+    // ── Broadcast: quick schedule shortcuts (1h / 3h / 24h / 48h)
+    if (
+      data === 'adm_bc_sched_1h' ||
+      data === 'adm_bc_sched_3h' ||
+      data === 'adm_bc_sched_24h' ||
+      data === 'adm_bc_sched_48h'
+    ) {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd = sessionData(sess);
+      const hoursMap = { adm_bc_sched_1h: 1, adm_bc_sched_3h: 3, adm_bc_sched_24h: 24, adm_bc_sched_48h: 48 };
+      const hours = hoursMap[data];
+      const sendAt = new Date(Date.now() + hours * 60 * 60 * 1000);
+      const pad = n => String(n).padStart(2, '0');
+      const scheduledAtStr = `${sendAt.getFullYear()}-${pad(sendAt.getMonth() + 1)}-${pad(sendAt.getDate())} ${pad(sendAt.getHours())}:${pad(sendAt.getMinutes())}:00`;
+      const displayDt = `${pad(sendAt.getDate())}.${pad(sendAt.getMonth() + 1)}.${sendAt.getFullYear()} ${pad(sendAt.getHours())}:${pad(sendAt.getMinutes())}`;
+      const segment = sd.broadcastSegment || 'all';
+      const bcText = sd.broadcastText || '';
+      const photoUrl = sd.broadcastPhotoId || null;
+      await run(
+        `INSERT INTO scheduled_broadcasts (text, scheduled_at, photo_url, segment, status) VALUES (?,?,?,?,'pending')`,
+        [bcText, scheduledAtStr, photoUrl, segment]
+      ).catch(() => {});
+      await clearSession(chatId);
+      return safeSend(
+        chatId,
+        `✅ *Рассылка запланирована на ${esc(displayDt)}*\n\nСегмент: *${esc(_bcSegmentLabel(segment))}*\nЧерез: *${hours} ч\\.*`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📅 Запланированные рассылки', callback_data: 'adm_bc_scheduled' }],
+              [{ text: '← Меню', callback_data: 'admin_menu' }],
+            ],
+          },
         }
       );
     }
