@@ -427,6 +427,11 @@
   <script src="/js/darkmode.js"></script>
   <script src="/js/analytics.js"></script>
   <script>
+    // ─── Default pricing tier minimums (overridden by settings) ──────────────
+    let TIER_START   = 8000;
+    let TIER_EVENT   = 15000;
+    let TIER_PREMIUM = 30000;
+
     // ─── Calculator logic ─────────────────────────────────────────────────────
     const BASE = {
       photo:  { 2: 8000,  4: 14000, 6: 20000, 8: 26000 },
@@ -502,6 +507,50 @@
     });
 
     calc();
+
+    // ─── Load dynamic pricing from settings ──────────────────────────────────
+    fetch('/api/settings/public').then(r => r.json()).then(settings => {
+      const startFrom   = settings.pricing_start_from;
+      const eventFrom   = settings.pricing_event_from;
+      const premiumFrom = settings.pricing_premium_from;
+
+      // Update pricing tier minimums for the calculator
+      if (startFrom)   TIER_START   = parseInt(startFrom);
+      if (eventFrom)   TIER_EVENT   = parseInt(eventFrom);
+      if (premiumFrom) TIER_PREMIUM = parseInt(premiumFrom);
+
+      // Adjust BASE photo/2h baseline to match the "Start" tier minimum
+      if (startFrom) {
+        const ratio = TIER_START / 8000;
+        for (const type of Object.keys(BASE)) {
+          for (const h of Object.keys(BASE[type])) {
+            BASE[type][h] = Math.round(BASE[type][h] * ratio);
+          }
+        }
+        calc();
+      }
+
+      // Update pricing card displayed prices
+      const priceEls = document.querySelectorAll('.pricing-price');
+      if (priceEls[0] && startFrom)   priceEls[0].innerHTML = `от ${TIER_START.toLocaleString('ru-RU')} <span>₽</span>`;
+      if (priceEls[1] && eventFrom)   priceEls[1].innerHTML = `от ${TIER_EVENT.toLocaleString('ru-RU')} <span>₽</span>`;
+      if (priceEls[2] && premiumFrom) priceEls[2].innerHTML = `от ${TIER_PREMIUM.toLocaleString('ru-RU')} <span>₽</span>`;
+
+      // Update Schema.org structured data
+      try {
+        const ldScript = document.querySelector('script[type="application/ld+json"]');
+        if (ldScript) {
+          const ld = JSON.parse(ldScript.textContent);
+          const service = ld.find && ld.find(item => item['@type'] === 'Service');
+          if (service && service.offers) {
+            if (startFrom)   service.offers[0].priceSpecification.minPrice = TIER_START;
+            if (eventFrom)   service.offers[1].priceSpecification.minPrice = TIER_EVENT;
+            if (premiumFrom) service.offers[2].priceSpecification.minPrice = TIER_PREMIUM;
+            ldScript.textContent = JSON.stringify(ld);
+          }
+        }
+      } catch {}
+    }).catch(() => {});
 
     // Analytics
     if (typeof NM !== 'undefined') {

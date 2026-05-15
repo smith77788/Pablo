@@ -1198,7 +1198,8 @@ router.get('/settings/public', async (req, res) => {
     const SAFE_KEYS = [
       'contacts_phone', 'contacts_email', 'contacts_insta', 'contacts_addr',
       'contacts_whatsapp', 'about', 'greeting', 'agency_name', 'tagline',
-      'catalog_per_page', 'site_url', 'manager_hours'
+      'catalog_per_page', 'site_url', 'manager_hours',
+      'pricing_start_from', 'pricing_event_from', 'pricing_premium_from'
     ];
     const cacheKey = 'settings:public';
     const cached = cache.get(cacheKey);
@@ -1272,6 +1273,8 @@ router.put('/settings', auth, async (req, res, next) => {
     'faq_items',
     // CRM webhooks
     'crm_webhook_url', 'crm_webhook_secret', 'amocrm_webhook_url', 'amocrm_api_key', 'bitrix24_webhook_url',
+    // Pricing tier minimums
+    'pricing_start_from', 'pricing_event_from', 'pricing_premium_from',
   ];
   try {
     const body = req.body;

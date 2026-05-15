@@ -380,6 +380,23 @@
                 placeholder="Фотосессия — от 15 000 ₽ / 4 ч&#10;Показ мод — от 25 000 ₽&#10;Корпоратив — от 20 000 ₽ / 3 ч&#10;..."></textarea>
               <div class="field-note">Текст отображается в боте по команде /pricing и на сайте</div>
             </div>
+
+            <!-- Pricing tier minimums -->
+            <div class="form-row-3" style="margin-top:16px">
+              <div class="admin-form-group">
+                <label>Цена Старт (от, ₽)</label>
+                <input type="number" class="admin-input" id="pricing_start_from" placeholder="8000" min="0">
+              </div>
+              <div class="admin-form-group">
+                <label>Цена Мероприятие (от, ₽)</label>
+                <input type="number" class="admin-input" id="pricing_event_from" placeholder="15000" min="0">
+              </div>
+              <div class="admin-form-group">
+                <label>Цена Премиум (от, ₽)</label>
+                <input type="number" class="admin-input" id="pricing_premium_from" placeholder="30000" min="0">
+              </div>
+            </div>
+            <div class="field-note" style="margin-top:4px">Минимальные цены для карточек на странице Цены и калькулятора. Оставьте пустым для значений по умолчанию.</div>
             <div class="sticky-save-bar">
               <button class="btn btn-md btn-gold" id="btnSavePricing" onclick="savePricing(this)">Сохранить прайс</button>
             </div>
@@ -1101,6 +1118,7 @@ async function loadSettings() {
       'catalog_per_page', 'cities_list',
       'reviews_min_completed', 'reviews_prompt_text',
       'faq_items',
+      'pricing_start_from', 'pricing_event_from', 'pricing_premium_from',
     ];
     textFields.forEach(key => {
       const el = document.getElementById(key);
@@ -1171,6 +1189,7 @@ async function saveAll() {
     'booking_min_budget', 'booking_confirm_msg', 'booking_thanks_text',
     'catalog_per_page', 'cities_list',
     'reviews_min_completed', 'reviews_prompt_text',
+    'pricing_start_from', 'pricing_event_from', 'pricing_premium_from',
   ];
   const toggleFields = [
     'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email',
