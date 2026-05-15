@@ -105,6 +105,44 @@ async function showAdminStats(chatId) {
       });
     }
 
+    // Top-3 cities by order count
+    let topCities = [];
+    try {
+      topCities = await query(
+        `SELECT m.city, COUNT(o.id) as cnt
+         FROM models m
+         JOIN orders o ON o.model_id = m.id
+         WHERE m.city IS NOT NULL AND m.city != ''
+         GROUP BY m.city
+         ORDER BY cnt DESC
+         LIMIT 3`
+      );
+    } catch {}
+
+    if (topCities.length) {
+      text += `\n*🏙 Топ\\-3 города:*\n`;
+      topCities.forEach((c, i) => {
+        text += `  ${medals[i] || (i+1+'.')} ${esc(c.city)} — ${esc(String(c.cnt))} заявок\n`;
+      });
+    }
+
+    // Average deal cycle (days from new to completed)
+    let avgCycleDays = null;
+    try {
+      const cycleRow = await get(
+        `SELECT AVG(
+           CAST(julianday(updated_at) - julianday(created_at) AS INTEGER)
+         ) as avg_days
+         FROM orders
+         WHERE status='completed' AND updated_at IS NOT NULL AND created_at IS NOT NULL`
+      );
+      if (cycleRow && cycleRow.avg_days) avgCycleDays = Math.round(cycleRow.avg_days);
+    } catch {}
+
+    if (avgCycleDays !== null) {
+      text += `*⏱ Средний цикл сделки:* ${esc(String(avgCycleDays))} дн\\.\n`;
+    }
+
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
