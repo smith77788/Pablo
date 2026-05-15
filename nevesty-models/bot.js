@@ -1518,8 +1518,8 @@ async function bkStep1(chatId, data = {}) {
     return safeSend(
       chatId,
       `_🏠 Главная › 📝 Бронирование_\n\n` +
-        stepHeader(1, 'Выберите модель') +
-        'Выберите из списка или нажмите «Менеджер подберёт»:',
+        stepHeader(1, STRINGS.bookingStepSelectModel) +
+        STRINGS.bookingSelectModelHint,
       {
         parse_mode: 'MarkdownV2',
         reply_markup: {
@@ -1541,7 +1541,7 @@ async function bkStep2EventType(chatId, data) {
   await setSession(chatId, 'bk_s2_event', data);
   resetSessionTimer(chatId);
   const btns = Object.entries(EVENT_TYPES).map(([k, v]) => [{ text: v, callback_data: `bk_etype_${k}` }]);
-  return safeSend(chatId, stepHeader(2, 'Детали мероприятия') + 'Выберите тип мероприятия:', {
+  return safeSend(chatId, stepHeader(2, STRINGS.bookingStepEventDetails) + STRINGS.bookingSelectEventType, {
     parse_mode: 'MarkdownV2',
     reply_markup: {
       inline_keyboard: [
@@ -1559,7 +1559,7 @@ async function bkStep2Date(chatId, data) {
   resetSessionTimer(chatId);
   return safeSend(
     chatId,
-    stepHeader(2, 'Детали мероприятия') +
+    stepHeader(2, STRINGS.bookingStepEventDetails) +
       `✅ Тип: *${esc(EVENT_TYPES[data.event_type] || data.event_type)}*\n\nВведите дату мероприятия:\n💡 Формат: ДД\\.ММ\\.ГГГГ, например: 25\\.12\\.2025`,
     {
       parse_mode: 'MarkdownV2',

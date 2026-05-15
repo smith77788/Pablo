@@ -94,7 +94,7 @@ async function showAdminStats(chatId) {
       if (avgRow?.avg) avgCheck = Math.round(avgRow.avg);
     } catch {}
 
-    // Top-3 models by completed orders
+    // Top-5 models by completed orders
     let topModels = [];
     try {
       topModels = await query(
@@ -103,7 +103,7 @@ async function showAdminStats(chatId) {
          JOIN orders o ON o.model_id = m.id AND o.status = 'completed'
          GROUP BY m.id, m.name
          ORDER BY cnt DESC
-         LIMIT 3`
+         LIMIT 5`
       );
     } catch {}
 
@@ -185,7 +185,7 @@ async function showAdminStats(chatId) {
     text += `• Топовых \\(featured\\): ${esc(String(featuredModels?.n || 0))}\n`;
 
     if (topModels.length) {
-      text += `\n👑 *Топ\\-3 моделей по завершённым заявкам*\n`;
+      text += `\n👑 *Топ\\-5 моделей по завершённым заявкам*\n`;
       topModels.forEach((m, i) => {
         text += `${i + 1}\\. ${esc(m.name)} — ${esc(String(m.cnt))} завершённых\n`;
       });
