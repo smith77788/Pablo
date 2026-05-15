@@ -2,41 +2,21 @@ require('dotenv').config();
 const crypto = require('crypto');
 const TelegramBot = require('node-telegram-bot-api');
 const { query, run, get, generateOrderNumber } = require('./database');
+const {
+  STATUS_LABELS,
+  VALID_STATUSES,
+  EVENT_TYPES,
+  CATEGORIES,
+  MODEL_CATEGORIES,
+  MODEL_HAIR_COLORS,
+  MODEL_EYE_COLORS,
+  DURATIONS,
+} = require('./utils/constants');
 
 const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const SITE_URL  = process.env.SITE_URL || 'http://localhost:3000';
 const WEBHOOK_URL    = process.env.WEBHOOK_URL || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || crypto.randomBytes(32).toString('hex');
-
-// ─── Dictionaries (must match website exactly) ───────────────────────────────
-
-const STATUS_LABELS = {
-  new:        '🆕 Новая',
-  reviewing:  '🔍 На рассмотрении',
-  confirmed:  '✅ Подтверждена',
-  in_progress:'▶️ В процессе',
-  completed:  '🏁 Завершена',
-  cancelled:  '❌ Отменена',
-};
-const VALID_STATUSES = ['new','reviewing','confirmed','in_progress','completed','cancelled'];
-
-const EVENT_TYPES = {
-  fashion_show: 'Показ мод',
-  photo_shoot:  'Фотосессия',
-  event:        'Корпоратив / Мероприятие',
-  commercial:   'Коммерческая съёмка',
-  runway:       'Подиум',
-  other:        'Другое',
-};
-
-const CATEGORIES = {
-  '':         'Все',
-  fashion:    'Fashion',
-  commercial: 'Commercial',
-  events:     'Events',
-};
-
-const DURATIONS = ['1', '2', '3', '4', '6', '8', '12'];
 
 let bot = null;
 
@@ -1875,10 +1855,6 @@ async function showAdminSettings(chatId, section) {
 }
 
 // ─── Add Model wizard ─────────────────────────────────────────────────────────
-
-const MODEL_HAIR_COLORS = ['Блонд','Тёмный блонд','Шатен','Брюнетка','Рыжая','Другой'];
-const MODEL_EYE_COLORS  = ['Голубые','Серые','Зелёные','Карие','Чёрные'];
-const MODEL_CATEGORIES  = { fashion:'Fashion', commercial:'Commercial', events:'Events' };
 
 async function showAddModelStep(chatId, d) {
   const step = d._step || 'name';

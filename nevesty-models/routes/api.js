@@ -11,6 +11,7 @@ const auth = require('../middleware/auth');
 const mailer = require('../services/mailer');
 const payment = require('../services/payment');
 const { cache, TTL_CATALOG } = require('../services/cache');
+const { ALLOWED_EVENT_TYPES, ALLOWED_CATEGORIES, VALID_STATUSES } = require('../utils/constants');
 
 // ─── Rate limiters ────────────────────────────────────────────────────────────
 let contactRateLimit = (req, res, next) => next(); // fallback: no-op
@@ -57,10 +58,9 @@ async function logAudit(req, action, entity, entityId, details) {
 }
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
-const ALLOWED_EVENT_TYPES = ['fashion_show', 'photo_shoot', 'event', 'commercial', 'runway', 'other'];
+// ALLOWED_EVENT_TYPES, ALLOWED_CATEGORIES, VALID_STATUSES imported from utils/constants
 const ALLOWED_IMG_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-const ALLOWED_CATEGORIES = ['fashion', 'commercial', 'events'];
-const ALLOWED_STATUSES = ['new', 'reviewing', 'confirmed', 'in_progress', 'completed', 'cancelled'];
+const ALLOWED_STATUSES = VALID_STATUSES; // alias for backwards compat within this file
 
 function sanitize(s, max = 500) {
   if (typeof s !== 'string') return null;
