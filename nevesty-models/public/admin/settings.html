@@ -996,26 +996,32 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre>
       <div class="tab-pane" id="pane-faq">
         <div class="section-card">
           <div class="section-card-header">
-            <div class="section-card-title">❓ FAQ — Часто задаваемые вопросы</div>
+            <div class="section-card-title">❓ Управление FAQ</div>
+            <a href="/faq.html" target="_blank" style="font-size:0.75rem;color:var(--gold);text-decoration:none">↗ Просмотр страницы FAQ</a>
           </div>
           <div class="section-card-body padded">
-            <div class="admin-form-group">
-              <div class="form-label-row">
-                <label>Элементы FAQ (JSON)</label>
-                <a href="/faq.html" target="_blank" style="font-size:0.75rem;color:var(--gold);text-decoration:none">↗ Просмотр страницы FAQ</a>
-              </div>
-              <textarea class="admin-input" id="faq_items" rows="14" style="resize:vertical;font-family:monospace;font-size:0.82rem"
-                placeholder='[&#10;  {"q": "Как заказать модель?", "a": "Ответ здесь..."},&#10;  {"q": "Стоимость услуг?", "a": "Ответ здесь..."}&#10;]'></textarea>
-              <div class="field-note">
-                Формат: JSON-массив объектов с полями <code style="color:var(--gold)">"q"</code> (вопрос) и <code style="color:var(--gold)">"a"</code> (ответ).<br>
-                Пример: <code style="color:var(--text-dim)">[{"q": "Вопрос?", "a": "Ответ."}]</code>
-              </div>
+
+            <div id="faq-list" style="margin-bottom:16px">
+              <!-- FAQ items loaded here -->
             </div>
-            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:20px">
-              <button class="btn btn-md btn-gold" id="btnSaveFaq" onclick="saveFaq(this)">Сохранить FAQ</button>
-              <button class="btn btn-md btn-ghost" onclick="validateFaqJson()">Проверить JSON</button>
-              <span id="faqJsonStatus" style="font-size:0.78rem;color:var(--text-muted)"></span>
+
+            <div class="section-card" style="padding:16px;background:var(--bg-card,var(--bg));border:1px solid var(--border);">
+              <h4 style="margin:0 0 12px;font-size:0.95rem;color:var(--text)">➕ Добавить вопрос</h4>
+              <div class="admin-form-group">
+                <label>Вопрос</label>
+                <input type="text" id="faq-new-q" placeholder="Как забронировать модель?" maxlength="500" class="admin-input" />
+              </div>
+              <div class="admin-form-group" style="margin-top:8px">
+                <label>Ответ</label>
+                <textarea id="faq-new-a" rows="3" placeholder="Ответ..." maxlength="2000" class="admin-input" style="resize:vertical"></textarea>
+              </div>
+              <div class="admin-form-group" style="margin-top:8px">
+                <label>Порядок (число, меньше = выше)</label>
+                <input type="number" id="faq-new-order" value="0" min="0" max="999" class="admin-input" style="width:80px" />
+              </div>
+              <button onclick="addFaqItem()" class="btn btn-md btn-gold" style="margin-top:8px">➕ Добавить</button>
             </div>
+
           </div>
         </div>
       </div>
@@ -1056,6 +1062,7 @@ function switchTab(name) {
   if (btn) { btn.classList.add('active'); btn.setAttribute('aria-selected','true'); }
   if (pane) pane.classList.add('active');
   if (name === 'email') loadEmailSettings();
+  if (name === 'faq') loadFaqAdmin();
 }
 
 /* ─── Character count ─────────────────────────────────────── */
@@ -1663,6 +1670,66 @@ function validateFaqJson() {
     status.style.color = 'var(--error)';
   }
   setTimeout(function() { if (status) status.textContent = ''; }, 4000);
+}
+
+/* ─── FAQ Admin ───────────────────────────────────────────── */
+async function loadFaqAdmin() {
+  const list = document.getElementById('faq-list');
+  if (!list) return;
+  try {
+    const items = await _admin.api('/admin/faq');
+    if (!items.length) {
+      list.innerHTML = '<p style="color:var(--text-muted)">FAQ пуст. Добавьте первый вопрос.</p>';
+      return;
+    }
+    list.innerHTML = items.map(function(f) {
+      return '<div class="section-card" style="padding:14px;margin-bottom:8px;border:1px solid var(--border)" id="faq-item-' + f.id + '">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">' +
+          '<div style="flex:1">' +
+            '<div style="font-weight:600;color:var(--text);margin-bottom:4px">' + _admin.escapeHtml(f.question) + '</div>' +
+            '<div style="font-size:0.82rem;color:var(--text-muted)">' + _admin.escapeHtml(f.answer) + '</div>' +
+            '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:4px">Порядок: ' + f.sort_order + ' · ' + (f.active ? '✅ Активен' : '🚫 Скрыт') + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:6px;flex-shrink:0">' +
+            '<button onclick="toggleFaq(' + f.id + ',' + f.active + ')" class="btn btn-sm btn-ghost" title="' + (f.active ? 'Скрыть' : 'Показать') + '">' + (f.active ? '🚫' : '✅') + '</button>' +
+            '<button onclick="deleteFaq(' + f.id + ')" class="btn btn-sm btn-danger" title="Удалить">🗑</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) { console.error('FAQ load error', e); }
+}
+
+async function addFaqItem() {
+  var q = (document.getElementById('faq-new-q')?.value || '').trim();
+  var a = (document.getElementById('faq-new-a')?.value || '').trim();
+  var order = parseInt(document.getElementById('faq-new-order')?.value) || 0;
+  if (!q || !a) { _admin.toast('Заполните вопрос и ответ', 'error'); return; }
+  try {
+    await _admin.api('/admin/faq', { method: 'POST', body: JSON.stringify({ question: q, answer: a, sort_order: order }) });
+    document.getElementById('faq-new-q').value = '';
+    document.getElementById('faq-new-a').value = '';
+    document.getElementById('faq-new-order').value = '0';
+    _admin.toast('Вопрос добавлен', 'success');
+    loadFaqAdmin();
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function toggleFaq(id, currentlyActive) {
+  try {
+    await _admin.api('/admin/faq/' + id, { method: 'PUT', body: JSON.stringify({ active: !currentlyActive }) });
+    loadFaqAdmin();
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function deleteFaq(id) {
+  if (!confirm('Удалить этот вопрос?')) return;
+  try {
+    await _admin.api('/admin/faq/' + id, { method: 'DELETE' });
+    var el = document.getElementById('faq-item-' + id);
+    if (el) el.remove();
+    _admin.toast('Вопрос удалён', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
 }
 
 /* ─── Save: CRM settings ──────────────────────────────────── */

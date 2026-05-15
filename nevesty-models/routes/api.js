@@ -2473,6 +2473,61 @@ router.post('/webhooks/stripe', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Admin FAQ CRUD ───────────────────────────────────────────────────────────
+
+// GET /admin/faq — list all FAQ items
+router.get('/admin/faq', auth, async (req, res, next) => {
+  try {
+    const items = await query('SELECT * FROM faq ORDER BY sort_order ASC, id ASC');
+    res.json(items);
+  } catch (e) { next(e); }
+});
+
+// POST /admin/faq — create FAQ item
+router.post('/admin/faq', auth, async (req, res, next) => {
+  try {
+    const { question, answer, sort_order = 0 } = req.body;
+    if (!question || !answer) return res.status(400).json({ error: 'question and answer required' });
+    const result = await run(
+      'INSERT INTO faq (question, answer, sort_order) VALUES (?, ?, ?)',
+      [question.slice(0, 500), answer.slice(0, 2000), parseInt(sort_order) || 0]
+    );
+    res.json({ ok: true, id: result.lastID });
+  } catch (e) { next(e); }
+});
+
+// PUT /admin/faq/:id — update FAQ item (supports partial updates)
+router.put('/admin/faq/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
+    const existing = await get('SELECT * FROM faq WHERE id=?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const { question, answer, sort_order, active } = req.body;
+    await run(
+      'UPDATE faq SET question=?, answer=?, sort_order=?, active=? WHERE id=?',
+      [
+        question !== undefined ? question.slice(0, 500) : existing.question,
+        answer !== undefined ? answer.slice(0, 2000) : existing.answer,
+        sort_order !== undefined ? (parseInt(sort_order) || 0) : existing.sort_order,
+        active !== undefined ? (active ? 1 : 0) : existing.active,
+        id
+      ]
+    );
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// DELETE /admin/faq/:id — delete FAQ item
+router.delete('/admin/faq/:id', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
+    await run('DELETE FROM faq WHERE id=?', [id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // ─── FAQ ──────────────────────────────────────────────────────────────────────
 const DEFAULT_FAQ_ITEMS = JSON.stringify([
   {"q": "Как заказать модель?", "a": "Выберите модель в каталоге и нажмите «Забронировать» или напишите нам в Telegram. Менеджер свяжется с вами в течение часа."},
