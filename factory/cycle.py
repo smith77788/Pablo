@@ -1263,6 +1263,88 @@ def run_cycle() -> dict:
         logger.error("Phase 16 monthly CEO report error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 17 — CUSTOMER SUCCESS ANALYSIS (weekly, Tuesdays)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🤝 PHASE 17: CUSTOMER SUCCESS ANALYSIS (Tuesdays)")
+    try:
+        import datetime as _dt17
+        _today17 = _dt17.date.today()
+        if _today17.weekday() == 1:  # Tuesday
+            import sqlite3 as _sqlite3_17
+            _bot_db_17 = "/home/user/Pablo/nevesty-models/data.db"
+            _data_db_17 = None
+            if os.path.exists(_bot_db_17):
+                _data_db_17 = _sqlite3_17.connect(_bot_db_17)
+                _data_db_17.row_factory = _sqlite3_17.Row
+
+            from factory.agents.customer_success import OnboardingSpecialist as _CS_Onboarding, \
+                RetentionAnalyst as _CS_Retention, FeedbackCollector as _CS_Feedback
+            cs17_results = []
+            for _AgentCls in [_CS_Onboarding, _CS_Retention, _CS_Feedback]:
+                try:
+                    _agent = _AgentCls()
+                    _result = _agent.run(data_db=_data_db_17)
+                    cs17_results.append(_result)
+                    logger.info("[Phase17] %s completed", _AgentCls.__name__)
+                except Exception as _ae:
+                    logger.error("[Phase17] %s error: %s", _AgentCls.__name__, _ae)
+
+            if _data_db_17:
+                _data_db_17.close()
+
+            results["phases"]["customer_success_weekly"] = {
+                "agents_run": len(cs17_results),
+                "roles": [r.get("role") for r in cs17_results],
+            }
+            summary_lines.append(f"🤝 CS Weekly (Phase 17): {len(cs17_results)} агента")
+            logger.info("[Phase17] Customer Success analysis: %d agents ran", len(cs17_results))
+        else:
+            logger.info("[Phase17] Skipping Customer Success weekly analysis (not Tuesday, weekday=%d)", _today17.weekday())
+    except Exception as e:
+        logger.error("Phase 17 Customer Success weekly error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 18 — FINANCE ANALYSIS (weekly, Thursdays)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n💰 PHASE 18: FINANCE ANALYSIS (Thursdays)")
+    try:
+        import datetime as _dt18
+        _today18 = _dt18.date.today()
+        if _today18.weekday() == 3:  # Thursday
+            import sqlite3 as _sqlite3_18
+            _bot_db_18 = "/home/user/Pablo/nevesty-models/data.db"
+            _data_db_18 = None
+            if os.path.exists(_bot_db_18):
+                _data_db_18 = _sqlite3_18.connect(_bot_db_18)
+                _data_db_18.row_factory = _sqlite3_18.Row
+
+            from factory.agents.finance import RevenueForecaster as _Fin_Revenue, \
+                PricingStrategist as _Fin_Pricing
+            finance18_results = []
+            for _AgentCls in [_Fin_Revenue, _Fin_Pricing]:
+                try:
+                    _agent = _AgentCls()
+                    _result = _agent.run(data_db=_data_db_18)
+                    finance18_results.append(_result)
+                    logger.info("[Phase18] %s completed", _AgentCls.__name__)
+                except Exception as _ae:
+                    logger.error("[Phase18] %s error: %s", _AgentCls.__name__, _ae)
+
+            if _data_db_18:
+                _data_db_18.close()
+
+            results["phases"]["finance_weekly"] = {
+                "agents_run": len(finance18_results),
+                "roles": [r.get("role") for r in finance18_results],
+            }
+            summary_lines.append(f"💰 Finance Weekly (Phase 18): {len(finance18_results)} агента")
+            logger.info("[Phase18] Finance analysis: %d agents ran", len(finance18_results))
+        else:
+            logger.info("[Phase18] Skipping Finance weekly analysis (not Thursday, weekday=%d)", _today18.weekday())
+    except Exception as e:
+        logger.error("Phase 18 Finance weekly error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)
