@@ -955,6 +955,22 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre>
             </div>
 
             <button class="btn btn-md btn-gold" id="btnSaveCRM" onclick="saveCRMSettings(this)">Сохранить настройки CRM</button>
+
+            <hr style="border:none;border-top:1px solid var(--border);margin:20px 0;" />
+
+            <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">Статус ENV-переменных (только для чтения)</div>
+            <div class="admin-form-group" style="margin-bottom:6px;">
+              <span style="font-size:0.82rem;color:var(--text-secondary);">Generic Webhook:</span>
+              <span id="env_crm_generic" style="margin-left:8px;font-size:0.82rem;">…</span>
+            </div>
+            <div class="admin-form-group" style="margin-bottom:6px;">
+              <span style="font-size:0.82rem;color:var(--text-secondary);">AmoCRM:</span>
+              <span id="env_crm_amocrm" style="margin-left:8px;font-size:0.82rem;">…</span>
+            </div>
+            <div class="admin-form-group" style="margin-bottom:6px;">
+              <span style="font-size:0.82rem;color:var(--text-secondary);">Bitrix24:</span>
+              <span id="env_crm_bitrix24" style="margin-left:8px;font-size:0.82rem;">…</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1649,6 +1665,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const swEl = document.getElementById('webhook_stripe_url');
   if (ywEl) ywEl.textContent = base + '/api/webhooks/yookassa';
   if (swEl) swEl.textContent = base + '/api/webhooks/stripe';
+
+  // Load CRM env-var status badges
+  fetch('/api/admin/crm-status', { headers: h })
+    .then(r => r.json())
+    .then(d => {
+      const badge = (active) => active
+        ? '<span style="color:#2e7d32;font-weight:600;">✅ активен</span>'
+        : '<span style="color:var(--text-muted);">— не задан</span>';
+      const eg = document.getElementById('env_crm_generic');
+      const ea = document.getElementById('env_crm_amocrm');
+      const eb = document.getElementById('env_crm_bitrix24');
+      if (eg) eg.innerHTML = badge(d.generic);
+      if (ea) ea.innerHTML = badge(d.amocrm);
+      if (eb) eb.innerHTML = badge(d.bitrix24);
+    })
+    .catch(() => {});
 });
 
 async function savePaymentSettings(btn) {

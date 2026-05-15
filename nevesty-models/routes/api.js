@@ -2072,6 +2072,14 @@ router.get('/admin/factory-monthly', auth, (req, res, next) => {
 });
 
 // ─── DB stats endpoint ────────────────────────────────────────────────────────
+router.get('/admin/crm-status', auth, (req, res) => {
+  res.json({
+    generic:  !!process.env.CRM_WEBHOOK_URL,
+    amocrm:   !!process.env.AMOCRM_WEBHOOK_URL,
+    bitrix24: !!process.env.BITRIX24_WEBHOOK_URL,
+  });
+});
+
 router.get('/admin/db-stats', auth, async (req, res, next) => {
   try {
     const tables = await query(`

@@ -1139,7 +1139,14 @@ async function bkSubmit(chatId, data) {
         ]}
       }
     );
-    if (order) notifyNewOrder(order);
+    if (order) {
+      notifyNewOrder(order);
+      // CRM webhooks (non-blocking)
+      try {
+        const { notifyCRM } = require('./services/crm');
+        notifyCRM('order.created', order, getSetting).catch(e => console.error('[CRM] bot:', e.message));
+      } catch {}
+    }
   } catch (e) {
     console.error('[Bot] bkSubmit:', e.message);
     await clearSession(chatId);
