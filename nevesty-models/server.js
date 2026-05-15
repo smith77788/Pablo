@@ -27,7 +27,7 @@ if (LOG_JSON) {
   app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
-      if (req.path === '/api/health' || req.path === '/health') return; // Skip health checks
+      if (req.path === '/api/health' || req.path === '/health' || req.path === '/api/metrics') return; // Skip health/metrics checks
       const log = {
         ts: new Date().toISOString(),
         method: req.method,
@@ -308,29 +308,61 @@ async function buildHealthResponse() {
   const loadAvg = os.loadavg();
   const freeMemMb = Math.round(os.freemem() / 1024 / 1024);
   const totalMemMb = Math.round(os.totalmem() / 1024 / 1024);
-  const memUsedMb = Math.round(mem.rss / 1024 / 1024);
+  const memUsedMb = Math.round(mem.rss / 1024 / 1024 * 10) / 10;
+  const heapUsedMb = Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10;
+  const heapTotalMb = Math.round(mem.heapTotal / 1024 / 1024 * 10) / 10;
   const memAlertMb = parseInt(process.env.MEMORY_ALERT_MB || '500');
   let dbStatus = 'ok';
+  let dbError = null;
+  let dbSizeMb = null;
+  let walStatus = null;
   let factoryLastCycle = null;
   let ordersToday = 0;
   let activeOrders = 0;
+  let totalOrders = 0;
   let modelsCount = 0;
+  let ordersByStatus = {};
 
-  let walStatus = null;
   try {
     await dbGet('SELECT 1 as ok');
     // Fetch DB metrics in parallel
     const today = new Date().toISOString().slice(0, 10);
-    const [todayRow, activeRow, modelsRow] = await Promise.all([
+    const [todayRow, activeRow, modelsRow, totalOrdersRow, pageCountRow, pageSizeRow] = await Promise.all([
       dbGet('SELECT COUNT(*) as n FROM orders WHERE date(created_at)=?', [today]),
       dbGet("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','confirmed','in_progress')"),
       dbGet('SELECT COUNT(*) as n FROM models WHERE available=1'),
+      dbGet('SELECT COUNT(*) as n FROM orders'),
+      dbGet('PRAGMA page_count'),
+      dbGet('PRAGMA page_size'),
     ]);
     ordersToday = todayRow?.n || 0;
     activeOrders = activeRow?.n || 0;
     modelsCount = modelsRow?.n || 0;
+    totalOrders = totalOrdersRow?.n || 0;
+
+    // DB size calculation
+    const pageCount = pageCountRow?.page_count || 0;
+    const pageSize = pageSizeRow?.page_size || 4096;
+    dbSizeMb = Math.round(pageCount * pageSize / 1024 / 1024 * 10) / 10;
+
+    // Orders by status for metrics endpoint
+    const statusRows = await Promise.all([
+      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='new'"),
+      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='confirmed'"),
+      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='in_progress'"),
+      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='completed'"),
+      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='cancelled'"),
+    ]);
+    ordersByStatus = {
+      new: statusRows[0]?.n || 0,
+      confirmed: statusRows[1]?.n || 0,
+      in_progress: statusRows[2]?.n || 0,
+      completed: statusRows[3]?.n || 0,
+      cancelled: statusRows[4]?.n || 0,
+    };
   } catch (e) {
-    dbStatus = 'error: ' + e.message;
+    dbStatus = 'error';
+    dbError = e.message;
   }
 
   try {
@@ -367,17 +399,27 @@ async function buildHealthResponse() {
 
   const uptime = Math.floor(process.uptime());
   const overallStatus = dbStatus === 'ok' ? 'ok' : 'degraded';
+
+  // Build database sub-object
+  const databaseInfo = dbStatus === 'ok'
+    ? { status: 'ok', wal: walStatus, size_mb: dbSizeMb }
+    : { status: 'error', error: dbError };
+
   return {
     status: overallStatus,
-    uptime_sec: uptime,
+    uptime_seconds: uptime,
     timestamp: new Date().toISOString(),
+    // Legacy aliases kept for compatibility
+    uptime_sec: uptime,
     uptime,
     uptimeHuman: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
+    node_version: process.version,
+    env: process.env.NODE_ENV || 'development',
     version: pkg.version || '1.0.0',
     memory: {
       rss_mb: memUsedMb,
-      heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
-      heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024),
+      heap_used_mb: heapUsedMb,
+      heap_total_mb: heapTotalMb,
       free_mb: freeMemMb,
       total_mb: totalMemMb,
       alert: memUsedMb > memAlertMb,
@@ -387,7 +429,13 @@ async function buildHealthResponse() {
       load_5m: Math.round(loadAvg[1] * 100) / 100,
       cores: os.cpus().length,
     },
-    db: { status: dbStatus, wal: walStatus },
+    database: databaseInfo,
+    stats: {
+      total_models: modelsCount,
+      active_orders: activeOrders,
+      total_orders: totalOrders,
+      orders_today: ordersToday,
+    },
     components: {
       database: dbStatus,
       bot: botInstance ? 'ok' : 'not_initialized',
@@ -401,12 +449,13 @@ async function buildHealthResponse() {
       orders_today: ordersToday,
       active_orders: activeOrders,
       models_count: modelsCount,
+      orders_by_status: ordersByStatus,
     },
-    // Legacy fields kept for compatibility
-    database: dbStatus,
+    // Legacy scalar fields kept for compatibility
     bot: botInstance ? 'connected' : 'not_initialized',
     memory_mb: memUsedMb,
     ts: new Date().toISOString(),
+    _ordersByStatus: ordersByStatus,
   };
 }
 
@@ -426,6 +475,72 @@ app.get('/api/health', async (req, res) => {
     res.status(health.status === 'ok' ? 200 : 503).json(health);
   } catch (e) {
     res.status(503).json({ status: 'down', error: e.message });
+  }
+});
+
+// ─── Prometheus-compatible metrics endpoint ────────────────────────────────────
+app.get('/api/metrics', async (req, res) => {
+  // Optional token-based auth: if METRICS_TOKEN is set, require Authorization: Bearer <token>
+  const metricsToken = process.env.METRICS_TOKEN;
+  if (metricsToken) {
+    const authHeader = req.headers['authorization'] || '';
+    const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (provided !== metricsToken) {
+      return res.status(401).set('WWW-Authenticate', 'Bearer realm="metrics"').send('Unauthorized\n');
+    }
+  }
+
+  try {
+    const health = await buildHealthResponse();
+    const s = health.stats || {};
+    const m = health.metrics || {};
+    const obs = health._ordersByStatus || {};
+    const uptime = health.uptime_seconds || 0;
+    const mem = health.memory || {};
+
+    const lines = [
+      '# HELP nevesty_orders_total Total orders by status',
+      '# TYPE nevesty_orders_total counter',
+      ...Object.entries(obs).map(([status, count]) => `nevesty_orders_total{status="${status}"} ${count}`),
+      '',
+      '# HELP nevesty_orders_active Active orders (new + confirmed + in_progress)',
+      '# TYPE nevesty_orders_active gauge',
+      `nevesty_orders_active ${s.active_orders || 0}`,
+      '',
+      '# HELP nevesty_orders_today Orders created today',
+      '# TYPE nevesty_orders_today gauge',
+      `nevesty_orders_today ${s.orders_today || 0}`,
+      '',
+      '# HELP nevesty_models_total Total active models',
+      '# TYPE nevesty_models_total gauge',
+      `nevesty_models_total ${s.total_models || 0}`,
+      '',
+      '# HELP process_uptime_seconds Process uptime in seconds',
+      '# TYPE process_uptime_seconds counter',
+      `process_uptime_seconds ${uptime}`,
+      '',
+      '# HELP process_memory_rss_mb Resident Set Size memory in MB',
+      '# TYPE process_memory_rss_mb gauge',
+      `process_memory_rss_mb ${mem.rss_mb || 0}`,
+      '',
+      '# HELP process_memory_heap_used_mb Heap used in MB',
+      '# TYPE process_memory_heap_used_mb gauge',
+      `process_memory_heap_used_mb ${mem.heap_used_mb || 0}`,
+      '',
+      '# HELP nevesty_db_size_mb SQLite database file size in MB',
+      '# TYPE nevesty_db_size_mb gauge',
+      `nevesty_db_size_mb ${(health.database && health.database.size_mb != null) ? health.database.size_mb : 0}`,
+      '',
+      '# HELP nevesty_status Overall service status (1=ok, 0=degraded)',
+      '# TYPE nevesty_status gauge',
+      `nevesty_status ${health.status === 'ok' ? 1 : 0}`,
+      '',
+    ];
+
+    res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.send(lines.join('\n'));
+  } catch (e) {
+    res.status(503).set('Content-Type', 'text/plain').send(`# ERROR: ${e.message}\n`);
   }
 });
 
