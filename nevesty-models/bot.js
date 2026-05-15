@@ -3593,6 +3593,7 @@ function initBot(app) {
     if (data === 'adm_factory_exp')       { if (!isAdmin(chatId)) return; return showFactoryExperiments(chatId); }
     if (data === 'adm_factory_decisions') { if (!isAdmin(chatId)) return; return showFactoryDecisions(chatId); }
     if (data === 'adm_factory_tasks')     { if (!isAdmin(chatId)) return; return showFactoryTasks(chatId, 0); }
+    if (data === 'adm_experiments')       { if (!isAdmin(chatId)) return; return showAdminExperiments(chatId); }
     if (data.startsWith('adm_factory_tasks_')) {
       if (!isAdmin(chatId)) return;
       const page = parseInt(data.replace('adm_factory_tasks_', '')) || 0;
@@ -4551,7 +4552,8 @@ async function showFactoryPanel(chatId) {
          { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' }],
         [{ text: '🧪 Эксперименты',  callback_data: 'adm_factory_exp' },
          { text: '📋 Решения CEO',   callback_data: 'adm_factory_decisions' }],
-        [{ text: '🎯 AI Задачи',     callback_data: 'adm_factory_tasks' }],
+        [{ text: '🎯 AI Задачи',     callback_data: 'adm_factory_tasks' },
+         { text: '🧪 A/B Тесты',    callback_data: 'adm_experiments' }],
         [{ text: '← Меню', callback_data: 'admin_menu' }],
       ]}
     });
@@ -4691,6 +4693,32 @@ async function showFactoryTasks(chatId, page) {
       reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
     });
   }
+}
+
+// ─── A/B Experiments (synced from AI Factory) ────────────────────────────────
+
+async function showAdminExperiments(chatId) {
+  if (!isAdmin(chatId)) return;
+  const experiments = await query(`SELECT * FROM ab_experiments ORDER BY created_at DESC LIMIT 10`).catch(() => []);
+
+  if (!experiments.length) {
+    return safeSend(chatId, `🧪 *A/B Эксперименты*\n\nЭкспериментов пока нет\\. Factory сгенерирует их при следующем цикле\\.`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← Factory панель', callback_data: 'adm_factory' }]] }
+    });
+  }
+
+  const statusIcon = { proposed: '💡', running: '▶️', applied: '✅', skipped: '❌' };
+  const lines = experiments.map((e, i) =>
+    `${i + 1}\\. ${statusIcon[e.status] || '💡'} ${esc(e.hypothesis?.slice(0, 80) || '')}\\.\\.\\.\n   _Усилие: ${esc(e.effort || '?')} | Ожидание: ${esc(e.expected_lift || '?')}_`
+  ).join('\n\n');
+
+  return safeSend(chatId, `🧪 *A/B Эксперименты* \\(${experiments.length}\\)\n\n${lines}`, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '← Factory панель', callback_data: 'adm_factory' }]
+    ]}
+  });
 }
 
 // ─── Admin Reviews ────────────────────────────────────────────────────────────

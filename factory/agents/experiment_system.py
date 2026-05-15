@@ -1,5 +1,6 @@
 """🧪 Experiment System — A/B тесты, traffic split, scale/iterate/kill решения."""
 from __future__ import annotations
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -7,6 +8,73 @@ from factory.agents.base import FactoryAgent
 from factory import db
 
 logger = logging.getLogger(__name__)
+
+
+class ExperimentDesigner(FactoryAgent):
+    """Designs A/B experiments for the modeling agency platform."""
+    name = "ExperimentDesigner"
+    department = "experiments"
+    role = "designer"
+    system_prompt = """Ты — специалист по A/B тестированию для Telegram-ботов и веб-сервисов.
+Разрабатываешь конкретные, измеримые гипотезы для улучшения конверсии.
+
+Формат гипотезы:
+{
+  "id": "exp_001",
+  "hypothesis": "Добавление кнопки 'Быстрая заявка' на главный экран увеличит конверсию на 15%",
+  "type": "bot|site|both",
+  "metric": "booking_count",
+  "variant_a": "текущее состояние",
+  "variant_b": "предлагаемое изменение",
+  "effort": "low|medium|high",
+  "expected_lift": "+10-20%",
+  "status": "proposed"
+}"""
+
+    def generate_hypotheses(self, context: dict) -> list[dict]:
+        """Generate A/B test hypotheses based on context."""
+        prompt = f"""Данные по платформе:
+- Заявок: {context.get('total_orders', 0)}
+- Конверсия: {context.get('conversion_rate', 0)}%
+- Активных клиентов: {context.get('active_clients', 0)}
+
+Придумай 3 конкретных A/B эксперимента для улучшения конверсии.
+Отвечай JSON массивом из 3 объектов. Каждый объект: hypothesis, type, metric, variant_a, variant_b, effort, expected_lift."""
+        result = self.think_json(prompt, context)
+        if isinstance(result, list):
+            for i, exp in enumerate(result):
+                exp['id'] = f'exp_{len(result):03d}_{i}'
+                exp['status'] = 'proposed'
+            return result
+        return []
+
+
+class ExperimentEvaluator(FactoryAgent):
+    """Evaluates running A/B experiments."""
+    name = "ExperimentEvaluator"
+    department = "experiments"
+    role = "evaluator"
+    system_prompt = """Ты — аналитик A/B тестов. Оцениваешь результаты экспериментов по метрикам.
+Если эксперимент показывает значимый результат — рекомендуешь его применить."""
+
+    def evaluate_experiments(self, experiments: list[dict], metrics: dict) -> list[dict]:
+        """Evaluate each experiment and return recommendations."""
+        results = []
+        for exp in experiments:
+            if exp.get('status') not in ('proposed', 'running'):
+                continue
+            prompt = f"""Эксперимент: {exp.get('hypothesis')}
+Метрика: {exp.get('metric')}
+Ожидаемый результат: {exp.get('expected_lift')}
+Текущие метрики: {json.dumps(metrics, ensure_ascii=False, default=str)}
+
+Стоит ли применить изменение? Отвечай JSON: {{"recommendation": "apply|skip|continue", "reason": "..."}}"""
+            rec = self.think_json(prompt)
+            if isinstance(rec, dict):
+                exp['recommendation'] = rec.get('recommendation', 'continue')
+                exp['eval_reason'] = rec.get('reason', '')
+            results.append(exp)
+        return results
 
 SCALE_THRESHOLD = 5.0   # conversion > 5% → SCALE
 KILL_THRESHOLD  = 2.0   # conversion < 2% → KILL

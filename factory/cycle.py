@@ -107,6 +107,39 @@ def _send_ceo_memo_to_telegram(memo_text: str, health_score: int, growth_actions
         logger.error("Failed to send CEO memo to Telegram: %s", e)
 
 
+def _sync_experiments_to_db(experiments: list, bot_db_path: str | None = None) -> None:
+    """Save A/B experiment proposals to nevesty-models DB."""
+    import os
+    import sqlite3
+    db_path = bot_db_path or os.path.join(
+        os.path.dirname(__file__), '..', 'nevesty-models', 'data.db'
+    )
+    if not os.path.exists(db_path):
+        logger.warning("Bot DB not found at %s", db_path)
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("""CREATE TABLE IF NOT EXISTS ab_experiments (
+            id TEXT PRIMARY KEY, hypothesis TEXT, type TEXT DEFAULT 'both',
+            metric TEXT, effort TEXT DEFAULT 'medium', expected_lift TEXT,
+            status TEXT DEFAULT 'proposed', created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
+        for exp in experiments:
+            cur.execute("""INSERT OR IGNORE INTO ab_experiments
+                (id, hypothesis, type, metric, effort, expected_lift, status)
+                VALUES (?,?,?,?,?,?,?)""",
+                (exp.get('id', f'exp_{id(exp)}'), exp.get('hypothesis', ''),
+                 exp.get('type', 'both'), exp.get('metric', ''),
+                 exp.get('effort', 'medium'), exp.get('expected_lift', ''),
+                 exp.get('status', 'proposed')))
+        conn.commit()
+        conn.close()
+        logger.info("Synced %d experiments to bot DB", len(experiments))
+    except Exception as e:
+        logger.warning("Failed to sync experiments: %s", e)
+
+
 def _sync_growth_actions_to_bot_db(growth_actions: list, bot_db_path: str) -> None:
     """Копирует growth actions из factory.db в bot БД для отображения в боте."""
     import os
@@ -564,6 +597,27 @@ def run_cycle() -> dict:
                 summary_lines.append(f"💡 Идей сгенерировано: {len(new_ideas)}")
     except Exception as e:
         logger.error("Ideas phase error: %s", e)
+
+    # Generate A/B hypotheses via ExperimentDesigner and sync to bot DB
+    try:
+        from factory.agents.experiment_system import ExperimentDesigner
+        designer = ExperimentDesigner()
+        nevesty_metrics = all_metrics.get("nevesty_models", {})
+        exp_context = {
+            "total_orders": nevesty_metrics.get("total_orders", 0),
+            "conversion_rate": nevesty_metrics.get("conversion_rate", 0),
+            "active_clients": nevesty_metrics.get("active_clients", 0),
+            "health_score": results.get("health_score", 50),
+        }
+        ab_hypotheses = designer.generate_hypotheses(exp_context)
+        if ab_hypotheses:
+            bot_db = "/home/user/Pablo/nevesty-models/data.db"
+            _sync_experiments_to_db(ab_hypotheses, bot_db)
+            results["phases"]["ab_experiments"] = {"generated": len(ab_hypotheses)}
+            summary_lines.append(f"🧪 A/B гипотез: {len(ab_hypotheses)}")
+            logger.info("[IDEAS] Generated %d A/B hypotheses", len(ab_hypotheses))
+    except Exception as e:
+        logger.error("A/B experiment generation error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # PHASE 9 — IDEAS DEPARTMENT: creative brainstorming & gamification
