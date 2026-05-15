@@ -1,0 +1,11 @@
+node_modules/
+public/vendor/
+*.min.js
+*.min.css
+coverage/
+data.db
+data.db-shm
+data.db-wal
+backups/
+backup/
+uploads/

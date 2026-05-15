@@ -2,15 +2,7 @@
 
 module.exports = [
   {
-    ignores: [
-      'node_modules/**',
-      'public/**',
-      'data/**',
-      'tests/**',
-      'coverage/**',
-      '**/*.min.js',
-      '**/*.test.js'
-    ]
+    ignores: ['node_modules/**', 'public/**', 'data/**', 'tests/**', 'coverage/**', '**/*.min.js', '**/*.test.js'],
   },
   {
     languageOptions: {
@@ -56,27 +48,38 @@ module.exports = [
         FormData: 'readonly',
         Headers: 'readonly',
         Request: 'readonly',
-        Response: 'readonly'
-      }
+        Response: 'readonly',
+      },
     },
     rules: {
-      'no-unused-vars': ['warn', {
-        argsIgnorePattern: '^_|^next$|^err$',
-        caughtErrorsIgnorePattern: '^_|^e$|^err$|^error$',
-        varsIgnorePattern: '^_'
-      }],
+      'no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_|^next$|^err$',
+          caughtErrorsIgnorePattern: '^_|^e$|^err$|^error$',
+          varsIgnorePattern: '^_',
+        },
+      ],
       'no-undef': 'error',
       'no-console': 'off',
-      'eqeqeq': ['warn', 'always', { 'null': 'ignore' }],
+      eqeqeq: ['warn', 'always', { null: 'ignore' }],
       'no-var': 'warn',
       'prefer-const': 'warn',
       'no-duplicate-case': 'error',
-      'no-unreachable': 'warn',
+      'no-unreachable': 'error',
       'no-empty': ['warn', { allowEmptyCatch: true }],
       'no-constant-condition': 'warn',
       'no-eval': 'error',
       'no-implied-eval': 'error',
-      'no-new-func': 'error'
-    }
-  }
+      'no-new-func': 'error',
+      'no-unused-expressions': [
+        'warn',
+        {
+          allowShortCircuit: true,
+          allowTernary: true,
+          allowTaggedTemplates: true,
+        },
+      ],
+    },
+  },
 ];
