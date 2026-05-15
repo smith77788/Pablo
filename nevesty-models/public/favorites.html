@@ -1,332 +1,641 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Избранные модели — Nevesty Models</title>
-  <meta name="description" content="Ваш список избранных моделей агентства Nevesty Models. Добавляйте понравившихся моделей из каталога и оформляйте заявку в один клик.">
-  <meta name="robots" content="noindex">
-  <meta property="og:title" content="Избранные модели — Nevesty Models">
-  <meta property="og:description" content="Ваш список избранных моделей агентства Nevesty Models. Добавляйте понравившихся моделей из каталога.">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
-  <meta property="og:url" content="https://nevesty-models.ru/favorites.html">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@nevesty_models">
-  <meta name="theme-color" content="#080808">
-  <link rel="canonical" href="https://nevesty-models.ru/favorites.html">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="/css/main.css" />
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Избранные модели — Nevesty Models</title>
+    <meta
+      name="description"
+      content="Ваш список избранных моделей агентства Nevesty Models. Добавляйте понравившихся моделей из каталога и оформляйте заявку в один клик."
+    />
+    <meta name="robots" content="noindex" />
+    <meta property="og:title" content="Избранные модели — Nevesty Models" />
+    <meta
+      property="og:description"
+      content="Ваш список избранных моделей агентства Nevesty Models. Добавляйте понравившихся моделей из каталога."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg" />
+    <meta property="og:url" content="https://nevesty-models.ru/favorites.html" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@nevesty_models" />
+    <meta name="twitter:title" content="Избранные модели — Nevesty Models" />
+    <meta
+      name="twitter:description"
+      content="Ваш список избранных моделей агентства Nevesty Models. Добавляйте понравившихся моделей из каталога."
+    />
+    <meta name="theme-color" content="#080808" />
+    <link rel="canonical" href="https://nevesty-models.ru/favorites.html" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="/css/main.css" />
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
 
-  <!-- NAVBAR -->
-  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links">
-        <a href="/catalog.html">Модели</a>
-        <a href="/#services">Услуги</a>
-        <a href="/#about">О нас</a>
-        <a href="/#contact">Контакты</a>
-        <a href="/favorites.html" style="color:var(--gold);display:inline-flex;align-items:center;gap:4px" aria-label="Избранное (текущая страница)" aria-current="page">
-          <span aria-hidden="true">❤️</span> Избранное
-          <span id="fav-nav-badge" style="background:red;color:white;border-radius:50%;padding:0 5px;font-size:0.7rem;min-width:18px;text-align:center;display:inline-block;line-height:18px"></span>
-        </a>
-        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
-           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
-           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
-          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-          <span>WhatsApp</span>
-        </a>
-        <a href="/booking.html" class="btn-nav">Заказать</a>
-      </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
-    </div>
-  </nav>
-
-  <!-- MOBILE MENU -->
-  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-    <a href="/catalog.html">Модели</a>
-    <a href="/#services">Услуги</a>
-    <a href="/#about">О нас</a>
-    <a href="/favorites.html" style="color:var(--gold)">❤️ Избранное</a>
-    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
-  </nav>
-
-  <!-- PAGE CONTENT -->
-  <div style="padding-top:60px;min-height:100vh" id="main-content">
-    <div class="container" style="padding-top:32px;padding-bottom:80px">
-
-      <!-- Breadcrumbs -->
-      <nav aria-label="breadcrumb" style="margin-bottom:8px">
-        <ol style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
-          <li><a href="/" style="color:var(--text-muted);text-decoration:none">Главная</a></li>
-          <li style="color:var(--border)" aria-hidden="true">/</li>
-          <li style="color:var(--gold)" aria-current="page">Избранное</li>
-        </ol>
-      </nav>
-
-      <!-- Header -->
-      <div style="margin-bottom:32px">
-        <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Мой список</div>
-        <h1 style="font-family:'Playfair Display',serif;font-size:clamp(1.8rem,4vw,3rem);color:var(--white);margin-bottom:8px">
-          Избранные <span id="favCountBadge" style="display:none;font-size:0.55em;background:rgba(201,169,110,0.15);border:1px solid rgba(201,169,110,0.3);color:var(--gold);padding:4px 14px;border-radius:2px;vertical-align:middle;font-family:'Inter',sans-serif;font-weight:400;letter-spacing:1px"></span>
-        </h1>
-        <p style="color:var(--text-muted);font-size:0.9rem;margin-top:6px" id="favCount">Загрузка...</p>
-        <!-- Top action bar (visible when favorites exist) -->
-        <div id="topActions" style="display:none;margin-top:20px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
-          <a id="compareAllBtn" href="/compare.html"
-            style="display:inline-flex;align-items:center;gap:8px;padding:10px 20px;background:transparent;border:1px solid var(--gold);color:var(--gold);font-size:0.78rem;letter-spacing:1px;text-transform:uppercase;text-decoration:none;transition:all 0.2s"
-            onmouseover="this.style.background='var(--gold)';this.style.color='var(--bg)'"
-            onmouseout="this.style.background='transparent';this.style.color='var(--gold)'">
-            📊 Сравнить выбранные
+    <!-- NAVBAR -->
+    <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links">
+          <a href="/catalog.html">Модели</a>
+          <a href="/#services">Услуги</a>
+          <a href="/#about">О нас</a>
+          <a href="/#contact">Контакты</a>
+          <a
+            href="/favorites.html"
+            style="color: var(--gold); display: inline-flex; align-items: center; gap: 4px"
+            aria-label="Избранное (текущая страница)"
+            aria-current="page"
+          >
+            <span aria-hidden="true">❤️</span> Избранное
+            <span
+              id="fav-nav-badge"
+              style="
+                background: red;
+                color: white;
+                border-radius: 50%;
+                padding: 0 5px;
+                font-size: 0.7rem;
+                min-width: 18px;
+                text-align: center;
+                display: inline-block;
+                line-height: 18px;
+              "
+            ></span>
           </a>
-          <button id="clearAllTopBtn"
-            style="display:inline-flex;align-items:center;gap:8px;background:none;border:1px solid var(--border);color:var(--text-muted);padding:10px 20px;font-size:0.78rem;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all 0.2s"
-            onmouseover="this.style.borderColor='#e54d4d';this.style.color='#e54d4d'"
-            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
+          <a
+            id="whatsapp-btn"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            style="
+              display: none;
+              align-items: center;
+              gap: 6px;
+              background: #25d366;
+              color: #fff;
+              padding: 6px 14px;
+              border-radius: 8px;
+              font-size: 0.8rem;
+              font-weight: 600;
+              transition: background 0.2s;
+              text-decoration: none;
+            "
+            onmouseover="this.style.background = '#1da851'"
+            onmouseout="this.style.background = '#25D366'"
+          >
+            <svg style="width: 16px; height: 16px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+              <path
+                d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+              />
+            </svg>
+            <span>WhatsApp</span>
+          </a>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
+        </div>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- MOBILE MENU -->
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/#services">Услуги</a>
+      <a href="/#about">О нас</a>
+      <a href="/favorites.html" style="color: var(--gold)">❤️ Избранное</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+    </nav>
+
+    <!-- PAGE CONTENT -->
+    <div style="padding-top: 60px; min-height: 100vh" id="main-content">
+      <div class="container" style="padding-top: 32px; padding-bottom: 80px">
+        <!-- Breadcrumbs -->
+        <nav aria-label="breadcrumb" style="margin-bottom: 8px">
+          <ol
+            style="
+              display: flex;
+              list-style: none;
+              padding: 0;
+              margin: 0;
+              gap: 8px;
+              font-size: 0.75rem;
+              color: var(--text-dim);
+            "
+          >
+            <li><a href="/" style="color: var(--text-muted); text-decoration: none">Главная</a></li>
+            <li style="color: var(--border)" aria-hidden="true">/</li>
+            <li style="color: var(--gold)" aria-current="page">Избранное</li>
+          </ol>
+        </nav>
+
+        <!-- Header -->
+        <div style="margin-bottom: 32px">
+          <div
+            style="
+              font-size: 0.7rem;
+              letter-spacing: 3px;
+              text-transform: uppercase;
+              color: var(--gold);
+              margin-bottom: 12px;
+            "
+          >
+            Мой список
+          </div>
+          <h1
+            style="
+              font-family: 'Playfair Display', serif;
+              font-size: clamp(1.8rem, 4vw, 3rem);
+              color: var(--white);
+              margin-bottom: 8px;
+            "
+          >
+            Избранные
+            <span
+              id="favCountBadge"
+              style="
+                display: none;
+                font-size: 0.55em;
+                background: rgba(201, 169, 110, 0.15);
+                border: 1px solid rgba(201, 169, 110, 0.3);
+                color: var(--gold);
+                padding: 4px 14px;
+                border-radius: 2px;
+                vertical-align: middle;
+                font-family: 'Inter', sans-serif;
+                font-weight: 400;
+                letter-spacing: 1px;
+              "
+            ></span>
+          </h1>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 6px" id="favCount">Загрузка...</p>
+          <!-- Top action bar (visible when favorites exist) -->
+          <div
+            id="topActions"
+            style="display: none; margin-top: 20px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center"
+          >
+            <a
+              id="compareAllBtn"
+              href="/compare.html"
+              style="
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 20px;
+                background: transparent;
+                border: 1px solid var(--gold);
+                color: var(--gold);
+                font-size: 0.78rem;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                text-decoration: none;
+                transition: all 0.2s;
+              "
+              onmouseover="
+                this.style.background = 'var(--gold)';
+                this.style.color = 'var(--bg)';
+              "
+              onmouseout="
+                this.style.background = 'transparent';
+                this.style.color = 'var(--gold)';
+              "
+            >
+              📊 Сравнить выбранные
+            </a>
+            <button
+              id="clearAllTopBtn"
+              style="
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                background: none;
+                border: 1px solid var(--border);
+                color: var(--text-muted);
+                padding: 10px 20px;
+                font-size: 0.78rem;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                cursor: pointer;
+                transition: all 0.2s;
+              "
+              onmouseover="
+                this.style.borderColor = '#e54d4d';
+                this.style.color = '#e54d4d';
+              "
+              onmouseout="
+                this.style.borderColor = 'var(--border)';
+                this.style.color = 'var(--text-muted)';
+              "
+            >
+              🗑 Очистить всё
+            </button>
+          </div>
+        </div>
+
+        <!-- Loading state -->
+        <div id="loadingState" aria-busy="true" aria-label="Загрузка избранных моделей" style="display: none">
+          <div class="catalog-grid" style="display: grid">
+            <div class="model-card-skeleton"></div>
+            <div class="model-card-skeleton"></div>
+            <div class="model-card-skeleton"></div>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div id="emptyState" style="display: none; text-align: center; padding: 80px 24px">
+          <div style="font-size: 4rem; margin-bottom: 24px; opacity: 0.4">🤍</div>
+          <h2 style="font-family: 'Playfair Display', serif; font-size: 2rem; color: var(--white); margin-bottom: 12px">
+            Список пуст
+          </h2>
+          <p
+            style="
+              color: var(--text-muted);
+              margin-bottom: 32px;
+              max-width: 400px;
+              margin-left: auto;
+              margin-right: auto;
+            "
+          >
+            У вас нет избранных моделей. Откройте каталог и добавьте понравившихся.
+          </p>
+          <a href="/catalog.html" class="btn-primary">Перейти в каталог</a>
+        </div>
+
+        <!-- Models grid -->
+        <div class="catalog-grid" id="favGrid" style="display: none" role="list" aria-label="Избранные модели"></div>
+
+        <!-- Bottom actions (shown when there are favorites) -->
+        <div
+          id="bottomActions"
+          style="display: none; margin-top: 40px; gap: 16px; flex-wrap: wrap; align-items: center"
+        >
+          <a href="/catalog.html" class="btn-outline">← В каталог</a>
+          <button
+            id="clearAllBtn"
+            style="
+              background: none;
+              border: 1px solid var(--border);
+              color: var(--text-muted);
+              padding: 12px 24px;
+              font-size: 0.8rem;
+              letter-spacing: 1px;
+              text-transform: uppercase;
+              cursor: pointer;
+              transition: all 0.2s;
+            "
+            onmouseover="
+              this.style.borderColor = '#e54d4d';
+              this.style.color = '#e54d4d';
+            "
+            onmouseout="
+              this.style.borderColor = 'var(--border)';
+              this.style.color = 'var(--text-muted)';
+            "
+          >
             🗑 Очистить всё
           </button>
         </div>
       </div>
+    </div>
 
-      <!-- Loading state -->
-      <div id="loadingState" aria-busy="true" aria-label="Загрузка избранных моделей" style="display:none">
-        <div class="catalog-grid" style="display:grid">
-          <div class="model-card-skeleton"></div>
-          <div class="model-card-skeleton"></div>
-          <div class="model-card-skeleton"></div>
+    <!-- Floating WhatsApp Button -->
+    <div id="float-whatsapp" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 400">
+      <a
+        id="float-wa-link"
+        href="#"
+        target="_blank"
+        rel="noopener"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #25d366;
+          color: #fff;
+          padding: 14px 20px;
+          border-radius: 50px;
+          box-shadow: 0 4px 16px rgba(37, 211, 102, 0.4);
+          text-decoration: none;
+          font-size: 0.85rem;
+          font-weight: 600;
+          transition: all 0.2s;
+        "
+        onmouseover="
+          this.style.background = '#1da851';
+          this.style.boxShadow = '0 6px 20px rgba(37,211,102,0.5)';
+        "
+        onmouseout="
+          this.style.background = '#25D366';
+          this.style.boxShadow = '0 4px 16px rgba(37,211,102,0.4)';
+        "
+      >
+        <svg style="width: 22px; height: 22px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+          <path
+            d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+          />
+        </svg>
+        Написать в WhatsApp
+      </a>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/main.js" defer></script>
+    <script src="/js/analytics.js" defer></script>
+    <script type="application/ld+json">
+      [
+        {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/" },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Избранное",
+              "item": "https://nevesty-models.ru/favorites.html"
+            }
+          ]
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "Nevesty Models",
+          "url": "https://nevesty-models.ru",
+          "logo": "https://nevesty-models.ru/og-image.jpg",
+          "contactPoint": {
+            "@type": "ContactPoint",
+            "contactType": "customer service",
+            "availableLanguage": "Russian"
+          }
+        }
+      ]
+    </script>
+
+    <!-- Floating Compare Bar -->
+    <div
+      id="favCompareBar"
+      style="
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 500;
+        background: rgba(8, 8, 8, 0.97);
+        border-top: 1px solid var(--gold);
+        backdrop-filter: blur(12px);
+        padding: 14px 24px;
+        transition: transform 0.3s ease;
+      "
+    >
+      <div
+        style="
+          max-width: 1200px;
+          margin: 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          flex-wrap: wrap;
+        "
+      >
+        <div style="display: flex; align-items: center; gap: 12px">
+          <span style="font-size: 0.7rem; letter-spacing: 2px; text-transform: uppercase; color: var(--gold)"
+            >⚖️ Сравнение</span
+          >
+          <span id="favCmpBarCount" style="font-size: 0.85rem; color: var(--text-muted)">Выбрано 0 моделей</span>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center">
+          <a
+            id="favCmpBarLink"
+            href="/compare.html"
+            style="
+              padding: 10px 24px;
+              background: var(--gold);
+              color: var(--bg);
+              font-size: 0.75rem;
+              letter-spacing: 1.5px;
+              text-transform: uppercase;
+              font-weight: 600;
+              text-decoration: none;
+              transition: background 0.2s;
+            "
+            onmouseover="this.style.background = 'var(--gold-light)'"
+            onmouseout="this.style.background = 'var(--gold)'"
+          >
+            Сравнить
+          </a>
+          <button
+            id="favCmpClearBtn"
+            style="
+              background: none;
+              border: 1px solid var(--border);
+              color: var(--text-muted);
+              padding: 10px 18px;
+              cursor: pointer;
+              font-size: 0.75rem;
+              letter-spacing: 1px;
+              text-transform: uppercase;
+              transition: all 0.2s;
+            "
+            onmouseover="this.style.borderColor = 'var(--text-muted)'"
+            onmouseout="this.style.borderColor = 'var(--border)'"
+          >
+            Очистить
+          </button>
         </div>
       </div>
-
-      <!-- Empty state -->
-      <div id="emptyState" style="display:none;text-align:center;padding:80px 24px">
-        <div style="font-size:4rem;margin-bottom:24px;opacity:0.4">🤍</div>
-        <h2 style="font-family:'Playfair Display',serif;font-size:2rem;color:var(--white);margin-bottom:12px">Список пуст</h2>
-        <p style="color:var(--text-muted);margin-bottom:32px;max-width:400px;margin-left:auto;margin-right:auto">
-          У вас нет избранных моделей. Откройте каталог и добавьте понравившихся.
-        </p>
-        <a href="/catalog.html" class="btn-primary">Перейти в каталог</a>
-      </div>
-
-      <!-- Models grid -->
-      <div class="catalog-grid" id="favGrid" style="display:none" role="list" aria-label="Избранные модели"></div>
-
-      <!-- Bottom actions (shown when there are favorites) -->
-      <div id="bottomActions" style="display:none;margin-top:40px;gap:16px;flex-wrap:wrap;align-items:center">
-        <a href="/catalog.html" class="btn-outline">← В каталог</a>
-        <button id="clearAllBtn"
-          style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:12px 24px;font-size:0.8rem;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all 0.2s"
-          onmouseover="this.style.borderColor='#e54d4d';this.style.color='#e54d4d'"
-          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
-          🗑 Очистить всё
-        </button>
-      </div>
-
     </div>
-  </div>
 
-  <!-- Floating WhatsApp Button -->
-  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
-    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
-       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
-       onmouseover="this.style.background='#1da851';this.style.boxShadow='0 6px 20px rgba(37,211,102,0.5)'"
-       onmouseout="this.style.background='#25D366';this.style.boxShadow='0 4px 16px rgba(37,211,102,0.4)'">
-      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      Написать в WhatsApp
-    </a>
-  </div>
+    <script>
+      (function () {
+        const FAV_KEY = 'nm_favorites';
+        const COMPARE_KEY = 'nm_compare';
+        const CAT_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
 
-  <div class="toast-container" id="toastContainer"></div>
-  <script src="/js/main.js" defer></script>
-  <script src="/js/analytics.js" defer></script>
-  <script type="application/ld+json">
-[
-  {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "itemListElement": [
-      {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
-      {"@type": "ListItem", "position": 2, "name": "Избранное", "item": "https://nevesty-models.ru/favorites.html"}
-    ]
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru",
-    "logo": "https://nevesty-models.ru/og-image.jpg",
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "contactType": "customer service",
-      "availableLanguage": "Russian"
-    }
-  }
-]
-  </script>
-
-  <!-- Floating Compare Bar -->
-  <div id="favCompareBar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:500;background:rgba(8,8,8,0.97);border-top:1px solid var(--gold);backdrop-filter:blur(12px);padding:14px 24px;transition:transform 0.3s ease">
-    <div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
-      <div style="display:flex;align-items:center;gap:12px">
-        <span style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold)">⚖️ Сравнение</span>
-        <span id="favCmpBarCount" style="font-size:0.85rem;color:var(--text-muted)">Выбрано 0 моделей</span>
-      </div>
-      <div style="display:flex;gap:10px;align-items:center">
-        <a id="favCmpBarLink" href="/compare.html" style="padding:10px 24px;background:var(--gold);color:var(--bg);font-size:0.75rem;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;text-decoration:none;transition:background 0.2s"
-           onmouseover="this.style.background='var(--gold-light)'" onmouseout="this.style.background='var(--gold)'">
-          Сравнить
-        </a>
-        <button id="favCmpClearBtn" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:10px 18px;cursor:pointer;font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;transition:all 0.2s" onmouseover="this.style.borderColor='var(--text-muted)'" onmouseout="this.style.borderColor='var(--border)'">
-          Очистить
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <script>
-  (function () {
-    const FAV_KEY = 'nm_favorites';
-    const COMPARE_KEY = 'nm_compare';
-    const CAT_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
-
-    // ── Storage helpers ───────────────────────────────────────────────────────
-    function getFavs() {
-      try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; }
-    }
-    function saveFavs(arr) {
-      try { localStorage.setItem(FAV_KEY, JSON.stringify(arr)); } catch {}
-    }
-    function getCompareIds() {
-      try { return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]'); } catch { return []; }
-    }
-    function saveCompareIds(ids) {
-      try { localStorage.setItem(COMPARE_KEY, JSON.stringify(ids)); } catch {}
-    }
-
-    function escHtml(s) {
-      if (s == null) return '';
-      return String(s)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
-
-    function plural(n) {
-      const m10 = n % 10, m100 = n % 100;
-      if (m100 >= 11 && m100 <= 19) return 'моделей';
-      if (m10 === 1) return 'модель';
-      if (m10 >= 2 && m10 <= 4) return 'модели';
-      return 'моделей';
-    }
-
-    // ── Nav badge ─────────────────────────────────────────────────────────────
-    function updateNavBadge() {
-      const count = getFavs().length;
-      const badge = document.getElementById('fav-nav-badge');
-      if (badge) badge.textContent = count > 0 ? count : '';
-    }
-
-    // ── Compare bar ───────────────────────────────────────────────────────────
-    function updateCompareBar() {
-      const ids = getCompareIds();
-      const bar = document.getElementById('favCompareBar');
-      const countEl = document.getElementById('favCmpBarCount');
-      const barLink = document.getElementById('favCmpBarLink');
-      const n = ids.length;
-      if (n >= 2) {
-        if (bar) bar.style.display = '';
-        const txt = n === 1 ? '1 модель' : n === 2 ? '2 модели' : '3 модели';
-        if (countEl) countEl.textContent = `Выбрано ${txt}`;
-        if (barLink) barLink.href = `/compare.html?ids=${ids.join(',')}`;
-      } else {
-        if (bar) bar.style.display = 'none';
-      }
-    }
-
-    document.getElementById('favCmpClearBtn').addEventListener('click', () => {
-      saveCompareIds([]);
-      updateCompareBar();
-      // Reset compare button states on all cards
-      document.querySelectorAll('.fav-cmp-btn').forEach(btn => {
-        btn.setAttribute('data-active', 'false');
-        btn.innerHTML = '⚖️';
-        btn.style.background = 'rgba(0,0,0,0.55)';
-      });
-    });
-
-    const favCountEl   = document.getElementById('favCount');
-    const favCountBadgeEl = document.getElementById('favCountBadge');
-    const loadingEl    = document.getElementById('loadingState');
-    const emptyEl      = document.getElementById('emptyState');
-    const gridEl       = document.getElementById('favGrid');
-    const bottomEl     = document.getElementById('bottomActions');
-    const topActionsEl = document.getElementById('topActions');
-    const clearAllBtn  = document.getElementById('clearAllBtn');
-    const clearAllTopBtn = document.getElementById('clearAllTopBtn');
-    const compareAllBtn  = document.getElementById('compareAllBtn');
-
-    function updateHeadingBadge(n) {
-      if (favCountBadgeEl) {
-        if (n > 0) {
-          favCountBadgeEl.textContent = n;
-          favCountBadgeEl.style.display = 'inline-block';
-        } else {
-          favCountBadgeEl.style.display = 'none';
+        // ── Storage helpers ───────────────────────────────────────────────────────
+        function getFavs() {
+          try {
+            return JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+          } catch {
+            return [];
+          }
         }
-      }
-    }
+        function saveFavs(arr) {
+          try {
+            localStorage.setItem(FAV_KEY, JSON.stringify(arr));
+          } catch {}
+        }
+        function getCompareIds() {
+          try {
+            return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]');
+          } catch {
+            return [];
+          }
+        }
+        function saveCompareIds(ids) {
+          try {
+            localStorage.setItem(COMPARE_KEY, JSON.stringify(ids));
+          } catch {}
+        }
 
-    function updateCompareAllLink(models) {
-      if (compareAllBtn && models && models.length >= 2) {
-        const ids = models.slice(0, 3).map(m => m.id).join(',');
-        compareAllBtn.href = `/compare.html?models=${ids}`;
-      }
-    }
+        function escHtml(s) {
+          if (s == null) return '';
+          return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        }
 
-    function renderCard(model, onRemove) {
-      const catLabel = CAT_LABELS[model.category] || model.category || '';
-      const statusText = model.available ? 'Свободна' : 'Занята';
-      const statusColor = model.available ? '#4caf50' : '#f44336';
-      const measures = [model.bust, model.waist, model.hips].filter(Boolean).join('/');
-      const photoSrc = model.photo_main || model.photo || '';
+        function plural(n) {
+          const m10 = n % 10,
+            m100 = n % 100;
+          if (m100 >= 11 && m100 <= 19) return 'моделей';
+          if (m10 === 1) return 'модель';
+          if (m10 >= 2 && m10 <= 4) return 'модели';
+          return 'моделей';
+        }
 
-      const article = document.createElement('article');
-      article.className = 'model-card';
-      article.tabIndex = 0;
-      article.setAttribute('role', 'listitem');
-      article.setAttribute('aria-label', `Профиль модели ${model.name}`);
-      article.addEventListener('click', () => { window.location.href = `/model.html?id=${model.id}`; });
-      article.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.href = `/model.html?id=${model.id}`; }
-      });
+        // ── Nav badge ─────────────────────────────────────────────────────────────
+        function updateNavBadge() {
+          const count = getFavs().length;
+          const badge = document.getElementById('fav-nav-badge');
+          if (badge) badge.textContent = count > 0 ? count : '';
+        }
 
-      article.innerHTML = `
+        // ── Compare bar ───────────────────────────────────────────────────────────
+        function updateCompareBar() {
+          const ids = getCompareIds();
+          const bar = document.getElementById('favCompareBar');
+          const countEl = document.getElementById('favCmpBarCount');
+          const barLink = document.getElementById('favCmpBarLink');
+          const n = ids.length;
+          if (n >= 2) {
+            if (bar) bar.style.display = '';
+            const txt = n === 1 ? '1 модель' : n === 2 ? '2 модели' : '3 модели';
+            if (countEl) countEl.textContent = `Выбрано ${txt}`;
+            if (barLink) barLink.href = `/compare.html?ids=${ids.join(',')}`;
+          } else {
+            if (bar) bar.style.display = 'none';
+          }
+        }
+
+        document.getElementById('favCmpClearBtn').addEventListener('click', () => {
+          saveCompareIds([]);
+          updateCompareBar();
+          // Reset compare button states on all cards
+          document.querySelectorAll('.fav-cmp-btn').forEach(btn => {
+            btn.setAttribute('data-active', 'false');
+            btn.innerHTML = '⚖️';
+            btn.style.background = 'rgba(0,0,0,0.55)';
+          });
+        });
+
+        const favCountEl = document.getElementById('favCount');
+        const favCountBadgeEl = document.getElementById('favCountBadge');
+        const loadingEl = document.getElementById('loadingState');
+        const emptyEl = document.getElementById('emptyState');
+        const gridEl = document.getElementById('favGrid');
+        const bottomEl = document.getElementById('bottomActions');
+        const topActionsEl = document.getElementById('topActions');
+        const clearAllBtn = document.getElementById('clearAllBtn');
+        const clearAllTopBtn = document.getElementById('clearAllTopBtn');
+        const compareAllBtn = document.getElementById('compareAllBtn');
+
+        function updateHeadingBadge(n) {
+          if (favCountBadgeEl) {
+            if (n > 0) {
+              favCountBadgeEl.textContent = n;
+              favCountBadgeEl.style.display = 'inline-block';
+            } else {
+              favCountBadgeEl.style.display = 'none';
+            }
+          }
+        }
+
+        function updateCompareAllLink(models) {
+          if (compareAllBtn && models && models.length >= 2) {
+            const ids = models
+              .slice(0, 3)
+              .map(m => m.id)
+              .join(',');
+            compareAllBtn.href = `/compare.html?models=${ids}`;
+          }
+        }
+
+        function renderCard(model, onRemove) {
+          const catLabel = CAT_LABELS[model.category] || model.category || '';
+          const statusText = model.available ? 'Свободна' : 'Занята';
+          const statusColor = model.available ? '#4caf50' : '#f44336';
+          const measures = [model.bust, model.waist, model.hips].filter(Boolean).join('/');
+          const photoSrc = model.photo_main || model.photo || '';
+
+          const article = document.createElement('article');
+          article.className = 'model-card';
+          article.tabIndex = 0;
+          article.setAttribute('role', 'listitem');
+          article.setAttribute('aria-label', `Профиль модели ${model.name}`);
+          article.addEventListener('click', () => {
+            window.location.href = `/model.html?id=${model.id}`;
+          });
+          article.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              window.location.href = `/model.html?id=${model.id}`;
+            }
+          });
+
+          article.innerHTML = `
         <div class="model-avail${model.available ? '' : ' unavailable'}" aria-hidden="true"></div>
         <div class="model-card-img" style="position:relative">
-          ${photoSrc
-            ? `<img src="${escHtml(photoSrc)}" alt="${escHtml(model.name)}" loading="lazy" />`
-            : `<div class="model-card-placeholder" aria-hidden="true">${escHtml((model.name||'?')[0])}</div>`}
+          ${
+            photoSrc
+              ? `<img src="${escHtml(photoSrc)}" alt="${escHtml(model.name)}" loading="lazy" />`
+              : `<div class="model-card-placeholder" aria-hidden="true">${escHtml((model.name || '?')[0])}</div>`
+          }
           ${model.featured ? '<span class="badge-top">⭐ Топ</span>' : ''}
           <div class="model-card-overlay" aria-hidden="true">
             <div class="model-card-tag">${escHtml(catLabel)}</div>
@@ -337,8 +646,8 @@
           <div class="model-card-name">${escHtml(model.name)}</div>
           <div class="model-card-chips">
             ${model.height ? `<span class="mc-chip">${model.height} см</span>` : ''}
-            ${model.age    ? `<span class="mc-chip">${model.age} лет</span>` : ''}
-            ${model.city   ? `<span class="mc-chip mc-city">${escHtml(model.city)}</span>` : ''}
+            ${model.age ? `<span class="mc-chip">${model.age} лет</span>` : ''}
+            ${model.city ? `<span class="mc-chip mc-city">${escHtml(model.city)}</span>` : ''}
           </div>
           <div class="model-card-bottom">
             <span style="font-size:0.7rem;color:${statusColor};letter-spacing:1px;text-transform:uppercase">${statusText}</span>
@@ -361,223 +670,243 @@
           </div>
         </div>`;
 
-      // ── Remove from favorites button (💔) ──────────────────────────────────
-      const removeBtn = document.createElement('button');
-      removeBtn.innerHTML = '❤️';
-      removeBtn.title = 'Убрать из избранного';
-      removeBtn.setAttribute('aria-label', 'Убрать из избранного');
-      removeBtn.style.cssText = 'position:absolute;top:8px;right:8px;width:34px;height:34px;border:none;background:rgba(0,0,0,0.55);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;';
-      removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = 'rgba(180,0,0,0.75)'; removeBtn.innerHTML = '💔'; });
-      removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'rgba(0,0,0,0.55)'; removeBtn.innerHTML = '❤️'; });
-      removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        const favs = getFavs();
-        const updated = favs.filter(f => {
-          const fid = typeof f === 'object' ? f.id : f;
-          return fid != model.id;
-        });
-        saveFavs(updated);
-        updateNavBadge();
-        article.style.opacity = '0';
-        article.style.transform = 'scale(0.95)';
-        article.style.transition = 'all 0.25s';
-        setTimeout(() => {
-          article.remove();
-          onRemove(model.id);
-        }, 250);
-      });
+          // ── Remove from favorites button (💔) ──────────────────────────────────
+          const removeBtn = document.createElement('button');
+          removeBtn.innerHTML = '❤️';
+          removeBtn.title = 'Убрать из избранного';
+          removeBtn.setAttribute('aria-label', 'Убрать из избранного');
+          removeBtn.style.cssText =
+            'position:absolute;top:8px;right:8px;width:34px;height:34px;border:none;background:rgba(0,0,0,0.55);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;';
+          removeBtn.addEventListener('mouseenter', () => {
+            removeBtn.style.background = 'rgba(180,0,0,0.75)';
+            removeBtn.innerHTML = '💔';
+          });
+          removeBtn.addEventListener('mouseleave', () => {
+            removeBtn.style.background = 'rgba(0,0,0,0.55)';
+            removeBtn.innerHTML = '❤️';
+          });
+          removeBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            e.preventDefault();
+            const favs = getFavs();
+            const updated = favs.filter(f => {
+              const fid = typeof f === 'object' ? f.id : f;
+              return fid != model.id;
+            });
+            saveFavs(updated);
+            updateNavBadge();
+            article.style.opacity = '0';
+            article.style.transform = 'scale(0.95)';
+            article.style.transition = 'all 0.25s';
+            setTimeout(() => {
+              article.remove();
+              onRemove(model.id);
+            }, 250);
+          });
 
-      // ── Compare button (⚖️) ────────────────────────────────────────────────
-      const cmpIds = getCompareIds();
-      const cmpActive = cmpIds.includes(String(model.id)) || cmpIds.includes(model.id);
-      const cmpBtn = document.createElement('button');
-      cmpBtn.className = 'fav-cmp-btn';
-      cmpBtn.setAttribute('data-active', cmpActive ? 'true' : 'false');
-      cmpBtn.setAttribute('aria-label', cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению');
-      cmpBtn.title = cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению';
-      cmpBtn.innerHTML = '⚖️';
-      cmpBtn.style.cssText = `position:absolute;top:8px;left:8px;width:34px;height:34px;border:none;background:${cmpActive ? 'rgba(201,169,110,0.85)' : 'rgba(0,0,0,0.55)'};border-radius:50%;font-size:0.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;`;
-      cmpBtn.addEventListener('mouseenter', () => {
-        if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(201,169,110,0.4)';
-      });
-      cmpBtn.addEventListener('mouseleave', () => {
-        if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(0,0,0,0.55)';
-      });
-      cmpBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        const ids = getCompareIds();
-        const idx = ids.findIndex(id => id == model.id);
-        if (idx === -1) {
-          if (ids.length >= 3) { showToast('Максимум 3 модели для сравнения'); return; }
-          ids.push(model.id);
-          saveCompareIds(ids);
-          cmpBtn.setAttribute('data-active', 'true');
-          cmpBtn.style.background = 'rgba(201,169,110,0.85)';
-          cmpBtn.title = 'Убрать из сравнения';
-          showToast('Добавлено в сравнение ⚖️');
-        } else {
-          ids.splice(idx, 1);
-          saveCompareIds(ids);
-          cmpBtn.setAttribute('data-active', 'false');
-          cmpBtn.style.background = 'rgba(0,0,0,0.55)';
-          cmpBtn.title = 'Добавить к сравнению';
-          showToast('Убрано из сравнения');
+          // ── Compare button (⚖️) ────────────────────────────────────────────────
+          const cmpIds = getCompareIds();
+          const cmpActive = cmpIds.includes(String(model.id)) || cmpIds.includes(model.id);
+          const cmpBtn = document.createElement('button');
+          cmpBtn.className = 'fav-cmp-btn';
+          cmpBtn.setAttribute('data-active', cmpActive ? 'true' : 'false');
+          cmpBtn.setAttribute('aria-label', cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению');
+          cmpBtn.title = cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению';
+          cmpBtn.innerHTML = '⚖️';
+          cmpBtn.style.cssText = `position:absolute;top:8px;left:8px;width:34px;height:34px;border:none;background:${cmpActive ? 'rgba(201,169,110,0.85)' : 'rgba(0,0,0,0.55)'};border-radius:50%;font-size:0.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;`;
+          cmpBtn.addEventListener('mouseenter', () => {
+            if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(201,169,110,0.4)';
+          });
+          cmpBtn.addEventListener('mouseleave', () => {
+            if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(0,0,0,0.55)';
+          });
+          cmpBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            e.preventDefault();
+            const ids = getCompareIds();
+            const idx = ids.findIndex(id => id == model.id);
+            if (idx === -1) {
+              if (ids.length >= 3) {
+                showToast('Максимум 3 модели для сравнения');
+                return;
+              }
+              ids.push(model.id);
+              saveCompareIds(ids);
+              cmpBtn.setAttribute('data-active', 'true');
+              cmpBtn.style.background = 'rgba(201,169,110,0.85)';
+              cmpBtn.title = 'Убрать из сравнения';
+              showToast('Добавлено в сравнение ⚖️');
+            } else {
+              ids.splice(idx, 1);
+              saveCompareIds(ids);
+              cmpBtn.setAttribute('data-active', 'false');
+              cmpBtn.style.background = 'rgba(0,0,0,0.55)';
+              cmpBtn.title = 'Добавить к сравнению';
+              showToast('Убрано из сравнения');
+            }
+            updateCompareBar();
+          });
+
+          const imgContainer = article.querySelector('.model-card-img');
+          if (imgContainer) {
+            imgContainer.appendChild(removeBtn);
+            imgContainer.appendChild(cmpBtn);
+          }
+
+          return article;
         }
-        updateCompareBar();
-      });
 
-      const imgContainer = article.querySelector('.model-card-img');
-      if (imgContainer) {
-        imgContainer.appendChild(removeBtn);
-        imgContainer.appendChild(cmpBtn);
-      }
-
-      return article;
-    }
-
-    function showToast(msg) {
-      const c = document.getElementById('toastContainer');
-      if (!c) return;
-      const t = document.createElement('div');
-      t.className = 'toast';
-      t.textContent = msg;
-      c.appendChild(t);
-      setTimeout(() => t.remove(), 2800);
-    }
-
-    function clearAll() {
-      if (!confirm('Очистить весь список избранного?')) return;
-      saveFavs([]);
-      updateNavBadge();
-      gridEl.innerHTML = '';
-      gridEl.style.display = 'none';
-      bottomEl.style.display = 'none';
-      if (topActionsEl) topActionsEl.style.display = 'none';
-      emptyEl.style.display = 'block';
-      favCountEl.textContent = '0 моделей';
-      updateHeadingBadge(0);
-    }
-
-    async function init() {
-      const raw = getFavs();
-      updateNavBadge();
-      updateCompareBar();
-
-      // Support both: array of string/number IDs, or array of objects with .id
-      let favIds = raw.map(f => (typeof f === 'object' && f !== null) ? f.id : f)
-                      .filter(id => id !== undefined && id !== null);
-      favIds = [...new Set(favIds.map(String))]; // dedup as strings
-
-      if (!favIds.length) {
-        favCountEl.textContent = '0 моделей';
-        updateHeadingBadge(0);
-        loadingEl.style.display = 'none';
-        emptyEl.style.display = 'block';
-        return;
-      }
-
-      // Show loading skeleton while fetching
-      loadingEl.style.display = '';
-      favCountEl.textContent = 'Загрузка...';
-      updateHeadingBadge(favIds.length);
-
-      // Build a map of stored objects for offline fallback
-      const storedMap = {};
-      raw.forEach(f => {
-        if (typeof f === 'object' && f !== null && f.id) storedMap[String(f.id)] = f;
-      });
-
-      // Fetch fresh data: try batch via /api/models?ids=... first, then fallback to individual
-      let models = [];
-      try {
-        const resp = await fetch('/api/models');
-        if (resp.ok) {
-          const all = await resp.json();
-          const apiMap = new Map(all.map(m => [String(m.id), m]));
-          models = favIds
-            .map(id => apiMap.get(String(id)) || storedMap[String(id)] || null)
-            .filter(Boolean);
+        function showToast(msg) {
+          const c = document.getElementById('toastContainer');
+          if (!c) return;
+          const t = document.createElement('div');
+          t.className = 'toast';
+          t.textContent = msg;
+          c.appendChild(t);
+          setTimeout(() => t.remove(), 2800);
         }
-      } catch (e) { /* network error - use stored */ }
 
-      // If API failed or returned nothing, use stored objects
-      if (!models.length) {
-        models = favIds.map(id => storedMap[id]).filter(Boolean);
-      }
-
-      // If still nothing, try fetching each individually
-      if (!models.length) {
-        loadingEl.style.display = '';
-        const fetched = await Promise.allSettled(
-          favIds.map(id => fetch(`/api/models/${encodeURIComponent(id)}`).then(r => r.ok ? r.json() : null))
-        );
-        models = fetched.map(r => r.status === 'fulfilled' ? r.value : null).filter(Boolean);
-      }
-
-      loadingEl.style.display = 'none';
-
-      if (!models.length) {
-        favCountEl.textContent = '0 моделей';
-        updateHeadingBadge(0);
-        emptyEl.style.display = 'block';
-        return;
-      }
-
-      favCountEl.textContent = `${models.length} ${plural(models.length)}`;
-      updateHeadingBadge(models.length);
-
-      gridEl.style.display = '';
-      bottomEl.style.display = 'flex';
-      if (topActionsEl) topActionsEl.style.display = 'flex';
-      updateCompareAllLink(models);
-
-      let currentModels = [...models];
-
-      function updateCount() {
-        const n = currentModels.length;
-        favCountEl.textContent = `${n} ${plural(n)}`;
-        updateHeadingBadge(n);
-        updateCompareAllLink(currentModels);
-        if (!n) {
+        function clearAll() {
+          if (!confirm('Очистить весь список избранного?')) return;
+          saveFavs([]);
+          updateNavBadge();
+          gridEl.innerHTML = '';
           gridEl.style.display = 'none';
           bottomEl.style.display = 'none';
           if (topActionsEl) topActionsEl.style.display = 'none';
           emptyEl.style.display = 'block';
+          favCountEl.textContent = '0 моделей';
+          updateHeadingBadge(0);
         }
-      }
 
-      models.forEach(model => {
-        const card = renderCard(model, (removedId) => {
-          currentModels = currentModels.filter(m => String(m.id) !== String(removedId));
-          updateCount();
-        });
-        gridEl.appendChild(card);
-      });
+        async function init() {
+          const raw = getFavs();
+          updateNavBadge();
+          updateCompareBar();
 
-      // Clear all buttons
-      [clearAllBtn, clearAllTopBtn].forEach(btn => {
-        if (btn) btn.addEventListener('click', clearAll);
-      });
-    }
+          // Support both: array of string/number IDs, or array of objects with .id
+          let favIds = raw
+            .map(f => (typeof f === 'object' && f !== null ? f.id : f))
+            .filter(id => id !== undefined && id !== null);
+          favIds = [...new Set(favIds.map(String))]; // dedup as strings
 
-    document.addEventListener('DOMContentLoaded', init);
+          if (!favIds.length) {
+            favCountEl.textContent = '0 моделей';
+            updateHeadingBadge(0);
+            loadingEl.style.display = 'none';
+            emptyEl.style.display = 'block';
+            return;
+          }
 
-    // WhatsApp button
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      const wa = d.contacts_whatsapp;
-      if (wa) {
-        const waNum = wa.replace(/\D/g,'');
-        const waUrl = `https://wa.me/${waNum}`;
-        const btn = document.getElementById('whatsapp-btn');
-        if (btn) { btn.href = waUrl; btn.style.display = 'flex'; }
-        const floatEl = document.getElementById('float-whatsapp');
-        const floatLink = document.getElementById('float-wa-link');
-        if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
-      }
-    }).catch(()=>{});
-  })();
-  </script>
-</body>
+          // Show loading skeleton while fetching
+          loadingEl.style.display = '';
+          favCountEl.textContent = 'Загрузка...';
+          updateHeadingBadge(favIds.length);
+
+          // Build a map of stored objects for offline fallback
+          const storedMap = {};
+          raw.forEach(f => {
+            if (typeof f === 'object' && f !== null && f.id) storedMap[String(f.id)] = f;
+          });
+
+          // Fetch fresh data: try batch via /api/models?ids=... first, then fallback to individual
+          let models = [];
+          try {
+            const resp = await fetch('/api/models');
+            if (resp.ok) {
+              const all = await resp.json();
+              const apiMap = new Map(all.map(m => [String(m.id), m]));
+              models = favIds.map(id => apiMap.get(String(id)) || storedMap[String(id)] || null).filter(Boolean);
+            }
+          } catch (e) {
+            /* network error - use stored */
+          }
+
+          // If API failed or returned nothing, use stored objects
+          if (!models.length) {
+            models = favIds.map(id => storedMap[id]).filter(Boolean);
+          }
+
+          // If still nothing, try fetching each individually
+          if (!models.length) {
+            loadingEl.style.display = '';
+            const fetched = await Promise.allSettled(
+              favIds.map(id => fetch(`/api/models/${encodeURIComponent(id)}`).then(r => (r.ok ? r.json() : null)))
+            );
+            models = fetched.map(r => (r.status === 'fulfilled' ? r.value : null)).filter(Boolean);
+          }
+
+          loadingEl.style.display = 'none';
+
+          if (!models.length) {
+            favCountEl.textContent = '0 моделей';
+            updateHeadingBadge(0);
+            emptyEl.style.display = 'block';
+            return;
+          }
+
+          favCountEl.textContent = `${models.length} ${plural(models.length)}`;
+          updateHeadingBadge(models.length);
+
+          gridEl.style.display = '';
+          bottomEl.style.display = 'flex';
+          if (topActionsEl) topActionsEl.style.display = 'flex';
+          updateCompareAllLink(models);
+
+          let currentModels = [...models];
+
+          function updateCount() {
+            const n = currentModels.length;
+            favCountEl.textContent = `${n} ${plural(n)}`;
+            updateHeadingBadge(n);
+            updateCompareAllLink(currentModels);
+            if (!n) {
+              gridEl.style.display = 'none';
+              bottomEl.style.display = 'none';
+              if (topActionsEl) topActionsEl.style.display = 'none';
+              emptyEl.style.display = 'block';
+            }
+          }
+
+          models.forEach(model => {
+            const card = renderCard(model, removedId => {
+              currentModels = currentModels.filter(m => String(m.id) !== String(removedId));
+              updateCount();
+            });
+            gridEl.appendChild(card);
+          });
+
+          // Clear all buttons
+          [clearAllBtn, clearAllTopBtn].forEach(btn => {
+            if (btn) btn.addEventListener('click', clearAll);
+          });
+        }
+
+        document.addEventListener('DOMContentLoaded', init);
+
+        // WhatsApp button
+        fetch('/api/settings/public')
+          .then(r => r.json())
+          .then(d => {
+            const wa = d.contacts_whatsapp;
+            if (wa) {
+              const waNum = wa.replace(/\D/g, '');
+              const waUrl = `https://wa.me/${waNum}`;
+              const btn = document.getElementById('whatsapp-btn');
+              if (btn) {
+                btn.href = waUrl;
+                btn.style.display = 'flex';
+              }
+              const floatEl = document.getElementById('float-whatsapp');
+              const floatLink = document.getElementById('float-wa-link');
+              if (floatEl && floatLink) {
+                floatLink.href = waUrl;
+                floatEl.style.display = 'block';
+              }
+            }
+          })
+          .catch(() => {});
+      })();
+    </script>
+  </body>
 </html>

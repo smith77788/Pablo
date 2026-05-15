@@ -1,671 +1,880 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <!-- Flash-prevention: apply theme class before first paint -->
-  <script>try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FAQ — Часто задаваемые вопросы | Nevesty Models</title>
-  <meta name="description" content="Ответы на часто задаваемые вопросы о работе модельного агентства Nevesty Models. Как заказать модель, стоимость услуг, зона работы.">
-  <meta name="keywords" content="FAQ, вопросы, ответы, модельное агентство, как заказать модель, стоимость моделей">
-  <meta name="theme-color" content="#080808">
-  <meta property="og:title" content="FAQ — Часто задаваемые вопросы | Nevesty Models">
-  <meta property="og:description" content="Ответы на часто задаваемые вопросы о работе модельного агентства Nevesty Models.">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
-  <meta property="og:url" content="https://nevesty-models.ru/faq.html">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://nevesty-models.ru/faq.html">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="/css/main.css" />
-  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Flash-prevention: apply theme class before first paint -->
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light') {
+          document.documentElement.classList.add('light');
+        } else if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FAQ — Часто задаваемые вопросы | Nevesty Models</title>
+    <meta
+      name="description"
+      content="Ответы на часто задаваемые вопросы о работе модельного агентства Nevesty Models. Как заказать модель, стоимость услуг, зона работы."
+    />
+    <meta name="keywords" content="FAQ, вопросы, ответы, модельное агентство, как заказать модель, стоимость моделей" />
+    <meta name="theme-color" content="#080808" />
+    <meta property="og:title" content="FAQ — Часто задаваемые вопросы | Nevesty Models" />
+    <meta
+      property="og:description"
+      content="Ответы на часто задаваемые вопросы о работе модельного агентства Nevesty Models."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg" />
+    <meta property="og:url" content="https://nevesty-models.ru/faq.html" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@nevesty_models" />
+    <meta name="twitter:title" content="FAQ — Часто задаваемые вопросы | Nevesty Models" />
+    <meta
+      name="twitter:description"
+      content="Ответы на часто задаваемые вопросы о работе модельного агентства Nevesty Models."
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://nevesty-models.ru/faq.html" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="/css/main.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
 
-  <!-- Schema.org: BreadcrumbList (static) -->
-  <script type="application/ld+json" id="schema-breadcrumb">
-  {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "itemListElement": [
-      {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
-      {"@type": "ListItem", "position": 2, "name": "FAQ", "item": "https://nevesty-models.ru/faq.html"}
-    ]
-  }
-  </script>
-  <!-- Schema.org: FAQPage (injected by JS after fetching items) -->
-  <script type="application/ld+json" id="schema-faqpage"></script>
+    <!-- Schema.org: BreadcrumbList (static) -->
+    <script type="application/ld+json" id="schema-breadcrumb">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/" },
+          { "@type": "ListItem", "position": 2, "name": "FAQ", "item": "https://nevesty-models.ru/faq.html" }
+        ]
+      }
+    </script>
+    <!-- Schema.org: FAQPage (injected by JS after fetching items) -->
+    <script type="application/ld+json" id="schema-faqpage"></script>
 
-  <style>
-    /* ─── FAQ HERO ─────────────────────────────────────────── */
-    .faq-hero {
-      padding: 140px 0 72px;
-      background: linear-gradient(135deg, #080808 0%, #0f0a06 50%, #080808 100%);
-      position: relative;
-      overflow: hidden;
-      text-align: center;
-    }
-    .faq-hero::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(ellipse at 50% 60%, rgba(201,169,110,0.07) 0%, transparent 65%);
-      pointer-events: none;
-    }
-    .faq-hero-inner {
-      position: relative;
-      z-index: 1;
-    }
-    .faq-hero h1 {
-      font-size: clamp(2.2rem, 5vw, 3.6rem);
-      color: var(--white);
-      margin-bottom: 16px;
-    }
-    .faq-hero h1 em { color: var(--gold); font-style: italic; }
-    .faq-hero p {
-      color: var(--text-muted);
-      font-size: 1rem;
-      max-width: 520px;
-      margin: 0 auto 20px;
-      line-height: 1.8;
-    }
-    .faq-count-badge {
-      display: inline-block;
-      background: rgba(201,169,110,0.12);
-      border: 1px solid rgba(201,169,110,0.3);
-      color: var(--gold);
-      font-size: 0.72rem;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      padding: 6px 16px;
-      border-radius: 2px;
-    }
+    <style>
+      /* ─── FAQ HERO ─────────────────────────────────────────── */
+      .faq-hero {
+        padding: 140px 0 72px;
+        background: linear-gradient(135deg, #080808 0%, #0f0a06 50%, #080808 100%);
+        position: relative;
+        overflow: hidden;
+        text-align: center;
+      }
+      .faq-hero::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at 50% 60%, rgba(201, 169, 110, 0.07) 0%, transparent 65%);
+        pointer-events: none;
+      }
+      .faq-hero-inner {
+        position: relative;
+        z-index: 1;
+      }
+      .faq-hero h1 {
+        font-size: clamp(2.2rem, 5vw, 3.6rem);
+        color: var(--white);
+        margin-bottom: 16px;
+      }
+      .faq-hero h1 em {
+        color: var(--gold);
+        font-style: italic;
+      }
+      .faq-hero p {
+        color: var(--text-muted);
+        font-size: 1rem;
+        max-width: 520px;
+        margin: 0 auto 20px;
+        line-height: 1.8;
+      }
+      .faq-count-badge {
+        display: inline-block;
+        background: rgba(201, 169, 110, 0.12);
+        border: 1px solid rgba(201, 169, 110, 0.3);
+        color: var(--gold);
+        font-size: 0.72rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        padding: 6px 16px;
+        border-radius: 2px;
+      }
 
-    /* ─── BREADCRUMB ───────────────────────────────────────── */
-    .breadcrumb-bar {
-      background: var(--bg2);
-      border-bottom: 1px solid var(--border);
-      padding: 12px 0;
-    }
-    .breadcrumb {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.78rem;
-      color: var(--text-dim);
-      flex-wrap: wrap;
-    }
-    .breadcrumb a {
-      color: var(--text-dim);
-      text-decoration: none;
-      transition: color var(--transition);
-    }
-    .breadcrumb a:hover { color: var(--gold); }
-    .breadcrumb-sep { color: var(--border2); }
-    .breadcrumb-current { color: var(--text-muted); }
+      /* ─── BREADCRUMB ───────────────────────────────────────── */
+      .breadcrumb-bar {
+        background: var(--bg2);
+        border-bottom: 1px solid var(--border);
+        padding: 12px 0;
+      }
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        flex-wrap: wrap;
+      }
+      .breadcrumb a {
+        color: var(--text-dim);
+        text-decoration: none;
+        transition: color var(--transition);
+      }
+      .breadcrumb a:hover {
+        color: var(--gold);
+      }
+      .breadcrumb-sep {
+        color: var(--border2);
+      }
+      .breadcrumb-current {
+        color: var(--text-muted);
+      }
 
-    /* ─── MAIN FAQ SECTION ─────────────────────────────────── */
-    .faq-main {
-      padding: 64px 0 100px;
-    }
+      /* ─── MAIN FAQ SECTION ─────────────────────────────────── */
+      .faq-main {
+        padding: 64px 0 100px;
+      }
 
-    /* ─── SEARCH BAR ───────────────────────────────────────── */
-    .faq-search-wrap {
-      max-width: 560px;
-      margin: 0 auto 48px;
-      position: relative;
-    }
-    .faq-search {
-      width: 100%;
-      padding: 14px 20px 14px 48px;
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-size: 0.9rem;
-      outline: none;
-      border-radius: 2px;
-      transition: border-color var(--transition);
-      box-sizing: border-box;
-    }
-    .faq-search:focus { border-color: rgba(201,169,110,0.5); }
-    .faq-search::placeholder { color: var(--text-dim); }
-    .faq-search-icon {
-      position: absolute;
-      left: 16px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--text-dim);
-      font-size: 1rem;
-      pointer-events: none;
-    }
+      /* ─── SEARCH BAR ───────────────────────────────────────── */
+      .faq-search-wrap {
+        max-width: 560px;
+        margin: 0 auto 48px;
+        position: relative;
+      }
+      .faq-search {
+        width: 100%;
+        padding: 14px 20px 14px 48px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 0.9rem;
+        outline: none;
+        border-radius: 2px;
+        transition: border-color var(--transition);
+        box-sizing: border-box;
+      }
+      .faq-search:focus {
+        border-color: rgba(201, 169, 110, 0.5);
+      }
+      .faq-search::placeholder {
+        color: var(--text-dim);
+      }
+      .faq-search-icon {
+        position: absolute;
+        left: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-dim);
+        font-size: 1rem;
+        pointer-events: none;
+      }
 
-    /* ─── ACCORDION ────────────────────────────────────────── */
-    .faq-accordion {
-      max-width: 800px;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-    }
-    .faq-accordion-item {
-      border: 1px solid var(--border);
-      border-top: none;
-      background: var(--bg2);
-      transition: border-color var(--transition);
-    }
-    .faq-accordion-item:first-child { border-top: 1px solid var(--border); border-radius: 2px 2px 0 0; }
-    .faq-accordion-item:last-child { border-radius: 0 0 2px 2px; }
-    .faq-accordion-item.open { border-color: rgba(201,169,110,0.35); }
-    .faq-accordion-item.open + .faq-accordion-item { border-top-color: rgba(201,169,110,0.2); }
+      /* ─── ACCORDION ────────────────────────────────────────── */
+      .faq-accordion {
+        max-width: 800px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+      .faq-accordion-item {
+        border: 1px solid var(--border);
+        border-top: none;
+        background: var(--bg2);
+        transition: border-color var(--transition);
+      }
+      .faq-accordion-item:first-child {
+        border-top: 1px solid var(--border);
+        border-radius: 2px 2px 0 0;
+      }
+      .faq-accordion-item:last-child {
+        border-radius: 0 0 2px 2px;
+      }
+      .faq-accordion-item.open {
+        border-color: rgba(201, 169, 110, 0.35);
+      }
+      .faq-accordion-item.open + .faq-accordion-item {
+        border-top-color: rgba(201, 169, 110, 0.2);
+      }
 
-    .faq-accordion-btn {
-      width: 100%;
-      background: none;
-      border: none;
-      padding: 20px 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      cursor: pointer;
-      text-align: left;
-      color: var(--text);
-      transition: background var(--transition);
-    }
-    .faq-accordion-btn:hover { background: rgba(201,169,110,0.04); }
-    .faq-accordion-item.open .faq-accordion-btn { background: rgba(201,169,110,0.06); }
+      .faq-accordion-btn {
+        width: 100%;
+        background: none;
+        border: none;
+        padding: 20px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        cursor: pointer;
+        text-align: left;
+        color: var(--text);
+        transition: background var(--transition);
+      }
+      .faq-accordion-btn:hover {
+        background: rgba(201, 169, 110, 0.04);
+      }
+      .faq-accordion-item.open .faq-accordion-btn {
+        background: rgba(201, 169, 110, 0.06);
+      }
 
-    .faq-accordion-q {
-      font-size: 0.95rem;
-      font-weight: 500;
-      color: var(--white);
-      line-height: 1.5;
-      flex: 1;
-    }
-    .faq-accordion-item.open .faq-accordion-q { color: var(--gold); }
+      .faq-accordion-q {
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: var(--white);
+        line-height: 1.5;
+        flex: 1;
+      }
+      .faq-accordion-item.open .faq-accordion-q {
+        color: var(--gold);
+      }
 
-    .faq-accordion-icon {
-      width: 28px;
-      height: 28px;
-      border: 1px solid var(--border);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      color: var(--text-dim);
-      font-size: 1.1rem;
-      font-weight: 300;
-      transition: all var(--transition);
-      line-height: 1;
-    }
-    .faq-accordion-item.open .faq-accordion-icon {
-      background: var(--gold);
-      border-color: var(--gold);
-      color: #000;
-      transform: rotate(45deg);
-    }
+      .faq-accordion-icon {
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        color: var(--text-dim);
+        font-size: 1.1rem;
+        font-weight: 300;
+        transition: all var(--transition);
+        line-height: 1;
+      }
+      .faq-accordion-item.open .faq-accordion-icon {
+        background: var(--gold);
+        border-color: var(--gold);
+        color: #000;
+        transform: rotate(45deg);
+      }
 
-    .faq-accordion-body {
-      overflow: hidden;
-      max-height: 0;
-      transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .faq-accordion-body.open {
-      max-height: 600px;
-    }
-    .faq-accordion-answer {
-      padding: 0 24px 20px 24px;
-      color: var(--text-muted);
-      font-size: 0.88rem;
-      line-height: 1.85;
-      border-top: 1px solid var(--border);
-    }
-    .faq-accordion-answer p { margin: 14px 0 0; }
-    .faq-accordion-answer p:first-child { margin-top: 14px; }
+      .faq-accordion-body {
+        overflow: hidden;
+        max-height: 0;
+        transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .faq-accordion-body.open {
+        max-height: 600px;
+      }
+      .faq-accordion-answer {
+        padding: 0 24px 20px 24px;
+        color: var(--text-muted);
+        font-size: 0.88rem;
+        line-height: 1.85;
+        border-top: 1px solid var(--border);
+      }
+      .faq-accordion-answer p {
+        margin: 14px 0 0;
+      }
+      .faq-accordion-answer p:first-child {
+        margin-top: 14px;
+      }
 
-    /* ─── SKELETON LOADING ─────────────────────────────────── */
-    .faq-skeleton-item {
-      border: 1px solid var(--border);
-      border-top: none;
-      background: var(--bg2);
-      padding: 22px 24px;
-      animation: faqSkelPulse 1.4s ease-in-out infinite;
-    }
-    .faq-skeleton-item:first-child { border-top: 1px solid var(--border); }
-    @keyframes faqSkelPulse {
-      0%, 100% { opacity: 0.4; }
-      50% { opacity: 0.9; }
-    }
-    .faq-skel-line {
-      height: 14px;
-      border-radius: 3px;
-      background: var(--border);
-    }
-    .faq-skel-line.short  { width: 40%; }
-    .faq-skel-line.medium { width: 68%; }
-    .faq-skel-line.long   { width: 88%; }
+      /* ─── SKELETON LOADING ─────────────────────────────────── */
+      .faq-skeleton-item {
+        border: 1px solid var(--border);
+        border-top: none;
+        background: var(--bg2);
+        padding: 22px 24px;
+        animation: faqSkelPulse 1.4s ease-in-out infinite;
+      }
+      .faq-skeleton-item:first-child {
+        border-top: 1px solid var(--border);
+      }
+      @keyframes faqSkelPulse {
+        0%,
+        100% {
+          opacity: 0.4;
+        }
+        50% {
+          opacity: 0.9;
+        }
+      }
+      .faq-skel-line {
+        height: 14px;
+        border-radius: 3px;
+        background: var(--border);
+      }
+      .faq-skel-line.short {
+        width: 40%;
+      }
+      .faq-skel-line.medium {
+        width: 68%;
+      }
+      .faq-skel-line.long {
+        width: 88%;
+      }
 
-    /* ─── NO RESULTS ───────────────────────────────────────── */
-    .faq-empty {
-      text-align: center;
-      padding: 64px 24px;
-      color: var(--text-dim);
-      font-size: 0.9rem;
-      display: none;
-    }
-    .faq-empty-icon { font-size: 2.5rem; display: block; margin-bottom: 12px; }
+      /* ─── NO RESULTS ───────────────────────────────────────── */
+      .faq-empty {
+        text-align: center;
+        padding: 64px 24px;
+        color: var(--text-dim);
+        font-size: 0.9rem;
+        display: none;
+      }
+      .faq-empty-icon {
+        font-size: 2.5rem;
+        display: block;
+        margin-bottom: 12px;
+      }
 
-    /* ─── CTA BLOCK ────────────────────────────────────────── */
-    .faq-cta {
-      margin-top: 64px;
-      text-align: center;
-      padding: 48px 32px;
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      max-width: 800px;
-      margin-left: auto;
-      margin-right: auto;
-    }
-    .faq-cta-icon { font-size: 2.5rem; margin-bottom: 16px; display: block; }
-    .faq-cta h3 { color: var(--white); font-size: 1.3rem; margin-bottom: 10px; }
-    .faq-cta p { color: var(--text-muted); font-size: 0.88rem; max-width: 420px; margin: 0 auto 28px; line-height: 1.8; }
-    .faq-cta-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+      /* ─── CTA BLOCK ────────────────────────────────────────── */
+      .faq-cta {
+        margin-top: 64px;
+        text-align: center;
+        padding: 48px 32px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        max-width: 800px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .faq-cta-icon {
+        font-size: 2.5rem;
+        margin-bottom: 16px;
+        display: block;
+      }
+      .faq-cta h3 {
+        color: var(--white);
+        font-size: 1.3rem;
+        margin-bottom: 10px;
+      }
+      .faq-cta p {
+        color: var(--text-muted);
+        font-size: 0.88rem;
+        max-width: 420px;
+        margin: 0 auto 28px;
+        line-height: 1.8;
+      }
+      .faq-cta-btns {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
 
-    /* ─── HIGHLIGHT SEARCH MATCH ───────────────────────────── */
-    mark.faq-hl {
-      background: rgba(201,169,110,0.25);
-      color: var(--gold);
-      border-radius: 2px;
-      padding: 0 2px;
-    }
+      /* ─── HIGHLIGHT SEARCH MATCH ───────────────────────────── */
+      mark.faq-hl {
+        background: rgba(201, 169, 110, 0.25);
+        color: var(--gold);
+        border-radius: 2px;
+        padding: 0 2px;
+      }
 
-    /* ─── MOBILE ───────────────────────────────────────────── */
-    @media (max-width: 600px) {
-      .faq-accordion-btn { padding: 16px 18px; }
-      .faq-accordion-answer { padding: 0 18px 16px; }
-      .faq-cta { padding: 32px 20px; }
-    }
-  </style>
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+      /* ─── MOBILE ───────────────────────────────────────────── */
+      @media (max-width: 600px) {
+        .faq-accordion-btn {
+          padding: 16px 18px;
+        }
+        .faq-accordion-answer {
+          padding: 0 18px 16px;
+        }
+        .faq-cta {
+          padding: 32px 20px;
+        }
+      }
+    </style>
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
 
-  <!-- NAVBAR -->
-  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links" role="list">
-        <a href="/catalog.html">Модели</a>
-        <a href="/pricing.html">Цены</a>
-        <a href="/reviews.html">Отзывы</a>
-        <a href="/cases.html">Кейсы</a>
-        <a href="/about.html">О нас</a>
-        <a href="/faq.html" style="color:var(--gold)">FAQ</a>
-        <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
-        <button onclick="DarkMode.toggle()"
-          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
-          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
-        </button>
-        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
-           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
-           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
-          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-          <span>WhatsApp</span>
-        </a>
-        <a href="/booking.html" class="btn-nav">Заказать</a>
-      </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu">
-        <span></span><span></span><span></span>
-      </button>
-    </div>
-  </nav>
-
-  <!-- MOBILE MENU -->
-  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-    <a href="/catalog.html">Модели</a>
-    <a href="/pricing.html">Цены</a>
-    <a href="/cases.html">Кейсы</a>
-    <a href="/about.html">О нас</a>
-    <a href="/faq.html" style="color:var(--gold)">FAQ</a>
-    <a href="/contact.html">Контакты</a>
-    <a href="/favorites.html">❤️ Избранное</a>
-    <a href="/cabinet.html">👤 Мои заявки</a>
-    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
-  </nav>
-
-  <!-- BREADCRUMB -->
-  <div class="breadcrumb-bar">
-    <div class="container">
-      <nav class="breadcrumb" aria-label="Навигационная цепочка">
-        <a href="/">Главная</a>
-        <span class="breadcrumb-sep" aria-hidden="true">›</span>
-        <span class="breadcrumb-current" aria-current="page">FAQ</span>
-      </nav>
-    </div>
-  </div>
-
-  <!-- HERO -->
-  <section class="faq-hero" id="main-content" tabindex="-1" role="main">
-    <div class="faq-hero-inner container">
-      <div class="section-tag" style="margin-bottom:20px">Помощь и поддержка</div>
-      <h1>Частые <em>вопросы</em></h1>
-      <p>Ответы на самые популярные вопросы о работе с агентством, выборе модели и оформлении заявок</p>
-      <div class="faq-count-badge" id="faqCountBadge" style="visibility:hidden">0 вопросов</div>
-    </div>
-  </section>
-
-  <!-- MAIN FAQ CONTENT -->
-  <section class="faq-main" aria-label="Часто задаваемые вопросы">
-    <div class="container">
-
-      <!-- Search -->
-      <div class="faq-search-wrap" role="search">
-        <span class="faq-search-icon" aria-hidden="true">🔍</span>
-        <input
-          type="search"
-          class="faq-search"
-          id="faqSearch"
-          placeholder="Поиск по вопросам..."
-          aria-label="Поиск по FAQ"
-          autocomplete="off"
-          oninput="filterFaq(this.value)"
-        />
-      </div>
-
-      <!-- Accordion container -->
-      <div class="faq-accordion" id="faqAccordion" role="list" aria-live="polite" aria-label="Список вопросов и ответов">
-        <!-- Skeleton loading state -->
-        <div class="faq-skeleton-item" aria-hidden="true">
-          <div class="faq-skel-line medium"></div>
-        </div>
-        <div class="faq-skeleton-item" aria-hidden="true" style="border-top:none">
-          <div class="faq-skel-line long"></div>
-        </div>
-        <div class="faq-skeleton-item" aria-hidden="true" style="border-top:none">
-          <div class="faq-skel-line short"></div>
-        </div>
-        <div class="faq-skeleton-item" aria-hidden="true" style="border-top:none">
-          <div class="faq-skel-line medium"></div>
-        </div>
-        <div class="faq-skeleton-item" aria-hidden="true" style="border-top:none">
-          <div class="faq-skel-line long"></div>
-        </div>
-      </div>
-
-      <!-- Empty / no results state -->
-      <div class="faq-empty" id="faqEmpty" role="status" aria-live="polite">
-        <span class="faq-empty-icon" aria-hidden="true">🔎</span>
-        По вашему запросу ничего не найдено.<br>
-        Попробуйте другой вопрос или <a href="/contact.html" style="color:var(--gold)">напишите нам напрямую</a>.
-      </div>
-
-      <!-- CTA -->
-      <div class="faq-cta" id="faqCta" style="display:none">
-        <span class="faq-cta-icon" aria-hidden="true">💬</span>
-        <h3>Не нашли ответ?</h3>
-        <p>Наш менеджер ответит на любой вопрос в течение часа — напишите в Telegram или оставьте заявку</p>
-        <div class="faq-cta-btns">
-          <a href="https://t.me/nevesty_models" target="_blank" rel="noopener" class="btn-primary">Написать в Telegram</a>
-          <a href="/contact.html" class="btn-outline">Контакты</a>
-        </div>
-      </div>
-
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer class="footer" role="contentinfo">
-    <div class="container">
-      <div class="footer-grid">
-        <div class="footer-brand">
-          <div class="nav-logo" style="font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--gold)">NEVESTY <span style="color:var(--text)">MODELS</span></div>
-          <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
-        </div>
-        <div class="footer-col">
-          <h4>Агентство</h4>
-          <a href="/catalog.html">Каталог моделей</a>
+    <!-- NAVBAR -->
+    <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links" role="list">
+          <a href="/catalog.html">Модели</a>
           <a href="/pricing.html">Цены</a>
+          <a href="/reviews.html">Отзывы</a>
           <a href="/cases.html">Кейсы</a>
           <a href="/about.html">О нас</a>
+          <a href="/faq.html" style="color: var(--gold)">FAQ</a>
           <a href="/contact.html">Контакты</a>
+          <a href="/favorites.html" aria-label="Избранное" style="font-size: 1.1rem"
+            ><span aria-hidden="true">❤️</span></a
+          >
+          <button
+            onclick="DarkMode.toggle()"
+            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            aria-label="Переключить тему"
+            title="Dark/Light mode"
+            style="background: none; border: none; cursor: pointer; padding: 4px 8px"
+          >
+            <span class="dark-mode-icon" style="font-size: 1.1rem">🌙</span>
+          </button>
+          <a
+            id="whatsapp-btn"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            style="
+              display: none;
+              align-items: center;
+              gap: 6px;
+              background: #25d366;
+              color: #fff;
+              padding: 6px 14px;
+              border-radius: 8px;
+              font-size: 0.8rem;
+              font-weight: 600;
+              transition: background 0.2s;
+              text-decoration: none;
+            "
+            onmouseover="this.style.background = '#1da851'"
+            onmouseout="this.style.background = '#25D366'"
+          >
+            <svg style="width: 16px; height: 16px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+              <path
+                d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+              />
+            </svg>
+            <span>WhatsApp</span>
+          </a>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
         </div>
-        <div class="footer-col">
-          <h4>Клиентам</h4>
-          <a href="/booking.html">Оформить заявку</a>
-          <a href="/cabinet.html">Мои заявки</a>
-          <a href="/order-status.html">Статус заявки</a>
-          <a href="/catalog.html">Выбрать модель</a>
-          <a href="/compare.html">Сравнить модели</a>
-          <a href="/favorites.html">Избранное</a>
-          <a href="/faq.html" style="color:var(--gold)">FAQ</a>
-          <a href="/privacy.html">Конфиденциальность</a>
-        </div>
-        <div class="footer-col">
-          <h4>Связаться</h4>
-          <a href="tel:+78005550000">+7 (800) 555-00-00</a>
-          <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
-          <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
-          <a href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
-        </div>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
+          <span></span><span></span><span></span>
+        </button>
       </div>
-      <div class="footer-bottom">
-        <p>© 2024 Nevesty Models. Все права защищены.</p>
-        <div class="footer-socials" aria-label="Социальные сети">
-          <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"><span aria-hidden="true">📸</span></a>
-          <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"><span aria-hidden="true">✈</span></a>
-          <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"><span aria-hidden="true">V</span></a>
-        </div>
+    </nav>
+
+    <!-- MOBILE MENU -->
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/pricing.html">Цены</a>
+      <a href="/cases.html">Кейсы</a>
+      <a href="/about.html">О нас</a>
+      <a href="/faq.html" style="color: var(--gold)">FAQ</a>
+      <a href="/contact.html">Контакты</a>
+      <a href="/favorites.html">❤️ Избранное</a>
+      <a href="/cabinet.html">👤 Мои заявки</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+    </nav>
+
+    <!-- BREADCRUMB -->
+    <div class="breadcrumb-bar">
+      <div class="container">
+        <nav class="breadcrumb" aria-label="Навигационная цепочка">
+          <a href="/">Главная</a>
+          <span class="breadcrumb-sep" aria-hidden="true">›</span>
+          <span class="breadcrumb-current" aria-current="page">FAQ</span>
+        </nav>
       </div>
     </div>
-  </footer>
 
-  <!-- Floating WhatsApp Button -->
-  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
-    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
-       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
-       onmouseover="this.style.background='#1da851';this.style.boxShadow='0 6px 20px rgba(37,211,102,0.5)'"
-       onmouseout="this.style.background='#25D366';this.style.boxShadow='0 4px 16px rgba(37,211,102,0.4)'">
-      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      Написать в WhatsApp
-    </a>
-  </div>
+    <!-- HERO -->
+    <section class="faq-hero" id="main-content" tabindex="-1" role="main">
+      <div class="faq-hero-inner container">
+        <div class="section-tag" style="margin-bottom: 20px">Помощь и поддержка</div>
+        <h1>Частые <em>вопросы</em></h1>
+        <p>Ответы на самые популярные вопросы о работе с агентством, выборе модели и оформлении заявок</p>
+        <div class="faq-count-badge" id="faqCountBadge" style="visibility: hidden">0 вопросов</div>
+      </div>
+    </section>
 
-  <div class="toast-container" id="toastContainer"></div>
+    <!-- MAIN FAQ CONTENT -->
+    <section class="faq-main" aria-label="Часто задаваемые вопросы">
+      <div class="container">
+        <!-- Search -->
+        <div class="faq-search-wrap" role="search">
+          <span class="faq-search-icon" aria-hidden="true">🔍</span>
+          <input
+            type="search"
+            class="faq-search"
+            id="faqSearch"
+            placeholder="Поиск по вопросам..."
+            aria-label="Поиск по FAQ"
+            autocomplete="off"
+            oninput="filterFaq(this.value)"
+          />
+        </div>
 
-  <script src="/js/main.js" defer></script>
-  <script src="/js/darkmode.js"></script>
-  <script src="/js/analytics.js" defer></script>
+        <!-- Accordion container -->
+        <div
+          class="faq-accordion"
+          id="faqAccordion"
+          role="list"
+          aria-live="polite"
+          aria-label="Список вопросов и ответов"
+        >
+          <!-- Skeleton loading state -->
+          <div class="faq-skeleton-item" aria-hidden="true">
+            <div class="faq-skel-line medium"></div>
+          </div>
+          <div class="faq-skeleton-item" aria-hidden="true" style="border-top: none">
+            <div class="faq-skel-line long"></div>
+          </div>
+          <div class="faq-skeleton-item" aria-hidden="true" style="border-top: none">
+            <div class="faq-skel-line short"></div>
+          </div>
+          <div class="faq-skeleton-item" aria-hidden="true" style="border-top: none">
+            <div class="faq-skel-line medium"></div>
+          </div>
+          <div class="faq-skeleton-item" aria-hidden="true" style="border-top: none">
+            <div class="faq-skel-line long"></div>
+          </div>
+        </div>
 
-  <script>
-  // ─── FAQ state ─────────────────────────────────────────────────────────────
-  let faqItems = [];
+        <!-- Empty / no results state -->
+        <div class="faq-empty" id="faqEmpty" role="status" aria-live="polite">
+          <span class="faq-empty-icon" aria-hidden="true">🔎</span>
+          По вашему запросу ничего не найдено.<br />
+          Попробуйте другой вопрос или <a href="/contact.html" style="color: var(--gold)">напишите нам напрямую</a>.
+        </div>
 
-  // ─── Escape HTML ───────────────────────────────────────────────────────────
-  function escHtml(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
+        <!-- CTA -->
+        <div class="faq-cta" id="faqCta" style="display: none">
+          <span class="faq-cta-icon" aria-hidden="true">💬</span>
+          <h3>Не нашли ответ?</h3>
+          <p>Наш менеджер ответит на любой вопрос в течение часа — напишите в Telegram или оставьте заявку</p>
+          <div class="faq-cta-btns">
+            <a href="https://t.me/nevesty_models" target="_blank" rel="noopener" class="btn-primary"
+              >Написать в Telegram</a
+            >
+            <a href="/contact.html" class="btn-outline">Контакты</a>
+          </div>
+        </div>
+      </div>
+    </section>
 
-  // ─── Highlight search term ─────────────────────────────────────────────────
-  function highlight(text, query) {
-    if (!query) return escHtml(text);
-    const safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return escHtml(text).replace(
-      new RegExp('(' + safe + ')', 'gi'),
-      '<mark class="faq-hl">$1</mark>'
-    );
-  }
+    <!-- FOOTER -->
+    <footer class="footer" role="contentinfo">
+      <div class="container">
+        <div class="footer-grid">
+          <div class="footer-brand">
+            <div class="nav-logo" style="font-family: 'Playfair Display', serif; font-size: 1.3rem; color: var(--gold)">
+              NEVESTY <span style="color: var(--text)">MODELS</span>
+            </div>
+            <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
+          </div>
+          <div class="footer-col">
+            <h4>Агентство</h4>
+            <a href="/catalog.html">Каталог моделей</a>
+            <a href="/pricing.html">Цены</a>
+            <a href="/cases.html">Кейсы</a>
+            <a href="/about.html">О нас</a>
+            <a href="/contact.html">Контакты</a>
+          </div>
+          <div class="footer-col">
+            <h4>Клиентам</h4>
+            <a href="/booking.html">Оформить заявку</a>
+            <a href="/cabinet.html">Мои заявки</a>
+            <a href="/order-status.html">Статус заявки</a>
+            <a href="/catalog.html">Выбрать модель</a>
+            <a href="/compare.html">Сравнить модели</a>
+            <a href="/favorites.html">Избранное</a>
+            <a href="/faq.html" style="color: var(--gold)">FAQ</a>
+            <a href="/privacy.html">Конфиденциальность</a>
+          </div>
+          <div class="footer-col">
+            <h4>Связаться</h4>
+            <a href="tel:+78005550000">+7 (800) 555-00-00</a>
+            <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
+            <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
+            <a href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>© 2024 Nevesty Models. Все права защищены.</p>
+          <div class="footer-socials" aria-label="Социальные сети">
+            <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"
+              ><span aria-hidden="true">📸</span></a
+            >
+            <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"
+              ><span aria-hidden="true">✈</span></a
+            >
+            <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"
+              ><span aria-hidden="true">V</span></a
+            >
+          </div>
+        </div>
+      </div>
+    </footer>
 
-  // ─── Inject Schema.org FAQPage ─────────────────────────────────────────────
-  function injectFaqSchema(items) {
-    if (!items.length) return;
-    const schema = {
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      "mainEntity": items.map(function(item) {
-        return {
-          "@type": "Question",
-          "name": item.q,
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": item.a
-          }
+    <!-- Floating WhatsApp Button -->
+    <div id="float-whatsapp" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 400">
+      <a
+        id="float-wa-link"
+        href="#"
+        target="_blank"
+        rel="noopener"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #25d366;
+          color: #fff;
+          padding: 14px 20px;
+          border-radius: 50px;
+          box-shadow: 0 4px 16px rgba(37, 211, 102, 0.4);
+          text-decoration: none;
+          font-size: 0.85rem;
+          font-weight: 600;
+          transition: all 0.2s;
+        "
+        onmouseover="
+          this.style.background = '#1da851';
+          this.style.boxShadow = '0 6px 20px rgba(37,211,102,0.5)';
+        "
+        onmouseout="
+          this.style.background = '#25D366';
+          this.style.boxShadow = '0 4px 16px rgba(37,211,102,0.4)';
+        "
+      >
+        <svg style="width: 22px; height: 22px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+          <path
+            d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+          />
+        </svg>
+        Написать в WhatsApp
+      </a>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/js/main.js" defer></script>
+    <script src="/js/darkmode.js"></script>
+    <script src="/js/analytics.js" defer></script>
+
+    <script>
+      // ─── FAQ state ─────────────────────────────────────────────────────────────
+      let faqItems = [];
+
+      // ─── Escape HTML ───────────────────────────────────────────────────────────
+      function escHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      // ─── Highlight search term ─────────────────────────────────────────────────
+      function highlight(text, query) {
+        if (!query) return escHtml(text);
+        const safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return escHtml(text).replace(new RegExp('(' + safe + ')', 'gi'), '<mark class="faq-hl">$1</mark>');
+      }
+
+      // ─── Inject Schema.org FAQPage ─────────────────────────────────────────────
+      function injectFaqSchema(items) {
+        if (!items.length) return;
+        const schema = {
+          '@context': 'https://schema.org',
+          '@type': 'FAQPage',
+          mainEntity: items.map(function (item) {
+            return {
+              '@type': 'Question',
+              name: item.q,
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: item.a,
+              },
+            };
+          }),
         };
-      })
-    };
-    var el = document.getElementById('schema-faqpage');
-    if (el) el.textContent = JSON.stringify(schema, null, 2);
-  }
+        var el = document.getElementById('schema-faqpage');
+        if (el) el.textContent = JSON.stringify(schema, null, 2);
+      }
 
-  // ─── Toggle accordion item ─────────────────────────────────────────────────
-  function toggleItem(btn) {
-    var item = btn.closest('.faq-accordion-item');
-    var body = item.querySelector('.faq-accordion-body');
-    var isOpen = item.classList.contains('open');
+      // ─── Toggle accordion item ─────────────────────────────────────────────────
+      function toggleItem(btn) {
+        var item = btn.closest('.faq-accordion-item');
+        var body = item.querySelector('.faq-accordion-body');
+        var isOpen = item.classList.contains('open');
 
-    // Close all open items
-    document.querySelectorAll('.faq-accordion-item.open').forEach(function(el) {
-      el.classList.remove('open');
-      el.querySelector('.faq-accordion-body').classList.remove('open');
-      el.querySelector('.faq-accordion-body').setAttribute('aria-hidden', 'true');
-      el.querySelector('.faq-accordion-btn').setAttribute('aria-expanded', 'false');
-    });
+        // Close all open items
+        document.querySelectorAll('.faq-accordion-item.open').forEach(function (el) {
+          el.classList.remove('open');
+          el.querySelector('.faq-accordion-body').classList.remove('open');
+          el.querySelector('.faq-accordion-body').setAttribute('aria-hidden', 'true');
+          el.querySelector('.faq-accordion-btn').setAttribute('aria-expanded', 'false');
+        });
 
-    // Open clicked item if it was closed
-    if (!isOpen) {
-      item.classList.add('open');
-      body.classList.add('open');
-      body.setAttribute('aria-hidden', 'false');
-      btn.setAttribute('aria-expanded', 'true');
-    }
-  }
-
-  // ─── Build accordion HTML ──────────────────────────────────────────────────
-  function buildAccordion(items, query) {
-    if (!items.length) return '';
-    return items.map(function(item, i) {
-      var btnId = 'faq-btn-' + i;
-      return '<div class="faq-accordion-item" role="listitem">' +
-        '<button class="faq-accordion-btn" id="' + btnId + '" aria-expanded="false"' +
-        ' aria-controls="faq-answer-' + i + '" onclick="toggleItem(this)">' +
-        '<span class="faq-accordion-q">' + highlight(item.q, query) + '</span>' +
-        '<span class="faq-accordion-icon" aria-hidden="true">+</span>' +
-        '</button>' +
-        '<div class="faq-accordion-body" id="faq-answer-' + i + '" role="region"' +
-        ' aria-labelledby="' + btnId + '" aria-hidden="true">' +
-        '<div class="faq-accordion-answer"><p>' + highlight(item.a, query) + '</p></div>' +
-        '</div>' +
-        '</div>';
-    }).join('');
-  }
-
-  // ─── Filter FAQ by search query ────────────────────────────────────────────
-  function filterFaq(query) {
-    var q = query.trim().toLowerCase();
-    var accordion = document.getElementById('faqAccordion');
-    var emptyEl   = document.getElementById('faqEmpty');
-
-    var filtered = q
-      ? faqItems.filter(function(item) {
-          return item.q.toLowerCase().indexOf(q) !== -1 ||
-                 item.a.toLowerCase().indexOf(q) !== -1;
-        })
-      : faqItems;
-
-    accordion.innerHTML = buildAccordion(filtered, q ? query.trim() : '');
-
-    if (filtered.length === 0) {
-      emptyEl.style.display = 'block';
-      accordion.style.display = 'none';
-    } else {
-      emptyEl.style.display = 'none';
-      accordion.style.display = 'flex';
-    }
-  }
-
-  // ─── Russian plural helper ─────────────────────────────────────────────────
-  function plural(n, one, few, many) {
-    var mod10 = n % 10, mod100 = n % 100;
-    if (mod10 === 1 && mod100 !== 11) return n + ' ' + one;
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return n + ' ' + few;
-    return n + ' ' + many;
-  }
-
-  // ─── Load FAQ from API ─────────────────────────────────────────────────────
-  function loadFaq() {
-    var accordion = document.getElementById('faqAccordion');
-    var badge     = document.getElementById('faqCountBadge');
-    var ctaEl     = document.getElementById('faqCta');
-
-    fetch('/api/faq')
-      .then(function(resp) {
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        return resp.json();
-      })
-      .then(function(items) {
-        faqItems = Array.isArray(items) ? items : [];
-
-        // Update title & badge
-        if (faqItems.length) {
-          document.title = 'FAQ — ' + plural(faqItems.length, 'вопрос', 'вопроса', 'вопросов') + ' | Nevesty Models';
-          badge.textContent = plural(faqItems.length, 'вопрос', 'вопроса', 'вопросов');
-          badge.style.visibility = 'visible';
+        // Open clicked item if it was closed
+        if (!isOpen) {
+          item.classList.add('open');
+          body.classList.add('open');
+          body.setAttribute('aria-hidden', 'false');
+          btn.setAttribute('aria-expanded', 'true');
         }
+      }
 
-        // Inject Schema.org FAQPage
-        injectFaqSchema(faqItems);
+      // ─── Build accordion HTML ──────────────────────────────────────────────────
+      function buildAccordion(items, query) {
+        if (!items.length) return '';
+        return items
+          .map(function (item, i) {
+            var btnId = 'faq-btn-' + i;
+            return (
+              '<div class="faq-accordion-item" role="listitem">' +
+              '<button class="faq-accordion-btn" id="' +
+              btnId +
+              '" aria-expanded="false"' +
+              ' aria-controls="faq-answer-' +
+              i +
+              '" onclick="toggleItem(this)">' +
+              '<span class="faq-accordion-q">' +
+              highlight(item.q, query) +
+              '</span>' +
+              '<span class="faq-accordion-icon" aria-hidden="true">+</span>' +
+              '</button>' +
+              '<div class="faq-accordion-body" id="faq-answer-' +
+              i +
+              '" role="region"' +
+              ' aria-labelledby="' +
+              btnId +
+              '" aria-hidden="true">' +
+              '<div class="faq-accordion-answer"><p>' +
+              highlight(item.a, query) +
+              '</p></div>' +
+              '</div>' +
+              '</div>'
+            );
+          })
+          .join('');
+      }
 
-        // Render accordion
-        accordion.innerHTML = buildAccordion(faqItems, '');
-        if (ctaEl) ctaEl.style.display = faqItems.length ? 'block' : 'none';
-      })
-      .catch(function(err) {
-        console.error('FAQ load error:', err);
-        accordion.innerHTML = '<div style="padding:32px 24px;color:var(--text-muted);font-size:0.88rem;text-align:center">Не удалось загрузить FAQ. <a href="/contact.html" style="color:var(--gold)">Свяжитесь с нами</a>.</div>';
-      });
-  }
+      // ─── Filter FAQ by search query ────────────────────────────────────────────
+      function filterFaq(query) {
+        var q = query.trim().toLowerCase();
+        var accordion = document.getElementById('faqAccordion');
+        var emptyEl = document.getElementById('faqEmpty');
 
-  // ─── WhatsApp button ───────────────────────────────────────────────────────
-  fetch('/api/settings/public').then(function(r) { return r.json(); }).then(function(d) {
-    if (d.contacts_whatsapp) {
-      var waNum = d.contacts_whatsapp.replace(/\D/g, '');
-      var waUrl = 'https://wa.me/' + waNum;
-      var btn = document.getElementById('whatsapp-btn');
-      if (btn) { btn.href = waUrl; btn.style.display = 'flex'; }
-      var floatEl   = document.getElementById('float-whatsapp');
-      var floatLink = document.getElementById('float-wa-link');
-      if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
-    }
-  }).catch(function() {});
+        var filtered = q
+          ? faqItems.filter(function (item) {
+              return item.q.toLowerCase().indexOf(q) !== -1 || item.a.toLowerCase().indexOf(q) !== -1;
+            })
+          : faqItems;
 
-  // ─── Init ──────────────────────────────────────────────────────────────────
-  loadFaq();
-  </script>
-  <script src="/js/cookie-consent.js" defer></script>
-</body>
+        accordion.innerHTML = buildAccordion(filtered, q ? query.trim() : '');
+
+        if (filtered.length === 0) {
+          emptyEl.style.display = 'block';
+          accordion.style.display = 'none';
+        } else {
+          emptyEl.style.display = 'none';
+          accordion.style.display = 'flex';
+        }
+      }
+
+      // ─── Russian plural helper ─────────────────────────────────────────────────
+      function plural(n, one, few, many) {
+        var mod10 = n % 10,
+          mod100 = n % 100;
+        if (mod10 === 1 && mod100 !== 11) return n + ' ' + one;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return n + ' ' + few;
+        return n + ' ' + many;
+      }
+
+      // ─── Load FAQ from API ─────────────────────────────────────────────────────
+      function loadFaq() {
+        var accordion = document.getElementById('faqAccordion');
+        var badge = document.getElementById('faqCountBadge');
+        var ctaEl = document.getElementById('faqCta');
+
+        fetch('/api/faq')
+          .then(function (resp) {
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.json();
+          })
+          .then(function (items) {
+            faqItems = Array.isArray(items) ? items : [];
+
+            // Update title & badge
+            if (faqItems.length) {
+              document.title =
+                'FAQ — ' + plural(faqItems.length, 'вопрос', 'вопроса', 'вопросов') + ' | Nevesty Models';
+              badge.textContent = plural(faqItems.length, 'вопрос', 'вопроса', 'вопросов');
+              badge.style.visibility = 'visible';
+            }
+
+            // Inject Schema.org FAQPage
+            injectFaqSchema(faqItems);
+
+            // Render accordion
+            accordion.innerHTML = buildAccordion(faqItems, '');
+            if (ctaEl) ctaEl.style.display = faqItems.length ? 'block' : 'none';
+          })
+          .catch(function (err) {
+            console.error('FAQ load error:', err);
+            accordion.innerHTML =
+              '<div style="padding:32px 24px;color:var(--text-muted);font-size:0.88rem;text-align:center">Не удалось загрузить FAQ. <a href="/contact.html" style="color:var(--gold)">Свяжитесь с нами</a>.</div>';
+          });
+      }
+
+      // ─── WhatsApp button ───────────────────────────────────────────────────────
+      fetch('/api/settings/public')
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (d) {
+          if (d.contacts_whatsapp) {
+            var waNum = d.contacts_whatsapp.replace(/\D/g, '');
+            var waUrl = 'https://wa.me/' + waNum;
+            var btn = document.getElementById('whatsapp-btn');
+            if (btn) {
+              btn.href = waUrl;
+              btn.style.display = 'flex';
+            }
+            var floatEl = document.getElementById('float-whatsapp');
+            var floatLink = document.getElementById('float-wa-link');
+            if (floatEl && floatLink) {
+              floatLink.href = waUrl;
+              floatEl.style.display = 'block';
+            }
+          }
+        })
+        .catch(function () {});
+
+      // ─── Init ──────────────────────────────────────────────────────────────────
+      loadFaq();
+    </script>
+    <script src="/js/cookie-consent.js" defer></script>
+  </body>
 </html>

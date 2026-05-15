@@ -1,427 +1,582 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <!-- Flash-prevention: apply theme class before first paint -->
-  <script>try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Расширенный поиск моделей — Nevesty Models</title>
-  <meta name="description" content="Поиск моделей в агентстве Nevesty Models по росту, возрасту, категории и городу. Найдите идеальную модель для фотосессии, корпоратива или показа мод.">
-  <meta property="og:title" content="Поиск моделей — Nevesty Models">
-  <meta property="og:description" content="Найдите профессиональную модель по параметрам: рост, возраст, категория и город. База 200+ моделей.">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
-  <meta property="og:url" content="https://nevesty-models.ru/search.html">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@nevesty_models">
-  <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://nevesty-models.ru/search.html">
-  <meta name="theme-color" content="#080808">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="/css/main.css" />
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843' }
-          }
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Flash-prevention: apply theme class before first paint -->
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light') {
+          document.documentElement.classList.add('light');
+        } else if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
         }
-      }
-    }
-  </script>
-  <script src="/js/analytics.js"></script>
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-  <style>
-    .search-page { min-height: 100vh; padding: 100px 0 80px; }
-    .search-form-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      padding: 36px;
-      margin-bottom: 40px;
-    }
-    .search-field-group { margin-bottom: 28px; }
-    .search-field-group label {
-      display: block;
-      font-size: 0.65rem;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      color: var(--gold);
-      margin-bottom: 12px;
-    }
-    .search-btn-group {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .search-btn-opt {
-      padding: 8px 18px;
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      font-size: 0.8rem;
-      cursor: pointer;
-      border-radius: 4px;
-      transition: all 0.2s;
-    }
-    .search-btn-opt:hover { border-color: var(--gold); color: var(--gold); }
-    .search-btn-opt.active { border-color: var(--gold); color: var(--gold); background: rgba(201,169,110,0.08); }
-    .search-select {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 10px 16px;
-      font-size: 0.85rem;
-      width: 100%;
-      max-width: 320px;
-      cursor: pointer;
-    }
-    .search-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
-    .btn-search {
-      padding: 14px 36px;
-      background: var(--gold);
-      color: var(--bg);
-      font-size: 0.8rem;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      font-weight: 600;
-      border: none;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .btn-search:hover { background: var(--gold-light); transform: translateY(-1px); }
-    .btn-reset-search {
-      padding: 14px 24px;
-      background: transparent;
-      color: var(--text-muted);
-      font-size: 0.8rem;
-      border: 1px solid var(--border);
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .btn-reset-search:hover { border-color: var(--gold); color: var(--gold); }
-    .search-results-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 20px;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
-    .search-count { font-size: 0.8rem; color: var(--text-muted); }
-    .search-pagination { display: flex; gap: 8px; align-items: center; margin-top: 40px; justify-content: center; }
-    .page-btn {
-      padding: 8px 16px;
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      font-size: 0.8rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .page-btn:hover, .page-btn.active { border-color: var(--gold); color: var(--gold); }
-    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .no-results {
-      text-align: center;
-      padding: 60px 24px;
-      color: var(--text-muted);
-    }
-    .no-results-icon { font-size: 3rem; opacity: 0.3; margin-bottom: 16px; }
-  </style>
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-
-  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links">
-        <a href="/catalog.html">Модели</a>
-        <a href="/search.html" style="color:var(--gold)">Поиск</a>
-        <a href="/#services">Услуги</a>
-        <a href="/#about">О нас</a>
-        <a href="/#contact">Контакты</a>
-        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
-        <button onclick="DarkMode.toggle()"
-          class="p-2 rounded-lg"
-          aria-label="Переключить тему" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
-          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
-        </button>
-        <a href="/booking.html" class="btn-nav">Заказать</a>
-      </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
-    </div>
-  </nav>
-
-  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-    <a href="/catalog.html">Модели</a>
-    <a href="/search.html" style="color:var(--gold)">Поиск</a>
-    <a href="/#services">Услуги</a>
-    <a href="/#about">О нас</a>
-    <a href="/favorites.html">❤️ Избранное</a>
-    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
-  </nav>
-
-  <main class="search-page" id="main-content">
-    <div class="container">
-      <nav aria-label="breadcrumb" style="margin-bottom:8px">
-        <ol style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
-          <li><a href="/" style="color:var(--text-muted);text-decoration:none">Главная</a></li>
-          <li style="color:var(--border)" aria-hidden="true">/</li>
-          <li><a href="/catalog.html" style="color:var(--text-muted);text-decoration:none">Каталог</a></li>
-          <li style="color:var(--border)" aria-hidden="true">/</li>
-          <li style="color:var(--gold)" aria-current="page">Расширенный поиск</li>
-        </ol>
-      </nav>
-
-      <div class="catalog-header">
-        <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Поиск моделей</div>
-        <h1>Расширенный поиск</h1>
-        <p style="color:var(--text-muted);margin-top:8px">Подберите модель по параметрам</p>
-      </div>
-
-      <!-- Search form -->
-      <div class="search-form-card">
-        <!-- Height -->
-        <div class="search-field-group">
-          <label>Рост</label>
-          <div class="search-btn-group" id="heightFilters">
-            <button class="search-btn-opt active" data-min="" data-max="">Любой</button>
-            <button class="search-btn-opt" data-min="160" data-max="165">160–165</button>
-            <button class="search-btn-opt" data-min="165" data-max="170">165–170</button>
-            <button class="search-btn-opt" data-min="170" data-max="175">170–175</button>
-            <button class="search-btn-opt" data-min="175" data-max="180">175–180</button>
-            <button class="search-btn-opt" data-min="180" data-max="">180+</button>
-          </div>
-        </div>
-
-        <!-- Age -->
-        <div class="search-field-group">
-          <label>Возраст</label>
-          <div class="search-btn-group" id="ageFilters">
-            <button class="search-btn-opt active" data-min="" data-max="">Любой</button>
-            <button class="search-btn-opt" data-min="18" data-max="22">18–22</button>
-            <button class="search-btn-opt" data-min="23" data-max="27">23–27</button>
-            <button class="search-btn-opt" data-min="28" data-max="32">28–32</button>
-            <button class="search-btn-opt" data-min="33" data-max="">33+</button>
-          </div>
-        </div>
-
-        <!-- Category -->
-        <div class="search-field-group">
-          <label>Категория</label>
-          <div class="search-btn-group" id="categoryFilters">
-            <button class="search-btn-opt active" data-value="">Все</button>
-            <button class="search-btn-opt" data-value="fashion">Fashion</button>
-            <button class="search-btn-opt" data-value="commercial">Commercial</button>
-            <button class="search-btn-opt" data-value="events">Events</button>
-          </div>
-        </div>
-
-        <!-- City -->
-        <div class="search-field-group">
-          <label>Город</label>
-          <select id="citySelect" class="search-select" aria-label="Выберите город">
-            <option value="">Все города</option>
-          </select>
-        </div>
-
-        <div class="search-actions">
-          <button class="btn-search" id="searchBtn" onclick="doSearch(0)">Найти</button>
-          <button class="btn-reset-search" onclick="resetSearch()">Сбросить</button>
-        </div>
-      </div>
-
-      <!-- Results -->
-      <div id="resultsSection" style="display:none">
-        <div class="search-results-header">
-          <div class="search-count" id="resultsCount" aria-live="polite"></div>
-        </div>
-        <div class="catalog-grid" id="resultsGrid"></div>
-        <div class="search-pagination" id="pagination"></div>
-      </div>
-
-      <div id="noResults" style="display:none">
-        <div class="no-results">
-          <div class="no-results-icon">✦</div>
-          <p>По вашим параметрам моделей не найдено.<br>Попробуйте изменить фильтры.</p>
-          <a href="/catalog.html" class="btn-primary" style="margin-top:20px;display:inline-block">Все модели</a>
-        </div>
-      </div>
-    </div>
-  </main>
-
-  <!-- Floating WhatsApp Button -->
-  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
-    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
-       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s">
-      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      Написать в WhatsApp
-    </a>
-  </div>
-
-  <div class="toast-container" id="toastContainer"></div>
-
-  <script src="/js/main.js" defer></script>
-  <script src="/js/darkmode.js"></script>
-  <script type="application/ld+json">
-[
-  {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "itemListElement": [
-      {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
-      {"@type": "ListItem", "position": 2, "name": "Поиск моделей", "item": "https://nevesty-models.ru/search.html"}
-    ]
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru",
-    "logo": "https://nevesty-models.ru/og-image.jpg",
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "contactType": "customer service",
-      "availableLanguage": "Russian"
-    }
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "WebPage",
-    "name": "Расширенный поиск моделей — Nevesty Models",
-    "description": "Поиск моделей в агентстве Nevesty Models по росту, возрасту, категории и городу. Найдите идеальную модель для фотосессии, корпоратива или показа мод.",
-    "url": "https://nevesty-models.ru/search.html",
-    "isPartOf": {"@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru"},
-    "inLanguage": "ru-RU",
-    "dateModified": "2026-05-15"
-  }
-]
-  </script>
-  <script>
-  (function () {
-    const CATEGORY_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
-    const PAGE_SIZE = 12;
-    let _currentPage = 0;
-    let _totalResults = 0;
-
-    // ── Filter state ──────────────────────────────────────────────────────────
-    function getFilterState() {
-      const hActive = document.querySelector('#heightFilters .search-btn-opt.active');
-      const aActive = document.querySelector('#ageFilters .search-btn-opt.active');
-      const cActive = document.querySelector('#categoryFilters .search-btn-opt.active');
-      return {
-        min_height: hActive?.dataset.min || '',
-        max_height: hActive?.dataset.max || '',
-        min_age: aActive?.dataset.min || '',
-        max_age: aActive?.dataset.max || '',
-        category: cActive?.dataset.value || '',
-        city: document.getElementById('citySelect')?.value || ''
-      };
-    }
-
-    // ── Toggle button groups ──────────────────────────────────────────────────
-    ['heightFilters', 'ageFilters', 'categoryFilters'].forEach(id => {
-      const group = document.getElementById(id);
-      if (!group) return;
-      group.querySelectorAll('.search-btn-opt').forEach(btn => {
-        btn.addEventListener('click', () => {
-          group.querySelectorAll('.search-btn-opt').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-        });
-      });
-    });
-
-    // ── Load cities ───────────────────────────────────────────────────────────
-    async function loadCities() {
-      try {
-        const resp = await fetch('/api/models?limit=200');
-        const models = await resp.json();
-        const cities = [...new Set(models.map(m => m.city).filter(Boolean))].sort();
-        const sel = document.getElementById('citySelect');
-        if (!sel) return;
-        cities.forEach(c => {
-          const opt = document.createElement('option');
-          opt.value = c;
-          opt.textContent = c;
-          sel.appendChild(opt);
-        });
       } catch (e) {}
-    }
-
-    // ── Search ────────────────────────────────────────────────────────────────
-    window.doSearch = async function (page) {
-      _currentPage = page || 0;
-      const f = getFilterState();
-      const params = new URLSearchParams();
-      if (f.min_height) params.set('min_height', f.min_height);
-      if (f.max_height) params.set('max_height', f.max_height);
-      if (f.min_age) params.set('min_age', f.min_age);
-      if (f.max_age) params.set('max_age', f.max_age);
-      if (f.category) params.set('category', f.category);
-      if (f.city) params.set('city', f.city);
-      params.set('page', _currentPage);
-      params.set('limit', PAGE_SIZE);
-
-      const btn = document.getElementById('searchBtn');
-      if (btn) btn.textContent = 'Поиск...';
-
-      try {
-        const resp = await fetch(`/api/models/search?${params}`);
-        const data = await resp.json();
-        _totalResults = data.total || 0;
-        renderResults(data.models || [], _totalResults, _currentPage);
-      } catch (e) {
-        document.getElementById('resultsSection').style.display = 'none';
-        document.getElementById('noResults').style.display = 'block';
-      } finally {
-        if (btn) btn.textContent = 'Найти';
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Расширенный поиск моделей — Nevesty Models</title>
+    <meta
+      name="description"
+      content="Поиск моделей в агентстве Nevesty Models по росту, возрасту, категории и городу. Найдите идеальную модель для фотосессии, корпоратива или показа мод."
+    />
+    <meta property="og:title" content="Поиск моделей — Nevesty Models" />
+    <meta
+      property="og:description"
+      content="Найдите профессиональную модель по параметрам: рост, возраст, категория и город. База 200+ моделей."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg" />
+    <meta property="og:url" content="https://nevesty-models.ru/search.html" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@nevesty_models" />
+    <meta name="twitter:title" content="Поиск моделей — Nevesty Models" />
+    <meta
+      name="twitter:description"
+      content="Найдите профессиональную модель по параметрам: рост, возраст, категория и город. База 200+ моделей."
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://nevesty-models.ru/search.html" />
+    <meta name="theme-color" content="#080808" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="/css/main.css" />
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              pink: {
+                50: '#fdf2f8',
+                100: '#fce7f3',
+                200: '#fbcfe8',
+                300: '#f9a8d4',
+                400: '#f472b6',
+                500: '#ec4899',
+                600: '#db2777',
+                700: '#be185d',
+                800: '#9d174d',
+                900: '#831843',
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <script src="/js/analytics.js"></script>
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+    <style>
+      .search-page {
+        min-height: 100vh;
+        padding: 100px 0 80px;
       }
-    };
-
-    function renderResults(models, total, page) {
-      const noRes = document.getElementById('noResults');
-      const resSection = document.getElementById('resultsSection');
-      const grid = document.getElementById('resultsGrid');
-      const countEl = document.getElementById('resultsCount');
-      const pagination = document.getElementById('pagination');
-
-      if (!models.length) {
-        resSection.style.display = 'none';
-        noRes.style.display = 'block';
-        return;
+      .search-form-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        padding: 36px;
+        margin-bottom: 40px;
       }
-      noRes.style.display = 'none';
-      resSection.style.display = 'block';
+      .search-field-group {
+        margin-bottom: 28px;
+      }
+      .search-field-group label {
+        display: block;
+        font-size: 0.65rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 12px;
+      }
+      .search-btn-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .search-btn-opt {
+        padding: 8px 18px;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.2s;
+      }
+      .search-btn-opt:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .search-btn-opt.active {
+        border-color: var(--gold);
+        color: var(--gold);
+        background: rgba(201, 169, 110, 0.08);
+      }
+      .search-select {
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 10px 16px;
+        font-size: 0.85rem;
+        width: 100%;
+        max-width: 320px;
+        cursor: pointer;
+      }
+      .search-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-top: 8px;
+      }
+      .btn-search {
+        padding: 14px 36px;
+        background: var(--gold);
+        color: var(--bg);
+        font-size: 0.8rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .btn-search:hover {
+        background: var(--gold-light);
+        transform: translateY(-1px);
+      }
+      .btn-reset-search {
+        padding: 14px 24px;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        border: 1px solid var(--border);
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .btn-reset-search:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .search-results-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .search-count {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
+      .search-pagination {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-top: 40px;
+        justify-content: center;
+      }
+      .page-btn {
+        padding: 8px 16px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .page-btn:hover,
+      .page-btn.active {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .page-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .no-results {
+        text-align: center;
+        padding: 60px 24px;
+        color: var(--text-muted);
+      }
+      .no-results-icon {
+        font-size: 3rem;
+        opacity: 0.3;
+        margin-bottom: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
 
-      countEl.textContent = `Найдено: ${total} ${pluralModels(total)}`;
+    <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links">
+          <a href="/catalog.html">Модели</a>
+          <a href="/search.html" style="color: var(--gold)">Поиск</a>
+          <a href="/#services">Услуги</a>
+          <a href="/#about">О нас</a>
+          <a href="/#contact">Контакты</a>
+          <a href="/favorites.html" aria-label="Избранное" style="font-size: 1.1rem"
+            ><span aria-hidden="true">❤️</span></a
+          >
+          <button
+            onclick="DarkMode.toggle()"
+            class="p-2 rounded-lg"
+            aria-label="Переключить тему"
+            style="background: none; border: none; cursor: pointer; padding: 4px 8px"
+          >
+            <span class="dark-mode-icon" style="font-size: 1.1rem">🌙</span>
+          </button>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
+        </div>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </nav>
 
-      grid.innerHTML = models.map(m => `
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/search.html" style="color: var(--gold)">Поиск</a>
+      <a href="/#services">Услуги</a>
+      <a href="/#about">О нас</a>
+      <a href="/favorites.html">❤️ Избранное</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+    </nav>
+
+    <main class="search-page" id="main-content">
+      <div class="container">
+        <nav aria-label="breadcrumb" style="margin-bottom: 8px">
+          <ol
+            style="
+              display: flex;
+              list-style: none;
+              padding: 0;
+              margin: 0;
+              gap: 8px;
+              font-size: 0.75rem;
+              color: var(--text-dim);
+            "
+          >
+            <li><a href="/" style="color: var(--text-muted); text-decoration: none">Главная</a></li>
+            <li style="color: var(--border)" aria-hidden="true">/</li>
+            <li><a href="/catalog.html" style="color: var(--text-muted); text-decoration: none">Каталог</a></li>
+            <li style="color: var(--border)" aria-hidden="true">/</li>
+            <li style="color: var(--gold)" aria-current="page">Расширенный поиск</li>
+          </ol>
+        </nav>
+
+        <div class="catalog-header">
+          <div
+            style="
+              font-size: 0.7rem;
+              letter-spacing: 3px;
+              text-transform: uppercase;
+              color: var(--gold);
+              margin-bottom: 12px;
+            "
+          >
+            Поиск моделей
+          </div>
+          <h1>Расширенный поиск</h1>
+          <p style="color: var(--text-muted); margin-top: 8px">Подберите модель по параметрам</p>
+        </div>
+
+        <!-- Search form -->
+        <div class="search-form-card">
+          <!-- Height -->
+          <div class="search-field-group">
+            <label>Рост</label>
+            <div class="search-btn-group" id="heightFilters">
+              <button class="search-btn-opt active" data-min="" data-max="">Любой</button>
+              <button class="search-btn-opt" data-min="160" data-max="165">160–165</button>
+              <button class="search-btn-opt" data-min="165" data-max="170">165–170</button>
+              <button class="search-btn-opt" data-min="170" data-max="175">170–175</button>
+              <button class="search-btn-opt" data-min="175" data-max="180">175–180</button>
+              <button class="search-btn-opt" data-min="180" data-max="">180+</button>
+            </div>
+          </div>
+
+          <!-- Age -->
+          <div class="search-field-group">
+            <label>Возраст</label>
+            <div class="search-btn-group" id="ageFilters">
+              <button class="search-btn-opt active" data-min="" data-max="">Любой</button>
+              <button class="search-btn-opt" data-min="18" data-max="22">18–22</button>
+              <button class="search-btn-opt" data-min="23" data-max="27">23–27</button>
+              <button class="search-btn-opt" data-min="28" data-max="32">28–32</button>
+              <button class="search-btn-opt" data-min="33" data-max="">33+</button>
+            </div>
+          </div>
+
+          <!-- Category -->
+          <div class="search-field-group">
+            <label>Категория</label>
+            <div class="search-btn-group" id="categoryFilters">
+              <button class="search-btn-opt active" data-value="">Все</button>
+              <button class="search-btn-opt" data-value="fashion">Fashion</button>
+              <button class="search-btn-opt" data-value="commercial">Commercial</button>
+              <button class="search-btn-opt" data-value="events">Events</button>
+            </div>
+          </div>
+
+          <!-- City -->
+          <div class="search-field-group">
+            <label>Город</label>
+            <select id="citySelect" class="search-select" aria-label="Выберите город">
+              <option value="">Все города</option>
+            </select>
+          </div>
+
+          <div class="search-actions">
+            <button class="btn-search" id="searchBtn" onclick="doSearch(0)">Найти</button>
+            <button class="btn-reset-search" onclick="resetSearch()">Сбросить</button>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <div id="resultsSection" style="display: none">
+          <div class="search-results-header">
+            <div class="search-count" id="resultsCount" aria-live="polite"></div>
+          </div>
+          <div class="catalog-grid" id="resultsGrid"></div>
+          <div class="search-pagination" id="pagination"></div>
+        </div>
+
+        <div id="noResults" style="display: none">
+          <div class="no-results">
+            <div class="no-results-icon">✦</div>
+            <p>По вашим параметрам моделей не найдено.<br />Попробуйте изменить фильтры.</p>
+            <a href="/catalog.html" class="btn-primary" style="margin-top: 20px; display: inline-block">Все модели</a>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Floating WhatsApp Button -->
+    <div id="float-whatsapp" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 400">
+      <a
+        id="float-wa-link"
+        href="#"
+        target="_blank"
+        rel="noopener"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #25d366;
+          color: #fff;
+          padding: 14px 20px;
+          border-radius: 50px;
+          box-shadow: 0 4px 16px rgba(37, 211, 102, 0.4);
+          text-decoration: none;
+          font-size: 0.85rem;
+          font-weight: 600;
+          transition: all 0.2s;
+        "
+      >
+        <svg style="width: 22px; height: 22px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+          <path
+            d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+          />
+        </svg>
+        Написать в WhatsApp
+      </a>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/js/main.js" defer></script>
+    <script src="/js/darkmode.js"></script>
+    <script type="application/ld+json">
+      [
+        {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/" },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Поиск моделей",
+              "item": "https://nevesty-models.ru/search.html"
+            }
+          ]
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "Nevesty Models",
+          "url": "https://nevesty-models.ru",
+          "logo": "https://nevesty-models.ru/og-image.jpg",
+          "contactPoint": {
+            "@type": "ContactPoint",
+            "contactType": "customer service",
+            "availableLanguage": "Russian"
+          }
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          "name": "Расширенный поиск моделей — Nevesty Models",
+          "description": "Поиск моделей в агентстве Nevesty Models по росту, возрасту, категории и городу. Найдите идеальную модель для фотосессии, корпоратива или показа мод.",
+          "url": "https://nevesty-models.ru/search.html",
+          "isPartOf": { "@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru" },
+          "inLanguage": "ru-RU",
+          "dateModified": "2026-05-15"
+        }
+      ]
+    </script>
+    <script>
+      (function () {
+        const CATEGORY_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
+        const PAGE_SIZE = 12;
+        let _currentPage = 0;
+        let _totalResults = 0;
+
+        // ── Filter state ──────────────────────────────────────────────────────────
+        function getFilterState() {
+          const hActive = document.querySelector('#heightFilters .search-btn-opt.active');
+          const aActive = document.querySelector('#ageFilters .search-btn-opt.active');
+          const cActive = document.querySelector('#categoryFilters .search-btn-opt.active');
+          return {
+            min_height: hActive?.dataset.min || '',
+            max_height: hActive?.dataset.max || '',
+            min_age: aActive?.dataset.min || '',
+            max_age: aActive?.dataset.max || '',
+            category: cActive?.dataset.value || '',
+            city: document.getElementById('citySelect')?.value || '',
+          };
+        }
+
+        // ── Toggle button groups ──────────────────────────────────────────────────
+        ['heightFilters', 'ageFilters', 'categoryFilters'].forEach(id => {
+          const group = document.getElementById(id);
+          if (!group) return;
+          group.querySelectorAll('.search-btn-opt').forEach(btn => {
+            btn.addEventListener('click', () => {
+              group.querySelectorAll('.search-btn-opt').forEach(b => b.classList.remove('active'));
+              btn.classList.add('active');
+            });
+          });
+        });
+
+        // ── Load cities ───────────────────────────────────────────────────────────
+        async function loadCities() {
+          try {
+            const resp = await fetch('/api/models?limit=200');
+            const models = await resp.json();
+            const cities = [...new Set(models.map(m => m.city).filter(Boolean))].sort();
+            const sel = document.getElementById('citySelect');
+            if (!sel) return;
+            cities.forEach(c => {
+              const opt = document.createElement('option');
+              opt.value = c;
+              opt.textContent = c;
+              sel.appendChild(opt);
+            });
+          } catch (e) {}
+        }
+
+        // ── Search ────────────────────────────────────────────────────────────────
+        window.doSearch = async function (page) {
+          _currentPage = page || 0;
+          const f = getFilterState();
+          const params = new URLSearchParams();
+          if (f.min_height) params.set('min_height', f.min_height);
+          if (f.max_height) params.set('max_height', f.max_height);
+          if (f.min_age) params.set('min_age', f.min_age);
+          if (f.max_age) params.set('max_age', f.max_age);
+          if (f.category) params.set('category', f.category);
+          if (f.city) params.set('city', f.city);
+          params.set('page', _currentPage);
+          params.set('limit', PAGE_SIZE);
+
+          const btn = document.getElementById('searchBtn');
+          if (btn) btn.textContent = 'Поиск...';
+
+          try {
+            const resp = await fetch(`/api/models/search?${params}`);
+            const data = await resp.json();
+            _totalResults = data.total || 0;
+            renderResults(data.models || [], _totalResults, _currentPage);
+          } catch (e) {
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('noResults').style.display = 'block';
+          } finally {
+            if (btn) btn.textContent = 'Найти';
+          }
+        };
+
+        function renderResults(models, total, page) {
+          const noRes = document.getElementById('noResults');
+          const resSection = document.getElementById('resultsSection');
+          const grid = document.getElementById('resultsGrid');
+          const countEl = document.getElementById('resultsCount');
+          const pagination = document.getElementById('pagination');
+
+          if (!models.length) {
+            resSection.style.display = 'none';
+            noRes.style.display = 'block';
+            return;
+          }
+          noRes.style.display = 'none';
+          resSection.style.display = 'block';
+
+          countEl.textContent = `Найдено: ${total} ${pluralModels(total)}`;
+
+          grid.innerHTML = models
+            .map(
+              m => `
         <a href="/model.html?id=${m.id}" class="model-card" role="listitem" style="text-decoration:none;display:block">
           <div class="model-card-img">
-            ${m.photo_main
-              ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" loading="lazy">`
-              : `<div class="model-card-placeholder">✦</div>`}
+            ${
+              m.photo_main
+                ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" loading="lazy">`
+                : `<div class="model-card-placeholder">✦</div>`
+            }
             <div class="model-card-overlay">
               <span style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold)">Подробнее</span>
             </div>
@@ -437,63 +592,77 @@
             </div>
           </div>
         </a>
-      `).join('');
+      `
+            )
+            .join('');
 
-      // Pagination
-      const totalPages = Math.ceil(total / PAGE_SIZE);
-      if (totalPages <= 1) {
-        pagination.innerHTML = '';
-        return;
-      }
-      let pages = '';
-      if (page > 0) pages += `<button class="page-btn" onclick="doSearch(${page - 1})">← Назад</button>`;
-      pages += `<span style="color:var(--text-dim);font-size:0.8rem">Стр. ${page + 1} из ${totalPages}</span>`;
-      if (page < totalPages - 1) pages += `<button class="page-btn" onclick="doSearch(${page + 1})">Вперёд →</button>`;
-      pagination.innerHTML = pages;
-    }
-
-    // ── Reset ─────────────────────────────────────────────────────────────────
-    window.resetSearch = function () {
-      ['heightFilters', 'ageFilters', 'categoryFilters'].forEach(id => {
-        const group = document.getElementById(id);
-        if (!group) return;
-        group.querySelectorAll('.search-btn-opt').forEach((btn, i) => {
-          btn.classList.toggle('active', i === 0);
-        });
-      });
-      const city = document.getElementById('citySelect');
-      if (city) city.value = '';
-      document.getElementById('resultsSection').style.display = 'none';
-      document.getElementById('noResults').style.display = 'none';
-    };
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    function escHtml(s) {
-      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
-    function pluralModels(n) {
-      const m = n % 10; const h = n % 100;
-      if (h >= 11 && h <= 19) return 'моделей';
-      if (m === 1) return 'модель';
-      if (m >= 2 && m <= 4) return 'модели';
-      return 'моделей';
-    }
-
-    // ── Init ──────────────────────────────────────────────────────────────────
-    document.addEventListener('DOMContentLoaded', function () {
-      loadCities();
-      // Load WhatsApp
-      fetch('/api/settings/public').then(r => r.json()).then(d => {
-        const wa = d.contacts_whatsapp;
-        if (wa) {
-          const waNum = wa.replace(/\D/g, '');
-          const floatEl = document.getElementById('float-whatsapp');
-          const floatLink = document.getElementById('float-wa-link');
-          if (floatEl && floatLink) { floatLink.href = `https://wa.me/${waNum}`; floatEl.style.display = 'block'; }
+          // Pagination
+          const totalPages = Math.ceil(total / PAGE_SIZE);
+          if (totalPages <= 1) {
+            pagination.innerHTML = '';
+            return;
+          }
+          let pages = '';
+          if (page > 0) pages += `<button class="page-btn" onclick="doSearch(${page - 1})">← Назад</button>`;
+          pages += `<span style="color:var(--text-dim);font-size:0.8rem">Стр. ${page + 1} из ${totalPages}</span>`;
+          if (page < totalPages - 1)
+            pages += `<button class="page-btn" onclick="doSearch(${page + 1})">Вперёд →</button>`;
+          pagination.innerHTML = pages;
         }
-      }).catch(() => {});
-    });
-  })();
-  </script>
-</body>
+
+        // ── Reset ─────────────────────────────────────────────────────────────────
+        window.resetSearch = function () {
+          ['heightFilters', 'ageFilters', 'categoryFilters'].forEach(id => {
+            const group = document.getElementById(id);
+            if (!group) return;
+            group.querySelectorAll('.search-btn-opt').forEach((btn, i) => {
+              btn.classList.toggle('active', i === 0);
+            });
+          });
+          const city = document.getElementById('citySelect');
+          if (city) city.value = '';
+          document.getElementById('resultsSection').style.display = 'none';
+          document.getElementById('noResults').style.display = 'none';
+        };
+
+        // ── Helpers ───────────────────────────────────────────────────────────────
+        function escHtml(s) {
+          return String(s || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        }
+        function pluralModels(n) {
+          const m = n % 10;
+          const h = n % 100;
+          if (h >= 11 && h <= 19) return 'моделей';
+          if (m === 1) return 'модель';
+          if (m >= 2 && m <= 4) return 'модели';
+          return 'моделей';
+        }
+
+        // ── Init ──────────────────────────────────────────────────────────────────
+        document.addEventListener('DOMContentLoaded', function () {
+          loadCities();
+          // Load WhatsApp
+          fetch('/api/settings/public')
+            .then(r => r.json())
+            .then(d => {
+              const wa = d.contacts_whatsapp;
+              if (wa) {
+                const waNum = wa.replace(/\D/g, '');
+                const floatEl = document.getElementById('float-whatsapp');
+                const floatLink = document.getElementById('float-wa-link');
+                if (floatEl && floatLink) {
+                  floatLink.href = `https://wa.me/${waNum}`;
+                  floatEl.style.display = 'block';
+                }
+              }
+            })
+            .catch(() => {});
+        });
+      })();
+    </script>
+  </body>
 </html>
