@@ -1513,7 +1513,12 @@ async function bkStep2Date(chatId, data) {
       `✅ Тип: *${esc(EVENT_TYPES[data.event_type] || data.event_type)}*\n\nВведите дату мероприятия:\n💡 Формат: ДД\\.ММ\\.ГГГГ, например: 25\\.12\\.2025`,
     {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }]] },
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '← Назад', callback_data: 'bk_back_event_type' }],
+          [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
+        ],
+      },
     }
   );
 }
@@ -1610,7 +1615,12 @@ async function bkStep3Name(chatId, data) {
     stepHeader(3, 'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\n${STRINGS.bookingAskName}`,
     {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }]] },
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '← Назад', callback_data: 'bk_back_to_comments' }],
+          [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
+        ],
+      },
     }
   );
 }
@@ -6365,6 +6375,11 @@ function initBot(app) {
     }
 
     // ── Booking: back navigation
+    if (data === 'bk_back_to_comments') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep2Comments(chatId, d);
+    }
     if (data === 'bk_back_to_name') {
       const session = await getSession(chatId);
       const d = sessionData(session);
