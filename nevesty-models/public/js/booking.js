@@ -67,36 +67,43 @@
 
   /* ─── sessionStorage: lightweight current-session progress ─── */
   const SESSION_KEY = 'nm_booking_session';
+  // Also mirror to the canonical 'bookingDraft' key for cross-page access
+  const BOOKING_DRAFT_KEY = 'bookingDraft';
 
   function saveSessionProgress() {
+    const data = {
+      step: state.step,
+      model_id: state.model_id,
+      model_ids: state.model_ids,
+      model_name: state.model_name,
+      model_photo: state.model_photo,
+      selected_models: state.selected_models,
+      event_type: state.event_type,
+      event_date: state.event_date,
+      event_duration: state.event_duration,
+      location: state.location,
+      budget: state.budget,
+      comments: state.comments,
+      client_name: state.client_name,
+      client_phone: state.client_phone,
+      client_email: state.client_email,
+      client_telegram: state.client_telegram,
+    };
     try {
-      sessionStorage.setItem(
-        SESSION_KEY,
-        JSON.stringify({
-          step: state.step,
-          model_id: state.model_id,
-          model_ids: state.model_ids,
-          model_name: state.model_name,
-          model_photo: state.model_photo,
-          selected_models: state.selected_models,
-          event_type: state.event_type,
-          event_date: state.event_date,
-          event_duration: state.event_duration,
-          location: state.location,
-          budget: state.budget,
-          comments: state.comments,
-          client_name: state.client_name,
-          client_phone: state.client_phone,
-          client_email: state.client_email,
-          client_telegram: state.client_telegram,
-        })
-      );
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
+    } catch (_) {}
+    // Mirror to canonical bookingDraft key
+    try {
+      sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(data));
     } catch (_) {}
   }
 
   function clearSessionProgress() {
     try {
       sessionStorage.removeItem(SESSION_KEY);
+    } catch (_) {}
+    try {
+      sessionStorage.removeItem(BOOKING_DRAFT_KEY);
     } catch (_) {}
   }
 

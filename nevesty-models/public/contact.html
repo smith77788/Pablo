@@ -579,6 +579,26 @@
             <div class="hours-box">
               <h3>Часы работы</h3>
               <p id="manager-hours-text"><span id="manager-hours">Ежедневно 9:00 – 21:00</span></p>
+              <div
+                id="manager-status-indicator"
+                style="margin-top: 12px; display: flex; align-items: center; gap: 8px; font-size: 0.82rem"
+              >
+                <span
+                  id="manager-status-dot"
+                  style="
+                    display: inline-block;
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 50%;
+                    background: #4caf50;
+                    flex-shrink: 0;
+                    box-shadow: 0 0 6px rgba(76, 175, 80, 0.6);
+                  "
+                ></span>
+                <span id="manager-status-text" style="color: var(--text-muted)"
+                  >Менеджер онлайн — ответим в течение 5 минут</span
+                >
+              </div>
             </div>
 
             <!-- Map placeholder -->
@@ -946,6 +966,38 @@
             else if (hoursTextEl) hoursTextEl.textContent = d.manager_hours;
           }
 
+          // Manager online/offline status based on current time vs working hours
+          (function updateManagerStatus() {
+            const hoursText = d.manager_hours || 'Ежедневно 9:00 – 21:00';
+            // Parse hours like "9:00 – 21:00" or "09:00-21:00" or "9:00–21:00"
+            const match = hoursText.match(/(\d{1,2}):(\d{2})\s*[–\-]\s*(\d{1,2}):(\d{2})/);
+            const dot = document.getElementById('manager-status-dot');
+            const txt = document.getElementById('manager-status-text');
+            if (!dot || !txt) return;
+            const now = new Date();
+            const nowMinutes = now.getHours() * 60 + now.getMinutes();
+            let isOnline = false;
+            if (match) {
+              const startMin = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+              const endMin = parseInt(match[3], 10) * 60 + parseInt(match[4], 10);
+              isOnline = nowMinutes >= startMin && nowMinutes < endMin;
+            } else {
+              // Default 9:00–21:00
+              isOnline = nowMinutes >= 9 * 60 && nowMinutes < 21 * 60;
+            }
+            if (isOnline) {
+              dot.style.background = '#4caf50';
+              dot.style.boxShadow = '0 0 6px rgba(76,175,80,0.6)';
+              txt.textContent = 'Менеджер онлайн — ответим в течение 5 минут';
+              txt.style.color = '';
+            } else {
+              dot.style.background = '#9e9e9e';
+              dot.style.boxShadow = 'none';
+              txt.textContent = 'Менеджер офлайн — ответим в рабочее время';
+              txt.style.color = 'var(--text-dim)';
+            }
+          })();
+
           // Telegram: prefer tg_channel from settings, fallback to bot_username from config
           const tgBtn = document.getElementById('tg-contact-btn');
           if (tgBtn) {
@@ -1028,8 +1080,8 @@
           showFieldError('cf-name', 'cf-name-err', 'Введите ваше имя (минимум 2 символа)');
           valid = false;
         }
-        if (!phone || phone.replace(/\D/g, '').length < 7) {
-          showFieldError('cf-phone', 'cf-phone-err', 'Введите корректный номер телефона');
+        if (!phone || phone.replace(/\D/g, '').length < 10) {
+          showFieldError('cf-phone', 'cf-phone-err', 'Введите корректный номер телефона (не менее 10 цифр)');
           valid = false;
         }
         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
