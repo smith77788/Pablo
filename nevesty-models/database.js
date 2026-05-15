@@ -523,6 +523,20 @@ async function initDatabase() {
   // Schema v14 — refresh_tokens table
   await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (14, 'refresh_tokens table for JWT refresh flow')`).catch(() => {});
 
+  // Schema v15 — model_busy_dates calendar
+  await run(`CREATE TABLE IF NOT EXISTS model_busy_dates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id INTEGER NOT NULL,
+    busy_date TEXT NOT NULL,
+    reason TEXT,
+    order_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(model_id, busy_date),
+    FOREIGN KEY(model_id) REFERENCES models(id)
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_busy_dates_model ON model_busy_dates(model_id, busy_date)`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (15, 'model_busy_dates calendar')`).catch(() => {});
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {

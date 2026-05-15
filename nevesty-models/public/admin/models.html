@@ -175,6 +175,19 @@
               <span class="text-sm text-gray-700 dark:text-gray-300">В топе (⭐)</span>
             </label>
           </div>
+          <!-- Busy dates calendar (only shown when editing an existing model) -->
+          <div class="col-span-2" id="busyDatesGroup" style="display:none">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">📅 Зайняті дати</label>
+            <div id="busyDatesList" class="text-sm text-gray-500 dark:text-gray-400 mb-2 flex flex-wrap gap-1"></div>
+            <div class="flex gap-2">
+              <input type="date" id="newBusyDate"
+                class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white text-sm" />
+              <button type="button" onclick="addBusyDate()"
+                class="px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">
+                + Додати
+              </button>
+            </div>
+          </div>
         </div>
         <div class="flex gap-3 justify-end pt-4 border-t border-gray-100 dark:border-gray-700">
           <button type="button" onclick="closeModal()"
@@ -419,6 +432,8 @@ document.getElementById('check-all-models').addEventListener('change', function(
   syncModelBulkBar();
 });
 
+let _currentModelId = null;
+
 async function editModel(id) {
   const resp = await fetch(`/api/models/${id}`, { headers });
   const m = await resp.json();
@@ -434,7 +449,50 @@ async function editModel(id) {
   document.getElementById('f-bio').value = m.bio || '';
   document.getElementById('f-available').checked = !!m.available;
   document.getElementById('f-featured').checked = !!m.featured;
+  // Show busy dates section for existing models
+  document.getElementById('busyDatesGroup').style.display = 'block';
+  loadBusyDates(m.id);
   openModal();
+}
+
+async function loadBusyDates(modelId) {
+  _currentModelId = modelId;
+  try {
+    const resp = await fetch(`/api/admin/models/${modelId}/busy-dates`, { headers });
+    const dates = await resp.json();
+    const list = document.getElementById('busyDatesList');
+    if (!list) return;
+    list.innerHTML = dates.length
+      ? dates.map(d =>
+          `<span style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;padding:2px 8px;border-radius:4px;font-size:0.75rem">` +
+          `${d.busy_date}` +
+          `<button type="button" onclick="removeBusyDate('${d.busy_date}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:0.7rem;padding:0 2px">✕</button>` +
+          `</span>`
+        ).join('')
+      : '<span style="font-size:0.8rem">Немає</span>';
+  } catch (e) { console.error('loadBusyDates', e); }
+}
+
+async function addBusyDate() {
+  const date = document.getElementById('newBusyDate').value;
+  if (!date || !_currentModelId) return;
+  try {
+    await fetch(`/api/admin/models/${_currentModelId}/busy-dates`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ busy_date: date }),
+    });
+    document.getElementById('newBusyDate').value = '';
+    loadBusyDates(_currentModelId);
+  } catch (e) { alert('Помилка: ' + e.message); }
+}
+
+async function removeBusyDate(date) {
+  if (!_currentModelId) return;
+  try {
+    await fetch(`/api/admin/models/${_currentModelId}/busy-dates/${date}`, { method: 'DELETE', headers });
+    loadBusyDates(_currentModelId);
+  } catch (e) { console.error('removeBusyDate', e); }
 }
 
 async function importCSV(input) {

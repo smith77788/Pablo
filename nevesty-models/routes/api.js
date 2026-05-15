@@ -840,6 +840,54 @@ router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Model busy dates (calendar) ──────────────────────────────────────────────
+router.get('/admin/models/:id/busy-dates', auth, async (req, res, next) => {
+  try {
+    const dates = await query(
+      'SELECT * FROM model_busy_dates WHERE model_id=? ORDER BY busy_date',
+      [req.params.id]
+    );
+    res.json(dates);
+  } catch (e) { next(e); }
+});
+
+router.post('/admin/models/:id/busy-dates', auth, async (req, res, next) => {
+  try {
+    const { busy_date, reason } = req.body;
+    if (!busy_date || !/^\d{4}-\d{2}-\d{2}$/.test(busy_date)) {
+      return res.status(400).json({ error: 'busy_date required (YYYY-MM-DD)' });
+    }
+    await run(
+      'INSERT OR IGNORE INTO model_busy_dates (model_id, busy_date, reason) VALUES (?,?,?)',
+      [req.params.id, busy_date, reason || null]
+    );
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+router.delete('/admin/models/:id/busy-dates/:date', auth, async (req, res, next) => {
+  try {
+    await run(
+      'DELETE FROM model_busy_dates WHERE model_id=? AND busy_date=?',
+      [req.params.id, req.params.date]
+    );
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Public: check model availability for a date
+router.get('/models/:id/availability', async (req, res, next) => {
+  try {
+    const { date } = req.query;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
+    }
+    const busy  = await get('SELECT id FROM model_busy_dates WHERE model_id=? AND busy_date=?', [req.params.id, date]);
+    const model = await get('SELECT available FROM models WHERE id=?', [req.params.id]);
+    res.json({ available: !busy && model && model.available === 1 });
+  } catch (e) { next(e); }
+});
+
 // ─── Orders (public) ──────────────────────────────────────────────────────────
 router.post('/orders', strictLimiter, async (req, res, next) => {
   try {
@@ -1131,25 +1179,35 @@ router.put('/admin/orders/:id', auth, async (req, res, next) => {
 router.post('/admin/orders/:id/pay', auth, async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { amount, description } = req.body;
+    const { amount, description, provider = 'yookassa' } = req.body;
     if (!amount || isNaN(amount) || amount < 1) return res.status(400).json({ error: 'amount required (integer RUB)' });
 
     const order = await get('SELECT * FROM orders WHERE id=?', [id]);
     if (!order) return res.status(404).json({ error: 'Order not found' });
 
-    const siteUrl = process.env.SITE_URL || 'https://example.com';
+    const siteUrl = (process.env.SITE_URL || 'https://example.com').replace(/\/$/, '');
     const returnUrl = `${siteUrl}/order-status.html?order=${order.order_number}`;
     const desc = description || `Оплата заявки #${order.order_number} — ${order.event_type || 'Модель'}`;
 
-    const result = await payment.createYooKassaPayment(id, parseInt(amount), desc, returnUrl);
+    let result;
+    if (provider === 'stripe') {
+      result = await payment.createStripePayment(id, parseInt(amount), desc);
+    } else {
+      result = await payment.createYooKassaPayment(id, parseInt(amount), desc, returnUrl);
+    }
     if (result.error) return res.status(400).json({ error: result.error });
 
     await run(
       'UPDATE orders SET payment_status=?, payment_id=?, payment_url=?, payment_amount=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-      ['pending', result.payment_id, result.payment_url, parseInt(amount), id]
+      ['pending', result.payment_id || result.session_id, result.payment_url || null, parseInt(amount), id]
     );
 
-    res.json({ payment_url: result.payment_url, payment_id: result.payment_id });
+    res.json({
+      payment_url:   result.payment_url || null,
+      payment_id:    result.payment_id || result.session_id,
+      client_secret: result.client_secret || null,
+      provider,
+    });
   } catch (e) { next(e); }
 });
 
@@ -2765,6 +2823,28 @@ router.post('/webhooks/stripe', async (req, res, next) => {
 
     const event = Buffer.isBuffer(body) ? JSON.parse(body.toString('utf8')) : body;
 
+    // Helper: mark order as paid and notify
+    const markPaid = async (ord, ref) => {
+      await run(
+        `UPDATE orders SET payment_status='paid', paid_at=CURRENT_TIMESTAMP,
+         status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+        [ord.id]
+      );
+      await run(
+        'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by, notes) VALUES (?,?,?,?,?)',
+        [ord.id, ord.status, 'confirmed', 'stripe_webhook', `Ref: ${ref}`]
+      ).catch(() => {});
+      if (botInstance && ord.client_chat_id && typeof botInstance.notifyPaymentSuccess === 'function') {
+        botInstance.notifyPaymentSuccess(ord.client_chat_id, ord.order_number).catch(() => {});
+      }
+      if (botInstance?.notifyAdmin) {
+        botInstance.notifyAdmin(
+          `💳 *Оплата Stripe получена\\!* Заявка ${escMd(ord.order_number)}\nКлиент: ${escMd(ord.client_name)}`,
+          { parse_mode: 'MarkdownV2' }
+        ).catch(() => {});
+      }
+    };
+
     if (event?.type === 'payment_intent.succeeded') {
       const pi          = event?.data?.object;
       const paymentId   = pi?.id;
@@ -2773,24 +2853,30 @@ router.post('/webhooks/stripe', async (req, res, next) => {
         const ord = metaOrderId
           ? await get('SELECT * FROM orders WHERE id=?', [parseInt(metaOrderId)]).catch(() => null)
           : await get('SELECT * FROM orders WHERE payment_id=?', [paymentId]).catch(() => null);
+        if (ord) await markPaid(ord, paymentId);
+      }
+    }
+
+    if (event?.type === 'checkout.session.completed') {
+      const session   = event?.data?.object;
+      const sessionId = session?.id;
+      if (sessionId) {
+        const ord = await get('SELECT * FROM orders WHERE payment_id=?', [sessionId]).catch(() => null);
+        if (ord) await markPaid(ord, sessionId);
+      }
+    }
+
+    if (event?.type === 'payment_intent.payment_failed') {
+      const pi        = event?.data?.object;
+      const paymentId = pi?.id;
+      if (paymentId) {
+        const ord = await get('SELECT * FROM orders WHERE payment_id=?', [paymentId]).catch(() => null);
         if (ord) {
-          await run(
-            `UPDATE orders SET payment_status='paid', paid_at=CURRENT_TIMESTAMP,
-             status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-            [ord.id]
-          );
-          if (botInstance && ord.client_chat_id && typeof botInstance.notifyPaymentSuccess === 'function') {
-            botInstance.notifyPaymentSuccess(ord.client_chat_id, ord.order_number).catch(() => {});
-          }
-          if (botInstance?.notifyAdmin) {
-            botInstance.notifyAdmin(
-              `💳 *Оплата Stripe получена\\!* Заявка ${escMd(ord.order_number)}\nКлиент: ${escMd(ord.client_name)}`,
-              { parse_mode: 'MarkdownV2' }
-            ).catch(() => {});
-          }
+          await run("UPDATE orders SET payment_status='failed', updated_at=CURRENT_TIMESTAMP WHERE id=?", [ord.id]);
         }
       }
     }
+
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
