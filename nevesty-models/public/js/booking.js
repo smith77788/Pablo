@@ -537,6 +537,8 @@
     updateStepIndicators(n);
     state.step = n;
     restoreStep(n);
+    // If restoring to the confirmation step, rebuild the summary
+    if (n === 5) buildSummary();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -1243,6 +1245,11 @@
 
   /* ─── Public API ─────────────────────────────────── */
   function goToStepPublic(n) { goToStep(n, n < state.step); }
+
+  /* ─── Initialize step indicators on page load ─────── */
+  // Sync ARIA progressbar and step dot classes with initial step state
+  // (goToStepInstant / restoreModelFromDraft may override this for drafts)
+  updateStepIndicators(state.step);
 
   window._booking = {
     nextStep, prevStep, selectModel, selectService, submit, checkStatus,
