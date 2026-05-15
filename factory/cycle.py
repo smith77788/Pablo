@@ -353,6 +353,130 @@ def run_cycle() -> dict:
     summary_lines.append(f"💡 Новых action items: {total_new_actions}")
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 7 — FINANCE + RESEARCH DEPARTMENTS
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n💰 FINANCE + RESEARCH DEPTS")
+    dept_context = {"insights": insights, "metrics": all_metrics}
+
+    # Finance Department
+    try:
+        finance = _load_dept("finance")
+        if finance:
+            finance_focus = "прогноз выручки бюджет расходы оптимизация"
+            finance_result = finance.execute_task(finance_focus, dept_context)
+            logger.info("[Phase7] Finance: roles_used=%s", finance_result.get("roles_used", []))
+            results["phases"]["finance"] = {
+                "roles_used": finance_result.get("roles_used", []),
+                "result": finance_result.get("result", {}),
+                "timestamp": finance_result.get("timestamp"),
+            }
+            summary_lines.append(f"💰 Finance: {', '.join(finance_result.get('roles_used', []))}")
+    except Exception as e:
+        logger.error("Finance dept phase error: %s", e)
+
+    # Research Department
+    try:
+        research = _load_dept("research")
+        if research:
+            research_focus = "рынок конкуренты тренды инсайты рекомендации"
+            research_result = research.execute_task(research_focus, dept_context)
+            logger.info("[Phase7] Research: roles_used=%s", research_result.get("roles_used", []))
+            results["phases"]["research"] = {
+                "roles_used": research_result.get("roles_used", []),
+                "result": research_result.get("result", {}),
+                "timestamp": research_result.get("timestamp"),
+            }
+            summary_lines.append(f"🔬 Research: {', '.join(research_result.get('roles_used', []))}")
+    except Exception as e:
+        logger.error("Research dept phase error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 8 — CEO SYNTHESIS: синтез всех департаментов
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🏆 CEO SYNTHESIS")
+    try:
+        # Собираем краткие итоги всех департаментов
+        all_department_results = {}
+        for dept_name, dept_data in results["phases"].items():
+            if dept_name not in ("analytics", "ceo", "departments", "ideas"):
+                all_department_results[dept_name] = dept_data
+
+        class CEOSynthesisAgent(FactoryAgent):
+            department = "ceo"
+            role = "ceo_synthesis"
+            name = "ceo_synthesis"
+            system_prompt = (
+                "Ты — CEO агентства моделей Nevesty Models. "
+                "Принимаешь стратегические решения на основе данных всех департаментов. "
+                "Мыслишь чётко, расставляешь приоритеты, даёшь конкретные указания команде. "
+                "Всё на русском языке."
+            )
+
+        ceo_agent = CEOSynthesisAgent()
+        ceo_synthesis_prompt = (
+            "Ты — CEO агентства моделей Nevesty Models. Получи отчёты всех департаментов и сделай выводы.\n\n"
+            "ОТЧЁТЫ ДЕПАРТАМЕНТОВ:\n"
+            + json.dumps(all_department_results, ensure_ascii=False, indent=2, default=str)
+            + "\n\nВерни JSON:\n"
+            '{\n'
+            '  "health_score": 75,\n'
+            '  "weekly_focus": "Улучшить конверсию из просмотра каталога в заявку",\n'
+            '  "growth_actions": [\n'
+            '    {"priority": 1, "action": "...", "department": "marketing", "expected_impact": "высокий"},\n'
+            '    {"priority": 2, "action": "...", "department": "sales", "expected_impact": "средний"}\n'
+            '  ],\n'
+            '  "ceo_memo": "Краткое резюме состояния бизнеса и стратегии на неделю...",\n'
+            '  "risks": ["Риск 1", "Риск 2"],\n'
+            '  "opportunities": ["Возможность 1", "Возможность 2"]\n'
+            '}'
+        )
+
+        ceo_synthesis = ceo_agent.think_json(ceo_synthesis_prompt, max_tokens=2000)
+
+        if ceo_synthesis and isinstance(ceo_synthesis, dict):
+            # Обновляем health_score если CEO дал оценку
+            if "health_score" in ceo_synthesis:
+                results["health_score"] = ceo_synthesis["health_score"]
+
+            results["phases"]["ceo_synthesis"] = ceo_synthesis
+
+            # Сохраняем CEO Weekly Memo в БД как growth_action
+            memo_text = ceo_synthesis.get("ceo_memo", "")
+            weekly_focus = ceo_synthesis.get("weekly_focus", "")
+            if memo_text or weekly_focus:
+                db.insert("growth_actions", {
+                    "product_id": nevesty_id,
+                    "action_type": "ceo_memo",
+                    "channel": "internal",
+                    "content": json.dumps({
+                        "type": "CEO Weekly Memo",
+                        "cycle_id": cycle_id,
+                        "health_score": ceo_synthesis.get("health_score"),
+                        "weekly_focus": weekly_focus,
+                        "memo": memo_text,
+                        "growth_actions": ceo_synthesis.get("growth_actions", []),
+                        "risks": ceo_synthesis.get("risks", []),
+                        "opportunities": ceo_synthesis.get("opportunities", []),
+                    }, ensure_ascii=False),
+                    "status": "done",
+                    "priority": 10,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+
+            summary_lines.append(f"🏆 CEO Health Score: {ceo_synthesis.get('health_score', '—')}%")
+            summary_lines.append(f"🎯 CEO Фокус: {weekly_focus[:80] if weekly_focus else '—'}")
+            actions_count = len(ceo_synthesis.get("growth_actions", []))
+            summary_lines.append(f"📋 CEO Growth Actions: {actions_count}")
+            logger.info(
+                "[CEOSynthesis] health=%s, focus=%s, actions=%s",
+                ceo_synthesis.get("health_score"),
+                weekly_focus[:60] if weekly_focus else "—",
+                actions_count,
+            )
+    except Exception as e:
+        logger.error("CEO Synthesis phase error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 4 — IDEAS (если мало)
     # ════════════════════════════════════════════════════════════════
     logger.info("\n💡 IDEAS")

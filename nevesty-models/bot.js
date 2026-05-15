@@ -864,7 +864,7 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
       });
     }
 
-    const filterKey = safe || '';
+    const activeFilter = safe || '';
     const filterLabel = safe ? (STATUS_LABELS[safe]||safe) : 'Все';
     let text = `📋 *Заявки — ${filterLabel}* \\(${total.n}\\)\n\n`;
 
@@ -875,10 +875,8 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
     });
 
     const nav = [];
-    if (page > 0)           nav.push({ text: '◀️', callback_data: `adm_orders_${filterKey}_${page-1}` });
-    if ((page+1)*8 < total.n) nav.push({ text: '▶️', callback_data: `adm_orders_${filterKey}_${page+1}` });
-
-    const activeFilter = safe || '';
+    if (page > 0)             nav.push({ text: '◀️', callback_data: `adm_orders_${activeFilter}_${page-1}` });
+    if ((page+1)*8 < total.n) nav.push({ text: '▶️', callback_data: `adm_orders_${activeFilter}_${page+1}` });
     const filterRow1 = [
       { text: (activeFilter === '') ? '📋 Все ✓' : '📋 Все',             callback_data: 'adm_orders__0'         },
       { text: (activeFilter === 'new') ? '🆕 Новые ✓' : '🆕 Новые',       callback_data: 'adm_orders_new_0'      },
@@ -2778,6 +2776,7 @@ function initBot(app) {
   });
 
   // ── Message handler ────────────────────────────────────────────────────────
+  const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
   bot.on('message', async (msg) => {
     if (!msg.text || msg.text.startsWith('/')) return;
     const chatId  = msg.chat.id;
@@ -2785,6 +2784,23 @@ function initBot(app) {
     const session = await getSession(chatId);
     const state   = session?.state || 'idle';
     const d       = sessionData(session);
+
+    // ── Session timeout: сброс если сессия не активна > 30 минут ────────────
+    if (state !== 'idle' && session?.updated_at) {
+      const updatedAt = new Date(session.updated_at).getTime();
+      if (!isNaN(updatedAt) && Date.now() - updatedAt > SESSION_TIMEOUT_MS) {
+        await clearSession(chatId);
+        await safeSend(chatId,
+          '⏰ Сессия истекла\\. Действие отменено\\.', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+          }
+        );
+        return isAdmin(chatId)
+          ? showAdminMenu(chatId, msg.from?.first_name)
+          : showMainMenu(chatId, msg.from?.first_name);
+      }
+    }
 
     // ── ReplyKeyboard кнопки клиента ─────────────────────────────────────────
     if (state === 'idle' || state === 'check_status') {
