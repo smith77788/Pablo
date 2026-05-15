@@ -1830,6 +1830,8 @@
             saveFavs(favs);
             updateFavNavBadge();
             if (window.NM?.analytics) NM.analytics.addToFavorites(id, _currentModel?.name || '');
+            if (typeof showToastMsg === 'function') showToastMsg('Добавлено в избранное ❤️');
+            else if (typeof toast === 'function') toast('Добавлено в избранное ❤️');
             if (btn) {
               btn.innerHTML = '<span aria-hidden="true">💔</span> В избранном';
               btn.style.color = '#e07070';
@@ -1839,6 +1841,8 @@
             favs.splice(idx, 1);
             saveFavs(favs);
             updateFavNavBadge();
+            if (typeof showToastMsg === 'function') showToastMsg('Убрано из избранного');
+            else if (typeof toast === 'function') toast('Убрано из избранного');
             if (btn) {
               btn.innerHTML = '<span aria-hidden="true">❤️</span> В избранное';
               btn.style.color = '';

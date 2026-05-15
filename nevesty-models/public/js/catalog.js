@@ -643,7 +643,8 @@
         const idx = favs.findIndex(f => (typeof f === 'object' ? f.id === m.id : f === m.id));
         if (idx === -1) {
           if (favs.length >= 50) {
-            alert('Максимум 50 в избранном');
+            if (typeof toast === 'function') toast('Максимум 50 моделей в избранном', 'error');
+            else alert('Максимум 50 в избранном');
             return;
           }
           // Store full model object for offline display in favorites.html
@@ -660,14 +661,18 @@
           });
           saveFavs(favs);
           favBtn.innerHTML = '❤️';
+          favBtn.style.background = 'rgba(180,0,0,0.7)';
           favBtn.title = 'Убрать из избранного';
           favBtn.setAttribute('aria-label', 'Убрать из избранного');
+          if (typeof toast === 'function') toast(`${m.name} добавлена в избранное ❤️`);
         } else {
           favs.splice(idx, 1);
           saveFavs(favs);
           favBtn.innerHTML = '🤍';
+          favBtn.style.background = 'rgba(0,0,0,0.55)';
           favBtn.title = 'В избранное';
           favBtn.setAttribute('aria-label', 'В избранное');
+          if (typeof toast === 'function') toast(`${m.name} убрана из избранного`);
         }
         _updateFavBadge();
       });
