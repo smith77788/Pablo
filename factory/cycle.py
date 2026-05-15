@@ -11,6 +11,7 @@ from factory.agents.strategic_core import StrategicCore
 from factory.agents.analytics_engine import AnalyticsEngine
 from factory.agents.experiment_system import ExperimentSystem
 from factory.agents.base import FactoryAgent
+from factory.agents.decision_tracker import DecisionTracker
 from factory.notifications import notify
 
 logger = logging.getLogger(__name__)
@@ -598,6 +599,37 @@ def run_cycle() -> dict:
     db.init_db()
     nevesty_id = _ensure_nevesty_product()
 
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 0 — DECISION TRACKING: load last cycle's factory_tasks
+    # ════════════════════════════════════════════════════════════════
+    previous_decisions: list = []
+    decision_tracker = DecisionTracker()
+    decision_accountability_report = ""
+    try:
+        import sqlite3 as _sqlite3_dt
+        import os as _os_dt
+        _bot_db = _os_dt.path.join(_os_dt.path.dirname(__file__), '..', 'nevesty-models', 'nevesty.db')
+        _bot_db = _os_dt.path.abspath(_bot_db)
+        if _os_dt.path.exists(_bot_db):
+            _conn_dt = _sqlite3_dt.connect(_bot_db)
+            _conn_dt.row_factory = _sqlite3_dt.Row
+            _rows = _conn_dt.execute(
+                "SELECT action, status, created_at FROM factory_tasks "
+                "WHERE status IN ('done', 'in_progress', 'pending') "
+                "ORDER BY created_at DESC LIMIT 5"
+            ).fetchall()
+            _conn_dt.close()
+            previous_decisions = [dict(r) for r in _rows]
+            _summary = decision_tracker.get_execution_summary(previous_decisions)
+            decision_accountability_report = decision_tracker.generate_accountability_report(_summary)
+            logger.info(
+                "[Phase0] Decision tracking: done=%s, in_progress=%s, pending=%s, rate=%.0f%%",
+                _summary["done_count"], _summary["in_progress_count"],
+                _summary["pending_count"], _summary["execution_rate"] * 100,
+            )
+    except Exception as _e_dt:
+        logger.warning("[Phase0] Decision tracking unavailable: %s", _e_dt)
+
     db.insert("cycles", {
         "id": cycle_id,
         "phase": "started",
@@ -700,11 +732,25 @@ def run_cycle() -> dict:
     logger.info("\n🧠 CEO CORE")
     decisions = []
     try:
+        # Build execution context from previous cycle's factory_tasks
+        executed = [t.get("action", "") for t in previous_decisions if t.get("status") == "done"]
+        pending = [t.get("action", "") for t in previous_decisions if t.get("status") == "in_progress"]
+        ceo_prev_context = {
+            "executed_last_cycle": executed,
+            "still_in_progress": pending,
+            "accountability_report": decision_accountability_report,
+        }
         ceo = StrategicCore()
-        decisions, _ = ceo.decide(insights, all_metrics)
+        decisions, _ = ceo.decide(insights, {**all_metrics, "previous_decisions": ceo_prev_context})
         results["decisions"] = decisions
-        results["phases"]["ceo"] = {"decisions_count": len(decisions)}
+        results["phases"]["ceo"] = {
+            "decisions_count": len(decisions),
+            "prev_executed_count": len(executed),
+            "prev_pending_count": len(pending),
+        }
         summary_lines.append(f"🧠 Решений CEO: {len(decisions)}")
+        if decision_accountability_report:
+            summary_lines.append(decision_accountability_report.strip())
         for d in decisions:
             logger.info("  [CEO] %s → %s", d.get("type"), d.get("rationale", "")[:60])
     except Exception as e:
@@ -1384,6 +1430,7 @@ def run_cycle() -> dict:
             + prev_actions_report
             + prev_growth_str
             + ("\n\n" + prev_decisions_str if prev_decisions_str else "")
+            + ("\n\nОТЧЁТ ПО ВЫПОЛНЕНИЮ factory_tasks (DecisionTracker):\n" + decision_accountability_report if decision_accountability_report else "")
             + "\n\nВерни JSON:\n"
             '{\n'
             '  "health_score": 75,\n'

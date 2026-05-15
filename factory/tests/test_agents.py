@@ -2528,3 +2528,84 @@ class TestTelegramNotification(unittest.TestCase):
         self.assertIn("Week 42", tg_text)
         self.assertIn("Improve conversion", tg_text)
         self.assertIn("Low traffic", tg_text)
+
+
+class TestDecisionTracker:
+    """Tests for the DecisionTracker class."""
+
+    def _make_tracker(self):
+        from factory.agents.decision_tracker import DecisionTracker
+        return DecisionTracker()
+
+    def test_get_execution_summary_returns_required_keys(self):
+        tracker = self._make_tracker()
+        tasks = [
+            {"title": "Task A", "action": "do_a", "status": "done"},
+            {"title": "Task B", "action": "do_b", "status": "in_progress"},
+            {"title": "Task C", "action": "do_c", "status": "pending"},
+        ]
+        result = tracker.get_execution_summary(tasks)
+        for key in ("done_count", "in_progress_count", "pending_count",
+                    "execution_rate", "done_titles", "next_focus"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_execution_rate_equals_done_over_total(self):
+        tracker = self._make_tracker()
+        tasks = [
+            {"action": "a", "status": "done"},
+            {"action": "b", "status": "done"},
+            {"action": "c", "status": "pending"},
+            {"action": "d", "status": "pending"},
+        ]
+        result = tracker.get_execution_summary(tasks)
+        assert result["execution_rate"] == 2 / 4
+
+    def test_empty_list_returns_zero_execution_rate(self):
+        tracker = self._make_tracker()
+        result = tracker.get_execution_summary([])
+        assert result["execution_rate"] == 0
+        assert result["done_count"] == 0
+        assert result["in_progress_count"] == 0
+        assert result["pending_count"] == 0
+
+    def test_generate_accountability_report_returns_string_with_percent(self):
+        tracker = self._make_tracker()
+        summary = {
+            "execution_rate": 0.75,
+            "done_count": 3,
+            "in_progress_count": 1,
+            "pending_count": 0,
+        }
+        report = tracker.generate_accountability_report(summary)
+        assert isinstance(report, str)
+        assert "75%" in report
+
+    def test_done_titles_listed_in_summary(self):
+        tracker = self._make_tracker()
+        tasks = [
+            {"title": "Launch campaign", "status": "done"},
+            {"title": "Update pricing", "status": "done"},
+            {"title": "Hire manager", "status": "pending"},
+        ]
+        result = tracker.get_execution_summary(tasks)
+        assert "Launch campaign" in result["done_titles"]
+        assert "Update pricing" in result["done_titles"]
+        assert result["done_count"] == 2
+
+    def test_next_focus_is_title_of_first_pending_task(self):
+        tracker = self._make_tracker()
+        tasks = [
+            {"action": "done_task", "status": "done"},
+            {"action": "first_pending", "status": "pending"},
+            {"action": "second_pending", "status": "pending"},
+        ]
+        result = tracker.get_execution_summary(tasks)
+        assert result["next_focus"] == "first_pending"
+
+    def test_next_focus_is_none_when_no_pending_tasks(self):
+        tracker = self._make_tracker()
+        tasks = [
+            {"action": "done_task", "status": "done"},
+        ]
+        result = tracker.get_execution_summary(tasks)
+        assert result["next_focus"] == "none"
