@@ -1866,6 +1866,63 @@ router.get('/admin/settings', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// GET /api/admin/settings/export — exports all settings as JSON file
+router.get('/admin/settings/export', auth, async (req, res, next) => {
+  try {
+    const settings = await query('SELECT key, value FROM bot_settings ORDER BY key');
+    const obj = Object.fromEntries(settings.map(s => [s.key, s.value]));
+    res.set('Content-Disposition', 'attachment; filename="settings.json"');
+    res.json(obj);
+  } catch (e) { next(e); }
+});
+
+// POST /api/admin/settings/import — imports settings from JSON object
+router.post('/admin/settings/import', auth, async (req, res, next) => {
+  try {
+    const settings = req.body;
+    if (typeof settings !== 'object' || Array.isArray(settings)) {
+      return res.status(400).json({ error: 'Expected JSON object' });
+    }
+
+    // Skip sensitive keys on import
+    const SKIP_KEYS = ['admin_password', 'jwt_secret', 'totp_secret'];
+
+    let imported = 0;
+    for (const [key, value] of Object.entries(settings)) {
+      if (SKIP_KEYS.includes(key)) continue;
+      if (typeof value !== 'string' || value.length > 10000) continue;
+      await run('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)', [key, value]);
+      imported++;
+    }
+
+    await logAudit(req, 'import_settings', 'setting', null, { imported });
+    res.json({ ok: true, imported });
+  } catch (e) { next(e); }
+});
+
+// POST /api/admin/settings/reset — resets a specific setting to its default value
+router.post('/admin/settings/reset', auth, async (req, res, next) => {
+  try {
+    const { key } = req.body;
+    if (!key) return res.status(400).json({ error: 'key required' });
+
+    const DEFAULTS = {
+      greeting: 'Добро пожаловать в Nevesty Models!',
+      reviews_enabled: '1',
+      wishlist_enabled: '1',
+      quick_booking_enabled: '1',
+      catalog_per_page: '6',
+      catalog_sort: 'featured',
+      event_reminders_enabled: '1',
+    };
+
+    if (!DEFAULTS[key]) return res.status(400).json({ error: 'No default for this key' });
+    await run('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)', [key, DEFAULTS[key]]);
+    await logAudit(req, 'reset_setting', 'setting', null, { key, value: DEFAULTS[key] });
+    res.json({ ok: true, value: DEFAULTS[key] });
+  } catch (e) { next(e); }
+});
+
 // DELETE /api/admin/sessions — clear active sessions (JWT is stateless; signals client logout)
 router.delete('/admin/sessions', auth, async (req, res, next) => {
   try {
