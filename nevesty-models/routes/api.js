@@ -4361,7 +4361,7 @@ router.get('/admin/analytics/top-cities', auth, async (req, res, next) => {
       SELECT
         COALESCE(m.city, 'Не указан') as city,
         COUNT(o.id) as orders,
-        COUNT(DISTINCT o.chat_id) as unique_clients
+        COUNT(DISTINCT o.client_chat_id) as unique_clients
       FROM orders o
       LEFT JOIN models m ON o.model_id = m.id
       WHERE o.status != 'cancelled'
