@@ -84,6 +84,48 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 // ─── Compression ──────────────────────────────────────────────────────────────
 if (compression) app.use(compression());
 
+// ─── SEO: Dynamic sitemap.xml ─────────────────────────────────────────────────
+app.get('/sitemap.xml', async (req, res) => {
+  try {
+    const { query: dbQuery } = require('./database');
+    const models = await dbQuery('SELECT id, name, updated_at FROM models WHERE available=1 ORDER BY featured DESC, id ASC');
+    const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
+
+    const modelUrls = models.map(m => `
+  <url>
+    <loc>${baseUrl}/model.html?id=${m.id}</loc>
+    <lastmod>${m.updated_at ? m.updated_at.split('T')[0] : new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>`).join('');
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>${baseUrl}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>${baseUrl}/catalog.html</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>${baseUrl}/booking.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>${baseUrl}/faq.html</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>${baseUrl}/favorites.html</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>${baseUrl}/privacy.html</loc><changefreq>monthly</changefreq><priority>0.4</priority></url>${modelUrls}
+</urlset>`;
+
+    res.header('Content-Type', 'application/xml');
+    res.send(xml);
+  } catch (e) {
+    console.error('[sitemap]', e.message);
+    res.status(500).send('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>');
+  }
+});
+
+// ─── SEO: Dynamic robots.txt ──────────────────────────────────────────────────
+app.get('/robots.txt', (req, res) => {
+  const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
+  res.type('text/plain');
+  res.send(
+    `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin/\nDisallow: /uploads/\nDisallow: /data/\n\nSitemap: ${baseUrl}/sitemap.xml`
+  );
+});
+
 // ─── Static files ─────────────────────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   maxAge: '7d',

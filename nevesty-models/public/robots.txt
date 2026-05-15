@@ -1,7 +1,8 @@
 User-agent: *
 Allow: /
-Disallow: /admin/
 Disallow: /api/
+Disallow: /admin/
 Disallow: /uploads/
+Disallow: /data/
 
 Sitemap: https://nevesty-models.ru/sitemap.xml

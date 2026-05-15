@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nevesty Models — Модельное Агентство</title>
-  <meta name="description" content="Nevesty Models — профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.">
+  <meta name="description" content="Модельное агентство Nevesty Models — профессиональные модели для свадеб, корпоративов и фотосессий. Забронируйте модель онлайн.">
+  <meta name="keywords" content="модельное агентство, аренда моделей, свадебные модели, корпоратив, фотосессия, невесты, модели для мероприятий">
   <meta name="theme-color" content="#080808">
   <meta property="og:title" content="Nevesty Models — Модельное агентство">
   <meta property="og:description" content="Профессиональные модели для любых мероприятий. Показы, фотосессии, корпоративы.">
@@ -17,8 +18,23 @@
   <link rel="canonical" href="https://nevesty-models.ru/">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
   <link rel="dns-prefetch" href="https://telegram.org">
+  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
   <link rel="stylesheet" href="/css/main.css" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843' }
+          }
+        }
+      }
+    }
+  </script>
   <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
   <!-- Google Analytics 4 -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=GA_MEASUREMENT_ID"></script>
@@ -52,6 +68,11 @@
         <a href="/faq.html">FAQ</a>
         <a href="#contact">Контакты</a>
         <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
+        <button onclick="DarkMode.toggle()"
+          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
+          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+        </button>
         <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
            style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
            onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
@@ -494,7 +515,7 @@
   </section>
 
   <!-- FOOTER -->
-  <footer class="footer">
+  <footer class="footer" role="contentinfo">
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
@@ -525,10 +546,10 @@
       </div>
       <div class="footer-bottom">
         <p>© 2024 Nevesty Models. Все права защищены.</p>
-        <div class="footer-socials">
-          <a href="https://instagram.com/nevesty_models" target="_blank" title="Instagram">📸</a>
-          <a href="https://t.me/nevesty_models" target="_blank" title="Telegram">✈</a>
-          <a href="https://vk.com/nevesty_models" target="_blank" title="ВКонтакте">V</a>
+        <div class="footer-socials" aria-label="Социальные сети">
+          <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"><span aria-hidden="true">📸</span></a>
+          <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"><span aria-hidden="true">✈</span></a>
+          <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"><span aria-hidden="true">V</span></a>
         </div>
       </div>
     </div>
@@ -546,6 +567,7 @@
 
   <script src="/js/main.js" defer></script>
   <script src="/js/telegram-webapp.js" defer></script>
+  <script src="/js/darkmode.js"></script>
 <script>
 // Загрузить контакты из настроек бота
 fetch('/api/settings').then(r=>r.json()).then(s=>{
@@ -608,6 +630,43 @@ fetch('/api/settings/public').then(r=>r.json()).then(d=>{
   }
 }
 </script>
+
+  <!-- Dark mode & animation styles -->
+  <style>
+    html { scroll-behavior: smooth; }
+
+    /* Fade-in animation */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .animate-fade-in {
+      animation: fadeInUp 0.4s ease-out forwards;
+    }
+
+    /* Model card hover */
+    .model-card {
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .model-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 24px -6px rgba(236, 72, 153, 0.15);
+    }
+
+    /* Dark mode transitions */
+    * { transition: background-color 0.2s, border-color 0.2s, color 0.2s; }
+
+    /* Dark mode overrides */
+    html.dark body { background-color: #111827; color: #f9fafb; }
+    html.dark .navbar, html.dark .nav-mobile { background-color: #1f2937; border-color: #374151; }
+    html.dark .footer { background-color: #1f2937; }
+    html.dark .model-card, html.dark .service-card, html.dark .pricing-card,
+    html.dark .testimonial-card, html.dark .step { background-color: #1f2937; border-color: #374151; }
+    html.dark h1, html.dark h2, html.dark h3, html.dark h4 { color: #f9fafb; }
+    html.dark p { color: #d1d5db; }
+    html.dark input, html.dark textarea, html.dark select { background-color: #374151; border-color: #4b5563; color: #f9fafb; }
+  </style>
 
   <!-- Cookie Banner -->
   <div id="cookie-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:16px;z-index:5000;border-top:1px solid #333">

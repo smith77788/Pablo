@@ -17,7 +17,22 @@
   <meta name="robots" content="index, follow">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
   <link rel="stylesheet" href="/css/main.css" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843' }
+          }
+        }
+      }
+    }
+  </script>
   <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
   <!-- Google Analytics 4 -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=GA_MEASUREMENT_ID"></script>
@@ -40,16 +55,21 @@
 </head>
 <body>
   <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-  <nav class="navbar scrolled" id="navbar">
+  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
     <div class="nav-inner">
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links">
+      <div class="nav-links" role="list">
         <a href="/catalog.html" style="color:var(--gold)">Модели</a>
         <a href="/#services">Услуги</a>
         <a href="/#about">О нас</a>
         <a href="/faq.html">FAQ</a>
         <a href="/#contact">Контакты</a>
         <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
+        <button onclick="DarkMode.toggle()"
+          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
+          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+        </button>
         <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
            style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
            onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
@@ -61,7 +81,7 @@
       <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
     </div>
   </nav>
-  <nav class="nav-mobile" id="mobileMenu">
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
     <span class="nav-mobile-close" id="mobileClose">✕</span>
     <a href="/catalog.html">Модели</a>
     <a href="/#services">Услуги</a>
@@ -71,7 +91,7 @@
     <a href="/booking.html" style="color:var(--gold)">Заказать</a>
   </nav>
 
-  <div class="catalog-page" id="main-content">
+  <main class="catalog-page" id="main-content" role="main">
     <div class="container">
       <nav aria-label="breadcrumb" style="padding-top:24px;margin-bottom:8px">
         <ol class="breadcrumb" style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
@@ -87,69 +107,70 @@
       </div>
       <div class="catalog-layout">
         <!-- FILTERS -->
-        <aside class="filters-panel">
+        <aside class="filters-panel" role="search" aria-label="Фильтры каталога">
           <h3>Фильтры</h3>
           <div class="filter-group">
-            <label>Поиск</label>
-            <input class="filter-search" type="text" id="searchInput" placeholder="Имя модели..." />
+            <label for="searchInput">Поиск</label>
+            <input class="filter-search" type="search" id="searchInput" placeholder="Имя модели..." aria-label="Поиск моделей" role="searchbox" />
           </div>
-          <div class="filter-group">
+          <div class="filter-group" role="group" aria-label="Категория">
             <label>Категория</label>
             <div class="filter-options" id="categoryFilters">
-              <span class="filter-tag active" data-value="">Все</span>
-              <span class="filter-tag" data-value="fashion">Fashion</span>
-              <span class="filter-tag" data-value="commercial">Commercial</span>
-              <span class="filter-tag" data-value="events">Events</span>
+              <span class="filter-tag active" data-value="" role="button" tabindex="0" aria-pressed="true">Все</span>
+              <span class="filter-tag" data-value="fashion" role="button" tabindex="0" aria-pressed="false">Fashion</span>
+              <span class="filter-tag" data-value="commercial" role="button" tabindex="0" aria-pressed="false">Commercial</span>
+              <span class="filter-tag" data-value="events" role="button" tabindex="0" aria-pressed="false">Events</span>
             </div>
           </div>
           <div class="filter-group">
-            <label>Город</label>
-            <select id="cityFilter" class="filter-search" style="padding:8px 14px;font-size:0.85rem;cursor:pointer">
+            <label for="cityFilter">Город</label>
+            <select id="cityFilter" class="filter-search" style="padding:8px 14px;font-size:0.85rem;cursor:pointer" aria-label="Фильтр по городу">
               <option value="">Все города</option>
             </select>
           </div>
-          <div class="filter-group">
+          <div class="filter-group" role="group" aria-label="Фильтр по возрасту">
             <label>Возраст</label>
             <div class="filter-options" id="ageFilters">
-              <span class="filter-tag active" data-min="" data-max="">Любой</span>
-              <span class="filter-tag" data-min="18" data-max="22">18–22</span>
-              <span class="filter-tag" data-min="22" data-max="26">22–26</span>
-              <span class="filter-tag" data-min="26" data-max="30">26–30</span>
-              <span class="filter-tag" data-min="30" data-max="">30+</span>
+              <span class="filter-tag active" data-min="" data-max="" role="button" tabindex="0" aria-pressed="true">Любой</span>
+              <span class="filter-tag" data-min="18" data-max="22" role="button" tabindex="0" aria-pressed="false">18–22</span>
+              <span class="filter-tag" data-min="22" data-max="26" role="button" tabindex="0" aria-pressed="false">22–26</span>
+              <span class="filter-tag" data-min="26" data-max="30" role="button" tabindex="0" aria-pressed="false">26–30</span>
+              <span class="filter-tag" data-min="30" data-max="" role="button" tabindex="0" aria-pressed="false">30+</span>
             </div>
           </div>
-          <div class="filter-group">
+          <div class="filter-group" role="group" aria-label="Фильтр по цвету волос">
             <label>Цвет волос</label>
             <div class="filter-options" id="hairFilters">
-              <span class="filter-tag active" data-value="">Все</span>
-              <span class="filter-tag" data-value="Блонд">Блонд</span>
-              <span class="filter-tag" data-value="Шатен">Шатен</span>
-              <span class="filter-tag" data-value="Брюнетка">Брюнетка</span>
-              <span class="filter-tag" data-value="Рыжая">Рыжая</span>
+              <span class="filter-tag active" data-value="" role="button" tabindex="0" aria-pressed="true">Все</span>
+              <span class="filter-tag" data-value="Блонд" role="button" tabindex="0" aria-pressed="false">Блонд</span>
+              <span class="filter-tag" data-value="Шатен" role="button" tabindex="0" aria-pressed="false">Шатен</span>
+              <span class="filter-tag" data-value="Брюнетка" role="button" tabindex="0" aria-pressed="false">Брюнетка</span>
+              <span class="filter-tag" data-value="Рыжая" role="button" tabindex="0" aria-pressed="false">Рыжая</span>
             </div>
           </div>
-          <div class="filter-group">
+          <div class="filter-group" role="group" aria-label="Фильтр по росту">
             <label>Рост (см)</label>
             <div class="range-row">
-              <input type="number" id="minHeight" placeholder="от" min="160" max="195" class="admin-input" style="padding:8px 10px;" />
-              <span>—</span>
-              <input type="number" id="maxHeight" placeholder="до" min="160" max="195" class="admin-input" style="padding:8px 10px;" />
+              <input type="number" id="minHeight" placeholder="от" min="160" max="195" class="admin-input" style="padding:8px 10px;" aria-label="Минимальный рост" />
+              <span aria-hidden="true">—</span>
+              <input type="number" id="maxHeight" placeholder="до" min="160" max="195" class="admin-input" style="padding:8px 10px;" aria-label="Максимальный рост" />
             </div>
           </div>
           <div class="filter-group">
             <label class="filter-avail-label">
-              <input type="checkbox" id="availableOnly" style="accent-color:var(--gold);width:15px;height:15px;cursor:pointer;vertical-align:middle;margin-right:6px" />
+              <input type="checkbox" id="availableOnly" style="accent-color:var(--gold);width:15px;height:15px;cursor:pointer;vertical-align:middle;margin-right:6px" aria-label="Показывать только свободных моделей" />
               Только свободные
             </label>
           </div>
-          <button class="btn-filter-reset" id="resetFilters">Сбросить фильтры</button>
+          <button class="btn-filter-reset" id="resetFilters" aria-label="Сбросить все фильтры">Сбросить фильтры</button>
         </aside>
 
         <!-- CATALOG -->
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:16px;flex-wrap:wrap">
-            <div class="catalog-count" id="catalogCount">Загрузка...</div>
-            <select id="sortSelect" class="filter-search" style="width:auto;padding:8px 14px;font-size:0.8rem;cursor:pointer">
+            <div class="catalog-count" id="catalogCount" aria-live="polite" aria-atomic="true">Загрузка...</div>
+            <label for="sortSelect" class="sr-only">Сортировка</label>
+            <select id="sortSelect" class="filter-search" style="width:auto;padding:8px 14px;font-size:0.8rem;cursor:pointer" aria-label="Сортировка результатов">
               <option value="default">По умолчанию</option>
               <option value="featured">По рейтингу</option>
               <option value="name_asc">По алфавиту</option>
@@ -161,7 +182,7 @@
             </select>
           </div>
           <!-- Skeleton loader -->
-          <div class="catalog-grid" id="catalogSkeleton" aria-hidden="true">
+          <div class="catalog-grid" id="catalogSkeleton" aria-hidden="true" aria-busy="true">
             <div class="model-card-skeleton"></div>
             <div class="model-card-skeleton"></div>
             <div class="model-card-skeleton"></div>
@@ -169,13 +190,13 @@
             <div class="model-card-skeleton"></div>
             <div class="model-card-skeleton"></div>
           </div>
-          <div class="catalog-grid" id="catalogGrid" style="display:none">
+          <div class="catalog-grid" id="catalogGrid" role="list" aria-live="polite" aria-label="Результаты поиска" style="display:none">
             <!-- injected -->
           </div>
         </div>
       </div>
     </div>
-  </div>
+  </main>
 
   <!-- MODEL MODAL -->
   <div class="modal-overlay" id="modelModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
@@ -215,6 +236,7 @@
   <script src="/js/main.js" defer></script>
   <script src="/js/catalog.js" defer></script>
   <script src="/js/telegram-webapp.js" defer></script>
+  <script src="/js/darkmode.js"></script>
   <script type="application/ld+json">
 {
   "@context": "https://schema.org",
