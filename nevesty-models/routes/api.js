@@ -16,6 +16,7 @@ const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const { query, run, get, generateOrderNumber, getSetting } = require('../database');
 const auth = require('../middleware/auth');
+const { aiBudgetLimiter } = require('../middleware/rateLimiter');
 const mailer = require('../services/mailer');
 const payment = require('../services/payment');
 const { cache, TTL_CATALOG } = require('../services/cache');
@@ -6817,7 +6818,7 @@ router.post('/client/ai-match', aiMatchLimiter, async (req, res) => {
 // ─── AI Budget Estimation by Description (БЛОК 12.2) ─────────────────────────
 // POST /api/client/ai-budget — estimate budget from free-text event description
 
-router.post('/client/ai-budget', aiMatchLimiter, async (req, res) => {
+router.post('/client/ai-budget', aiBudgetLimiter, async (req, res) => {
   const { description } = req.body;
   if (!description || description.length < 10)
     return res.json({ ok: false, error: 'Опишите мероприятие подробнее (минимум 10 символов)' });
@@ -7071,6 +7072,7 @@ async function generateSitemap() {
     { path: '/pricing.html', priority: '0.7', freq: 'weekly' },
     { path: '/cases.html', priority: '0.7', freq: 'monthly' },
     { path: '/search.html', priority: '0.6', freq: 'weekly' },
+    { path: '/favorites.html', priority: '0.5', freq: 'weekly' },
   ];
 
   const staticUrls = staticPages
