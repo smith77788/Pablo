@@ -22,10 +22,11 @@ async function showAdminStats(chatId) {
   if (!isAdmin(chatId)) return;
   try {
     const [
-      total, todayR, weekR, monthR,
+      total, todayOrders, weekOrders, monthOrders,
       active,
       done, canc,
-      newClients,
+      newClients, newClientsMonth,
+      totalNew, confirmed,
     ] = await Promise.all([
       get('SELECT COUNT(*) as n FROM orders'),
       get("SELECT COUNT(*) as n FROM orders WHERE date(created_at) = date('now')"),
@@ -34,114 +35,14 @@ async function showAdminStats(chatId) {
       get("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','reviewing','confirmed','in_progress')"),
       get("SELECT COUNT(*) as n FROM orders WHERE status='completed'"),
       get("SELECT COUNT(*) as n FROM orders WHERE status='cancelled'"),
+      get("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE date(created_at) = date('now') AND client_chat_id IS NOT NULL"),
       get("SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE created_at >= datetime('now','-30 days') AND client_chat_id IS NOT NULL"),
+      get("SELECT COUNT(*) as n FROM orders WHERE status != 'cancelled'"),
+      get("SELECT COUNT(*) as n FROM orders WHERE status IN ('confirmed','completed')"),
     ]);
 
-    // Conversion: completed / (total - cancelled) * 100
-    const denominator = (total.n || 0) - (canc.n || 0);
-    const conversion = denominator > 0 ? Math.round((done.n / denominator) * 100) : 0;
-
-    // Average budget
-    let avgBudget = null;
-    try {
-      const budgetRow = await get(
-        `SELECT AVG(CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','') AS REAL)) as avg
-         FROM orders WHERE budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`
-      );
-      if (budgetRow && budgetRow.avg) avgBudget = Math.round(budgetRow.avg);
-    } catch {}
-
-    // Top-3 models by order count
-    let topModels = [];
-    try {
-      topModels = await query(
-        `SELECT m.name, COUNT(o.id) as cnt
-         FROM models m
-         JOIN orders o ON o.model_id = m.id
-         GROUP BY m.id, m.name
-         ORDER BY cnt DESC
-         LIMIT 3`
-      );
-    } catch {}
-
-    const medals = ['🥇','🥈','🥉'];
-
-    let text = `*📊 Статистика Nevesty Models*\n\n`;
-    text += `*📅 Заявки:*\n`;
-    text += `  Сегодня: *${esc(String(todayR.n))}*\n`;
-    text += `  За неделю: *${esc(String(weekR.n))}*\n`;
-    text += `  За месяц: *${esc(String(monthR.n))}*\n`;
-    text += `  Всего: *${esc(String(total.n))}*\n\n`;
-    text += `*🔥 Активных прямо сейчас:* ${esc(String(active.n))}\n`;
-    text += `*✅ Завершено:* ${esc(String(done.n))}\n`;
-    text += `*❌ Отклонено:* ${esc(String(canc.n))}\n\n`;
-    text += `*📈 Конверсия:* ${esc(String(conversion))}%\n`;
-    if (avgBudget) text += `*💰 Средний бюджет:* ${esc(String(avgBudget.toLocaleString('ru')))} руб\\.\n`;
-    text += `*🆕 Новые клиенты \\(30 дней\\):* ${esc(String(newClients.n))}\n`;
-
-    if (topModels.length) {
-      text += `\n*🏆 Топ\\-3 модели по заявкам:*\n`;
-      topModels.forEach((m, i) => {
-        text += `  ${medals[i] || (i+1+'.')} ${esc(m.name)} — ${esc(String(m.cnt))} заявок\n`;
-      });
-    }
-
-    // Top-5 models by view count
-    let topViewed = [];
-    try {
-      topViewed = await query(`
-        SELECT name, view_count,
-          (SELECT COUNT(*) FROM orders WHERE model_id=models.id AND status NOT IN ('cancelled')) as order_count
-        FROM models
-        ORDER BY view_count DESC
-        LIMIT 5
-      `);
-    } catch {}
-
-    if (topViewed.length) {
-      text += `\n*👁 Топ\\-5 по просмотрам:*\n`;
-      topViewed.forEach((m, i) => {
-        text += `  ${i+1}\\. ${esc(m.name)} — 👁 ${esc(String(m.view_count || 0))} просм\\., 📋 ${esc(String(m.order_count || 0))} заявок\n`;
-      });
-    }
-
-    // Top-3 cities by order count
-    let topCities = [];
-    try {
-      topCities = await query(
-        `SELECT m.city, COUNT(o.id) as cnt
-         FROM models m
-         JOIN orders o ON o.model_id = m.id
-         WHERE m.city IS NOT NULL AND m.city != ''
-         GROUP BY m.city
-         ORDER BY cnt DESC
-         LIMIT 3`
-      );
-    } catch {}
-
-    if (topCities.length) {
-      text += `\n*🏙 Топ\\-3 города:*\n`;
-      topCities.forEach((c, i) => {
-        text += `  ${medals[i] || (i+1+'.')} ${esc(c.city)} — ${esc(String(c.cnt))} заявок\n`;
-      });
-    }
-
-    // Average deal cycle (days from new to completed)
-    let avgCycleDays = null;
-    try {
-      const cycleRow = await get(
-        `SELECT AVG(
-           CAST(julianday(updated_at) - julianday(created_at) AS INTEGER)
-         ) as avg_days
-         FROM orders
-         WHERE status='completed' AND updated_at IS NOT NULL AND created_at IS NOT NULL`
-      );
-      if (cycleRow && cycleRow.avg_days) avgCycleDays = Math.round(cycleRow.avg_days);
-    } catch {}
-
-    if (avgCycleDays !== null) {
-      text += `*⏱ Средний цикл сделки:* ${esc(String(avgCycleDays))} дн\\.\n`;
-    }
+    // Conversion: new→confirmed ratio
+    const conversion = (totalNew.n || 0) > 0 ? Math.round(((confirmed.n || 0) / totalNew.n) * 100) : 0;
 
     // Revenue: sum of budgets for confirmed+completed orders
     let revenue = { total: 0, month: 0, week: 0 };
@@ -158,6 +59,68 @@ async function showAdminStats(chatId) {
       };
     } catch {}
 
+    // Average deal ("средний чек") for confirmed+completed
+    let avgCheck = null;
+    try {
+      const checkRow = await get(
+        `SELECT AVG(CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','') AS REAL)) as avg
+         FROM orders WHERE status IN ('confirmed','completed') AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`
+      );
+      if (checkRow && checkRow.avg) avgCheck = Math.round(checkRow.avg);
+    } catch {}
+
+    // Top-3 models by order count
+    let topModels = [];
+    try {
+      topModels = await query(
+        `SELECT m.name, COUNT(o.id) as cnt
+         FROM models m
+         JOIN orders o ON o.model_id = m.id
+         GROUP BY m.id, m.name
+         ORDER BY cnt DESC
+         LIMIT 3`
+      );
+    } catch {}
+
+    // Top-3 cities by order count (via model city)
+    let topCities = [];
+    try {
+      topCities = await query(
+        `SELECT m.city, COUNT(o.id) as cnt
+         FROM models m
+         JOIN orders o ON o.model_id = m.id
+         WHERE m.city IS NOT NULL AND m.city != ''
+         GROUP BY m.city
+         ORDER BY cnt DESC
+         LIMIT 3`
+      );
+    } catch {}
+
+    // Top-5 models by view count (bonus insight)
+    let topViewed = [];
+    try {
+      topViewed = await query(`
+        SELECT name, view_count,
+          (SELECT COUNT(*) FROM orders WHERE model_id=models.id AND status NOT IN ('cancelled')) as order_count
+        FROM models
+        ORDER BY view_count DESC
+        LIMIT 5
+      `);
+    } catch {}
+
+    // Average deal cycle (days from new to completed)
+    let avgCycleDays = null;
+    try {
+      const cycleRow = await get(
+        `SELECT AVG(
+           CAST(julianday(updated_at) - julianday(created_at) AS INTEGER)
+         ) as avg_days
+         FROM orders
+         WHERE status='completed' AND updated_at IS NOT NULL AND created_at IS NOT NULL`
+      );
+      if (cycleRow && cycleRow.avg_days) avgCycleDays = Math.round(cycleRow.avg_days);
+    } catch {}
+
     // Repeat clients (ordered more than once)
     let repeatClients = 0;
     try {
@@ -165,26 +128,77 @@ async function showAdminStats(chatId) {
       repeatClients = rc?.n || 0;
     } catch {}
 
+    const medals = ['🥇','🥈','🥉'];
+    const fmt = n => esc(n.toLocaleString('ru'));
+
+    let text = `*📊 Статистика агентства*\n\n`;
+
+    // Daily / weekly / monthly / total
+    text += `📅 *Сегодня:* ${esc(String(todayOrders.n))} заявок \\| ${esc(String(newClients.n))} новых клиентов\n`;
+    text += `📅 *Неделя:* ${esc(String(weekOrders.n))} заявок`;
+    if (revenue.week > 0) text += ` \\| ${fmt(revenue.week)} руб\\.`;
+    text += `\n`;
+    text += `📅 *Месяц:* ${esc(String(monthOrders.n))} заявок`;
+    if (revenue.month > 0) text += ` \\| ${fmt(revenue.month)} руб\\.`;
+    text += `\n`;
+    text += `📅 *Всего:* ${esc(String(total.n))} заявок\n`;
+
+    // Revenue total
     if (revenue.total > 0) {
-      text += `\n*💰 Выручка:*\n`;
-      text += `  За неделю: *${esc(revenue.week.toLocaleString('ru'))} ₽*\n`;
-      text += `  За месяц: *${esc(revenue.month.toLocaleString('ru'))} ₽*\n`;
-      text += `  Всего: *${esc(revenue.total.toLocaleString('ru'))} ₽*\n`;
+      text += `\n💰 *Выручка за всё время:* ${fmt(revenue.total)} руб\\. \\(_подтверждённые/завершённые_\\)\n`;
     }
-    text += `*🔄 Повторные клиенты:* ${esc(String(repeatClients))}\n`;
+
+    // Top-3 models
+    if (topModels.length) {
+      text += `\n🏆 *Топ\\-3 модели по заявкам:*\n`;
+      topModels.forEach((m, i) => {
+        text += `  ${medals[i] || `${i+1}\\.`} ${esc(m.name)} — ${esc(String(m.cnt))} заявок\n`;
+      });
+    }
+
+    // Top-3 cities
+    if (topCities.length) {
+      text += `\n🏙 *Топ\\-3 города:*\n`;
+      topCities.forEach((c, i) => {
+        text += `  ${medals[i] || `${i+1}\\.`} ${esc(c.city)} — ${esc(String(c.cnt))} заявок\n`;
+      });
+    }
+
+    // Top-5 by views (bonus)
+    if (topViewed.length) {
+      text += `\n👁 *Топ\\-5 по просмотрам:*\n`;
+      topViewed.forEach((m, i) => {
+        text += `  ${i+1}\\. ${esc(m.name)} — 👁 ${esc(String(m.view_count || 0))} просм\\., 📋 ${esc(String(m.order_count || 0))} заявок\n`;
+      });
+    }
+
+    // Conversion & avg check
+    text += `\n📊 *Конверсия:* ${esc(String(conversion))}% \\(_new→confirmed_\\)\n`;
+    if (avgCheck) text += `💳 *Средний чек:* ${fmt(avgCheck)} руб\\.\n`;
+
+    // Active & new clients
+    text += `\n🔄 *Активных заявок сейчас:* ${esc(String(active.n))}\n`;
+    text += `⭐ *Новых клиентов за месяц:* ${esc(String(newClientsMonth.n))}\n`;
+
+    // Additional metrics
+    text += `✅ *Завершено:* ${esc(String(done.n))}  ❌ *Отклонено:* ${esc(String(canc.n))}\n`;
+    text += `🔁 *Повторные клиенты:* ${esc(String(repeatClients))}\n`;
+    if (avgCycleDays !== null) {
+      text += `⏱ *Средний цикл сделки:* ${esc(String(avgCycleDays))} дн\\.\n`;
+    }
 
     // Broadcast stats
     const bcastRow = await get(`SELECT COUNT(*) as total, SUM(sent_count) as sent FROM scheduled_broadcasts WHERE status='sent'`).catch(() => null);
     if (bcastRow?.total > 0) {
-      text += `*📢 Рассылки:* ${esc(String(bcastRow.total))} отправлено, ${esc(String(bcastRow.sent || 0))} доставлено\n`;
+      text += `📢 *Рассылки:* ${esc(String(bcastRow.total))} отправлено, ${esc(String(bcastRow.sent || 0))} доставлено\n`;
     }
 
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
+        [{ text: '🔄 Обновить', callback_data: 'adm_stats_refresh' }, { text: '← Меню', callback_data: 'admin_menu' }],
         [{ text: '📋 Все заявки', callback_data: 'adm_orders__0' }],
         [{ text: '📊 Аналитика (сайт)', url: 'https://nevesty-models.ru/admin/analytics.html' }],
-        [{ text: '← Меню',        callback_data: 'admin_menu'    }],
       ]}
     });
   } catch (e) { console.error('[Bot] showAdminStats:', e.message); }

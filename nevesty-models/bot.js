@@ -3937,7 +3937,7 @@ function initBot(app) {
     if (data === 'noop')       return; // label-only buttons
     if (data === 'my_orders')  return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
-    if (data === 'adm_stats')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminStats(chatId); }
+    if (data === 'adm_stats' || data === 'adm_stats_refresh')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminStats(chatId); }
     if (data === 'adm_organism')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showOrganismStatus(chatId); }
     if (data === 'adm_run_organism') {
       if (!isAdmin(chatId)) return;
@@ -5644,6 +5644,24 @@ function initBot(app) {
       const orderId = parseInt(data.replace('leave_review_', ''));
       return startLeaveReview(chatId, orderId);
     }
+    // ── rev_start_{orderId} — альтернативний формат запуску відгуку
+    if (data.startsWith('rev_start_')) {
+      const orderId = parseInt(data.replace('rev_start_', ''));
+      // Check if review already exists for this order
+      if (orderId) {
+        const existing = await get(
+          'SELECT id FROM reviews WHERE chat_id=? AND order_id=?',
+          [String(chatId), orderId]
+        ).catch(() => null);
+        if (existing) {
+          return safeSend(chatId, '✅ Вы уже оставили отзыв\\.', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+          });
+        }
+      }
+      return startLeaveReview(chatId, orderId);
+    }
     if (data.startsWith('review_rating_')) {
       // review_rating_{orderId}_{rating}
       const parts = data.replace('review_rating_', '').split('_');
@@ -6386,8 +6404,8 @@ function initBot(app) {
       }
       // Allow "." as a shortcut to skip writing text
       const reviewText = text.trim() === '.' ? '' : text.trim();
-      if (reviewText && reviewText.length < 3) {
-        return safeSend(chatId, '❌ Отзыв слишком короткий. Напишите хотя бы несколько слов или отправьте «.» чтобы пропустить:');
+      if (reviewText && reviewText.length < 20) {
+        return safeSend(chatId, '❌ Отзыв слишком короткий. Напишите не менее 20 символов или отправьте «.» чтобы пропустить:');
       }
       const orderId = d.review_order_id;
       const rating  = d.review_rating || 5;
@@ -6424,15 +6442,16 @@ function initBot(app) {
              { text: '❌ Отклонить', callback_data: `rev_reject_${newReviewId}` }],
           ]
         : [[{ text: '✅ Модерация отзывов', callback_data: 'adm_reviews' }]];
+      const adminNotifyText = `⭐ *Новый отзыв от ${esc(clientName)}\\!*\nОценка: ${rating}⭐${reviewPreview}\n\n_Перейдите в раздел отзывов для модерации\\._`;
       await Promise.allSettled(adminIds2.map(id => safeSend(id,
-        `📝 Новый отзыв от *${esc(clientName)}* — ★${rating}${reviewPreview}`,
+        adminNotifyText,
         {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: adminReviewBtns }
         }
       )));
       return safeSend(chatId,
-        `✅ Спасибо за отзыв\\!\n\nОн появится после модерации\\.${reviewBonusMsg}`, {
+        `✅ Спасибо за отзыв\\! Он появится на сайте после проверки\\.${reviewBonusMsg}`, {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
         }
@@ -6824,17 +6843,17 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus, clientPh
       ).catch(() => ({ n: 0 }));
       if ((completedCount?.n || 0) >= minCompleted) {
         const promptText = reviewsPromptText ||
-          'Понравилось сотрудничество? Оставьте отзыв — это займёт 1 минуту 😊';
+          '⭐ Как прошло мероприятие? Оставьте отзыв о работе с нами!\nЭто займёт 1 минуту и поможет другим клиентам.';
         setTimeout(async () => {
           await safeSend(clientChatId, promptText, {
             reply_markup: {
               inline_keyboard: [
-                [{ text: '⭐ Оставить отзыв', callback_data: `leave_review_${reviewOrderId}` }],
-                [{ text: '⏩ Позже',          callback_data: 'review_skip'                   }],
+                [{ text: '⭐ Оставить отзыв', callback_data: `rev_start_${reviewOrderId}` }],
+                [{ text: '⏩ Позже',          callback_data: 'review_skip'                }],
               ],
             },
           }).catch(() => {});
-        }, 3000);
+        }, 1000);
       }
     } catch {}
   }
@@ -8083,13 +8102,13 @@ async function runAiMatch(chatId, userDesc) {
 async function showPublicReviews(chatId, page) {
   page = parseInt(page) || 0;
   try {
-    const perPage = 5;
+    const perPage = 3;
     const totalRow = await get('SELECT COUNT(*) as n FROM reviews WHERE approved=1').catch(()=>({n:0}));
     const total = totalRow.n;
 
     if (!total) {
       return safeSend(chatId,
-        '📭 Пока нет опубликованных отзывов\\.\n\nБудьте первым\\!', {
+        '📭 *Пока нет отзывов*\n\nБудьте первым\\!', {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [
             [{ text: '⭐ Оставить отзыв', callback_data: 'leave_review_0' }],
@@ -8102,30 +8121,29 @@ async function showPublicReviews(chatId, page) {
     const reviews = await query(
       `SELECT r.*, m.name as model_name
        FROM reviews r
-       LEFT JOIN models m ON m.id = r.model_id
+       LEFT JOIN models m ON r.model_id = m.id
        WHERE r.approved=1 ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
       [perPage, page * perPage]
     ).catch(()=>[]);
 
     const totalPages = Math.ceil(total / perPage);
-    let text = `⭐ *Отзывы клиентов Nevesty Models*\n`;
-    text += `_Страница ${page + 1} из ${totalPages}_\n\n`;
-    reviews.forEach((r, i) => {
+    let text = `⭐ *Отзывы клиентов \\(${total}\\)*\n\n`;
+    reviews.forEach(r => {
       const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 5)));
       const date  = r.created_at ? new Date(r.created_at).toLocaleDateString('ru') : '';
       const snippet = r.text ? (r.text.length > 200 ? r.text.slice(0, 200) + '…' : r.text) : '';
-      text += `${page * perPage + i + 1}\\. *${esc(r.client_name)}* ${stars}`;
-      if (r.model_name) text += ` — _${esc(r.model_name)}_`;
-      if (date) text += ` \\(${esc(date)}\\)`;
-      text += `\n_${esc(snippet)}_`;
+      text += `${stars}`;
+      if (r.model_name) text += ` Модель: _${esc(r.model_name)}_`;
+      text += `\n_"${esc(snippet)}"_`;
+      if (date) text += `\n📅 ${esc(date)}`;
       if (r.admin_reply) text += `\n💬 _${esc(r.admin_reply)}_`;
       text += '\n\n';
     });
 
     const nav = [];
-    if (page > 0) nav.push({ text: '← Пред', callback_data: `show_reviews_${page-1}` });
+    if (page > 0) nav.push({ text: '← Пред', callback_data: `cat_rev_${page-1}` });
     nav.push({ text: `${page + 1}/${totalPages}`, callback_data: 'noop' });
-    if ((page+1)*perPage < total) nav.push({ text: 'След →', callback_data: `show_reviews_${page+1}` });
+    if ((page+1)*perPage < total) nav.push({ text: 'След →', callback_data: `cat_rev_${page+1}` });
 
     const reviewsEnabled = await getSetting('reviews_enabled').catch(() => '1');
 
