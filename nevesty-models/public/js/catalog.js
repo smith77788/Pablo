@@ -19,17 +19,51 @@
   // ── Read URL params ──────────────────────────────────────────────────────────
   function getUrlParams() {
     const p = new URLSearchParams(window.location.search);
+
+    // Support combined format: height=160-165, age=18-22 (for shareable links)
+    let minHeight = '', maxHeight = '';
+    const heightVal = p.get('height');
+    if (heightVal) {
+      if (heightVal.endsWith('+')) {
+        minHeight = heightVal.slice(0, -1);
+      } else {
+        const parts = heightVal.split('-');
+        minHeight = parts[0] || '';
+        maxHeight = parts[1] || '';
+      }
+    } else {
+      // Legacy separate params
+      minHeight = p.get('minH') || '';
+      maxHeight = p.get('maxH') || '';
+    }
+
+    let ageMin = '', ageMax = '';
+    const ageVal = p.get('age');
+    if (ageVal) {
+      if (ageVal.endsWith('+')) {
+        ageMin = ageVal.slice(0, -1);
+      } else {
+        const parts = ageVal.split('-');
+        ageMin = parts[0] || '';
+        ageMax = parts[1] || '';
+      }
+    } else {
+      // Legacy separate params
+      ageMin = p.get('ageMin') || '';
+      ageMax = p.get('ageMax') || '';
+    }
+
     return {
       category:      p.get('category') || '',
       hair:          p.get('hair') || '',
       city:          p.get('city') || '',
-      ageMin:        p.get('ageMin') || '',
-      ageMax:        p.get('ageMax') || '',
+      ageMin,
+      ageMax,
       availableOnly: p.get('available') === '1',
       sort:          p.get('sort') || 'default',
       search:        p.get('q') || '',
-      minHeight:     p.get('minH') || '',
-      maxHeight:     p.get('maxH') || '',
+      minHeight,
+      maxHeight,
     };
   }
 
@@ -42,13 +76,30 @@
       if (filters.category)    p.set('category', filters.category);
       if (filters.hair)        p.set('hair', filters.hair);
       if (filters.city)        p.set('city', filters.city);
-      if (filters.ageMin)      p.set('ageMin', filters.ageMin);
-      if (filters.ageMax)      p.set('ageMax', filters.ageMax);
+
+      // Use human-readable combined format for height and age
+      if (filters.minHeight || filters.maxHeight) {
+        if (filters.minHeight && !filters.maxHeight) {
+          p.set('height', filters.minHeight + '+');
+        } else if (filters.minHeight && filters.maxHeight) {
+          p.set('height', `${filters.minHeight}-${filters.maxHeight}`);
+        } else {
+          p.set('height', filters.maxHeight);
+        }
+      }
+      if (filters.ageMin || filters.ageMax) {
+        if (filters.ageMin && !filters.ageMax) {
+          p.set('age', filters.ageMin + '+');
+        } else if (filters.ageMin && filters.ageMax) {
+          p.set('age', `${filters.ageMin}-${filters.ageMax}`);
+        } else {
+          p.set('age', filters.ageMax);
+        }
+      }
+
       if (filters.availableOnly) p.set('available', '1');
       if (filters.sort && filters.sort !== 'default') p.set('sort', filters.sort);
       if (filters.search)      p.set('q', filters.search);
-      if (filters.minHeight)   p.set('minH', filters.minHeight);
-      if (filters.maxHeight)   p.set('maxH', filters.maxHeight);
       const qs = p.toString();
       const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
       window.history.replaceState({}, '', newUrl);
