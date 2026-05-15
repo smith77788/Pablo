@@ -59,6 +59,9 @@
     "supertest": "^7.2.2"
   },
   "lint-staged": {
-    "*.js": ["eslint --fix --max-warnings=999"]
+    "*.js": ["eslint --fix --max-warnings=0"],
+    "routes/**/*.js": ["eslint --fix"],
+    "services/**/*.js": ["eslint --fix"],
+    "tests/**/*.js": ["eslint --fix"]
   }
 }
