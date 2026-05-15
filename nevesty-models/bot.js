@@ -4807,12 +4807,12 @@ function initBot(app) {
       await run('UPDATE orders SET manager_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [adminId, orderId]);
       const [admin, order] = await Promise.all([
         get('SELECT username, telegram_id FROM admins WHERE id=?', [adminId]).catch(()=>null),
-        get('SELECT order_number FROM orders WHERE id=?', [orderId]).catch(()=>null),
+        get('SELECT order_number, client_name, event_type FROM orders WHERE id=?', [orderId]).catch(()=>null),
       ]);
       // Notify assigned manager if they have a telegram_id
       if (admin?.telegram_id && String(admin.telegram_id) !== String(chatId)) {
         safeSend(admin.telegram_id,
-          `👤 Вам назначена заявка *${esc(order?.order_number||String(orderId))}*\n\nНажмите, чтобы открыть:`,
+          `📋 *Вам назначена заявка \\#${esc(order?.order_number||String(orderId))}*\n\nКлиент: ${esc(order?.client_name||'—')}\nТип: ${esc(EVENT_TYPES[order?.event_type]||order?.event_type||'—')}\n\nОткройте панель управления для просмотра деталей\\.`,
           {
             parse_mode: 'MarkdownV2',
             reply_markup: { inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]] }

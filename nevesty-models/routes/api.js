@@ -3402,6 +3402,99 @@ router.delete('/admin/faq/:id', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── AI: FAQ generation (admin) ───────────────────────────────────────────────
+// POST /api/admin/faq/generate — generate FAQ items using Claude AI
+router.post('/admin/faq/generate', auth, async (req, res) => {
+  const { topic } = req.body;
+  if (!topic) return res.json({ ok: false, error: 'topic required' });
+
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) return res.json({ ok: false, error: 'ANTHROPIC_API_KEY not set' });
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        messages: [{
+          role: 'user',
+          content: `Создай 3 вопроса и ответа для FAQ агентства моделей Nevesty Models на тему: "${topic}"\n\nФормат JSON: [{"question": "...", "answer": "..."}]\nТолько JSON, без других слов. Язык: русский.`
+        }]
+      })
+    });
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text || '[]';
+    const match = text.match(/\[[\s\S]*\]/);
+    const items = match ? JSON.parse(match[0]) : [];
+
+    res.json({ ok: true, items });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// ─── AI: model matching by description (client) ───────────────────────────────
+// POST /api/client/ai-match — match models to a natural language description
+router.post('/client/ai-match', async (req, res) => {
+  const { description } = req.body;
+  if (!description || description.length < 10) return res.json({ ok: false, error: 'Describe your request in more detail' });
+
+  let models = [];
+  try {
+    models = await query(
+      `SELECT id, name, age, height, category, bio, params, city, instagram
+       FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY featured DESC LIMIT 20`
+    );
+
+    if (!models.length) return res.json({ ok: true, models: [] });
+
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    if (!ANTHROPIC_API_KEY) return res.json({ ok: true, models: models.slice(0, 3) });
+
+    const modelList = models.map((m, i) =>
+      `${i+1}. ${m.name} (${m.age} лет, рост ${m.height} см, ${m.category}, ${m.city || 'Москва'}): ${m.bio || 'Профессиональная модель'}`
+    ).join('\n');
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        messages: [{
+          role: 'user',
+          content: `Клиент ищет модель для мероприятия: "${description}"\n\nДоступные модели:\n${modelList}\n\nВерни JSON: {"top3": [номер1, номер2, номер3], "reason": "краткое объяснение"}\nТолько JSON, без других слов.`
+        }]
+      })
+    });
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text || '';
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return res.json({ ok: true, models: models.slice(0, 3) });
+
+    const parsed = JSON.parse(match[0]);
+    const topIndices = (parsed.top3 || [1, 2, 3]).map(n => parseInt(n) - 1).filter(i => i >= 0 && i < models.length);
+    const topModels = topIndices.map(i => models[i]).filter(Boolean);
+
+    res.json({ ok: true, models: topModels, reason: parsed.reason || '' });
+  } catch (e) {
+    console.error('[AI Match] Error:', e.message);
+    res.json({ ok: true, models: models.slice(0, 3) }); // fallback
+  }
+});
+
 // ─── FAQ ──────────────────────────────────────────────────────────────────────
 const DEFAULT_FAQ_ITEMS = JSON.stringify([
   {"q": "Как заказать модель?", "a": "Выберите модель в каталоге и нажмите «Забронировать» или напишите нам в Telegram. Менеджер свяжется с вами в течение часа."},

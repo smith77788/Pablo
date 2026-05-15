@@ -44,13 +44,16 @@
     </header>
 
     <div class="page-content">
+      <!-- Aggregate stats -->
+      <div id="aggregateStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px"></div>
+
       <div class="section-card" style="margin-bottom:24px">
         <div class="section-card-body">
           <table class="data-table">
             <thead>
-              <tr><th>Логин</th><th>Email</th><th>Роль</th><th>Telegram ID</th><th>Добавлен</th><th></th></tr>
+              <tr><th>Логин</th><th>Email</th><th>Роль</th><th>Telegram ID</th><th>Заявок</th><th>Завершено</th><th>Конверсия</th><th>Добавлен</th><th></th></tr>
             </thead>
-            <tbody id="managersBody"><tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr></tbody>
+            <tbody id="managersBody"><tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -96,20 +99,110 @@
 <div class="toast-container" id="toastContainer"></div>
 <script src="/js/admin.js"></script>
 <script>
+let expandedManagerId = null;
+
 async function loadManagers() {
   try {
     const managers = await _admin.apiFetch('/admin/managers');
     const tbody = document.getElementById('managersBody');
-    tbody.innerHTML = managers.map(m => `
+    const me = JSON.parse(localStorage.getItem('admin_user') || '{}');
+
+    // Aggregate stats
+    const totalManagers = managers.length;
+    const totalOrders = managers.reduce((s, m) => s + (m.total_orders || 0), 0);
+    const totalCompleted = managers.reduce((s, m) => s + (m.completed_orders || 0), 0);
+    const avgRate = totalManagers > 0
+      ? Math.round(managers.reduce((s, m) => {
+          const rate = m.total_orders > 0 ? (m.completed_orders / m.total_orders) * 100 : 0;
+          return s + rate;
+        }, 0) / totalManagers)
+      : 0;
+
+    const statsEl = document.getElementById('aggregateStats');
+    statsEl.innerHTML = [
+      { label: 'Менеджеров', value: totalManagers, icon: '👥' },
+      { label: 'Заявок назначено', value: totalOrders, icon: '📋' },
+      { label: 'Завершено', value: totalCompleted, icon: '✅' },
+      { label: 'Средняя конверсия', value: avgRate + '%', icon: '📊' },
+    ].map(s => `
+      <div class="section-card" style="padding:16px;text-align:center">
+        <div style="font-size:1.6rem">${s.icon}</div>
+        <div style="font-size:1.5rem;font-weight:700;color:var(--gold);margin:4px 0">${s.value}</div>
+        <div style="font-size:0.8rem;color:var(--text-muted)">${s.label}</div>
+      </div>`).join('');
+
+    tbody.innerHTML = managers.map(m => {
+      const rate = m.total_orders > 0 ? Math.round((m.completed_orders / m.total_orders) * 100) : 0;
+      const rateColor = rate >= 70 ? 'var(--success)' : rate >= 40 ? 'var(--gold)' : 'var(--danger)';
+      const isMe = m.username === me.username;
+      return `
       <tr>
-        <td><strong>${m.username}</strong></td>
-        <td>${m.email || '—'}</td>
+        <td><strong>${_admin.escapeHtml(m.username)}</strong></td>
+        <td>${m.email ? _admin.escapeHtml(m.email) : '—'}</td>
         <td>${m.role === 'superadmin' ? '<span class="badge badge-confirmed">Суперадмин</span>' : '<span class="badge badge-reviewing">Менеджер</span>'}</td>
         <td>${m.telegram_id || '<span style="color:var(--text-dim)">не указан</span>'}</td>
+        <td style="text-align:center">${m.total_orders || 0}</td>
+        <td style="text-align:center">${m.completed_orders || 0}</td>
+        <td style="text-align:center;font-weight:600;color:${rateColor}">${rate}%</td>
         <td>${_admin.formatDate(m.created_at)}</td>
-        <td>${m.username !== (JSON.parse(localStorage.getItem('admin_user') || '{}').username) ? `<button class="btn btn-sm btn-danger" data-action="del-manager" data-id="${m.id}" data-name="${_admin.escapeHtml(m.username)}" title="Удалить">🗑</button>` : '<span style="color:var(--text-dim);font-size:0.75rem">это вы</span>'}</td>
-      </tr>`).join('');
+        <td style="white-space:nowrap">
+          <button class="btn btn-sm btn-ghost" data-action="mgr-stats" data-id="${m.id}" title="Подробная статистика">📊 Подробно</button>
+          ${!isMe ? `<button class="btn btn-sm btn-danger" data-action="del-manager" data-id="${m.id}" data-name="${_admin.escapeHtml(m.username)}" title="Удалить" style="margin-left:4px">🗑</button>` : '<span style="color:var(--text-dim);font-size:0.75rem;margin-left:4px">это вы</span>'}
+        </td>
+      </tr>
+      <tr id="statsRow-${m.id}" style="display:none">
+        <td colspan="9" style="padding:0;background:var(--bg-secondary)">
+          <div id="statsPanel-${m.id}" style="padding:16px"></div>
+        </td>
+      </tr>`;
+    }).join('');
   } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function toggleManagerStats(id) {
+  const row = document.getElementById(`statsRow-${id}`);
+  const panel = document.getElementById(`statsPanel-${id}`);
+  if (!row) return;
+
+  if (expandedManagerId === id) {
+    row.style.display = 'none';
+    expandedManagerId = null;
+    return;
+  }
+
+  // Collapse previously expanded
+  if (expandedManagerId !== null) {
+    const prev = document.getElementById(`statsRow-${expandedManagerId}`);
+    if (prev) prev.style.display = 'none';
+  }
+
+  row.style.display = '';
+  expandedManagerId = id;
+  panel.innerHTML = '<span style="color:var(--text-dim)">Загрузка статистики…</span>';
+
+  try {
+    const data = await _admin.apiFetch(`/admin/managers/${id}/stats`);
+    if (!data.ok) throw new Error(data.error || 'Ошибка');
+    const s = data.stats;
+    const rateColor = s.completion_rate >= 70 ? 'var(--success)' : s.completion_rate >= 40 ? 'var(--gold)' : 'var(--danger)';
+    panel.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
+        ${[
+          { label: 'Всего назначено', value: s.total_assigned, icon: '📋' },
+          { label: 'Активных', value: s.active, icon: '🔄' },
+          { label: 'Завершено', value: s.completed, icon: '✅' },
+          { label: 'Конверсия', value: s.completion_rate + '%', icon: '📊', color: rateColor },
+          { label: 'Сред. цикл (дней)', value: s.avg_days_to_complete !== null ? s.avg_days_to_complete : '—', icon: '⏱' },
+        ].map(st => `
+          <div style="background:var(--bg-card,var(--bg));border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:1.3rem">${st.icon}</div>
+            <div style="font-size:1.3rem;font-weight:700;color:${st.color||'var(--gold)'};margin:4px 0">${st.value}</div>
+            <div style="font-size:0.75rem;color:var(--text-muted)">${st.label}</div>
+          </div>`).join('')}
+      </div>`;
+  } catch (e) {
+    panel.innerHTML = `<span style="color:var(--danger)">Ошибка: ${_admin.escapeHtml(e.message)}</span>`;
+  }
 }
 
 async function addManager() {
@@ -148,8 +241,10 @@ function showAddForm() { document.getElementById('addForm').style.display = 'blo
 function hideAddForm() { document.getElementById('addForm').style.display = 'none'; }
 
 document.addEventListener('click', e => {
-  const btn = e.target.closest('[data-action="del-manager"]');
-  if (btn) deleteManager(+btn.dataset.id, btn.dataset.name);
+  const delBtn = e.target.closest('[data-action="del-manager"]');
+  if (delBtn) return deleteManager(+delBtn.dataset.id, delBtn.dataset.name);
+  const statsBtn = e.target.closest('[data-action="mgr-stats"]');
+  if (statsBtn) toggleManagerStats(+statsBtn.dataset.id);
 });
 
 loadManagers();
