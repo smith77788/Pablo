@@ -6727,5 +6727,64 @@ router.get('/sitemap-models.xml', async (req, res, next) => {
   }
 });
 
+// ─── Social Media Posts ────────────────────────────────────────────────────────
+router.get('/admin/social/posts', auth, async (req, res, next) => {
+  try {
+    const { platform = 'instagram', status, limit = 20, offset = 0 } = req.query;
+    const conditions = ['platform=?'];
+    const params = [platform];
+    if (status) {
+      conditions.push('status=?');
+      params.push(status);
+    }
+    const posts = await query(
+      `SELECT sp.*, m.name as model_name FROM social_posts sp
+       LEFT JOIN models m ON sp.model_id = m.id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY sp.created_at DESC LIMIT ? OFFSET ?`,
+      [...params, parseInt(limit) || 20, parseInt(offset) || 0]
+    );
+    res.json({ posts });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/admin/social/posts', auth, async (req, res, next) => {
+  try {
+    const {
+      platform = 'instagram',
+      model_id,
+      content_type = 'post',
+      caption,
+      media_url,
+      hashtags,
+      scheduled_at,
+    } = req.body;
+    if (!caption) return res.status(400).json({ error: 'caption required' });
+    const result = await run(
+      `INSERT INTO social_posts (platform, model_id, content_type, caption, media_url, hashtags, scheduled_at, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled')`,
+      [platform, model_id || null, content_type, caption, media_url || null, hashtags || null, scheduled_at || null]
+    );
+    res.json({ id: result.id, status: 'scheduled' });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.patch('/admin/social/posts/:id/status', auth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const allowed = ['draft', 'scheduled', 'published', 'cancelled'];
+    if (!allowed.includes(status)) return res.status(400).json({ error: 'invalid status' });
+    await run('UPDATE social_posts SET status=? WHERE id=?', [status, id]);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
 module.exports.setBot = setBot;

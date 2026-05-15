@@ -74,6 +74,9 @@ def _load_dept(name: str):
         elif name == "research":
             from factory.agents.research_dept import ResearchDepartment
             return ResearchDepartment()
+        elif name == "social_media":
+            from factory.agents.social_media_dept import SocialMediaDepartment
+            return SocialMediaDepartment()
     except Exception as e:
         logger.warning("Dept %s unavailable: %s", name, e)
     return None
@@ -3080,6 +3083,22 @@ def run_cycle() -> dict:
     except Exception as e:
         results["phases"]["ceo_intelligence"] = {"status": "error", "error": str(e)}
         logger.error("Phase 5.3b CEO Intelligence error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 29 — SOCIAL MEDIA DEPARTMENT (heuristic, always runs)
+    # Generates Instagram content plan for the week
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n📸 PHASE 29: SOCIAL MEDIA DEPARTMENT")
+    try:
+        social_media = _load_dept("social_media")
+        if social_media:
+            _sm_result = social_media.execute_task({"action": "analyze"})
+            results["phases"]["social_media"] = _sm_result
+            analytics_rec = _sm_result.get("analytics", {}).get("weekly_post_target", "?")
+            summary_lines.append(f"📸 Social Media: weekly_target={analytics_rec} posts")
+            logger.info("[Phase29] Social Media: weekly_post_target=%s", analytics_rec)
+    except Exception as e:
+        logger.error("Phase 29 Social Media error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE

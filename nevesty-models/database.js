@@ -51,10 +51,10 @@ async function initDatabase() {
     version INTEGER PRIMARY KEY,
     description TEXT NOT NULL,
     applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`).catch(()=>{});
+  )`).catch(() => {});
 
   // Record current schema version if not exists
-  const schemaVer = await get('SELECT MAX(version) as v FROM schema_versions').catch(()=>null);
+  const schemaVer = await get('SELECT MAX(version) as v FROM schema_versions').catch(() => null);
   if (!schemaVer?.v) {
     const migrations = [
       [1, 'Initial schema — models, orders, admins, settings'],
@@ -67,7 +67,7 @@ async function initDatabase() {
       [8, 'Add achievements table'],
     ];
     for (const [v, desc] of migrations) {
-      await run('INSERT OR IGNORE INTO schema_versions (version, description) VALUES (?,?)', [v, desc]).catch(()=>{});
+      await run('INSERT OR IGNORE INTO schema_versions (version, description) VALUES (?,?)', [v, desc]).catch(() => {});
     }
   }
 
@@ -235,7 +235,7 @@ async function initDatabase() {
     total_earned INTEGER DEFAULT 0,
     level TEXT DEFAULT 'bronze',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`).catch(()=>{});
+  )`).catch(() => {});
 
   await run(`CREATE TABLE IF NOT EXISTS loyalty_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -245,9 +245,9 @@ async function initDatabase() {
     description TEXT,
     order_id INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`).catch(()=>{});
+  )`).catch(() => {});
 
-  await run(`CREATE INDEX IF NOT EXISTS idx_loyalty_chat ON loyalty_points(chat_id)`).catch(()=>{});
+  await run(`CREATE INDEX IF NOT EXISTS idx_loyalty_chat ON loyalty_points(chat_id)`).catch(() => {});
 
   // Referral program
   await run(`CREATE TABLE IF NOT EXISTS referrals (
@@ -256,8 +256,8 @@ async function initDatabase() {
     referred_chat_id INTEGER NOT NULL,
     bonus_points INTEGER DEFAULT 50,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`).catch(()=>{});
-  await run(`CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_chat_id)`).catch(()=>{});
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_chat_id)`).catch(() => {});
 
   // Achievements system
   await run(`CREATE TABLE IF NOT EXISTS achievements (
@@ -266,8 +266,8 @@ async function initDatabase() {
     achievement_key TEXT NOT NULL,
     achieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(chat_id, achievement_key)
-  )`).catch(()=>{});
-  await run(`CREATE INDEX IF NOT EXISTS idx_achievements_chat ON achievements(chat_id)`).catch(()=>{});
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_achievements_chat ON achievements(chat_id)`).catch(() => {});
 
   // Migrations — add status column to reviews if missing
   await run(`ALTER TABLE reviews ADD COLUMN status TEXT DEFAULT 'pending'`).catch(() => {});
@@ -311,17 +311,17 @@ async function initDatabase() {
 
   // Default settings
   const defaults = [
-    ['greeting',       'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],
-    ['about',          'Мы работаем с 2018 года. Более 200 моделей в базе. Fashion, Commercial, Events.'],
+    ['greeting', 'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],
+    ['about', 'Мы работаем с 2018 года. Более 200 моделей в базе. Fashion, Commercial, Events.'],
     ['contacts_phone', '+7 (900) 000-00-00'],
     ['contacts_email', 'info@nevesty-models.ru'],
     ['contacts_insta', '@nevesty_models'],
-    ['contacts_addr',  'Москва, ул. Пресненская, 8'],
-    ['pricing',        'Fashion/Commercial — от 5000₽/час\nEvents — от 8000₽/час\nRunway — от 10000₽/час'],
-    ['notif_new_order',       '1'],
-    ['notif_status',          '1'],
-    ['notif_message',         '1'],
-    ['wishlist_enabled',      '1'],
+    ['contacts_addr', 'Москва, ул. Пресненская, 8'],
+    ['pricing', 'Fashion/Commercial — от 5000₽/час\nEvents — от 8000₽/час\nRunway — от 10000₽/час'],
+    ['notif_new_order', '1'],
+    ['notif_status', '1'],
+    ['notif_message', '1'],
+    ['wishlist_enabled', '1'],
     ['quick_booking_enabled', '1'],
     ['event_reminders_enabled', '1'],
   ];
@@ -335,7 +335,7 @@ async function initDatabase() {
     reason TEXT,
     blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     blocked_by INTEGER
-  )`).catch(()=>{});
+  )`).catch(() => {});
 
   // Client notification preferences
   await run(`CREATE TABLE IF NOT EXISTS client_prefs (
@@ -356,8 +356,8 @@ async function initDatabase() {
     entity_id INTEGER,
     details TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`).catch(()=>{});
-  await run(`CREATE INDEX IF NOT EXISTS idx_audit_admin ON audit_log(admin_chat_id)`).catch(()=>{});
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_audit_admin ON audit_log(admin_chat_id)`).catch(() => {});
 
   // Client OTP verification codes — for cabinet phone login
   await run(`CREATE TABLE IF NOT EXISTS client_otp (
@@ -420,7 +420,7 @@ async function initDatabase() {
     department TEXT DEFAULT 'experiments',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`).catch(()=>{});
+  )`).catch(() => {});
 
   // Notifications table — system notifications queue
   await run(`CREATE TABLE IF NOT EXISTS notifications (
@@ -444,7 +444,9 @@ async function initDatabase() {
     created_by TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`).catch(() => {});
-  await run(`CREATE INDEX IF NOT EXISTS idx_sched_bcast_status ON scheduled_broadcasts(status, scheduled_at)`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_sched_bcast_status ON scheduled_broadcasts(status, scheduled_at)`).catch(
+    () => {}
+  );
 
   // Bot direct broadcasts — tracks manual broadcasts sent from Telegram bot admin panel
   await run(`CREATE TABLE IF NOT EXISTS bot_broadcasts (
@@ -461,11 +463,15 @@ async function initDatabase() {
     finished_at DATETIME
   )`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_bot_bcast_started ON bot_broadcasts(started_at DESC)`).catch(() => {});
-  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (17, 'bot_broadcasts table for direct Telegram admin broadcasts')`).catch(() => {});
+  await run(
+    `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (17, 'bot_broadcasts table for direct Telegram admin broadcasts')`
+  ).catch(() => {});
 
   // Schema v18 — FAQ category column
   await run(`ALTER TABLE faq ADD COLUMN category TEXT DEFAULT 'general'`).catch(() => {});
-  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (18, 'faq category column')`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (18, 'faq category column')`).catch(
+    () => {}
+  );
 
   // Schema v16 — TOTP 2FA for admins
   await run(`ALTER TABLE admins ADD COLUMN totp_secret TEXT DEFAULT NULL`).catch(() => {});
@@ -479,7 +485,9 @@ async function initDatabase() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_totp_temp_hash ON totp_temp_tokens(token_hash)`).catch(() => {});
-  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (16, 'TOTP 2FA for admins — totp_secret, totp_enabled, totp_temp_tokens')`).catch(() => {});
+  await run(
+    `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (16, 'TOTP 2FA for admins — totp_secret, totp_enabled, totp_temp_tokens')`
+  ).catch(() => {});
 
   // Migrations — add columns that may not exist in older DBs
   await run(`ALTER TABLE models ADD COLUMN city TEXT`).catch(() => {});
@@ -510,7 +518,9 @@ async function initDatabase() {
   await run(`ALTER TABLE orders ADD COLUMN invoice_sent_at TEXT DEFAULT NULL`).catch(() => {});
 
   // Internal note column for quick manager notes (migration v9)
-  await run(`ALTER TABLE orders ADD COLUMN internal_note TEXT`).catch(err => { if (err && !err.message.includes('duplicate')) console.error(err); });
+  await run(`ALTER TABLE orders ADD COLUMN internal_note TEXT`).catch(err => {
+    if (err && !err.message.includes('duplicate')) console.error(err);
+  });
 
   // Broadcast stats columns (migration v10)
   await run(`ALTER TABLE scheduled_broadcasts ADD COLUMN sent_count INTEGER DEFAULT 0`).catch(() => {});
@@ -540,43 +550,59 @@ async function initDatabase() {
 
   // Additional performance indexes
   const perfIndexes = [
-    ['idx_orders_chat_id',          'CREATE INDEX IF NOT EXISTS idx_orders_chat_id ON orders(client_chat_id)'],
-    ['idx_orders_created_at',       'CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC)'],
-    ['idx_orders_status_created',   'CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at DESC)'],
-    ['idx_models_category_active',  'CREATE INDEX IF NOT EXISTS idx_models_category_active ON models(category) WHERE archived=0'],
-    ['idx_models_city_active',      'CREATE INDEX IF NOT EXISTS idx_models_city_active ON models(city) WHERE archived=0'],
-    ['idx_models_available_active', 'CREATE INDEX IF NOT EXISTS idx_models_available_active ON models(available) WHERE archived=0'],
-    ['idx_sessions_state',          'CREATE INDEX IF NOT EXISTS idx_sessions_state ON telegram_sessions(state)'],
-    ['idx_sessions_updated_at',     'CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON telegram_sessions(updated_at)'],
-    ['idx_reviews_status',          'CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status)'],
-    ['idx_factory_tasks_status_pri','CREATE INDEX IF NOT EXISTS idx_factory_tasks_status_pri ON factory_tasks(status, priority)'],
-    ['idx_audit_created',           'CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)'],
+    ['idx_orders_chat_id', 'CREATE INDEX IF NOT EXISTS idx_orders_chat_id ON orders(client_chat_id)'],
+    ['idx_orders_created_at', 'CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC)'],
+    [
+      'idx_orders_status_created',
+      'CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at DESC)',
+    ],
+    [
+      'idx_models_category_active',
+      'CREATE INDEX IF NOT EXISTS idx_models_category_active ON models(category) WHERE archived=0',
+    ],
+    ['idx_models_city_active', 'CREATE INDEX IF NOT EXISTS idx_models_city_active ON models(city) WHERE archived=0'],
+    [
+      'idx_models_available_active',
+      'CREATE INDEX IF NOT EXISTS idx_models_available_active ON models(available) WHERE archived=0',
+    ],
+    ['idx_sessions_state', 'CREATE INDEX IF NOT EXISTS idx_sessions_state ON telegram_sessions(state)'],
+    ['idx_sessions_updated_at', 'CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON telegram_sessions(updated_at)'],
+    ['idx_reviews_status', 'CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status)'],
+    [
+      'idx_factory_tasks_status_pri',
+      'CREATE INDEX IF NOT EXISTS idx_factory_tasks_status_pri ON factory_tasks(status, priority)',
+    ],
+    ['idx_audit_created', 'CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)'],
     // v9 indexes
-    ['idx_orders_payment_status',   'CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders(payment_status)'],
-    ['idx_models_status',           'CREATE INDEX IF NOT EXISTS idx_models_status ON models(available)'],
-    ['idx_reviews_approved',        'CREATE INDEX IF NOT EXISTS idx_reviews_approved ON reviews(approved)'],
-    ['idx_reviews_model_id',        'CREATE INDEX IF NOT EXISTS idx_reviews_model_id ON reviews(model_id)'],
-    ['idx_reviews_client_chat_id',  'CREATE INDEX IF NOT EXISTS idx_reviews_client_chat_id ON reviews(chat_id)'],
-    ['idx_models_city',             'CREATE INDEX IF NOT EXISTS idx_models_city ON models(city)'],
+    ['idx_orders_payment_status', 'CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders(payment_status)'],
+    ['idx_models_status', 'CREATE INDEX IF NOT EXISTS idx_models_status ON models(available)'],
+    ['idx_reviews_approved', 'CREATE INDEX IF NOT EXISTS idx_reviews_approved ON reviews(approved)'],
+    ['idx_reviews_model_id', 'CREATE INDEX IF NOT EXISTS idx_reviews_model_id ON reviews(model_id)'],
+    ['idx_reviews_client_chat_id', 'CREATE INDEX IF NOT EXISTS idx_reviews_client_chat_id ON reviews(chat_id)'],
+    ['idx_models_city', 'CREATE INDEX IF NOT EXISTS idx_models_city ON models(city)'],
     // v9 additional indexes
-    ['idx_orders_client_phone',     'CREATE INDEX IF NOT EXISTS idx_orders_client_phone ON orders(client_phone)'],
-    ['idx_orders_event_date',       'CREATE INDEX IF NOT EXISTS idx_orders_event_date ON orders(event_date)'],
-    ['idx_audit_log_event_type',    'CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log(action)'],
-    ['idx_sessions_chat_id',        'CREATE INDEX IF NOT EXISTS idx_telegram_users_chat_id ON telegram_sessions(chat_id)'],
+    ['idx_orders_client_phone', 'CREATE INDEX IF NOT EXISTS idx_orders_client_phone ON orders(client_phone)'],
+    ['idx_orders_event_date', 'CREATE INDEX IF NOT EXISTS idx_orders_event_date ON orders(event_date)'],
+    ['idx_audit_log_event_type', 'CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log(action)'],
+    ['idx_sessions_chat_id', 'CREATE INDEX IF NOT EXISTS idx_telegram_users_chat_id ON telegram_sessions(chat_id)'],
   ];
   for (const [name, sql] of perfIndexes) {
     await run(sql).catch(e => console.log(`Index ${name}: ${e.message}`));
   }
 
   // Schema version 9 — indexes and schema versioning
-  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (9, 'indexes and schema versioning')`).catch(() => {});
+  await run(
+    `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (9, 'indexes and schema versioning')`
+  ).catch(() => {});
 
   // Audit log extended columns (migration v10)
   await run(`ALTER TABLE audit_log ADD COLUMN admin_username TEXT`).catch(() => {});
   await run(`ALTER TABLE audit_log ADD COLUMN entity TEXT`).catch(() => {});
   await run(`ALTER TABLE audit_log ADD COLUMN ip TEXT`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)`).catch(() => {});
-  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (10, 'audit_log extended columns for admin actions')`).catch(() => {});
+  await run(
+    `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (10, 'audit_log extended columns for admin actions')`
+  ).catch(() => {});
 
   // Wishlists table — named alias for favorites (schema v11)
   await run(`CREATE TABLE IF NOT EXISTS wishlists (
@@ -588,7 +614,9 @@ async function initDatabase() {
     FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE
   )`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_wishlists_chat_id ON wishlists(chat_id)`).catch(() => {});
-  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (11, 'wishlists table')`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (11, 'wishlists table')`).catch(
+    () => {}
+  );
 
   // FAQ table (schema v12)
   await run(`CREATE TABLE IF NOT EXISTS faq (
@@ -603,10 +631,14 @@ async function initDatabase() {
 
   // Schema v13 — wishlists index & ensure INTEGER chat_id compatibility
   await run(`CREATE INDEX IF NOT EXISTS idx_wishlists_chat_model ON wishlists(chat_id, model_id)`).catch(() => {});
-  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (13, 'wishlists composite index, quick_booking_enabled & wishlist_enabled defaults')`).catch(() => {});
+  await run(
+    `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (13, 'wishlists composite index, quick_booking_enabled & wishlist_enabled defaults')`
+  ).catch(() => {});
 
   // Schema v14 — refresh_tokens table
-  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (14, 'refresh_tokens table for JWT refresh flow')`).catch(() => {});
+  await run(
+    `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (14, 'refresh_tokens table for JWT refresh flow')`
+  ).catch(() => {});
 
   // Schema v15 — model_busy_dates calendar
   await run(`CREATE TABLE IF NOT EXISTS model_busy_dates (
@@ -620,17 +652,59 @@ async function initDatabase() {
     FOREIGN KEY(model_id) REFERENCES models(id)
   )`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_busy_dates_model ON model_busy_dates(model_id, busy_date)`).catch(() => {});
-  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (15, 'model_busy_dates calendar')`).catch(() => {});
+  await run(
+    `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (15, 'model_busy_dates calendar')`
+  ).catch(() => {});
+
+  // Schema v19 — social_posts for Instagram & social media content planning
+  await run(`CREATE TABLE IF NOT EXISTS social_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL DEFAULT 'instagram',
+    model_id INTEGER REFERENCES models(id) ON DELETE SET NULL,
+    content_type TEXT NOT NULL DEFAULT 'post',
+    caption TEXT,
+    media_url TEXT,
+    hashtags TEXT,
+    scheduled_at DATETIME,
+    published_at DATETIME,
+    platform_post_id TEXT UNIQUE,
+    metrics TEXT DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'draft',
+    factory_cycle_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_social_posts_status ON social_posts(status)`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_social_posts_platform ON social_posts(platform, created_at DESC)`).catch(
+    () => {}
+  );
+  await run(
+    `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (19, 'social_posts table for Instagram & social media planning')`
+  ).catch(() => {});
 
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
     const faqItems = [
-      ['Как забронировать модель?', 'Нажмите «📋 Забронировать» в меню, выберите категорию и заполните форму. Менеджер свяжется с вами в течение часа.'],
-      ['Сколько стоят услуги?', 'Стоимость зависит от типа мероприятия и длительности. Минимальный бюджет — от 8 000 ₽. Точную цену уточните через форму заявки.'],
-      ['Как долго рассматривается заявка?', 'Обычно 1–2 часа в рабочее время. Срочные запросы — в течение 30 минут при наличии свободных моделей.'],
-      ['Можно ли выбрать конкретную модель?', 'Да! В каталоге выберите понравившуюся модель и нажмите «📋 Забронировать» прямо на её карточке.'],
-      ['Какие гарантии качества?', 'Все модели прошли отбор. Средний рейтинг по отзывам — 4.8/5. При несоответствии — полный возврат средств.'],
+      [
+        'Как забронировать модель?',
+        'Нажмите «📋 Забронировать» в меню, выберите категорию и заполните форму. Менеджер свяжется с вами в течение часа.',
+      ],
+      [
+        'Сколько стоят услуги?',
+        'Стоимость зависит от типа мероприятия и длительности. Минимальный бюджет — от 8 000 ₽. Точную цену уточните через форму заявки.',
+      ],
+      [
+        'Как долго рассматривается заявка?',
+        'Обычно 1–2 часа в рабочее время. Срочные запросы — в течение 30 минут при наличии свободных моделей.',
+      ],
+      [
+        'Можно ли выбрать конкретную модель?',
+        'Да! В каталоге выберите понравившуюся модель и нажмите «📋 Забронировать» прямо на её карточке.',
+      ],
+      [
+        'Какие гарантии качества?',
+        'Все модели прошли отбор. Средний рейтинг по отзывам — 4.8/5. При несоответствии — полный возврат средств.',
+      ],
       ['Работаете ли вы в выходные?', 'Да, мы принимаем заявки 7 дней в неделю. Менеджеры онлайн с 9:00 до 22:00.'],
     ];
     for (const [q, a] of faqItems) {
@@ -641,13 +715,16 @@ async function initDatabase() {
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);
   if (!admin) {
-    const adminPassword = process.env.ADMIN_PASSWORD ||
+    const adminPassword =
+      process.env.ADMIN_PASSWORD ||
       require('crypto').randomBytes(12).toString('base64').replace(/[+/=]/g, '').slice(0, 16);
     const hash = await bcrypt.hash(adminPassword, 10);
-    await run(
-      'INSERT INTO admins (username, email, password_hash, role) VALUES (?, ?, ?, ?)',
-      [process.env.ADMIN_USERNAME || 'admin', process.env.AGENCY_EMAIL || 'admin@nevesty-models.ru', hash, 'superadmin']
-    );
+    await run('INSERT INTO admins (username, email, password_hash, role) VALUES (?, ?, ?, ?)', [
+      process.env.ADMIN_USERNAME || 'admin',
+      process.env.AGENCY_EMAIL || 'admin@nevesty-models.ru',
+      hash,
+      'superadmin',
+    ]);
     if (!process.env.ADMIN_PASSWORD) {
       console.log(`[SETUP] Admin created. Temporary password: [set ADMIN_PASSWORD in .env to retrieve]`);
       console.log('[SETUP] Set ADMIN_PASSWORD in .env to use a fixed password.');
@@ -672,7 +749,7 @@ async function initDatabase() {
   function scheduleVacuum() {
     const now = new Date();
     const nextSunday = new Date(now);
-    nextSunday.setDate(now.getDate() + (7 - now.getDay()) % 7 || 7);
+    nextSunday.setDate(now.getDate() + ((7 - now.getDay()) % 7) || 7);
     nextSunday.setHours(3, 0, 0, 0);
     const delay = nextSunday - now;
     setTimeout(async () => {
@@ -724,13 +801,16 @@ function scheduleBackups() {
       }
 
       // Keep only last 28 backups (7 days × 4 backups/day)
-      const backupFiles = fs.readdirSync(BACKUP_DIR)
+      const backupFiles = fs
+        .readdirSync(BACKUP_DIR)
         .filter(f => f.startsWith('nevesty_') && f.endsWith('.db'))
         .sort();
       if (backupFiles.length >= 28) {
         const toDelete = backupFiles.slice(0, backupFiles.length - 27);
         toDelete.forEach(f => {
-          try { fs.unlinkSync(pathMod.join(BACKUP_DIR, f)); } catch(_) {}
+          try {
+            fs.unlinkSync(pathMod.join(BACKUP_DIR, f));
+          } catch (_) {}
         });
       }
 
@@ -740,19 +820,26 @@ function scheduleBackups() {
       const backupPath = pathMod.join(BACKUP_DIR, `nevesty_${stamp}.db`);
 
       // Use SQLite backup command via node sqlite3
-      const src = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READONLY, (err) => {
-        if (err) { console.error('[Backup] Failed to open source DB:', err.message); return; }
-        const dst = new sqlite3.Database(backupPath, (err2) => {
-          if (err2) { console.error('[Backup] Failed to create backup DB:', err2.message); src.close(); return; }
+      const src = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READONLY, err => {
+        if (err) {
+          console.error('[Backup] Failed to open source DB:', err.message);
+          return;
+        }
+        const dst = new sqlite3.Database(backupPath, err2 => {
+          if (err2) {
+            console.error('[Backup] Failed to create backup DB:', err2.message);
+            src.close();
+            return;
+          }
           // Copy via VACUUM INTO (SQLite 3.27+)
-          src.run(`VACUUM INTO '${backupPath}'`, (vacErr) => {
+          src.run(`VACUUM INTO '${backupPath}'`, vacErr => {
             if (vacErr) {
               // Fallback: file copy
               dst.close(() => {
                 try {
                   fs.copyFileSync(DB_PATH, backupPath);
                   console.log(`[Backup] Created (file copy): ${backupPath}`);
-                } catch(copyErr) {
+                } catch (copyErr) {
                   console.error('[Backup] File copy failed:', copyErr.message);
                 }
               });
@@ -764,7 +851,7 @@ function scheduleBackups() {
           });
         });
       });
-    } catch(e) {
+    } catch (e) {
       console.error('[Backup] Error:', e.message);
     }
   };
@@ -779,19 +866,124 @@ function scheduleBackups() {
 
 async function seedDemoModels() {
   const models = [
-    { name: 'Анастасия Белова', age: 22, height: 178, weight: 55, bust: 86, waist: 61, hips: 88, shoe_size: '38', hair_color: 'Блонд', eye_color: 'Голубые', city: 'Москва', bio: 'Профессиональная модель с опытом участия в показах ведущих дизайнеров. Специализируется на fashion и editorial съёмках.', category: 'fashion', instagram: '@anastasia_models' },
-    { name: 'Виктория Нова', age: 24, height: 175, weight: 53, bust: 84, waist: 60, hips: 86, shoe_size: '37', hair_color: 'Шатен', eye_color: 'Карие', city: 'Санкт-Петербург', bio: 'Универсальная модель для коммерческих и fashion проектов. Работала с крупнейшими брендами России и Европы.', category: 'commercial', instagram: '@victoria_nova_model' },
-    { name: 'Дарья Светлова', age: 20, height: 180, weight: 57, bust: 88, waist: 63, hips: 90, shoe_size: '39', hair_color: 'Рыжая', eye_color: 'Зелёные', city: 'Москва', bio: 'Начинающая модель с ярким имиджем. Идеально подходит для avant-garde и editorial проектов.', category: 'fashion', instagram: '@dasha_models' },
-    { name: 'Екатерина Морозова', age: 26, height: 172, weight: 54, bust: 85, waist: 62, hips: 87, shoe_size: '38', hair_color: 'Брюнетка', eye_color: 'Серые', city: 'Казань', bio: 'Опытная модель для корпоративных мероприятий, рекламных кампаний и роскошных событий.', category: 'events', instagram: '@kate_morozova_' },
-    { name: 'Полина Золотарёва', age: 23, height: 176, weight: 56, bust: 87, waist: 61, hips: 89, shoe_size: '38', hair_color: 'Блонд', eye_color: 'Голубые', city: 'Санкт-Петербург', bio: 'Fashion и lifestyle модель. Специализация: luxury brands, jewelry, beauty campaigns.', category: 'fashion', instagram: '@polina_models' },
-    { name: 'Алина Лебедева', age: 21, height: 174, weight: 52, bust: 83, waist: 59, hips: 85, shoe_size: '37', hair_color: 'Тёмный блонд', eye_color: 'Зелёные', city: 'Екатеринбург', bio: 'Танцовщица и модель. Идеально для динамичных fashion-show и event-проектов.', category: 'events', instagram: '@alina_lebedeva_m' },
+    {
+      name: 'Анастасия Белова',
+      age: 22,
+      height: 178,
+      weight: 55,
+      bust: 86,
+      waist: 61,
+      hips: 88,
+      shoe_size: '38',
+      hair_color: 'Блонд',
+      eye_color: 'Голубые',
+      city: 'Москва',
+      bio: 'Профессиональная модель с опытом участия в показах ведущих дизайнеров. Специализируется на fashion и editorial съёмках.',
+      category: 'fashion',
+      instagram: '@anastasia_models',
+    },
+    {
+      name: 'Виктория Нова',
+      age: 24,
+      height: 175,
+      weight: 53,
+      bust: 84,
+      waist: 60,
+      hips: 86,
+      shoe_size: '37',
+      hair_color: 'Шатен',
+      eye_color: 'Карие',
+      city: 'Санкт-Петербург',
+      bio: 'Универсальная модель для коммерческих и fashion проектов. Работала с крупнейшими брендами России и Европы.',
+      category: 'commercial',
+      instagram: '@victoria_nova_model',
+    },
+    {
+      name: 'Дарья Светлова',
+      age: 20,
+      height: 180,
+      weight: 57,
+      bust: 88,
+      waist: 63,
+      hips: 90,
+      shoe_size: '39',
+      hair_color: 'Рыжая',
+      eye_color: 'Зелёные',
+      city: 'Москва',
+      bio: 'Начинающая модель с ярким имиджем. Идеально подходит для avant-garde и editorial проектов.',
+      category: 'fashion',
+      instagram: '@dasha_models',
+    },
+    {
+      name: 'Екатерина Морозова',
+      age: 26,
+      height: 172,
+      weight: 54,
+      bust: 85,
+      waist: 62,
+      hips: 87,
+      shoe_size: '38',
+      hair_color: 'Брюнетка',
+      eye_color: 'Серые',
+      city: 'Казань',
+      bio: 'Опытная модель для корпоративных мероприятий, рекламных кампаний и роскошных событий.',
+      category: 'events',
+      instagram: '@kate_morozova_',
+    },
+    {
+      name: 'Полина Золотарёва',
+      age: 23,
+      height: 176,
+      weight: 56,
+      bust: 87,
+      waist: 61,
+      hips: 89,
+      shoe_size: '38',
+      hair_color: 'Блонд',
+      eye_color: 'Голубые',
+      city: 'Санкт-Петербург',
+      bio: 'Fashion и lifestyle модель. Специализация: luxury brands, jewelry, beauty campaigns.',
+      category: 'fashion',
+      instagram: '@polina_models',
+    },
+    {
+      name: 'Алина Лебедева',
+      age: 21,
+      height: 174,
+      weight: 52,
+      bust: 83,
+      waist: 59,
+      hips: 85,
+      shoe_size: '37',
+      hair_color: 'Тёмный блонд',
+      eye_color: 'Зелёные',
+      city: 'Екатеринбург',
+      bio: 'Танцовщица и модель. Идеально для динамичных fashion-show и event-проектов.',
+      category: 'events',
+      instagram: '@alina_lebedeva_m',
+    },
   ];
 
   for (const m of models) {
     await run(
       `INSERT INTO models (name,age,height,weight,bust,waist,hips,shoe_size,hair_color,eye_color,city,bio,category,instagram,available)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
-      [m.name, m.age, m.height, m.weight, m.bust, m.waist, m.hips, m.shoe_size, m.hair_color, m.eye_color, m.city, m.bio, m.category, m.instagram]
+      [
+        m.name,
+        m.age,
+        m.height,
+        m.weight,
+        m.bust,
+        m.waist,
+        m.hips,
+        m.shoe_size,
+        m.hair_color,
+        m.eye_color,
+        m.city,
+        m.bio,
+        m.category,
+        m.instagram,
+      ]
     );
   }
   console.log('Demo models seeded');
@@ -799,17 +991,50 @@ async function seedDemoModels() {
 
 async function seedSampleReviews() {
   const reviews = [
-    { client_name: 'Михаил Орлов',    rating: 5, text: 'Потрясающая работа агентства! Модели были профессиональны и пунктуальны. Мероприятие прошло на высшем уровне.',           model_id: null, approved: 1 },
-    { client_name: 'Светлана Иванова', rating: 5, text: 'Заказывали фотосессию для рекламной кампании. Результат превзошёл все ожидания. Обязательно обратимся снова.',          model_id: null, approved: 1 },
-    { client_name: 'Дмитрий Ковалёв', rating: 4, text: 'Очень хорошее агентство, широкий выбор моделей. Небольшая задержка при согласовании, но итогом довольны.',             model_id: null, approved: 1 },
-    { client_name: 'Анна Петрова',    rating: 5, text: 'Работали с агентством на корпоративном мероприятии. Модели отлично справились с ролью хостес. Рекомендуем!',           model_id: null, approved: 1 },
-    { client_name: 'Роман Смирнов',   rating: 5, text: 'Профессиональный подход на всех этапах: от подбора модели до самого мероприятия. Отличная команда, спасибо!',           model_id: null, approved: 0 },
+    {
+      client_name: 'Михаил Орлов',
+      rating: 5,
+      text: 'Потрясающая работа агентства! Модели были профессиональны и пунктуальны. Мероприятие прошло на высшем уровне.',
+      model_id: null,
+      approved: 1,
+    },
+    {
+      client_name: 'Светлана Иванова',
+      rating: 5,
+      text: 'Заказывали фотосессию для рекламной кампании. Результат превзошёл все ожидания. Обязательно обратимся снова.',
+      model_id: null,
+      approved: 1,
+    },
+    {
+      client_name: 'Дмитрий Ковалёв',
+      rating: 4,
+      text: 'Очень хорошее агентство, широкий выбор моделей. Небольшая задержка при согласовании, но итогом довольны.',
+      model_id: null,
+      approved: 1,
+    },
+    {
+      client_name: 'Анна Петрова',
+      rating: 5,
+      text: 'Работали с агентством на корпоративном мероприятии. Модели отлично справились с ролью хостес. Рекомендуем!',
+      model_id: null,
+      approved: 1,
+    },
+    {
+      client_name: 'Роман Смирнов',
+      rating: 5,
+      text: 'Профессиональный подход на всех этапах: от подбора модели до самого мероприятия. Отличная команда, спасибо!',
+      model_id: null,
+      approved: 0,
+    },
   ];
   for (const r of reviews) {
-    await run(
-      'INSERT OR IGNORE INTO reviews (client_name, rating, text, model_id, approved) VALUES (?,?,?,?,?)',
-      [r.client_name, r.rating, r.text, r.model_id, r.approved]
-    );
+    await run('INSERT OR IGNORE INTO reviews (client_name, rating, text, model_id, approved) VALUES (?,?,?,?,?)', [
+      r.client_name,
+      r.rating,
+      r.text,
+      r.model_id,
+      r.approved,
+    ]);
   }
   console.log('Sample reviews seeded');
 }
@@ -821,7 +1046,11 @@ function generateOrderNumber() {
 
 function closeDatabase() {
   return new Promise(resolve => {
-    if (db) db.close(err => { if (err) console.error('DB close error:', err.message); resolve(); });
+    if (db)
+      db.close(err => {
+        if (err) console.error('DB close error:', err.message);
+        resolve();
+      });
     else resolve();
   });
 }
@@ -849,11 +1078,22 @@ async function getSetting(key, ttlMs = TTL_SETTINGS) {
  * @param {string} value
  */
 async function setSetting(key, value) {
-  await run(
-    'INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-    [key, String(value ?? '')]
-  );
+  await run('INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', [
+    key,
+    String(value ?? ''),
+  ]);
   cache.del(`setting:${key}`);
 }
 
-module.exports = { initDatabase, initDB: initDatabase, query, run, get, generateOrderNumber, closeDatabase, getSetting, setSetting, scheduleBackups };
+module.exports = {
+  initDatabase,
+  initDB: initDatabase,
+  query,
+  run,
+  get,
+  generateOrderNumber,
+  closeDatabase,
+  getSetting,
+  setSetting,
+  scheduleBackups,
+};
