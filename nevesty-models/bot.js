@@ -5620,8 +5620,10 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       // Format: adm_rev_p_{filter}_{page}
       const parts = data.replace('adm_rev_p_', '').split('_');
-      const revPage = parseInt(parts[parts.length - 1]) || 0;
-      const revFilter = parts.slice(0, parts.length - 1).join('_') || 'all';
+      const revPage = Math.max(0, parseInt(parts[parts.length - 1]) || 0);
+      const rawFilter = parts.slice(0, parts.length - 1).join('_') || 'all';
+      // Sanitize filter to prevent unexpected values from callback data
+      const revFilter = ['pending', 'approved', 'all'].includes(rawFilter) ? rawFilter : 'pending';
       return showAdminReviewsPanel(chatId, revFilter, revPage);
     }
     if (data.startsWith('rev_view_')) {
@@ -8811,12 +8813,17 @@ async function showSearchMenu(chatId) {
       ? `🔍 Найти (${matchCount})`
       : `🔍 Найти всех (${matchCount})`;
 
+    // City input button — shows active city or prompt to type
+    const cityInputLabel = f.city ? `✅ 🏙 ${f.city}` : '✏️ Ввести город';
+    const cityInputBtn = { text: cityInputLabel, callback_data: 'search_city_input' };
+
     const keyboard = [
       ...heightBtns,
       ...ageBtns,
       [catBtns[0], catBtns[1], catBtns[2]],
       ...(cityBtns.length ? [cityBtns.slice(0, 4)] : []),
       ...(cityBtns.length > 4 ? [cityBtns.slice(4)] : []),
+      [cityInputBtn],
       [
         ...(hasFilters ? [{ text: '✖️ Сбросить фильтры', callback_data: 'search_reset' }] : []),
         { text: findLabel, callback_data: 'search_go' },

@@ -377,7 +377,11 @@ async function showAdminOrdersToday(chatId) {
  */
 async function showAdminReviews(chatId, filter = 'pending', page = 0) {
   if (!isAdmin(chatId)) return;
-  page = parseInt(page) || 0;
+  // Sanitize filter to known values only
+  const VALID_FILTERS = ['pending', 'approved', 'all'];
+  if (!VALID_FILTERS.includes(filter)) filter = 'pending';
+  // Ensure page is non-negative integer
+  page = Math.max(0, parseInt(page) || 0);
 
   const PER_PAGE = 5;
 
