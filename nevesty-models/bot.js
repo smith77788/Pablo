@@ -171,7 +171,8 @@ const REPLY_KB_ADMIN = {
   persistent: true,
 };
 
-function buildClientKeyboard() {
+async function buildClientKeyboard() {
+  const tgChannel = await getSetting('tg_channel').catch(() => null);
   const rows = [
     [{ text: '💃 Каталог',              callback_data: 'cat_cat__0'         },
      { text: '⭐ Топ-модели',           callback_data: 'cat_top_0'          }],
@@ -194,6 +195,9 @@ function buildClientKeyboard() {
     [{ text: 'ℹ️ О нас',               callback_data: 'about_us'           },
      { text: '📞 Контакты',             callback_data: 'contacts'           }],
   ];
+  if (tgChannel) {
+    rows.push([{ text: '📣 Наш канал', callback_data: 'tg_channel' }]);
+  }
   if (SITE_URL.startsWith('https://')) {
     const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
     rows.unshift([{ text: '📱 Открыть Mini App', web_app: { url: webappUrl } }]);
@@ -208,7 +212,8 @@ const KB_MAIN_ADMIN = (badge, score) => {
       [{ text: `📋 Заявки${badge}`,          callback_data: 'adm_orders__0'  },
        { text: '💃 Модели',                  callback_data: 'adm_models_0'   }],
       [{ text: '📊 Статистика',              callback_data: 'adm_stats'      },
-       { text: '📈 Дашборд',                callback_data: 'adm_dashboard'  }],
+       { text: '📈 Дашборд',                callback_data: 'adm_dashboard'  },
+       { text: '⚡ Кратко',                 callback_data: 'adm_quick_stats'}],
       [{ text: `🤖 Организм${health}`,       callback_data: 'adm_organism'   },
        { text: '⚙️ Настройки',              callback_data: 'adm_settings'   }],
       [{ text: '📢 Рассылка',               callback_data: 'adm_broadcast'  },
@@ -237,9 +242,10 @@ const KB_MAIN_ADMIN = (badge, score) => {
 
 async function showMainMenu(chatId, name) {
   await clearSession(chatId);
-  const [greeting, menuText] = await Promise.all([
+  const [greeting, menuText, clientKb] = await Promise.all([
     getSetting('greeting').catch(() => null),
     getSetting('main_menu_text').catch(() => null),
+    buildClientKeyboard(),
   ]);
   // Сначала показываем persistent ReplyKeyboard
   await safeSend(chatId,
@@ -248,12 +254,12 @@ async function showMainMenu(chatId, name) {
   );
   if (greeting) {
     const rawGreeting = greeting.replace('{name}', name || 'гость');
-    return safeSend(chatId, esc(rawGreeting), { parse_mode: 'MarkdownV2', reply_markup: buildClientKeyboard() });
+    return safeSend(chatId, esc(rawGreeting), { parse_mode: 'MarkdownV2', reply_markup: clientKb });
   }
   const greetingText = menuText || 'Выберите действие:';
   return safeSend(chatId,
     `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\n${esc(greetingText)}`,
-    { parse_mode: 'MarkdownV2', reply_markup: buildClientKeyboard() }
+    { parse_mode: 'MarkdownV2', reply_markup: clientKb }
   );
 }
 
@@ -1682,22 +1688,29 @@ async function showAdminSettings(chatId, section) {
   // ── Бот и интерфейс ───────────────────────────────────────────────────────
   if (section === 'bot') {
     const [welcomePhoto, menuText, wishlistEnabled, searchEnabled, botLang,
-           quickBooking, reviewsEnabled, loyaltyEnabled, referralEnabled, modelStatsEnabled] = await Promise.all([
+           quickBooking, reviewsEnabled, loyaltyEnabled, referralEnabled, modelStatsEnabled,
+           faqEnabled, calcEnabled, bookingThanks, tgChannel] = await Promise.all([
       getSetting('welcome_photo_url'), getSetting('main_menu_text'),
       getSetting('wishlist_enabled'), getSetting('search_enabled'), getSetting('bot_language'),
       getSetting('quick_booking_enabled'), getSetting('reviews_enabled'),
       getSetting('loyalty_enabled'), getSetting('referral_enabled'), getSetting('model_stats_enabled'),
+      getSetting('faq_enabled'), getSetting('calc_enabled'),
+      getSetting('booking_thanks_text'), getSetting('tg_channel'),
     ]);
     const onOff = v => v === '0' ? '❌' : '✅';
+    const trunc = (s, n=35) => s ? (s.length > n ? s.slice(0,n)+'…' : s) : '—';
     const text =
       `🤖 Бот и интерфейс\n\n` +
       `🌐 Язык: ${botLang||'ru'}\n` +
       `🖼 Фото приветствия: ${welcomePhoto ? '✅ Задано' : '❌ Нет'}\n` +
-      `📋 Текст главного меню: ${(menuText||'').slice(0,40)||'—'}\n` +
+      `📋 Текст главного меню: ${trunc(menuText)}\n` +
       `⚡ Быстрая заявка: ${onOff(quickBooking)}  ❤️ Wishlist: ${onOff(wishlistEnabled)}\n` +
       `🔍 Поиск: ${onOff(searchEnabled)}  ⭐ Отзывы: ${onOff(reviewsEnabled)}\n` +
       `💫 Баллы: ${onOff(loyaltyEnabled)}  🎁 Реферальная: ${onOff(referralEnabled)}\n` +
-      `📊 Статистика моделей: ${onOff(modelStatsEnabled)}`;
+      `📊 Статистика моделей: ${onOff(modelStatsEnabled)}\n` +
+      `❓ FAQ: ${onOff(faqEnabled)}  🧮 Калькулятор: ${onOff(calcEnabled)}\n` +
+      `📣 Telegram канал: ${tgChannel||'—'}\n` +
+      `🎉 Текст после бронирования: ${trunc(bookingThanks)}`;
     return safeSend(chatId, text, {
       reply_markup: { inline_keyboard: [
         [{ text: `⚡ Быстрая заявка: ${onOff(quickBooking)}`, callback_data: 'adm_toggle_quick_booking' }],
@@ -1707,8 +1720,12 @@ async function showAdminSettings(chatId, section) {
         [{ text: `💫 Баллы лояльности: ${onOff(loyaltyEnabled)}`,      callback_data: 'adm_toggle_loyalty'    }],
         [{ text: `🎁 Реферальная: ${onOff(referralEnabled)}`,          callback_data: 'adm_toggle_referral'   }],
         [{ text: `📊 Статистика моделей: ${onOff(modelStatsEnabled)}`, callback_data: 'adm_toggle_model_stats'}],
+        [{ text: `❓ FAQ: ${onOff(faqEnabled)}`,              callback_data: 'adm_toggle_faq'            },
+         { text: `🧮 Калькулятор: ${onOff(calcEnabled)}`,    callback_data: 'adm_toggle_calc'           }],
         [{ text: '🖼 Фото приветствия', callback_data: 'adm_set_welcome_photo'  },
          { text: '📋 Текст меню',      callback_data: 'adm_set_main_menu_text'  }],
+        [{ text: '🎉 Текст после бронирования', callback_data: 'adm_set_booking_thanks' }],
+        [{ text: '📣 Telegram канал',           callback_data: 'adm_set_tg_channel'     }],
         [{ text: '🔙 Назад', callback_data: 'adm_settings_main' }],
       ]}
     });
@@ -2429,12 +2446,33 @@ async function showAdminManagement(chatId) {
   });
 }
 
-// ─── Export orders ────────────────────────────────────────────────────────────
+// ─── Export ───────────────────────────────────────────────────────────────────
 
-async function exportOrders(chatId) {
+async function showExportMenu(chatId) {
   if (!isAdmin(chatId)) return;
   return safeSend(chatId,
-    `📤 *Экспорт заявок*\n\nВыберите период:`,
+    `📥 *Экспорт данных*\n\nВыберите тип экспорта:`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📋 Заявки (CSV)',   callback_data: 'adm_export_orders_csv'  },
+         { text: '💃 Модели (CSV)',   callback_data: 'adm_export_models_csv'  }],
+        [{ text: '👥 Клиенты (CSV)', callback_data: 'adm_export_clients_csv' }],
+        [{ text: '← Меню', callback_data: 'admin_menu' }],
+      ]}
+    }
+  );
+}
+
+// Keep legacy alias for existing KB_MAIN_ADMIN button
+async function exportOrders(chatId) {
+  return showExportMenu(chatId);
+}
+
+async function showExportOrdersMenu(chatId) {
+  if (!isAdmin(chatId)) return;
+  return safeSend(chatId,
+    `📋 *Экспорт заявок*\n\nВыберите период:`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
@@ -2442,7 +2480,7 @@ async function exportOrders(chatId) {
          { text: '📅 За неделю',   callback_data: 'adm_export_week'  }],
         [{ text: '📅 За месяц',    callback_data: 'adm_export_month' },
          { text: '📋 Все заявки',  callback_data: 'adm_export_all'   }],
-        [{ text: '← Меню', callback_data: 'admin_menu' }],
+        [{ text: '← Экспорт', callback_data: 'adm_export' }],
       ]}
     }
   );
@@ -2475,6 +2513,7 @@ async function doExportOrders(chatId, period) {
        WHERE 1=1 ${dateFilter}
        ORDER BY o.created_at DESC`
     );
+    const SEP = ';';
     const header = ['Номер','Клиент','Телефон','Email','Telegram','Тип события','Дата','Длит(ч)','Место','Бюджет','Комментарий','Статус','Создан','Модель','ID менеджера','Первая заметка'];
     const rows = orders.map(o => [
       o.order_number, o.client_name, o.client_phone, o.client_email||'', o.client_telegram||'',
@@ -2483,13 +2522,73 @@ async function doExportOrders(chatId, period) {
       new Date(o.created_at).toLocaleString('ru'), o.model_name||'',
       o.manager_id||'',
       (o.first_note||'').replace(/"/g,'""'),
-    ].map(v => `"${v}"`).join(','));
-    const csv = [header.join(','), ...rows].join('\n');
-    const buf = Buffer.from('﻿' + csv, 'utf8'); // BOM для Excel
+    ].map(v => `"${v}"`).join(SEP));
+    const csv = [header.join(SEP), ...rows].join('\n');
+    const buf = Buffer.from('﻿' + csv, 'utf8'); // UTF-8 BOM для Excel
     await bot.sendDocument(chatId, buf, {
       caption: `📤 Экспорт заявок (${periodLabel}) — ${orders.length} записей\n${new Date().toLocaleString('ru')}`,
     }, { filename: `orders_${period}_${Date.now()}.csv`, contentType: 'text/csv' });
   } catch (e) { return safeSend(chatId, `❌ Ошибка экспорта: ${e.message}`); }
+}
+
+async function exportModelsCSV(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const models = await query(`
+      SELECT m.id, m.name, m.age, m.height, m.params, m.category, m.instagram,
+             m.available, m.featured, m.view_count, m.created_at,
+             COUNT(o.id) as orders_count
+      FROM models m
+      LEFT JOIN orders o ON o.model_id = m.id
+      GROUP BY m.id
+      ORDER BY m.id`);
+    const SEP = ';';
+    const header = ['ID','Имя','Возраст','Рост','Параметры','Категория','Instagram','Доступна','Топ','Просмотры','Заявок','Создана'];
+    const rows = models.map(m => [
+      m.id, m.name||'', m.age||'', m.height||'', m.params||'', m.category||'',
+      m.instagram||'', m.available ? 'Да' : 'Нет', m.featured ? 'Да' : 'Нет',
+      m.view_count||0, m.orders_count||0,
+      m.created_at ? new Date(m.created_at).toLocaleString('ru') : '',
+    ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(SEP));
+    const csv = [header.join(SEP), ...rows].join('\n');
+    const buf = Buffer.from('﻿' + csv, 'utf8');
+    await bot.sendDocument(chatId, buf, {
+      caption: `💃 Экспорт моделей — ${models.length} записей\n${new Date().toLocaleString('ru')}`,
+    }, { filename: `models_${Date.now()}.csv`, contentType: 'text/csv' });
+  } catch (e) { return safeSend(chatId, `❌ Ошибка экспорта моделей: ${e.message}`); }
+}
+
+async function exportClientsCSV(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const clients = await query(`
+      SELECT
+        o.client_chat_id as chat_id,
+        MAX(o.client_name) as name,
+        MAX(o.client_phone) as phone,
+        MAX(o.client_email) as email,
+        MAX(o.client_telegram) as telegram,
+        COUNT(*) as total_orders,
+        SUM(CASE WHEN o.status='completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN o.status='cancelled' THEN 1 ELSE 0 END) as cancelled,
+        MAX(o.created_at) as last_order
+      FROM orders o
+      WHERE o.client_chat_id IS NOT NULL AND o.client_chat_id != ''
+      GROUP BY o.client_chat_id
+      ORDER BY last_order DESC`);
+    const SEP = ';';
+    const header = ['Chat ID','Имя','Телефон','Email','Telegram','Всего заявок','Завершено','Отменено','Последняя заявка'];
+    const rows = clients.map(c => [
+      c.chat_id||'', c.name||'', c.phone||'', c.email||'', c.telegram||'',
+      c.total_orders||0, c.completed||0, c.cancelled||0,
+      c.last_order ? new Date(c.last_order).toLocaleString('ru') : '',
+    ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(SEP));
+    const csv = [header.join(SEP), ...rows].join('\n');
+    const buf = Buffer.from('﻿' + csv, 'utf8');
+    await bot.sendDocument(chatId, buf, {
+      caption: `👥 Экспорт клиентов — ${clients.length} записей\n${new Date().toLocaleString('ru')}`,
+    }, { filename: `clients_${Date.now()}.csv`, contentType: 'text/csv' });
+  } catch (e) { return safeSend(chatId, `❌ Ошибка экспорта клиентов: ${e.message}`); }
 }
 
 // ─── Loyalty system ───────────────────────────────────────────────────────────
@@ -3038,6 +3137,13 @@ function initBot(app) {
     // Welcome follow-up for new clients (no orders yet)
     const hasOrders = await get('SELECT id FROM orders WHERE client_chat_id=? LIMIT 1', [String(chatId)]).catch(() => null);
     if (!hasOrders && !isAdmin(chatId)) {
+      // Notify admins about new user
+      const username = msg.from.username ? `@${msg.from.username}` : (firstName || String(chatId));
+      const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+      for (const adminId of adminIds) {
+        safeSend(adminId, `👤 Новый пользователь: ${esc(username)} открыл бота\\.`, { parse_mode: 'MarkdownV2' }).catch(()=>{});
+      }
+
       // Schedule welcome follow-up hint in 1 hour
       setTimeout(async () => {
         try {
@@ -3597,6 +3703,8 @@ function initBot(app) {
         'loyalty':       'loyalty_enabled',
         'referral':      'referral_enabled',
         'model_stats':   'model_stats_enabled',
+        'faq':           'faq_enabled',
+        'calc':          'calc_enabled',
       };
       const featureKey = data.replace('adm_toggle_', '');
       const settingKey = TOGGLE_FEATURES[featureKey];
@@ -3816,7 +3924,7 @@ function initBot(app) {
       return safeSend(chatId, `🗑 Отзыв #${id} удалён.`);
     }
     if (data === 'adm_admins')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showAdminManagement(chatId); }
-    if (data === 'adm_export')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return exportOrders(chatId); }
+    if (data === 'adm_export')    { if (!isAdmin(chatId)) { await bot.answerCallbackQuery(q.id, { text: '⛔ Нет доступа', show_alert: true }).catch(()=>{}); return; } return showExportMenu(chatId); }
     if (data === 'adm_addmodel')  { if (!isAdmin(chatId)) return; return showAddModelStep(chatId, { _step: 'name' }); }
 
     // ── Admin: client management
@@ -3865,6 +3973,58 @@ function initBot(app) {
     if (data === 'adm_export_week')  { if (!isAdmin(chatId)) return; return doExportOrders(chatId, 'week');  }
     if (data === 'adm_export_month') { if (!isAdmin(chatId)) return; return doExportOrders(chatId, 'month'); }
     if (data === 'adm_export_all')   { if (!isAdmin(chatId)) return; return doExportOrders(chatId, 'all');   }
+
+    // ── Export: CSV documents
+    if (data === 'adm_export_orders_csv') {
+      if (!isAdmin(chatId)) return;
+      await bot.answerCallbackQuery(q.id, { text: '⏳ Формирую CSV...' }).catch(()=>{});
+      return showExportOrdersMenu(chatId);
+    }
+    if (data === 'adm_export_models_csv') {
+      if (!isAdmin(chatId)) return;
+      await bot.answerCallbackQuery(q.id, { text: '⏳ Формирую CSV...' }).catch(()=>{});
+      return exportModelsCSV(chatId);
+    }
+    if (data === 'adm_export_clients_csv') {
+      if (!isAdmin(chatId)) return;
+      await bot.answerCallbackQuery(q.id, { text: '⏳ Формирую CSV...' }).catch(()=>{});
+      return exportClientsCSV(chatId);
+    }
+
+    // ── Quick stats
+    if (data === 'adm_quick_stats') {
+      if (!isAdmin(chatId)) return;
+      try {
+        const [todayR, activeR, monthBudget] = await Promise.all([
+          get("SELECT COUNT(*) as n FROM orders WHERE date(created_at) = date('now')"),
+          get("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','reviewing','confirmed','in_progress')"),
+          get(`SELECT SUM(CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','') AS REAL)) as total
+               FROM orders WHERE status='completed' AND created_at >= datetime('now','-30 days')
+               AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`),
+        ]);
+        const revenue = monthBudget?.total ? Math.round(monthBudget.total).toLocaleString('ru') : '—';
+        await bot.answerCallbackQuery(q.id, {
+          text: `📊 Сегодня: ${todayR.n} | Активных: ${activeR.n} | Выручка/мес: ${revenue} руб.`,
+          show_alert: true,
+        }).catch(()=>{});
+      } catch { await bot.answerCallbackQuery(q.id, { text: '❌ Ошибка загрузки статистики' }).catch(()=>{}); }
+      return;
+    }
+
+    // ── Telegram channel
+    if (data === 'tg_channel') {
+      const ch = await getSetting('tg_channel').catch(()=>null);
+      if (ch) {
+        return safeSend(chatId, `📣 *Наш Telegram канал:*\n\n${esc(ch)}`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '📣 Перейти в канал', url: ch.startsWith('http') ? ch : `https://t.me/${ch.replace(/^@/,'')}` }],
+            [{ text: '← Главное меню', callback_data: 'main_menu' }],
+          ]}
+        });
+      }
+      return;
+    }
 
     // ── Bulk: новые → В работу
     if (data === 'adm_bulk_new_to_review') {
@@ -3960,6 +4120,8 @@ function initBot(app) {
       'adm_set_catalog_title':      '📌 Введите *заголовок каталога*:',
       'adm_set_booking_min_budget': '💰 Введите *минимальный бюджет* для заявки (оставьте пустым — без лимита):',
       'adm_set_booking_confirm_msg':'💬 Введите *сообщение после бронирования*:',
+      'adm_set_booking_thanks':     '🎉 Введите *текст после успешного бронирования* (отображается клиенту):',
+      'adm_set_tg_channel':         '📣 Введите *ссылку или @username* Telegram канала агентства:',
       'adm_set_reviews_min':        '🔢 Введите *минимум завершённых заявок* для написания отзыва:',
       'adm_set_reviews_prompt':     '📝 Введите *текст приглашения к отзыву*:',
       'adm_set_cities_list':        '🏙 Введите *список городов* через запятую (например: Москва, Санкт-Петербург, Казань):',
@@ -4510,6 +4672,8 @@ function initBot(app) {
         'adm_set_catalog_title':      ['catalog_title',                '📌 Заголовок каталога обновлён!'],
         'adm_set_booking_min_budget': ['booking_min_budget',           '💰 Мин. бюджет обновлён!'],
         'adm_set_booking_confirm_msg':['booking_confirm_msg',          '💬 Сообщение брони обновлено!'],
+        'adm_set_booking_thanks':     ['booking_thanks_text',          '🎉 Текст после бронирования обновлён!'],
+        'adm_set_tg_channel':         ['tg_channel',                   '📣 Telegram канал обновлён!'],
         'adm_set_reviews_min':        ['reviews_min_completed',        '🔢 Мин. заявок обновлено!'],
         'adm_set_reviews_prompt':     ['reviews_prompt_text',          '📝 Приглашение к отзыву обновлено!'],
         'adm_set_cities_list':        ['cities_list',                  '🏙 Список городов обновлён!'],
@@ -4968,6 +5132,24 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus) {
       }
     } catch {}
   }
+
+  // WhatsApp кнопка — если есть телефон и настроен WhatsApp контакт агентства
+  try {
+    const [orderRow, waContact] = await Promise.all([
+      get('SELECT client_phone FROM orders WHERE order_number=?', [orderNumber]).catch(()=>null),
+      getSetting('contacts_whatsapp').catch(()=>null),
+    ]);
+    if (orderRow?.client_phone && waContact) {
+      const statusLabels = {
+        confirmed: 'подтверждена', reviewing: 'принята в работу',
+        in_progress: 'выполняется', completed: 'завершена', cancelled: 'отклонена',
+      };
+      const waMsg = `Здравствуйте! Статус вашей заявки №${orderNumber} изменён: ${statusLabels[newStatus] || newStatus}. Агентство Nevesty Models.`;
+      const phone = orderRow.client_phone.replace(/[^0-9+]/g, '');
+      const waUrl = `https://wa.me/${phone.replace(/^\+/, '')}?text=${encodeURIComponent(waMsg)}`;
+      keyboard.inline_keyboard.push([{ text: '💬 Написать в WhatsApp', url: waUrl }]);
+    }
+  } catch {}
 
   await safeSend(clientChatId, text, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
 }

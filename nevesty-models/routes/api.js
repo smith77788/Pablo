@@ -823,7 +823,7 @@ router.get('/admin/quick-bookings', auth, async (req, res, next) => {
 // ─── Orders (admin) ───────────────────────────────────────────────────────────
 router.get('/admin/orders', auth, async (req, res, next) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, from, to } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
     const offset = (page - 1) * limit;
@@ -834,6 +834,8 @@ router.get('/admin/orders', auth, async (req, res, next) => {
       where += ' AND (o.client_name LIKE ? OR o.order_number LIKE ? OR o.client_phone LIKE ?)';
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
+    if (from && validateDate(from)) { where += ' AND date(o.created_at) >= ?'; params.push(from); }
+    if (to   && validateDate(to))   { where += ' AND date(o.created_at) <= ?'; params.push(to); }
     const [totalRow, orders] = await Promise.all([
       get(`SELECT COUNT(*) as n FROM orders o WHERE ${where}`, params),
       query(`SELECT o.*, m.name as model_name, a.username as manager_name

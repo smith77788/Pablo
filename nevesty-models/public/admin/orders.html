@@ -178,6 +178,10 @@
             <option value="completed">Завершённые</option>
             <option value="cancelled">Отменённые</option>
           </select>
+          <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">с</label>
+          <input class="filter-input" type="date" id="filterFrom" style="width:130px" onchange="loadOrders(1)" />
+          <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">по</label>
+          <input class="filter-input" type="date" id="filterTo" style="width:130px" onchange="loadOrders(1)" />
           <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
           <span id="refresh-indicator" class="hidden text-xs text-green-500 animate-pulse" style="display:none;font-size:0.7rem;color:var(--success)">↻ Обновление...</span>
           <button class="btn-export" onclick="toggleExportPanel()" title="Экспорт в CSV">📥 CSV ▾</button>
@@ -187,15 +191,6 @@
         <div id="exportPanel" style="display:none;padding:12px 24px;background:rgba(201,169,110,0.06);border-bottom:1px solid rgba(201,169,110,0.2);">
           <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
             <span style="font-size:0.75rem;color:var(--gold);font-weight:600;letter-spacing:1px;text-transform:uppercase">📥 Экспорт CSV</span>
-            <div style="display:flex;align-items:center;gap:6px">
-              <label style="font-size:0.72rem;color:var(--text-muted)">Период:</label>
-              <select id="exportPeriod" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:4px 8px;outline:none">
-                <option value="">Все</option>
-                <option value="today">Сегодня</option>
-                <option value="week">Неделя</option>
-                <option value="month">Месяц</option>
-              </select>
-            </div>
             <div style="display:flex;align-items:center;gap:6px">
               <label style="font-size:0.72rem;color:var(--text-muted)">Статус:</label>
               <select id="exportStatus" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:4px 8px;outline:none">
@@ -208,7 +203,16 @@
                 <option value="cancelled">Отменённые</option>
               </select>
             </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <label style="font-size:0.72rem;color:var(--text-muted)">С:</label>
+              <input type="date" id="exportFrom" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:3px 6px;outline:none" />
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <label style="font-size:0.72rem;color:var(--text-muted)">По:</label>
+              <input type="date" id="exportTo" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:3px 6px;outline:none" />
+            </div>
             <button class="btn btn-sm btn-ghost" onclick="exportCSVWithFilters()" style="border-color:var(--gold);color:var(--gold)">⬇ Скачать CSV</button>
+            <button class="btn btn-sm btn-ghost" onclick="exportCSVCurrentFilters()" title="Экспорт с текущими фильтрами" style="border-color:var(--border);color:var(--text-muted)">⬇ Текущие фильтры</button>
             <button class="btn btn-sm btn-ghost" onclick="toggleExportPanel()" style="margin-left:auto">✕</button>
           </div>
         </div>
@@ -221,6 +225,18 @@
           <button class="btn btn-sm btn-ghost" onclick="bulkAction('completed')">🏁 Завершить</button>
           <button class="btn btn-sm btn-ghost" onclick="bulkAction('cancelled')">❌ Отменить</button>
           <button class="btn btn-sm btn-danger" onclick="bulkAction('delete')">🗑 Удалить</button>
+          <span style="display:flex;align-items:center;gap:6px;margin-left:8px">
+            <select id="bulkStatusSelect" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:4px 8px;outline:none;border-radius:3px">
+              <option value="">— статус —</option>
+              <option value="new">Новая</option>
+              <option value="reviewing">На рассмотрении</option>
+              <option value="confirmed">Подтверждена</option>
+              <option value="in_progress">В процессе</option>
+              <option value="completed">Завершена</option>
+              <option value="cancelled">Отменена</option>
+            </select>
+            <button class="btn btn-sm btn-ghost" onclick="bulkStatusFromSelect()" style="border-color:var(--gold);color:var(--gold)">Применить к выбранным</button>
+          </span>
           <button class="btn btn-sm btn-ghost" onclick="clearSelection()" style="margin-left:auto">✕ Снять выбор</button>
         </div>
 
@@ -397,10 +413,28 @@ async function loadOrders(page) {
   if (page !== undefined) currentPage = page;
   const search = document.getElementById('searchInput').value.trim();
   const status = document.getElementById('statusFilter').value;
+  const from   = document.getElementById('filterFrom').value;
+  const to     = document.getElementById('filterTo').value;
+
+  // If search looks like a phone number, use dedicated search endpoint
+  if (search && /^[\d\s\+\(\)\-]{7,}$/.test(search)) {
+    try {
+      const data = await _admin.apiFetch('/admin/orders/search?q=' + encodeURIComponent(search));
+      const orders = data.orders || [];
+      totalPages   = 1;
+      totalOrders  = data.total || orders.length;
+      renderTable(orders);
+      renderPagination();
+      syncBulkBar();
+      return;
+    } catch (e) { /* fall through to normal search */ }
+  }
 
   const params = new URLSearchParams({ page: currentPage, limit: PAGE_LIMIT });
   if (status) params.set('status', status);
   if (search) params.set('search', search);
+  if (from)   params.set('from', from);
+  if (to)     params.set('to', to);
 
   try {
     const data = await _admin.apiFetch('/admin/orders?' + params);
@@ -580,32 +614,85 @@ async function bulkAction(action) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   EXPORT CSV — with period/status filters (Task 5)
+   BULK STATUS from dropdown
+═══════════════════════════════════════════════════════ */
+function bulkStatusFromSelect() {
+  const status = document.getElementById('bulkStatusSelect').value;
+  if (!status) { _admin.toast('Выберите статус', 'warning'); return; }
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  const labels = {
+    new:'Новая', reviewing:'На рассмотрении', confirmed:'Подтверждена',
+    in_progress:'В процессе', completed:'Завершена', cancelled:'Отменена'
+  };
+  _admin.adminConfirm('Массовое изменение статуса',
+    `Изменить статус ${ids.length} заявок(и) на «${labels[status] || status}»?`, async () => {
+      try {
+        await _admin.apiFetch('/admin/orders/bulk-status', {
+          method: 'POST',
+          body: JSON.stringify({ order_ids: ids, status })
+        });
+        _admin.toast('Статус обновлён', 'success');
+        clearSelection();
+        document.getElementById('bulkStatusSelect').value = '';
+        loadOrders();
+      } catch (e) {
+        _admin.toast('Ошибка: ' + e.message, 'error');
+      }
+    });
+}
+
+/* ═══════════════════════════════════════════════════════
+   EXPORT CSV — with filters
 ═══════════════════════════════════════════════════════ */
 function toggleExportPanel() {
   const panel = document.getElementById('exportPanel');
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  // Pre-fill export fields with current filter values
+  if (panel.style.display !== 'none') {
+    const status = document.getElementById('statusFilter').value;
+    if (status) document.getElementById('exportStatus').value = status;
+    const from = document.getElementById('filterFrom').value;
+    const to   = document.getElementById('filterTo').value;
+    if (from) document.getElementById('exportFrom').value = from;
+    if (to)   document.getElementById('exportTo').value   = to;
+  }
 }
 
 function exportCSV() {
   // Quick export using current list filters
   const status = document.getElementById('statusFilter').value;
-  const search = document.getElementById('searchInput').value.trim();
+  const from   = document.getElementById('filterFrom').value;
+  const to     = document.getElementById('filterTo').value;
   const params = new URLSearchParams();
   if (status) params.set('status', status);
-  if (search) params.set('search', search);
-  _admin.downloadCSV('/admin/orders/export?' + params);
+  if (from)   params.set('from', from);
+  if (to)     params.set('to', to);
+  _admin.downloadCSV('/admin/export/orders?' + params);
 }
 
 function exportCSVWithFilters() {
-  const period  = document.getElementById('exportPeriod').value;
-  const status  = document.getElementById('exportStatus').value;
-  const search  = document.getElementById('searchInput').value.trim();
-  const params  = new URLSearchParams();
+  const status = document.getElementById('exportStatus').value;
+  const from   = document.getElementById('exportFrom').value;
+  const to     = document.getElementById('exportTo').value;
+  const params = new URLSearchParams();
   if (status) params.set('status', status);
-  if (search)  params.set('search', search);
-  if (period)  params.set('period', period);
-  _admin.downloadCSV('/admin/orders/export?' + params);
+  if (from)   params.set('from', from);
+  if (to)     params.set('to', to);
+  _admin.downloadCSV('/admin/export/orders?' + params);
+  document.getElementById('exportPanel').style.display = 'none';
+  _admin.toast('Экспорт начат...', 'info');
+}
+
+function exportCSVCurrentFilters() {
+  const status = document.getElementById('statusFilter').value;
+  const from   = document.getElementById('filterFrom').value;
+  const to     = document.getElementById('filterTo').value;
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (from)   params.set('from', from);
+  if (to)     params.set('to', to);
+  _admin.downloadCSV('/admin/export/orders?' + params);
   document.getElementById('exportPanel').style.display = 'none';
   _admin.toast('Экспорт начат...', 'info');
 }
