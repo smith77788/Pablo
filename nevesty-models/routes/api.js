@@ -1691,6 +1691,31 @@ router.post('/admin/orders/:id/pay', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Generate payment link stub (admin) ────────────────────────────────────────
+router.post('/admin/orders/:id/payment-link', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    const order = await get('SELECT * FROM orders WHERE id=?', [id]);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    // In real implementation, call Yookassa API here
+    // For now, return a stub link
+    const yookassaShopId = process.env.YOOKASSA_SHOP_ID || '';
+    const yookassaKey = process.env.YOOKASSA_SECRET_KEY || '';
+
+    if (!yookassaShopId || !yookassaKey) {
+      return res.json({
+        ok: true,
+        link: null,
+        message: 'Yookassa not configured. Set YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY in .env'
+      });
+    }
+
+    // Stub response
+    res.json({ ok: true, link: `https://yookassa.ru/checkout/payment/stub-${id}`, order_id: id });
+  } catch(e) { next(e); }
+});
+
 // ─── Bulk actions ─────────────────────────────────────────────────────────────
 router.post('/admin/orders/bulk', auth, async (req, res, next) => {
   try {

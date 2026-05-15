@@ -636,7 +636,7 @@ async function initDatabase() {
         else console.log('[DB] VACUUM completed');
       });
       scheduleVacuum(); // reschedule
-    }, delay);
+    }, delay).unref(); // allow process to exit cleanly if no other work remains
   }
   scheduleVacuum();
 
