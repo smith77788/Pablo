@@ -162,6 +162,34 @@ def init_db() -> None:
         """)
         conn.commit()
 
+        # Migrate: add ceo_decisions table if missing
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS ceo_decisions (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            cycle_id        TEXT NOT NULL,
+            decision_text   TEXT,
+            health_score    INTEGER,
+            departments_active TEXT,   -- JSON list
+            weekly_focus    TEXT,
+            department_focus TEXT,
+            experiment_proposal TEXT,  -- JSON
+            created_at      TEXT NOT NULL
+        )
+        """)
+        conn.commit()
+
+        # Migrate: add factory_reports table if missing (weekly/periodic summaries)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS factory_reports (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_type TEXT NOT NULL,   -- weekly, monthly, experiment_auto_apply
+            period_key  TEXT NOT NULL,   -- e.g. '2026-W20', '2026-05'
+            report_json TEXT NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+        """)
+        conn.commit()
+
         # Migrate existing growth_actions table — add experiment columns if missing
         _existing = [r[1] for r in conn.execute("PRAGMA table_info(growth_actions)").fetchall()]
         _new_cols = {
@@ -256,4 +284,35 @@ def record_metric(product_id: int, name: str, value: float, unit: str = "", peri
         "unit": unit,
         "period": period,
         "recorded_at": _now(),
+    })
+
+
+def get_recent_ceo_decisions(limit: int = 3) -> list[dict]:
+    """Return the last N CEO decisions for context."""
+    return fetch_all(
+        "SELECT decision_text, health_score, weekly_focus, department_focus, "
+        "experiment_proposal, created_at FROM ceo_decisions ORDER BY created_at DESC LIMIT ?",
+        (limit,)
+    )
+
+
+def save_ceo_decision(
+    cycle_id: str,
+    decision_text: str,
+    health_score: int,
+    departments_active: list,
+    weekly_focus: str = "",
+    department_focus: str = "",
+    experiment_proposal: dict | None = None,
+) -> int:
+    """Persist a CEO decision record."""
+    return insert("ceo_decisions", {
+        "cycle_id": cycle_id,
+        "decision_text": decision_text[:1000] if decision_text else "",
+        "health_score": health_score,
+        "departments_active": json.dumps(departments_active),
+        "weekly_focus": weekly_focus,
+        "department_focus": department_focus,
+        "experiment_proposal": json.dumps(experiment_proposal or {}),
+        "created_at": _now(),
     })

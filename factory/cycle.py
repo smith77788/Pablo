@@ -318,6 +318,168 @@ def _load_last_cycle_from_history() -> dict:
         return {}
 
 
+# Threshold for auto-apply: variant B must be at least 3% conversion to auto-apply
+SCALE_THRESHOLD_AUTO = 3.0
+
+
+def _auto_apply_successful_experiments(nevesty_id: int) -> list[str]:
+    """Check running experiments older than 7 days; if metrics improved, mark as successful.
+
+    Returns list of experiment names that were auto-applied.
+    """
+    from datetime import timedelta
+
+    applied_names = []
+    try:
+        running_exps = db.fetch_all(
+            "SELECT * FROM experiments WHERE status='running' ORDER BY started_at ASC"
+        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+
+        for exp in running_exps:
+            started_at = exp.get("started_at", "")
+            if not started_at or started_at > cutoff:
+                # Experiment hasn't been running for 7+ days
+                continue
+
+            conv_a = exp.get("conversion_a", 0) or 0
+            conv_b = exp.get("conversion_b", 0) or 0
+
+            # Determine if variant B shows improvement vs variant A
+            improved = False
+            if conv_b > 0 and conv_a > 0 and conv_b > conv_a:
+                improved = True
+            elif conv_b >= SCALE_THRESHOLD_AUTO:
+                improved = True
+
+            if improved:
+                note = (
+                    f"Авто-применення: вариант B конвертирует {conv_b:.1f}% "
+                    f"vs A {conv_a:.1f}% після 7+ днів тесту"
+                )
+                db.execute(
+                    "UPDATE experiments SET status='concluded', result='successful', "
+                    "concluded_at=?, notes=? WHERE id=?",
+                    (datetime.now(timezone.utc).isoformat(), note, exp["id"]),
+                )
+                db.insert("growth_actions", {
+                    "product_id": exp.get("product_id") or nevesty_id,
+                    "action_type": "experiment_auto_apply",
+                    "channel": "internal",
+                    "content": f"✅ Эксперимент [{exp['name']}] применён автоматически. {note}",
+                    "status": "done",
+                    "priority": 8,
+                    "outcome": "success",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+                applied_names.append(exp["name"])
+                logger.info(
+                    "[AutoApply] Experiment '%s' (id=%d) marked successful: conv_a=%.1f%%, conv_b=%.1f%%",
+                    exp["name"], exp["id"], conv_a, conv_b,
+                )
+    except Exception as e:
+        logger.error("_auto_apply_successful_experiments error: %s", e)
+
+    return applied_names
+
+
+def _maybe_generate_weekly_summary(cycle_id: str, results: dict) -> dict | None:
+    """Generate a weekly factory summary if none has been created in the last 7 days.
+
+    Saves to factory_reports table and returns a summary dict, or None if skipped.
+    """
+    import datetime as _dt
+
+    try:
+        period_key = _dt.date.today().strftime("%G-W%V")  # ISO week, e.g. '2026-W20'
+
+        # Check if a weekly summary for this week already exists
+        existing = db.fetch_one(
+            "SELECT id FROM factory_reports WHERE report_type='weekly' AND period_key=?",
+            (period_key,)
+        )
+        if existing:
+            logger.info("[WeeklySummary] Already exists for %s — skipping", period_key)
+            return None
+
+        # Also check if last summary was within 7 days (guard for mid-week runs)
+        last_summary = db.fetch_one(
+            "SELECT created_at FROM factory_reports WHERE report_type='weekly' "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+        if last_summary:
+            last_ts_str = last_summary.get("created_at", "")
+            try:
+                last_ts = datetime.fromisoformat(last_ts_str.replace("Z", "+00:00"))
+                days_since = (datetime.now(timezone.utc) - last_ts).days
+                if days_since < 7:
+                    logger.info(
+                        "[WeeklySummary] Last summary was %d days ago — skipping", days_since
+                    )
+                    return None
+            except Exception:
+                pass
+
+        # Gather data for the summary
+        health_score = results.get("health_score", 50)
+        health_trend = _load_metrics_trend("health_score", last_n=5)
+        trend_values = [c.get("value") for c in health_trend if c.get("value") is not None]
+
+        recent_decisions = db.get_recent_ceo_decisions(limit=5)
+        top_growth_actions = db.fetch_all(
+            "SELECT action_type, content, outcome, created_at FROM growth_actions "
+            "WHERE outcome='success' OR (status='done' AND created_at >= date('now', '-7 days')) "
+            "ORDER BY priority DESC LIMIT 5"
+        )
+
+        # Identify best-performing department from current cycle phases
+        dept_phases = {
+            k: v for k, v in results.get("phases", {}).items()
+            if k not in ("analytics", "ceo", "ceo_synthesis", "departments", "ideas",
+                         "experiment_auto_apply", "weekly_factory_summary", "monthly_report",
+                         "experiment_tracking", "ab_experiments", "content_generation")
+        }
+
+        top_dept = ""
+        if dept_phases:
+            # Prefer phase with most roles_used
+            best = max(
+                dept_phases.items(),
+                key=lambda kv: len(kv[1].get("roles_used", [])) if isinstance(kv[1], dict) else 0,
+                default=(None, None),
+            )
+            if best[0]:
+                top_dept = best[0]
+
+        summary_data = {
+            "period_key": period_key,
+            "health_score": health_score,
+            "health_trend": trend_values,
+            "top_department": top_dept,
+            "top_growth_actions": [
+                ga.get("content", "")[:100] for ga in top_growth_actions
+            ],
+            "ceo_decisions_count": len(recent_decisions),
+            "last_ceo_focus": recent_decisions[0].get("weekly_focus", "") if recent_decisions else "",
+        }
+
+        db.insert("factory_reports", {
+            "report_type": "weekly",
+            "period_key": period_key,
+            "report_json": json.dumps(summary_data, ensure_ascii=False, default=str),
+        })
+
+        logger.info(
+            "[WeeklySummary] Generated for %s: health=%s, top_dept=%s, actions=%d",
+            period_key, health_score, top_dept, len(top_growth_actions),
+        )
+        return summary_data
+
+    except Exception as e:
+        logger.error("_maybe_generate_weekly_summary error: %s", e)
+        return None
+
+
 def get_monthly_metrics(data_db) -> dict:
     """Get order metrics for current month from data.db."""
     import datetime as _dt
@@ -891,6 +1053,26 @@ def run_cycle() -> dict:
             prev_ceo = prev_cycle_data.get("phases", {}).get("ceo_synthesis", {})
             previous_growth_actions = prev_ceo.get("growth_actions", [])
 
+        # Load last 3 CEO decisions from DB for decision continuity tracking
+        prev_ceo_decisions = db.get_recent_ceo_decisions(limit=3)
+        prev_decisions_str = ""
+        if prev_ceo_decisions:
+            lines = ["ПРЕДЫДУЩИЕ РЕШЕНИЯ CEO (последние 3 цикла):"]
+            for dec in prev_ceo_decisions:
+                ts = dec.get("created_at", "")[:16]
+                hs = dec.get("health_score", "?")
+                focus = dec.get("weekly_focus", "—")
+                dept = dec.get("department_focus", "—")
+                text_preview = (dec.get("decision_text") or "")[:200]
+                lines.append(
+                    f"  [{ts}] health={hs}, focus='{focus}', dept_focus='{dept}'\n"
+                    f"    Меморандум: {text_preview}..."
+                )
+            lines.append(
+                "\nCEO: проверь — выполнены ли предыдущие решения, изменился ли курс и почему."
+            )
+            prev_decisions_str = "\n".join(lines)
+
         class CEOSynthesisAgent(FactoryAgent):
             department = "ceo"
             role = "ceo_synthesis"
@@ -976,6 +1158,7 @@ def run_cycle() -> dict:
             + "\n\nАНАЛИЗ ПРЕДЫДУЩЕГО ЦИКЛА:\n"
             + prev_actions_report
             + prev_growth_str
+            + ("\n\n" + prev_decisions_str if prev_decisions_str else "")
             + "\n\nВерни JSON:\n"
             '{\n'
             '  "health_score": 75,\n'
@@ -1080,8 +1263,54 @@ def run_cycle() -> dict:
                 experiment_proposal, bot_db
             )
             _send_ceo_memo_to_telegram(memo_text, final_health, growth_actions_list)
+
+            # Save CEO decision to DB for future decision-tracking context
+            try:
+                active_depts = [
+                    k for k in results.get("phases", {})
+                    if k not in ("analytics", "ceo", "ceo_synthesis", "departments", "ideas")
+                ]
+                db.save_ceo_decision(
+                    cycle_id=cycle_id,
+                    decision_text=memo_text,
+                    health_score=int(final_health) if final_health is not None else 50,
+                    departments_active=active_depts,
+                    weekly_focus=weekly_focus,
+                    department_focus=department_focus,
+                    experiment_proposal=experiment_proposal if isinstance(experiment_proposal, dict) else {},
+                )
+                logger.info("[CEOSynthesis] Decision saved to ceo_decisions table")
+            except Exception as _dbe:
+                logger.warning("[CEOSynthesis] Failed to save CEO decision: %s", _dbe)
     except Exception as e:
         logger.error("CEO Synthesis phase error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 5.3 — EXPERIMENT AUTO-APPLY: detect & promote successful experiments
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🚀 PHASE 5.3: EXPERIMENT AUTO-APPLY")
+    try:
+        _auto_applied = _auto_apply_successful_experiments(nevesty_id)
+        if _auto_applied:
+            results["phases"]["experiment_auto_apply"] = {"applied": _auto_applied}
+            for _exp_name in _auto_applied:
+                summary_lines.append(f"✅ Эксперимент [{_exp_name}] применён автоматически")
+            logger.info("[Phase5.3] Auto-applied experiments: %s", _auto_applied)
+    except Exception as e:
+        logger.error("Phase 5.3 experiment auto-apply error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 5.4 — WEEKLY FACTORY SUMMARY (every 7 days)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n📅 PHASE 5.4: WEEKLY FACTORY SUMMARY")
+    try:
+        _weekly_summary_result = _maybe_generate_weekly_summary(cycle_id, results)
+        if _weekly_summary_result:
+            results["phases"]["weekly_factory_summary"] = _weekly_summary_result
+            summary_lines.append(f"📅 Weekly Factory Summary сгенерирован ({_weekly_summary_result.get('period_key', '')})")
+            logger.info("[Phase5.4] Weekly summary generated: %s", _weekly_summary_result.get("period_key"))
+    except Exception as e:
+        logger.error("Phase 5.4 weekly factory summary error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # PHASE 4 — IDEAS (если мало)
