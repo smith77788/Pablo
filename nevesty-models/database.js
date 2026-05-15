@@ -715,6 +715,42 @@ async function initDatabase() {
     ).catch(() => {});
   }
 
+  // v23 — price_packages table for dynamic pricing from DB
+  const v23 = await get(`SELECT version FROM schema_versions WHERE version=23`).catch(() => null);
+  if (!v23) {
+    await run(`CREATE TABLE IF NOT EXISTS price_packages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      price_from INTEGER DEFAULT 0,
+      price_to INTEGER,
+      duration TEXT,
+      category TEXT DEFAULT 'standard',
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1
+    )`).catch(() => {});
+    const existingPrices = await get('SELECT COUNT(*) as c FROM price_packages').catch(() => ({ c: 0 }));
+    if (!existingPrices.c) {
+      const packages = [
+        ['Портретная съёмка', '2 часа, 1 образ, 50+ кадров', 15000, 25000, '2 часа', 'photo', 1],
+        ['Коммерческая съёмка', '4 часа, 2-3 образа, 100+ кадров', 25000, 45000, '4 часа', 'photo', 2],
+        ['Показ / Runway', 'Участие в показе мод', 20000, 50000, 'по договору', 'event', 3],
+        ['Промо / BTL', 'Промо-акции, выставки', 15000, 30000, 'полный день', 'event', 4],
+        ['Видеосъёмка', 'Рекламный ролик', 35000, 80000, 'полный день', 'video', 5],
+        ['Корпоратив', 'Ведение, образы на мероприятии', 20000, 40000, 'по договору', 'event', 6],
+      ];
+      for (const [name, desc, priceFrom, priceTo, duration, cat, sort] of packages) {
+        await run(
+          'INSERT INTO price_packages (name, description, price_from, price_to, duration, category, sort_order) VALUES (?,?,?,?,?,?,?)',
+          [name, desc, priceFrom, priceTo, duration, cat, sort]
+        ).catch(() => {});
+      }
+    }
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(23, 'price_packages table for dynamic pricing')`
+    ).catch(() => {});
+  }
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
@@ -1119,6 +1155,18 @@ async function setSetting(key, value) {
   cache.del(`setting:${key}`);
 }
 
+/**
+ * Invalidate one or all settings cache entries.
+ * @param {string} [key] — if omitted, clears the entire settings cache
+ */
+function invalidateSettingsCache(key) {
+  if (key) {
+    cache.del(`setting:${key}`);
+  } else {
+    cache.delByPrefix('setting:');
+  }
+}
+
 module.exports = {
   initDatabase,
   initDB: initDatabase,
@@ -1129,5 +1177,6 @@ module.exports = {
   closeDatabase,
   getSetting,
   setSetting,
+  invalidateSettingsCache,
   scheduleBackups,
 };

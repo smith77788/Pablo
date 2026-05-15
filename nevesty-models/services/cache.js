@@ -73,4 +73,15 @@ const TTL_COUNTER = 30 * 1000; // 30 s  — frequently changing counters
 
 const cache = new SimpleCache(TTL_SETTINGS);
 
+// Periodically evict expired entries to prevent unbounded memory growth
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [key, entry] of cache._store) {
+      if (entry.expiresAt <= now) cache._store.delete(key);
+    }
+  },
+  10 * 60 * 1000
+).unref(); // every 10 minutes, non-blocking
+
 module.exports = { cache, TTL_SETTINGS, TTL_CATALOG, TTL_COUNTER };

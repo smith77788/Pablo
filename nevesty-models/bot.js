@@ -1,7 +1,7 @@
 require('dotenv').config();
 const crypto = require('crypto');
 const TelegramBot = require('node-telegram-bot-api');
-const { query, run, get, generateOrderNumber } = require('./database');
+const { query, run, get, generateOrderNumber, getSetting, setSetting } = require('./database');
 const { RU } = require('./utils/strings');
 const STRINGS = require('./strings');
 const {
@@ -399,28 +399,6 @@ function sessionData(session) {
   } catch {
     return {};
   }
-}
-
-// ─── In-memory settings cache (TTL 60s) ──────────────────────────────────────
-const _settingsCache = new Map(); // key → { value, expiresAt }
-const SETTINGS_TTL = 60_000;
-
-async function getSetting(key) {
-  const cached = _settingsCache.get(key);
-  if (cached && Date.now() < cached.expiresAt) return cached.value;
-  try {
-    const r = await get('SELECT value FROM bot_settings WHERE key=?', [key]);
-    const value = r?.value ?? null;
-    _settingsCache.set(key, { value, expiresAt: Date.now() + SETTINGS_TTL });
-    return value;
-  } catch {
-    return cached?.value ?? null;
-  }
-}
-
-async function setSetting(key, value) {
-  _settingsCache.set(key, { value, expiresAt: Date.now() + SETTINGS_TTL });
-  await run('INSERT OR REPLACE INTO bot_settings (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)', [key, value]);
 }
 
 // ─── Admin Handlers module ────────────────────────────────────────────────────
