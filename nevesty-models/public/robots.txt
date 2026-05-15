@@ -3,6 +3,7 @@ Allow: /
 Disallow: /api/
 Disallow: /admin/
 Disallow: /uploads/
+Disallow: /backups/
 Disallow: /offline.html
 Crawl-delay: 2
 

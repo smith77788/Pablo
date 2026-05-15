@@ -1,939 +1,1187 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <!-- Flash-prevention: apply theme class before first paint -->
-  <script>try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>О нас — Nevesty Models</title>
-  <meta name="description" content="Модельное агентство Nevesty Models — 10 лет опыта, 200+ моделей, 500+ успешных проектов. Узнайте о нашей команде и ценностях.">
-  <meta property="og:title" content="О нас — Nevesty Models">
-  <meta property="og:description" content="Профессиональное модельное агентство с 2014 года. История, команда, ценности.">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
-  <meta property="og:url" content="https://nevesty-models.ru/about.html">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@nevesty_models">
-  <meta name="theme-color" content="#080808">
-  <link rel="canonical" href="https://nevesty-models.ru/about.html">
-  <meta name="robots" content="index, follow">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="/css/main.css" />
-  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
-  <script type="application/ld+json">
-[
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru",
-    "logo": "https://nevesty-models.ru/og-image.jpg",
-    "foundingDate": "2014",
-    "description": "Профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.",
-    "email": "info@nevesty-models.ru",
-    "numberOfEmployees": { "@type": "QuantitativeValue", "value": 20 },
-    "sameAs": [
-      "https://instagram.com/nevesty_models",
-      "https://t.me/nevesty_models",
-      "https://vk.com/nevesty_models"
-    ],
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "contactType": "customer service",
-      "availableLanguage": "Russian"
-    }
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "itemListElement": [
-      {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
-      {"@type": "ListItem", "position": 2, "name": "О нас", "item": "https://nevesty-models.ru/about.html"}
-    ]
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "WebPage",
-    "name": "О нас — Nevesty Models",
-    "description": "Модельное агентство Nevesty Models — 10 лет опыта, 200+ моделей, 500+ успешных проектов. Узнайте о нашей команде и ценностях.",
-    "url": "https://nevesty-models.ru/about.html",
-    "isPartOf": {"@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru"},
-    "inLanguage": "ru-RU",
-    "dateModified": "2026-05-15"
-  }
-]
-  </script>
-  <style>
-    /* ─── ABOUT HERO ─────────────────────────────────── */
-    .about-hero {
-      padding: 140px 0 80px;
-      background: linear-gradient(135deg, #080808 0%, #0f0a06 50%, #080808 100%);
-      position: relative;
-      overflow: hidden;
-      text-align: center;
-    }
-    .about-hero::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(ellipse at 50% 60%, rgba(201,169,110,0.07) 0%, transparent 65%);
-      pointer-events: none;
-    }
-    .about-hero-inner {
-      position: relative;
-      z-index: 1;
-    }
-    .about-hero h1 {
-      font-size: clamp(2.2rem, 5vw, 4rem);
-      color: var(--white);
-      margin-bottom: 16px;
-    }
-    .about-hero h1 em { color: var(--gold); font-style: italic; }
-    .about-hero p {
-      color: var(--text-muted);
-      font-size: 1rem;
-      max-width: 560px;
-      margin: 0 auto;
-      line-height: 1.8;
-    }
-
-    /* ─── STATS BAR ──────────────────────────────────── */
-    .about-stats {
-      background: var(--bg2);
-      border-bottom: 1px solid var(--border);
-      padding: 48px 0;
-    }
-    .about-stats-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 0;
-    }
-    @media (max-width: 640px) {
-      .about-stats-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    .about-stat {
-      text-align: center;
-      padding: 24px;
-      border-right: 1px solid var(--border);
-    }
-    .about-stat:last-child { border-right: none; }
-    @media (max-width: 640px) {
-      .about-stat:nth-child(2) { border-right: none; }
-      .about-stat:nth-child(3) { border-top: 1px solid var(--border); }
-      .about-stat:nth-child(4) { border-top: 1px solid var(--border); }
-    }
-    .about-stat-num {
-      font-size: clamp(1.8rem, 4vw, 2.5rem);
-      font-weight: 700;
-      color: var(--gold);
-      display: block;
-      margin-bottom: 6px;
-      font-family: 'Playfair Display', serif;
-    }
-    .about-stat-label {
-      font-size: 0.75rem;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      color: var(--text-dim);
-    }
-
-    /* ─── STORY SECTION ──────────────────────────────── */
-    .about-story {
-      padding: 80px 0;
-    }
-    .about-story-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 80px;
-      align-items: center;
-    }
-    @media (max-width: 768px) {
-      .about-story-grid { grid-template-columns: 1fr; gap: 40px; }
-    }
-    .about-story-visual {
-      position: relative;
-      height: 400px;
-    }
-    .story-visual-main {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(135deg, #1a1510, #0d0a07);
-      border: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    }
-    .story-visual-letter {
-      font-family: 'Playfair Display', serif;
-      font-size: 12rem;
-      color: rgba(201,169,110,0.08);
-      user-select: none;
-      line-height: 1;
-    }
-    .story-badge {
-      position: absolute;
-      bottom: -20px;
-      right: -20px;
-      width: 100px;
-      height: 100px;
-      background: var(--bg2);
-      border: 1px solid rgba(201,169,110,0.5);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 2px;
-      z-index: 2;
-    }
-    .story-badge strong {
-      font-size: 1.8rem;
-      color: var(--gold);
-      font-family: 'Playfair Display', serif;
-      line-height: 1;
-    }
-    .story-badge span {
-      font-size: 0.65rem;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      color: var(--text-dim);
-    }
-    .about-story-content h2 {
-      font-size: clamp(1.8rem, 3vw, 2.5rem);
-      color: var(--white);
-      margin-bottom: 24px;
-    }
-    .about-story-content p {
-      color: var(--text-muted);
-      font-size: 0.92rem;
-      line-height: 1.85;
-      margin-bottom: 16px;
-    }
-
-    /* ─── WHY US ─────────────────────────────────────── */
-    .why-us {
-      padding: 80px 0;
-      background: var(--bg2);
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-    }
-    .why-us-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 24px;
-      margin-top: 48px;
-    }
-    @media (max-width: 640px) {
-      .why-us-grid { grid-template-columns: 1fr; }
-    }
-    .why-card {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      padding: 32px;
-      border-radius: var(--radius);
-      transition: border-color var(--transition);
-    }
-    .why-card:hover { border-color: rgba(201,169,110,0.4); }
-    .why-card-icon {
-      font-size: 2rem;
-      margin-bottom: 16px;
-      display: block;
-    }
-    .why-card h3 {
-      color: var(--white);
-      font-size: 1.1rem;
-      margin-bottom: 10px;
-    }
-    .why-card p {
-      color: var(--text-muted);
-      font-size: 0.87rem;
-      line-height: 1.7;
-    }
-
-    /* ─── TEAM ───────────────────────────────────────── */
-    .team-section {
-      padding: 80px 0;
-    }
-    .team-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 32px;
-      margin-top: 48px;
-    }
-    @media (max-width: 768px) {
-      .team-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 480px) {
-      .team-grid { grid-template-columns: 1fr; }
-    }
-    .team-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      padding: 32px 24px;
-      text-align: center;
-      border-radius: var(--radius);
-      transition: border-color var(--transition), transform 0.2s;
-    }
-    .team-card:hover {
-      border-color: rgba(201,169,110,0.4);
-      transform: translateY(-3px);
-    }
-    .team-avatar {
-      width: 80px;
-      height: 80px;
-      background: linear-gradient(135deg, #1a1510, #0d0a07);
-      border: 1px solid rgba(201,169,110,0.3);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 2rem;
-      margin: 0 auto 16px;
-    }
-    .team-name {
-      color: var(--white);
-      font-size: 1rem;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-    .team-role {
-      color: var(--gold);
-      font-size: 0.75rem;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      margin-bottom: 12px;
-    }
-    .team-bio {
-      color: var(--text-muted);
-      font-size: 0.82rem;
-      line-height: 1.65;
-    }
-
-    /* ─── TIMELINE ──────────────────────────────────── */
-    .timeline-section {
-      padding: 80px 0;
-      background: var(--bg);
-    }
-    .timeline {
-      position: relative;
-      max-width: 720px;
-      margin: 48px auto 0;
-      padding-left: 40px;
-    }
-    .timeline::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 1px;
-      background: linear-gradient(to bottom, transparent, rgba(201,169,110,0.5), rgba(201,169,110,0.5), transparent);
-    }
-    .timeline-item {
-      position: relative;
-      margin-bottom: 48px;
-    }
-    .timeline-item:last-child { margin-bottom: 0; }
-    .timeline-dot {
-      position: absolute;
-      left: -48px;
-      top: 4px;
-      width: 16px;
-      height: 16px;
-      border: 2px solid var(--gold);
-      background: var(--bg);
-      border-radius: 50%;
-    }
-    .timeline-year {
-      font-size: 0.7rem;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-      color: var(--gold);
-      margin-bottom: 8px;
-    }
-    .timeline-title {
-      color: var(--white);
-      font-size: 1.1rem;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    .timeline-text {
-      color: var(--text-muted);
-      font-size: 0.87rem;
-      line-height: 1.7;
-    }
-
-    /* ─── PROCESS SECTION ────────────────────────────── */
-    .process-section {
-      padding: 80px 0;
-      background: var(--bg2);
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-    }
-    .process-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 0;
-      margin-top: 48px;
-    }
-    @media (max-width: 768px) {
-      .process-grid { grid-template-columns: repeat(2, 1fr); gap: 24px; }
-    }
-    @media (max-width: 480px) {
-      .process-grid { grid-template-columns: 1fr; }
-    }
-    .process-step {
-      padding: 32px 24px;
-      border-right: 1px solid var(--border);
-      text-align: center;
-    }
-    .process-step:last-child { border-right: none; }
-    @media (max-width: 768px) {
-      .process-step { border-right: none; }
-    }
-    .process-num {
-      font-family: 'Playfair Display', serif;
-      font-size: 3rem;
-      color: rgba(201,169,110,0.15);
-      line-height: 1;
-      margin-bottom: 16px;
-    }
-    .process-title {
-      color: var(--white);
-      font-size: 0.95rem;
-      font-weight: 600;
-      margin-bottom: 10px;
-    }
-    .process-text {
-      color: var(--text-muted);
-      font-size: 0.82rem;
-      line-height: 1.65;
-    }
-
-    /* ─── TESTIMONIALS ──────────────────────────────── */
-    .testimonials-section {
-      padding: 80px 0;
-      background: var(--bg);
-      border-top: 1px solid var(--border);
-    }
-    .testimonials-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 24px;
-      margin-top: 48px;
-    }
-    @media (max-width: 768px) {
-      .testimonials-grid { grid-template-columns: 1fr; }
-    }
-    .testimonial-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      padding: 28px;
-      border-radius: var(--radius);
-      transition: border-color var(--transition);
-    }
-    .testimonial-card:hover { border-color: rgba(201,169,110,0.4); }
-    .testimonial-stars {
-      color: var(--gold);
-      font-size: 1rem;
-      margin-bottom: 12px;
-      letter-spacing: 2px;
-    }
-    .testimonial-text {
-      color: var(--text-muted);
-      font-size: 0.87rem;
-      line-height: 1.7;
-      margin-bottom: 16px;
-      font-style: italic;
-    }
-    .testimonial-author {
-      font-size: 0.75rem;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      color: var(--text-dim);
-    }
-    .testimonial-model {
-      font-size: 0.75rem;
-      color: var(--gold);
-      margin-top: 4px;
-    }
-    .testimonials-skeleton {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 24px;
-    }
-    @media (max-width: 768px) {
-      .testimonials-skeleton { grid-template-columns: 1fr; }
-    }
-    .skeleton-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      padding: 28px;
-      border-radius: var(--radius);
-      animation: pulse 1.5s ease-in-out infinite;
-    }
-    .skeleton-line {
-      height: 12px;
-      background: var(--bg3);
-      border-radius: 4px;
-      margin-bottom: 10px;
-    }
-    .skeleton-line.short { width: 60%; }
-    .skeleton-line.medium { width: 85%; }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
-    }
-
-    /* ─── CTA ────────────────────────────────────────── */
-    .about-cta {
-      padding: 80px 0 100px;
-      background: linear-gradient(135deg, #0f0c08, #1a1410, #0f0c08);
-      border-top: 1px solid var(--border);
-      text-align: center;
-    }
-    .about-cta h2 {
-      font-size: clamp(1.6rem, 3vw, 2.5rem);
-      color: var(--white);
-      margin-bottom: 16px;
-    }
-    .about-cta p {
-      color: var(--text-muted);
-      font-size: 0.95rem;
-      max-width: 480px;
-      margin: 0 auto 40px;
-      line-height: 1.8;
-    }
-    .about-cta-btns {
-      display: flex;
-      gap: 16px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-  </style>
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-
-  <!-- NAVBAR -->
-  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links" role="list">
-        <a href="/catalog.html">Модели</a>
-        <a href="/pricing.html">Цены</a>
-        <a href="/about.html" style="color:var(--gold)">О нас</a>
-        <a href="/reviews.html">Отзывы</a>
-        <a href="/faq.html">FAQ</a>
-        <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" aria-label="Избранное" style="font-size:1.1rem"><span aria-hidden="true">❤️</span></a>
-        <button onclick="DarkMode.toggle()"
-          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
-          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
-        </button>
-        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
-           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
-           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
-          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-          <span>WhatsApp</span>
-        </a>
-        <a href="/booking.html" class="btn-nav">Заказать</a>
-      </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu"><span></span><span></span><span></span></button>
-    </div>
-  </nav>
-
-  <!-- MOBILE MENU -->
-  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-    <a href="/catalog.html">Модели</a>
-    <a href="/pricing.html">Цены</a>
-    <a href="/about.html" style="color:var(--gold)">О нас</a>
-    <a href="/reviews.html">Отзывы</a>
-    <a href="/faq.html">FAQ</a>
-    <a href="/contact.html">Контакты</a>
-    <a href="/favorites.html">❤️ Избранное</a>
-    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
-  </nav>
-
-  <!-- HERO -->
-  <section class="about-hero" id="main-content" tabindex="-1" role="main">
-    <div class="about-hero-inner container">
-      <div class="section-tag" style="margin-bottom:20px">О компании</div>
-      <h1>Nevesty <em>Models</em></h1>
-      <p>Профессиональное модельное агентство с 2014 года. Мы создаём незабываемые образы и обеспечиваем безупречный сервис для каждого клиента</p>
-    </div>
-  </section>
-
-  <!-- STATS BAR -->
-  <section class="about-stats" aria-label="Статистика агентства">
-    <div class="container">
-      <div class="about-stats-grid">
-        <div class="about-stat">
-          <span class="about-stat-num" data-count="200">200+</span>
-          <span class="about-stat-label">Моделей в базе</span>
-        </div>
-        <div class="about-stat">
-          <span class="about-stat-num" data-count="500">500+</span>
-          <span class="about-stat-label">Успешных заказов</span>
-        </div>
-        <div class="about-stat">
-          <span class="about-stat-num">10</span>
-          <span class="about-stat-label">Лет на рынке</span>
-        </div>
-        <div class="about-stat">
-          <span class="about-stat-num">15+</span>
-          <span class="about-stat-label">Городов присутствия</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- STORY -->
-  <section class="about-story" aria-labelledby="story-heading">
-    <div class="container">
-      <div class="about-story-grid">
-        <div class="about-story-visual">
-          <div class="story-visual-main">
-            <span class="story-visual-letter">N</span>
-          </div>
-          <div class="story-badge">
-            <strong>10</strong>
-            <span>лет опыта</span>
-          </div>
-        </div>
-        <div class="about-story-content">
-          <div class="section-tag" style="margin-bottom:20px">Наша история</div>
-          <h2 id="story-heading">С 2014 года мы делаем мир красивее</h2>
-          <p id="about-text-main">Мы — модельное агентство полного цикла, работающее с 2014 года. За это время мы стали одним из ведущих агентств страны, объединив в своей базе более 200 профессиональных моделей.</p>
-          <p>Наша миссия — обеспечить клиентам безупречный сервис и предоставить моделей, которые идеально соответствуют концепции и задачам проекта.</p>
-          <p>Каждая модель проходит строгий кастинг и профессиональную подготовку. Мы гарантируем пунктуальность, профессионализм и результат.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- TIMELINE -->
-  <section class="timeline-section" aria-labelledby="timeline-heading">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Вехи развития</div>
-        <h2 id="timeline-heading">Наша история</h2>
-        <div class="gold-line"></div>
-      </div>
-      <div class="timeline">
-        <div class="timeline-item">
-          <div class="timeline-dot"></div>
-          <div class="timeline-year">2014 — Основание</div>
-          <div class="timeline-title">Рождение агентства</div>
-          <p class="timeline-text">Основана команда из трёх специалистов, началось формирование первой базы из 20 моделей. Первые успешные проекты в Москве и Санкт-Петербурге.</p>
-        </div>
-        <div class="timeline-item">
-          <div class="timeline-dot"></div>
-          <div class="timeline-year">2017 — Рост</div>
-          <div class="timeline-title">Выход в регионы</div>
-          <p class="timeline-text">Расширение на 8 городов России. База моделей выросла до 80 человек. Запуск собственного онлайн-каталога и системы бронирования.</p>
-        </div>
-        <div class="timeline-item">
-          <div class="timeline-dot"></div>
-          <div class="timeline-year">2021 — Масштаб</div>
-          <div class="timeline-title">Международные проекты</div>
-          <p class="timeline-text">Первые выезды в ОАЭ и Дубай. Партнёрство с крупными fashion-домами. База превысила 150 профессиональных моделей.</p>
-        </div>
-        <div class="timeline-item">
-          <div class="timeline-dot"></div>
-          <div class="timeline-year">2024 — Сегодня</div>
-          <div class="timeline-title">Лидер рынка</div>
-          <p class="timeline-text">Более 200 моделей, 500+ успешных проектов, 15+ городов присутствия. Запуск нового цифрового сервиса для мгновенного бронирования и онлайн-каталога.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- HOW WE WORK -->
-  <section class="process-section" aria-labelledby="process-heading">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Наш процесс</div>
-        <h2 id="process-heading">Как мы работаем</h2>
-        <div class="gold-line"></div>
-      </div>
-      <div class="process-grid">
-        <div class="process-step">
-          <div class="process-num">01</div>
-          <div class="process-title">Заявка</div>
-          <p class="process-text">Вы оставляете заявку онлайн или пишете менеджеру. Описываете задачу, дату, формат мероприятия.</p>
-        </div>
-        <div class="process-step">
-          <div class="process-num">02</div>
-          <div class="process-title">Подбор</div>
-          <p class="process-text">В течение 1 часа менеджер предлагает подходящих моделей из нашей базы с учётом ваших требований.</p>
-        </div>
-        <div class="process-step">
-          <div class="process-num">03</div>
-          <div class="process-title">Согласование</div>
-          <p class="process-text">Выбираете модель, подписываем договор, фиксируем все детали и стоимость. Никаких скрытых платежей.</p>
-        </div>
-        <div class="process-step">
-          <div class="process-num">04</div>
-          <div class="process-title">Результат</div>
-          <p class="process-text">Модель прибывает вовремя и профессионально выполняет задачу. Менеджер на связи весь день мероприятия.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- WHY US -->
-  <section class="why-us" aria-labelledby="why-heading">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Наши преимущества</div>
-        <h2 id="why-heading">Почему выбирают нас</h2>
-        <div class="gold-line"></div>
-      </div>
-      <div class="why-us-grid">
-        <div class="why-card">
-          <span class="why-card-icon">🏆</span>
-          <h3>10 лет экспертизы</h3>
-          <p>Работаем с 2014 года. За это время накопили уникальный опыт и выстроили систему, гарантирующую результат для каждого клиента.</p>
-        </div>
-        <div class="why-card">
-          <span class="why-card-icon">⚡</span>
-          <h3>Быстрый подбор</h3>
-          <p>Менеджер свяжется с вами в течение часа. В срочных случаях подбор и подтверждение модели возможны за 2–4 часа.</p>
-        </div>
-        <div class="why-card">
-          <span class="why-card-icon">✅</span>
-          <h3>Гарантия замены</h3>
-          <p>Если модель не сможет приехать — мы немедленно предложим равноценную замену. Надёжность обеспечена базой в 200+ моделей.</p>
-        </div>
-        <div class="why-card">
-          <span class="why-card-icon">🌍</span>
-          <h3>Работаем по всей стране</h3>
-          <p>Присутствуем в 15+ городах. Выезды за рубеж, включая Дубай и страны ОАЭ, согласовываются индивидуально.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- TEAM -->
-  <section class="team-section" aria-labelledby="team-heading">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Наша команда</div>
-        <h2 id="team-heading">Люди за кулисами</h2>
-        <div class="gold-line"></div>
-        <p>Профессионалы, которые каждый день работают для вашего успеха</p>
-      </div>
-      <div class="team-grid">
-        <div class="team-card">
-          <div class="team-avatar">👑</div>
-          <div class="team-name">Анна Соколова</div>
-          <div class="team-role">Директор агентства</div>
-          <p class="team-bio">10 лет в индустрии моды. Основала агентство в 2014 году. Эксперт по кастингу и стратегическому развитию.</p>
-        </div>
-        <div class="team-card">
-          <div class="team-avatar">🎯</div>
-          <div class="team-name">Мария Петрова</div>
-          <div class="team-role">Старший менеджер</div>
-          <p class="team-bio">Более 300 успешно организованных мероприятий. Отвечает за качество обслуживания клиентов и координацию моделей.</p>
-        </div>
-        <div class="team-card">
-          <div class="team-avatar">✨</div>
-          <div class="team-name">Екатерина Иванова</div>
-          <div class="team-role">Кастинг-директор</div>
-          <p class="team-bio">Профессиональный фотограф и стилист. Отвечает за отбор, обучение и подготовку моделей к съёмкам.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- TESTIMONIALS -->
-  <section class="testimonials-section" aria-labelledby="testimonials-heading">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-tag">Отзывы клиентов</div>
-        <h2 id="testimonials-heading">Что говорят о нас</h2>
-        <div class="gold-line"></div>
-        <p>Мнения реальных клиентов о работе с нашим агентством</p>
-      </div>
-      <div id="testimonials-container">
-        <!-- Skeleton loading -->
-        <div class="testimonials-skeleton">
-          <div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>
-          <div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>
-          <div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>
-        </div>
-      </div>
-      <div style="text-align:center;margin-top:40px">
-        <a href="/reviews.html" class="btn-outline">Все отзывы</a>
-      </div>
-    </div>
-  </section>
-
-  <!-- CTA -->
-  <section class="about-cta">
-    <div class="container">
-      <div class="section-tag" style="margin-bottom:16px">Готовы начать?</div>
-      <h2>Создайте незабываемый проект</h2>
-      <p>Свяжитесь с нами сегодня и получите персональную консультацию. Менеджер ответит в течение часа.</p>
-      <div class="about-cta-btns">
-        <a href="/booking.html" class="btn-primary">Оформить заявку</a>
-        <a href="/contact.html" class="btn-outline">Связаться с нами</a>
-      </div>
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer class="footer" role="contentinfo">
-    <div class="container">
-      <div class="footer-grid">
-        <div class="footer-brand">
-          <div class="nav-logo" style="font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--gold)">NEVESTY <span style="color:var(--text)">MODELS</span></div>
-          <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
-        </div>
-        <div class="footer-col">
-          <h4>Агентство</h4>
-          <a href="/catalog.html">Каталог моделей</a>
-          <a href="/pricing.html">Цены</a>
-          <a href="/about.html">О нас</a>
-          <a href="/contact.html">Контакты</a>
-        </div>
-        <div class="footer-col">
-          <h4>Клиентам</h4>
-          <a href="/booking.html">Оформить заявку</a>
-          <a href="/order-status.html">Статус заявки</a>
-          <a href="/catalog.html">Выбрать модель</a>
-          <a href="/faq.html">FAQ</a>
-          <a href="/privacy.html">Конфиденциальность</a>
-        </div>
-        <div class="footer-col">
-          <h4>Связаться</h4>
-          <a href="tel:+78005550000">+7 (800) 555-00-00</a>
-          <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
-          <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
-          <a href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
-        </div>
-      </div>
-      <div class="footer-bottom">
-        <p>© 2024 Nevesty Models. Все права защищены.</p>
-        <div class="footer-socials" aria-label="Социальные сети">
-          <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"><span aria-hidden="true">📸</span></a>
-          <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"><span aria-hidden="true">✈</span></a>
-          <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"><span aria-hidden="true">V</span></a>
-        </div>
-      </div>
-    </div>
-  </footer>
-
-  <div class="toast-container" id="toastContainer"></div>
-  <script src="/js/main.js" defer></script>
-  <script src="/js/darkmode.js"></script>
-  <script src="/js/analytics.js" defer></script>
-  <script>
-  // Load about text, contact info, dynamic stats, and reviews from APIs
-  Promise.all([
-    fetch('/api/settings/public').then(r => r.json()).catch(() => ({})),
-    fetch('/api/stats/public').then(r => r.json()).catch(() => ({})),
-    fetch('/api/reviews/recent?limit=3').then(r => r.json()).catch(() => [])
-  ]).then(([d, stats, reviews]) => {
-    // About text
-    const aboutText = d.about_text || d.about;
-    if (aboutText) {
-      const mainEl = document.getElementById('about-text-main');
-      const aliasEl = document.getElementById('about-text');
-      if (mainEl) mainEl.textContent = aboutText;
-      if (aliasEl) aliasEl.textContent = aboutText;
-    }
-
-    // WhatsApp button
-    if (d.contacts_whatsapp) {
-      const waNum = d.contacts_whatsapp.replace(/\D/g, '');
-      const btn = document.getElementById('whatsapp-btn');
-      if (btn) { btn.href = `https://wa.me/${waNum}`; btn.style.display = 'flex'; }
-      const floatWa = document.getElementById('float-wa-link');
-      if (floatWa) { floatWa.href = `https://wa.me/${waNum}`; document.getElementById('float-whatsapp').style.display = 'block'; }
-    }
-
-    // Dynamic stats from /api/stats/public
-    if (stats && (stats.total_models || stats.completed_orders || stats.cities_count)) {
-      const statNums = document.querySelectorAll('.about-stat-num');
-      const statLabels = document.querySelectorAll('.about-stat-label');
-      if (statNums.length >= 4) {
-        if (stats.total_models > 0) { statNums[0].textContent = stats.total_models + '+'; }
-        if (stats.completed_orders > 0) { statNums[1].textContent = stats.completed_orders + '+'; }
-        if (stats.cities_count > 0) { statNums[3].textContent = stats.cities_count + '+'; }
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Flash-prevention: apply theme class before first paint -->
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light') {
+          document.documentElement.classList.add('light');
+        } else if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>О нас — Nevesty Models</title>
+    <meta
+      name="description"
+      content="Модельное агентство Nevesty Models — 10 лет опыта, 200+ моделей, 500+ успешных проектов. Узнайте о нашей команде и ценностях."
+    />
+    <meta property="og:title" content="О нас — Nevesty Models" />
+    <meta
+      property="og:description"
+      content="Профессиональное модельное агентство с 2014 года. История, команда, ценности."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg" />
+    <meta property="og:url" content="https://nevesty-models.ru/about.html" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@nevesty_models" />
+    <meta name="twitter:title" content="О нас — Nevesty Models" />
+    <meta
+      name="twitter:description"
+      content="Профессиональное модельное агентство с 2014 года. История, команда, ценности."
+    />
+    <meta name="theme-color" content="#080808" />
+    <link rel="canonical" href="https://nevesty-models.ru/about.html" />
+    <meta name="robots" content="index, follow" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="/css/main.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+    <script type="application/ld+json">
+      [
+        {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "Nevesty Models",
+          "url": "https://nevesty-models.ru",
+          "logo": "https://nevesty-models.ru/og-image.jpg",
+          "foundingDate": "2014",
+          "description": "Профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.",
+          "email": "info@nevesty-models.ru",
+          "numberOfEmployees": { "@type": "QuantitativeValue", "value": 20 },
+          "sameAs": [
+            "https://instagram.com/nevesty_models",
+            "https://t.me/nevesty_models",
+            "https://vk.com/nevesty_models"
+          ],
+          "contactPoint": {
+            "@type": "ContactPoint",
+            "contactType": "customer service",
+            "availableLanguage": "Russian"
+          }
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/" },
+            { "@type": "ListItem", "position": 2, "name": "О нас", "item": "https://nevesty-models.ru/about.html" }
+          ]
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          "name": "О нас — Nevesty Models",
+          "description": "Модельное агентство Nevesty Models — 10 лет опыта, 200+ моделей, 500+ успешных проектов. Узнайте о нашей команде и ценностях.",
+          "url": "https://nevesty-models.ru/about.html",
+          "isPartOf": { "@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru" },
+          "inLanguage": "ru-RU",
+          "dateModified": "2026-05-15"
+        }
+      ]
+    </script>
+    <style>
+      /* ─── ABOUT HERO ─────────────────────────────────── */
+      .about-hero {
+        padding: 140px 0 80px;
+        background: linear-gradient(135deg, #080808 0%, #0f0a06 50%, #080808 100%);
+        position: relative;
+        overflow: hidden;
+        text-align: center;
       }
-    }
+      .about-hero::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at 50% 60%, rgba(201, 169, 110, 0.07) 0%, transparent 65%);
+        pointer-events: none;
+      }
+      .about-hero-inner {
+        position: relative;
+        z-index: 1;
+      }
+      .about-hero h1 {
+        font-size: clamp(2.2rem, 5vw, 4rem);
+        color: var(--white);
+        margin-bottom: 16px;
+      }
+      .about-hero h1 em {
+        color: var(--gold);
+        font-style: italic;
+      }
+      .about-hero p {
+        color: var(--text-muted);
+        font-size: 1rem;
+        max-width: 560px;
+        margin: 0 auto;
+        line-height: 1.8;
+      }
 
-    // Testimonials from /api/reviews/recent
-    const container = document.getElementById('testimonials-container');
-    if (container && reviews && reviews.length > 0) {
-      const stars = n => '★'.repeat(Math.min(5, Math.max(0, n))) + '☆'.repeat(Math.max(0, 5 - n));
-      const cards = reviews.map(r => {
-        const text = r.text ? r.text.slice(0, 300) + (r.text.length > 300 ? '…' : '') : '';
-        const authorName = r.client_name || r.author_name || 'Клиент';
-        const modelLine = r.model_name ? `<div class="testimonial-model">Модель: ${r.model_name}</div>` : '';
-        return `<div class="testimonial-card">
+      /* ─── STATS BAR ──────────────────────────────────── */
+      .about-stats {
+        background: var(--bg2);
+        border-bottom: 1px solid var(--border);
+        padding: 48px 0;
+      }
+      .about-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+      }
+      @media (max-width: 640px) {
+        .about-stats-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .about-stat {
+        text-align: center;
+        padding: 24px;
+        border-right: 1px solid var(--border);
+      }
+      .about-stat:last-child {
+        border-right: none;
+      }
+      @media (max-width: 640px) {
+        .about-stat:nth-child(2) {
+          border-right: none;
+        }
+        .about-stat:nth-child(3) {
+          border-top: 1px solid var(--border);
+        }
+        .about-stat:nth-child(4) {
+          border-top: 1px solid var(--border);
+        }
+      }
+      .about-stat-num {
+        font-size: clamp(1.8rem, 4vw, 2.5rem);
+        font-weight: 700;
+        color: var(--gold);
+        display: block;
+        margin-bottom: 6px;
+        font-family: 'Playfair Display', serif;
+      }
+      .about-stat-label {
+        font-size: 0.75rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+
+      /* ─── STORY SECTION ──────────────────────────────── */
+      .about-story {
+        padding: 80px 0;
+      }
+      .about-story-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 80px;
+        align-items: center;
+      }
+      @media (max-width: 768px) {
+        .about-story-grid {
+          grid-template-columns: 1fr;
+          gap: 40px;
+        }
+      }
+      .about-story-visual {
+        position: relative;
+        height: 400px;
+      }
+      .story-visual-main {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(135deg, #1a1510, #0d0a07);
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+      .story-visual-letter {
+        font-family: 'Playfair Display', serif;
+        font-size: 12rem;
+        color: rgba(201, 169, 110, 0.08);
+        user-select: none;
+        line-height: 1;
+      }
+      .story-badge {
+        position: absolute;
+        bottom: -20px;
+        right: -20px;
+        width: 100px;
+        height: 100px;
+        background: var(--bg2);
+        border: 1px solid rgba(201, 169, 110, 0.5);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        z-index: 2;
+      }
+      .story-badge strong {
+        font-size: 1.8rem;
+        color: var(--gold);
+        font-family: 'Playfair Display', serif;
+        line-height: 1;
+      }
+      .story-badge span {
+        font-size: 0.65rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      .about-story-content h2 {
+        font-size: clamp(1.8rem, 3vw, 2.5rem);
+        color: var(--white);
+        margin-bottom: 24px;
+      }
+      .about-story-content p {
+        color: var(--text-muted);
+        font-size: 0.92rem;
+        line-height: 1.85;
+        margin-bottom: 16px;
+      }
+
+      /* ─── WHY US ─────────────────────────────────────── */
+      .why-us {
+        padding: 80px 0;
+        background: var(--bg2);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      .why-us-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 24px;
+        margin-top: 48px;
+      }
+      @media (max-width: 640px) {
+        .why-us-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .why-card {
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        padding: 32px;
+        border-radius: var(--radius);
+        transition: border-color var(--transition);
+      }
+      .why-card:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+      }
+      .why-card-icon {
+        font-size: 2rem;
+        margin-bottom: 16px;
+        display: block;
+      }
+      .why-card h3 {
+        color: var(--white);
+        font-size: 1.1rem;
+        margin-bottom: 10px;
+      }
+      .why-card p {
+        color: var(--text-muted);
+        font-size: 0.87rem;
+        line-height: 1.7;
+      }
+
+      /* ─── TEAM ───────────────────────────────────────── */
+      .team-section {
+        padding: 80px 0;
+      }
+      .team-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 32px;
+        margin-top: 48px;
+      }
+      @media (max-width: 768px) {
+        .team-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 480px) {
+        .team-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .team-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        padding: 32px 24px;
+        text-align: center;
+        border-radius: var(--radius);
+        transition:
+          border-color var(--transition),
+          transform 0.2s;
+      }
+      .team-card:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+        transform: translateY(-3px);
+      }
+      .team-avatar {
+        width: 80px;
+        height: 80px;
+        background: linear-gradient(135deg, #1a1510, #0d0a07);
+        border: 1px solid rgba(201, 169, 110, 0.3);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2rem;
+        margin: 0 auto 16px;
+      }
+      .team-name {
+        color: var(--white);
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .team-role {
+        color: var(--gold);
+        font-size: 0.75rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      .team-bio {
+        color: var(--text-muted);
+        font-size: 0.82rem;
+        line-height: 1.65;
+      }
+
+      /* ─── TIMELINE ──────────────────────────────────── */
+      .timeline-section {
+        padding: 80px 0;
+        background: var(--bg);
+      }
+      .timeline {
+        position: relative;
+        max-width: 720px;
+        margin: 48px auto 0;
+        padding-left: 40px;
+      }
+      .timeline::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: linear-gradient(
+          to bottom,
+          transparent,
+          rgba(201, 169, 110, 0.5),
+          rgba(201, 169, 110, 0.5),
+          transparent
+        );
+      }
+      .timeline-item {
+        position: relative;
+        margin-bottom: 48px;
+      }
+      .timeline-item:last-child {
+        margin-bottom: 0;
+      }
+      .timeline-dot {
+        position: absolute;
+        left: -48px;
+        top: 4px;
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--gold);
+        background: var(--bg);
+        border-radius: 50%;
+      }
+      .timeline-year {
+        font-size: 0.7rem;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 8px;
+      }
+      .timeline-title {
+        color: var(--white);
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .timeline-text {
+        color: var(--text-muted);
+        font-size: 0.87rem;
+        line-height: 1.7;
+      }
+
+      /* ─── PROCESS SECTION ────────────────────────────── */
+      .process-section {
+        padding: 80px 0;
+        background: var(--bg2);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      .process-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+        margin-top: 48px;
+      }
+      @media (max-width: 768px) {
+        .process-grid {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 24px;
+        }
+      }
+      @media (max-width: 480px) {
+        .process-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .process-step {
+        padding: 32px 24px;
+        border-right: 1px solid var(--border);
+        text-align: center;
+      }
+      .process-step:last-child {
+        border-right: none;
+      }
+      @media (max-width: 768px) {
+        .process-step {
+          border-right: none;
+        }
+      }
+      .process-num {
+        font-family: 'Playfair Display', serif;
+        font-size: 3rem;
+        color: rgba(201, 169, 110, 0.15);
+        line-height: 1;
+        margin-bottom: 16px;
+      }
+      .process-title {
+        color: var(--white);
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+      .process-text {
+        color: var(--text-muted);
+        font-size: 0.82rem;
+        line-height: 1.65;
+      }
+
+      /* ─── TESTIMONIALS ──────────────────────────────── */
+      .testimonials-section {
+        padding: 80px 0;
+        background: var(--bg);
+        border-top: 1px solid var(--border);
+      }
+      .testimonials-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 24px;
+        margin-top: 48px;
+      }
+      @media (max-width: 768px) {
+        .testimonials-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .testimonial-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        padding: 28px;
+        border-radius: var(--radius);
+        transition: border-color var(--transition);
+      }
+      .testimonial-card:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+      }
+      .testimonial-stars {
+        color: var(--gold);
+        font-size: 1rem;
+        margin-bottom: 12px;
+        letter-spacing: 2px;
+      }
+      .testimonial-text {
+        color: var(--text-muted);
+        font-size: 0.87rem;
+        line-height: 1.7;
+        margin-bottom: 16px;
+        font-style: italic;
+      }
+      .testimonial-author {
+        font-size: 0.75rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      .testimonial-model {
+        font-size: 0.75rem;
+        color: var(--gold);
+        margin-top: 4px;
+      }
+      .testimonials-skeleton {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 24px;
+      }
+      @media (max-width: 768px) {
+        .testimonials-skeleton {
+          grid-template-columns: 1fr;
+        }
+      }
+      .skeleton-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        padding: 28px;
+        border-radius: var(--radius);
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      .skeleton-line {
+        height: 12px;
+        background: var(--bg3);
+        border-radius: 4px;
+        margin-bottom: 10px;
+      }
+      .skeleton-line.short {
+        width: 60%;
+      }
+      .skeleton-line.medium {
+        width: 85%;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.6;
+        }
+      }
+
+      /* ─── CTA ────────────────────────────────────────── */
+      .about-cta {
+        padding: 80px 0 100px;
+        background: linear-gradient(135deg, #0f0c08, #1a1410, #0f0c08);
+        border-top: 1px solid var(--border);
+        text-align: center;
+      }
+      .about-cta h2 {
+        font-size: clamp(1.6rem, 3vw, 2.5rem);
+        color: var(--white);
+        margin-bottom: 16px;
+      }
+      .about-cta p {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        max-width: 480px;
+        margin: 0 auto 40px;
+        line-height: 1.8;
+      }
+      .about-cta-btns {
+        display: flex;
+        gap: 16px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+    </style>
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+
+    <!-- NAVBAR -->
+    <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links" role="list">
+          <a href="/catalog.html">Модели</a>
+          <a href="/pricing.html">Цены</a>
+          <a href="/about.html" style="color: var(--gold)">О нас</a>
+          <a href="/reviews.html">Отзывы</a>
+          <a href="/faq.html">FAQ</a>
+          <a href="/contact.html">Контакты</a>
+          <a href="/favorites.html" aria-label="Избранное" style="font-size: 1.1rem"
+            ><span aria-hidden="true">❤️</span></a
+          >
+          <button
+            onclick="DarkMode.toggle()"
+            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            aria-label="Переключить тему"
+            title="Dark/Light mode"
+            style="background: none; border: none; cursor: pointer; padding: 4px 8px"
+          >
+            <span class="dark-mode-icon" style="font-size: 1.1rem">🌙</span>
+          </button>
+          <a
+            id="whatsapp-btn"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            style="
+              display: none;
+              align-items: center;
+              gap: 6px;
+              background: #25d366;
+              color: #fff;
+              padding: 6px 14px;
+              border-radius: 8px;
+              font-size: 0.8rem;
+              font-weight: 600;
+              transition: background 0.2s;
+              text-decoration: none;
+            "
+            onmouseover="this.style.background = '#1da851'"
+            onmouseout="this.style.background = '#25D366'"
+          >
+            <svg style="width: 16px; height: 16px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+              <path
+                d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+              />
+            </svg>
+            <span>WhatsApp</span>
+          </a>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
+        </div>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- MOBILE MENU -->
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/pricing.html">Цены</a>
+      <a href="/about.html" style="color: var(--gold)">О нас</a>
+      <a href="/reviews.html">Отзывы</a>
+      <a href="/faq.html">FAQ</a>
+      <a href="/contact.html">Контакты</a>
+      <a href="/favorites.html">❤️ Избранное</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+    </nav>
+
+    <!-- HERO -->
+    <section class="about-hero" id="main-content" tabindex="-1" role="main">
+      <div class="about-hero-inner container">
+        <div class="section-tag" style="margin-bottom: 20px">О компании</div>
+        <h1>Nevesty <em>Models</em></h1>
+        <p>
+          Профессиональное модельное агентство с 2014 года. Мы создаём незабываемые образы и обеспечиваем безупречный
+          сервис для каждого клиента
+        </p>
+      </div>
+    </section>
+
+    <!-- STATS BAR -->
+    <section class="about-stats" aria-label="Статистика агентства">
+      <div class="container">
+        <div class="about-stats-grid">
+          <div class="about-stat">
+            <span class="about-stat-num" data-count="200">200+</span>
+            <span class="about-stat-label">Моделей в базе</span>
+          </div>
+          <div class="about-stat">
+            <span class="about-stat-num" data-count="500">500+</span>
+            <span class="about-stat-label">Успешных заказов</span>
+          </div>
+          <div class="about-stat">
+            <span class="about-stat-num">10</span>
+            <span class="about-stat-label">Лет на рынке</span>
+          </div>
+          <div class="about-stat">
+            <span class="about-stat-num">15+</span>
+            <span class="about-stat-label">Городов присутствия</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STORY -->
+    <section class="about-story" aria-labelledby="story-heading">
+      <div class="container">
+        <div class="about-story-grid">
+          <div class="about-story-visual">
+            <div class="story-visual-main">
+              <span class="story-visual-letter">N</span>
+            </div>
+            <div class="story-badge">
+              <strong>10</strong>
+              <span>лет опыта</span>
+            </div>
+          </div>
+          <div class="about-story-content">
+            <div class="section-tag" style="margin-bottom: 20px">Наша история</div>
+            <h2 id="story-heading">С 2014 года мы делаем мир красивее</h2>
+            <p id="about-text-main">
+              Мы — модельное агентство полного цикла, работающее с 2014 года. За это время мы стали одним из ведущих
+              агентств страны, объединив в своей базе более 200 профессиональных моделей.
+            </p>
+            <p>
+              Наша миссия — обеспечить клиентам безупречный сервис и предоставить моделей, которые идеально
+              соответствуют концепции и задачам проекта.
+            </p>
+            <p>
+              Каждая модель проходит строгий кастинг и профессиональную подготовку. Мы гарантируем пунктуальность,
+              профессионализм и результат.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TIMELINE -->
+    <section class="timeline-section" aria-labelledby="timeline-heading">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-tag">Вехи развития</div>
+          <h2 id="timeline-heading">Наша история</h2>
+          <div class="gold-line"></div>
+        </div>
+        <div class="timeline">
+          <div class="timeline-item">
+            <div class="timeline-dot"></div>
+            <div class="timeline-year">2014 — Основание</div>
+            <div class="timeline-title">Рождение агентства</div>
+            <p class="timeline-text">
+              Основана команда из трёх специалистов, началось формирование первой базы из 20 моделей. Первые успешные
+              проекты в Москве и Санкт-Петербурге.
+            </p>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-dot"></div>
+            <div class="timeline-year">2017 — Рост</div>
+            <div class="timeline-title">Выход в регионы</div>
+            <p class="timeline-text">
+              Расширение на 8 городов России. База моделей выросла до 80 человек. Запуск собственного онлайн-каталога и
+              системы бронирования.
+            </p>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-dot"></div>
+            <div class="timeline-year">2021 — Масштаб</div>
+            <div class="timeline-title">Международные проекты</div>
+            <p class="timeline-text">
+              Первые выезды в ОАЭ и Дубай. Партнёрство с крупными fashion-домами. База превысила 150 профессиональных
+              моделей.
+            </p>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-dot"></div>
+            <div class="timeline-year">2024 — Сегодня</div>
+            <div class="timeline-title">Лидер рынка</div>
+            <p class="timeline-text">
+              Более 200 моделей, 500+ успешных проектов, 15+ городов присутствия. Запуск нового цифрового сервиса для
+              мгновенного бронирования и онлайн-каталога.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW WE WORK -->
+    <section class="process-section" aria-labelledby="process-heading">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-tag">Наш процесс</div>
+          <h2 id="process-heading">Как мы работаем</h2>
+          <div class="gold-line"></div>
+        </div>
+        <div class="process-grid">
+          <div class="process-step">
+            <div class="process-num">01</div>
+            <div class="process-title">Заявка</div>
+            <p class="process-text">
+              Вы оставляете заявку онлайн или пишете менеджеру. Описываете задачу, дату, формат мероприятия.
+            </p>
+          </div>
+          <div class="process-step">
+            <div class="process-num">02</div>
+            <div class="process-title">Подбор</div>
+            <p class="process-text">
+              В течение 1 часа менеджер предлагает подходящих моделей из нашей базы с учётом ваших требований.
+            </p>
+          </div>
+          <div class="process-step">
+            <div class="process-num">03</div>
+            <div class="process-title">Согласование</div>
+            <p class="process-text">
+              Выбираете модель, подписываем договор, фиксируем все детали и стоимость. Никаких скрытых платежей.
+            </p>
+          </div>
+          <div class="process-step">
+            <div class="process-num">04</div>
+            <div class="process-title">Результат</div>
+            <p class="process-text">
+              Модель прибывает вовремя и профессионально выполняет задачу. Менеджер на связи весь день мероприятия.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WHY US -->
+    <section class="why-us" aria-labelledby="why-heading">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-tag">Наши преимущества</div>
+          <h2 id="why-heading">Почему выбирают нас</h2>
+          <div class="gold-line"></div>
+        </div>
+        <div class="why-us-grid">
+          <div class="why-card">
+            <span class="why-card-icon">🏆</span>
+            <h3>10 лет экспертизы</h3>
+            <p>
+              Работаем с 2014 года. За это время накопили уникальный опыт и выстроили систему, гарантирующую результат
+              для каждого клиента.
+            </p>
+          </div>
+          <div class="why-card">
+            <span class="why-card-icon">⚡</span>
+            <h3>Быстрый подбор</h3>
+            <p>
+              Менеджер свяжется с вами в течение часа. В срочных случаях подбор и подтверждение модели возможны за 2–4
+              часа.
+            </p>
+          </div>
+          <div class="why-card">
+            <span class="why-card-icon">✅</span>
+            <h3>Гарантия замены</h3>
+            <p>
+              Если модель не сможет приехать — мы немедленно предложим равноценную замену. Надёжность обеспечена базой в
+              200+ моделей.
+            </p>
+          </div>
+          <div class="why-card">
+            <span class="why-card-icon">🌍</span>
+            <h3>Работаем по всей стране</h3>
+            <p>
+              Присутствуем в 15+ городах. Выезды за рубеж, включая Дубай и страны ОАЭ, согласовываются индивидуально.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TEAM -->
+    <section class="team-section" aria-labelledby="team-heading">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-tag">Наша команда</div>
+          <h2 id="team-heading">Люди за кулисами</h2>
+          <div class="gold-line"></div>
+          <p>Профессионалы, которые каждый день работают для вашего успеха</p>
+        </div>
+        <div class="team-grid">
+          <div class="team-card">
+            <div class="team-avatar">👑</div>
+            <div class="team-name">Анна Соколова</div>
+            <div class="team-role">Директор агентства</div>
+            <p class="team-bio">
+              10 лет в индустрии моды. Основала агентство в 2014 году. Эксперт по кастингу и стратегическому развитию.
+            </p>
+          </div>
+          <div class="team-card">
+            <div class="team-avatar">🎯</div>
+            <div class="team-name">Мария Петрова</div>
+            <div class="team-role">Старший менеджер</div>
+            <p class="team-bio">
+              Более 300 успешно организованных мероприятий. Отвечает за качество обслуживания клиентов и координацию
+              моделей.
+            </p>
+          </div>
+          <div class="team-card">
+            <div class="team-avatar">✨</div>
+            <div class="team-name">Екатерина Иванова</div>
+            <div class="team-role">Кастинг-директор</div>
+            <p class="team-bio">
+              Профессиональный фотограф и стилист. Отвечает за отбор, обучение и подготовку моделей к съёмкам.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TESTIMONIALS -->
+    <section class="testimonials-section" aria-labelledby="testimonials-heading">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-tag">Отзывы клиентов</div>
+          <h2 id="testimonials-heading">Что говорят о нас</h2>
+          <div class="gold-line"></div>
+          <p>Мнения реальных клиентов о работе с нашим агентством</p>
+        </div>
+        <div id="testimonials-container">
+          <!-- Skeleton loading -->
+          <div class="testimonials-skeleton">
+            <div class="skeleton-card">
+              <div class="skeleton-line short"></div>
+              <div class="skeleton-line"></div>
+              <div class="skeleton-line medium"></div>
+              <div class="skeleton-line short"></div>
+            </div>
+            <div class="skeleton-card">
+              <div class="skeleton-line short"></div>
+              <div class="skeleton-line"></div>
+              <div class="skeleton-line medium"></div>
+              <div class="skeleton-line short"></div>
+            </div>
+            <div class="skeleton-card">
+              <div class="skeleton-line short"></div>
+              <div class="skeleton-line"></div>
+              <div class="skeleton-line medium"></div>
+              <div class="skeleton-line short"></div>
+            </div>
+          </div>
+        </div>
+        <div style="text-align: center; margin-top: 40px">
+          <a href="/reviews.html" class="btn-outline">Все отзывы</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="about-cta">
+      <div class="container">
+        <div class="section-tag" style="margin-bottom: 16px">Готовы начать?</div>
+        <h2>Создайте незабываемый проект</h2>
+        <p>Свяжитесь с нами сегодня и получите персональную консультацию. Менеджер ответит в течение часа.</p>
+        <div class="about-cta-btns">
+          <a href="/booking.html" class="btn-primary">Оформить заявку</a>
+          <a href="/contact.html" class="btn-outline">Связаться с нами</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer" role="contentinfo">
+      <div class="container">
+        <div class="footer-grid">
+          <div class="footer-brand">
+            <div class="nav-logo" style="font-family: 'Playfair Display', serif; font-size: 1.3rem; color: var(--gold)">
+              NEVESTY <span style="color: var(--text)">MODELS</span>
+            </div>
+            <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
+          </div>
+          <div class="footer-col">
+            <h4>Агентство</h4>
+            <a href="/catalog.html">Каталог моделей</a>
+            <a href="/pricing.html">Цены</a>
+            <a href="/about.html">О нас</a>
+            <a href="/contact.html">Контакты</a>
+          </div>
+          <div class="footer-col">
+            <h4>Клиентам</h4>
+            <a href="/booking.html">Оформить заявку</a>
+            <a href="/order-status.html">Статус заявки</a>
+            <a href="/catalog.html">Выбрать модель</a>
+            <a href="/faq.html">FAQ</a>
+            <a href="/privacy.html">Конфиденциальность</a>
+          </div>
+          <div class="footer-col">
+            <h4>Связаться</h4>
+            <a href="tel:+78005550000">+7 (800) 555-00-00</a>
+            <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
+            <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
+            <a href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>© 2024 Nevesty Models. Все права защищены.</p>
+          <div class="footer-socials" aria-label="Социальные сети">
+            <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"
+              ><span aria-hidden="true">📸</span></a
+            >
+            <a href="https://t.me/nevesty_models" target="_blank" aria-label="Telegram"
+              ><span aria-hidden="true">✈</span></a
+            >
+            <a href="https://vk.com/nevesty_models" target="_blank" aria-label="ВКонтакте"
+              ><span aria-hidden="true">V</span></a
+            >
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/main.js" defer></script>
+    <script src="/js/darkmode.js"></script>
+    <script src="/js/analytics.js" defer></script>
+    <script>
+      // Load about text, contact info, dynamic stats, and reviews from APIs
+      Promise.all([
+        fetch('/api/settings/public')
+          .then(r => r.json())
+          .catch(() => ({})),
+        fetch('/api/stats/public')
+          .then(r => r.json())
+          .catch(() => ({})),
+        fetch('/api/reviews/recent?limit=3')
+          .then(r => r.json())
+          .catch(() => []),
+      ])
+        .then(([d, stats, reviews]) => {
+          // About text
+          const aboutText = d.about_text || d.about;
+          if (aboutText) {
+            const mainEl = document.getElementById('about-text-main');
+            const aliasEl = document.getElementById('about-text');
+            if (mainEl) mainEl.textContent = aboutText;
+            if (aliasEl) aliasEl.textContent = aboutText;
+          }
+
+          // WhatsApp button
+          if (d.contacts_whatsapp) {
+            const waNum = d.contacts_whatsapp.replace(/\D/g, '');
+            const btn = document.getElementById('whatsapp-btn');
+            if (btn) {
+              btn.href = `https://wa.me/${waNum}`;
+              btn.style.display = 'flex';
+            }
+            const floatWa = document.getElementById('float-wa-link');
+            if (floatWa) {
+              floatWa.href = `https://wa.me/${waNum}`;
+              document.getElementById('float-whatsapp').style.display = 'block';
+            }
+          }
+
+          // Dynamic stats from /api/stats/public
+          if (stats && (stats.total_models || stats.completed_orders || stats.cities_count)) {
+            const statNums = document.querySelectorAll('.about-stat-num');
+            const statLabels = document.querySelectorAll('.about-stat-label');
+            if (statNums.length >= 4) {
+              if (stats.total_models > 0) {
+                statNums[0].textContent = stats.total_models + '+';
+              }
+              if (stats.completed_orders > 0) {
+                statNums[1].textContent = stats.completed_orders + '+';
+              }
+              if (stats.cities_count > 0) {
+                statNums[3].textContent = stats.cities_count + '+';
+              }
+            }
+          }
+
+          // Testimonials from /api/reviews/recent
+          const container = document.getElementById('testimonials-container');
+          if (container && reviews && reviews.length > 0) {
+            const stars = n => '★'.repeat(Math.min(5, Math.max(0, n))) + '☆'.repeat(Math.max(0, 5 - n));
+            const cards = reviews
+              .map(r => {
+                const text = r.text ? r.text.slice(0, 300) + (r.text.length > 300 ? '…' : '') : '';
+                const authorName = r.client_name || r.author_name || 'Клиент';
+                const modelLine = r.model_name ? `<div class="testimonial-model">Модель: ${r.model_name}</div>` : '';
+                return `<div class="testimonial-card">
           <div class="testimonial-stars">${stars(r.rating || 5)}</div>
           <p class="testimonial-text">"${text}"</p>
           <div class="testimonial-author">${authorName}</div>
           ${modelLine}
         </div>`;
-      }).join('');
-      container.innerHTML = `<div class="testimonials-grid">${cards}</div>`;
-    } else if (container) {
-      // No reviews yet — hide section gracefully
-      container.closest('.testimonials-section').style.display = 'none';
-    }
+              })
+              .join('');
+            container.innerHTML = `<div class="testimonials-grid">${cards}</div>`;
+          } else if (container) {
+            // No reviews yet — hide section gracefully
+            container.closest('.testimonials-section').style.display = 'none';
+          }
 
-    // Update Schema.org Organization markup with dynamic data
-    const schemaEl = document.querySelector('script[type="application/ld+json"]');
-    if (schemaEl) {
-      try {
-        const schemas = JSON.parse(schemaEl.textContent);
-        const org = schemas.find(s => s['@type'] === 'Organization');
-        if (org) {
-          if (d.contacts_email) org.email = d.contacts_email;
-          if (d.contacts_phone) org.telephone = d.contacts_phone;
-          if (d.site_url) org.url = d.site_url;
-          if (d.agency_name) org.name = d.agency_name;
-          schemaEl.textContent = JSON.stringify(schemas, null, 2);
-        }
-      } catch (_) {}
-    }
-  }).catch(() => {});
-  </script>
+          // Update Schema.org Organization markup with dynamic data
+          const schemaEl = document.querySelector('script[type="application/ld+json"]');
+          if (schemaEl) {
+            try {
+              const schemas = JSON.parse(schemaEl.textContent);
+              const org = schemas.find(s => s['@type'] === 'Organization');
+              if (org) {
+                if (d.contacts_email) org.email = d.contacts_email;
+                if (d.contacts_phone) org.telephone = d.contacts_phone;
+                if (d.site_url) org.url = d.site_url;
+                if (d.agency_name) org.name = d.agency_name;
+                schemaEl.textContent = JSON.stringify(schemas, null, 2);
+              }
+            } catch (_) {}
+          }
+        })
+        .catch(() => {});
+    </script>
 
-  <!-- Floating WhatsApp Button -->
-  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
-    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
-       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
-       onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
-      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      Написать в WhatsApp
-    </a>
-  </div>
-  <script src="/js/cookie-consent.js" defer></script>
-</body>
+    <!-- Floating WhatsApp Button -->
+    <div id="float-whatsapp" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 400">
+      <a
+        id="float-wa-link"
+        href="#"
+        target="_blank"
+        rel="noopener"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #25d366;
+          color: #fff;
+          padding: 14px 20px;
+          border-radius: 50px;
+          box-shadow: 0 4px 16px rgba(37, 211, 102, 0.4);
+          text-decoration: none;
+          font-size: 0.85rem;
+          font-weight: 600;
+          transition: all 0.2s;
+        "
+        onmouseover="this.style.background = '#1da851'"
+        onmouseout="this.style.background = '#25D366'"
+      >
+        <svg style="width: 22px; height: 22px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+          <path
+            d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+          />
+        </svg>
+        Написать в WhatsApp
+      </a>
+    </div>
+    <script src="/js/cookie-consent.js" defer></script>
+  </body>
 </html>
