@@ -625,6 +625,7 @@ router.post('/admin/models', auth, upload.fields([{ name: 'photo_main', maxCount
       [sanitize(name, 100), +age || null, +height || null, +weight || null, +bust || null, +waist || null, +hips || null, sanitize(shoe_size, 10), sanitize(hair_color, 50), sanitize(eye_color, 50), sanitize(bio, 2000), photo_main, JSON.stringify(photos), sanitize(instagram, 100), category || 'fashion', available === '1' ? 1 : 0]
     );
     cache.delByPrefix('catalog:'); // invalidate catalog cache
+    await logAudit(req, 'create', 'model', result.id, { name: sanitize(name, 100) });
     res.json({ id: result.id });
   } catch (e) { next(e); }
 });
@@ -667,6 +668,7 @@ router.delete('/admin/models/:id', auth, async (req, res, next) => {
     photos.forEach(p => deleteFile(p));
     await run('DELETE FROM models WHERE id = ?', [id]);
     cache.delByPrefix('catalog:'); // invalidate catalog cache
+    await logAudit(req, 'delete', 'model', id, { name: m.name });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -795,6 +797,10 @@ router.post('/orders', strictLimiter, async (req, res, next) => {
     for (const adminEmail of adminEmails) {
       mailer.sendManagerNotification(adminEmail, orderForEmail).catch(e => console.error('[mailer] manager notification error:', e.message));
     }
+
+    // ─── CRM webhooks (non-blocking) ─────────────────────────────────────────
+    const { notifyCRM } = require('../services/crm');
+    notifyCRM('order.created', { ...s, order_number, id: result.id }, getSetting).catch(() => {});
 
     res.json({ order_number, id: result.id });
   } catch (e) { next(e); }
@@ -1251,6 +1257,8 @@ router.put('/settings', auth, async (req, res, next) => {
     'payment_provider', 'payment_min_amount', 'payment_prepay_percent',
     // FAQ
     'faq_items',
+    // CRM webhooks
+    'crm_webhook_url', 'crm_webhook_secret', 'amocrm_webhook_url', 'amocrm_api_key', 'bitrix24_webhook_url',
   ];
   try {
     const body = req.body;
@@ -1319,6 +1327,7 @@ router.put('/admin/reviews/:id/approve', auth, async (req, res, next) => {
     if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
     const newApproved = review.approved ? 0 : 1;
     await run('UPDATE reviews SET approved = ? WHERE id = ?', [newApproved, id]);
+    await logAudit(req, 'toggle_approve', 'review', id, { approved: newApproved });
     res.json({ ok: true, approved: newApproved });
   } catch (e) { next(e); }
 });
@@ -1332,6 +1341,15 @@ router.delete('/admin/reviews/:id', auth, async (req, res, next) => {
     await run('DELETE FROM reviews WHERE id = ?', [id]);
     res.json({ ok: true });
   } catch (e) { next(e); }
+});
+
+// ─── Admin audit log ─────────────────────────────────────────────────────────
+router.get('/admin/audit-log', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(200, parseInt(req.query.limit) || 50);
+    const rows = await query('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?', [limit]);
+    res.json(rows);
+  } catch(e) { next(e); }
 });
 
 // ─── Order detail (admin, with model join) ───────────────────────────────────
@@ -1420,6 +1438,12 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
       }
     }
     await logAudit(req, 'status_change', 'order', id, { from: order.prev_status, to: status });
+    // ─── CRM webhooks on status change (non-blocking) ────────────────────────
+    if (status !== order.prev_status) {
+      const { notifyCRM } = require('../services/crm');
+      const updatedOrder = await get('SELECT o.*, m.name as model_name FROM orders o LEFT JOIN models m ON o.model_id=m.id WHERE o.id=?', [id]);
+      notifyCRM('order.status_changed', updatedOrder, getSetting).catch(() => {});
+    }
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'DB error' }); }
 });

@@ -310,9 +310,11 @@
     if (!name || name.length < 2) { err.textContent = 'Введите имя'; err.style.display = 'block'; return; }
     if (!phone || phone.replace(/\D/g,'').length < 7) { err.textContent = 'Введите корректный номер телефона'; err.style.display = 'block'; return; }
     try {
+      let csrfToken = '';
+      try { const ct = await fetch('/api/csrf-token'); const cd = await ct.json(); csrfToken = cd.token || ''; } catch {}
       const r = await fetch('/api/quick-booking', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
         body: JSON.stringify({ client_name: name, client_phone: phone })
       });
       const d = await r.json();

@@ -182,6 +182,7 @@
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('notif')"      id="tab-notif">🔔 Уведомления</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('email')"      id="tab-email">📧 Email</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('payment')"   id="tab-payment">💳 Оплата</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('crm')"       id="tab-crm">🔗 CRM</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('password')"   id="tab-password">🔑 Пароль</button>
         <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('faq')"         id="tab-faq">❓ FAQ</button>
       </div>
@@ -857,6 +858,55 @@ ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre>
             </div>
 
             <button class="btn btn-md btn-gold" id="btnSavePayment" onclick="savePaymentSettings(this)">Сохранить настройки оплаты</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: CRM ══════════════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-crm">
+        <div class="section-card" style="max-width:600px">
+          <div class="section-card-header"><div class="section-card-title">🔗 CRM-интеграции</div></div>
+          <div class="section-card-body padded">
+
+            <div style="background:#e8f5e9;border:1px solid #4caf50;border-radius:8px;padding:14px;margin-bottom:20px;font-size:0.82rem;color:#2e7d32;line-height:1.6;">
+              При создании заявки и смене статуса система автоматически отправит данные во все настроенные CRM. Оставьте поля пустыми, чтобы отключить интеграцию.
+            </div>
+
+            <div class="admin-form-group">
+              <label class="admin-label">Общий вебхук URL</label>
+              <input class="admin-input" type="url" id="crm_webhook_url" placeholder="https://your-crm.com/webhook" />
+              <div class="field-note">Универсальный вебхук — POST с JSON {event, order, timestamp}</div>
+            </div>
+
+            <div class="admin-form-group">
+              <label class="admin-label">Секрет вебхука</label>
+              <input class="admin-input" type="password" id="crm_webhook_secret" placeholder="my-secret-token" autocomplete="off" />
+              <div class="field-note">Передаётся в заголовке <code>X-Webhook-Secret</code> для верификации</div>
+            </div>
+
+            <hr style="border:none;border-top:1px solid var(--border);margin:20px 0;" />
+
+            <div class="admin-form-group">
+              <label class="admin-label">AmoCRM — вебхук URL</label>
+              <input class="admin-input" type="url" id="amocrm_webhook_url" placeholder="https://your-domain.amocrm.ru/api/v4/leads" />
+              <div class="field-note">URL для создания сделки в AmoCRM при новой заявке</div>
+            </div>
+
+            <div class="admin-form-group">
+              <label class="admin-label">AmoCRM — API ключ</label>
+              <input class="admin-input" type="password" id="amocrm_api_key" placeholder="Bearer token из личного кабинета AmoCRM" autocomplete="off" />
+              <div class="field-note">Передаётся в заголовке <code>Authorization: Bearer ...</code></div>
+            </div>
+
+            <hr style="border:none;border-top:1px solid var(--border);margin:20px 0;" />
+
+            <div class="admin-form-group">
+              <label class="admin-label">Bitrix24 — вебхук URL</label>
+              <input class="admin-input" type="url" id="bitrix24_webhook_url" placeholder="https://your-domain.bitrix24.ru/rest/1/xxxx/" />
+              <div class="field-note">URL входящего вебхука из раздела «Разработчикам» → «Входящие вебхуки». Должен заканчиваться на <code>/</code></div>
+            </div>
+
+            <button class="btn btn-md btn-gold" id="btnSaveCRM" onclick="saveCRMSettings(this)">Сохранить настройки CRM</button>
           </div>
         </div>
       </div>
@@ -1573,6 +1623,50 @@ function validateFaqJson() {
   }
   setTimeout(function() { if (status) status.textContent = ''; }, 4000);
 }
+
+/* ─── Save: CRM settings ──────────────────────────────────── */
+async function saveCRMSettings(btn) {
+  btn.disabled = true; btn.textContent = 'Сохраняем...';
+  try {
+    const body = {
+      crm_webhook_url:     document.getElementById('crm_webhook_url')?.value || '',
+      crm_webhook_secret:  document.getElementById('crm_webhook_secret')?.value || '',
+      amocrm_webhook_url:  document.getElementById('amocrm_webhook_url')?.value || '',
+      amocrm_api_key:      document.getElementById('amocrm_api_key')?.value || '',
+      bitrix24_webhook_url: document.getElementById('bitrix24_webhook_url')?.value || '',
+    };
+    const resp = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    _admin.toast('Настройки CRM сохранены', 'success');
+  } catch(e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Сохранить настройки CRM';
+  }
+}
+
+// Extend loadSettings to also load CRM fields
+const _origLoadSettingsForCRM = loadSettings;
+loadSettings = async function() {
+  await _origLoadSettingsForCRM();
+  try {
+    const resp = await fetch('/api/admin/settings', { headers: h });
+    const data = await resp.json();
+    function val(key) {
+      if (Array.isArray(data)) { const f = data.find(s => s.key === key); return f ? f.value : ''; }
+      return data[key] !== undefined ? data[key] : '';
+    }
+    const crmFields = ['crm_webhook_url', 'crm_webhook_secret', 'amocrm_webhook_url', 'amocrm_api_key', 'bitrix24_webhook_url'];
+    crmFields.forEach(function(key) {
+      const el = document.getElementById(key);
+      if (el) el.value = val(key) || '';
+    });
+  } catch {}
+};
 
 /* ─── Init ────────────────────────────────────────────────── */
 loadSettings();

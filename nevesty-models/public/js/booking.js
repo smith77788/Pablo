@@ -656,6 +656,15 @@
       .replace(/'/g, '&#39;');
   }
 
+  /* ─── CSRF token helper ──────────────────────────── */
+  async function getCsrfToken() {
+    try {
+      const r = await fetch('/api/csrf-token');
+      const d = await r.json();
+      return d.token || '';
+    } catch { return ''; }
+  }
+
   /* ─── Submit ──────────────────────────────────────── */
   async function submit() {
     const btn = document.getElementById('submitBtn');
@@ -663,6 +672,8 @@
     btn.disabled = true;
     btn.textContent = 'Отправка...';
     try {
+      const csrfToken = await getCsrfToken();
+
       const body = {
         client_name:     state.client_name,
         client_phone:    state.client_phone,
@@ -687,7 +698,11 @@
         }
       }
 
-      const result = await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) });
+      const result = await apiFetch('/orders', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { 'x-csrf-token': csrfToken },
+      });
 
       clearDraft();
 

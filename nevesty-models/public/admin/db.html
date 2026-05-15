@@ -91,6 +91,14 @@
         </div>
       </div>
 
+      <!-- Audit log -->
+      <div class="section-card" style="margin-bottom:24px">
+        <div class="section-card-header"><div class="section-card-title">🔍 Аудит лог</div></div>
+        <div id="audit-log" class="section-card-body">
+          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -151,6 +159,30 @@ async function loadData() {
   } catch (e) {
     _admin.toast('Ошибка загрузки: ' + e.message, 'error');
   }
+
+  // Audit log (separate fetch — non-blocking)
+  try {
+    const auditRows = await _admin.apiFetch('/admin/audit-log?limit=50');
+    const auditCont = document.getElementById('audit-log');
+    if (!auditRows || !auditRows.length) {
+      auditCont.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет записей аудита</div>';
+    } else {
+      auditCont.innerHTML = `<table class="data-table">
+        <thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>ID</th><th>Детали</th></tr></thead>
+        <tbody>
+          ${auditRows.map(r => `
+            <tr>
+              <td style="font-size:0.78rem;color:var(--text-dim);white-space:nowrap">${(r.created_at || '').slice(0, 19).replace('T', ' ')}</td>
+              <td style="color:var(--gold)">${_admin.escapeHtml(r.admin_username || r.admin_chat_id || '—')}</td>
+              <td style="font-weight:500">${_admin.escapeHtml(r.action || '—')}</td>
+              <td style="color:var(--text-muted)">${_admin.escapeHtml(r.entity || r.entity_type || '—')}</td>
+              <td style="color:var(--text-dim)">${r.entity_id != null ? r.entity_id : '—'}</td>
+              <td style="font-size:0.78rem;color:var(--text-dim);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_admin.escapeHtml(r.details || '')}">${_admin.escapeHtml(r.details || '—')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+    }
+  } catch (_) {}
 }
 
 loadData();

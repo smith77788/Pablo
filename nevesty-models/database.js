@@ -447,6 +447,13 @@ async function initDatabase() {
   // Schema version 9 — indexes and schema versioning
   await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (9, 'indexes and schema versioning')`).catch(() => {});
 
+  // Audit log extended columns (migration v10)
+  await run(`ALTER TABLE audit_log ADD COLUMN admin_username TEXT`).catch(() => {});
+  await run(`ALTER TABLE audit_log ADD COLUMN entity TEXT`).catch(() => {});
+  await run(`ALTER TABLE audit_log ADD COLUMN ip TEXT`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (10, 'audit_log extended columns for admin actions')`).catch(() => {});
+
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);
   if (!admin) {
