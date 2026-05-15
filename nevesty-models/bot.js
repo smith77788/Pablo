@@ -3760,8 +3760,51 @@ function initBot(app) {
 
     // ── Booking: cancel
     if (data === 'bk_cancel') {
+      clearTimeout(sessionTimers.get(chatId));
+      sessionTimers.delete(chatId);
       await clearSession(chatId);
       return isAdmin(chatId) ? showAdminMenu(chatId, q.from.first_name) : showMainMenu(chatId, q.from.first_name);
+    }
+
+    // ── Session: continue / restart
+    if (data === 'session_continue') {
+      return safeSend(chatId,
+        '✅ Хорошо, продолжаем с того места где остановились\\.',
+        { parse_mode: 'MarkdownV2' }
+      );
+    }
+    if (data === 'session_restart') {
+      clearTimeout(sessionTimers.get(chatId));
+      sessionTimers.delete(chatId);
+      await clearSession(chatId);
+      return safeSend(chatId,
+        '🔄 Начинаем заново\\. Используйте кнопки меню для навигации\\.',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '📝 Оформить заявку', callback_data: 'bk_start'   }],
+            [{ text: '⚡ Быстрая заявка',   callback_data: 'bk_quick'   }],
+            [{ text: '🏠 Главное меню',     callback_data: 'main_menu'  }],
+          ]}
+        }
+      );
+    }
+
+    // ── Booking: back navigation
+    if (data === 'bk_back_to_name') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep3Name(chatId, d);
+    }
+    if (data === 'bk_back_to_phone') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep3Phone(chatId, d);
+    }
+    if (data === 'bk_back_to_email') {
+      const session = await getSession(chatId);
+      const d = sessionData(session);
+      return bkStep3Email(chatId, d);
     }
 
     // ── Admin orders list: adm_orders_{status}_{page}
@@ -5006,6 +5049,8 @@ function initBot(app) {
     if (state !== 'idle' && session?.updated_at) {
       const updatedAt = new Date(session.updated_at).getTime();
       if (!isNaN(updatedAt) && Date.now() - updatedAt > SESSION_TIMEOUT_MS) {
+        clearTimeout(sessionTimers.get(chatId));
+        sessionTimers.delete(chatId);
         await clearSession(chatId);
         await safeSend(chatId,
           '⏰ Сессия истекла\\. Действие отменено\\.', {
@@ -5017,6 +5062,11 @@ function initBot(app) {
           ? showAdminMenu(chatId, msg.from?.first_name)
           : showMainMenu(chatId, msg.from?.first_name);
       }
+    }
+
+    // ── Reset inactivity timer for active booking states ──────────────────────
+    if (ACTIVE_BOOKING_STATES.has(state)) {
+      resetSessionTimer(chatId);
     }
 
     // ── ReplyKeyboard кнопки клиента ─────────────────────────────────────────
@@ -6693,6 +6743,7 @@ async function removeFavorite(chatId, modelId) {
 
 async function bkQuickStart(chatId) {
   await setSession(chatId, 'bk_quick_name', {});
+  resetSessionTimer(chatId);
   return safeSend(chatId,
     `⚡ *Быстрая заявка*\n\nМенеджер свяжется с вами и уточнит все детали\\.\n\n📝 Шаг 1/2 — Введите ваше имя:`, {
       parse_mode: 'MarkdownV2',
@@ -6706,6 +6757,7 @@ async function bkQuickStart(chatId) {
 
 async function bkQuickPhone(chatId, data) {
   await setSession(chatId, 'bk_quick_phone', data);
+  resetSessionTimer(chatId);
   return safeSend(chatId,
     `⚡ *Быстрая заявка*\n\n✅ Имя: *${esc(data.quick_name)}*\n\n📝 Шаг 2/2 — Введите номер телефона:`, {
       parse_mode: 'MarkdownV2',
