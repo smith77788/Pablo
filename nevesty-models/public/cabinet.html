@@ -97,6 +97,16 @@
     }
     .cabinet-logout-btn:hover { border-color: var(--gold); color: var(--gold); }
 
+    /* ── WS indicator ── */
+    .ws-indicator {
+      font-size: 0.7rem; color: var(--text-dim); white-space: nowrap;
+      display: flex; align-items: center; gap: 4px; margin-left: 8px;
+      transition: color 0.3s;
+    }
+    .ws-indicator.online  { color: #4ade80; }
+    .ws-indicator.offline { color: #f87171; }
+    .ws-indicator.error   { color: #fbbf24; }
+
     /* ── Order card ── */
     .order-card {
       background: var(--bg2); border: 1px solid var(--border);
@@ -398,6 +408,7 @@
               <div class="cabinet-user-count" id="userCount">0 заявок</div>
             </div>
           </div>
+          <span id="ws-indicator" class="ws-indicator" aria-live="polite" aria-label="Статус соединения" title="Статус WebSocket соединения">Подключение...</span>
           <button class="cabinet-logout-btn" onclick="Cabinet.logout()">Сменить номер</button>
         </div>
 
@@ -410,7 +421,7 @@
         </div>
 
         <!-- Orders container -->
-        <div id="ordersContainer" role="list" aria-label="Список заявок"></div>
+        <div id="ordersContainer" role="list" aria-label="Список заявок" aria-live="polite" aria-relevant="additions text"></div>
       </div>
 
     </div>
@@ -514,15 +525,28 @@
       in_progress: 'В работе', completed: 'Завершена', cancelled: 'Отменена',
     };
 
+    function _wsSetIndicator(state) {
+      const el = document.getElementById('ws-indicator');
+      if (!el) return;
+      el.className = 'ws-indicator ' + state;
+      if (state === 'online')  { el.textContent = '🟢 Онлайн'; }
+      else if (state === 'offline') { el.textContent = '🔴 Нет соединения'; }
+      else if (state === 'error')   { el.textContent = '⚠️ Ошибка'; }
+      else                          { el.textContent = 'Подключение...'; el.className = 'ws-indicator'; }
+    }
+
     function wsConnect(phone10) {
       _wsPhone = phone10;
       if (_ws) { try { _ws.close(); } catch (_e) {} }
       if (_wsReconnectTimer) { clearTimeout(_wsReconnectTimer); _wsReconnectTimer = null; }
 
+      _wsSetIndicator('');
+
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       _ws = new WebSocket(`${proto}//${location.host}`);
 
       _ws.onopen = () => {
+        _wsSetIndicator('online');
         _ws.send(JSON.stringify({ type: 'subscribe', phone: '7' + phone10 }));
       };
 
@@ -538,18 +562,24 @@
       };
 
       _ws.onclose = () => {
+        _wsSetIndicator('offline');
         if (_wsPhone) {
           _wsReconnectTimer = setTimeout(() => wsConnect(_wsPhone), 3000);
         }
       };
 
-      _ws.onerror = () => { try { _ws.close(); } catch (_e) {} };
+      _ws.onerror = () => {
+        _wsSetIndicator('error');
+        try { _ws.close(); } catch (_e) {}
+      };
     }
 
     function wsDisconnect() {
       _wsPhone = null;
       if (_wsReconnectTimer) { clearTimeout(_wsReconnectTimer); _wsReconnectTimer = null; }
       if (_ws) { try { _ws.close(); } catch (_e) {} _ws = null; }
+      const el = document.getElementById('ws-indicator');
+      if (el) { el.textContent = ''; el.className = 'ws-indicator'; }
     }
 
     function wsUpdateOrderCard(orderId, newStatus) {
