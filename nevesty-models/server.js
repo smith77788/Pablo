@@ -356,7 +356,7 @@ app.get('/og-image/:modelId', async (req, res) => {
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   maxAge: '7d',
   etag: true,
-  setHeaders: (res, filePath) => {
+  setHeaders: (res, _path) => {
     // Images served from /uploads — 1 week cache
     res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
   }
@@ -455,10 +455,18 @@ async function buildHealthResponse() {
   try {
     // WAL checkpoint in passive mode (doesn't block reads/writes)
     const walRow = await dbGet('PRAGMA wal_checkpoint(PASSIVE)');
+    let walSizeKb = 0;
+    try {
+      const walPath = (process.env.DB_PATH || './data/nevesty.db') + '-wal';
+      if (require('fs').existsSync(walPath)) {
+        walSizeKb = Math.round(require('fs').statSync(walPath).size / 1024);
+      }
+    } catch (_) {}
     walStatus = {
       mode: 'WAL',
       total_pages: walRow ? walRow.log : 0,
       moved_pages: walRow ? walRow.ckpt : 0,
+      wal_size_kb: walSizeKb,
     };
   } catch (e) {
     walStatus = { error: e.message };

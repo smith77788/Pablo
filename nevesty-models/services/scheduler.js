@@ -2,22 +2,22 @@
 const { execFile } = require('child_process');
 const path = require('path');
 
-let _db;
 let _bot;
 let _adminIds;
 let _intervals = [];
 
-function init({ db, bot, adminIds }) {
-  _db = db;
+function init({ db: _db, bot, adminIds }) {
   _bot = bot;
   _adminIds = (adminIds || '').split(',').filter(Boolean);
+  void _db; // kept for API compatibility
 }
 
-function notify(msg) {
+function _notify(msg) {
   if (!_bot || !_adminIds.length) return;
   for (const id of _adminIds) {
     _bot.sendMessage(id, msg).catch(() => {});
   }
+  void msg;
 }
 
 // ─── Parse simple cron-like schedule ──────────────────────────────────────────
@@ -106,21 +106,28 @@ async function sendEventReminders() {
 }
 
 async function runVacuum() {
-  if (!_db) return;
   try {
-    const { run } = _db;
-    if (run) {
-      await run('VACUUM');
-      console.log('[scheduler] VACUUM completed');
-    }
+    const { run } = require('../database');
+    await run('PRAGMA wal_checkpoint(TRUNCATE)');
+    await run('VACUUM');
+    console.log('[scheduler] Weekly VACUUM + WAL checkpoint completed');
   } catch (e) {
     console.error('[scheduler] VACUUM error:', e.message);
   }
 }
 
+async function runWalCheckpoint() {
+  try {
+    const { run } = require('../database');
+    await run('PRAGMA wal_checkpoint(PASSIVE)');
+  } catch (e) {
+    console.error('[scheduler] WAL checkpoint error:', e.message);
+  }
+}
+
 function runBackup() {
   const script = path.join(__dirname, '../scripts/backup.sh');
-  execFile('bash', [script], { timeout: 60000 }, (err, stdout, stderr) => {
+  execFile('bash', [script], { timeout: 60000 }, (err, stdout) => {
     if (err) {
       console.error('[scheduler] Backup error:', err.message);
     } else {
@@ -129,7 +136,7 @@ function runBackup() {
   });
 }
 
-function scheduleOnce(fn, delayMs, name) {
+function _scheduleOnce(fn, delayMs, name) {
   const timer = setTimeout(() => {
     fn();
     // Re-schedule for next occurrence
@@ -161,11 +168,24 @@ function scheduleWeekly(fn, name, dayOfWeek, hour = 3, minute = 0) {
   _intervals.push(timer);
 }
 
+// Schedule a task every N hours
+function scheduleEvery(fn, name, intervalHours) {
+  const intervalMs = intervalHours * 60 * 60 * 1000;
+  const timer = setInterval(() => {
+    console.log(`[scheduler] Running: ${name}`);
+    fn();
+  }, intervalMs);
+  if (timer.unref) timer.unref();
+  _intervals.push(timer);
+  console.log(`[scheduler] ${name} scheduled every ${intervalHours}h`);
+}
+
 function start() {
   scheduleDaily(runBackup, 'DB backup', 1, 0);
-  scheduleWeekly(runVacuum, 'SQLite VACUUM', 0, 3, 0); // Sunday 03:00
+  scheduleWeekly(runVacuum, 'SQLite VACUUM + WAL TRUNCATE', 0, 3, 0); // Sunday 03:00
+  scheduleEvery(runWalCheckpoint, 'WAL checkpoint (PASSIVE)', 6);
   scheduleDaily(sendEventReminders, 'Event reminders', 9, 0);
-  console.log('[scheduler] Started: backup (daily 01:00), VACUUM (Sunday 03:00), event reminders (daily 09:00)');
+  console.log('[scheduler] Started: backup (daily 01:00), VACUUM (Sunday 03:00), WAL checkpoint (every 6h), event reminders (daily 09:00)');
 }
 
 function stop() {
