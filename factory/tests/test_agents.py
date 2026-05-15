@@ -605,6 +605,189 @@ class TestExperimentSystem:
         assert isinstance(prompt, str)
 
 
+class TestFinanceDepartment:
+    """Tests for the standalone finance_department agents (heuristic, no API calls)."""
+
+    # ── RevenueForecaster ──────────────────────────────────────────
+
+    def test_forecast_monthly_revenue_returns_required_keys(self):
+        from factory.agents.finance_department import RevenueForecaster
+        agent = RevenueForecaster()
+        history = [{"revenue": 100_000}, {"revenue": 120_000}, {"revenue": 110_000}]
+        result = agent.forecast_monthly_revenue(history)
+        assert isinstance(result, dict)
+        for key in ("forecast", "confidence", "trend", "basis_months"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_forecast_monthly_revenue_empty_history(self):
+        from factory.agents.finance_department import RevenueForecaster
+        agent = RevenueForecaster()
+        result = agent.forecast_monthly_revenue([])
+        assert result["forecast"] == 0.0
+        assert result["confidence"] == "low"
+        assert result["basis_months"] == 0
+
+    def test_forecast_monthly_revenue_trend_growing(self):
+        from factory.agents.finance_department import RevenueForecaster
+        agent = RevenueForecaster()
+        history = [{"revenue": 100_000}, {"revenue": 120_000}, {"revenue": 145_000}]
+        result = agent.forecast_monthly_revenue(history)
+        assert result["trend"] == "growing"
+
+    def test_calculate_growth_rate_returns_float(self):
+        from factory.agents.finance_department import RevenueForecaster
+        agent = RevenueForecaster()
+        rate = agent.calculate_growth_rate([100.0, 110.0, 121.0])
+        assert isinstance(rate, float)
+        assert abs(rate - 0.10) < 0.01  # ~10% growth
+
+    def test_calculate_growth_rate_single_element(self):
+        from factory.agents.finance_department import RevenueForecaster
+        agent = RevenueForecaster()
+        assert agent.calculate_growth_rate([500.0]) == 0.0
+
+    # ── CostOptimizer ──────────────────────────────────────────────
+
+    def test_analyze_cost_structure_returns_required_keys(self):
+        from factory.agents.finance_department import CostOptimizer
+        agent = CostOptimizer()
+        expenses = {"marketing": 30_000, "hosting": 5_000, "accounting": 3_000}
+        result = agent.analyze_cost_structure(expenses)
+        assert isinstance(result, dict)
+        for key in ("total", "breakdown", "suggestions"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_analyze_cost_structure_suggestions_is_list(self):
+        from factory.agents.finance_department import CostOptimizer
+        agent = CostOptimizer()
+        result = agent.analyze_cost_structure({"rent": 50_000, "misc": 2_000})
+        assert isinstance(result["suggestions"], list)
+        assert len(result["suggestions"]) >= 1
+
+    def test_analyze_cost_structure_high_spend_flagged(self):
+        from factory.agents.finance_department import CostOptimizer
+        agent = CostOptimizer()
+        # marketing = 80% of total → should be flagged
+        result = agent.analyze_cost_structure({"marketing": 80_000, "hosting": 10_000, "misc": 10_000})
+        suggestion_text = " ".join(result["suggestions"]).lower()
+        assert "marketing" in suggestion_text
+
+    def test_suggest_pricing_adjustments_returns_list(self):
+        from factory.agents.finance_department import CostOptimizer
+        agent = CostOptimizer()
+        stats = [
+            {"name": "Anna", "bookings": 50, "current_rate": 20_000, "avg_rating": 4.8},
+            {"name": "Maria", "bookings": 5, "current_rate": 15_000, "avg_rating": 3.5},
+        ]
+        result = agent.suggest_pricing_adjustments(stats)
+        assert isinstance(result, list)
+        assert len(result) == 2
+
+    def test_suggest_pricing_adjustments_high_demand_increases_rate(self):
+        from factory.agents.finance_department import CostOptimizer
+        agent = CostOptimizer()
+        stats = [
+            {"name": "TopModel", "bookings": 100, "current_rate": 20_000, "avg_rating": 4.9},
+            {"name": "LowModel", "bookings": 1, "current_rate": 20_000, "avg_rating": 3.0},
+        ]
+        result = agent.suggest_pricing_adjustments(stats)
+        top = next(r for r in result if r["name"] == "TopModel")
+        low = next(r for r in result if r["name"] == "LowModel")
+        assert top["suggested_rate"] > top["current_rate"]
+        assert low["suggested_rate"] < low["current_rate"]
+
+    # ── PricingStrategist ──────────────────────────────────────────
+
+    def test_calculate_optimal_price_returns_required_keys(self):
+        from factory.agents.finance_department import PricingStrategist
+        agent = PricingStrategist()
+        result = agent.calculate_optimal_price("corporate", {"avg_rating": 4.5, "bookings": 30})
+        assert isinstance(result, dict)
+        for key in ("suggested_price", "min_price", "max_price", "rationale"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_calculate_optimal_price_suggested_within_range(self):
+        from factory.agents.finance_department import PricingStrategist
+        agent = PricingStrategist()
+        result = agent.calculate_optimal_price("wedding", {"avg_rating": 4.0, "bookings": 10})
+        assert isinstance(result["suggested_price"], float)
+        # suggested should be positive and within a reasonable range
+        assert result["suggested_price"] > 0
+
+    def test_get_seasonal_multiplier_returns_float(self):
+        from factory.agents.finance_department import PricingStrategist
+        agent = PricingStrategist()
+        mult = agent.get_seasonal_multiplier(12)  # December — peak
+        assert isinstance(mult, float)
+        assert mult >= 1.0
+
+    def test_get_seasonal_multiplier_december_peak(self):
+        from factory.agents.finance_department import PricingStrategist
+        agent = PricingStrategist()
+        dec = agent.get_seasonal_multiplier(12)
+        aug = agent.get_seasonal_multiplier(8)
+        assert dec > aug  # December should be pricier than August
+
+    # ── BudgetPlanner ──────────────────────────────────────────────
+
+    def test_create_monthly_budget_returns_required_keys(self):
+        from factory.agents.finance_department import BudgetPlanner
+        agent = BudgetPlanner()
+        result = agent.create_monthly_budget(200_000.0, {"hosting": 5_000, "accounting": 3_000})
+        assert isinstance(result, dict)
+        for key in ("total_budget", "allocations", "surplus"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_create_monthly_budget_allocations_is_dict(self):
+        from factory.agents.finance_department import BudgetPlanner
+        agent = BudgetPlanner()
+        result = agent.create_monthly_budget(150_000.0, {"hosting": 5_000})
+        assert isinstance(result["allocations"], dict)
+        assert len(result["allocations"]) >= 1
+
+    def test_create_monthly_budget_zero_revenue(self):
+        from factory.agents.finance_department import BudgetPlanner
+        agent = BudgetPlanner()
+        result = agent.create_monthly_budget(0.0, {"hosting": 5_000})
+        assert result["total_budget"] == 0.0
+
+    def test_evaluate_budget_variance_returns_required_keys(self):
+        from factory.agents.finance_department import BudgetPlanner
+        agent = BudgetPlanner()
+        planned = {"marketing": 30_000, "hosting": 5_000}
+        actual = {"marketing": 35_000, "hosting": 4_800}
+        result = agent.evaluate_budget_variance(planned, actual)
+        assert isinstance(result, dict)
+        for key in ("variances", "total_variance", "status"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_evaluate_budget_variance_over_budget_status(self):
+        from factory.agents.finance_department import BudgetPlanner
+        agent = BudgetPlanner()
+        planned = {"marketing": 10_000}
+        actual = {"marketing": 12_000}  # 20% over
+        result = agent.evaluate_budget_variance(planned, actual)
+        assert result["status"] == "over_budget"
+
+    def test_evaluate_budget_variance_on_budget_status(self):
+        from factory.agents.finance_department import BudgetPlanner
+        agent = BudgetPlanner()
+        planned = {"marketing": 10_000, "hosting": 5_000}
+        actual = {"marketing": 10_200, "hosting": 4_900}  # <5% variance
+        result = agent.evaluate_budget_variance(planned, actual)
+        assert result["status"] == "on_budget"
+
+    def test_evaluate_budget_variance_variances_contain_categories(self):
+        from factory.agents.finance_department import BudgetPlanner
+        agent = BudgetPlanner()
+        planned = {"a": 1_000, "b": 2_000}
+        actual = {"a": 1_100, "b": 1_800}
+        result = agent.evaluate_budget_variance(planned, actual)
+        assert "a" in result["variances"]
+        assert "b" in result["variances"]
+        assert result["variances"]["a"]["variance"] == pytest.approx(100.0)
+
+
 class TestAgentRequiredAttributes:
     """Verify each agent has required class attributes: department, role, name."""
 

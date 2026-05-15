@@ -2008,6 +2008,92 @@ def run_cycle() -> dict:
         logger.error("Phase 21 error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 22 — FINANCE DEPARTMENT ANALYSIS (heuristic, every cycle)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n💰 PHASE 22: FINANCE DEPARTMENT ANALYSIS")
+    try:
+        from factory.agents.finance_department import (
+            RevenueForecaster as _FD_Forecaster,
+            CostOptimizer as _FD_Optimizer,
+            PricingStrategist as _FD_Strategist,
+            BudgetPlanner as _FD_Planner,
+        )
+        import sqlite3 as _sqlite3_22
+        import datetime as _dt22
+
+        _forecaster22 = _FD_Forecaster()
+        _optimizer22 = _FD_Optimizer()
+        _strategist22 = _FD_Strategist()
+        _planner22 = _FD_Planner()
+
+        # --- Collect order data from nevesty-models DB ---
+        _orders_history22: list = []
+        _bot_db_22 = "/home/user/Pablo/nevesty-models/data.db"
+        if os.path.exists(_bot_db_22):
+            try:
+                _conn22 = _sqlite3_22.connect(_bot_db_22)
+                _conn22.row_factory = _sqlite3_22.Row
+                _rows22 = _conn22.execute(
+                    "SELECT strftime('%Y-%m', created_at) AS month, "
+                    "SUM(COALESCE(budget,0)) AS revenue, COUNT(*) AS cnt "
+                    "FROM orders WHERE status='completed' "
+                    "GROUP BY month ORDER BY month DESC LIMIT 6"
+                ).fetchall()
+                _orders_history22 = [dict(r) for r in _rows22]
+                _conn22.close()
+            except Exception as _db22_e:
+                logger.warning("[Phase22] DB read error: %s", _db22_e)
+
+        # --- Revenue forecast ---
+        _revenue_forecast22 = _forecaster22.forecast_monthly_revenue(_orders_history22)
+        logger.info(
+            "[Phase22] Revenue forecast: %.0f (%s, %s)",
+            _revenue_forecast22.get("forecast", 0),
+            _revenue_forecast22.get("trend"),
+            _revenue_forecast22.get("confidence"),
+        )
+
+        # --- Cost structure analysis (use illustrative fixed costs if no real data) ---
+        _fixed_costs22: dict = {
+            "hosting": 5_000,
+            "sms_notifications": 2_000,
+            "accounting": 3_000,
+        }
+        _cost_analysis22 = _optimizer22.analyze_cost_structure(_fixed_costs22)
+        logger.info("[Phase22] Cost analysis: total=%.0f, suggestions=%d",
+                    _cost_analysis22.get("total", 0), len(_cost_analysis22.get("suggestions", [])))
+
+        # --- Seasonal pricing check ---
+        _current_month22 = _dt22.date.today().month
+        _seasonal_mult22 = _strategist22.get_seasonal_multiplier(_current_month22)
+        logger.info("[Phase22] Seasonal multiplier for month %d: %.2f", _current_month22, _seasonal_mult22)
+
+        # --- Budget plan ---
+        _forecast_val22 = _revenue_forecast22.get("forecast", 150_000.0)
+        _budget22 = _planner22.create_monthly_budget(
+            revenue_forecast=_forecast_val22,
+            fixed_costs=_fixed_costs22,
+        )
+        logger.info("[Phase22] Budget plan: total=%.0f, surplus=%.0f",
+                    _budget22.get("total_budget", 0), _budget22.get("surplus", 0))
+
+        results["phases"]["finance_department"] = {
+            "revenue_forecast": _revenue_forecast22.get("forecast", 0),
+            "trend": _revenue_forecast22.get("trend"),
+            "confidence": _revenue_forecast22.get("confidence"),
+            "cost_total": _cost_analysis22.get("total", 0),
+            "cost_suggestions": len(_cost_analysis22.get("suggestions", [])),
+            "seasonal_multiplier": _seasonal_mult22,
+            "budget_surplus": _budget22.get("surplus", 0),
+        }
+        summary_lines.append(
+            f"💰 Finance Dept (Phase 22): forecast={_revenue_forecast22.get('forecast', 0):.0f}₽, "
+            f"trend={_revenue_forecast22.get('trend')}, season={_seasonal_mult22:.2f}x"
+        )
+    except Exception as e:
+        logger.error("Phase 22 Finance Department error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)
