@@ -475,6 +475,37 @@ async function buildHealthResponse() {
   let usersCount = 0;
   let ordersByStatus = {};
 
+  // Backup status — read from disk (scheduler writes files asynchronously)
+  let backupStatus = { status: 'unknown', last_backup: null, count: 0 };
+  try {
+    const _fs = require('fs');
+    const _path = require('path');
+    const backupDir = process.env.BACKUP_DIR || _path.join(__dirname, 'backups');
+    if (_fs.existsSync(backupDir)) {
+      const backupFiles = _fs
+        .readdirSync(backupDir)
+        .filter(f => f.startsWith('nevesty_') && f.endsWith('.db'))
+        .sort();
+      const count = backupFiles.length;
+      if (count > 0) {
+        const latest = backupFiles[count - 1];
+        const stat = _fs.statSync(_path.join(backupDir, latest));
+        backupStatus = {
+          status: 'ok',
+          last_backup: stat.mtime.toISOString(),
+          last_backup_file: latest,
+          count,
+        };
+      } else {
+        backupStatus = { status: 'no_backups_yet', last_backup: null, count: 0 };
+      }
+    } else {
+      backupStatus = { status: 'no_backups_yet', last_backup: null, count: 0 };
+    }
+  } catch (_) {
+    backupStatus = { status: 'error', last_backup: null, count: 0 };
+  }
+
   try {
     const dbPing = Date.now();
     await dbGet('SELECT 1 as ok');
@@ -663,7 +694,9 @@ async function buildHealthResponse() {
       mailer: { status: process.env.SMTP_HOST ? 'ok' : 'disabled' },
       scheduler: { status: 'ok' },
       cache: Object.keys(cacheStats).length ? { status: 'ok', ...cacheStats } : { status: 'disabled' },
+      backup: backupStatus,
     },
+    backup: backupStatus,
     // Structured bot health (matches task spec)
     botHealth: {
       status: botInstance ? 'ok' : 'disabled',
