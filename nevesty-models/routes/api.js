@@ -5587,7 +5587,7 @@ router.get('/admin/analytics/funnel', auth, async (req, res, next) => {
   }
 });
 
-// ─── Analytics: Top models ────────────────────────────────────────────────────
+// ─── Analytics: Top models (canonical) — supports ?days=30&limit=5 ───────────
 router.get('/admin/analytics/top-models', auth, async (req, res, next) => {
   try {
     const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
@@ -5914,6 +5914,63 @@ router.get('/admin/analytics/revenue-by-month', auth, async (req, res, next) => 
       []
     );
     res.json({ months: rows || [] });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── Analytics: Revenue Forecast (linear regression) ─────────────────────────
+router.get('/admin/analytics/forecast', auth, async (req, res, next) => {
+  try {
+    // Get last 6 months of revenue data
+    const months = await query(`
+      SELECT
+        strftime('%Y-%m', created_at) as month,
+        COALESCE(SUM(CAST(budget AS REAL)), 0) as revenue,
+        COUNT(*) as orders
+      FROM orders
+      WHERE status IN ('confirmed','completed')
+        AND created_at >= datetime('now', '-6 months')
+      GROUP BY month
+      ORDER BY month ASC
+    `);
+
+    if (months.length < 2) {
+      return res.json({
+        ok: true,
+        forecast: null,
+        message: 'Недостаточно данных для прогноза (нужно минимум 2 месяца)',
+      });
+    }
+
+    // Simple linear regression (least squares)
+    const n = months.length;
+    const xs = months.map((_, i) => i);
+    const ys = months.map(m => m.revenue);
+    const sumX = xs.reduce((a, b) => a + b, 0);
+    const sumY = ys.reduce((a, b) => a + b, 0);
+    const sumXY = xs.reduce((s, x, i) => s + x * ys[i], 0);
+    const sumX2 = xs.reduce((s, x) => s + x * x, 0);
+    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    const intercept = (sumY - slope * sumX) / n;
+    const nextX = n; // next month index
+    const forecastRevenue = Math.max(0, Math.round(intercept + slope * nextX));
+
+    // Forecast next month label
+    const lastMonth = months[months.length - 1].month;
+    const [yr, mo] = lastMonth.split('-').map(Number);
+    const nextMo = mo === 12 ? `${yr + 1}-01` : `${yr}-${String(mo + 1).padStart(2, '0')}`;
+
+    res.json({
+      ok: true,
+      forecast: {
+        month: nextMo,
+        revenue: forecastRevenue,
+        trend: slope > 0 ? 'growing' : slope < 0 ? 'declining' : 'stable',
+        trend_pct: months[0].revenue > 0 ? Math.round((slope / months[0].revenue) * 100) : 0,
+      },
+      history: months,
+    });
   } catch (e) {
     next(e);
   }
@@ -7390,29 +7447,8 @@ router.get('/admin/analytics/overview', auth, async (req, res, next) => {
   }
 });
 
-// GET /api/admin/analytics/top-models?limit=5
-router.get('/admin/analytics/top-models', auth, async (req, res, next) => {
-  const limit = Math.min(parseInt(req.query.limit) || 5, 20);
-  try {
-    const models = await query(
-      `SELECT m.id, m.name, m.photo_main, m.category,
-              COUNT(o.id) as order_count,
-              COALESCE(SUM(CASE WHEN o.status IN ('completed','confirmed') THEN CAST(o.budget AS REAL) ELSE 0 END), 0) as total_revenue,
-              AVG(r.rating) as avg_rating
-       FROM models m
-       LEFT JOIN orders o ON o.model_id = m.id
-       LEFT JOIN reviews r ON r.model_id = m.id AND r.approved = 1
-       WHERE m.archived = 0
-       GROUP BY m.id
-       ORDER BY order_count DESC, total_revenue DESC
-       LIMIT ?`,
-      [limit]
-    );
-    res.json({ ok: true, models });
-  } catch (e) {
-    next(e);
-  }
-});
+// NOTE: duplicate /admin/analytics/top-models route removed (was shadowing the
+// canonical route at line ~5591 which supports ?days and ?limit query params).
 
 // GET /api/admin/analytics/revenue-chart?period=30
 router.get('/admin/analytics/revenue-chart', auth, async (req, res, next) => {
