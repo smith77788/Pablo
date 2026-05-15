@@ -469,6 +469,7 @@ async function buildHealthResponse() {
   let totalOrders = 0;
   let modelsCount = 0;
   let usersCount = 0;
+  let tableCount = 0;
   let ordersByStatus = {};
 
   // Backup status — read from disk (scheduler writes files asynchronously)
@@ -508,20 +509,23 @@ async function buildHealthResponse() {
     dbLatencyMs = Date.now() - dbPing;
     // Fetch DB metrics in parallel
     const today = new Date().toISOString().slice(0, 10);
-    const [todayRow, activeRow, modelsRow, totalOrdersRow, pageCountRow, pageSizeRow, usersRow] = await Promise.all([
-      dbGet('SELECT COUNT(*) as n FROM orders WHERE date(created_at)=?', [today]),
-      dbGet("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','confirmed','in_progress')"),
-      dbGet('SELECT COUNT(*) as n FROM models WHERE available=1'),
-      dbGet('SELECT COUNT(*) as n FROM orders'),
-      dbGet('PRAGMA page_count'),
-      dbGet('PRAGMA page_size'),
-      dbGet('SELECT COUNT(*) as n FROM telegram_sessions'),
-    ]);
+    const [todayRow, activeRow, modelsRow, totalOrdersRow, pageCountRow, pageSizeRow, usersRow, tablesRow] =
+      await Promise.all([
+        dbGet('SELECT COUNT(*) as n FROM orders WHERE date(created_at)=?', [today]),
+        dbGet("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','confirmed','in_progress')"),
+        dbGet('SELECT COUNT(*) as n FROM models WHERE available=1'),
+        dbGet('SELECT COUNT(*) as n FROM orders'),
+        dbGet('PRAGMA page_count'),
+        dbGet('PRAGMA page_size'),
+        dbGet('SELECT COUNT(*) as n FROM telegram_sessions'),
+        dbGet("SELECT COUNT(*) as n FROM sqlite_master WHERE type='table'"),
+      ]);
     ordersToday = todayRow?.n || 0;
     activeOrders = activeRow?.n || 0;
     modelsCount = modelsRow?.n || 0;
     totalOrders = totalOrdersRow?.n || 0;
     usersCount = usersRow?.n || 0;
+    tableCount = tablesRow?.n || 0;
 
     // DB size calculation
     const pageCount = pageCountRow?.page_count || 0;
@@ -659,6 +663,8 @@ async function buildHealthResponse() {
       orders_today: ordersToday,
     },
     db: {
+      status: dbStatus,
+      tables: tableCount,
       models: modelsCount,
       orders: totalOrders,
       users: usersCount,
@@ -703,6 +709,7 @@ async function buildHealthResponse() {
       last_run: factoryLastCycle,
       factory_last_run: factoryLastCycle,
       hours_since_run: factoryHoursSince,
+      last_cycle_ago_hours: factoryHoursSince,
       staleSinceHours: factoryStale ? factoryHoursSince : 0,
       stale: factoryStale,
       factory_alert: factoryStale,

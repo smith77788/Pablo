@@ -394,6 +394,23 @@ function runVacuumScript() {
   });
 }
 
+// ─── Memory usage monitor ─────────────────────────────────────────────────────
+function checkMemoryUsage() {
+  try {
+    const mem = process.memoryUsage();
+    const heapMb = Math.round(mem.heapUsed / 1024 / 1024);
+    const rssMb = Math.round(mem.rss / 1024 / 1024);
+    const threshold = parseInt(process.env.MEMORY_ALERT_MB || '500');
+    if (heapMb > threshold) {
+      const msg = `⚠️ Высокое использование памяти: heap ${heapMb} МБ (RSS ${rssMb} МБ). Порог: ${threshold} МБ`;
+      console.warn('[scheduler]', msg);
+      _notify(msg);
+    }
+  } catch (e) {
+    console.error('[scheduler] checkMemoryUsage error:', e.message);
+  }
+}
+
 function _scheduleOnce(fn, delayMs, name) {
   const timer = setTimeout(() => {
     fn();
@@ -472,8 +489,10 @@ function start() {
   scheduleEvery(checkWalSize, 'WAL size monitor (every 1h)', 1);
   // Scheduled broadcasts processor: check every minute
   scheduleEveryMinutes(processScheduledBroadcasts, 'Scheduled broadcasts processor', 1);
+  // Memory usage monitor: check every hour
+  scheduleEvery(checkMemoryUsage, 'Memory monitor', 1);
   console.log(
-    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), WAL size monitor (every 1h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h), scheduled broadcasts processor (every 1min)'
+    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), WAL size monitor (every 1h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h), scheduled broadcasts processor (every 1min), memory monitor (every 1h)'
   );
 }
 
