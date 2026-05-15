@@ -13,6 +13,9 @@ const {
   MODEL_HAIR_COLORS,
   MODEL_EYE_COLORS,
   DURATIONS,
+  MAX_MESSAGE_LENGTH,
+  MAX_CAPTION_LENGTH,
+  SESSION_TIMEOUT_MS,
 } = require('./utils/constants');
 let mailer;
 try { mailer = require('./services/mailer'); } catch { mailer = null; }
@@ -61,7 +64,7 @@ function resetSessionTimer(chatId) {
       }
     } catch {}
     sessionTimers.delete(chatId);
-  }, 30 * 60 * 1000); // 30 minutes
+  }, SESSION_TIMEOUT_MS);
   sessionTimers.set(chatId, timer);
 }
 
@@ -100,9 +103,8 @@ async function getAdminChatIds() {
 }
 
 async function safeSend(chatId, text, opts = {}) {
-  // Telegram hard limit is 4096 chars — truncate gracefully
-  const MAX = 4096;
-  if (text && text.length > MAX) text = text.slice(0, MAX - 3) + '…';
+  // Telegram hard limit — truncate gracefully
+  if (text && text.length > MAX_MESSAGE_LENGTH) text = text.slice(0, MAX_MESSAGE_LENGTH - 3) + '…';
   try {
     return await bot.sendMessage(chatId, text, opts);
   } catch (e) {
@@ -115,9 +117,9 @@ async function safeSend(chatId, text, opts = {}) {
 }
 
 async function safePhoto(chatId, photo, opts = {}) {
-  // Telegram caption limit is 1024 chars
-  if (opts.caption && opts.caption.length > 1024) {
-    opts = { ...opts, caption: opts.caption.slice(0, 1021) + '…' };
+  // Telegram caption limit
+  if (opts.caption && opts.caption.length > MAX_CAPTION_LENGTH) {
+    opts = { ...opts, caption: opts.caption.slice(0, MAX_CAPTION_LENGTH - 3) + '…' };
   }
   try { return await bot.sendPhoto(chatId, photo, opts); }
   catch { return safeSend(chatId, opts.caption || '📷', { parse_mode: opts.parse_mode }); }
@@ -698,13 +700,13 @@ async function showModel(chatId, modelId) {
       avail = '✅ Доступна для бронирования';
     }
     const star    = m.featured ? '⭐ ' : '';
-    // Caption ≤ 1024 chars (Telegram limit for media)
+    // Caption must fit Telegram's media caption limit
     const bioEsc  = m.bio ? esc(m.bio) : '';
     const bioFits = bioEsc.slice(0, 180) + (bioEsc.length > 180 ? '…' : '');
     const breadcrumb = `_🏠 Главная › 💃 Каталог › ${esc(m.name)}_`;
     const captionParts = [breadcrumb, `*${esc(catBanner)}*`, `${star}*${esc(m.name)}*`, '', ...lines, '', avail];
     if (bioFits) captionParts.push('', `_${bioFits}_`);
-    const caption = captionParts.join('\n').slice(0, 1020);
+    const caption = captionParts.join('\n').slice(0, MAX_CAPTION_LENGTH - 4);
 
     const contactBtn = m.phone || m.instagram
       ? [{ text: '📞 Написать менеджеру', callback_data: `model_contact_${m.id}` }]
@@ -757,14 +759,14 @@ async function showModel(chatId, modelId) {
     }
 
     if (galleryUrls.length >= 2) {
-      // Медиагруппа — caption только на первом фото (лимит 1024 chars)
+      // Медиагруппа — caption только на первом фото
       const totalPhotos = galleryUrls.length;
       const media = galleryUrls.slice(0, 8).map((url, i) => {
         const item = { type: 'photo', media: url };
         if (i === 0) {
           // Add photo count to caption header
-          const galCaption = caption.slice(0, 950) + `\n\n📸 Фото: 1 из ${totalPhotos}`;
-          item.caption = galCaption.slice(0, 1020);
+          const galCaption = caption.slice(0, MAX_CAPTION_LENGTH - 74) + `\n\n📸 Фото: 1 из ${totalPhotos}`;
+          item.caption = galCaption.slice(0, MAX_CAPTION_LENGTH - 4);
           item.parse_mode = 'MarkdownV2';
         }
         return item;
@@ -6073,7 +6075,6 @@ function initBot(app) {
   });
 
   // ── Message handler ────────────────────────────────────────────────────────
-  const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
   bot.on('message', async (msg) => {
     if (!msg.text || msg.text.startsWith('/')) return;
     const chatId  = msg.chat.id;

@@ -45,6 +45,18 @@ const MODEL_EYE_COLORS  = ['Голубые', 'Серые', 'Зелёные', 'К
 
 const DURATIONS = ['1', '2', '3', '4', '6', '8', '12'];
 
+// Telegram message length limits
+const MAX_MESSAGE_LENGTH = 4096;
+const MAX_CAPTION_LENGTH = 1024;
+
+// Session timeout
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+// Pagination defaults
+const CATALOG_PAGE_SIZE  = 5;
+const ORDERS_PAGE_SIZE   = 5;
+const REVIEWS_PAGE_SIZE  = 5;
+
 module.exports = {
   STATUS_LABELS,
   VALID_STATUSES,
@@ -56,4 +68,10 @@ module.exports = {
   MODEL_HAIR_COLORS,
   MODEL_EYE_COLORS,
   DURATIONS,
+  MAX_MESSAGE_LENGTH,
+  MAX_CAPTION_LENGTH,
+  SESSION_TIMEOUT_MS,
+  CATALOG_PAGE_SIZE,
+  ORDERS_PAGE_SIZE,
+  REVIEWS_PAGE_SIZE,
 };
