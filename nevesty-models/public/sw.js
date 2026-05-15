@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nm-v2';
+const CACHE_NAME = 'nm-v3';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
@@ -7,6 +7,12 @@ const PRECACHE_URLS = [
   '/about.html',
   '/booking.html',
   '/cabinet.html',
+  '/cases.html',
+  '/reviews.html',
+  '/faq.html',
+  '/contact.html',
+  '/favorites.html',
+  '/order-status.html',
   '/offline.html',
   '/css/main.css',
   '/js/analytics.js',
