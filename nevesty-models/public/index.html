@@ -124,6 +124,11 @@
         <a href="/catalog.html" class="btn-primary">Смотреть каталог</a>
         <a href="/booking.html" class="btn-outline">Оформить заявку</a>
       </div>
+      <div class="quick-form" style="display:flex;gap:8px;flex-wrap:wrap;max-width:500px;margin:24px auto 0">
+        <input type="text" id="qf-name" placeholder="Ваше имя" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
+        <input type="tel" id="qf-phone" placeholder="+7 (999) 123-45-67" style="flex:1;min-width:150px;padding:12px 16px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff">
+        <button onclick="quickSubmitForm()" style="padding:12px 24px;background:#c8a96e;color:#000;border:none;border-radius:8px;font-weight:600;cursor:pointer;white-space:nowrap">Залишити заявку</button>
+      </div>
     </div>
     <div class="hero-scroll">Листайте</div>
   </section>
@@ -606,6 +611,34 @@ fetch('/api/settings/public').then(r=>r.json()).then(d=>{
     if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
   }
 }).catch(()=>{});
+// Quick form submission from hero
+async function quickSubmitForm() {
+  const name = document.getElementById('qf-name')?.value.trim();
+  const phone = document.getElementById('qf-phone')?.value.trim();
+  if (!name || name.length < 2) { alert('Введіть ваше ім\'я'); return; }
+  if (!phone || phone.replace(/\D/g,'').length < 7) { alert('Введіть коректний номер телефону'); return; }
+  try {
+    const r = await fetch('/api/contact', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name, phone, message: 'Швидка заявка з головної сторінки' }) });
+    if (!r.ok) throw new Error();
+    alert('✅ Дякуємо! Менеджер зв\'яжеться найближчим часом.');
+    document.getElementById('qf-name').value = '';
+    document.getElementById('qf-phone').value = '';
+  } catch { alert('Помилка. Спробуйте пізніше або напишіть нам напряму.'); }
+}
+// Load about text and pricing from public settings
+fetch('/api/settings/public').then(r => r.json()).then(d => {
+  // About text
+  const aboutEl = document.getElementById('about-text');
+  if (aboutEl && d.about_text) aboutEl.textContent = d.about_text;
+  // Agency name
+  document.querySelectorAll('[data-setting="agency_name"]').forEach(el => { if (d.agency_name) el.textContent = d.agency_name; });
+  // Pricing cards on homepage
+  const fmt = v => v ? Number(v).toLocaleString('ru-RU') + ' ₽' : null;
+  const pCards = document.querySelectorAll('.pricing-section .pricing-price strong');
+  if (pCards[0] && d.pricing_start_from) pCards[0].textContent = Number(d.pricing_start_from).toLocaleString('ru-RU');
+  if (pCards[1] && d.pricing_event_from) pCards[1].textContent = Number(d.pricing_event_from).toLocaleString('ru-RU');
+  if (pCards[2] && d.pricing_premium_from) pCards[2].textContent = Number(d.pricing_premium_from).toLocaleString('ru-RU');
+}).catch(() => {});
 // Load approved reviews
 (function loadReviews() {
   const cont = document.getElementById('reviews-container');
