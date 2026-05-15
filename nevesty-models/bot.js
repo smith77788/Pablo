@@ -2537,7 +2537,7 @@ async function previewBroadcast(chatId) {
   if (photoId) {
     await safePhoto(chatId, photoId, { caption: msgBody.slice(0, 1020), parse_mode: 'MarkdownV2' }).catch(() => {});
   } else {
-    await safeSend(chatId, msgBody, { parse_mode: 'MarkdownV2' }).catch(() => {});
+    await safeSend(chatId, msgBody.slice(0, 4096), { parse_mode: 'MarkdownV2' }).catch(() => {});
   }
 
   const photoRowBtn = photoId
@@ -2588,7 +2588,7 @@ async function _sendOneBroadcastMsg(cid, photoId, text) {
       if (photoId) {
         await bot.sendPhoto(cid, photoId, { caption: caption.slice(0, 1020), parse_mode: 'MarkdownV2' });
       } else {
-        await bot.sendMessage(cid, caption, { parse_mode: 'MarkdownV2' });
+        await bot.sendMessage(cid, caption.slice(0, 4096), { parse_mode: 'MarkdownV2' });
       }
       return 'ok';
     } catch (err) {
