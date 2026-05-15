@@ -604,7 +604,7 @@ async function initDatabase() {
       [process.env.ADMIN_USERNAME || 'admin', process.env.AGENCY_EMAIL || 'admin@nevesty-models.ru', hash, 'superadmin']
     );
     if (!process.env.ADMIN_PASSWORD) {
-      console.log(`[SETUP] Admin created. Temporary password: ${adminPassword}`);
+      console.log(`[SETUP] Admin created. Temporary password: [set ADMIN_PASSWORD in .env to retrieve]`);
       console.log('[SETUP] Set ADMIN_PASSWORD in .env to use a fixed password.');
     } else {
       console.log('[SETUP] Admin account created from ADMIN_PASSWORD env var.');
