@@ -161,7 +161,13 @@
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
           </div>
           <div class="col-span-2">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание (bio)</label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Описание (bio)</label>
+              <button type="button" id="genBioBtn" onclick="generateBio()"
+                class="text-xs px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                🤖 AI
+              </button>
+            </div>
             <textarea id="f-bio" rows="3" placeholder="Профессиональное описание модели..."
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white resize-none"></textarea>
           </div>
@@ -578,6 +584,40 @@ async function saveModel(e) {
 }
 
 loadModels();
+
+/* ─── AI Bio Generator ──────────────────────────────── */
+async function generateBio() {
+  const modelId = document.getElementById('model-id').value;
+  if (!modelId) {
+    if (window._admin?.toast) _admin.toast('Сначала сохраните модель, чтобы сгенерировать описание', 'error');
+    else alert('Сначала сохраните модель, чтобы сгенерировать описание');
+    return;
+  }
+  const btn = document.getElementById('genBioBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Генерирую…';
+  try {
+    const resp = await fetch(`/api/admin/models/${modelId}/generate-description`, {
+      method: 'POST',
+      headers,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const result = await resp.json();
+    if (result.description) {
+      document.getElementById('f-bio').value = result.description;
+      if (window._admin?.toast) _admin.toast('✅ Описание сгенерировано!', 'success');
+    }
+  } catch (e) {
+    if (window._admin?.toast) _admin.toast('Ошибка: ' + e.message, 'error');
+    else alert('Ошибка: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🤖 AI';
+  }
+}
 
 /* ─── Model Stats Modal ─────────────────────────────── */
 async function showModelStats(id) {

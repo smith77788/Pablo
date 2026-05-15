@@ -1135,6 +1135,63 @@ router.delete('/admin/models/:id/busy-dates/:date', auth, async (req, res, next)
   } catch (e) { next(e); }
 });
 
+// POST /admin/models/:id/generate-description — AI-powered bio generator
+router.post('/admin/models/:id/generate-description', auth, async (req, res, next) => {
+  try {
+    const modelId = parseInt(req.params.id);
+    if (!modelId) return res.status(400).json({ error: 'Invalid id' });
+
+    const model = await get('SELECT * FROM models WHERE id=?', [modelId]);
+    if (!model) return res.status(404).json({ error: 'Model not found' });
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'AI not configured (ANTHROPIC_API_KEY missing)' });
+
+    // Build context from model fields
+    const context = [
+      model.name && `Имя: ${model.name}`,
+      model.age && `Возраст: ${model.age} лет`,
+      model.height && `Рост: ${model.height} см`,
+      model.city && `Город: ${model.city}`,
+      model.category && `Категория: ${model.category}`,
+      model.parameters && `Параметры: ${model.parameters}`,
+      model.hair_color && `Цвет волос: ${model.hair_color}`,
+      model.eye_color && `Цвет глаз: ${model.eye_color}`,
+      model.languages && `Языки: ${model.languages}`,
+      model.experience && `Опыт: ${model.experience}`,
+    ].filter(Boolean).join('\n');
+
+    // Call Anthropic API using Node 18+ global fetch
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        messages: [{
+          role: 'user',
+          content: `Напиши профессиональное описание для модели агентства Nevesty Models. Используй следующие данные:\n\n${context}\n\nОписание должно быть:\n- 2-3 предложения, 80-150 слов\n- На русском языке\n- Профессиональный и привлекательный тон\n- Без упоминания агентства, только о модели\n- Без markdown разметки\n\nОписание:`
+        }],
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      return res.status(502).json({ error: 'AI API error', details: err.slice(0, 200) });
+    }
+
+    const data = await response.json();
+    const description = data.content?.[0]?.text?.trim();
+    if (!description) return res.status(502).json({ error: 'Empty AI response' });
+
+    res.json({ description });
+  } catch (e) { next(e); }
+});
+
 // Public: check model availability for a date
 router.get('/models/:id/availability', async (req, res, next) => {
   try {
