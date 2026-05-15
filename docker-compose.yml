@@ -4,6 +4,13 @@ networks:
   nevesty-net:
     driver: bridge
 
+volumes:
+  app-data:
+  app-backups:
+  logs-bot:
+  logs-factory:
+  logs-nginx:
+
 services:
   # ── Nginx reverse proxy ───────────────────────────────────────────────
   nginx:
@@ -17,6 +24,7 @@ services:
       - ./nevesty-models/public:/app/nevesty-models/public:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - /var/www/certbot:/var/www/certbot:ro
+      - logs-nginx:/var/log/nginx
     depends_on:
       nevesty-models:
         condition: service_healthy
@@ -33,13 +41,15 @@ services:
     build:
       context: ./nevesty-models
       dockerfile: Dockerfile
+    container_name: nevesty-bot
     restart: unless-stopped
     ports:
       - "3000:3000"
     env_file: nevesty-models/.env
     volumes:
-      - ./data:/app/data
-      - ./backups:/app/backups
+      - app-data:/app/data
+      - app-backups:/app/backups
+      - logs-bot:/app/logs
     deploy:
       resources:
         limits:
@@ -63,10 +73,12 @@ services:
     build:
       context: ./factory
       dockerfile: Dockerfile
+    container_name: nevesty-factory
     restart: unless-stopped
     env_file: factory/.env
     volumes:
-      - ./data:/app/data
+      - app-data:/app/data
+      - logs-factory:/app/logs
     environment:
       FACTORY_CYCLE_HOURS: ${FACTORY_CYCLE_HOURS:-6}
       PYTHONPATH: /app
