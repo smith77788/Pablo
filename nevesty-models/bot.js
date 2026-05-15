@@ -4626,9 +4626,13 @@ function initBot(app) {
     }
 
     // ── Отзывы (публичные)
-    if (data === 'show_reviews')           return showPublicReviews(chatId, 0);
+    if (data === 'show_reviews' || data === 'cat_rev') return showPublicReviews(chatId, 0);
     if (data.startsWith('show_reviews_')) {
       const page = parseInt(data.replace('show_reviews_', '')) || 0;
+      return showPublicReviews(chatId, page);
+    }
+    if (data.startsWith('cat_rev_')) {
+      const page = parseInt(data.replace('cat_rev_', '')) || 0;
       return showPublicReviews(chatId, page);
     }
 
