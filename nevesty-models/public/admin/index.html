@@ -442,6 +442,17 @@
           </div>
         </div>
 
+        <!-- Quick booking leads -->
+        <div class="section-card">
+          <div class="section-card-header">
+            <div class="section-card-title">⚡ Быстрые заявки (лиды)</div>
+            <button class="btn btn-sm btn-ghost" onclick="loadQuickBookings()">↺</button>
+          </div>
+          <div class="section-card-body" id="quickBookingsList">
+            <div style="padding:16px;color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+          </div>
+        </div>
+
         <!-- Bot commands -->
         <div class="section-card">
           <div class="section-card-header"><div class="section-card-title">📱 Telegram бот — команды</div></div>
@@ -868,6 +879,34 @@ document.addEventListener('click', e => {
   if (wrap && popup && !wrap.contains(e.target)) popup.classList.remove('open');
 });
 
+/* ─── Quick booking leads ────────────────────────────── */
+async function loadQuickBookings() {
+  const cont = document.getElementById('quickBookingsList');
+  try {
+    const rows = await _admin.apiFetch('/admin/quick-bookings');
+    if (!rows || !rows.length) {
+      cont.innerHTML = '<div style="padding:16px;color:var(--text-dim);font-size:0.85rem">Быстрых заявок нет</div>';
+      return;
+    }
+    cont.innerHTML = `<table class="data-table">
+      <thead><tr><th>Имя</th><th>Телефон</th><th>Дата</th></tr></thead>
+      <tbody>${rows.slice(0, 10).map(r => `
+        <tr>
+          <td>${_admin.escapeHtml(r.client_name || '—')}</td>
+          <td>
+            <a href="tel:${_admin.escapeHtml(r.client_phone || '')}" style="color:var(--gold);text-decoration:none">
+              ${_admin.escapeHtml(r.client_phone || '—')}
+            </a>
+          </td>
+          <td style="font-size:0.78rem;color:var(--text-dim)">${_admin.formatDateTime(r.created_at)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  } catch {
+    cont.innerHTML = '<div style="padding:16px;color:var(--text-dim);font-size:0.85rem">Нет данных</div>';
+  }
+}
+
 /* ─── Init ───────────────────────────────────────────── */
 loadDashboard();
 loadActivityFeed();
@@ -875,6 +914,7 @@ loadAgentFeed();
 loadKpiCards();
 loadChart30();
 loadNotifications();
+loadQuickBookings();
 
 // Auto-refresh every 30 seconds
 setInterval(loadDashboard, 30000);
