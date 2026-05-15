@@ -264,12 +264,12 @@ class Agent {
     // In silent mode, no individual Telegram notification (orchestrator handles it)
     if (!silent && (critical + high + fixCount > 0)) {
       const detail = [
-        `${this.emoji} *${this.name}* [${this.organ}]`,
+        `${this.emoji} ${this.name} [${this.organ}]`,
         '',
         ...this.findings.filter(f => [SEV.CRITICAL, SEV.HIGH].includes(f.sev)).map(f => `${f.sev} ${f.msg}`),
         ...this.fixed.map(m => `🔧 ${m}`),
       ].join('\n');
-      await tgSend(detail, { parse_mode: 'Markdown' });
+      await tgSend(detail); // plain text — finding messages may contain MarkdownV2 special chars
     }
 
     return { findings: this.findings, fixed: this.fixed, elapsed };

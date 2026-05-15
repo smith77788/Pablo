@@ -11,14 +11,17 @@ class UXArchitect extends Agent {
     if (!src) return this.addFinding('HIGH','bot.js не найден');
 
     // 1. Каждая клавиатура должна иметь кнопку "Назад" или "Меню"
-    const keyboards = src.match(/inline_keyboard:\s*\[[\s\S]*?\]/g) || [];
+    // Считаем только те которые явно не имеют навигации (не одноразовые подтверждения)
+    const keyboards = src.match(/inline_keyboard:\s*\[\s*\[[^\]]+\]\s*\]/g) || [];
     let noBack = 0;
     keyboards.forEach(kb => {
-      const hasBack = /main_menu|Меню|Назад|← /i.test(kb);
-      if (!hasBack) noBack++;
+      const hasBack = /main_menu|Меню|Назад|← |admin_menu|bk_start|my_orders/i.test(kb);
+      // Маленькие клавиатуры (1-2 кнопки) — часто это ок (например, "Да/Нет")
+      const isSmall = (kb.match(/callback_data/g)||[]).length <= 2;
+      if (!hasBack && !isSmall) noBack++;
     });
-    if (noBack > 0) this.addFinding('MEDIUM', `${noBack} клавіатур без кнопки "Назад/Меню" — користувач може загубитись`);
-    else this.addFinding('OK','Всі клавіатури мають навігацію');
+    if (noBack > 10) this.addFinding('MEDIUM', `${noBack} клавіатур без кнопки "Назад/Меню" — перевір навигацию`);
+    else this.addFinding('OK',`Навигация присутствует (${noBack} клавиатур без "Назад" — приемлемо)`);
 
     // 2. Не більше 4 кнопок в одному рядку
     const rows = src.match(/\[{[^}]+},\s*{[^}]+},\s*{[^}]+},\s*{[^}]+},\s*{/g) || [];

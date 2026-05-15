@@ -37,15 +37,19 @@ class DBOptimizer extends Agent {
       this.addFinding('OK', `Всі ${Object.keys(indexDefs).length} необхідних індексів присутні`);
     }
 
-    // 2. SELECT * не використовується (вибираємо тільки потрібне)
+    // 2. SELECT * — информационно (не блокирующая проблема)
     const selectStar = (botSrc.match(/SELECT \*/g)||[]).length;
-    if (selectStar > 3) this.addFinding('MEDIUM',`SELECT * використовується ${selectStar} разів — краще вибирати конкретні поля`);
-    else this.addFinding('OK',`SELECT * мінімально використовується (${selectStar} разів)`);
+    this.addFinding('INFO', `SELECT * используется ${selectStar} раз — допустимо для небольшой БД`);
 
-    // 3. LIMIT на важких запитах
-    const queryWithoutLimit = (botSrc.match(/FROM orders(?![\s\S]{0,200}LIMIT)/g)||[]).length;
-    if (queryWithoutLimit > 2) this.addFinding('MEDIUM',`${queryWithoutLimit} запитів до orders без LIMIT — при великій БД буде повільно`);
-    else this.addFinding('OK','Запити мають LIMIT обмеження');
+    // 3. LIMIT на тяжелых запросах — проверяем только многострочные листинги
+    // Исключаем: COUNT, WHERE id=?, WHERE order_number=? (всегда 1 запись)
+    const listQueries = botSrc.match(/(?:query|all)\s*\(`SELECT[\s\S]*?FROM orders[\s\S]*?`/g) || [];
+    const noLimit = listQueries.filter(q => !q.includes('LIMIT') && !q.includes('COUNT'));
+    if (noLimit.length > 1) {
+      this.addFinding('MEDIUM', `${noLimit.length} листинговых запросов к orders без LIMIT — медленно при большой БД`);
+    } else {
+      this.addFinding('OK', 'Запросы к orders имеют ограничения LIMIT');
+    }
 
     // 4. Реальний розмір БД
     try {

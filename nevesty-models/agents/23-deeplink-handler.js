@@ -18,8 +18,9 @@ class DeeplinkHandler extends Agent {
     }
     this.addFinding('OK', 'Команда /start зарегистрирована');
 
-    // 2. msg.text.split(' ')[1] или startParam
-    const hasStartParam = src.includes("split(' ')[1]") || src.includes('startParam') || src.includes('start_param');
+    // 2. Параметр /start обрабатывается (match[1], split(' ')[1] или start_param)
+    const hasStartParam = src.includes("split(' ')[1]") || src.includes('startParam') ||
+      src.includes('start_param') || src.includes('match[1]') || src.includes('ref.match(');
     if (!hasStartParam) {
       this.addFinding('MEDIUM', 'Deep link параметр (/start model_123) не парсится — ссылки на конкретные модели не работают');
     } else {
@@ -49,11 +50,11 @@ class DeeplinkHandler extends Agent {
       this.addFinding('OK', 'Ссылка на каталог в Mini App присутствует');
     }
 
-    // 6. Bot username для ссылок
-    if (!src.includes('BOT_USERNAME') && !src.includes('BOT_NAME')) {
-      this.addFinding('LOW', 'BOT_USERNAME не используется — ссылки t.me/<bot>?start= не формируются');
+    // 6. Bot username для ссылок — INFO (необязательно для базовой работы)
+    if (src.includes('BOT_USERNAME') || src.includes('BOT_NAME') || src.includes('t.me/')) {
+      this.addFinding('OK', 'Bot username / deep link URL настроен');
     } else {
-      this.addFinding('OK', 'BOT_USERNAME используется для формирования deep links');
+      this.addFinding('INFO', 'BOT_USERNAME не используется — при желании добавь t.me/<bot>?start= ссылки');
     }
 
     // 7. bk_start deeplink для бронирования

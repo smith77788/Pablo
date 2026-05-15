@@ -12,8 +12,10 @@ class ConsistencyChecker extends Agent {
 
     // 1. STATUS_LABELS соответствует реальным статусам в DB
     const expectedStatuses = ['new','reviewing','confirmed','in_progress','completed','cancelled'];
-    const labelBlock = botSrc.match(/STATUS_LABELS\s*=\s*\{([^}]+)\}/)?.[1] || '';
-    const definedStatuses = (labelBlock.match(/'([^']+)':/g)||[]).map(s=>s.replace(/[':]/g,''));
+    const labelBlock = botSrc.match(/STATUS_LABELS\s*=\s*\{([\s\S]*?)\}/)?.[1] || '';
+    // Поддерживаем как quoted ('new':) так и unquoted (new:) ключи JS-объекта
+    const definedStatuses = (labelBlock.match(/(?:'([^']+)'|"([^"]+)"|([a-zA-Z_]\w*))\s*:/g)||[])
+      .map(s => s.replace(/['":\s]/g,''));
 
     const missingInLabels = expectedStatuses.filter(s => !definedStatuses.includes(s));
     const extraInLabels   = definedStatuses.filter(s => !expectedStatuses.includes(s));

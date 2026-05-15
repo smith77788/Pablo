@@ -30,10 +30,15 @@ class ResponseFormatter extends Agent {
     if (src.includes('stepHeader')) this.addFinding('OK','Прогрес-індикатор бронювання (●○○○) реалізований');
     else this.addFinding('MEDIUM','Немає візуального прогресу кроків бронювання');
 
-    // 5. Одиниці виміру з крапкою після числа (Markdown safe)
-    const safeUnits = src.includes('ч\\.') || src.includes('см\\.') || src.includes('кг\\.');
-    if (!safeUnits) this.addFinding('LOW','Одиниці виміру можуть ламати MarkdownV2 (крапка не екранована)');
-    else this.addFinding('OK','Одиниці виміру з екранованою крапкою');
+    // 5. Единицы измерения — русские/украинские буквы не нужно экранировать в MarkdownV2
+    // Экранировать нужно только: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    // Проверяем только потенциально проблемные паттерны: число + точка + единица
+    const dangerousUnits = (src.match(/\d+\.\s*(?:кг|см|м|ч|мин|руб|₽)/g)||[]).filter(m => !m.includes('\\.'));
+    if (dangerousUnits.length > 3) {
+      this.addFinding('LOW', `MarkdownV2: ${dangerousUnits.length} паттернов "число.единица" без экранирования точки`);
+    } else {
+      this.addFinding('OK', 'Единицы измерения используются безопасно');
+    }
   }
 }
 

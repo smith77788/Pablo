@@ -18,6 +18,7 @@ const STATUS_LABELS = {
   completed:  '🏁 Завершена',
   cancelled:  '❌ Отменена',
 };
+const VALID_STATUSES = ['new','reviewing','confirmed','in_progress','completed','cancelled'];
 
 const EVENT_TYPES = {
   fashion_show: 'Показ мод',
@@ -1514,6 +1515,12 @@ function initBot(app) {
     return showMainMenu(chatId, firstName);
   });
 
+  // ── /admin ─────────────────────────────────────────────────────────────────
+  bot.onText(/\/admin/, async (msg) => {
+    if (!isAdmin(msg.chat.id)) return;
+    return showAdminMenu(msg.chat.id, msg.from.first_name);
+  });
+
   // ── /cancel ────────────────────────────────────────────────────────────────
   bot.onText(/\/cancel/, async (msg) => {
     const chatId = msg.chat.id;
@@ -2237,6 +2244,10 @@ function initBot(app) {
       case 'bk_s3_tg':
         d.client_telegram = text.replace('@','');
         return bkStep4Confirm(chatId, d);
+
+      default:
+        // unknown booking state — handled by fallthrough logic below
+        break;
     }
 
     // ── Client free message → forward to admin

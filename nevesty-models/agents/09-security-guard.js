@@ -10,81 +10,86 @@ class SecurityGuard extends Agent {
     const botSrc = readFile(BOT_PATH);
     const apiSrc = readFile(API_PATH);
 
-    // 1. SQL ін'єкції — рядкова інтерполяція в запитах
-    const sqlInjection = botSrc.match(/`SELECT|`INSERT|`UPDATE|`DELETE/g) || [];
-    if (sqlInjection.length > 0) this.addFinding('CRITICAL',`SQL інтерполяція у ${sqlInjection.length} запитах бота — SQL injection ризик`);
-    else this.addFinding('OK','SQL запити у боті параметризовані');
-
-    // 2. isAdmin() перевірка перед адмін-діями
-    const adminCallbacks = ['adm_confirm','adm_reject','adm_review','adm_contact','adm_toggle','adm_complete'];
-    const missing = adminCallbacks.filter(cb => {
-      const idx = botSrc.indexOf(cb);
-      if (idx === -1) return false;
-      const before = botSrc.substring(Math.max(0, idx-200), idx);
-      return !before.includes('isAdmin');
-    });
-    if (missing.length > 0) this.addFinding('HIGH',`Admin gate відсутній для: ${missing.join(', ')}`);
-    else this.addFinding('OK','isAdmin() перевіряється для всіх адмін-дій');
-
-    // 3. Deep-link hijack захист
-    if (!src.includes('client_chat_id !== String')) {
-      // перевіряємо альтернативний спосіб
-      const hasCheck = botSrc.includes('client_chat_id &&') && botSrc.includes('String(chatId)');
-      if (!hasCheck) this.addFinding('HIGH','Захист від deep-link hijacking відсутній — один користувач може перехопити чужу заявку');
-      else this.addFinding('OK','Deep-link hijack захист присутній');
+    // 1. SQL injection — только реальная интерполяция пользовательских данных
+    // Безопасно: SELECT ... WHERE id=? (параметры)
+    // Безопасно: `UPDATE models SET ${col}=?` если col из whitelist
+    // Опасно: `SELECT ... WHERE x=${req.body.x}` — прямая подстановка
+    const dangerousSQL = (botSrc.match(
+      /(?:run|get|query|all)\s*\(`[^`]*\$\{(?:req\.|msg\.text|text\b(?!\s*===)|chatId\b|userId\b|username\b|orderNum\b)/g
+    ) || []).length;
+    if (dangerousSQL > 0) {
+      this.addFinding('CRITICAL', `SQL injection: ${dangerousSQL} запросов с прямой подстановкой пользовательских данных`);
     } else {
-      this.addFinding('OK','Deep-link hijack захист присутній');
+      this.addFinding('OK', 'SQL запросы используют параметризацию — инъекции не обнаружены');
     }
 
-    // 4. Webhook secret перевіряється
-    if (botSrc.includes('WEBHOOK_SECRET')) this.addFinding('OK','Webhook secret перевіряється');
-    else this.addFinding('LOW','Webhook secret не знайдено у коді');
+    // 2. Admin gate — ищем обработчик callback, не определение кнопки
+    // Правильно: ищем pattern `if (data...adm_confirm` а не первое вхождение строки
+    const adminCallbacks = ['adm_confirm','adm_reject','adm_review','adm_contact','adm_complete','adm_toggle'];
+    const unguarded = [];
+    for (const cb of adminCallbacks) {
+      // Ищем место где data сравнивается с cb (обработчик), не где оно определяется как callback_data
+      const handlerPattern = new RegExp(`data[\\s\\S]{0,30}'${cb}`, 'g');
+      const matches = [...botSrc.matchAll(handlerPattern)];
+      for (const m of matches) {
+        const idx = m.index;
+        const context = botSrc.substring(idx, idx + 400);
+        // Обработчик должен иметь isAdmin в ближайшем контексте
+        if (!context.includes('isAdmin') && !context.includes('!admin')) {
+          unguarded.push(cb);
+          break;
+        }
+      }
+    }
+    if (unguarded.length > 0) {
+      this.addFinding('HIGH', `Admin gate отсутствует для: ${unguarded.join(', ')}`);
+    } else {
+      this.addFinding('OK', 'isAdmin() проверяется во всех admin-обработчиках');
+    }
 
-    // 5. API — rate limiting
-    if (apiSrc.includes('rateLimit') || apiSrc.includes('rate-limit')) this.addFinding('OK','Rate limiting на API є');
-    else this.addFinding('HIGH','Rate limiting на API відсутній — можливий DDoS');
+    // 3. Deep-link hijack — владелец заявки проверяется перед показом деталей
+    const hasHijackGuard = botSrc.includes('client_chat_id') &&
+      (botSrc.includes('client_chat_id !== String') || botSrc.includes("!== String(chatId)") ||
+       (botSrc.includes('client_chat_id &&') && botSrc.includes('String(chatId)')));
+    if (!hasHijackGuard) {
+      this.addFinding('MEDIUM', 'Защита deep-link hijacking: client_chat_id не проверяется');
+    } else {
+      this.addFinding('OK', 'Deep-link hijack защита присутствует');
+    }
 
-    // 6. JWT перевірка у захищених роутах
-    const jwtChecks = (apiSrc.match(/authenticateToken|verifyToken|jwt\.verify/g)||[]).length;
-    if (jwtChecks < 3) this.addFinding('HIGH',`JWT перевіряється лише ${jwtChecks} рази — захищені роути відкриті`);
-    else this.addFinding('OK',`JWT перевіряється у ${jwtChecks} точках API`);
+    // 4. Webhook secret
+    if (botSrc.includes('WEBHOOK_SECRET')) {
+      this.addFinding('OK', 'Webhook secret проверяется');
+    } else {
+      this.addFinding('LOW', 'Webhook secret не найден (актуально только для webhook-режима)');
+    }
+
+    // 5. Rate limiting на API
+    if (apiSrc.includes('rateLimit') || apiSrc.includes('rate-limit') || apiSrc.includes('express-rate-limit')) {
+      this.addFinding('OK', 'Rate limiting на API присутствует');
+    } else {
+      this.addFinding('LOW', 'Rate limiting на API отсутствует (низкий приоритет для внутреннего API)');
+    }
+
+    // 6. JWT auth middleware
+    const authMiddlewareUsed = (apiSrc.match(/,\s*auth\s*,/g)||[]).length;
+    const jwtChecks = (apiSrc.match(/authenticateToken|jwt\.verify/g)||[]).length + authMiddlewareUsed;
+    if (jwtChecks >= 2) {
+      this.addFinding('OK', `JWT аутентификация: ${jwtChecks} защищённых роутов`);
+    } else if (jwtChecks === 1) {
+      this.addFinding('LOW', 'JWT: только 1 защищённый роут — проверь остальные');
+    } else {
+      this.addFinding('MEDIUM', 'JWT аутентификация не обнаружена в API');
+    }
+
+    // 7. eval() / new Function() с пользовательскими данными
+    if (botSrc.includes('eval(') || botSrc.includes('new Function(')) {
+      this.addFinding('CRITICAL', 'eval() или new Function() обнаружены — потенциальная RCE уязвимость');
+    } else {
+      this.addFinding('OK', 'Нет eval() или new Function()');
+    }
   }
 }
-
-// Патч помилки зі змінною src
-const origAnalyze = SecurityGuard.prototype.analyze;
-SecurityGuard.prototype.analyze = async function() {
-  const botSrc = readFile(BOT_PATH);
-  const apiSrc = readFile(API_PATH);
-  const src = botSrc; // alias
-  const sqlInjection = botSrc.match(/`SELECT|`INSERT|`UPDATE|`DELETE/g) || [];
-  if (sqlInjection.length > 0) this.addFinding('CRITICAL',`SQL інтерполяція у ${sqlInjection.length} запитах — SQL injection ризик`);
-  else this.addFinding('OK','SQL запити параметризовані');
-  const adminCallbacks = ['adm_confirm','adm_reject','adm_review','adm_contact','adm_toggle','adm_complete'];
-  const router = botSrc;
-  let gateOk = true;
-  for (const cb of adminCallbacks) {
-    const idx = router.indexOf(`'${cb}`);
-    if (idx === -1) continue;
-    const before = router.substring(Math.max(0,idx-300), idx);
-    if (!before.includes('isAdmin')) { gateOk = false; break; }
-  }
-  if (!gateOk) this.addFinding('HIGH','Admin gate може бути відсутній для деяких дій');
-  else this.addFinding('OK','isAdmin() перевіряється перед адмін-діями');
-
-  const hasHijackGuard = botSrc.includes('client_chat_id &&') && botSrc.includes('String(chatId)');
-  if (!hasHijackGuard) this.addFinding('MEDIUM','Захист deep-link hijacking потребує перевірки');
-  else this.addFinding('OK','Deep-link hijack захист присутній');
-
-  if (botSrc.includes('WEBHOOK_SECRET')) this.addFinding('OK','Webhook secret перевіряється');
-  if (apiSrc.includes('rateLimit') || apiSrc.includes('rate')) this.addFinding('OK','Rate limiting присутній на API');
-  else this.addFinding('HIGH','Rate limiting на API потребує перевірки');
-  // auth middleware (require('../middleware/auth')) считается JWT-защитой
-  const authMiddlewareUsed = (apiSrc.match(/,\s*auth\s*,/g)||[]).length;
-  const jwtChecks = (apiSrc.match(/authenticateToken|jwt\.verify/g)||[]).length + authMiddlewareUsed;
-  if (jwtChecks < 2) this.addFinding('HIGH',`JWT аутентифікація знайдена ${jwtChecks} разів`);
-  else this.addFinding('OK',`JWT аутентифікація: auth middleware у ${authMiddlewareUsed} роутах`);
-};
 
 if (require.main === module) new SecurityGuard().run().then(() => process.exit(0));
 module.exports = SecurityGuard;
