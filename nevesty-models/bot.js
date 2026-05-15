@@ -288,6 +288,13 @@ async function showCatalog(chatId, cat, page) {
       callback_data: `cat_cat_${k}_0`
     }));
 
+    // Dynamic city buttons from settings
+    const citiesSetting = await getSetting('cities_list').catch(() => '');
+    const cityButtons = citiesSetting
+      ? citiesSetting.split(',').map(c => c.trim()).filter(Boolean).slice(0, 4)
+        .map(city => ({ text: `🏙 ${city}`, callback_data: `cat_city_${city}_0` }))
+      : [];
+
     // Model buttons
     const modelBtns = slice.map(m => [{
       text: `${m.available ? '🟢' : '🔴'} ${m.name}  ·  ${m.height}см  ·  ${m.hair_color || ''}`,
@@ -301,6 +308,7 @@ async function showCatalog(chatId, cat, page) {
 
     const keyboard = [
       catRow,
+      ...(cityButtons.length ? [cityButtons] : []),
       ...modelBtns,
       ...(nav.length ? [nav] : []),
       [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }],
@@ -1927,7 +1935,11 @@ function initBot(app) {
     }
 
     if (isAdmin(chatId)) return showAdminMenu(chatId, firstName);
-    return showMainMenu(chatId, firstName);
+    await showMainMenu(chatId, firstName);
+    const welcomePhoto = await getSetting('welcome_photo_url').catch(() => null);
+    if (welcomePhoto) {
+      await safePhoto(chatId, welcomePhoto, { caption: 'Nevesty Models' }).catch(() => {});
+    }
   });
 
   // ── /admin ─────────────────────────────────────────────────────────────────
