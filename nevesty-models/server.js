@@ -182,7 +182,14 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // ─── Compression ──────────────────────────────────────────────────────────────
-if (compression) app.use(compression());
+if (compression) app.use(compression({
+  level: 6,          // balanced speed/ratio (default is 6, but explicit is clearer)
+  threshold: 1024,   // only compress responses > 1 KB
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  },
+}));
 
 // ─── Response-time header (useful for monitoring / APM) ───────────────────────
 app.use((req, res, next) => {
@@ -380,8 +387,8 @@ app.use(express.static(path.join(__dirname, 'public'), {
       // HTML: always revalidate
       res.setHeader('Cache-Control', 'no-cache');
     } else if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
-      // JS/CSS: 1 day cache
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+      // JS/CSS: 7 day cache (files are versioned or change infrequently)
+      res.setHeader('Cache-Control', 'public, max-age=604800');
     } else if (/\.(png|jpe?g|gif|svg|webp|ico|avif)$/i.test(filePath)) {
       // Images: 1 week cache
       res.setHeader('Cache-Control', 'public, max-age=604800');

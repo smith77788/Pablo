@@ -45,7 +45,7 @@ function modelCard(m, onClick) {
       <div class="model-card-img">
         ${m.photo_main
           ? `<img data-src="${m.photo_main}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-               alt="${m.name}" class="lazy-img" />`
+               alt="${m.name}" class="lazy-img" decoding="async" />`
           : placeholderImg(m.name)
         }
         <div class="model-card-overlay">
