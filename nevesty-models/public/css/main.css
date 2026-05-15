@@ -2409,6 +2409,22 @@ textarea:focus-visible {
   color: var(--gold, #f0b429);
   font-size: 0.8rem;
 }
+.review-date {
+  color: var(--text-dim, #aaa);
+  font-size: 0.75rem;
+  margin-top: 8px;
+}
+.no-reviews {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-muted, #aaa);
+  padding: 32px 0;
+  font-style: italic;
+}
+.reviews-cta {
+  text-align: center;
+  margin-top: 24px;
+}
 
 /* ─── REVIEWS GRID (dynamic) ─────────────────────── */
 .reviews-grid {

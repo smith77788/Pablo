@@ -3881,17 +3881,17 @@ router.get('/reviews/recent', async (req, res, next) => {
 router.get('/reviews/public', async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 6, 20);
-    const rows = await query(
-      `SELECT r.id, r.rating, r.text, r.client_name as author_name, r.created_at,
-              m.name as model_name
+    const reviews = await query(
+      `SELECT r.rating, r.text, r.created_at, r.client_name,
+              m.name as model_name, m.id as model_id
        FROM reviews r
-       LEFT JOIN models m ON m.id = r.model_id
+       LEFT JOIN models m ON r.model_id = m.id
        WHERE r.approved = 1
        ORDER BY r.created_at DESC
        LIMIT ?`,
       [limit]
     );
-    res.json(rows);
+    res.json({ ok: true, reviews });
   } catch (e) {
     next(e);
   }

@@ -427,15 +427,17 @@
       </section>
 
       <!-- TESTIMONIALS -->
-      <section class="testimonials-section" id="reviews" data-animate>
+      <section class="testimonials-section" id="reviews" data-animate aria-labelledby="reviews-heading">
         <div class="container">
           <div class="section-header">
             <div class="section-tag">Что говорят клиенты</div>
-            <h2>Отзывы клиентов</h2>
+            <h2 id="reviews-heading">Отзывы клиентов</h2>
             <div class="gold-line"></div>
           </div>
           <div id="reviews-container" class="reviews-grid">
-            <!-- loaded dynamically -->
+            <div class="skeleton skeleton-card" aria-hidden="true"></div>
+            <div class="skeleton skeleton-card" aria-hidden="true"></div>
+            <div class="skeleton skeleton-card" aria-hidden="true"></div>
           </div>
           <div
             id="reviews-pagination"
@@ -1297,6 +1299,47 @@
               cont.innerHTML =
                 '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:24px">Ошибка загрузки отзывов</div>';
           });
+      }
+
+      // ─── loadReviews: uses /api/reviews/public endpoint ──────────────────────────
+      async function loadReviews() {
+        try {
+          const res = await fetch('/api/reviews/public?limit=6');
+          const data = await res.json();
+          const grid = document.getElementById('reviews-container');
+          if (!grid || !data.reviews?.length) {
+            if (grid) grid.innerHTML = '<p class="no-reviews">Будьте первым, кто оставит отзыв!</p>';
+            return;
+          }
+          const esc = s =>
+            String(s || '').replace(
+              /[&<>"']/g,
+              c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+            );
+          const stars = n =>
+            '★'.repeat(Math.max(1, Math.min(5, n || 5))) + '☆'.repeat(5 - Math.max(1, Math.min(5, n || 5)));
+          const fmtDate = s => {
+            try {
+              return new Date(s).toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
+            } catch {
+              return '';
+            }
+          };
+          grid.innerHTML = data.reviews
+            .map(
+              r => `
+            <div class="review-card">
+              <div class="review-stars">${stars(r.rating)}</div>
+              <p class="review-text">"${esc(r.text || '—')}"</p>
+              <div class="review-author">${esc(r.client_name || 'Клиент')}</div>
+              ${r.model_name ? `<div class="review-model">Модель: ${esc(r.model_name)}</div>` : ''}
+              ${r.created_at ? `<div class="review-date">${fmtDate(r.created_at)}</div>` : ''}
+            </div>`
+            )
+            .join('');
+        } catch (err) {
+          console.error('[Reviews]', err);
+        }
       }
 
       // Load reviews on page init
