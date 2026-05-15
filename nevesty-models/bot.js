@@ -47,6 +47,7 @@ function isActiveInputState(state) {
   if (ACTIVE_BOOKING_STATES.has(state)) return true;
   // Admin input states
   if (state.startsWith('adm_mdl_')) return true;
+  if (state === 'model_reg_phone') return true;
   if (state.startsWith('adm_set_')) return true;
   if (state.startsWith('adm_gallery_')) return true;
   if (state.startsWith('adm_ai_bio_preview_')) return true;
@@ -1487,6 +1488,9 @@ async function showAdminOrder(chatId, orderId) {
     keyboard.push([
       { text: '👤 Назначить менеджера', callback_data: `adm_assign_mgr_${orderId}` },
       { text: '📝 Добавить заметку',    callback_data: `adm_note_${orderId}` },
+    ]);
+    keyboard.push([
+      { text: '💃 Назначить модель', callback_data: `adm_assign_model_${orderId}` },
     ]);
     keyboard.push([
       { text: '📋 Все заметки',         callback_data: `adm_notes_${orderId}_0` },
@@ -4084,6 +4088,22 @@ function initBot(app) {
     return showReferralProgram(msg.chat.id);
   });
 
+  // ── /register_model — link Telegram account to model by phone ────────────────
+  bot.onText(/^\/register_model/, async (msg) => {
+    const chatId = msg.chat.id;
+    if (isAdmin(chatId)) {
+      return safeSend(chatId, '⚠️ Эта команда предназначена для моделей, а не для администраторов\\.', { parse_mode: 'MarkdownV2' });
+    }
+    await setSession(chatId, 'model_reg_phone', {});
+    return safeSend(chatId,
+      '📱 *Регистрация модели*\n\nВведите ваш номер телефона в формате \\+7XXXXXXXXXX или 8XXXXXXXXXX:\n\n_Номер должен совпадать с тем, который зарегистрирован в базе агентства\\._ ',
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'main_menu' }]] }
+      }
+    );
+  });
+
   // ── /factory_content (admin: view & send AI-generated posts) ─────────────────
   bot.onText(/^\/factory_content/, async (msg) => {
     if (!isAdmin(msg.chat.id)) return;
@@ -5401,6 +5421,57 @@ function initBot(app) {
         ).catch(()=>{});
       }
       await safeSend(chatId, `✅ Менеджер *${esc(admin?.username||String(adminId))}* назначен на заявку\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] }
+      });
+      return;
+    }
+
+    // ── Assign model to order: show list — adm_assign_model_{orderId}
+    if (data.startsWith('adm_assign_model_') && !data.match(/adm_assign_model_\d+_\d+/)) {
+      if (!isAdmin(chatId)) return;
+      const orderId = parseInt(data.replace('adm_assign_model_', ''));
+      const models = await query('SELECT id, name, city FROM models WHERE available=1 AND archived=0 ORDER BY name').catch(() => []);
+      if (!models.length) return safeSend(chatId, '❌ Нет доступных моделей в базе\\.', { parse_mode: 'MarkdownV2' });
+      const btns = models.map(m => [{
+        text: `${m.name}${m.city ? ' (' + m.city + ')' : ''}`,
+        callback_data: `adm_assign_model_${orderId}_${m.id}`
+      }]);
+      btns.push([{ text: '← Назад', callback_data: `adm_order_${orderId}` }]);
+      return safeSend(chatId, `💃 *Выберите модель для заявки:*`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: btns }
+      });
+    }
+
+    // ── Assign model to order: confirm selection — adm_assign_model_{orderId}_{modelId}
+    if (data.match(/^adm_assign_model_\d+_\d+$/)) {
+      if (!isAdmin(chatId)) return;
+      const parts = data.replace('adm_assign_model_', '').split('_');
+      const orderId = parseInt(parts[0]);
+      const modelId = parseInt(parts[1]);
+      await run('UPDATE orders SET model_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [modelId, orderId]);
+      const [model, order] = await Promise.all([
+        get('SELECT name, telegram_chat_id, phone FROM models WHERE id=?', [modelId]).catch(() => null),
+        get('SELECT order_number, event_type, event_date FROM orders WHERE id=?', [orderId]).catch(() => null),
+      ]);
+      // Notify the model via Telegram if their chat_id is known
+      if (model?.telegram_chat_id) {
+        const eventLabel = esc(EVENT_TYPES[order?.event_type] || order?.event_type || '—');
+        const dateLabel  = order?.event_date ? esc(order.event_date) : '—';
+        safeSend(model.telegram_chat_id,
+          `📋 *Новая заявка\\!*\n\n\\#${esc(order?.order_number||String(orderId))}\nДата: ${dateLabel}\nТип: ${eventLabel}\n\nПодтвердите участие:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[
+              { text: '✅ Принять',  callback_data: `mdl_confirm_${orderId}` },
+              { text: '❌ Отклонить', callback_data: `mdl_reject_${orderId}` },
+            ]] }
+          }
+        ).catch(() => {});
+      }
+      const notifiedNote = model?.telegram_chat_id ? '' : ' \\(Telegram не привязан\\)';
+      await safeSend(chatId, `✅ Модель *${esc(model?.name||String(modelId))}* назначена на заявку\\.${notifiedNote}`, {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]] }
       });
@@ -9105,6 +9176,84 @@ function _registerNewFeatures() {
       const modelId = parseInt(data.replace('adm_ai_bio_', ''));
       return generateAiBio(chatId, modelId);
     }
+
+    // ── Model confirm booking: mdl_confirm_{orderId}
+    if (data.startsWith('mdl_confirm_')) {
+      const orderId = parseInt(data.replace('mdl_confirm_', ''));
+      if (!orderId) return;
+      const order = await get(
+        `SELECT o.*,m.name as model_name,m.telegram_chat_id as model_chat_id
+         FROM orders o LEFT JOIN models m ON o.model_id=m.id
+         WHERE o.id=?`,
+        [orderId]
+      ).catch(() => null);
+      if (!order) return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
+      // Verify the sender is indeed the assigned model
+      if (String(order.model_chat_id) !== String(chatId)) {
+        return safeSend(chatId, '❌ Эта заявка не назначена вам\\.', { parse_mode: 'MarkdownV2' });
+      }
+      const noteText = 'Модель подтвердила участие';
+      get('SELECT * FROM order_notes WHERE order_id=? AND admin_note=? LIMIT 1', [orderId, noteText]).then(existing => {
+        if (!existing) {
+          run('INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)', [orderId, noteText]).catch(() => {});
+        }
+      }).catch(() => {});
+      await safeSend(chatId,
+        `✅ *Вы подтвердили участие в заявке \\#${esc(order.order_number||String(orderId))}*\n\nМенеджер будет уведомлён\\.`,
+        { parse_mode: 'MarkdownV2' }
+      );
+      // Notify all admins
+      const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+      for (const adminId of adminIds) {
+        safeSend(adminId,
+          `✅ Модель *${esc(order.model_name||'—')}* подтвердила заявку *\\#${esc(order.order_number||String(orderId))}*`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]] }
+          }
+        ).catch(() => {});
+      }
+      return;
+    }
+
+    // ── Model reject booking: mdl_reject_{orderId}
+    if (data.startsWith('mdl_reject_')) {
+      const orderId = parseInt(data.replace('mdl_reject_', ''));
+      if (!orderId) return;
+      const order = await get(
+        `SELECT o.*,m.name as model_name,m.telegram_chat_id as model_chat_id
+         FROM orders o LEFT JOIN models m ON o.model_id=m.id
+         WHERE o.id=?`,
+        [orderId]
+      ).catch(() => null);
+      if (!order) return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
+      // Verify the sender is indeed the assigned model
+      if (String(order.model_chat_id) !== String(chatId)) {
+        return safeSend(chatId, '❌ Эта заявка не назначена вам\\.', { parse_mode: 'MarkdownV2' });
+      }
+      const noteText = 'Модель отклонила участие';
+      get('SELECT * FROM order_notes WHERE order_id=? AND admin_note=? LIMIT 1', [orderId, noteText]).then(existing => {
+        if (!existing) {
+          run('INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)', [orderId, noteText]).catch(() => {});
+        }
+      }).catch(() => {});
+      await safeSend(chatId,
+        `❌ *Вы отклонили участие в заявке \\#${esc(order.order_number||String(orderId))}*\n\nМенеджер будет уведомлён\\.`,
+        { parse_mode: 'MarkdownV2' }
+      );
+      // Notify all admins
+      const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+      for (const adminId of adminIds) {
+        safeSend(adminId,
+          `❌ Модель *${esc(order.model_name||'—')}* отклонила заявку *\\#${esc(order.order_number||String(orderId))}*\\. Необходимо выбрать другую модель\\.`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]] }
+          }
+        ).catch(() => {});
+      }
+      return;
+    }
   });
 
   // ── Additional message state handlers ─────────────────────────────────────
@@ -9155,6 +9304,38 @@ function _registerNewFeatures() {
           { parse_mode: 'MarkdownV2' }
         );
       }
+    }
+
+    // ── Model registration: phone input
+    if (state === 'model_reg_phone') {
+      const phone = text.replace(/\s/g, '');
+      if (!/^[\d+\-()]{7,20}$/.test(phone)) {
+        return safeSend(chatId,
+          '❌ Некорректный номер телефона\\. Введите номер в формате \\+7XXXXXXXXXX:',
+          { parse_mode: 'MarkdownV2' }
+        );
+      }
+      // Normalise: try the raw value and also strip leading + or 8
+      const phoneVariants = [phone];
+      const stripped = phone.replace(/^[+8]/, '');
+      if (stripped !== phone) phoneVariants.push(stripped, '+7' + stripped, '8' + stripped);
+      // Build a LIKE-search covering all variants
+      const whereClauses = phoneVariants.map(() => 'phone LIKE ?').join(' OR ');
+      const likeParams   = phoneVariants.map(p => `%${p}%`);
+      const model = await get(`SELECT id, name FROM models WHERE (${whereClauses}) LIMIT 1`, likeParams).catch(() => null);
+      if (!model) {
+        await clearSession(chatId);
+        return safeSend(chatId,
+          '❌ *Телефон не найден в базе моделей\\.*\n\nОбратитесь к администратору агентства\\.',
+          { parse_mode: 'MarkdownV2' }
+        );
+      }
+      await run('UPDATE models SET telegram_chat_id=? WHERE id=?', [String(chatId), model.id]).catch(() => {});
+      await clearSession(chatId);
+      return safeSend(chatId,
+        `✅ *Вы зарегистрированы как модель ${esc(model.name)}\\!*\n\nТеперь вы будете получать уведомления о заявках и сможете подтверждать или отклонять участие\\.`,
+        { parse_mode: 'MarkdownV2' }
+      );
     }
 
     // Age search: manual range input (via srch_age callback)
