@@ -379,6 +379,25 @@ router.get('/models/search', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Related models (public) ──────────────────────────────────────────────────
+router.get('/models/related', async (req, res) => {
+  try {
+    const { category, city, limit = 4, exclude } = req.query;
+    let where = ['archived=0', 'available=1'];
+    const params = [];
+    if (exclude) { where.push('id != ?'); params.push(parseInt(exclude)); }
+    if (category) { where.push('category = ?'); params.push(category); }
+    else if (city) { where.push('city = ?'); params.push(city); }
+    params.push(parseInt(limit) || 4);
+
+    const models = await query(
+      `SELECT id, name, photos, photo_main, height, category, city FROM models WHERE ${where.join(' AND ')} ORDER BY featured DESC, order_count DESC LIMIT ?`,
+      params
+    );
+    res.json({ models });
+  } catch (e) { res.status(500).json({ error: 'DB error' }); }
+});
+
 router.get('/models/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
@@ -386,6 +405,8 @@ router.get('/models/:id', async (req, res, next) => {
     const m = await get('SELECT * FROM models WHERE id = ?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
     res.json({ ...m, photos: JSON.parse(m.photos || '[]') });
+    // Increment view count asynchronously after response is sent
+    run('UPDATE models SET view_count = COALESCE(view_count, 0) + 1 WHERE id=?', [id]).catch(() => {});
   } catch (e) { next(e); }
 });
 

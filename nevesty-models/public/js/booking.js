@@ -341,7 +341,20 @@
   /* ─── Parse URL params & pre-select model ─────────── */
   function initFromUrlParams() {
     const urlParams = new URLSearchParams(window.location.search);
-    const urlModel = urlParams.get('model');
+    // Support both ?model= (legacy) and ?model_id= (new)
+    const urlModel = urlParams.get('model') || urlParams.get('model_id');
+    const urlModelName = urlParams.get('model_name');
+
+    // Show selected model banner if model_name is passed
+    if (urlModelName) {
+      const banner = document.getElementById('selected-model-banner');
+      if (banner) {
+        banner.textContent = `📸 Выбрана модель: ${decodeURIComponent(urlModelName)}`;
+        banner.style.display = 'block';
+        banner.classList.remove('hidden');
+      }
+    }
+
     if (!urlModel) return;
 
     apiFetch(`/models/${urlModel}`).then(m => {

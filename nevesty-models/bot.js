@@ -1850,6 +1850,7 @@ async function showModelEditMenu(chatId, modelId) {
       [{ text: '📞 Телефон',    callback_data: `adm_ef_${modelId}_phone`      },
        { text: '🏙 Город',      callback_data: `adm_ef_${modelId}_city`       }],
       [{ text: '📝 Описание',   callback_data: `adm_ef_${modelId}_bio`        }],
+      [{ text: '🎬 Видео URL',  callback_data: `adm_ef_${modelId}_video_url`  }],
       [{ text: '🤖 AI описание', callback_data: `adm_ai_bio_${modelId}`        }],
       [{ text: '📷 Галерея фото', callback_data: `adm_gallery_${modelId}`      }],
       [{ text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${modelId}` },
@@ -3553,7 +3554,7 @@ function initBot(app) {
       const fieldLabels = { name:'имя', age:'возраст', height:'рост (см)', weight:'вес (кг)',
                             shoe_size:'размер обуви', instagram:'Instagram', bio:'описание',
                             hair_color:'цвет волос', eye_color:'цвет глаз', params:'параметры (ОГ/ОТ/ОБ)',
-                            phone:'телефон модели', city:'город' };
+                            phone:'телефон модели', city:'город', video_url:'ссылка на видео (URL)' };
       await setSession(chatId, `adm_ef_${modelId}_${field}`, {});
       return safeSend(chatId, `✏️ Введите новое *${fieldLabels[field]||field}*:`, {
         reply_markup: { inline_keyboard: [[{ text: '← Отмена', callback_data: `adm_editmodel_${modelId}` }]] } });
@@ -4139,7 +4140,7 @@ function initBot(app) {
       const field   = parts.slice(1).join('_');
       const fieldMap = { name:'name', age:'age', height:'height', weight:'weight',
                          shoe_size:'shoe_size', instagram:'instagram', bio:'bio', eye_color:'eye_color',
-                         hair_color:'hair_color', phone:'phone', city:'city' };
+                         hair_color:'hair_color', phone:'phone', city:'city', video_url:'video_url' };
       if (field === 'params') {
         const ps = text.split('/').map(x => parseInt(x.trim()));
         if (ps.length === 3 && ps.every(Boolean)) {
