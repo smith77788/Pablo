@@ -138,9 +138,10 @@ async function setSetting(key, value) {
 // Persistent ReplyKeyboard — всегда показывается внизу чата вместо клавиатуры
 const REPLY_KB_CLIENT = {
   keyboard: [
-    [{ text: '💃 Каталог' }, { text: '📝 Подать заявку' }],
+    [{ text: '⭐ Топ-модели' }, { text: '💃 Каталог' }],
+    [{ text: '📝 Подать заявку' }, { text: '💬 Менеджер' }],
     [{ text: '📋 Мои заявки' }, { text: '🔍 Статус заявки' }],
-    [{ text: '❓ FAQ' }, { text: '👤 Профиль' }, { text: '📞 Контакты' }],
+    [{ text: '💰 Прайс' }, { text: '📞 Контакты' }, { text: '❓ FAQ' }],
   ],
   resize_keyboard: true,
   persistent: true,
@@ -158,16 +159,19 @@ const REPLY_KB_ADMIN = {
 
 function buildClientKeyboard() {
   const rows = [
-    [{ text: '💃 Каталог моделей',      callback_data: 'cat_cat__0'   }],
+    [{ text: '⭐ Топ-модели',           callback_data: 'cat_top_0'    },
+     { text: '💃 Все модели',           callback_data: 'cat_cat__0'   }],
     [{ text: '📝 Оформить заявку',      callback_data: 'bk_start'     }],
-    [{ text: '📋 Мои заявки',           callback_data: 'my_orders'    }],
-    [{ text: '🔍 Проверить статус',     callback_data: 'check_status' }],
-    [{ text: '📞 Контакты',             callback_data: 'contacts'     }],
-    [{ text: '❓ FAQ',                  callback_data: 'faq'          },
-     { text: '👤 Мой профиль',         callback_data: 'profile'      }],
+    [{ text: '💬 Написать менеджеру',   callback_data: 'contact_mgr'  }],
+    [{ text: '📋 Мои заявки',           callback_data: 'my_orders'    },
+     { text: '🔍 Статус заявки',        callback_data: 'check_status' }],
+    [{ text: '💰 Прайс-лист',          callback_data: 'pricing'      },
+     { text: 'ℹ️ О нас',               callback_data: 'about_us'     }],
+    [{ text: '📞 Контакты',             callback_data: 'contacts'     },
+     { text: '❓ FAQ',                  callback_data: 'faq'          }],
+    [{ text: '👤 Мой профиль',          callback_data: 'profile'      }],
   ];
   if (SITE_URL.startsWith('https://')) {
-    // Полноценный Mini App только на HTTPS
     const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
     rows.unshift([{ text: '📱 Открыть Mini App', web_app: { url: webappUrl } }]);
   }
@@ -318,9 +322,13 @@ async function showModel(chatId, modelId) {
     const avail = m.available ? '🟢 Доступна для заказа' : '🔴 Временно недоступна';
     const caption = `💃 *${esc(m.name)}*\n${lines.join(' \\| ')}${bio}\n\n${avail}`;
 
+    const contactBtn = m.phone || m.instagram
+      ? [{ text: '📱 Получить контакт', callback_data: `model_contact_${m.id}` }]
+      : [];
     const keyboard = {
       inline_keyboard: [
         m.available ? [{ text: '📝 Заказать эту модель', callback_data: `bk_model_${m.id}` }] : [],
+        contactBtn,
         [{ text: '← Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Меню', callback_data: 'main_menu' }],
       ].filter(r => r.length)
     };
@@ -1297,9 +1305,12 @@ async function showModelEditMenu(chatId, modelId) {
        { text: '👁 Глаза',       callback_data: `adm_ef_${modelId}_eye_color`  }],
       [{ text: '📸 Instagram',  callback_data: `adm_ef_${modelId}_instagram`  },
        { text: '🏷 Категория',  callback_data: `adm_ef_${modelId}_category`   }],
+      [{ text: '📞 Телефон',    callback_data: `adm_ef_${modelId}_phone`      },
+       { text: '🏙 Город',      callback_data: `adm_ef_${modelId}_city`       }],
       [{ text: '📝 Описание',   callback_data: `adm_ef_${modelId}_bio`        }],
       [{ text: '📷 Галерея фото', callback_data: `adm_gallery_${modelId}`      }],
-      [{ text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${modelId}` }],
+      [{ text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${modelId}` },
+       { text: m.featured ? '⭐ Убрать из топа' : '⭐ В топ', callback_data: `adm_featured_${modelId}` }],
       [{ text: '🗑 Удалить модель', callback_data: `adm_del_model_${modelId}` }],
       [{ text: '← Карточка',   callback_data: `adm_model_${modelId}`          }],
     ]}
@@ -1613,6 +1624,8 @@ function initBot(app) {
     if (data === 'admin_menu') { if (!isAdmin(chatId)) return; return showAdminMenu(chatId, q.from.first_name); }
     if (data === 'contacts')   return showContacts(chatId);
     if (data === 'faq')        return showFaq(chatId);
+    if (data === 'about_us')   return showAboutUs(chatId);
+    if (data === 'pricing')    return showPricing(chatId);
     if (data === 'profile')    return showUserProfile(chatId, q.from.first_name);
     if (data === 'my_orders')  return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
@@ -1716,6 +1729,41 @@ function initBot(app) {
       return bkStep2Location(chatId, d);
     }
 
+    // ── Booking: менеджер подберёт модель
+    if (data === 'bk_pick_any') {
+      const d = { model_id: null, model_name: 'Менеджер подберёт' };
+      return bkStep2EventType(chatId, d);
+    }
+
+    // ── Топ-модели
+    if (data.startsWith('cat_top_')) {
+      const page = parseInt(data.replace('cat_top_', '')) || 0;
+      return showTopModels(chatId, page);
+    }
+
+    // ── Написать менеджеру
+    if (data === 'contact_mgr') return showContactManager(chatId);
+
+    // ── Получить контакт модели
+    if (data.startsWith('model_contact_')) {
+      const modelId = parseInt(data.replace('model_contact_', ''));
+      return showModelContact(chatId, modelId);
+    }
+
+    // ── О нас
+    if (data === 'about_us') return showAboutUs(chatId);
+
+    // ── Прайс-лист
+    if (data === 'pricing') return showPricing(chatId);
+
+    // ── Фильтр по городу
+    if (data.startsWith('cat_city_')) {
+      const parts = data.replace('cat_city_', '').split('_');
+      const page = parseInt(parts.pop()) || 0;
+      const city = parts.join('_');
+      return showCatalogByCity(chatId, city, page);
+    }
+
     // ── Booking: skip optional fields
     if (data === 'bk_skip_budget') {
       const session = await getSession(chatId);
@@ -1812,6 +1860,14 @@ function initBot(app) {
       const id = parseInt(data.replace('adm_toggle_',''));
       const m  = await get('SELECT available FROM models WHERE id=?', [id]).catch(()=>null);
       if (m) await run('UPDATE models SET available=? WHERE id=?', [m.available ? 0 : 1, id]);
+      return showAdminModel(chatId, id);
+    }
+    if (data.startsWith('adm_featured_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('adm_featured_',''));
+      const m  = await get('SELECT featured FROM models WHERE id=?', [id]).catch(()=>null);
+      if (m) await run('UPDATE models SET featured=? WHERE id=?', [m.featured ? 0 : 1, id]);
+      await bot.answerCallbackQuery(q.id, { text: m?.featured ? '⭐ Убрано из топа' : '⭐ Добавлено в топ' }).catch(()=>{});
       return showAdminModel(chatId, id);
     }
 
@@ -1931,7 +1987,8 @@ function initBot(app) {
       }
       const fieldLabels = { name:'имя', age:'возраст', height:'рост (см)', weight:'вес (кг)',
                             shoe_size:'размер обуви', instagram:'Instagram', bio:'описание',
-                            hair_color:'цвет волос', eye_color:'цвет глаз', params:'параметры (ОГ/ОТ/ОБ)' };
+                            hair_color:'цвет волос', eye_color:'цвет глаз', params:'параметры (ОГ/ОТ/ОБ)',
+                            phone:'телефон модели', city:'город' };
       await setSession(chatId, `adm_ef_${modelId}_${field}`, {});
       return safeSend(chatId, `✏️ Введите новое *${fieldLabels[field]||field}*:`, {
         reply_markup: { inline_keyboard: [[{ text: '← Отмена', callback_data: `adm_editmodel_${modelId}` }]] } });
@@ -1978,6 +2035,28 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const modelId = parseInt(data.replace('adm_gallery_',''));
       return showPhotoGalleryManager(chatId, modelId);
+    }
+
+    // ── Прямой ответ клиенту (direct_reply_chatId — из вопроса менеджеру)
+    if (data.startsWith('direct_reply_')) {
+      if (!isAdmin(chatId)) return;
+      const targetId = data.replace('direct_reply_', '');
+      await setSession(chatId, 'direct_reply', { target_chat_id: targetId });
+      return safeSend(chatId, `✍️ Введите ответ клиенту (ID: ${targetId}):`, {
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_main' }]] }
+      });
+    }
+
+    // ── Написать менеджеру
+    if (data === 'msg_manager_start') {
+      await setSession(chatId, 'msg_to_manager', {});
+      return safeSend(chatId,
+        '✍️ *Напишите ваш вопрос*\n\nОтправьте сообщение — менеджер ответит в течение часа\\.',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'main_menu' }]] }
+        }
+      );
     }
 
     // ── AI Factory
@@ -2101,13 +2180,16 @@ function initBot(app) {
     if (state === 'idle' || state === 'check_status') {
       // Клиентские кнопки
       if (!isAdmin(chatId)) {
+        if (text === '⭐ Топ-модели')       return showTopModels(chatId, 0);
         if (text === '💃 Каталог')         return showCatalog(chatId, null, 0);
         if (text === '📝 Подать заявку')   return bkStep1(chatId);
+        if (text === '💬 Менеджер')        return showContactManager(chatId);
         if (text === '📋 Мои заявки')      return showMyOrders(chatId);
         if (text === '🔍 Статус заявки') {
           await setSession(chatId, 'check_status', {});
           return safeSend(chatId, '🔍 Введите номер заявки (например, НМ-001):');
         }
+        if (text === '💰 Прайс')           return showPricing(chatId);
         if (text === '❓ FAQ')             return showFaq(chatId);
         if (text === '👤 Профиль')         return showUserProfile(chatId, msg.from.first_name);
         if (text === '📞 Контакты')        return showContacts(chatId);
@@ -2207,7 +2289,8 @@ function initBot(app) {
       const modelId = parseInt(parts[0]);
       const field   = parts.slice(1).join('_');
       const fieldMap = { name:'name', age:'age', height:'height', weight:'weight',
-                         shoe_size:'shoe_size', instagram:'instagram', bio:'bio', eye_color:'eye_color', hair_color:'hair_color' };
+                         shoe_size:'shoe_size', instagram:'instagram', bio:'bio', eye_color:'eye_color',
+                         hair_color:'hair_color', phone:'phone', city:'city' };
       if (field === 'params') {
         const ps = text.split('/').map(x => parseInt(x.trim()));
         if (ps.length === 3 && ps.every(Boolean)) {
@@ -2288,6 +2371,43 @@ function initBot(app) {
         break;
     }
 
+    // ── Вопрос менеджеру (через кнопку "Написать менеджеру")
+    if (state === 'msg_to_manager') {
+      const clientName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || 'Клиент';
+      const username   = msg.from.username ? `@${msg.from.username}` : '';
+      const adminIds   = await getAdminChatIds();
+      await Promise.allSettled(adminIds.map(id => safeSend(id,
+        `💬 *Вопрос менеджеру*\nОт: ${esc(clientName)} ${esc(username)}\nTelegram ID: ${chatId}\n\n${esc(text)}`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[
+            { text: '💬 Ответить', callback_data: `direct_reply_${chatId}` }
+          ]]}
+        }
+      )));
+      await clearSession(chatId);
+      return safeSend(chatId,
+        '✅ Вопрос отправлен менеджеру\\. Мы ответим в ближайшее время\\!',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+        }
+      );
+    }
+
+    // ── Ответ администратора напрямую клиенту (direct_reply)
+    if (isAdmin(chatId) && state === 'direct_reply' && d.target_chat_id) {
+      await safeSend(d.target_chat_id,
+        `💬 *Сообщение от менеджера:*\n\n${esc(text)}`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '✍️ Ответить', callback_data: 'msg_manager_start' }]] }
+        }
+      );
+      await clearSession(chatId);
+      return safeSend(chatId, '✅ Ответ отправлен клиенту.');
+    }
+
     // ── Client free message → forward to admin
     if (!isAdmin(chatId)) {
       const clientName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || 'Клиент';
@@ -2362,14 +2482,35 @@ async function notifyNewOrder(order) {
 async function notifyStatusChange(clientChatId, orderNumber, newStatus) {
   if (!bot || !clientChatId) return;
   const msgs = {
-    confirmed:   `✅ *Заявка ${orderNumber} подтверждена!*\n\nМенеджер свяжется с вами для уточнения деталей.`,
-    reviewing:   `🔍 *Заявка ${orderNumber} принята в работу.*\n\nМы изучаем ваш запрос.`,
-    in_progress: `▶️ *Заявка ${orderNumber} выполняется.*`,
-    completed:   `🏁 *Заявка ${orderNumber} завершена!*\n\nСпасибо, что выбрали Nevesty Models! 💎`,
-    cancelled:   `❌ *Заявка ${orderNumber} отклонена.*\n\nЕсли есть вопросы — свяжитесь с нами.`,
+    confirmed:   `✅ *Заявка ${esc(orderNumber)} подтверждена\\!*\n\nМенеджер свяжется с вами для уточнения деталей\\.`,
+    reviewing:   `🔍 *Заявка ${esc(orderNumber)} принята в работу\\.*\n\nМы изучаем ваш запрос\\.`,
+    in_progress: `▶️ *Заявка ${esc(orderNumber)} выполняется\\.*`,
+    completed:   `🏁 *Заявка ${esc(orderNumber)} завершена\\!*\n\nСпасибо, что выбрали Nevesty Models\\! 💎`,
+    cancelled:   `❌ *Заявка ${esc(orderNumber)} отклонена\\.*\n\nЕсли есть вопросы — свяжитесь с нами\\.`,
   };
   const text = msgs[newStatus];
-  if (text) await safeSend(clientChatId, text, {});
+  if (!text) return;
+
+  // Кнопки действий для клиента при смене статуса
+  const keyboard = { inline_keyboard: [
+    [{ text: '💬 Написать менеджеру', callback_data: 'contact_mgr'  },
+     { text: '📋 Мои заявки',        callback_data: 'my_orders'     }],
+    [{ text: '📝 Повторить заявку',  callback_data: 'bk_start'      }],
+  ]};
+
+  // После завершения — предлагаем оставить отзыв
+  if (newStatus === 'completed') {
+    try {
+      const order = await get('SELECT id FROM orders WHERE order_number=?', [orderNumber]).catch(()=>null);
+      if (order) {
+        keyboard.inline_keyboard.unshift([
+          { text: '⭐ Оставить отзыв', callback_data: `leave_review_${order.id}` }
+        ]);
+      }
+    } catch {}
+  }
+
+  await safeSend(clientChatId, text, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
 }
 
 async function sendMessageToClient(clientChatId, orderNumber, text) {
@@ -2645,6 +2786,190 @@ async function showAdminReviews(chatId) {
       reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
     });
   } catch (e) { console.error('[Bot] showAdminReviews:', e.message); }
+}
+
+// ─── Топ-модели ───────────────────────────────────────────────────────────────
+
+async function showTopModels(chatId, page = 0) {
+  try {
+    const perPage = 5;
+    const models = await query(
+      `SELECT m.*,
+        (SELECT COUNT(*) FROM orders o WHERE o.model_id=m.id AND o.status NOT IN ('cancelled','new')) as book_count
+       FROM models m WHERE m.available=1
+       ORDER BY m.featured DESC, book_count DESC, m.id ASC`
+    ).catch(() => []);
+
+    if (!models.length) {
+      return safeSend(chatId, '📭 Нет доступных моделей\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'main_menu' }]] }
+      });
+    }
+
+    const total = models.length;
+    const slice = models.slice(page * perPage, page * perPage + perPage);
+    const modelBtns = slice.map((m, i) => {
+      const star = m.featured ? '⭐ ' : '';
+      const rank = page * perPage + i + 1;
+      return [{ text: `${rank}. ${star}${m.name}  ·  ${m.height}см`, callback_data: `cat_model_${m.id}` }];
+    });
+    const nav = [];
+    if (page > 0) nav.push({ text: '◀️', callback_data: `cat_top_${page-1}` });
+    if ((page+1)*perPage < total) nav.push({ text: '▶️', callback_data: `cat_top_${page+1}` });
+
+    return safeSend(chatId,
+      `⭐ *Топ\\-модели Nevesty Models*\n\n_Рейтинг по популярности и востребованности_\n\nВсего: ${total} ${ru_plural(total,'модель','модели','моделей')}`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          ...modelBtns,
+          ...(nav.length ? [nav] : []),
+          [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }],
+          [{ text: '🏠 Меню', callback_data: 'main_menu' }],
+        ]}
+      }
+    );
+  } catch (e) { console.error('[Bot] showTopModels:', e.message); }
+}
+
+// ─── Написать менеджеру ───────────────────────────────────────────────────────
+
+async function showContactManager(chatId) {
+  const phone  = await getSetting('contacts_phone').catch(() => '+7 (900) 000-00-00');
+  const insta  = await getSetting('contacts_insta').catch(() => '@nevesty_models');
+  await setSession(chatId, 'msg_to_manager', {});
+  return safeSend(chatId,
+    `💬 *Связаться с менеджером*\n\n` +
+    `Напишите ваш вопрос прямо здесь — менеджер ответит в течение часа\\.\n\n` +
+    `Или свяжитесь напрямую:\n` +
+    `📞 ${esc(phone)}\n` +
+    `📸 Instagram: ${esc(insta)}`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '✍️ Написать вопрос сейчас', callback_data: 'msg_manager_start' }],
+        [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+      ]}
+    }
+  );
+}
+
+// ─── Получить контакт модели ──────────────────────────────────────────────────
+
+async function showModelContact(chatId, modelId) {
+  try {
+    const m = await get('SELECT * FROM models WHERE id=?', [modelId]);
+    if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+    const parts = [];
+    if (m.phone)     parts.push(`📞 Телефон: ${esc(m.phone)}`);
+    if (m.instagram) parts.push(`📸 Instagram: @${esc(m.instagram)}`);
+    if (!parts.length) {
+      return safeSend(chatId,
+        `📱 *Контакт модели ${esc(m.name)}*\n\nДля получения контакта обратитесь к менеджеру\\.`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '💬 Написать менеджеру', callback_data: 'contact_mgr' }],
+            [{ text: '← Назад', callback_data: `cat_model_${modelId}` }],
+          ]}
+        }
+      );
+    }
+    return safeSend(chatId,
+      `📱 *Контакт: ${esc(m.name)}*\n\n${parts.join('\n')}`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📝 Заказать модель', callback_data: `bk_model_${m.id}` }],
+          [{ text: '← Назад', callback_data: `cat_model_${modelId}` }],
+        ]}
+      }
+    );
+  } catch (e) { console.error('[Bot] showModelContact:', e.message); }
+}
+
+// ─── О нас ────────────────────────────────────────────────────────────────────
+
+async function showAboutUs(chatId) {
+  const about   = await getSetting('about').catch(() => 'Мы работаем с 2018 года. Более 200 моделей в базе.');
+  const phone   = await getSetting('contacts_phone').catch(() => '');
+  const pricing = await getSetting('pricing').catch(() => '');
+  return safeSend(chatId,
+    `ℹ️ *О нас — Nevesty Models*\n\n${esc(about)}\n\n` +
+    `💎 *Почему мы:*\n` +
+    `• Более 200 профессиональных моделей\n` +
+    `• Работаем по всей России\n` +
+    `• Договор и полная юридическая чистота\n` +
+    `• Fashion, Commercial, Events, Runway\n\n` +
+    (phone ? `📞 ${esc(phone)}` : ''),
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '💃 Смотреть каталог', callback_data: 'cat_cat__0' }],
+        [{ text: '📞 Контакты',         callback_data: 'contacts'   }],
+        [{ text: '🏠 Меню',             callback_data: 'main_menu'  }],
+      ]}
+    }
+  );
+}
+
+// ─── Прайс-лист ───────────────────────────────────────────────────────────────
+
+async function showPricing(chatId) {
+  const pricing = await getSetting('pricing').catch(() =>
+    'Fashion/Commercial — от 5000₽/час\nEvents — от 8000₽/час\nRunway — от 10000₽/час'
+  );
+  return safeSend(chatId,
+    `💰 *Прайс\\-лист Nevesty Models*\n\n${esc(pricing)}\n\n` +
+    `_Точная стоимость зависит от типа съёмки, длительности и модели\\._\n\n` +
+    `Для точного расчёта — оставьте заявку или напишите менеджеру\\.`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📝 Оставить заявку',    callback_data: 'bk_start'    }],
+        [{ text: '💬 Спросить менеджера', callback_data: 'contact_mgr' }],
+        [{ text: '🏠 Меню',               callback_data: 'main_menu'   }],
+      ]}
+    }
+  );
+}
+
+// ─── Каталог по городу ────────────────────────────────────────────────────────
+
+async function showCatalogByCity(chatId, city, page = 0) {
+  try {
+    const perPage = 5;
+    const models = city
+      ? await query('SELECT * FROM models WHERE available=1 AND city=? ORDER BY id', [city])
+      : await query('SELECT * FROM models WHERE available=1 ORDER BY id');
+
+    if (!models.length) {
+      return safeSend(chatId, `📭 Моделей в городе «${city}» нет\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '💃 Все модели', callback_data: 'cat_cat__0' }]] }
+      });
+    }
+
+    const total = models.length;
+    const slice = models.slice(page * perPage, page * perPage + perPage);
+    const modelBtns = slice.map(m => [{ text: `${m.name} · ${m.height}см`, callback_data: `cat_model_${m.id}` }]);
+    const nav = [];
+    if (page > 0) nav.push({ text: '◀️', callback_data: `cat_city_${city}_${page-1}` });
+    if ((page+1)*perPage < total) nav.push({ text: '▶️', callback_data: `cat_city_${city}_${page+1}` });
+
+    return safeSend(chatId,
+      `🏙 *Модели — ${esc(city)}*\n\nНайдено: ${total}`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          ...modelBtns,
+          ...(nav.length ? [nav] : []),
+          [{ text: '🏠 Меню', callback_data: 'main_menu' }],
+        ]}
+      }
+    );
+  } catch (e) { console.error('[Bot] showCatalogByCity:', e.message); }
 }
 
 module.exports = { initBot, notifyAdmin, notifyNewOrder, notifyStatusChange, sendMessageToClient };

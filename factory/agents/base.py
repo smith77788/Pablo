@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 CLAUDE_BIN = os.getenv("CLAUDE_CODE_EXECPATH", "claude")
 MODEL = os.getenv("FACTORY_MODEL", "claude-sonnet-4-6")
-TIMEOUT = int(os.getenv("FACTORY_TIMEOUT", "120"))
+TIMEOUT = int(os.getenv("FACTORY_TIMEOUT", "300"))
 _USE_SDK = bool(os.getenv("ANTHROPIC_API_KEY"))
 
 
