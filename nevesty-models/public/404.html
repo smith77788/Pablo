@@ -1,11 +1,19 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>404 — Страница не найдена · Nevesty Models</title>
+  <title>404 — Страница не найдена | Nevesty Models</title>
+  <meta name="description" content="Страница не найдена. Возможно, страница была удалена или вы перешли по неверной ссылке.">
   <meta name="robots" content="noindex, nofollow">
+  <meta property="og:title" content="404 — Страница не найдена | Nevesty Models">
+  <meta property="og:description" content="Страница не найдена. Возможно, страница была удалена или вы перешли по неверной ссылке.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Nevesty Models">
   <meta name="theme-color" content="#080808">
+  <meta name="color-scheme" content="dark">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="/css/main.css" />
@@ -16,14 +24,6 @@
     function gtag(){dataLayer.push(arguments);}
     gtag('js', new Date());
     gtag('config', 'GA_MEASUREMENT_ID', { anonymize_ip: true });
-  </script>
-  <!-- Yandex.Metrica -->
-  <script>
-    window.YM_ID = 00000000; // Replace with real ID
-    (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-    m[i].l=1*new Date();k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-    (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
-    ym(window.YM_ID, "init", { clickmap:true, trackLinks:true, accurateTrackBounce:true, webvisor:true });
   </script>
   <!-- Analytics wrapper -->
   <script src="/js/analytics.js"></script>
@@ -49,18 +49,22 @@
     }
 
     .err-code {
-      font-family: 'Playfair Display', serif;
       font-size: clamp(7rem, 22vw, 16rem);
-      font-weight: 700;
+      font-weight: 900;
       line-height: 1;
-      color: transparent;
-      -webkit-text-stroke: 1px rgba(201,169,110,0.25);
-      background: linear-gradient(135deg, rgba(201,169,110,0.15) 0%, rgba(201,169,110,0.05) 100%);
+      background: linear-gradient(135deg, #C9A96E 0%, #e8d5a3 40%, #C9A96E 65%, #9a7840 100%);
       -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
       background-clip: text;
       user-select: none;
-      letter-spacing: -0.02em;
+      letter-spacing: -0.03em;
       margin-bottom: -16px;
+      animation: pulse404 3s ease-in-out infinite;
+    }
+
+    @keyframes pulse404 {
+      0%, 100% { opacity: 1; filter: drop-shadow(0 0 24px rgba(201,169,110,0.28)); }
+      50%       { opacity: 0.82; filter: drop-shadow(0 0 48px rgba(201,169,110,0.52)); }
     }
 
     .err-divider {
@@ -79,8 +83,8 @@
     }
 
     .err-title {
-      font-family: 'Playfair Display', serif;
       font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 700;
       color: var(--text);
       margin-bottom: 16px;
     }
@@ -88,16 +92,42 @@
     .err-desc {
       color: var(--text-muted);
       font-size: 0.95rem;
-      max-width: 420px;
+      max-width: 440px;
       line-height: 1.7;
       margin-bottom: 40px;
     }
 
     .err-actions {
       display: flex;
-      gap: 16px;
+      gap: 14px;
       flex-wrap: wrap;
       justify-content: center;
+      margin-bottom: 32px;
+    }
+
+    .err-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 24px;
+      background: transparent;
+      border: 1px solid rgba(201,169,110,0.35);
+      border-radius: 8px;
+      color: var(--gold);
+      font-size: 0.875rem;
+      font-family: inherit;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .err-back:hover {
+      background: rgba(201,169,110,0.1);
+      border-color: var(--gold);
+    }
+    .err-back svg {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
     }
 
     .err-corner {
@@ -114,6 +144,7 @@
 
     @media (max-width: 480px) {
       .err-corner { display: none; }
+      .err-actions { gap: 10px; }
     }
   </style>
 </head>
@@ -123,32 +154,38 @@
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
       <div class="nav-links">
         <a href="/catalog.html">Модели</a>
-        <a href="/#services">Услуги</a>
-        <a href="/#about">О нас</a>
-        <a href="/#contact">Контакты</a>
+        <a href="/pricing.html">Цены</a>
+        <a href="/about.html">О нас</a>
+        <a href="/contact.html">Контакты</a>
         <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
     </div>
   </nav>
 
-  <main class="page-404">
-    <div class="err-corner err-corner-tl"></div>
-    <div class="err-corner err-corner-tr"></div>
-    <div class="err-corner err-corner-bl"></div>
-    <div class="err-corner err-corner-br"></div>
+  <main class="page-404" role="main">
+    <div class="err-corner err-corner-tl" aria-hidden="true"></div>
+    <div class="err-corner err-corner-tr" aria-hidden="true"></div>
+    <div class="err-corner err-corner-bl" aria-hidden="true"></div>
+    <div class="err-corner err-corner-br" aria-hidden="true"></div>
 
-    <div class="err-code">404</div>
-    <div class="err-divider"></div>
-    <div class="err-label">Ошибка</div>
+    <div class="err-code" aria-label="Ошибка 404">404</div>
+    <div class="err-divider" aria-hidden="true"></div>
+    <div class="err-label" aria-hidden="true">Ошибка</div>
     <h1 class="err-title">Страница не найдена</h1>
     <p class="err-desc">
-      К сожалению, запрошенная страница не существует или была перемещена.<br>
-      Воспользуйтесь навигацией или вернитесь на главную.
+      Возможно, страница была удалена или вы перешли по неверной ссылке.
     </p>
-    <div class="err-actions">
-      <a href="/" class="btn-primary" style="padding:14px 32px;font-size:0.8rem">На главную</a>
-      <a href="/catalog.html" class="btn-outline" style="padding:14px 32px;font-size:0.8rem">Каталог моделей</a>
-    </div>
+    <nav class="err-actions" aria-label="Полезные ссылки">
+      <a href="/catalog.html" class="btn-outline" style="padding:13px 28px;font-size:0.85rem">Каталог моделей</a>
+      <a href="/booking.html" class="btn-outline" style="padding:13px 28px;font-size:0.85rem">Бронирование</a>
+      <a href="/" class="btn-primary" style="padding:13px 28px;font-size:0.85rem">На главную</a>
+    </nav>
+    <button class="err-back" onclick="history.length > 1 ? history.back() : (window.location.href = '/')" aria-label="Вернуться на предыдущую страницу">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+      Вернуться назад
+    </button>
   </main>
 </body>
 </html>

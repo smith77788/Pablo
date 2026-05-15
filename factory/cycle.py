@@ -604,15 +604,158 @@ def run_cycle() -> dict:
         logger.error("Research dept phase error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 12 — SALES DEPARTMENT (все 4 агента индивидуально)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n💼 PHASE 12: SALES DEPARTMENT (4 agents)")
+    sales_agents_results = {}
+    try:
+        from factory.agents.sales_dept import LeadQualifier, ProposalWriter, FollowUpSpecialist, PricingNegotiator
+
+        sales_agent_context = {"insights": insights, "metrics": all_metrics}
+
+        try:
+            lead_qualifier = LeadQualifier()
+            lq_result = lead_qualifier.run(sales_agent_context)
+            sales_agents_results["lead_qualifier"] = lq_result
+            logger.info("[Phase12] LeadQualifier: insights=%d", len(lq_result.get("insights", [])))
+        except Exception as e:
+            logger.error("[Phase12] LeadQualifier error: %s", e)
+            sales_agents_results["lead_qualifier"] = {}
+
+        try:
+            proposal_writer = ProposalWriter()
+            pw_result = proposal_writer.run(sales_agent_context)
+            sales_agents_results["proposal_writer"] = pw_result
+            logger.info("[Phase12] ProposalWriter: insights=%d", len(pw_result.get("insights", [])))
+        except Exception as e:
+            logger.error("[Phase12] ProposalWriter error: %s", e)
+            sales_agents_results["proposal_writer"] = {}
+
+        try:
+            followup_specialist = FollowUpSpecialist()
+            fu_result = followup_specialist.run(sales_agent_context)
+            sales_agents_results["followup_specialist"] = fu_result
+            logger.info("[Phase12] FollowUpSpecialist: insights=%d", len(fu_result.get("insights", [])))
+        except Exception as e:
+            logger.error("[Phase12] FollowUpSpecialist error: %s", e)
+            sales_agents_results["followup_specialist"] = {}
+
+        try:
+            pricing_negotiator = PricingNegotiator()
+            pn_result = pricing_negotiator.run(sales_agent_context)
+            sales_agents_results["pricing_negotiator"] = pn_result
+            logger.info("[Phase12] PricingNegotiator: insights=%d", len(pn_result.get("insights", [])))
+        except Exception as e:
+            logger.error("[Phase12] PricingNegotiator error: %s", e)
+            sales_agents_results["pricing_negotiator"] = {}
+
+        results["phases"]["sales_agents"] = {
+            "agents": list(sales_agents_results.keys()),
+            "results": sales_agents_results,
+        }
+        active_agents = [k for k, v in sales_agents_results.items() if v]
+        summary_lines.append(f"💼 Sales Agents (Phase 12): {', '.join(active_agents)}")
+    except Exception as e:
+        logger.error("Phase 12 Sales agents error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 13 — CUSTOMER SUCCESS DEPARTMENT (все 4 агента индивидуально)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🤝 PHASE 13: CUSTOMER SUCCESS DEPARTMENT (4 agents)")
+    cx_agents_results = {}
+    try:
+        from factory.agents.customer_success_dept import (
+            OnboardingSpecialist, RetentionAnalyst, FeedbackCollector, UpsellAdvisor
+        )
+
+        cx_agent_context = {"insights": insights, "metrics": all_metrics}
+
+        try:
+            onboarding = OnboardingSpecialist()
+            ob_result = onboarding.run(cx_agent_context)
+            cx_agents_results["onboarding_specialist"] = ob_result
+            logger.info("[Phase13] OnboardingSpecialist: insights=%d", len(ob_result.get("insights", [])))
+        except Exception as e:
+            logger.error("[Phase13] OnboardingSpecialist error: %s", e)
+            cx_agents_results["onboarding_specialist"] = {}
+
+        try:
+            retention = RetentionAnalyst()
+            ra_result = retention.run(cx_agent_context)
+            cx_agents_results["retention_analyst"] = ra_result
+            logger.info("[Phase13] RetentionAnalyst: insights=%d", len(ra_result.get("insights", [])))
+        except Exception as e:
+            logger.error("[Phase13] RetentionAnalyst error: %s", e)
+            cx_agents_results["retention_analyst"] = {}
+
+        try:
+            feedback = FeedbackCollector()
+            fb_result = feedback.run(cx_agent_context)
+            cx_agents_results["feedback_collector"] = fb_result
+            logger.info("[Phase13] FeedbackCollector: insights=%d", len(fb_result.get("insights", [])))
+        except Exception as e:
+            logger.error("[Phase13] FeedbackCollector error: %s", e)
+            cx_agents_results["feedback_collector"] = {}
+
+        try:
+            upsell = UpsellAdvisor()
+            ua_result = upsell.run(cx_agent_context)
+            cx_agents_results["upsell_advisor"] = ua_result
+            logger.info("[Phase13] UpsellAdvisor: insights=%d", len(ua_result.get("insights", [])))
+        except Exception as e:
+            logger.error("[Phase13] UpsellAdvisor error: %s", e)
+            cx_agents_results["upsell_advisor"] = {}
+
+        results["phases"]["cx_agents"] = {
+            "agents": list(cx_agents_results.keys()),
+            "results": cx_agents_results,
+        }
+        active_cx = [k for k, v in cx_agents_results.items() if v]
+        summary_lines.append(f"🤝 CX Agents (Phase 13): {', '.join(active_cx)}")
+    except Exception as e:
+        logger.error("Phase 13 Customer Success agents error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 8 — CEO SYNTHESIS: синтез всех департаментов
     # ════════════════════════════════════════════════════════════════
     logger.info("\n🏆 CEO SYNTHESIS")
     try:
-        # Собираем краткие итоги всех департаментов
+        # Собираем краткие итоги всех департаментов (включая Phase 12 и 13)
         all_department_results = {}
         for dept_name, dept_data in results["phases"].items():
             if dept_name not in ("analytics", "ceo", "departments", "ideas"):
                 all_department_results[dept_name] = dept_data
+
+        # Явно включаем результаты Phase 12/13 в контекст CEO
+        if sales_agents_results:
+            all_department_results["sales_agents_phase12"] = {
+                "agents": list(sales_agents_results.keys()),
+                "summary": {
+                    agent: {
+                        "insights": data.get("insights", [])[:2],
+                        "priority": data.get("priority"),
+                    }
+                    for agent, data in sales_agents_results.items() if data
+                },
+            }
+        if cx_agents_results:
+            all_department_results["cx_agents_phase13"] = {
+                "agents": list(cx_agents_results.keys()),
+                "summary": {
+                    agent: {
+                        "insights": data.get("insights", [])[:2],
+                        "priority": data.get("priority"),
+                    }
+                    for agent, data in cx_agents_results.items() if data
+                },
+            }
+
+        # Извлекаем previous_growth_actions из последнего цикла для CEO tracking
+        prev_cycle_data = _load_last_cycle_from_history()
+        previous_growth_actions = []
+        if prev_cycle_data:
+            prev_ceo = prev_cycle_data.get("phases", {}).get("ceo_synthesis", {})
+            previous_growth_actions = prev_ceo.get("growth_actions", [])
 
         class CEOSynthesisAgent(FactoryAgent):
             department = "ceo"
@@ -621,12 +764,15 @@ def run_cycle() -> dict:
             system_prompt = (
                 "Ты — CEO агентства моделей Nevesty Models. "
                 "Отвечаешь за стратегическое направление компании. "
-                "Принимаешь решения на основе данных всех 9+ департаментов: аналитики, маркетинга, "
-                "продаж, операций, технологий, финансов, исследований, клиентского успеха и HR. "
+                "Принимаешь решения на основе данных всех 13 фаз: аналитики, маркетинга, "
+                "продаж (Phase 12: LeadQualifier, ProposalWriter, FollowUpSpecialist, PricingNegotiator), "
+                "Customer Success (Phase 13: OnboardingSpecialist, RetentionAnalyst, FeedbackCollector, UpsellAdvisor), "
+                "операций, технологий, финансов, исследований и HR. "
                 "По итогам каждого цикла ты ОБЯЗАН: "
-                "1) Указать один конкретный эксперимент который нужно запустить в следующем цикле. "
-                "2) Выбрать один KPI который критично улучшить (с конкретным целевым значением). "
-                "3) Назвать одну главную причину успеха или неудачи прошлого цикла. "
+                "1) Оценить насколько были выполнены growth_actions прошлого цикла (action_completion_score 0-10). "
+                "2) Выбрать один департамент для фокуса следующего цикла (department_focus). "
+                "3) Предложить один A/B тест с гипотезой и метрикой успеха (experiment_proposal). "
+                "4) Указать приоритетный KPI и эксперимент следующего цикла. "
                 "Мыслишь чётко, расставляешь приоритеты, даёшь конкретные указания команде. "
                 "Всё на русском языке."
             )
@@ -637,14 +783,22 @@ def run_cycle() -> dict:
         prev_cycles = _load_metrics_trend('phases.ceo_synthesis.health_score', last_n=3)
         trend_info = f"Тренд health_score за последние циклы: {[c.get('value') for c in prev_cycles]}" if prev_cycles else "Первый цикл (история отсутствует)"
 
-        prev_cycle_data = _load_last_cycle_from_history()
         prev_actions_report = _check_previous_actions_completion(prev_cycle_data)
+
+        # Формируем строку о previous_growth_actions для CEO tracking
+        prev_growth_str = ""
+        if previous_growth_actions:
+            prev_growth_str = (
+                f"\n\nPREVIOUS GROWTH ACTIONS (из прошлого цикла, {len(previous_growth_actions)} шт.):\n"
+                + json.dumps(previous_growth_actions[:5], ensure_ascii=False, indent=2, default=str)
+                + "\nОцени выполнение каждого (action_completion_score: 0=ничего не выполнено, 10=всё выполнено)."
+            )
 
         context_str = json.dumps(all_department_results, ensure_ascii=False, indent=2, default=str)
 
         memo_prompt = f"""Ты — CEO модельного агентства. Напиши ЕЖЕНЕДЕЛЬНЫЙ МЕМОРАНДУМ на русском языке.
 
-Данные этого цикла:
+Данные этого цикла (включая Phase 12: Sales agents, Phase 13: CX agents):
 {context_str}
 
 {trend_info}
@@ -680,17 +834,21 @@ def run_cycle() -> dict:
 Пиши кратко, по делу, как настоящий CEO. Максимум 400 слов."""
 
         ceo_synthesis_prompt = (
-            "Ты — CEO агентства моделей Nevesty Models. Получи отчёты всех департаментов и сделай выводы.\n\n"
+            "Ты — CEO агентства моделей Nevesty Models. Получи отчёты всех 13 фаз и сделай выводы.\n\n"
             "ИНСТРУКЦИЯ ДЛЯ CEO MEMO:\n"
             + memo_prompt
-            + "\n\nОТЧЁТЫ ДЕПАРТАМЕНТОВ:\n"
+            + "\n\nОТЧЁТЫ ВСЕХ ДЕПАРТАМЕНТОВ (Phase 1-13):\n"
             + context_str
             + "\n\nАНАЛИЗ ПРЕДЫДУЩЕГО ЦИКЛА:\n"
             + prev_actions_report
+            + prev_growth_str
             + "\n\nВерни JSON:\n"
             '{\n'
             '  "health_score": 75,\n'
             '  "weekly_focus": "Улучшить конверсию из просмотра каталога в заявку",\n'
+            '  "action_completion_score": 7,\n'
+            '  "department_focus": "sales",\n'
+            '  "experiment_proposal": {"hypothesis": "Если добавить кнопку быстрого заказа в каталоге, конверсия вырастет на 20%", "success_metric": "конверсия каталог→заявка > 5%", "department": "product"},\n'
             '  "next_cycle_experiment": {"hypothesis": "...", "metric": "...", "department": "..."},\n'
             '  "priority_kpi": {"name": "конверсия в заявку", "current": "2%", "target": "4%"},\n'
             '  "prev_cycle_lesson": "Одна причина успеха или неудачи прошлого цикла",\n'
@@ -704,7 +862,7 @@ def run_cycle() -> dict:
             '}'
         )
 
-        ceo_synthesis = ceo_agent.think_json(ceo_synthesis_prompt, max_tokens=2000)
+        ceo_synthesis = ceo_agent.think_json(ceo_synthesis_prompt, max_tokens=2500)
 
         if ceo_synthesis and isinstance(ceo_synthesis, dict):
             # Обновляем health_score если CEO дал оценку
@@ -716,6 +874,10 @@ def run_cycle() -> dict:
             # Сохраняем CEO Weekly Memo в БД как growth_action
             memo_text = ceo_synthesis.get("ceo_memo", "")
             weekly_focus = ceo_synthesis.get("weekly_focus", "")
+            action_completion_score = ceo_synthesis.get("action_completion_score")
+            department_focus = ceo_synthesis.get("department_focus", "")
+            experiment_proposal = ceo_synthesis.get("experiment_proposal", {})
+
             if memo_text or weekly_focus:
                 db.insert("growth_actions", {
                     "product_id": nevesty_id,
@@ -727,6 +889,9 @@ def run_cycle() -> dict:
                         "health_score": ceo_synthesis.get("health_score"),
                         "weekly_focus": weekly_focus,
                         "memo": memo_text,
+                        "action_completion_score": action_completion_score,
+                        "department_focus": department_focus,
+                        "experiment_proposal": experiment_proposal,
                         "next_cycle_experiment": ceo_synthesis.get("next_cycle_experiment", {}),
                         "priority_kpi": ceo_synthesis.get("priority_kpi", {}),
                         "prev_cycle_lesson": ceo_synthesis.get("prev_cycle_lesson", ""),
@@ -749,20 +914,27 @@ def run_cycle() -> dict:
             next_exp = ceo_synthesis.get("next_cycle_experiment", {})
             priority_kpi = ceo_synthesis.get("priority_kpi", {})
             prev_lesson = ceo_synthesis.get("prev_cycle_lesson", "")
+            if action_completion_score is not None:
+                summary_lines.append(f"✅ Выполнение прошлых задач: {action_completion_score}/10")
+            if department_focus:
+                summary_lines.append(f"🏢 Фокус-департамент: {department_focus}")
+            if experiment_proposal:
+                summary_lines.append(f"🧪 A/B тест: {experiment_proposal.get('hypothesis', '—')[:60]}")
             if next_exp:
-                summary_lines.append(f"🧪 Эксперимент: {next_exp.get('hypothesis', '—')[:60]}")
+                summary_lines.append(f"🔬 Эксперимент цикла: {next_exp.get('hypothesis', '—')[:60]}")
             if priority_kpi:
                 summary_lines.append(f"📈 KPI: {priority_kpi.get('name', '—')} → {priority_kpi.get('target', '—')}")
             if prev_lesson:
                 summary_lines.append(f"🔍 Урок: {prev_lesson[:80]}")
 
             logger.info(
-                "[CEOSynthesis] health=%s, focus=%s, actions=%s, experiment=%s, kpi=%s",
+                "[CEOSynthesis] health=%s, focus=%s, actions=%s, completion=%s, dept_focus=%s, experiment=%s",
                 ceo_synthesis.get("health_score"),
                 weekly_focus[:60] if weekly_focus else "—",
                 actions_count,
-                next_exp.get("hypothesis", "—")[:50] if next_exp else "—",
-                priority_kpi.get("name", "—") if priority_kpi else "—",
+                action_completion_score,
+                department_focus,
+                experiment_proposal.get("hypothesis", "—")[:50] if experiment_proposal else "—",
             )
 
             # Sync growth actions to bot DB and send CEO memo to Telegram
