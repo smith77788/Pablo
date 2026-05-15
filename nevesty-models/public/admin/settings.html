@@ -712,6 +712,13 @@
               </div>
             </div>
 
+            <div class="settings-divider" style="margin-top:24px">Аналитика</div>
+            <div class="admin-form-group">
+              <label>Google Analytics 4 ID (G-XXXXXXXXXX)</label>
+              <input type="text" id="s_ga_measurement_id" class="admin-input" placeholder="G-XXXXXXXXXX" maxlength="20" />
+              <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Вставте Measurement ID з Google Analytics 4</div>
+            </div>
+
             <button class="btn btn-md btn-gold" id="btnSaveIntegrations" onclick="saveIntegrations(this)" style="margin-top:20px">Сохранить интеграции</button>
           </div>
         </div>
@@ -1227,6 +1234,7 @@ async function loadSettings() {
       's_tagline': 'tagline',
       's_hero_image': 'hero_image',
       's_webhook_url': 'webhook_url',
+      's_ga_measurement_id': 'ga_measurement_id',
     };
     for (const [elId, key] of Object.entries(appearanceMap)) {
       const el = document.getElementById(elId);
@@ -1501,8 +1509,9 @@ async function saveIntegrations(btn) {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        webhook_url:      document.getElementById('s_webhook_url').value,
-        tg_notif_enabled: document.getElementById('s_tg_notif_enabled').checked ? '1' : '0'
+        webhook_url:        document.getElementById('s_webhook_url').value,
+        tg_notif_enabled:   document.getElementById('s_tg_notif_enabled').checked ? '1' : '0',
+        ga_measurement_id:  document.getElementById('s_ga_measurement_id').value.trim()
       })
     });
     _admin.toast('Интеграции сохранены', 'success');

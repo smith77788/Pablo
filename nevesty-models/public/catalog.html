@@ -86,13 +86,24 @@
     }
   </script>
   <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
-  <!-- Google Analytics 4 -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=GA_MEASUREMENT_ID"></script>
+  <!-- Google Analytics 4 (loads only if consent given) -->
   <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'GA_MEASUREMENT_ID', { anonymize_ip: true });
+    window._ga_id = ''; // loaded from API
+    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
+      if (!d.ga_measurement_id) return;
+      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+      window._ga_id = d.ga_measurement_id;
+      var s = document.createElement('script');
+      s.async = true;
+      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
+      document.head.appendChild(s);
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      window.gtag = gtag;
+      gtag('js', new Date());
+      gtag('config', d.ga_measurement_id, { 'send_page_view': true });
+      window._ga_ready = true;
+    }).catch(()=>{});
   </script>
   <!-- Yandex.Metrica -->
   <script>

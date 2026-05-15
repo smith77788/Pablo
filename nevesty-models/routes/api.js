@@ -1287,7 +1287,8 @@ router.get('/settings/public', async (req, res) => {
       'contacts_phone', 'contacts_email', 'contacts_insta', 'contacts_addr',
       'contacts_whatsapp', 'about', 'greeting', 'agency_name', 'tagline',
       'catalog_per_page', 'site_url', 'manager_hours',
-      'pricing_start_from', 'pricing_event_from', 'pricing_premium_from'
+      'pricing_start_from', 'pricing_event_from', 'pricing_premium_from',
+      'ga_measurement_id'
     ];
     const cacheKey = 'settings:public';
     const cached = cache.get(cacheKey);

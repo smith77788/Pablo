@@ -220,6 +220,18 @@
       return STAR.repeat(Math.min(n,5)) + STAR_EMPTY.repeat(Math.max(0,5-n));
     }
 
+    function starsLabel(rating) {
+      if (!rating) return '';
+      return '⭐'.repeat(rating) + ` (${rating}/5)`;
+    }
+
+    // Map filter tab values to API filter param
+    function filterToApiParam(f) {
+      if (f === '0') return 'pending';
+      if (f === '1') return 'approved';
+      return 'all';
+    }
+
     function setFilter(f, el) {
       currentFilter = f;
       currentPage = 1;
@@ -231,42 +243,48 @@
     async function loadStats() {
       try {
         const [allData, approvedData, pendingData] = await Promise.all([
-          _admin.api('/admin/reviews?limit=1'),
-          _admin.api('/admin/reviews?approved=1&limit=1'),
-          _admin.api('/admin/reviews?approved=0&limit=1'),
+          _admin.api('/admin/reviews?filter=all&limit=500'),
+          _admin.api('/admin/reviews?filter=approved&limit=500'),
+          _admin.api('/admin/reviews?filter=pending&limit=500'),
         ]);
-        document.getElementById('totalCount').textContent = allData.total || 0;
-        document.getElementById('approvedCount').textContent = approvedData.total || 0;
-        const pending = pendingData.total || 0;
-        document.getElementById('pendingCount').textContent = pending;
-        if (pending > 0) {
-          document.getElementById('pendingBadge').textContent = pending;
-          document.getElementById('pendingBadge').style.display = '';
+
+        const totalReviews = allData.total != null ? allData.total : (allData.reviews || []).length;
+        const approvedCount = approvedData.total != null ? approvedData.total : (approvedData.reviews || []).length;
+        const pendingCount = pendingData.total != null ? pendingData.total : (pendingData.reviews || []).length;
+
+        document.getElementById('totalCount').textContent = totalReviews;
+        document.getElementById('approvedCount').textContent = approvedCount;
+        document.getElementById('pendingCount').textContent = pendingCount;
+
+        // Update pending filter tab label
+        const pendingTab = document.querySelector('.filter-tab[data-filter="0"]');
+        if (pendingTab) {
+          pendingTab.textContent = pendingCount > 0
+            ? `Ожидают ✋ (${pendingCount})`
+            : 'Ожидают ✋';
         }
-        // Average rating from all reviews
-        const revs = allData.reviews || [];
-        if (revs.length > 0) {
-          // We need to load more to get accurate average - use a separate fetch
-          loadAvgRating();
+
+        // Update nav badge
+        const badge = document.getElementById('pendingBadge');
+        if (badge) {
+          badge.textContent = pendingCount;
+          badge.style.display = pendingCount > 0 ? '' : 'none';
+        }
+
+        // Compute avg rating from all reviews
+        const allReviews = allData.reviews || [];
+        const rated = allReviews.filter(r => r.rating > 0);
+        if (rated.length > 0) {
+          const avg = rated.reduce((s, r) => s + r.rating, 0) / rated.length;
+          document.getElementById('avgRating').textContent = avg.toFixed(1);
+          document.getElementById('avgStars').textContent = stars(Math.round(avg));
         } else {
           document.getElementById('avgRating').textContent = '—';
+          document.getElementById('avgStars').textContent = '';
         }
       } catch (e) {
         console.error('Stats error:', e);
       }
-    }
-
-    async function loadAvgRating() {
-      try {
-        const data = await _admin.api('/admin/reviews?limit=100');
-        const reviews = data.reviews || [];
-        if (reviews.length === 0) { document.getElementById('avgRating').textContent = '—'; return; }
-        const rated = reviews.filter(r => r.rating > 0);
-        if (rated.length === 0) { document.getElementById('avgRating').textContent = '—'; return; }
-        const avg = rated.reduce((s, r) => s + r.rating, 0) / rated.length;
-        document.getElementById('avgRating').textContent = avg.toFixed(1);
-        document.getElementById('avgStars').textContent = stars(Math.round(avg));
-      } catch (e) {}
     }
 
     async function loadReviews() {
@@ -274,8 +292,8 @@
       list.innerHTML = '<div class="empty-state"><div class="icon">⏳</div>Загрузка...</div>';
 
       try {
-        let url = `/admin/reviews?page=${currentPage}&limit=${PAGE_SIZE}`;
-        if (currentFilter !== 'all') url += `&approved=${currentFilter}`;
+        const apiFilter = filterToApiParam(currentFilter);
+        const url = `/admin/reviews?filter=${apiFilter}&page=${currentPage}&limit=${PAGE_SIZE}`;
 
         const data = await _admin.api(url);
         const reviews = data.reviews || [];
@@ -307,6 +325,8 @@
         hour: '2-digit', minute: '2-digit'
       });
 
+      const ratingDisplay = r.rating ? starsLabel(r.rating) : '';
+
       const safeReply = r.admin_reply ? r.admin_reply.replace(/\\/g, '\\\\').replace(/'/g, "\\'") : '';
       const replyHtml = r.admin_reply
         ? `<div class="review-reply">
@@ -328,39 +348,64 @@
             <div class="review-date">${date}</div>
           </div>
           <div style="text-align:right;flex-shrink:0">
-            <div class="review-stars">${stars(r.rating)}</div>
+            <div class="review-stars">${ratingDisplay}</div>
             <span class="status-badge ${statusBadgeClass}">${statusLabel}</span>
           </div>
         </div>
         ${r.text ? `<div class="review-text">${_admin.escapeHtml(r.text)}</div>` : '<div class="review-text" style="color:var(--text-dim);font-style:italic">Без текста</div>'}
         ${replyHtml}
         <div class="review-actions">
-          <button class="btn btn-sm ${approved ? 'btn-ghost' : 'btn-primary'}"
-            onclick="toggleApprove(${r.id}, ${approved})">
-            ${approved ? '🚫 Снять публикацию' : '✅ Опубликовать'}
-          </button>
+          ${!approved
+            ? `<button class="btn btn-sm btn-primary" onclick="approveReview(${r.id})">✅ Схвалити</button>
+               <button class="btn btn-sm btn-ghost" onclick="rejectReview(${r.id})">❌ Відхилити</button>`
+            : `<button class="btn btn-sm btn-ghost" onclick="rejectReview(${r.id})">🚫 Зняти публікацію</button>`
+          }
           <button class="btn btn-sm btn-danger" onclick="deleteReview(${r.id}, '${_admin.escapeHtml(r.client_name || 'Аноним').replace(/'/g, '')}')">
-            🗑 Удалить
+            🗑 Видалити
           </button>
           ${r.model_id ? `<a href="/model.html?id=${r.model_id}" target="_blank" class="btn btn-sm btn-ghost">👁 Модель</a>` : ''}
         </div>
       </div>`;
     }
 
-    async function toggleApprove(id, currentlyApproved) {
+    async function approveReview(id) {
       const card = document.getElementById(`review-${id}`);
       if (card) card.style.opacity = '0.5';
       try {
-        await _admin.api(`/admin/reviews/${id}/approve`, { method: 'PUT' });
+        await _admin.api(`/admin/reviews/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ approved: 1 })
+        });
+        await Promise.all([loadReviews(), loadStats()]);
+      } catch (e) {
+        // Fallback to legacy PUT endpoint
+        try {
+          await _admin.api(`/admin/reviews/${id}/approve`, { method: 'PUT' });
+          await Promise.all([loadReviews(), loadStats()]);
+        } catch (e2) {
+          if (card) card.style.opacity = '1';
+          alert('Помилка: ' + (e2.message || 'Спробуйте ще раз'));
+        }
+      }
+    }
+
+    async function rejectReview(id) {
+      const card = document.getElementById(`review-${id}`);
+      if (card) card.style.opacity = '0.5';
+      try {
+        await _admin.api(`/admin/reviews/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ approved: 0 })
+        });
         await Promise.all([loadReviews(), loadStats()]);
       } catch (e) {
         if (card) card.style.opacity = '1';
-        alert('Ошибка: ' + (e.message || 'Попробуйте снова'));
+        alert('Помилка: ' + (e.message || 'Спробуйте ще раз'));
       }
     }
 
     async function deleteReview(id, name) {
-      if (!confirm(`Удалить отзыв от "${name}"? Это действие необратимо.`)) return;
+      if (!confirm(`Видалити відгук від "${name}"? Цю дію не можна скасувати.`)) return;
       try {
         await _admin.api(`/admin/reviews/${id}`, { method: 'DELETE' });
         const card = document.getElementById(`review-${id}`);
@@ -372,7 +417,7 @@
         }
         loadStats();
       } catch (e) {
-        alert('Ошибка удаления: ' + (e.message || 'Попробуйте снова'));
+        alert('Помилка видалення: ' + (e.message || 'Спробуйте ще раз'));
       }
     }
 
