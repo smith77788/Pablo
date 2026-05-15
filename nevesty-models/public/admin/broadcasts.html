@@ -155,6 +155,12 @@
           </div>
         </div>
 
+        <div style="margin-top:12px;padding:8px 12px;background:rgba(201,169,110,0.08);border:1px solid rgba(201,169,110,0.2);border-radius:6px;font-size:0.82rem;color:var(--text-muted);display:flex;align-items:center;gap:8px">
+          <span>👥 Получателей:</span>
+          <span id="recipientCount" style="font-weight:700;color:var(--gold)">…</span>
+          <span id="recipientNote" style="color:var(--text-dim)"></span>
+        </div>
+
         <div style="margin-top:16px;display:flex;gap:12px;align-items:center">
           <button class="btn btn-gold" onclick="createBroadcast()" id="createBtn">📢 Отправить</button>
           <span id="createStatus" style="font-size:0.82rem;color:var(--text-dim)"></span>
@@ -337,8 +343,29 @@ async function cancelBroadcast(id) {
   }
 }
 
+async function loadRecipientCount(segment) {
+  const el = document.getElementById('recipientCount');
+  const note = document.getElementById('recipientNote');
+  if (!el) return;
+  el.textContent = '…';
+  if (note) note.textContent = '';
+  try {
+    const data = await _admin.apiFetch(`/admin/broadcasts/count?segment=${encodeURIComponent(segment)}`);
+    el.textContent = data.count ?? '?';
+    if (note) note.textContent = data.count === 0 ? '(нет получателей с Telegram)' : '';
+  } catch {
+    el.textContent = '?';
+  }
+}
+
+// Listen for segment change to update recipient preview count
+document.getElementById('broadcastSegment').addEventListener('change', function() {
+  loadRecipientCount(this.value);
+});
+
 loadCities();
 loadBroadcasts();
+loadRecipientCount('all');
 </script>
 </body>
 </html>

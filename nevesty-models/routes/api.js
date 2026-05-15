@@ -3327,19 +3327,25 @@ router.get('/admin/analytics/funnel', auth, async (req, res, next) => {
       in_progress: '🔄 В работе',
       completed: '🏁 Завершены'
     };
-    const [stages, cancelledRow] = await Promise.all([
+    const [stages, cancelledRow, viewRow] = await Promise.all([
       Promise.all(statuses.map(async s => ({
         label: labelMap[s],
         status: s,
         count: (await get(`SELECT COUNT(*) as cnt FROM orders WHERE status=? AND created_at >= ?`, [s, since]))?.cnt || 0
       }))),
       get(`SELECT COUNT(*) as cnt FROM orders WHERE status='cancelled' AND created_at >= ?`, [since]),
+      get(`SELECT COALESCE(SUM(view_count), 0) as total_views FROM models WHERE archived=0`),
     ]);
     const cancelled = cancelledRow?.cnt || 0;
     const total = stages.reduce((s, st) => s + st.count, 0) + cancelled;
     const completed = stages.find(s => s.status === 'completed')?.count || 0;
     const conversion_rate = total > 0 ? Math.round((completed / total) * 100) : 0;
-    res.json({ stages, cancelled, total, conversion_rate });
+    const viewCount = viewRow?.total_views || 0;
+    // Prepend model views as top-of-funnel stage
+    const allStages = viewCount > 0
+      ? [{ label: '👁 Просмотры моделей', status: 'views', count: viewCount }, ...stages]
+      : stages;
+    res.json({ stages: allStages, cancelled, total, conversion_rate, view_count: viewCount });
   } catch (e) { next(e); }
 });
 
@@ -4191,28 +4197,15 @@ router.post('/client/ai-match', aiMatchLimiter, async (req, res) => {
   }
 });
 
-// ─── FAQ ──────────────────────────────────────────────────────────────────────
-const DEFAULT_FAQ_ITEMS = JSON.stringify([
-  {"q": "Как заказать модель?", "a": "Выберите модель в каталоге и нажмите «Забронировать» или напишите нам в Telegram. Менеджер свяжется с вами в течение часа."},
-  {"q": "Какова стоимость услуг?", "a": "Стоимость зависит от типа мероприятия, продолжительности и требований. Заполните форму заявки, и мы рассчитаем индивидуальную цену."},
-  {"q": "Работаете ли вы по всей России?", "a": "Да, наши модели работают по всей России. Возможен выезд в другие города."},
-  {"q": "Сколько времени занимает подтверждение заявки?", "a": "Обычно менеджер связывается в течение 1-2 часов. В срочных случаях звоните напрямую."},
-  {"q": "Можно ли посмотреть работы модели?", "a": "Да, портфолио каждой модели доступно на её странице в каталоге. Дополнительные материалы можно запросить у менеджера."}
-]);
-
+// ─── FAQ (public) ─────────────────────────────────────────────────────────────
+// GET /api/faq — returns active FAQ items from the faq table (managed via admin CRUD)
+// Response shape: [{id, q, a}] — maps question/answer to q/a for faq.html compatibility
 router.get('/faq', async (req, res) => {
   try {
-    // Seed default FAQ items if not yet set
-    const existing = await get('SELECT value FROM bot_settings WHERE key = ?', ['faq_items']);
-    if (!existing) {
-      await run(
-        'INSERT OR IGNORE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-        ['faq_items', DEFAULT_FAQ_ITEMS]
-      );
-    }
-    const raw = await getSetting('faq_items');
-    const items = raw ? JSON.parse(raw) : [];
-    res.json(items);
+    const rows = await query(
+      'SELECT id, question AS q, answer AS a FROM faq WHERE active=1 ORDER BY sort_order ASC, id ASC'
+    );
+    res.json(rows);
   } catch (e) {
     res.json([]);
   }
