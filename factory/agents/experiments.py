@@ -1,4 +1,5 @@
 """Autonomous experiment system for Nevesty Models AI Factory."""
+from __future__ import annotations
 
 import sqlite3
 import json
@@ -24,7 +25,7 @@ class ExperimentProposer(FactoryAgent):
         "Propose concrete, measurable hypotheses to improve conversion and order volume."
     )
 
-    def think(self):
+    def think(self) -> str:  # type: ignore[override]
         """Build a prompt based on current metrics from data.db."""
         try:
             conn = sqlite3.connect(DATA_DB_PATH)
@@ -55,7 +56,7 @@ class ExperimentProposer(FactoryAgent):
             f"Focus on: catalog presentation, booking flow, messaging, pricing display."
         )
 
-    def run(self):
+    def run(self) -> str:
         prompt = self.think()
         analysis = super().think(prompt)
         # Try to save proposed experiments to factory.db
@@ -92,7 +93,7 @@ class ExperimentTracker(FactoryAgent):
         "Analyze active experiments and recommend prioritization."
     )
 
-    def think(self):
+    def think(self) -> str:  # type: ignore[override]
         """Build a prompt from active experiments in factory.db."""
         try:
             conn = sqlite3.connect(FACTORY_DB_PATH)
@@ -125,7 +126,7 @@ class ExperimentTracker(FactoryAgent):
                 "Recommend creating new experiment hypotheses."
             )
 
-    def run(self):
+    def run(self) -> str:
         prompt = self.think()
         return super().think(prompt)
 
@@ -140,7 +141,7 @@ class ResultAnalyzer(FactoryAgent):
         "Provide concrete, data-driven recommendations."
     )
 
-    def think(self):
+    def think(self) -> str:  # type: ignore[override]
         return (
             "Analyze the overall experiment pipeline for Nevesty Models modeling agency. "
             "What experiments would have the highest impact on: "
@@ -151,6 +152,6 @@ class ResultAnalyzer(FactoryAgent):
             "Provide specific, actionable recommendations."
         )
 
-    def run(self):
+    def run(self) -> str:
         prompt = self.think()
         return super().think(prompt)
