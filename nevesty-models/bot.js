@@ -6004,7 +6004,7 @@ function initBot(app) {
           [String(chatId), orderId]
         ).catch(() => null);
         if (existing) {
-          return safeSend(chatId, '✅ Вы уже оставили отзыв\\.', {
+          return safeSend(chatId, STRINGS.reviewAlreadyLeft, {
             parse_mode: 'MarkdownV2',
             reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
           });
@@ -6969,7 +6969,7 @@ function initBot(app) {
 
       case 'bk_s3_email':
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return safeSend(chatId,
-          '❌ Неверный формат email\\. Пример: name@mail\\.ru\n\nВведите корректный email или нажмите «Пропустить»\\.',
+          STRINGS.bookingErrorEmail,
           {
             parse_mode: 'MarkdownV2',
             reply_markup: { inline_keyboard: [
@@ -8270,7 +8270,7 @@ async function showSearchResults(chatId, filters, page = 0) {
 
     if (!total) {
       return safeSend(chatId,
-        `🔍 *Поиск моделей*\n\nПо вашему запросу ничего не найдено\\.\n\n_Попробуйте изменить или сбросить фильтры_`,
+        STRINGS.searchNoResults,
         {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [
@@ -8580,7 +8580,7 @@ async function startLeaveReview(chatId, orderId) {
       [String(chatId), orderId]
     ).catch(() => null);
     if (existing) {
-      return safeSend(chatId, '✅ Вы уже оставили отзыв для этой заявки\\.', {
+      return safeSend(chatId, STRINGS.reviewAlreadyLeftForOrder, {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] },
       });
@@ -8709,7 +8709,7 @@ async function showWishlist(chatId, page = 0) {
     const enabled = await getSetting('wishlist_enabled').catch(() => '1');
     if (enabled === '0') {
       return safeSend(chatId,
-        '❤️ Список избранного временно недоступен\\.',
+        STRINGS.wishlistUnavailable,
         { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [
           [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
         ]}}
@@ -8731,7 +8731,7 @@ async function showWishlist(chatId, page = 0) {
 
     if (items.length === 0 && page === 0) {
       return safeSend(chatId,
-        '❤️ *Ваш список избранного пуст*\n\nОткройте карточку модели и нажмите ❤️, чтобы добавить её в избранное\\.',
+        STRINGS.wishlistEmpty,
         {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [
@@ -8970,7 +8970,7 @@ function _registerNewFeatures() {
         return;
       }
       await addToWishlist(chatId, favModelId);
-      try { await bot.answerCallbackQuery(q.id, { text: '❤️ Добавлено в избранное!' }); } catch {}
+      try { await bot.answerCallbackQuery(q.id, { text: STRINGS.wishlistAdded }); } catch {}
       try {
         const favKb = (q.message.reply_markup?.inline_keyboard || []).map(row =>
           row.map(btn => btn.callback_data === `fav_add_${favModelId}`
@@ -8987,7 +8987,7 @@ function _registerNewFeatures() {
       const remModelId = parseInt(data.replace('fav_remove_', ''));
       if (!remModelId || remModelId <= 0) return;
       await removeFromWishlist(chatId, remModelId);
-      try { await bot.answerCallbackQuery(q.id, { text: '💔 Убрано из избранного' }); } catch {}
+      try { await bot.answerCallbackQuery(q.id, { text: STRINGS.wishlistRemoved }); } catch {}
       try {
         const remKb = q.message.reply_markup?.inline_keyboard || [];
         if (remKb.some(row => row.some(btn => btn.callback_data === `fav_view_${remModelId}`))) {
@@ -9095,8 +9095,8 @@ function _registerNewFeatures() {
 
     // Quick booking: collect name
     if (state === 'bk_quick_name') {
-      if (text.length < 2) return safeSend(chatId, '❌ Введите имя (минимум 2 символа):');
-      if (text.length > 100) return safeSend(chatId, '❌ Имя слишком длинное (максимум 100 символов):');
+      if (text.length < 2) return safeSend(chatId, STRINGS.bookingErrorName);
+      if (text.length > 100) return safeSend(chatId, STRINGS.bookingErrorNameLong);
       d.quick_name = text.slice(0, 100);
       return bkQuickPhone(chatId, d);
     }
@@ -9104,7 +9104,7 @@ function _registerNewFeatures() {
     // Quick booking: collect phone
     if (state === 'bk_quick_phone') {
       if (!/^[\d\s+\-()]{7,20}$/.test(text)) {
-        return safeSend(chatId, '❌ Введите корректный номер телефона:');
+        return safeSend(chatId, STRINGS.bookingErrorPhone);
       }
       d.quick_phone = text;
       return bkQuickSubmit(chatId, d);

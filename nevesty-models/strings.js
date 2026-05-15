@@ -72,6 +72,53 @@ const STRINGS = {
   btnCancel: '❌ Отменить',
   btnSkip: '⏭ Пропустить',
   btnMyOrders: '📋 Мои заявки',
+
+  // ─── Extended errors ───────────────────────────────────────────────────────
+  errorGeneric: '❌ Произошла ошибка\\. Попробуйте позже\\.',
+  errorUnauthorized: '❌ Нет доступа\\.',
+  errorPhotoTooLarge: '❌ Фото слишком большое\\. Максимум 10 МБ\\.',
+  errorInvalidDate: '❌ Неверный формат даты\\. Используйте ДД\\.ММ\\.ГГГГ',
+  errorModelNotFound: '❌ Модель не найдена\\.',
+  errorOrderNotFound: '❌ Заявка не найдена\\.',
+
+  // ─── Booking validation errors ─────────────────────────────────────────────
+  bookingErrorName: '❌ Введите имя \\(минимум 2 символа\\):',
+  bookingErrorNameLong: '❌ Имя слишком длинное \\(максимум 100 символов\\):',
+  bookingErrorPhone: '❌ Введите корректный номер телефона:',
+  bookingErrorEmail: '❌ Неверный формат email\\. Пример: name@mail\\.ru\n\nВведите корректный email или нажмите «Пропустить»\\.',
+  bookingErrorBudget: '❌ Введите корректный бюджет цифрами\\.',
+  bookingErrorDatePast: '❌ Дата не может быть в прошлом\\.',
+
+  // ─── Review strings ────────────────────────────────────────────────────────
+  reviewThankYou: '🙏 Спасибо за ваш отзыв\\! Он будет опубликован после проверки\\.',
+  reviewPrompt: '⭐ Как вы оцениваете работу с нами? Выберите рейтинг:',
+  reviewTextPrompt: '📝 Напишите несколько слов о вашем опыте работы с нами:',
+  reviewAlreadyLeft: '✅ Вы уже оставили отзыв\\.',
+  reviewAlreadyLeftForOrder: '✅ Вы уже оставили отзыв для этой заявки\\.',
+
+  // ─── Wishlist strings ──────────────────────────────────────────────────────
+  wishlistAdded: '❤️ Добавлено в избранное!',
+  wishlistRemoved: '💔 Убрано из избранного',
+  wishlistEmpty: '❤️ *Ваш список избранного пуст*\n\nОткройте карточку модели и нажмите ❤️, чтобы добавить её в избранное\\.',
+  wishlistUnavailable: '❤️ Список избранного временно недоступен\\.',
+
+  // ─── Notifications ─────────────────────────────────────────────────────────
+  notifNewOrder: '🆕 *Новая заявка\\!*',
+  notifStatusChanged: '📋 Статус заявки изменён',
+  notifNewMessage: '📩 *Новое сообщение*',
+
+  // ─── Search strings ────────────────────────────────────────────────────────
+  searchNoResults: '🔍 *Поиск моделей*\n\nПо вашему запросу ничего не найдено\\.\n\n_Попробуйте изменить или сбросить фильтры_',
+  searchPrompt: '🔍 Введите имя или часть имени модели:',
+
+  // ─── Admin notifications ───────────────────────────────────────────────────
+  adminNewOrderAlert: '🆕 *Новая заявка\\!*',
+  adminOrderClient: '👤 Клиент:',
+
+  // ─── Broadcast strings ─────────────────────────────────────────────────────
+  broadcastSending: '📤 Начинаю рассылку для *{count}* получателей\\.\\.\\.',
+  broadcastDone: '📊 *Рассылка завершена\\!*',
+  broadcastNoRecipients: '⚠️ Нет получателей для этого сегмента\\.',
 };
 
 /**
@@ -83,7 +130,7 @@ const STRINGS = {
 function getString(key, vars = {}) {
   let str = STRINGS[key] || key;
   Object.entries(vars).forEach(([k, v]) => {
-    str = str.replace(`{${k}}`, v);
+    str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), v);
   });
   return str;
 }
