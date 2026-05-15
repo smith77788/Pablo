@@ -47,6 +47,12 @@ def _load_dept(name: str):
         elif name == "hr":
             from factory.agents.hr_dept import HRDepartment
             return HRDepartment()
+        elif name == "operations":
+            from factory.agents.operations_dept import OperationsDepartment
+            return OperationsDepartment()
+        elif name == "tech":
+            from factory.agents.tech_dept import TechDepartment
+            return TechDepartment()
     except Exception as e:
         logger.warning("Dept %s unavailable: %s", name, e)
     return None
@@ -221,6 +227,46 @@ def run_cycle() -> dict:
             total_new_actions += len(hr_actions)
     except Exception as e:
         logger.error("HR dept error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 5 — OPERATIONS + TECH DEPARTMENTS
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n⚙️ OPERATIONS + TECH DEPTS")
+
+    # Operations Department
+    try:
+        ops = _load_dept("operations")
+        if ops:
+            ops_result = ops.execute_task(
+                ceo_decision.get("focus", "optimize operations") if (ceo_decision := next(iter(decisions), {})) else "optimize operations",
+                context if (context := {"insights": insights, "metrics": all_metrics}) else {},
+            )
+            logger.info("[Phase5] Operations: roles_used=%s", ops_result.get("roles_used", []))
+            results["phases"]["operations"] = {
+                "roles_used": ops_result.get("roles_used", []),
+                "timestamp": ops_result.get("timestamp"),
+            }
+            summary_lines.append(f"⚙️ Operations: {', '.join(ops_result.get('roles_used', []))}")
+    except Exception as e:
+        logger.error("Operations dept phase error: %s", e)
+
+    # Tech Department
+    try:
+        tech = _load_dept("tech")
+        if tech:
+            tech_focus = next(iter(decisions), {}).get("focus", "improve system")
+            tech_result = tech.execute_task(
+                tech_focus,
+                {"insights": insights, "metrics": all_metrics},
+            )
+            logger.info("[Phase5] Tech: roles_used=%s", tech_result.get("roles_used", []))
+            results["phases"]["tech"] = {
+                "roles_used": tech_result.get("roles_used", []),
+                "timestamp": tech_result.get("timestamp"),
+            }
+            summary_lines.append(f"🛠️ Tech: {', '.join(tech_result.get('roles_used', []))}")
+    except Exception as e:
+        logger.error("Tech dept phase error: %s", e)
 
     results["new_actions"] = total_new_actions
     results["phases"]["departments"] = {
