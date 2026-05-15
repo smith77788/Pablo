@@ -4502,7 +4502,26 @@ function initBot(app) {
     // ── Admin order actions
     if (data.startsWith('adm_confirm_'))  { if (!isAdmin(chatId)) return; return adminChangeStatus(chatId, parseInt(data.replace('adm_confirm_','')), 'confirmed'); }
     if (data.startsWith('adm_review_'))   { if (!isAdmin(chatId)) return; return adminChangeStatus(chatId, parseInt(data.replace('adm_review_','')), 'reviewing'); }
-    if (data.startsWith('adm_reject_'))   { if (!isAdmin(chatId)) return; return adminChangeStatus(chatId, parseInt(data.replace('adm_reject_','')), 'cancelled'); }
+    if (data.startsWith('adm_reject_confirm_')) {
+      if (!isAdmin(chatId)) return;
+      return adminChangeStatus(chatId, parseInt(data.replace('adm_reject_confirm_','')), 'cancelled');
+    }
+    if (data.startsWith('adm_reject_')) {
+      if (!isAdmin(chatId)) return;
+      const orderId = parseInt(data.replace('adm_reject_',''));
+      const order = await get('SELECT order_number, client_name FROM orders WHERE id=?', [orderId]).catch(()=>null);
+      const label = order ? `${esc(order.order_number)}${order.client_name ? ` \\(${esc(order.client_name)}\\)` : ''}` : String(orderId);
+      return safeSend(chatId,
+        `❓ *Отклонить заявку ${label}?*\n\nКлиент получит уведомление об отмене\\.`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '✅ Да, отклонить', callback_data: `adm_reject_confirm_${orderId}` }],
+            [{ text: '❌ Назад',          callback_data: `adm_order_${orderId}`           }],
+          ]}
+        }
+      );
+    }
     if (data.startsWith('adm_complete_')) { if (!isAdmin(chatId)) return; return adminChangeStatus(chatId, parseInt(data.replace('adm_complete_','')), 'completed'); }
 
     // ── Invoice: send payment info to client
@@ -5611,11 +5630,26 @@ function initBot(app) {
         reply_markup: { inline_keyboard: [[{ text: '← К моделям', callback_data: 'adm_models_0' }]] }
       });
     }
+    if (data.startsWith('adm_gallery_clear_confirm_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_gallery_clear_confirm_',''));
+      await run("UPDATE models SET photo_main=NULL, photos='[]' WHERE id=?", [modelId]).catch(()=>{});
+      return showPhotoGalleryManager(chatId, modelId);
+    }
     if (data.startsWith('adm_gallery_clear_')) {
       if (!isAdmin(chatId)) return;
       const modelId = parseInt(data.replace('adm_gallery_clear_',''));
-      await run("UPDATE models SET photo_main=NULL, photos='[]' WHERE id=?", [modelId]).catch(()=>{});
-      return showPhotoGalleryManager(chatId, modelId);
+      const m = await get('SELECT name FROM models WHERE id=?', [modelId]).catch(()=>null);
+      return safeSend(chatId,
+        `🗑 *Очистить все фото «${esc(m?.name || String(modelId))}»?*\n\nВсе загруженные фото будут удалены\\. Действие необратимо\\!`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '⚠️ Да, удалить все фото', callback_data: `adm_gallery_clear_confirm_${modelId}` }],
+            [{ text: '← Отмена',                callback_data: `adm_gallery_${modelId}`               }],
+          ]}
+        }
+      );
     }
     if (data.startsWith('adm_gallery_')) {
       if (!isAdmin(chatId)) return;
