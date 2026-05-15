@@ -955,6 +955,49 @@ router.get('/recommend', async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
+// GET /api/budget-estimate?event_type=X&model_count=N&duration_hours=N
+// Returns estimated budget range for a booking (no auth needed — public helper)
+router.get('/budget-estimate', (req, res) => {
+  try {
+    const { event_type = '', model_count = '1', duration_hours = '4' } = req.query;
+    const count = Math.min(20, Math.max(1, parseInt(model_count) || 1));
+    const hours = Math.min(24, Math.max(1, parseFloat(duration_hours) || 4));
+
+    const BASE_PRICES = {
+      'корпоратив': [15000, 35000], 'corporate': [15000, 35000],
+      'свадьба': [20000, 50000], 'wedding': [20000, 50000],
+      'фотосессия': [10000, 25000], 'photoshoot': [10000, 25000],
+      'photo': [10000, 25000],
+      'показ': [25000, 60000], 'fashion': [25000, 60000], 'runway': [25000, 60000],
+      'промо': [8000, 20000], 'promo': [8000, 20000],
+      'реклама': [12000, 30000], 'commercial': [12000, 30000],
+      'мероприятие': [12000, 28000], 'event': [12000, 28000],
+    };
+    const key = Object.keys(BASE_PRICES).find(k => event_type.toLowerCase().includes(k));
+    const [baseMin, baseMax] = BASE_PRICES[key] || [12000, 30000];
+
+    // Duration multiplier: >6h adds 50%, >12h doubles
+    const durMult = hours > 12 ? 2.0 : hours > 6 ? 1.5 : hours > 3 ? 1.0 : 0.75;
+    const min = Math.round(baseMin * count * durMult);
+    const max = Math.round(baseMax * count * durMult);
+    const recommended = Math.round((min + max) / 2);
+
+    const tips = [];
+    if (count > 3) tips.push('При заказе от 3 моделей возможна скидка группы');
+    if (hours > 8) tips.push('Для длительных мероприятий уточняйте условия у менеджера');
+    if (!key) tips.push('Уточните тип события для более точного расчёта');
+
+    res.json({
+      event_type: event_type || null,
+      model_count: count,
+      duration_hours: hours,
+      budget: { min, max, recommended },
+      currency: 'RUB',
+      tips,
+    });
+  } catch (e) { res.status(500).json({ error: 'Server error' }); }
+});
+
 // GET /api/models/my-orders?name=X&phone=Y — model views their orders
 router.get('/models/my-orders', async (req, res) => {
   try {
