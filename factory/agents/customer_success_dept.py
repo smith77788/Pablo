@@ -45,6 +45,27 @@ class OnboardingSpecialist(FactoryAgent):
             logger.error("[customer_success/onboarding] improve_onboarding error: %s", e)
             return {}
 
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Onboarding Specialist агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о текущем процессе онбординга", "инсайт 2 о точках трения"], '
+                '"recommendations": ["рекомендация 1 по улучшению первого заказа", "рекомендация 2 по welcome-последовательности"], '
+                '"priority": 8}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 8),
+            }
+        except Exception as e:
+            logger.error("[customer_success/onboarding] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 8}
+
 
 class RetentionAnalyst(FactoryAgent):
     department = "customer_success"
@@ -83,6 +104,27 @@ class RetentionAnalyst(FactoryAgent):
         except Exception as e:
             logger.error("[customer_success/retention] analyze_churn error: %s", e)
             return {}
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Retention Analyst агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о причинах оттока клиентов", "инсайт 2 о паттернах повторных заказов"], '
+                '"recommendations": ["рекомендация 1 по снижению оттока", "рекомендация 2 по программе лояльности"], '
+                '"priority": 9}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 9),
+            }
+        except Exception as e:
+            logger.error("[customer_success/retention] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 9}
 
 
 class FeedbackCollector(FactoryAgent):
@@ -123,6 +165,27 @@ class FeedbackCollector(FactoryAgent):
             logger.error("[customer_success/feedback] analyze_feedback error: %s", e)
             return {}
 
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Feedback Collector агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 об обратной связи клиентов", "инсайт 2 о ключевых темах отзывов"], '
+                '"recommendations": ["рекомендация 1 по улучшению процесса сбора отзывов", "рекомендация 2 по реагированию на негатив"], '
+                '"priority": 7}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 7),
+            }
+        except Exception as e:
+            logger.error("[customer_success/feedback] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 7}
+
 
 class UpsellAdvisor(FactoryAgent):
     department = "customer_success"
@@ -161,6 +224,27 @@ class UpsellAdvisor(FactoryAgent):
         except Exception as e:
             logger.error("[customer_success/upsell] suggest_upsell error: %s", e)
             return {}
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Upsell Advisor агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о возможностях апселла", "инсайт 2 о готовности клиентов к доп.услугам"], '
+                '"recommendations": ["рекомендация 1 по стратегии апселла", "рекомендация 2 по кросс-продажам"], '
+                '"priority": 8}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 8),
+            }
+        except Exception as e:
+            logger.error("[customer_success/upsell] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 8}
 
 
 class CustomerSuccessDepartment:

@@ -44,6 +44,27 @@ class LeadQualifier(FactoryAgent):
             logger.error("[sales/lead_qualifier] analyze_leads error: %s", e)
             return {}
 
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Lead Qualifier агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о качестве лидов", "инсайт 2 о конверсии"], '
+                '"recommendations": ["рекомендация 1 по работе с лидами", "рекомендация 2"], '
+                '"priority": 8}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 7),
+            }
+        except Exception as e:
+            logger.error("[sales/lead_qualifier] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 7}
+
 
 class ProposalWriter(FactoryAgent):
     department = "sales"
@@ -78,6 +99,27 @@ class ProposalWriter(FactoryAgent):
             logger.error("[sales/proposal_writer] generate_proposal error: %s", e)
             return {}
 
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Proposal Writer агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о коммерческих предложениях", "инсайт 2 о конверсии КП"], '
+                '"recommendations": ["рекомендация 1 по улучшению КП", "рекомендация 2 по сегментации"], '
+                '"priority": 7}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 7),
+            }
+        except Exception as e:
+            logger.error("[sales/proposal_writer] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 7}
+
 
 class FollowUpSpecialist(FactoryAgent):
     department = "sales"
@@ -110,6 +152,27 @@ class FollowUpSpecialist(FactoryAgent):
         except Exception as e:
             logger.error("[sales/followup] plan_followups error: %s", e)
             return {}
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Follow-Up Specialist агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о незакрытых заявках", "инсайт 2 о причинах потери лидов"], '
+                '"recommendations": ["рекомендация 1 по follow-up стратегии", "рекомендация 2 по реактивации"], '
+                '"priority": 6}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 6),
+            }
+        except Exception as e:
+            logger.error("[sales/followup] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 6}
 
 
 class PricingNegotiator(FactoryAgent):
@@ -146,6 +209,27 @@ class PricingNegotiator(FactoryAgent):
         except Exception as e:
             logger.error("[sales/pricing] optimize_pricing error: %s", e)
             return {}
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Pricing Negotiator агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о текущем ценообразовании", "инсайт 2 о маржинальности"], '
+                '"recommendations": ["рекомендация 1 по ценовой политике", "рекомендация 2 по пакетам"], '
+                '"priority": 8}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 8),
+            }
+        except Exception as e:
+            logger.error("[sales/pricing] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 8}
 
 
 class SalesDepartment:

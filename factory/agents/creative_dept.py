@@ -44,6 +44,27 @@ class CopywriterAI(FactoryAgent):
             logger.error("[creative/copywriter] write_content error: %s", e)
             return {}
 
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Copywriter AI агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о текущем контенте агентства", "инсайт 2 о вовлечённости аудитории"], '
+                '"recommendations": ["рекомендация 1 по улучшению текстов", "рекомендация 2 по тону"], '
+                '"priority": 7}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 7),
+            }
+        except Exception as e:
+            logger.error("[creative/copywriter] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 7}
+
 
 class VisualConceptor(FactoryAgent):
     department = "creative"
@@ -83,6 +104,27 @@ class VisualConceptor(FactoryAgent):
             logger.error("[creative/visual] generate_concepts error: %s", e)
             return {}
 
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Visual Conceptor агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о визуальной идентичности бренда", "инсайт 2 о трендах контента"], '
+                '"recommendations": ["рекомендация 1 по концепции фотосессий", "рекомендация 2 по визуальному стилю"], '
+                '"priority": 6}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 6),
+            }
+        except Exception as e:
+            logger.error("[creative/visual] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 6}
+
 
 class BrandVoiceKeeper(FactoryAgent):
     department = "creative"
@@ -120,6 +162,27 @@ class BrandVoiceKeeper(FactoryAgent):
         except Exception as e:
             logger.error("[creative/brand_voice] audit_brand_voice error: %s", e)
             return {}
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Brand Voice Keeper агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о единстве бренд-голоса", "инсайт 2 о несоответствиях в коммуникациях"], '
+                '"recommendations": ["рекомендация 1 по унификации тона", "рекомендация 2 по style guide"], '
+                '"priority": 5}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 5),
+            }
+        except Exception as e:
+            logger.error("[creative/brand_voice] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 5}
 
 
 class StorytellingAgent(FactoryAgent):
@@ -159,6 +222,27 @@ class StorytellingAgent(FactoryAgent):
         except Exception as e:
             logger.error("[creative/storytelling] create_stories error: %s", e)
             return {}
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента. Возвращает insights, recommendations, priority."""
+        try:
+            result = self.think_json(
+                "Ты — Storytelling Agent агентства моделей. Проанализируй контекст бизнеса.\n"
+                "Верни JSON:\n"
+                '{"insights": ["инсайт 1 о нарративах бренда", "инсайт 2 о кейсах клиентов"], '
+                '"recommendations": ["рекомендация 1 по историям успеха", "рекомендация 2 по формату кейсов"], '
+                '"priority": 6}',
+                context=context,
+                max_tokens=1000,
+            ) or {}
+            return {
+                "insights": result.get("insights", []),
+                "recommendations": result.get("recommendations", []),
+                "priority": result.get("priority", 6),
+            }
+        except Exception as e:
+            logger.error("[creative/storytelling] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 6}
 
 
 class CreativeDepartment:
