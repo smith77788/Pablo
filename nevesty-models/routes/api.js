@@ -4220,6 +4220,73 @@ router.get('/admin/analytics/hourly', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Analytics: Conversion funnel (simplified, all-time) ─────────────────────
+router.get('/admin/analytics/conversion-funnel', auth, async (req, res, next) => {
+  try {
+    const rows = await query(`
+      SELECT
+        SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END) as new_count,
+        SUM(CASE WHEN status = 'reviewing' THEN 1 ELSE 0 END) as reviewing_count,
+        SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmed_count,
+        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_count,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count,
+        COUNT(*) as total
+      FROM orders
+    `, []);
+    const r = rows[0] || {};
+    const total = r.total || 1; // avoid division by zero
+    res.json({
+      stages: [
+        { name: 'Новые',           count: r.new_count || 0,         pct: Math.round((r.new_count || 0) / total * 100) },
+        { name: 'На рассмотрении', count: r.reviewing_count || 0,   pct: Math.round((r.reviewing_count || 0) / total * 100) },
+        { name: 'Подтверждены',    count: r.confirmed_count || 0,   pct: Math.round((r.confirmed_count || 0) / total * 100) },
+        { name: 'В работе',        count: r.in_progress_count || 0, pct: Math.round((r.in_progress_count || 0) / total * 100) },
+        { name: 'Завершены',       count: r.completed_count || 0,   pct: Math.round((r.completed_count || 0) / total * 100) },
+      ],
+      cancelled: r.cancelled_count || 0,
+      total: r.total || 0,
+    });
+  } catch (e) { next(e); }
+});
+
+// ─── Analytics: Revenue by month (last 12 months) ────────────────────────────
+router.get('/admin/analytics/revenue-by-month', auth, async (req, res, next) => {
+  try {
+    const rows = await query(`
+      SELECT
+        strftime('%Y-%m', created_at) as month,
+        COUNT(*) as orders,
+        COALESCE(SUM(CASE WHEN budget IS NOT NULL AND budget != '' THEN CAST(budget AS REAL) ELSE 0 END), 0) as revenue
+      FROM orders
+      WHERE status IN ('confirmed', 'completed', 'in_progress')
+        AND created_at >= datetime('now', '-12 months')
+      GROUP BY month
+      ORDER BY month ASC
+    `, []);
+    res.json({ months: rows || [] });
+  } catch (e) { next(e); }
+});
+
+// ─── Analytics: Top cities by orders ─────────────────────────────────────────
+router.get('/admin/analytics/top-cities', auth, async (req, res, next) => {
+  try {
+    const rows = await query(`
+      SELECT
+        COALESCE(m.city, 'Не указан') as city,
+        COUNT(o.id) as orders,
+        COUNT(DISTINCT o.chat_id) as unique_clients
+      FROM orders o
+      LEFT JOIN models m ON o.model_id = m.id
+      WHERE o.status != 'cancelled'
+      GROUP BY city
+      ORDER BY orders DESC
+      LIMIT 10
+    `, []);
+    res.json({ cities: rows || [] });
+  } catch (e) { next(e); }
+});
+
 // ─── Client Cabinet ───────────────────────────────────────────────────────────
 // Rate-limit store: { ip: [timestamps] }
 const _clientRateLimits = new Map();
