@@ -84,6 +84,11 @@ jobs:
         working-directory: nevesty-models
         run: npm audit --audit-level=high || true
 
+      - name: Run ESLint
+        working-directory: nevesty-models
+        run: |
+          npx eslint routes/api.js database.js services/*.js utils/*.js --max-warnings 30 || true
+
   python-check:
     name: Factory Python Check
     runs-on: ubuntu-latest
