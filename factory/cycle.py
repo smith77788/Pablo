@@ -108,6 +108,30 @@ def _send_ceo_memo_to_telegram(memo_text: str, health_score: int, growth_actions
         logger.error("Failed to send CEO memo to Telegram: %s", e)
 
 
+def _send_telegram_to_admins(text: str) -> bool:
+    """Send a message to all admin Telegram IDs using the bot token."""
+    import requests  # type: ignore
+    token = os.environ.get('TELEGRAM_BOT_TOKEN', '') or os.environ.get('BOT_TOKEN', '')
+    admin_ids_str = os.environ.get('ADMIN_TELEGRAM_IDS', '')
+    if not token or not admin_ids_str:
+        return False
+
+    admin_ids = [aid.strip() for aid in admin_ids_str.split(',') if aid.strip()]
+    success = False
+    for chat_id in admin_ids:
+        try:
+            resp = requests.post(
+                f'https://api.telegram.org/bot{token}/sendMessage',
+                json={'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                success = True
+        except Exception as e:
+            logger.error('[Factory] Telegram notify failed for %s: %s', chat_id, e)
+    return success
+
+
 def _sync_experiments_to_db(experiments: list, bot_db_path: str | None = None) -> None:
     """Save A/B experiment proposals to nevesty-models DB."""
     import os
@@ -1121,6 +1145,23 @@ def run_cycle() -> dict:
                             exp["id"], "orders_month", orders_count
                         )
                         metric_updates.append(update_res)
+                        # Notify admins when an experiment concludes
+                        if update_res.get('status') in ('success', 'failed'):
+                            status_emoji = '✅' if update_res['status'] == 'success' else '❌'
+                            tg_text = (
+                                f"{status_emoji} <b>Эксперимент завершён</b>\n"
+                                f"Статус: {update_res['status']}\n"
+                                f"До: {update_res.get('metric_before', '?')} | "
+                                f"После: {update_res.get('metric_after', '?')}"
+                            )
+                            try:
+                                _send_telegram_to_admins(tg_text)
+                                logger.info(
+                                    "[Phase15] Experiment %s concluded (%s), Telegram sent",
+                                    exp.get('id'), update_res['status'],
+                                )
+                            except Exception as _tg_e:
+                                logger.warning("[Phase15] Telegram notify for experiment failed: %s", _tg_e)
             logger.info(
                 "[Phase15] Active experiments: %d checked, %d updated with real metrics",
                 len(active_exps), len(metric_updates),
@@ -1491,6 +1532,24 @@ def run_cycle() -> dict:
                 results["phases"]["ceo_weekly_report"] = weekly
                 summary_lines.append(f"📊 CEO Weekly: {weekly.get('headline', '')[:60]}")
                 logger.info("[Phase5.2] CEO weekly report: trend=%s", weekly.get("key_metric_trend"))
+
+                # Send CEO weekly report to Telegram admins
+                try:
+                    headline = weekly.get('headline', 'CEO Weekly Report')
+                    focus = weekly.get('focus_next_week', '')
+                    concerns = ', '.join(weekly.get('concerns', []))
+
+                    tg_text = (
+                        f"<b>📊 CEO Weekly Report — Week {weekly.get('week', '?')}</b>\n\n"
+                        f"<b>{headline}</b>\n\n"
+                        f"🎯 <b>Фокус следующей недели:</b> {focus}\n"
+                        f"⚠️ <b>Риски:</b> {concerns or 'нет'}\n\n"
+                        f"<i>Сгенерировано AI Factory</i>"
+                    )
+                    _send_telegram_to_admins(tg_text)
+                    logger.info("[Phase5.2] CEO weekly report sent to Telegram admins")
+                except Exception as _tg_e:
+                    logger.warning("[Phase5.2] Failed to send CEO weekly report to Telegram: %s", _tg_e)
     except Exception as e:
         logger.error("Phase 5.2 CEO weekly report error: %s", e)
 

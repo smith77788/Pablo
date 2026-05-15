@@ -2244,3 +2244,104 @@ class TestCustomerSuccessDepartmentNew:
         result = dept.suggest_upsell({"event_type": "корпоратив"})
         assert isinstance(result["reason"], str)
         assert len(result["reason"]) > 5
+
+
+import unittest
+
+
+class TestTelegramNotification(unittest.TestCase):
+    """Tests for _send_telegram_to_admins in cycle.py."""
+
+    def _get_fn(self):
+        from factory import cycle
+        return cycle._send_telegram_to_admins
+
+    def test_send_telegram_to_admins_no_token(self):
+        """Should return False when TELEGRAM_BOT_TOKEN is not set."""
+        fn = self._get_fn()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('TELEGRAM_BOT_TOKEN', None)
+            os.environ.pop('BOT_TOKEN', None)
+            os.environ.pop('ADMIN_TELEGRAM_IDS', None)
+            result = fn("Test message")
+        self.assertFalse(result)
+
+    def test_send_telegram_to_admins_no_admin_ids(self):
+        """Should return False when ADMIN_TELEGRAM_IDS is not set."""
+        fn = self._get_fn()
+        with patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': 'fake_token'}, clear=False):
+            os.environ.pop('ADMIN_TELEGRAM_IDS', None)
+            result = fn("Test message")
+        self.assertFalse(result)
+
+    def test_send_telegram_to_admins_success(self):
+        """Should return True when Telegram API responds with 200."""
+        fn = self._get_fn()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        with patch.dict(os.environ, {
+            'TELEGRAM_BOT_TOKEN': 'fake_token',
+            'ADMIN_TELEGRAM_IDS': '123456789',
+        }):
+            with patch('requests.post', return_value=mock_resp) as mock_post:
+                result = fn("Test message")
+        self.assertTrue(result)
+        mock_post.assert_called_once()
+
+    def test_send_telegram_to_admins_multiple_admins(self):
+        """Should send message to each admin ID."""
+        fn = self._get_fn()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        with patch.dict(os.environ, {
+            'TELEGRAM_BOT_TOKEN': 'fake_token',
+            'ADMIN_TELEGRAM_IDS': '111,222,333',
+        }):
+            with patch('requests.post', return_value=mock_resp) as mock_post:
+                result = fn("Test message")
+        self.assertTrue(result)
+        self.assertEqual(mock_post.call_count, 3)
+
+    def test_send_telegram_to_admins_api_failure(self):
+        """Should return False when Telegram API responds with non-200."""
+        fn = self._get_fn()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        with patch.dict(os.environ, {
+            'TELEGRAM_BOT_TOKEN': 'fake_token',
+            'ADMIN_TELEGRAM_IDS': '123456789',
+        }):
+            with patch('requests.post', return_value=mock_resp):
+                result = fn("Test message")
+        self.assertFalse(result)
+
+    def test_send_telegram_to_admins_network_error(self):
+        """Should return False and not raise when requests raises an exception."""
+        fn = self._get_fn()
+        with patch.dict(os.environ, {
+            'TELEGRAM_BOT_TOKEN': 'fake_token',
+            'ADMIN_TELEGRAM_IDS': '123456789',
+        }):
+            with patch('requests.post', side_effect=Exception("Network error")):
+                result = fn("Test message")
+        self.assertFalse(result)
+
+    def test_ceo_report_tg_text_format(self):
+        """CEO weekly report Telegram text has expected HTML structure."""
+        week = 42
+        headline = "Strong growth in orders"
+        focus = "Improve conversion"
+        concerns = ["Low traffic", "High churn"]
+
+        tg_text = (
+            f"<b>📊 CEO Weekly Report — Week {week}</b>\n\n"
+            f"<b>{headline}</b>\n\n"
+            f"🎯 <b>Фокус следующей недели:</b> {focus}\n"
+            f"⚠️ <b>Риски:</b> {', '.join(concerns)}\n\n"
+            f"<i>Сгенерировано AI Factory</i>"
+        )
+        self.assertIn("<b>", tg_text)
+        self.assertIn("CEO Weekly Report", tg_text)
+        self.assertIn("Week 42", tg_text)
+        self.assertIn("Improve conversion", tg_text)
+        self.assertIn("Low traffic", tg_text)
