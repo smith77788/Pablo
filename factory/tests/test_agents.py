@@ -225,3 +225,135 @@ class TestCycleModule:
         import factory.cycle as cycle
         result = cycle._load_dept("nonexistent_department_xyz")
         assert result is None
+
+
+class TestCustomerSuccess:
+    """Tests for Customer Success department agents."""
+
+    def test_onboarding_specialist_instantiates(self):
+        from factory.agents.customer_success import OnboardingSpecialist
+        agent = OnboardingSpecialist()
+        assert agent.department == "customer_success"
+        assert agent.role == "OnboardingSpecialist"
+
+    def test_retention_analyst_instantiates(self):
+        from factory.agents.customer_success import RetentionAnalyst
+        agent = RetentionAnalyst()
+        assert agent.department == "customer_success"
+        assert agent.role == "RetentionAnalyst"
+
+    def test_feedback_collector_instantiates(self):
+        from factory.agents.customer_success import FeedbackCollector
+        agent = FeedbackCollector()
+        assert agent.department == "customer_success"
+        assert agent.role == "FeedbackCollector"
+
+    def test_onboarding_run_no_db(self):
+        from factory.agents.customer_success import OnboardingSpecialist
+        agent = OnboardingSpecialist()
+        # Mock the think method to avoid API call
+        agent.think = lambda prompt, **kw: "Mock analysis"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get("role") == "OnboardingSpecialist"
+
+    def test_retention_analyst_run_no_db(self):
+        from factory.agents.customer_success import RetentionAnalyst
+        agent = RetentionAnalyst()
+        agent.think = lambda prompt, **kw: "Mock retention"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get("role") == "RetentionAnalyst"
+        assert "retention_data" in result
+
+    def test_feedback_collector_run_no_db(self):
+        from factory.agents.customer_success import FeedbackCollector
+        agent = FeedbackCollector()
+        agent.think = lambda prompt, **kw: "Mock feedback"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get("role") == "FeedbackCollector"
+        assert "review_data" in result
+
+
+class TestFinanceDept:
+    """Tests for Finance department agents."""
+
+    def test_revenue_forecaster_instantiates(self):
+        from factory.agents.finance import RevenueForecaster
+        agent = RevenueForecaster()
+        assert agent.department == "finance"
+        assert agent.role == "RevenueForecaster"
+
+    def test_pricing_strategist_instantiates(self):
+        from factory.agents.finance import PricingStrategist
+        agent = PricingStrategist()
+        assert agent.department == "finance"
+        assert agent.role == "PricingStrategist"
+
+    def test_revenue_forecaster_run_no_db(self):
+        from factory.agents.finance import RevenueForecaster
+        agent = RevenueForecaster()
+        agent.think = lambda prompt, **kw: "Mock forecast"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get("role") == "RevenueForecaster"
+        assert "trend_data" in result
+
+    def test_pricing_strategist_run_no_db(self):
+        from factory.agents.finance import PricingStrategist
+        agent = PricingStrategist()
+        agent.think = lambda prompt, **kw: "Mock pricing"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get("role") == "PricingStrategist"
+        assert "pricing_data" in result
+
+
+class TestResearchDept:
+    """Tests for Research department agents."""
+
+    def test_market_researcher_instantiates(self):
+        from factory.agents.research import MarketResearcher
+        agent = MarketResearcher()
+        assert agent.department == "research"
+        assert agent.role == "MarketResearcher"
+
+    def test_trend_spotter_instantiates(self):
+        from factory.agents.research import TrendSpotter
+        agent = TrendSpotter()
+        assert agent.department == "research"
+        assert agent.role == "TrendSpotter"
+
+    def test_insight_synthesizer_instantiates(self):
+        from factory.agents.research import InsightSynthesizer
+        agent = InsightSynthesizer()
+        assert agent.department == "research"
+        assert agent.role == "InsightSynthesizer"
+
+    def test_market_researcher_run_no_db(self):
+        from factory.agents.research import MarketResearcher
+        agent = MarketResearcher()
+        agent.think = lambda prompt, **kw: "Mock market analysis"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get("role") == "MarketResearcher"
+        assert "market_data" in result
+
+    def test_trend_spotter_run_no_db(self):
+        from factory.agents.research import TrendSpotter
+        agent = TrendSpotter()
+        agent.think = lambda prompt, **kw: "Mock trends"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get("role") == "TrendSpotter"
+        assert "trend_data" in result
+
+    def test_insight_synthesizer_run_no_db(self):
+        from factory.agents.research import InsightSynthesizer
+        agent = InsightSynthesizer()
+        agent.think = lambda prompt, **kw: "Mock insights"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get("role") == "InsightSynthesizer"
+        assert "data" in result
