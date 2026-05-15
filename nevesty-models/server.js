@@ -244,6 +244,18 @@ app.get('/model/:id', async (req, res) => {
       "url": "${siteUrl}"
     }
   }
+  <\/script>
+  <!-- Schema.org BreadcrumbList -->
+  <script type="application/ld+json">
+  ${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Главная", "item": siteUrl },
+      { "@type": "ListItem", "position": 2, "name": "Каталог моделей", "item": `${siteUrl}/catalog.html` },
+      { "@type": "ListItem", "position": 3, "name": model.name || 'Модель', "item": canonicalUrl }
+    ]
+  })}
   <\/script>`;
 
     const fs = require('fs');
