@@ -178,6 +178,7 @@
             <option value="cancelled">Отменённые</option>
           </select>
           <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
+          <span id="refresh-indicator" class="hidden text-xs text-green-500 animate-pulse" style="display:none;font-size:0.7rem;color:var(--success)">↻ Обновление...</span>
           <button class="btn-export" onclick="toggleExportPanel()" title="Экспорт в CSV">📥 CSV ▾</button>
         </div>
 
@@ -325,6 +326,51 @@
   </div>
 </div>
 
+<!-- ══════════════════ ORDER DETAIL MODAL ══════════════════ -->
+<div id="order-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
+  <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="p-6 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white" id="modal-order-num">Заявка</h2>
+        <p class="text-sm text-gray-500" id="modal-order-date"></p>
+      </div>
+      <button onclick="closeOrderModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+    </div>
+    <div class="p-6 space-y-6">
+      <!-- Status section -->
+      <div>
+        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Статус</label>
+        <div class="mt-2 flex gap-2 flex-wrap" id="modal-status-btns"></div>
+      </div>
+      <!-- Client info -->
+      <div>
+        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Клиент</label>
+        <div class="mt-2 grid grid-cols-2 gap-3 text-sm" id="modal-client-info"></div>
+      </div>
+      <!-- Order details -->
+      <div>
+        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Детали заявки</label>
+        <div class="mt-2 grid grid-cols-2 gap-3 text-sm" id="modal-order-details"></div>
+      </div>
+      <!-- Manager note -->
+      <div>
+        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Внутренняя заметка</label>
+        <textarea id="modal-note" rows="3" placeholder="Заметка для команды (не видна клиенту)..."
+          class="mt-2 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white resize-none"></textarea>
+        <button onclick="saveNote()" class="mt-2 px-4 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-sm">Сохранить заметку</button>
+      </div>
+      <!-- Notes history -->
+      <div id="modal-notes-history" class="space-y-2"></div>
+    </div>
+    <div class="p-6 border-t border-gray-100 dark:border-gray-700 flex gap-3">
+      <button id="modal-tg-btn" class="flex-1 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium hidden">
+        📬 Написать в Telegram
+      </button>
+      <button onclick="closeOrderModal()" class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Закрыть</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast-container" id="toastContainer"></div>
 <script src="/js/admin.js"></script>
 <script>
@@ -393,7 +439,7 @@ function renderTable(orders) {
       `<option value="${v}"${v === o.status ? ' selected' : ''}>${l}</option>`
     ).join('');
     return `
-    <tr data-id="${o.id}" style="cursor:pointer" onclick="openDetail(${o.id})">
+    <tr data-id="${o.id}" style="cursor:pointer" onclick="openOrderModal(${o.id})">
       <td class="cb-cell" onclick="event.stopPropagation()">
         <input type="checkbox" class="row-check" data-id="${o.id}" ${checked}
           onchange="toggleRow(${o.id}, this.checked)" />
@@ -815,6 +861,155 @@ document.getElementById('searchInput').addEventListener('input', () => {
   searchTimer = setTimeout(() => loadOrders(1), 400);
 });
 document.getElementById('statusFilter').addEventListener('change', () => loadOrders(1));
+
+/* ═══════════════════════════════════════════════════════
+   ORDER DETAIL MODAL
+═══════════════════════════════════════════════════════ */
+let _modalOrderId = null;
+
+async function openOrderModal(orderId) {
+  _modalOrderId = orderId;
+  try {
+    const order = await _admin.apiFetch(`/admin/orders/${orderId}`);
+
+    document.getElementById('modal-order-num').textContent =
+      `Заявка ${order.order_number || '#' + orderId}`;
+    document.getElementById('modal-order-date').textContent =
+      new Date(order.created_at).toLocaleString('ru-RU');
+
+    // Status buttons
+    const statuses = {
+      new: '🆕 Новая', reviewing: '🔍 На рассмотрении', confirmed: '✅ Подтверждена',
+      in_progress: '🔄 В работе', completed: '🏁 Завершена', cancelled: '❌ Отменена'
+    };
+    document.getElementById('modal-status-btns').innerHTML =
+      Object.entries(statuses).map(([k, v]) => `
+        <button onclick="changeOrderStatus(${orderId}, '${k}')"
+          class="px-3 py-1.5 text-sm rounded-lg border-2 ${order.status === k
+            ? 'border-pink-500 bg-pink-50 dark:bg-pink-900/20 font-medium'
+            : 'border-gray-200 dark:border-gray-700 hover:border-pink-300'}">
+          ${v}
+        </button>`).join('');
+
+    // Client info
+    const clientRows = [
+      ['Имя',      order.client_name],
+      ['Телефон',  order.client_phone],
+      ['Email',    order.client_email],
+      ['Telegram', order.client_chat_id ? `ID: ${order.client_chat_id}` : null],
+    ].filter(([, v]) => v);
+    document.getElementById('modal-client-info').innerHTML = clientRows.map(([k, v]) => `
+      <div>
+        <span style="color:var(--text-muted);font-size:0.8rem">${_admin.escapeHtml(k)}:</span><br>
+        <span style="font-weight:600">${_admin.escapeHtml(String(v))}</span>
+      </div>`).join('');
+
+    // Order details
+    const eventNames = {
+      wedding: 'Свадьба', corporate: 'Корпоратив', fashion: 'Показ мод',
+      commercial: 'Съёмка', fashion_show: 'Показ мод', photo_shoot: 'Фотосессия',
+      event: 'Мероприятие', runway: 'Подиум', other: 'Другое'
+    };
+    const orderRows = [
+      ['Тип события', eventNames[order.event_type] || order.event_type],
+      ['Дата события', order.event_date || null],
+      ['Бюджет',       order.budget     || null],
+      ['Модель',       order.model_name || null],
+      ['Место',        order.location   || null],
+    ].filter(([, v]) => v);
+    document.getElementById('modal-order-details').innerHTML = orderRows.map(([k, v]) => `
+      <div>
+        <span style="color:var(--text-muted);font-size:0.8rem">${_admin.escapeHtml(k)}:</span><br>
+        <span style="font-weight:600">${_admin.escapeHtml(String(v))}</span>
+      </div>`).join('');
+
+    // Telegram button
+    const tgBtn = document.getElementById('modal-tg-btn');
+    if (order.client_chat_id) {
+      tgBtn.classList.remove('hidden');
+      tgBtn.style.display = '';
+      tgBtn.onclick = () => window.open(`tg://user?id=${order.client_chat_id}`);
+    } else {
+      tgBtn.classList.add('hidden');
+      tgBtn.style.display = 'none';
+    }
+
+    // Load notes
+    try {
+      const notesData = await _admin.apiFetch(`/admin/orders/${orderId}/notes`);
+      const notes = notesData.notes || [];
+      document.getElementById('modal-notes-history').innerHTML = notes.length
+        ? notes.map(n => `
+            <div style="background:var(--bg2);border-radius:8px;padding:12px;font-size:0.85rem;color:var(--text)">
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">${new Date(n.created_at).toLocaleString('ru-RU')}</div>
+              ${_admin.escapeHtml(n.admin_note)}
+            </div>`).join('')
+        : '';
+    } catch { /* notes table may not exist yet */ }
+
+    document.getElementById('order-modal').classList.remove('hidden');
+    document.getElementById('order-modal').style.display = 'flex';
+  } catch (e) {
+    _admin.toast('Ошибка загрузки заявки: ' + e.message, 'error');
+  }
+}
+
+function closeOrderModal() {
+  document.getElementById('order-modal').classList.add('hidden');
+  document.getElementById('order-modal').style.display = 'none';
+}
+
+async function changeOrderStatus(orderId, newStatus) {
+  try {
+    await _admin.apiFetch(`/admin/orders/${orderId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: newStatus })
+    });
+    _admin.toast('Статус обновлён', 'success');
+    closeOrderModal();
+    loadOrders();
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function saveNote() {
+  const note = document.getElementById('modal-note').value.trim();
+  if (!note) return;
+  try {
+    await _admin.apiFetch(`/admin/orders/${_modalOrderId}/notes`, {
+      method: 'POST',
+      body: JSON.stringify({ note })
+    });
+    document.getElementById('modal-note').value = '';
+    _admin.toast('Заметка сохранена', 'success');
+    openOrderModal(_modalOrderId); // reload to show new note
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+// Close modal on backdrop click
+document.getElementById('order-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeOrderModal();
+});
+
+/* ═══════════════════════════════════════════════════════
+   AUTO-REFRESH every 30 seconds
+═══════════════════════════════════════════════════════ */
+function showRefreshIndicator() {
+  const el = document.getElementById('refresh-indicator');
+  if (el) { el.style.display = 'inline'; setTimeout(() => { el.style.display = 'none'; }, 1000); }
+}
+
+setInterval(() => {
+  const modal = document.getElementById('order-modal');
+  const modalOpen = modal && !modal.classList.contains('hidden') && modal.style.display !== 'none';
+  if (!modalOpen) {
+    showRefreshIndicator();
+    loadOrders();
+  }
+}, 30000);
 
 /* ═══════════════════════════════════════════════════════
    INIT

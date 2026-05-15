@@ -934,6 +934,14 @@ router.get('/settings', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// GET /api/admin/settings — alias returning all settings as array of {key,value}
+router.get('/admin/settings', auth, async (req, res, next) => {
+  try {
+    const rows = await query('SELECT key, value FROM bot_settings ORDER BY key');
+    res.json(rows);
+  } catch(e) { next(e); }
+});
+
 // DELETE /api/admin/sessions — clear active sessions (JWT is stateless; signals client logout)
 router.delete('/admin/sessions', auth, async (req, res, next) => {
   try {
@@ -946,13 +954,24 @@ router.delete('/admin/sessions', auth, async (req, res, next) => {
 // PUT /api/settings — сохраняет настройки бота (принимает объект key:value)
 router.put('/settings', auth, async (req, res, next) => {
   const ALLOWED_KEYS = [
-    'greeting', 'about',
-    'contacts_phone', 'contacts_email', 'contacts_insta', 'contacts_addr', 'contacts_whatsapp',
-    'pricing',
-    'notif_new_order', 'notif_status', 'notif_message',
-    'agency_name', 'tagline', 'hero_image',
-    'webhook_url', 'tg_notif_enabled',
-    'catalog_per_page', 'site_url', 'manager_hours',
+    // Bot texts
+    'greeting', 'about_text', 'about', 'pricing', 'manager_hours', 'manager_reply', 'site_url',
+    // Contacts
+    'contacts_phone', 'contacts_email', 'contacts_instagram', 'contacts_insta',
+    'contacts_whatsapp', 'contacts_address', 'contacts_addr',
+    // Booking
+    'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email',
+    'booking_min_budget', 'booking_confirm_msg',
+    // Catalog
+    'catalog_per_page', 'catalog_default_sort', 'catalog_show_city', 'catalog_badge_top',
+    'cities_list',
+    // Notifications
+    'notif_new_order', 'notify_new_order', 'notif_status', 'notify_status_change',
+    'notif_message', 'notify_review', 'notify_message',
+    // Features
+    'wishlist_enabled', 'search_enabled', 'reviews_enabled', 'loyalty_enabled', 'referral_enabled',
+    // Appearance / integrations
+    'agency_name', 'tagline', 'hero_image', 'webhook_url', 'tg_notif_enabled',
   ];
   try {
     const body = req.body;
@@ -1032,6 +1051,59 @@ router.delete('/admin/reviews/:id', auth, async (req, res, next) => {
     await run('DELETE FROM reviews WHERE id = ?', [id]);
     res.json({ ok: true });
   } catch (e) { next(e); }
+});
+
+// ─── Order detail (admin, with model join) ───────────────────────────────────
+router.get('/admin/orders/:id/detail', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const order = await get(
+      `SELECT o.*, m.name as model_name FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE o.id=?`, [id]);
+    if (!order) return res.status(404).json({ error: 'Not found' });
+    res.json(order);
+  } catch (e) { res.status(500).json({ error: 'DB error' }); }
+});
+
+// ─── Order notes (admin, /admin/ prefix) ─────────────────────────────────────
+router.get('/admin/orders/:id/notes', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const notes = await query(
+      `SELECT * FROM order_notes WHERE order_id=? ORDER BY created_at DESC LIMIT 20`, [id]);
+    res.json({ notes });
+  } catch (e) { res.status(500).json({ error: 'DB error' }); }
+});
+
+router.post('/admin/orders/:id/notes', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const note = sanitize(req.body.note, 2000);
+    if (!note) return res.status(400).json({ error: 'Note required' });
+    await run(`INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)`, [id, note]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'DB error' }); }
+});
+
+// ─── Order status patch ────────────────────────────────────────────────────────
+router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const { status } = req.body;
+    if (!ALLOWED_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    const order = await get('SELECT id, client_chat_id, order_number, status as prev_status FROM orders WHERE id=?', [id]);
+    if (!order) return res.status(404).json({ error: 'Not found' });
+    await run(`UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, [status, id]);
+    if (botInstance && order.client_chat_id && status !== order.prev_status) {
+      botInstance.notifyStatusChange(order.client_chat_id, order.order_number, status).catch(() => {});
+    }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'DB error' }); }
 });
 
 // ─── Order notes (admin) ──────────────────────────────────────────────────────

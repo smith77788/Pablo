@@ -127,6 +127,14 @@
 
     /* ─── Info note ───────────────────────────────────── */
     .field-note { font-size: 0.75rem; color: var(--text-dim); margin-top: 6px; }
+
+    /* ─── Sticky save bar ─────────────────────────────── */
+    .sticky-save-bar {
+      position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--border);
+      padding: 14px 0; margin-top: 28px; display: flex; align-items: center; gap: 16px;
+      z-index: 10;
+    }
+    .save-status { font-size: 0.8rem; color: var(--text-muted); }
   </style>
 </head>
 <body>
@@ -160,13 +168,16 @@
 
       <!-- Tab navigation -->
       <div class="settings-tabs" role="tablist">
-        <button class="tab-btn active" role="tab" aria-selected="true"  onclick="switchTab('profile')"      id="tab-profile">👤 Профиль</button>
-        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('bot')"          id="tab-bot">🤖 Бот</button>
-        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('contacts')"     id="tab-contacts">📞 Контакты</button>
-        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('pricing')"      id="tab-pricing">💰 Прайс</button>
-        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('appearance')"   id="tab-appearance">🎨 Внешний вид</button>
-        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('notif')"        id="tab-notif">🔔 Уведомления</button>
-        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('password')"     id="tab-password">🔑 Пароль</button>
+        <button class="tab-btn active" role="tab" aria-selected="true"  onclick="switchTab('profile')"    id="tab-profile">👤 Профиль</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('bot')"        id="tab-bot">🤖 Бот</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('contacts')"   id="tab-contacts">📞 Контакты</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('pricing')"    id="tab-pricing">💰 Прайс</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('booking')"    id="tab-booking">📅 Бронирование</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('catalog')"    id="tab-catalog">📋 Каталог</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('features')"   id="tab-features">🔧 Функции бота</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('appearance')" id="tab-appearance">🎨 Внешний вид</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('notif')"      id="tab-notif">🔔 Уведомления</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" onclick="switchTab('password')"   id="tab-password">🔑 Пароль</button>
       </div>
 
       <!-- ═══ TAB: Профиль ═══════════════════════════════════════════════════ -->
@@ -194,17 +205,17 @@
 
       <!-- ═══ TAB: Бот ════════════════════════════════════════════════════════ -->
       <div class="tab-pane" id="pane-bot">
-        <!-- Bot settings (editable) -->
         <div class="section-card">
-          <div class="section-card-header"><div class="section-card-title">🤖 Настройки бота</div></div>
+          <div class="section-card-header"><div class="section-card-title">🤖 Тексты бота</div></div>
           <div class="section-card-body padded">
+
             <!-- Greeting -->
             <div class="admin-form-group">
               <div class="form-label-row">
-                <label>Приветствие (команда /start)</label>
+                <label>Приветствие при /start</label>
                 <span class="restore-link" onclick="restoreDefault('greeting')">Вернуть по умолчанию</span>
               </div>
-              <textarea class="admin-input" id="s_greeting" rows="5" style="resize:vertical"
+              <textarea class="admin-input" id="greeting" rows="5" style="resize:vertical"
                 oninput="updateCharCount(this,'cnt_greeting',500)"
                 placeholder="Привет, {name}! Добро пожаловать в Nevesty Models..."></textarea>
               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px">
@@ -222,16 +233,39 @@
             <!-- About -->
             <div class="admin-form-group" style="margin-top:20px">
               <div class="form-label-row">
-                <label>О нас (команда /about)</label>
-                <span class="restore-link" onclick="restoreDefault('about')">Вернуть по умолчанию</span>
+                <label>О нас (/about)</label>
+                <span class="restore-link" onclick="restoreDefault('about_text')">Вернуть по умолчанию</span>
               </div>
-              <textarea class="admin-input" id="s_about" rows="5" style="resize:vertical"
+              <textarea class="admin-input" id="about_text" rows="5" style="resize:vertical"
                 oninput="updateCharCount(this,'cnt_about',1000)"
                 placeholder="Nevesty Models — элитное модельное агентство..."></textarea>
               <div class="char-count" id="cnt_about" style="margin-top:5px">0 / 1000</div>
             </div>
 
-            <button class="btn btn-md btn-gold" id="btnSaveBot" onclick="saveBot(this)" style="margin-top:8px">Сохранить настройки бота</button>
+            <!-- Manager hours -->
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>Часы работы менеджера</label>
+              <input class="admin-input" type="text" id="manager_hours" placeholder="Пн–Пт 10:00–20:00, Сб 11:00–18:00" />
+              <div class="field-note">Отображается клиентам в боте</div>
+            </div>
+
+            <!-- Manager auto-reply -->
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>Авто-ответ менеджера</label>
+              <textarea class="admin-input" id="manager_reply" rows="3" style="resize:vertical"
+                placeholder="Спасибо за ваше сообщение! Менеджер ответит в ближайшее время."></textarea>
+            </div>
+
+            <!-- Site URL -->
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>URL сайта</label>
+              <input class="admin-input" type="url" id="site_url" placeholder="https://nevesty-models.ru" />
+              <div class="field-note">Используется в ссылках, которые бот отправляет клиентам</div>
+            </div>
+
+            <div class="sticky-save-bar">
+              <button class="btn btn-md btn-gold" id="btnSaveBot" onclick="saveBot(this)">Сохранить тексты бота</button>
+            </div>
           </div>
         </div>
 
@@ -277,25 +311,32 @@
           <div class="section-card-header"><div class="section-card-title">📞 Контакты агентства</div></div>
           <div class="section-card-body padded" style="max-width:560px">
             <div class="admin-form-group">
-              <label>Телефон</label>
-              <input class="admin-input" type="text" id="s_phone" placeholder="+7 (999) 123-45-67" />
+              <label>Телефон агентства</label>
+              <input class="admin-input" type="text" id="contacts_phone" placeholder="+7 (999) 123-45-67" />
             </div>
             <div class="admin-form-group">
-              <label>Email</label>
-              <input class="admin-input" type="email" id="s_email" placeholder="info@nevesty-models.ru" />
+              <label>Email агентства</label>
+              <input class="admin-input" type="email" id="contacts_email" placeholder="info@nevesty-models.ru" />
             </div>
             <div class="admin-form-group">
               <label>Instagram</label>
               <div style="position:relative">
                 <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:0.9rem">@</span>
-                <input class="admin-input" type="text" id="s_insta" placeholder="nevesty_models" style="padding-left:28px" />
+                <input class="admin-input" type="text" id="contacts_instagram" placeholder="nevesty_models" style="padding-left:28px" />
               </div>
             </div>
             <div class="admin-form-group">
-              <label>Адрес</label>
-              <input class="admin-input" type="text" id="s_addr" placeholder="Москва, ул. Пречистенка, 1" />
+              <label>WhatsApp</label>
+              <input class="admin-input" type="text" id="contacts_whatsapp" placeholder="+7 (999) 123-45-67" />
+              <div class="field-note">Номер телефона в формате WhatsApp (для ссылки wa.me)</div>
             </div>
-            <button class="btn btn-md btn-gold" id="btnSaveContacts" onclick="saveContacts(this)">Сохранить контакты</button>
+            <div class="admin-form-group">
+              <label>Адрес</label>
+              <input class="admin-input" type="text" id="contacts_address" placeholder="Москва, ул. Пречистенка, 1" />
+            </div>
+            <div class="sticky-save-bar">
+              <button class="btn btn-md btn-gold" id="btnSaveContacts" onclick="saveContacts(this)">Сохранить контакты</button>
+            </div>
           </div>
         </div>
       </div>
@@ -310,12 +351,197 @@
                 <label style="margin:0">Текст прайс-листа</label>
                 <div class="char-count" id="cnt_pricing">0 / 2000</div>
               </div>
-              <textarea class="admin-input" id="s_pricing" rows="12" style="resize:vertical"
+              <textarea class="admin-input" id="pricing" rows="12" style="resize:vertical"
                 oninput="updateCharCount(this,'cnt_pricing',2000)"
                 placeholder="Фотосессия — от 15 000 ₽ / 4 ч&#10;Показ мод — от 25 000 ₽&#10;Корпоратив — от 20 000 ₽ / 3 ч&#10;..."></textarea>
               <div class="field-note">Текст отображается в боте по команде /pricing и на сайте</div>
             </div>
-            <button class="btn btn-md btn-gold" id="btnSavePricing" onclick="savePricing(this)">Сохранить прайс</button>
+            <div class="sticky-save-bar">
+              <button class="btn btn-md btn-gold" id="btnSavePricing" onclick="savePricing(this)">Сохранить прайс</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: Бронирование ═══════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-booking">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">📅 Настройки бронирования</div></div>
+          <div class="section-card-body padded" style="max-width:560px">
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Быстрая заявка</div>
+                <div class="toggle-row-desc">Кнопка быстрой заявки (имя + телефон) отображается на сайте и в боте</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="quick_booking_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Авто-подтверждение</div>
+                <div class="toggle-row-desc">Новые заявки автоматически переводятся в статус "Подтверждена"</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="booking_auto_confirm" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Требовать email</div>
+                <div class="toggle-row-desc">Email становится обязательным полем при оформлении заявки</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="booking_require_email" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>Минимальный бюджет</label>
+              <input class="admin-input" type="text" id="booking_min_budget" placeholder="5000" />
+              <div class="field-note">Минимальная сумма заявки в рублях. Оставьте пустым для отключения ограничения.</div>
+            </div>
+
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>Сообщение после бронирования</label>
+              <textarea class="admin-input" id="booking_confirm_msg" rows="4" style="resize:vertical"
+                placeholder="Ваша заявка принята! Менеджер свяжется с вами в ближайшее время."></textarea>
+              <div class="field-note">Это сообщение клиент получит сразу после подачи заявки</div>
+            </div>
+
+            <div class="sticky-save-bar">
+              <button class="btn btn-md btn-gold" id="btnSaveBooking" onclick="saveBooking(this)">Сохранить настройки бронирования</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: Каталог ════════════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-catalog">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">📋 Настройки каталога</div></div>
+          <div class="section-card-body padded" style="max-width:560px">
+
+            <div class="admin-form-group">
+              <label>Количество моделей на странице</label>
+              <input class="admin-input" type="number" id="catalog_per_page" placeholder="12" min="1" max="100" />
+            </div>
+
+            <div class="admin-form-group" style="margin-top:16px">
+              <label>Сортировка по умолчанию</label>
+              <select class="admin-input" id="catalog_default_sort">
+                <option value="id_desc">Сначала новые</option>
+                <option value="name_asc">По алфавиту</option>
+                <option value="available_first">Сначала доступные</option>
+              </select>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Показывать город</div>
+                <div class="toggle-row-desc">Город модели отображается в карточке каталога</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="catalog_show_city" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Бейдж "Топ-модель"</div>
+                <div class="toggle-row-desc">Отображать бейдж на карточках featured-моделей</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="catalog_badge_top" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="admin-form-group" style="margin-top:20px">
+              <label>Список городов</label>
+              <textarea class="admin-input" id="cities_list" rows="4" style="resize:vertical"
+                placeholder="Москва, Санкт-Петербург, Казань, Краснодар, Екатеринбург"></textarea>
+              <div class="field-note">Города через запятую. Используются в фильтрах каталога и боте.</div>
+            </div>
+
+            <div class="sticky-save-bar">
+              <button class="btn btn-md btn-gold" id="btnSaveCatalog" onclick="saveCatalog(this)">Сохранить настройки каталога</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: Функции бота ═══════════════════════════════════════════════ -->
+      <div class="tab-pane" id="pane-features">
+        <div class="section-card">
+          <div class="section-card-header"><div class="section-card-title">🔧 Функции бота</div></div>
+          <div class="section-card-body padded" style="max-width:560px">
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Wishlist (Избранное)</div>
+                <div class="toggle-row-desc">Клиенты могут добавлять моделей в список избранного</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="wishlist_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Поиск моделей</div>
+                <div class="toggle-row-desc">Поиск по имени и параметрам модели через бота</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="search_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Отзывы</div>
+                <div class="toggle-row-desc">Клиенты могут оставлять отзывы о работе с агентством</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="reviews_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Программа лояльности</div>
+                <div class="toggle-row-desc">Баллы и скидки для постоянных клиентов</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="loyalty_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Реферальная программа</div>
+                <div class="toggle-row-desc">Клиенты получают бонус за приглашение новых клиентов</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="referral_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="sticky-save-bar">
+              <button class="btn btn-md btn-gold" id="btnSaveFeatures" onclick="saveFeatures(this)">Сохранить функции бота</button>
+            </div>
           </div>
         </div>
       </div>
@@ -393,7 +619,7 @@
                 <div class="toggle-row-desc">Уведомлять в Telegram при поступлении новой заявки</div>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" id="s_notif_new" />
+                <input type="checkbox" id="notify_new_order" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -403,7 +629,17 @@
                 <div class="toggle-row-desc">Уведомлять клиента при изменении статуса его заявки</div>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" id="s_notif_status" />
+                <input type="checkbox" id="notify_status_change" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-row-info">
+                <div class="toggle-row-title">Новый отзыв</div>
+                <div class="toggle-row-desc">Уведомлять менеджера, когда клиент оставил отзыв</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="notify_review" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -413,11 +649,13 @@
                 <div class="toggle-row-desc">Уведомлять менеджера, когда клиент написал в бот</div>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" id="s_notif_message" />
+                <input type="checkbox" id="notify_message" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
-            <button class="btn btn-md btn-gold" id="btnSaveNotif" onclick="saveNotif(this)" style="margin-top:20px">Сохранить</button>
+            <div class="sticky-save-bar">
+              <button class="btn btn-md btn-gold" id="btnSaveNotif" onclick="saveNotif(this)">Сохранить</button>
+            </div>
           </div>
         </div>
       </div>
@@ -468,6 +706,15 @@
         </div>
       </div>
 
+      <!-- ─── Sticky global save bar ──────────────────────────── -->
+      <div class="sticky bottom-0 bg-white border-t px-6 py-4" style="position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--border);padding:14px 0;margin-top:28px;display:flex;align-items:center;gap:16px;z-index:10;">
+        <button id="save-btn" onclick="saveAll()"
+          style="padding:12px 24px;background:var(--gold);color:#000;border:none;border-radius:10px;font-size:0.9rem;font-weight:600;cursor:pointer;transition:opacity 0.2s;">
+          Сохранить все настройки
+        </button>
+        <span id="save-all-status" style="font-size:0.8rem;color:var(--text-muted)"></span>
+      </div>
+
     </div><!-- /.page-content -->
   </div>
 </div>
@@ -475,10 +722,15 @@
 <div class="toast-container" id="toastContainer"></div>
 <script src="/js/admin.js"></script>
 <script>
+/* ─── Auth guard ─────────────────────────────────────────── */
+const token = localStorage.getItem('admin_token');
+if (!token) window.location.href = '/admin/login.html';
+const h = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+
 /* ─── Default values ──────────────────────────────────────── */
 const DEFAULTS = {
   greeting: 'Привет, {name}! 👋\n\nДобро пожаловать в Nevesty Models — элитное модельное агентство.\n\nЧем могу помочь?',
-  about: 'Nevesty Models — профессиональное модельное агентство. Мы работаем с лучшими моделями для фотосессий, показов мод, мероприятий и рекламных проектов.'
+  about_text: 'Nevesty Models — профессиональное модельное агентство. Мы работаем с лучшими моделями для фотосессий, показов мод, мероприятий и рекламных проектов.'
 };
 
 /* ─── Tab switching ───────────────────────────────────────── */
@@ -499,7 +751,6 @@ function updateCharCount(el, counterId, max) {
   counter.textContent = n + ' / ' + max;
   counter.className = 'char-count' + (n > max * 0.9 ? (n >= max ? ' danger' : ' warn') : '');
 }
-
 function initCharCount(id, counterId, max) {
   const el = document.getElementById(id);
   if (el) updateCharCount(el, counterId, max);
@@ -507,16 +758,16 @@ function initCharCount(id, counterId, max) {
 
 /* ─── Restore defaults ────────────────────────────────────── */
 function restoreDefault(field) {
-  const el = document.getElementById('s_' + field);
+  const el = document.getElementById(field);
   if (!el || !DEFAULTS[field]) return;
   el.value = DEFAULTS[field];
-  if (field === 'greeting') updateCharCount(el, 'cnt_greeting', 500);
-  if (field === 'about')    updateCharCount(el, 'cnt_about', 1000);
+  if (field === 'greeting')  updateCharCount(el, 'cnt_greeting', 500);
+  if (field === 'about_text') updateCharCount(el, 'cnt_about', 1000);
 }
 
 /* ─── Greeting preview ────────────────────────────────────── */
 function previewGreeting() {
-  const text = document.getElementById('s_greeting').value.replace(/{name}/g, 'Александра');
+  const text = document.getElementById('greeting').value.replace(/{name}/g, 'Александра');
   const wrap = document.getElementById('greetingPreview');
   const preEl = document.getElementById('greetingPreviewText');
   preEl.textContent = text || '(пусто)';
@@ -539,8 +790,8 @@ function previewHero() {
 function startSave(btn) { btn.classList.add('btn-saving'); btn.disabled = true; }
 function endSave(btn)   { btn.classList.remove('btn-saving'); btn.disabled = false; }
 
-/* ─── Load all settings ───────────────────────────────────── */
-(async function() {
+/* ─── Load all settings (unified) ────────────────────────── */
+async function loadSettings() {
   try {
     const me = await _admin.apiFetch('/admin/me');
     document.getElementById('p_username').value = me.username;
@@ -549,39 +800,142 @@ function endSave(btn)   { btn.classList.remove('btn-saving'); btn.disabled = fal
   } catch(e) {}
 
   try {
-    const s = await _admin.apiFetch('/settings');
+    const resp = await fetch('/api/admin/settings', { headers: h });
+    const data = await resp.json();
 
-    // Bot tab
-    document.getElementById('s_greeting').value = s.greeting || '';
-    document.getElementById('s_about').value = s.about || '';
-    initCharCount('s_greeting', 'cnt_greeting', 500);
-    initCharCount('s_about', 'cnt_about', 1000);
+    // Helper: get value from array [{key,value}] or flat object
+    function val(key) {
+      if (Array.isArray(data)) {
+        const found = data.find(s => s.key === key);
+        return found ? found.value : '';
+      }
+      return data[key] !== undefined ? data[key] : '';
+    }
 
-    // Contacts tab
-    document.getElementById('s_phone').value = s.contacts_phone || '';
-    document.getElementById('s_email').value = s.contacts_email || '';
-    document.getElementById('s_insta').value = s.contacts_insta || '';
-    document.getElementById('s_addr').value = s.contacts_addr || '';
+    // Text fields
+    const textFields = [
+      'greeting', 'about_text', 'pricing', 'manager_hours', 'manager_reply', 'site_url',
+      'contacts_phone', 'contacts_email', 'contacts_instagram', 'contacts_whatsapp', 'contacts_address',
+      'booking_min_budget', 'booking_confirm_msg',
+      'catalog_per_page', 'cities_list',
+    ];
+    textFields.forEach(key => {
+      const el = document.getElementById(key);
+      if (el) el.value = val(key) || '';
+    });
 
-    // Pricing tab
-    document.getElementById('s_pricing').value = s.pricing || '';
-    initCharCount('s_pricing', 'cnt_pricing', 2000);
+    // Select fields
+    const sortEl = document.getElementById('catalog_default_sort');
+    if (sortEl) { const v = val('catalog_default_sort'); if (v) sortEl.value = v; }
 
-    // Appearance tab
-    document.getElementById('s_agency_name').value = s.agency_name || '';
-    document.getElementById('s_tagline').value = s.tagline || '';
-    document.getElementById('s_hero_image').value = s.hero_image || '';
+    // Toggle fields
+    const toggleFields = [
+      'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email',
+      'catalog_show_city', 'catalog_badge_top',
+      'notify_new_order', 'notify_status_change', 'notify_review', 'notify_message',
+      'wishlist_enabled', 'search_enabled', 'reviews_enabled', 'loyalty_enabled', 'referral_enabled',
+    ];
+    toggleFields.forEach(key => {
+      const el = document.getElementById(key);
+      const v = val(key);
+      if (el) el.checked = v === '1' || v === 'true' || v === 1 || v === true;
+    });
 
-    // Integrations
-    document.getElementById('s_webhook_url').value = s.webhook_url || '';
-    document.getElementById('s_tg_notif_enabled').checked = s.tg_notif_enabled !== '0';
+    // Appearance tab (uses s_ prefix IDs for backward compat)
+    const appearanceMap = {
+      's_agency_name': 'agency_name',
+      's_tagline': 'tagline',
+      's_hero_image': 'hero_image',
+      's_webhook_url': 'webhook_url',
+    };
+    for (const [elId, key] of Object.entries(appearanceMap)) {
+      const el = document.getElementById(elId);
+      if (el) el.value = val(key) || '';
+    }
+    const tgEl = document.getElementById('s_tg_notif_enabled');
+    if (tgEl) { const v = val('tg_notif_enabled'); tgEl.checked = v !== '0'; }
 
-    // Notifications tab
-    document.getElementById('s_notif_new').checked = s.notif_new_order === '1';
-    document.getElementById('s_notif_status').checked = s.notif_status === '1';
-    document.getElementById('s_notif_message').checked = s.notif_message === '1';
-  } catch(e) {}
-})();
+    // Char counts
+    initCharCount('greeting', 'cnt_greeting', 500);
+    initCharCount('about_text', 'cnt_about', 1000);
+    initCharCount('pricing', 'cnt_pricing', 2000);
+
+  } catch(e) { console.error('loadSettings error:', e); }
+}
+
+/* ─── saveSetting (single key) ────────────────────────────── */
+async function saveSetting(key, value) {
+  const body = {};
+  body[key] = String(value);
+  await fetch('/api/settings', {
+    method: 'PUT', headers: h,
+    body: JSON.stringify(body)
+  });
+}
+
+/* ─── saveAll ─────────────────────────────────────────────── */
+async function saveAll() {
+  const btn = document.getElementById('save-btn');
+  const status = document.getElementById('save-all-status');
+  btn.textContent = 'Сохраняем...'; btn.disabled = true;
+  if (status) status.textContent = '';
+
+  const textFields = [
+    'greeting', 'about_text', 'pricing', 'manager_hours', 'manager_reply', 'site_url',
+    'contacts_phone', 'contacts_email', 'contacts_instagram', 'contacts_whatsapp', 'contacts_address',
+    'booking_min_budget', 'booking_confirm_msg',
+    'catalog_per_page', 'cities_list',
+  ];
+  const toggleFields = [
+    'quick_booking_enabled', 'booking_auto_confirm', 'booking_require_email',
+    'catalog_show_city', 'catalog_badge_top',
+    'notify_new_order', 'notify_status_change', 'notify_review', 'notify_message',
+    'wishlist_enabled', 'search_enabled', 'reviews_enabled', 'loyalty_enabled', 'referral_enabled',
+  ];
+
+  const body = {};
+  textFields.forEach(key => {
+    const el = document.getElementById(key);
+    if (el) body[key] = el.value;
+  });
+  toggleFields.forEach(key => {
+    const el = document.getElementById(key);
+    if (el) body[key] = el.checked ? '1' : '0';
+  });
+
+  // Also collect appearance fields
+  const appearanceMap = {
+    's_agency_name': 'agency_name',
+    's_tagline': 'tagline',
+    's_hero_image': 'hero_image',
+    's_webhook_url': 'webhook_url',
+  };
+  for (const [elId, key] of Object.entries(appearanceMap)) {
+    const el = document.getElementById(elId);
+    if (el) body[key] = el.value;
+  }
+  const tgEl = document.getElementById('s_tg_notif_enabled');
+  if (tgEl) body['tg_notif_enabled'] = tgEl.checked ? '1' : '0';
+  const sortEl = document.getElementById('catalog_default_sort');
+  if (sortEl) body['catalog_default_sort'] = sortEl.value;
+
+  try {
+    await fetch('/api/settings', { method: 'PUT', headers: h, body: JSON.stringify(body) });
+    btn.textContent = '✅ Сохранено!';
+    if (status) status.textContent = 'Все настройки сохранены';
+    if (typeof _admin !== 'undefined' && _admin.toast) _admin.toast('Все настройки сохранены', 'success');
+  } catch(e) {
+    btn.textContent = 'Сохранить все настройки';
+    if (status) status.textContent = 'Ошибка сохранения';
+    if (typeof _admin !== 'undefined' && _admin.toast) _admin.toast('Ошибка сохранения', 'error');
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => {
+      if (btn.textContent === '✅ Сохранено!') btn.textContent = 'Сохранить все настройки';
+      if (status) status.textContent = '';
+    }, 3000);
+  }
+}
 
 /* ─── Save: Profile ───────────────────────────────────────── */
 async function saveProfile(btn) {
@@ -621,18 +975,21 @@ async function changePassword(btn) {
   finally { endSave(btn); }
 }
 
-/* ─── Save: Bot settings ──────────────────────────────────── */
+/* ─── Save: Bot texts ─────────────────────────────────────── */
 async function saveBot(btn) {
   startSave(btn);
   try {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        greeting: document.getElementById('s_greeting').value,
-        about: document.getElementById('s_about').value
+        greeting:      document.getElementById('greeting').value,
+        about_text:    document.getElementById('about_text').value,
+        manager_hours: document.getElementById('manager_hours').value,
+        manager_reply: document.getElementById('manager_reply').value,
+        site_url:      document.getElementById('site_url').value,
       })
     });
-    _admin.toast('Настройки бота сохранены', 'success');
+    _admin.toast('Тексты бота сохранены', 'success');
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
   finally { endSave(btn); }
 }
@@ -644,10 +1001,11 @@ async function saveContacts(btn) {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        contacts_phone: document.getElementById('s_phone').value,
-        contacts_email: document.getElementById('s_email').value,
-        contacts_insta: document.getElementById('s_insta').value,
-        contacts_addr:  document.getElementById('s_addr').value
+        contacts_phone:     document.getElementById('contacts_phone').value,
+        contacts_email:     document.getElementById('contacts_email').value,
+        contacts_instagram: document.getElementById('contacts_instagram').value,
+        contacts_whatsapp:  document.getElementById('contacts_whatsapp').value,
+        contacts_address:   document.getElementById('contacts_address').value,
       })
     });
     _admin.toast('Контакты сохранены', 'success');
@@ -661,9 +1019,66 @@ async function savePricing(btn) {
   try {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
-      body: JSON.stringify({ pricing: document.getElementById('s_pricing').value })
+      body: JSON.stringify({ pricing: document.getElementById('pricing').value })
     });
     _admin.toast('Прайс сохранён', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
+}
+
+/* ─── Save: Booking ───────────────────────────────────────── */
+async function saveBooking(btn) {
+  startSave(btn);
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        quick_booking_enabled: document.getElementById('quick_booking_enabled').checked ? '1' : '0',
+        booking_auto_confirm:  document.getElementById('booking_auto_confirm').checked  ? '1' : '0',
+        booking_require_email: document.getElementById('booking_require_email').checked ? '1' : '0',
+        booking_min_budget:    document.getElementById('booking_min_budget').value,
+        booking_confirm_msg:   document.getElementById('booking_confirm_msg').value,
+      })
+    });
+    _admin.toast('Настройки бронирования сохранены', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
+}
+
+/* ─── Save: Catalog ───────────────────────────────────────── */
+async function saveCatalog(btn) {
+  startSave(btn);
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        catalog_per_page:     document.getElementById('catalog_per_page').value,
+        catalog_default_sort: document.getElementById('catalog_default_sort').value,
+        catalog_show_city:    document.getElementById('catalog_show_city').checked  ? '1' : '0',
+        catalog_badge_top:    document.getElementById('catalog_badge_top').checked  ? '1' : '0',
+        cities_list:          document.getElementById('cities_list').value,
+      })
+    });
+    _admin.toast('Настройки каталога сохранены', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+  finally { endSave(btn); }
+}
+
+/* ─── Save: Features ──────────────────────────────────────── */
+async function saveFeatures(btn) {
+  startSave(btn);
+  try {
+    await _admin.apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        wishlist_enabled:  document.getElementById('wishlist_enabled').checked  ? '1' : '0',
+        search_enabled:    document.getElementById('search_enabled').checked    ? '1' : '0',
+        reviews_enabled:   document.getElementById('reviews_enabled').checked   ? '1' : '0',
+        loyalty_enabled:   document.getElementById('loyalty_enabled').checked   ? '1' : '0',
+        referral_enabled:  document.getElementById('referral_enabled').checked  ? '1' : '0',
+      })
+    });
+    _admin.toast('Функции бота сохранены', 'success');
   } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
   finally { endSave(btn); }
 }
@@ -692,8 +1107,8 @@ async function saveIntegrations(btn) {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        webhook_url:       document.getElementById('s_webhook_url').value,
-        tg_notif_enabled:  document.getElementById('s_tg_notif_enabled').checked ? '1' : '0'
+        webhook_url:      document.getElementById('s_webhook_url').value,
+        tg_notif_enabled: document.getElementById('s_tg_notif_enabled').checked ? '1' : '0'
       })
     });
     _admin.toast('Интеграции сохранены', 'success');
@@ -708,9 +1123,10 @@ async function saveNotif(btn) {
     await _admin.apiFetch('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        notif_new_order: document.getElementById('s_notif_new').checked ? '1' : '0',
-        notif_status:    document.getElementById('s_notif_status').checked ? '1' : '0',
-        notif_message:   document.getElementById('s_notif_message').checked ? '1' : '0'
+        notify_new_order:    document.getElementById('notify_new_order').checked    ? '1' : '0',
+        notify_status_change: document.getElementById('notify_status_change').checked ? '1' : '0',
+        notify_review:       document.getElementById('notify_review').checked       ? '1' : '0',
+        notify_message:      document.getElementById('notify_message').checked      ? '1' : '0',
       })
     });
     _admin.toast('Настройки уведомлений сохранены', 'success');
@@ -735,15 +1151,18 @@ async function clearSessions() {
 
 /* ─── Danger zone: export orders ─────────────────────────── */
 function exportOrders() {
-  const token = localStorage.getItem('admin_token');
+  const tok = localStorage.getItem('admin_token');
   const a = document.createElement('a');
-  a.href = '/api/admin/orders/export?_t=' + encodeURIComponent(token);
+  a.href = '/api/admin/orders/export?_t=' + encodeURIComponent(tok);
   a.download = 'orders_' + new Date().toISOString().slice(0,10) + '.csv';
   document.body.appendChild(a);
   a.click();
   a.remove();
   _admin.toast('Экспорт начат…', 'info');
 }
+
+/* ─── Init ────────────────────────────────────────────────── */
+loadSettings();
 </script>
 </body>
 </html>
