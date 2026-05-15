@@ -1264,8 +1264,8 @@ router.get('/budget-estimate', (req, res) => {
   }
 });
 
-// GET /api/models/my-orders?name=X&phone=Y — model views their orders
-router.get('/models/my-orders', async (req, res) => {
+// GET /api/models/my-orders?name=X — model views their orders (rate-limited, no client PII)
+router.get('/models/my-orders', strictLimiter, async (req, res) => {
   try {
     const { name } = req.query;
     if (!name || name.trim().length < 2) {
@@ -1281,9 +1281,9 @@ router.get('/models/my-orders', async (req, res) => {
       return res.json({ orders: [], message: 'Модель не найдена' });
     }
 
-    // Get orders for this model
+    // Get orders for this model — exclude client PII (name/phone) from public endpoint
     const orders = await query(
-      `SELECT id, order_number, client_name, event_type, event_date, status, budget, created_at
+      `SELECT id, order_number, event_type, event_date, status, budget, created_at
        FROM orders WHERE model_id=? ORDER BY created_at DESC LIMIT 20`,
       [model.id]
     );
