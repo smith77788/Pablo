@@ -546,6 +546,10 @@ async function showModel(chatId, modelId) {
     const reviewRow = await get('SELECT COUNT(*) as cnt FROM reviews WHERE model_id=? AND approved=1', [modelId]).catch(() => null);
     const reviewCount = reviewRow ? (reviewRow.cnt || 0) : 0;
 
+    // Completed orders count
+    const orderCountRow = await get('SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status="completed"', [m.id]).catch(() => ({ n: 0 }));
+    const completedOrders = orderCountRow ? (orderCountRow.n || 0) : 0;
+
     const lines = [];
     if (m.featured)                    lines.push(`⭐ Топ\\-модель`);
     if (m.age)                         lines.push(`📅 Возраст: *${m.age}* лет`);
@@ -559,6 +563,7 @@ async function showModel(chatId, modelId) {
     if (m.city)                        lines.push(`🏙 Город: *${esc(m.city)}*`);
     if (m.instagram)                   lines.push(`📸 @${esc(m.instagram)}`);
     if (reviewCount > 0)               lines.push(`⭐ Отзывов: *${reviewCount}*`);
+    if (completedOrders > 0)           lines.push(`📋 Завершено заявок: *${esc(String(completedOrders))}*`);
     const viewCount = (m.view_count || 0) + 1; // +1 for the just-incremented count
     if (viewCount > 0)                 lines.push(`👁 Просмотров: *${viewCount}*`);
 
@@ -4786,10 +4791,10 @@ function initBot(app) {
 
     // ── FAQ: отдельный вопрос
     if (data.startsWith('faq_')) {
-      const idx = parseInt(data.replace('faq_', ''));
-      const faq = FAQ_ITEMS[idx];
+      const faqId = parseInt(data.replace('faq_', ''));
+      const faq = await get('SELECT * FROM faq WHERE id=? AND active=1', [faqId]).catch(() => null);
       if (!faq) return;
-      return safeSend(chatId, `*${esc(faq.q)}*\n\n${esc(faq.a)}`, {
+      return safeSend(chatId, `*${esc(faq.question)}*\n\n${esc(faq.answer)}`, {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [
           [{ text: '← Все вопросы', callback_data: 'faq' }],
@@ -5533,16 +5538,9 @@ async function notifyPaymentSuccess(clientChatId, orderNumber) {
 
 // ─── FAQ ──────────────────────────────────────────────────────────────────────
 
-const FAQ_ITEMS = [
-  { q: 'Как оформить заявку?', a: 'Выберите модель в каталоге → нажмите «Оформить заявку» → заполните форму. Менеджер свяжется с вами в течение часа.' },
-  { q: 'Какова минимальная стоимость?', a: 'Стоимость зависит от типа мероприятия и длительности. Примерные цены: от 15 000 ₽ за 4 часа.' },
-  { q: 'Можно ли отменить заявку?', a: 'Да, вы можете отменить заявку до подтверждения. После подтверждения — по согласованию с менеджером.' },
-  { q: 'Нужно ли платить заранее?', a: 'Форма оплаты обсуждается индивидуально. Возможна оплата частично или полностью по факту.' },
-  { q: 'Как долго ждать ответа?', a: 'Менеджеры работают с 9:00 до 21:00. Обычно отвечаем в течение 30-60 минут.' },
-];
-
 async function showFaq(chatId) {
-  const keyboard = FAQ_ITEMS.map((faq, i) => [{ text: `❓ ${faq.q}`, callback_data: `faq_${i}` }]);
+  const faqItems = await query('SELECT * FROM faq WHERE active=1 ORDER BY sort_order ASC, id ASC').catch(() => []);
+  const keyboard = faqItems.map(faq => [{ text: `❓ ${faq.question}`, callback_data: `faq_${faq.id}` }]);
   keyboard.push([{ text: '🏠 Главное меню', callback_data: 'main_menu' }]);
 
   return safeSend(chatId, '❓ *Часто задаваемые вопросы*\n\nВыберите вопрос:', {

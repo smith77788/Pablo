@@ -474,6 +474,33 @@ async function initDatabase() {
   await run(`CREATE INDEX IF NOT EXISTS idx_wishlists_chat_id ON wishlists(chat_id)`).catch(() => {});
   await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (11, 'wishlists table')`).catch(() => {});
 
+  // FAQ table (schema v12)
+  await run(`CREATE TABLE IF NOT EXISTS faq (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (12, 'faq table')`).catch(() => {});
+
+  // Seed FAQ items if empty
+  const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
+  if (!faqCount.n) {
+    const faqItems = [
+      ['Как забронировать модель?', 'Нажмите «📋 Забронировать» в меню, выберите категорию и заполните форму. Менеджер свяжется с вами в течение часа.'],
+      ['Сколько стоят услуги?', 'Стоимость зависит от типа мероприятия и длительности. Минимальный бюджет — от 8 000 ₽. Точную цену уточните через форму заявки.'],
+      ['Как долго рассматривается заявка?', 'Обычно 1–2 часа в рабочее время. Срочные запросы — в течение 30 минут при наличии свободных моделей.'],
+      ['Можно ли выбрать конкретную модель?', 'Да! В каталоге выберите понравившуюся модель и нажмите «📋 Забронировать» прямо на её карточке.'],
+      ['Какие гарантии качества?', 'Все модели прошли отбор. Средний рейтинг по отзывам — 4.8/5. При несоответствии — полный возврат средств.'],
+      ['Работаете ли вы в выходные?', 'Да, мы принимаем заявки 7 дней в неделю. Менеджеры онлайн с 9:00 до 22:00.'],
+    ];
+    for (const [q, a] of faqItems) {
+      await run('INSERT INTO faq (question, answer) VALUES (?, ?)', [q, a]).catch(() => {});
+    }
+  }
+
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);
   if (!admin) {
