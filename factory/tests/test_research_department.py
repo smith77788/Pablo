@@ -180,3 +180,204 @@ class TestInsightSynthesizer:
     def test_report_negative_growth_indicator(self):
         report = self.synthesizer.generate_weekly_insight_report({"revenue_growth_pct": -5.0})
         assert "↓" in report
+
+    def test_report_zero_growth_neutral_arrow(self):
+        report = self.synthesizer.generate_weekly_insight_report({"revenue_growth_pct": 0.0})
+        assert "→" in report
+
+    def test_synthesize_with_empty_competitor_gaps(self):
+        result = self.synthesizer.synthesize_insights({}, [], [], {})
+        assert isinstance(result, dict)
+        assert "executive_summary" in result
+        assert "recommended_focus" in result
+
+    def test_synthesize_confidence_medium_when_two_opportunities(self):
+        market = {"segment": "promo"}
+        gaps = [
+            {"segment": "promo", "available_share": 0.80, "opportunity": "high"},
+            {"segment": "events", "available_share": 0.70, "opportunity": "high"},
+        ]
+        trends = [{"name": "AI tools", "action": "build AI"}]
+        perf = {"conversion_rate": 0.5, "avg_budget": 50_000}
+        result = self.synthesizer.synthesize_insights(market, gaps, trends, perf)
+        assert result["confidence_level"] in ("medium", "low")
+
+    def test_synthesize_top_opportunities_list(self):
+        gaps = [{"segment": "promo", "available_share": 0.80, "opportunity": "high"}]
+        trends = [{"name": "AI tools", "action": "build AI engine"}]
+        result = self.synthesizer.synthesize_insights({}, gaps, trends, {})
+        assert isinstance(result["top_opportunities"], list)
+
+    def test_generate_report_all_sections_present(self):
+        report = self.synthesizer.generate_weekly_insight_report({
+            "orders_this_week": 5,
+            "conversion_rate": 0.40,
+            "top_segment": "events",
+            "revenue_growth_pct": 3.0,
+        })
+        assert "Конверсия" in report
+        assert "Заявок" in report
+        assert "Топ-сегмент" in report
+
+
+class TestMarketResearcherExtended:
+    def setup_method(self):
+        self.researcher = MarketResearcher()
+
+    def test_all_known_segments_have_data(self):
+        for segment in ["fashion", "commercial", "events", "promo"]:
+            result = self.researcher.analyze_market_segment(segment)
+            assert result["market_size_rub"] > 0
+            assert result["annual_growth_pct"] > 0
+
+    def test_analyze_segment_uppercase_normalized(self):
+        result = self.researcher.analyze_market_segment("FASHION")
+        assert result["segment"] == "fashion"
+
+    def test_analyze_segment_has_timestamp(self):
+        result = self.researcher.analyze_market_segment("events")
+        assert "analyzed_at" in result
+        assert "T" in result["analyzed_at"]  # ISO format
+
+    def test_tam_sam_som_hierarchy(self):
+        for city in ["Москва", "санкт-петербург", "Воронеж"]:
+            result = self.researcher.estimate_addressable_market(city, "fashion")
+            assert result["tam_rub"] >= result["sam_rub"] >= result["som_rub"]
+
+    def test_opportunity_score_promo_low_competition(self):
+        # promo has "low" competition → higher base score
+        result = self.researcher.analyze_market_segment("promo")
+        fashion_result = self.researcher.analyze_market_segment("fashion")
+        # promo has lower competition than fashion, should contribute higher base
+        assert result["competition_level"] == "low"
+        assert fashion_result["competition_level"] == "high"
+
+
+class TestCompetitorAnalystExtended:
+    def setup_method(self):
+        self.analyst = CompetitorAnalyst()
+
+    def test_we_compete_flag_true(self):
+        gaps = self.analyst.identify_competitive_gaps(["fashion"])
+        fashion_gap = next(g for g in gaps if g["segment"] == "fashion")
+        assert fashion_gap["we_compete"] is True
+
+    def test_we_compete_flag_false(self):
+        gaps = self.analyst.identify_competitive_gaps([])
+        for gap in gaps:
+            assert gap["we_compete"] is False
+
+    def test_benchmark_pricing_luxury_fashion(self):
+        result = self.analyst.benchmark_pricing(200_000, "fashion")
+        assert result["market_position"] == "luxury"
+
+    def test_benchmark_pricing_unknown_event_type_defaults(self):
+        result = self.analyst.benchmark_pricing(30_000, "unknown_type")
+        assert "market_position" in result
+        assert "recommendation" in result
+
+    def test_benchmark_pricing_vs_mid_pct_sign(self):
+        result = self.analyst.benchmark_pricing(50_000, "fashion")
+        # mid fashion = 25000, so 50000 is 100% above mid
+        assert result["vs_mid_market_pct"] > 0
+
+    def test_competitor_profiles_non_empty(self):
+        assert len(self.analyst.COMPETITOR_PROFILES) > 0
+        for c in self.analyst.COMPETITOR_PROFILES:
+            assert "name" in c
+            assert "market_share" in c
+
+
+class TestTrendSpotterExtended:
+    def setup_method(self):
+        self.spotter = TrendSpotter()
+
+    def test_no_focus_area_returns_all_trends(self):
+        all_trends = self.spotter.get_actionable_trends()
+        assert len(all_trends) == len(self.spotter.CURRENT_TRENDS)
+
+    def test_filter_by_direct_relevance(self):
+        trends = self.spotter.get_actionable_trends(focus_area="direct")
+        assert all("direct" in t["relevance"] for t in trends)
+
+    def test_score_with_large_team(self):
+        result = self.spotter.score_trend_relevance("AI-assisted model selection", {"team_size": 20})
+        # Large team → no complexity penalty → higher score
+        result_small = self.spotter.score_trend_relevance("AI-assisted model selection", {"team_size": 5})
+        assert result["score"] >= result_small["score"]
+
+    def test_score_trend_suggested_action_present(self):
+        result = self.spotter.score_trend_relevance("Personalization at scale", {"team_size": 10})
+        assert "suggested_action" in result
+        assert result["suggested_action"]
+
+
+class TestRunPhaseResearch:
+    """Integration tests for the run_phase_research standalone function."""
+
+    def test_run_phase_research_missing_db(self):
+        from factory.cycle import run_phase_research
+        result = run_phase_research("/nonexistent/path/db.sqlite3")
+        # Should not crash; returns status ok with defaults or error
+        assert isinstance(result, dict)
+        assert "status" in result
+
+    def test_run_phase_research_with_temp_db(self, tmp_path):
+        import sqlite3
+        from factory.cycle import run_phase_research
+
+        db_file = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute(
+            "CREATE TABLE orders (id INTEGER PRIMARY KEY, event_type TEXT, status TEXT, "
+            "budget REAL, created_at TEXT, client_chat_id INTEGER, model_id INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO orders VALUES (1, 'fashion', 'completed', 50000, date('now'), 1, 1)"
+        )
+        conn.execute(
+            "INSERT INTO orders VALUES (2, 'fashion', 'new', 30000, date('now'), 2, 1)"
+        )
+        conn.commit()
+        conn.close()
+
+        result = run_phase_research(str(db_file))
+        assert result["status"] == "ok"
+        assert "top_segment" in result
+        assert "market_opportunity_score" in result
+        assert isinstance(result["top_opportunities"], list)
+        assert isinstance(result["strategic_alerts"], list)
+
+    def test_run_phase_research_empty_db(self, tmp_path):
+        import sqlite3
+        from factory.cycle import run_phase_research
+
+        db_file = tmp_path / "empty.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute(
+            "CREATE TABLE orders (id INTEGER PRIMARY KEY, event_type TEXT, status TEXT, "
+            "budget REAL, created_at TEXT, client_chat_id INTEGER, model_id INTEGER)"
+        )
+        conn.commit()
+        conn.close()
+
+        result = run_phase_research(str(db_file))
+        assert result["status"] == "ok"
+        assert result["top_segment"] == "commercial"  # default
+        assert result["conv_rate"] == 0.0
+
+    def test_run_phase_research_returns_confidence(self, tmp_path):
+        import sqlite3
+        from factory.cycle import run_phase_research
+
+        db_file = tmp_path / "conf.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute(
+            "CREATE TABLE orders (id INTEGER PRIMARY KEY, event_type TEXT, status TEXT, "
+            "budget REAL, created_at TEXT, client_chat_id INTEGER, model_id INTEGER)"
+        )
+        conn.commit()
+        conn.close()
+
+        result = run_phase_research(str(db_file))
+        assert result["confidence"] in ("low", "medium", "high")
