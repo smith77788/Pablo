@@ -131,41 +131,155 @@ class TestSalesDepartment:
     """Tests for Sales department agents."""
 
     def test_sales_module_imports(self):
-        from factory.agents.sales import LeadQualifier, ProposalWriter, FollowUpSpecialist
-        assert LeadQualifier is not None
-        assert ProposalWriter is not None
-        assert FollowUpSpecialist is not None
+        from factory.agents.sales import (
+            LeadQualifierAgent, ProposalWriterAgent,
+            FollowUpSpecialistAgent, PricingNegotiatorAgent,
+        )
+        assert LeadQualifierAgent is not None
+        assert ProposalWriterAgent is not None
+        assert FollowUpSpecialistAgent is not None
+        assert PricingNegotiatorAgent is not None
 
     def test_lead_qualifier_init(self):
-        from factory.agents.sales import LeadQualifier
-        agent = LeadQualifier()
-        assert agent.name == 'LeadQualifier'
+        from factory.agents.sales import LeadQualifierAgent
+        agent = LeadQualifierAgent()
         assert agent.department == 'sales'
+        assert agent.role == 'LeadQualifier'
+        assert agent.name == 'Алиса'
 
     def test_proposal_writer_init(self):
-        from factory.agents.sales import ProposalWriter
-        agent = ProposalWriter()
-        assert agent.name == 'ProposalWriter'
+        from factory.agents.sales import ProposalWriterAgent
+        agent = ProposalWriterAgent()
+        assert agent.department == 'sales'
+        assert agent.role == 'ProposalWriter'
+        assert agent.name == 'Михаил'
 
     def test_follow_up_specialist_init(self):
-        from factory.agents.sales import FollowUpSpecialist
-        agent = FollowUpSpecialist()
-        assert agent.name == 'FollowUpSpecialist'
+        from factory.agents.sales import FollowUpSpecialistAgent
+        agent = FollowUpSpecialistAgent()
+        assert agent.department == 'sales'
+        assert agent.role == 'FollowUpSpecialist'
+        assert agent.name == 'Екатерина'
+
+    def test_pricing_negotiator_init(self):
+        from factory.agents.sales import PricingNegotiatorAgent
+        agent = PricingNegotiatorAgent()
+        assert agent.department == 'sales'
+        assert agent.role == 'PricingNegotiator'
+        assert agent.name == 'Дмитрий'
 
     def test_lead_qualifier_has_run_method(self):
-        from factory.agents.sales import LeadQualifier
-        agent = LeadQualifier()
+        from factory.agents.sales import LeadQualifierAgent
+        agent = LeadQualifierAgent()
         assert hasattr(agent, 'run')
         assert callable(agent.run)
 
     def test_lead_qualifier_has_build_prompt(self):
-        from factory.agents.sales import LeadQualifier
-        agent = LeadQualifier()
+        from factory.agents.sales import LeadQualifierAgent
+        agent = LeadQualifierAgent()
         assert hasattr(agent, 'build_prompt')
         # build_prompt should return a string even with no DB data
         prompt = agent.build_prompt()
         assert isinstance(prompt, str)
         assert len(prompt) > 0
+
+    def test_sales_department_run_cycle(self):
+        from factory.agents.sales import SalesDepartment
+        dept = SalesDepartment()
+        assert hasattr(dept, 'run_cycle')
+        assert callable(dept.run_cycle)
+        assert len(dept.agents) == 4
+
+
+class TestCreativeDepartment:
+    """Tests for Creative department agents."""
+
+    def test_creative_module_imports(self):
+        from factory.agents.creative import (
+            CopywriterAgent, VisualConceptorAgent,
+            BrandVoiceKeeperAgent, StorytellingAgent,
+        )
+        assert CopywriterAgent is not None
+        assert VisualConceptorAgent is not None
+        assert BrandVoiceKeeperAgent is not None
+        assert StorytellingAgent is not None
+
+    def test_copywriter_init(self):
+        from factory.agents.creative import CopywriterAgent
+        agent = CopywriterAgent()
+        assert agent.department == 'creative'
+        assert agent.role == 'Copywriter'
+        assert agent.name == 'Анастасия'
+
+    def test_visual_conceptor_init(self):
+        from factory.agents.creative import VisualConceptorAgent
+        agent = VisualConceptorAgent()
+        assert agent.department == 'creative'
+        assert agent.role == 'VisualConceptor'
+        assert agent.name == 'Артём'
+
+    def test_brand_voice_keeper_init(self):
+        from factory.agents.creative import BrandVoiceKeeperAgent
+        agent = BrandVoiceKeeperAgent()
+        assert agent.department == 'creative'
+        assert agent.role == 'BrandVoiceKeeper'
+        assert agent.name == 'Мария'
+
+    def test_storytelling_agent_init(self):
+        from factory.agents.creative import StorytellingAgent
+        agent = StorytellingAgent()
+        assert agent.department == 'creative'
+        assert agent.role == 'Storytelling'
+        assert agent.name == 'Ольга'
+
+    def test_copywriter_has_run_method(self):
+        from factory.agents.creative import CopywriterAgent
+        agent = CopywriterAgent()
+        assert hasattr(agent, 'run')
+        assert callable(agent.run)
+
+    def test_visual_conceptor_has_run_method(self):
+        from factory.agents.creative import VisualConceptorAgent
+        agent = VisualConceptorAgent()
+        assert hasattr(agent, 'run')
+        assert callable(agent.run)
+
+    def test_brand_voice_keeper_has_run_method(self):
+        from factory.agents.creative import BrandVoiceKeeperAgent
+        agent = BrandVoiceKeeperAgent()
+        assert hasattr(agent, 'run')
+        assert callable(agent.run)
+
+    def test_storytelling_agent_has_run_method(self):
+        from factory.agents.creative import StorytellingAgent
+        agent = StorytellingAgent()
+        assert hasattr(agent, 'run')
+        assert callable(agent.run)
+
+    def test_creative_department_run_cycle(self):
+        from factory.agents.creative import CreativeDepartment
+        dept = CreativeDepartment()
+        assert hasattr(dept, 'run_cycle')
+        assert callable(dept.run_cycle)
+        assert len(dept.agents) == 4
+
+    def test_copywriter_run_returns_dict(self):
+        from factory.agents.creative import CopywriterAgent
+        agent = CopywriterAgent()
+        agent.think = lambda prompt, **kw: "Mock marketing copy"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get('role') == 'Copywriter'
+        assert result.get('department') == 'creative'
+
+    def test_storytelling_run_returns_dict(self):
+        from factory.agents.creative import StorytellingAgent
+        agent = StorytellingAgent()
+        agent.think = lambda prompt, **kw: "Mock story"
+        result = agent.run()
+        assert isinstance(result, dict)
+        assert result.get('role') == 'Storytelling'
+        assert result.get('department') == 'creative'
 
 
 class TestDatabase:
@@ -397,9 +511,14 @@ class TestAgentRequiredAttributes:
     ALL_AGENT_CLASSES = [
         ("factory.agents.analytics_engine", "AnalyticsEngine"),
         ("factory.agents.content_generator", "ContentGenerator"),
-        ("factory.agents.sales", "LeadQualifier"),
-        ("factory.agents.sales", "ProposalWriter"),
-        ("factory.agents.sales", "FollowUpSpecialist"),
+        ("factory.agents.sales", "LeadQualifierAgent"),
+        ("factory.agents.sales", "ProposalWriterAgent"),
+        ("factory.agents.sales", "FollowUpSpecialistAgent"),
+        ("factory.agents.sales", "PricingNegotiatorAgent"),
+        ("factory.agents.creative", "CopywriterAgent"),
+        ("factory.agents.creative", "VisualConceptorAgent"),
+        ("factory.agents.creative", "BrandVoiceKeeperAgent"),
+        ("factory.agents.creative", "StorytellingAgent"),
         ("factory.agents.customer_success", "OnboardingSpecialist"),
         ("factory.agents.customer_success", "RetentionAnalyst"),
         ("factory.agents.customer_success", "FeedbackCollector"),
@@ -413,9 +532,14 @@ class TestAgentRequiredAttributes:
     # Agents that expose a run() method (AnalyticsEngine uses analyze() instead)
     RUN_AGENT_CLASSES = [
         ("factory.agents.content_generator", "ContentGenerator"),
-        ("factory.agents.sales", "LeadQualifier"),
-        ("factory.agents.sales", "ProposalWriter"),
-        ("factory.agents.sales", "FollowUpSpecialist"),
+        ("factory.agents.sales", "LeadQualifierAgent"),
+        ("factory.agents.sales", "ProposalWriterAgent"),
+        ("factory.agents.sales", "FollowUpSpecialistAgent"),
+        ("factory.agents.sales", "PricingNegotiatorAgent"),
+        ("factory.agents.creative", "CopywriterAgent"),
+        ("factory.agents.creative", "VisualConceptorAgent"),
+        ("factory.agents.creative", "BrandVoiceKeeperAgent"),
+        ("factory.agents.creative", "StorytellingAgent"),
         ("factory.agents.customer_success", "OnboardingSpecialist"),
         ("factory.agents.customer_success", "RetentionAnalyst"),
         ("factory.agents.customer_success", "FeedbackCollector"),
