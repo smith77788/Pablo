@@ -340,7 +340,10 @@ async function loadContent() {
           </div>
           <p style="font-size:0.88rem;color:var(--text-muted);line-height:1.6;margin:0;white-space:pre-wrap">${_admin.escapeHtml((r.content||'').slice(0,600))}${(r.content||'').length>600?'…':''}</p>
         </div>
-        <button onclick="copyPost(${r.id})" title="Скопировать" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;flex-shrink:0">📋</button>
+        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+          <button onclick="copyPost(${r.id})" title="Скопировать" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem">📋</button>
+          <button onclick="publishPost(${r.id})" title="Опубликовать в канал" style="background:rgba(201,169,110,0.1);border:1px solid var(--gold);color:var(--gold);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem">📢</button>
+        </div>
       </div>`).join('');
 
     // Store posts for copy
@@ -353,6 +356,15 @@ async function loadContent() {
 function copyPost(id) {
   const post = (window._contentPosts||[]).find(p => p.id === id);
   if (post) _admin.copyToClipboard(post.content || '');
+}
+
+async function publishPost(id) {
+  try {
+    const result = await _admin.apiFetch(`/admin/factory-content/${id}/publish`, { method: 'POST' });
+    _admin.toast('Пост опубликован в Telegram-канале!', 'success');
+  } catch(e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  }
 }
 
 async function loadExperiments() {

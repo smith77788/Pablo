@@ -1275,6 +1275,11 @@ router.put('/settings', auth, async (req, res, next) => {
     'crm_webhook_url', 'crm_webhook_secret', 'amocrm_webhook_url', 'amocrm_api_key', 'bitrix24_webhook_url',
     // Pricing tier minimums
     'pricing_start_from', 'pricing_event_from', 'pricing_premium_from',
+    // Telegram channel
+    'telegram_channel_id', 'tg_channel',
+    // Bot settings extras
+    'welcome_photo_url', 'main_menu_text', 'pricing_text', 'booking_thanks_text',
+    'calc_enabled', 'catalog_title', 'catalog_sort',
   ];
   try {
     const body = req.body;
@@ -1758,6 +1763,45 @@ router.get('/admin/factory-content', auth, async (req, res, next) => {
       fdb.close();
     } catch (_) {}
     res.json(rows);
+  } catch(e) { next(e); }
+});
+
+// ─── Publish factory content post to Telegram channel ────────────────────────
+router.post('/admin/factory-content/:id/publish', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    let channelId = await getSetting('tg_channel').catch(() => null) ||
+                    await getSetting('telegram_channel_id').catch(() => null);
+    if (!channelId) {
+      return res.status(400).json({ error: 'Telegram channel not configured. Set tg_channel in Settings → Bot.' });
+    }
+    // Ensure @username format for public channels
+    if (!channelId.startsWith('@') && !channelId.startsWith('-')) {
+      channelId = '@' + channelId;
+    }
+
+    const Database = require('better-sqlite3');
+    const factoryDbPath = require('path').join(__dirname, '../../factory/factory.db');
+    let content = null;
+    try {
+      const fdb = new Database(factoryDbPath, { readonly: true });
+      const row = fdb.prepare('SELECT action as content FROM growth_actions WHERE id=?').get(id);
+      fdb.close();
+      if (row) content = row.content;
+    } catch (_) {}
+
+    if (!content) return res.status(404).json({ error: 'Post not found' });
+
+    const botRef = req.app.get('botInstance') || global._botInstance;
+    if (!botRef?.instance?.sendMessage) {
+      return res.status(503).json({ error: 'Bot not initialized' });
+    }
+
+    await botRef.instance.sendMessage(channelId, content, { parse_mode: 'HTML' });
+    logAudit(req, 'publish_to_channel', 'factory_post', id, `channel=${channelId}`);
+    res.json({ success: true, channel_id: channelId });
   } catch(e) { next(e); }
 });
 
