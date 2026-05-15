@@ -196,15 +196,15 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
+
+// When ALLOWED_ORIGINS is not configured, default to blocking cross-origin
+// requests rather than allowing all origins (open CORS is a security risk).
+const corsOrigin = ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : false;
 app.use(
-  cors(
-    ALLOWED_ORIGINS.length
-      ? {
-          origin: ALLOWED_ORIGINS,
-          credentials: true,
-        }
-      : {}
-  )
+  cors({
+    origin: corsOrigin,
+    credentials: true,
+  })
 );
 
 app.use(express.json({ limit: '2mb' }));

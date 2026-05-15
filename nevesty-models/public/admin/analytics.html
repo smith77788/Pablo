@@ -1,1171 +1,1509 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Аналитика — Admin Nevesty Models</title>
-  <script>tailwind.config = { darkMode: 'class' }</script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <style>
-    .skeleton { animation: pulse 1.5s cubic-bezier(0.4,0,0.6,1) infinite; background: #e5e7eb; border-radius: 6px; }
-    .dark .skeleton { background: #374151; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-    .chart-card { position: relative; }
-    .chart-export-btn {
-      position: absolute; top: 16px; right: 16px;
-      padding: 4px 10px; font-size: 12px; border-radius: 6px;
-      background: rgba(0,0,0,0.07); border: none; cursor: pointer;
-      color: #6b7280; transition: background 0.15s;
-    }
-    .dark .chart-export-btn { background: rgba(255,255,255,0.08); color: #9ca3af; }
-    .chart-export-btn:hover { background: rgba(236,72,153,0.15); color: #ec4899; }
-    .chart-error { display:flex; align-items:center; justify-content:center; height:100%; color:#9ca3af; font-size:14px; }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Аналитика — Admin Nevesty Models</title>
+    <script>
+      tailwind.config = { darkMode: 'class' };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <style>
+      .skeleton {
+        animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        background: #e5e7eb;
+        border-radius: 6px;
+      }
+      .dark .skeleton {
+        background: #374151;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      .chart-card {
+        position: relative;
+      }
+      .chart-export-btn {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        padding: 4px 10px;
+        font-size: 12px;
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.07);
+        border: none;
+        cursor: pointer;
+        color: #6b7280;
+        transition: background 0.15s;
+      }
+      .dark .chart-export-btn {
+        background: rgba(255, 255, 255, 0.08);
+        color: #9ca3af;
+      }
+      .chart-export-btn:hover {
+        background: rgba(236, 72, 153, 0.15);
+        color: #ec4899;
+      }
+      .chart-error {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: #9ca3af;
+        font-size: 14px;
+      }
 
-    /* KPI cards */
-    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 14px; margin-bottom: 8px; }
-    .kpi-card {
-      background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
-      padding: 20px 14px 16px; text-align: center; position: relative; overflow: hidden;
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.09); }
-    .dark .kpi-card { background: #1f2937; border-color: #374151; }
-    .kpi-card::before {
-      content: ''; position: absolute; inset: 0; opacity: 0.06; border-radius: 14px;
-      background: var(--kpi-color, #ec4899);
-    }
-    .kpi-icon { font-size: 1.9rem; margin-bottom: 8px; line-height: 1; }
-    .kpi-value { font-size: 2rem; font-weight: 800; color: var(--kpi-color, #ec4899); line-height: 1.1; }
-    .kpi-label { font-size: 0.72rem; color: #6b7280; margin-top: 6px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; }
-    .dark .kpi-label { color: #9ca3af; }
+      /* KPI cards */
+      .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+        gap: 14px;
+        margin-bottom: 8px;
+      }
+      .kpi-card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 20px 14px 16px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+        transition:
+          transform 0.15s,
+          box-shadow 0.15s;
+      }
+      .kpi-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.09);
+      }
+      .dark .kpi-card {
+        background: #1f2937;
+        border-color: #374151;
+      }
+      .kpi-card::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        opacity: 0.06;
+        border-radius: 14px;
+        background: var(--kpi-color, #ec4899);
+      }
+      .kpi-icon {
+        font-size: 1.9rem;
+        margin-bottom: 8px;
+        line-height: 1;
+      }
+      .kpi-value {
+        font-size: 2rem;
+        font-weight: 800;
+        color: var(--kpi-color, #ec4899);
+        line-height: 1.1;
+      }
+      .kpi-label {
+        font-size: 0.72rem;
+        color: #6b7280;
+        margin-top: 6px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+      .dark .kpi-label {
+        color: #9ca3af;
+      }
 
-    /* Bar chart improvements */
-    #kpi-bar-wrap {
-      position: relative; height: 180px;
-    }
-  </style>
-</head>
-<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
-
-  <!-- Header -->
-  <div class="bg-white dark:bg-gray-800 border-b dark:border-gray-700 px-6 py-4 flex items-center gap-4 sticky top-0 z-10">
-    <a href="/admin/" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fas fa-arrow-left"></i></a>
-    <h1 class="text-xl font-bold text-gray-900 dark:text-white">📈 Аналитика</h1>
-    <!-- Period selector -->
-    <div class="ml-auto flex gap-2">
-      <button onclick="setPeriod(7)"  class="period-btn px-3 py-1.5 text-sm border rounded-lg dark:border-gray-600 dark:text-gray-300">7 дней</button>
-      <button onclick="setPeriod(30)" class="period-btn px-3 py-1.5 text-sm border rounded-lg bg-pink-600 text-white border-pink-600">30 дней</button>
-      <button onclick="setPeriod(90)" class="period-btn px-3 py-1.5 text-sm border rounded-lg dark:border-gray-600 dark:text-gray-300">90 дней</button>
+      /* Bar chart improvements */
+      #kpi-bar-wrap {
+        position: relative;
+        height: 180px;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+    <!-- Header -->
+    <div
+      class="bg-white dark:bg-gray-800 border-b dark:border-gray-700 px-6 py-4 flex items-center gap-4 sticky top-0 z-10"
+    >
+      <a href="/admin/" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+        ><i class="fas fa-arrow-left"></i
+      ></a>
+      <h1 class="text-xl font-bold text-gray-900 dark:text-white">📈 Аналитика</h1>
+      <!-- Period selector -->
+      <div class="ml-auto flex gap-2">
+        <button
+          onclick="setPeriod(7)"
+          class="period-btn px-3 py-1.5 text-sm border rounded-lg dark:border-gray-600 dark:text-gray-300"
+        >
+          7 дней
+        </button>
+        <button
+          onclick="setPeriod(30)"
+          class="period-btn px-3 py-1.5 text-sm border rounded-lg bg-pink-600 text-white border-pink-600"
+        >
+          30 дней
+        </button>
+        <button
+          onclick="setPeriod(90)"
+          class="period-btn px-3 py-1.5 text-sm border rounded-lg dark:border-gray-600 dark:text-gray-300"
+        >
+          90 дней
+        </button>
+      </div>
     </div>
-  </div>
 
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+      <!-- KPI Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card" style="--kpi-color: #ec4899">
+          <div class="kpi-icon">📋</div>
+          <div class="kpi-value" id="kpi-total">—</div>
+          <div class="kpi-label">Всего заявок</div>
+        </div>
+        <div class="kpi-card" style="--kpi-color: #3b82f6">
+          <div class="kpi-icon">📅</div>
+          <div class="kpi-value" id="kpi-today">—</div>
+          <div class="kpi-label">Сегодня</div>
+        </div>
+        <div class="kpi-card" style="--kpi-color: #8b5cf6">
+          <div class="kpi-icon">⏳</div>
+          <div class="kpi-value" id="kpi-active">—</div>
+          <div class="kpi-label">Активных</div>
+        </div>
+        <div class="kpi-card" style="--kpi-color: #22c55e">
+          <div class="kpi-icon">✅</div>
+          <div class="kpi-value" id="kpi-completed">—</div>
+          <div class="kpi-label" id="kpi-conv">Завершено</div>
+        </div>
+        <div class="kpi-card" style="--kpi-color: #06b6d4">
+          <div class="kpi-icon">👥</div>
+          <div class="kpi-value" id="kpi-clients">—</div>
+          <div class="kpi-label">Новых клиентов</div>
+        </div>
+        <div class="kpi-card" style="--kpi-color: #f59e0b">
+          <div class="kpi-icon">🔍</div>
+          <div class="kpi-value" id="kpi-pending">—</div>
+          <div class="kpi-label">На рассмотрении</div>
+        </div>
+        <div class="kpi-card" style="--kpi-color: #10b981">
+          <div class="kpi-icon">💰</div>
+          <div class="kpi-value" id="kpi-avg-budget" style="font-size: 1.35rem">—</div>
+          <div class="kpi-label">Середній чек</div>
+        </div>
+      </div>
 
-    <!-- KPI Cards -->
-    <div class="kpi-grid">
-      <div class="kpi-card" style="--kpi-color:#ec4899">
-        <div class="kpi-icon">📋</div>
-        <div class="kpi-value" id="kpi-total">—</div>
-        <div class="kpi-label">Всего заявок</div>
-      </div>
-      <div class="kpi-card" style="--kpi-color:#3b82f6">
-        <div class="kpi-icon">📅</div>
-        <div class="kpi-value" id="kpi-today">—</div>
-        <div class="kpi-label">Сегодня</div>
-      </div>
-      <div class="kpi-card" style="--kpi-color:#8b5cf6">
-        <div class="kpi-icon">⏳</div>
-        <div class="kpi-value" id="kpi-active">—</div>
-        <div class="kpi-label">Активных</div>
-      </div>
-      <div class="kpi-card" style="--kpi-color:#22c55e">
-        <div class="kpi-icon">✅</div>
-        <div class="kpi-value" id="kpi-completed">—</div>
-        <div class="kpi-label" id="kpi-conv">Завершено</div>
-      </div>
-      <div class="kpi-card" style="--kpi-color:#06b6d4">
-        <div class="kpi-icon">👥</div>
-        <div class="kpi-value" id="kpi-clients">—</div>
-        <div class="kpi-label">Новых клиентов</div>
-      </div>
-      <div class="kpi-card" style="--kpi-color:#f59e0b">
-        <div class="kpi-icon">🔍</div>
-        <div class="kpi-value" id="kpi-pending">—</div>
-        <div class="kpi-label">На рассмотрении</div>
-      </div>
-      <div class="kpi-card" style="--kpi-color:#10b981">
-        <div class="kpi-icon">💰</div>
-        <div class="kpi-value" id="kpi-avg-budget" style="font-size:1.35rem">—</div>
-        <div class="kpi-label">Середній чек</div>
-      </div>
-    </div>
-
-    <!-- Orders Bar Chart -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white">📊 Заявки по дням</h2>
-        <button class="chart-export-btn" onclick="exportChart('chart-daily', 'daily-orders.png')" title="Скачать PNG" style="position:static;margin:0"><i class="fas fa-download"></i></button>
-      </div>
-      <div id="kpi-bar-wrap">
-        <div id="chart-daily-skeleton" class="skeleton h-full w-full rounded-lg" style="height:180px"></div>
-        <canvas id="chart-daily" class="hidden" style="max-height:180px"></canvas>
-        <div id="chart-daily-error" class="chart-error hidden" style="height:180px">Нет данных за период</div>
-      </div>
-    </div>
-
-    <!-- Row 1: Funnel Chart + Event Types Chart -->
-    <div class="grid md:grid-cols-2 gap-6">
-
-      <!-- Воронка заявок — horizontal bar (Chart.js) -->
+      <!-- Orders Bar Chart -->
       <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-bold text-gray-900 dark:text-white">🎯 Воронка конверсии</h2>
-          <span id="funnel-conv-badge" style="display:none;font-size:0.8rem;padding:2px 10px;border-radius:12px;background:rgba(34,197,94,0.15);color:#22c55e;font-weight:600"></span>
-        </div>
-        <button class="chart-export-btn" onclick="exportChart('chart-funnel', 'funnel.png')" title="Скачать PNG"><i class="fas fa-download"></i></button>
-        <div id="funnel-chart-wrap" class="relative h-56">
-          <div id="funnel-skeleton" class="skeleton h-full w-full rounded-lg"></div>
-          <canvas id="chart-funnel" class="hidden"></canvas>
-          <div id="funnel-error" class="chart-error hidden">Нет данных</div>
-        </div>
-        <div id="funnel-cancelled-row" style="display:none;font-size:0.78rem;color:#6b7280;margin-top:8px">❌ Отклонено: <span id="funnel-cancelled-count">0</span></div>
-      </div>
-
-      <!-- Типы событий — doughnut (Chart.js) -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📋 Типы событий</h2>
-        <button class="chart-export-btn" onclick="exportChart('chart-events', 'event-types.png')" title="Скачать PNG"><i class="fas fa-download"></i></button>
-        <div id="events-chart-wrap" class="relative h-56">
-          <div id="events-skeleton" class="skeleton h-full w-full rounded-lg"></div>
-          <canvas id="chart-events" class="hidden"></canvas>
-          <div id="events-error" class="chart-error hidden">Нет данных</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Row 2: Top Models + Sources -->
-    <div class="grid md:grid-cols-2 gap-6">
-
-      <!-- Топ моделей — horizontal bar (Chart.js) -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-bold text-gray-900 dark:text-white">⭐ Топ моделей по заказам</h2>
-          <span style="font-size:0.75rem;color:#9ca3af">завершённые · всего</span>
-        </div>
-        <button class="chart-export-btn" onclick="exportChart('chart-models', 'top-models.png')" title="Скачать PNG"><i class="fas fa-download"></i></button>
-        <div id="models-chart-wrap" class="relative h-64">
-          <div id="models-skeleton" class="skeleton h-full w-full rounded-lg"></div>
-          <canvas id="chart-models" class="hidden"></canvas>
-          <div id="models-error" class="chart-error hidden">Нет данных</div>
-        </div>
-      </div>
-
-      <!-- Источники трафика — doughnut (Chart.js) -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🔗 Источники заявок</h2>
-        <button class="chart-export-btn" onclick="exportChart('chart-sources', 'sources.png')" title="Скачать PNG"><i class="fas fa-download"></i></button>
-        <div id="sources-chart-wrap" class="relative h-64">
-          <div id="sources-skeleton" class="skeleton h-full w-full rounded-lg"></div>
-          <canvas id="chart-sources" class="hidden"></canvas>
-          <div id="sources-error" class="chart-error hidden">Нет данных</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Monthly Trend chart (full width) -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <div class="flex items-center gap-2">
-          <h3 class="font-semibold text-gray-800 dark:text-white">Заявки по месяцам</h3>
-          <button onclick="exportChart('monthly')" title="Скачать PNG" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 ml-2">
-            <i class="fas fa-download text-sm"></i>
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white">📊 Заявки по дням</h2>
+          <button
+            class="chart-export-btn"
+            onclick="exportChart('chart-daily', 'daily-orders.png')"
+            title="Скачать PNG"
+            style="position: static; margin: 0"
+          >
+            <i class="fas fa-download"></i>
           </button>
         </div>
-        <select id="monthly-months" onchange="loadMonthly()" class="text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200">
-          <option value="6">6 месяцев</option>
-          <option value="12" selected>12 месяцев</option>
-          <option value="24">24 месяца</option>
-        </select>
+        <div id="kpi-bar-wrap">
+          <div id="chart-daily-skeleton" class="skeleton h-full w-full rounded-lg" style="height: 180px"></div>
+          <canvas id="chart-daily" class="hidden" style="max-height: 180px"></canvas>
+          <div id="chart-daily-error" class="chart-error hidden" style="height: 180px">Нет данных за период</div>
+        </div>
       </div>
-      <div id="monthly-skeleton" class="animate-pulse flex gap-2 h-48 items-end pb-4">
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-20"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-32"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-28"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-40"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-36"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-48"></div>
-      </div>
-      <div id="monthly-chart-wrap" style="display:none"><canvas id="monthly-chart"></canvas></div>
-      <div id="monthly-error" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
-    </div>
 
-    <!-- Row 3: Extended metrics — cities, repeat clients, avg cycle, rating -->
-    <div class="grid md:grid-cols-2 gap-6">
-      <!-- Top cities -->
+      <!-- Row 1: Funnel Chart + Event Types Chart -->
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- Воронка заявок — horizontal bar (Chart.js) -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white">🎯 Воронка конверсии</h2>
+            <span
+              id="funnel-conv-badge"
+              style="
+                display: none;
+                font-size: 0.8rem;
+                padding: 2px 10px;
+                border-radius: 12px;
+                background: rgba(34, 197, 94, 0.15);
+                color: #22c55e;
+                font-weight: 600;
+              "
+            ></span>
+          </div>
+          <button class="chart-export-btn" onclick="exportChart('chart-funnel', 'funnel.png')" title="Скачать PNG">
+            <i class="fas fa-download"></i>
+          </button>
+          <div id="funnel-chart-wrap" class="relative h-56">
+            <div id="funnel-skeleton" class="skeleton h-full w-full rounded-lg"></div>
+            <canvas id="chart-funnel" class="hidden"></canvas>
+            <div id="funnel-error" class="chart-error hidden">Нет данных</div>
+          </div>
+          <div id="funnel-cancelled-row" style="display: none; font-size: 0.78rem; color: #6b7280; margin-top: 8px">
+            ❌ Отклонено: <span id="funnel-cancelled-count">0</span>
+          </div>
+        </div>
+
+        <!-- Типы событий — doughnut (Chart.js) -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📋 Типы событий</h2>
+          <button class="chart-export-btn" onclick="exportChart('chart-events', 'event-types.png')" title="Скачать PNG">
+            <i class="fas fa-download"></i>
+          </button>
+          <div id="events-chart-wrap" class="relative h-56">
+            <div id="events-skeleton" class="skeleton h-full w-full rounded-lg"></div>
+            <canvas id="chart-events" class="hidden"></canvas>
+            <div id="events-error" class="chart-error hidden">Нет данных</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 2: Top Models + Sources -->
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- Топ моделей — horizontal bar (Chart.js) -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white">⭐ Топ моделей по заказам</h2>
+            <span style="font-size: 0.75rem; color: #9ca3af">завершённые · всего</span>
+          </div>
+          <button class="chart-export-btn" onclick="exportChart('chart-models', 'top-models.png')" title="Скачать PNG">
+            <i class="fas fa-download"></i>
+          </button>
+          <div id="models-chart-wrap" class="relative h-64">
+            <div id="models-skeleton" class="skeleton h-full w-full rounded-lg"></div>
+            <canvas id="chart-models" class="hidden"></canvas>
+            <div id="models-error" class="chart-error hidden">Нет данных</div>
+          </div>
+        </div>
+
+        <!-- Источники трафика — doughnut (Chart.js) -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🔗 Источники заявок</h2>
+          <button class="chart-export-btn" onclick="exportChart('chart-sources', 'sources.png')" title="Скачать PNG">
+            <i class="fas fa-download"></i>
+          </button>
+          <div id="sources-chart-wrap" class="relative h-64">
+            <div id="sources-skeleton" class="skeleton h-full w-full rounded-lg"></div>
+            <canvas id="chart-sources" class="hidden"></canvas>
+            <div id="sources-error" class="chart-error hidden">Нет данных</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Monthly Trend chart (full width) -->
       <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🏙 Топ городов</h2>
-        <div id="cities-list" class="space-y-3">
-          <div class="skeleton h-6 w-full rounded"></div>
-          <div class="skeleton h-6 w-3/4 rounded"></div>
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div class="flex items-center gap-2">
+            <h3 class="font-semibold text-gray-800 dark:text-white">Заявки по месяцам</h3>
+            <button
+              onclick="exportChart('monthly')"
+              title="Скачать PNG"
+              class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 ml-2"
+            >
+              <i class="fas fa-download text-sm"></i>
+            </button>
+          </div>
+          <select
+            id="monthly-months"
+            onchange="loadMonthly()"
+            class="text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200"
+          >
+            <option value="6">6 месяцев</option>
+            <option value="12" selected>12 месяцев</option>
+            <option value="24">24 месяца</option>
+          </select>
+        </div>
+        <div id="monthly-skeleton" class="animate-pulse flex gap-2 h-48 items-end pb-4">
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-20"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-32"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-28"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-40"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-36"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-48"></div>
+        </div>
+        <div id="monthly-chart-wrap" style="display: none"><canvas id="monthly-chart"></canvas></div>
+        <div id="monthly-error" style="display: none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
+          Нет данных
+        </div>
+      </div>
+
+      <!-- Row 3: Extended metrics — cities, repeat clients, avg cycle, rating -->
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- Top cities -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🏙 Топ городов</h2>
+          <div id="cities-list" class="space-y-3">
+            <div class="skeleton h-6 w-full rounded"></div>
+            <div class="skeleton h-6 w-3/4 rounded"></div>
+            <div class="skeleton h-6 w-1/2 rounded"></div>
+          </div>
+        </div>
+        <!-- Extended KPIs -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📈 Дополнительные метрики</h2>
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-gray-600 dark:text-gray-400">🔄 Повторные клиенты</span>
+              <span id="ext-repeat" class="font-bold text-blue-600">—</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-gray-600 dark:text-gray-400">⏱ Средний цикл сделки</span>
+              <span id="ext-cycle" class="font-bold text-orange-600">—</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-gray-600 dark:text-gray-400">⭐ Средний рейтинг отзывов</span>
+              <span id="ext-rating" class="font-bold text-yellow-600">—</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-gray-600 dark:text-gray-400">💬 Всего отзывов</span>
+              <span id="ext-reviews" class="font-bold text-green-600">—</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-gray-600 dark:text-gray-400">💰 Середній чек</span>
+              <span id="ext-avg-budget" class="font-bold text-emerald-600">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Revenue Trend Chart (full width) -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div class="flex items-center gap-2">
+            <h3 class="font-semibold text-gray-800 dark:text-white">💰 Выручка по месяцам</h3>
+            <button
+              onclick="exportChart('revenue-chart')"
+              title="Скачать PNG"
+              class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 ml-2"
+            >
+              <i class="fas fa-download text-sm"></i>
+            </button>
+          </div>
+          <select
+            id="revenue-months"
+            onchange="loadRevenueTrend()"
+            class="text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200"
+          >
+            <option value="6">6 месяцев</option>
+            <option value="12" selected>12 месяцев</option>
+            <option value="24">24 месяца</option>
+          </select>
+        </div>
+        <div id="revenue-skeleton" class="animate-pulse flex gap-2 h-48 items-end pb-4">
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-24"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-36"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-30"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-40"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-32"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-48"></div>
+        </div>
+        <div id="revenue-chart-wrap" style="display: none"><canvas id="revenue-chart"></canvas></div>
+        <div id="revenue-error" style="display: none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
+          Нет данных о выручке
+        </div>
+      </div>
+
+      <!-- Order Heatmap -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h3 class="font-semibold text-gray-800 dark:text-white">📅 Тепловая карта заявок</h3>
+          <select
+            id="heatmap-year"
+            onchange="loadHeatmap()"
+            class="text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200"
+          ></select>
+        </div>
+        <div id="heatmap-container" class="overflow-x-auto">
+          <div id="heatmap-skeleton" class="animate-pulse grid grid-cols-12 gap-1 h-20">
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          </div>
+          <div id="heatmap-grid" style="display: none"></div>
+          <div
+            id="heatmap-error"
+            style="display: none"
+            class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm"
+          >
+            Нет данных
+          </div>
+        </div>
+        <div class="flex items-center gap-2 mt-3">
+          <span class="text-xs text-gray-400 dark:text-gray-500">Меньше</span>
+          <div class="flex gap-1">
+            <div class="w-4 h-4 rounded" style="background: #e5e7eb"></div>
+            <div class="w-4 h-4 rounded" style="background: #fce7f3"></div>
+            <div class="w-4 h-4 rounded" style="background: #f9a8d4"></div>
+            <div class="w-4 h-4 rounded" style="background: #ec4899"></div>
+            <div class="w-4 h-4 rounded" style="background: #9d174d"></div>
+          </div>
+          <span class="text-xs text-gray-400 dark:text-gray-500">Больше</span>
+        </div>
+      </div>
+
+      <!-- Row: Revenue by Month (bar) + New vs Repeat Clients (doughnut) -->
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- Выручка по месяцам — bar chart -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white">💰 Выручка по месяцам</h2>
+            <button
+              class="chart-export-btn"
+              onclick="exportChart('chart-revenue-bar', 'revenue-bar.png')"
+              title="Скачать PNG"
+              style="position: static; margin: 0"
+            >
+              <i class="fas fa-download"></i>
+            </button>
+          </div>
+          <div id="revenue-bar-wrap" class="relative" style="height: 240px">
+            <div id="revenue-bar-skeleton" class="skeleton h-full w-full rounded-lg"></div>
+            <canvas id="chart-revenue-bar" class="hidden"></canvas>
+            <div id="revenue-bar-error" class="chart-error hidden" style="height: 240px">Нет данных о выручке</div>
+          </div>
+        </div>
+
+        <!-- Новые vs Повторные клиенты — doughnut -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🔄 Новые vs Повторные клиенты</h2>
+          <button
+            class="chart-export-btn"
+            onclick="exportChart('chart-repeat-clients', 'repeat-clients.png')"
+            title="Скачать PNG"
+          >
+            <i class="fas fa-download"></i>
+          </button>
+          <div id="repeat-clients-wrap" class="relative" style="height: 240px">
+            <div id="repeat-clients-skeleton" class="skeleton h-full w-full rounded-lg"></div>
+            <canvas id="chart-repeat-clients" class="hidden"></canvas>
+            <div id="repeat-clients-error" class="chart-error hidden" style="height: 240px">Нет данных</div>
+          </div>
+          <div
+            id="repeat-clients-summary"
+            class="mt-3 text-sm text-gray-500 dark:text-gray-400 text-center"
+            style="display: none"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Top Clients / LTV -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h3 class="font-semibold text-gray-800 dark:text-white mb-4">👑 Топ клиентов по выручке</h3>
+        <div id="ltv-skeleton" class="animate-pulse space-y-2">
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/4"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-1/2"></div>
+        </div>
+        <div id="ltv-table" style="display: none" class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left border-b dark:border-gray-700">
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Клиент</th>
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Заявок</th>
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Завершено</th>
+                <th class="py-2 font-medium text-gray-600 dark:text-gray-400 text-right">Сумма</th>
+              </tr>
+            </thead>
+            <tbody id="ltv-rows"></tbody>
+          </table>
+        </div>
+        <div id="ltv-empty" style="display: none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
+          Нет данных
+        </div>
+      </div>
+
+      <!-- Model Performance Table -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h3 class="font-semibold text-gray-800 dark:text-white">🏆 Топ моделей — детальная таблица</h3>
+          <span class="text-xs text-gray-400 dark:text-gray-500">за выбранный период</span>
+        </div>
+        <div id="models-table-skeleton" class="animate-pulse space-y-2">
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/4"></div>
+        </div>
+        <div id="models-table-wrap" style="display: none" class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left border-b dark:border-gray-700">
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">#</th>
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Модель</th>
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Заявок</th>
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Завершено</th>
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Ср. бюджет</th>
+                <th class="py-2 font-medium text-gray-600 dark:text-gray-400 text-center">Действие</th>
+              </tr>
+            </thead>
+            <tbody id="models-table-rows"></tbody>
+          </table>
+        </div>
+        <div
+          id="models-table-empty"
+          style="display: none"
+          class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm"
+        >
+          Нет данных
+        </div>
+      </div>
+
+      <!-- CSS Conversion Funnel -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-5 flex-wrap gap-2">
+          <h3 class="font-semibold text-gray-800 dark:text-white">🎯 Воронка конверсии (% от первого этапа)</h3>
+          <span
+            id="css-funnel-conv-rate"
+            class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-semibold"
+            style="display: none"
+          ></span>
+        </div>
+        <div id="css-funnel-skeleton" class="animate-pulse space-y-3">
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-4/5"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/5"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-2/5"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-1/4"></div>
+        </div>
+        <div id="css-funnel-wrap" style="display: none" class="space-y-2"></div>
+        <div
+          id="css-funnel-empty"
+          style="display: none"
+          class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm"
+        >
+          Нет данных
+        </div>
+      </div>
+
+      <!-- Time-of-Day Heatmap -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h3 class="font-semibold text-gray-800 dark:text-white">🕐 Активность по часам</h3>
+          <span class="text-xs text-gray-400 dark:text-gray-500">за последние 90 дней</span>
+        </div>
+        <div id="hourly-skeleton" class="animate-pulse">
+          <div class="grid grid-cols-12 gap-1 h-16">
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+            <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
+          </div>
+        </div>
+        <div id="hourly-grid" style="display: none">
+          <div
+            style="display: grid; grid-template-columns: repeat(24, 1fr); gap: 4px; margin-bottom: 6px"
+            id="hourly-bars"
+          ></div>
+          <div style="display: grid; grid-template-columns: repeat(24, 1fr); gap: 4px" id="hourly-labels"></div>
+          <div class="flex items-center gap-2 mt-3">
+            <span class="text-xs text-gray-400 dark:text-gray-500">Мало</span>
+            <div class="flex gap-1">
+              <div class="w-4 h-4 rounded" style="background: #e5e7eb"></div>
+              <div class="w-4 h-4 rounded" style="background: #fce7f3"></div>
+              <div class="w-4 h-4 rounded" style="background: #f9a8d4"></div>
+              <div class="w-4 h-4 rounded" style="background: #ec4899"></div>
+              <div class="w-4 h-4 rounded" style="background: #9d174d"></div>
+            </div>
+            <span class="text-xs text-gray-400 dark:text-gray-500">Много</span>
+            <span class="ml-auto text-xs text-gray-400 dark:text-gray-500" id="hourly-peak-label"></span>
+          </div>
+        </div>
+        <div id="hourly-empty" style="display: none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
+          Нет данных
+        </div>
+      </div>
+
+      <!-- Conversion Funnel (all-time) -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🔽 Воронка заявок (за всё время)</h2>
+        <div id="funnel-section">
+          <div class="skeleton h-6 w-full rounded mb-2"></div>
+          <div class="skeleton h-6 w-3/4 rounded mb-2"></div>
           <div class="skeleton h-6 w-1/2 rounded"></div>
         </div>
       </div>
-      <!-- Extended KPIs -->
+
+      <!-- Revenue by Month (new endpoint) -->
       <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📈 Дополнительные метрики</h2>
-        <div class="space-y-4">
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-gray-600 dark:text-gray-400">🔄 Повторные клиенты</span>
-            <span id="ext-repeat" class="font-bold text-blue-600">—</span>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-gray-600 dark:text-gray-400">⏱ Средний цикл сделки</span>
-            <span id="ext-cycle" class="font-bold text-orange-600">—</span>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-gray-600 dark:text-gray-400">⭐ Средний рейтинг отзывов</span>
-            <span id="ext-rating" class="font-bold text-yellow-600">—</span>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-gray-600 dark:text-gray-400">💬 Всего отзывов</span>
-            <span id="ext-reviews" class="font-bold text-green-600">—</span>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-gray-600 dark:text-gray-400">💰 Середній чек</span>
-            <span id="ext-avg-budget" class="font-bold text-emerald-600">—</span>
-          </div>
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📆 Выручка по месяцам (подтверждённые)</h2>
+        <div style="position: relative; height: 200px"><canvas id="revenue-by-month-chart"></canvas></div>
+      </div>
+
+      <!-- Top Cities (new endpoint) -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🗺 Топ городов (по заявкам)</h2>
+        <div id="cities-section">
+          <div class="skeleton h-6 w-full rounded mb-2"></div>
+          <div class="skeleton h-6 w-3/4 rounded mb-2"></div>
+          <div class="skeleton h-6 w-1/2 rounded"></div>
         </div>
       </div>
     </div>
+    <!-- /max-w-7xl -->
 
-    <!-- Revenue Trend Chart (full width) -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <div class="flex items-center gap-2">
-          <h3 class="font-semibold text-gray-800 dark:text-white">💰 Выручка по месяцам</h3>
-          <button onclick="exportChart('revenue-chart')" title="Скачать PNG" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 ml-2">
-            <i class="fas fa-download text-sm"></i>
-          </button>
-        </div>
-        <select id="revenue-months" onchange="loadRevenueTrend()" class="text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200">
-          <option value="6">6 месяцев</option>
-          <option value="12" selected>12 месяцев</option>
-          <option value="24">24 месяца</option>
-        </select>
-      </div>
-      <div id="revenue-skeleton" class="animate-pulse flex gap-2 h-48 items-end pb-4">
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-24"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-36"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-30"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-40"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-32"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-48"></div>
-      </div>
-      <div id="revenue-chart-wrap" style="display:none"><canvas id="revenue-chart"></canvas></div>
-      <div id="revenue-error" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных о выручке</div>
-    </div>
+    <script>
+      const token = localStorage.getItem('admin_token');
+      if (!token) window.location.href = '/admin/login.html';
+      const h = { Authorization: `Bearer ${token}` };
+      let currentPeriod = 30;
 
-    <!-- Order Heatmap -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h3 class="font-semibold text-gray-800 dark:text-white">📅 Тепловая карта заявок</h3>
-        <select id="heatmap-year" onchange="loadHeatmap()" class="text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200">
-        </select>
-      </div>
-      <div id="heatmap-container" class="overflow-x-auto">
-        <div id="heatmap-skeleton" class="animate-pulse grid grid-cols-12 gap-1 h-20">
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
-        </div>
-        <div id="heatmap-grid" style="display:none"></div>
-        <div id="heatmap-error" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
-      </div>
-      <div class="flex items-center gap-2 mt-3">
-        <span class="text-xs text-gray-400 dark:text-gray-500">Меньше</span>
-        <div class="flex gap-1">
-          <div class="w-4 h-4 rounded" style="background:#e5e7eb"></div>
-          <div class="w-4 h-4 rounded" style="background:#fce7f3"></div>
-          <div class="w-4 h-4 rounded" style="background:#f9a8d4"></div>
-          <div class="w-4 h-4 rounded" style="background:#ec4899"></div>
-          <div class="w-4 h-4 rounded" style="background:#9d174d"></div>
-        </div>
-        <span class="text-xs text-gray-400 dark:text-gray-500">Больше</span>
-      </div>
-    </div>
+      // Chart instances (for destroy on reload)
+      const _charts = {};
 
-    <!-- Row: Revenue by Month (bar) + New vs Repeat Clients (doughnut) -->
-    <div class="grid md:grid-cols-2 gap-6">
+      // Dark mode detection
+      function isDark() {
+        return document.documentElement.classList.contains('dark');
+      }
 
-      <!-- Выручка по месяцам — bar chart -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-bold text-gray-900 dark:text-white">💰 Выручка по месяцам</h2>
-          <button class="chart-export-btn" onclick="exportChart('chart-revenue-bar', 'revenue-bar.png')" title="Скачать PNG" style="position:static;margin:0"><i class="fas fa-download"></i></button>
-        </div>
-        <div id="revenue-bar-wrap" class="relative" style="height:240px">
-          <div id="revenue-bar-skeleton" class="skeleton h-full w-full rounded-lg"></div>
-          <canvas id="chart-revenue-bar" class="hidden"></canvas>
-          <div id="revenue-bar-error" class="chart-error hidden" style="height:240px">Нет данных о выручке</div>
-        </div>
-      </div>
+      // Chart.js global text color
+      function setChartDefaults() {
+        const c = isDark() ? '#d1d5db' : '#374151';
+        Chart.defaults.color = c;
+        Chart.defaults.borderColor = isDark() ? '#374151' : '#e5e7eb';
+      }
 
-      <!-- Новые vs Повторные клиенты — doughnut -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🔄 Новые vs Повторные клиенты</h2>
-        <button class="chart-export-btn" onclick="exportChart('chart-repeat-clients', 'repeat-clients.png')" title="Скачать PNG"><i class="fas fa-download"></i></button>
-        <div id="repeat-clients-wrap" class="relative" style="height:240px">
-          <div id="repeat-clients-skeleton" class="skeleton h-full w-full rounded-lg"></div>
-          <canvas id="chart-repeat-clients" class="hidden"></canvas>
-          <div id="repeat-clients-error" class="chart-error hidden" style="height:240px">Нет данных</div>
-        </div>
-        <div id="repeat-clients-summary" class="mt-3 text-sm text-gray-500 dark:text-gray-400 text-center" style="display:none"></div>
-      </div>
-    </div>
+      function setPeriod(days) {
+        currentPeriod = days;
+        document.querySelectorAll('.period-btn').forEach(b => {
+          const btnDays = parseInt(b.textContent);
+          b.className =
+            'period-btn px-3 py-1.5 text-sm border rounded-lg dark:border-gray-600 dark:text-gray-300' +
+            (btnDays === days ? ' bg-pink-600 text-white !border-pink-600' : '');
+        });
+        loadAll();
+      }
 
-    <!-- Top Clients / LTV -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <h3 class="font-semibold text-gray-800 dark:text-white mb-4">👑 Топ клиентов по выручке</h3>
-      <div id="ltv-skeleton" class="animate-pulse space-y-2">
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/4"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-1/2"></div>
-      </div>
-      <div id="ltv-table" style="display:none" class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead><tr class="text-left border-b dark:border-gray-700">
-            <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Клиент</th>
-            <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Заявок</th>
-            <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Завершено</th>
-            <th class="py-2 font-medium text-gray-600 dark:text-gray-400 text-right">Сумма</th>
-          </tr></thead>
-          <tbody id="ltv-rows"></tbody>
-        </table>
-      </div>
-      <div id="ltv-empty" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
-    </div>
+      async function safeJson(promise) {
+        try {
+          return await promise;
+        } catch {
+          return {};
+        }
+      }
 
-    <!-- Model Performance Table -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h3 class="font-semibold text-gray-800 dark:text-white">🏆 Топ моделей — детальная таблица</h3>
-        <span class="text-xs text-gray-400 dark:text-gray-500">за выбранный период</span>
-      </div>
-      <div id="models-table-skeleton" class="animate-pulse space-y-2">
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/4"></div>
-      </div>
-      <div id="models-table-wrap" style="display:none" class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="text-left border-b dark:border-gray-700">
-              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">#</th>
-              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Модель</th>
-              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Заявок</th>
-              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Завершено</th>
-              <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Ср. бюджет</th>
-              <th class="py-2 font-medium text-gray-600 dark:text-gray-400 text-center">Действие</th>
-            </tr>
-          </thead>
-          <tbody id="models-table-rows"></tbody>
-        </table>
-      </div>
-      <div id="models-table-empty" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
-    </div>
+      // Show/hide states for a chart section
+      function showChart(id) {
+        document.getElementById(id + '-skeleton').classList.add('hidden');
+        document.getElementById('chart-' + id).classList.remove('hidden');
+        document.getElementById(id + '-error').classList.add('hidden');
+      }
+      function showError(id) {
+        document.getElementById(id + '-skeleton').classList.add('hidden');
+        document.getElementById('chart-' + id).classList.add('hidden');
+        document.getElementById(id + '-error').classList.remove('hidden');
+      }
+      function showSkeleton(id) {
+        document.getElementById(id + '-skeleton').classList.remove('hidden');
+        document.getElementById('chart-' + id).classList.add('hidden');
+        document.getElementById(id + '-error').classList.add('hidden');
+      }
 
-    <!-- CSS Conversion Funnel -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <div class="flex items-center justify-between mb-5 flex-wrap gap-2">
-        <h3 class="font-semibold text-gray-800 dark:text-white">🎯 Воронка конверсии (% от первого этапа)</h3>
-        <span id="css-funnel-conv-rate" class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-semibold" style="display:none"></span>
-      </div>
-      <div id="css-funnel-skeleton" class="animate-pulse space-y-3">
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-4/5"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/5"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-2/5"></div>
-        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-1/4"></div>
-      </div>
-      <div id="css-funnel-wrap" style="display:none" class="space-y-2"></div>
-      <div id="css-funnel-empty" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
-    </div>
+      // Destroy existing Chart.js instance before re-creating
+      function destroyChart(key) {
+        if (_charts[key]) {
+          _charts[key].destroy();
+          delete _charts[key];
+        }
+      }
 
-    <!-- Time-of-Day Heatmap -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h3 class="font-semibold text-gray-800 dark:text-white">🕐 Активность по часам</h3>
-        <span class="text-xs text-gray-400 dark:text-gray-500">за последние 90 дней</span>
-      </div>
-      <div id="hourly-skeleton" class="animate-pulse">
-        <div class="grid grid-cols-12 gap-1 h-16">
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded col-span-1"></div>
-        </div>
-      </div>
-      <div id="hourly-grid" style="display:none">
-        <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:4px;margin-bottom:6px;" id="hourly-bars"></div>
-        <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:4px;" id="hourly-labels"></div>
-        <div class="flex items-center gap-2 mt-3">
-          <span class="text-xs text-gray-400 dark:text-gray-500">Мало</span>
-          <div class="flex gap-1">
-            <div class="w-4 h-4 rounded" style="background:#e5e7eb"></div>
-            <div class="w-4 h-4 rounded" style="background:#fce7f3"></div>
-            <div class="w-4 h-4 rounded" style="background:#f9a8d4"></div>
-            <div class="w-4 h-4 rounded" style="background:#ec4899"></div>
-            <div class="w-4 h-4 rounded" style="background:#9d174d"></div>
-          </div>
-          <span class="text-xs text-gray-400 dark:text-gray-500">Много</span>
-          <span class="ml-auto text-xs text-gray-400 dark:text-gray-500" id="hourly-peak-label"></span>
-        </div>
-      </div>
-      <div id="hourly-empty" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
-    </div>
+      // Export chart as PNG download
+      function exportChart(canvasId, filename) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const link = document.createElement('a');
+        link.download = filename || 'chart.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      }
 
-    <!-- Conversion Funnel (all-time) -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🔽 Воронка заявок (за всё время)</h2>
-      <div id="funnel-section"><div class="skeleton h-6 w-full rounded mb-2"></div><div class="skeleton h-6 w-3/4 rounded mb-2"></div><div class="skeleton h-6 w-1/2 rounded"></div></div>
-    </div>
+      async function loadExtended() {
+        try {
+          const ext = await safeJson(
+            fetch(`/api/admin/analytics/extended?days=${currentPeriod}`, { headers: h }).then(r => r.json())
+          );
 
-    <!-- Revenue by Month (new endpoint) -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">📆 Выручка по месяцам (подтверждённые)</h2>
-      <div style="position:relative;height:200px"><canvas id="revenue-by-month-chart"></canvas></div>
-    </div>
-
-    <!-- Top Cities (new endpoint) -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-      <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">🗺 Топ городов (по заявкам)</h2>
-      <div id="cities-section"><div class="skeleton h-6 w-full rounded mb-2"></div><div class="skeleton h-6 w-3/4 rounded mb-2"></div><div class="skeleton h-6 w-1/2 rounded"></div></div>
-    </div>
-
-  </div><!-- /max-w-7xl -->
-
-<script>
-const token = localStorage.getItem('admin_token');
-if (!token) window.location.href = '/admin/login.html';
-const h = { 'Authorization': `Bearer ${token}` };
-let currentPeriod = 30;
-
-// Chart instances (for destroy on reload)
-const _charts = {};
-
-// Dark mode detection
-function isDark() { return document.documentElement.classList.contains('dark'); }
-
-// Chart.js global text color
-function setChartDefaults() {
-  const c = isDark() ? '#d1d5db' : '#374151';
-  Chart.defaults.color = c;
-  Chart.defaults.borderColor = isDark() ? '#374151' : '#e5e7eb';
-}
-
-function setPeriod(days) {
-  currentPeriod = days;
-  document.querySelectorAll('.period-btn').forEach(b => {
-    const btnDays = parseInt(b.textContent);
-    b.className = 'period-btn px-3 py-1.5 text-sm border rounded-lg dark:border-gray-600 dark:text-gray-300'
-      + (btnDays === days ? ' bg-pink-600 text-white !border-pink-600' : '');
-  });
-  loadAll();
-}
-
-async function safeJson(promise) {
-  try { return await promise; } catch { return {}; }
-}
-
-// Show/hide states for a chart section
-function showChart(id) {
-  document.getElementById(id + '-skeleton').classList.add('hidden');
-  document.getElementById('chart-' + id).classList.remove('hidden');
-  document.getElementById(id + '-error').classList.add('hidden');
-}
-function showError(id) {
-  document.getElementById(id + '-skeleton').classList.add('hidden');
-  document.getElementById('chart-' + id).classList.add('hidden');
-  document.getElementById(id + '-error').classList.remove('hidden');
-}
-function showSkeleton(id) {
-  document.getElementById(id + '-skeleton').classList.remove('hidden');
-  document.getElementById('chart-' + id).classList.add('hidden');
-  document.getElementById(id + '-error').classList.add('hidden');
-}
-
-// Destroy existing Chart.js instance before re-creating
-function destroyChart(key) {
-  if (_charts[key]) { _charts[key].destroy(); delete _charts[key]; }
-}
-
-// Export chart as PNG download
-function exportChart(canvasId, filename) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  const link = document.createElement('a');
-  link.download = filename || 'chart.png';
-  link.href = canvas.toDataURL('image/png');
-  link.click();
-}
-
-async function loadExtended() {
-  try {
-    const ext = await safeJson(fetch(`/api/admin/analytics/extended?days=${currentPeriod}`, {headers:h}).then(r=>r.json()));
-
-    // Top cities bar visualization
-    const citiesEl = document.getElementById('cities-list');
-    if (ext.top_cities && ext.top_cities.length) {
-      const max = ext.top_cities[0].cnt || 1;
-      citiesEl.innerHTML = ext.top_cities.map((c, i) => `
+          // Top cities bar visualization
+          const citiesEl = document.getElementById('cities-list');
+          if (ext.top_cities && ext.top_cities.length) {
+            const max = ext.top_cities[0].cnt || 1;
+            citiesEl.innerHTML = ext.top_cities
+              .map(
+                (c, i) => `
         <div>
           <div class="flex justify-between text-sm mb-1">
-            <span class="font-medium text-gray-900 dark:text-white">${i+1}. ${c.city}</span>
+            <span class="font-medium text-gray-900 dark:text-white">${i + 1}. ${escHtml(c.city || '')}</span>
             <span class="text-gray-500 dark:text-gray-400">${c.cnt} заявок</span>
           </div>
           <div class="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-            <div class="h-full rounded-full bg-gradient-to-r from-pink-500 to-purple-500" style="width:${Math.round(c.cnt/max*100)}%"></div>
+            <div class="h-full rounded-full bg-gradient-to-r from-pink-500 to-purple-500" style="width:${Math.round((c.cnt / max) * 100)}%"></div>
           </div>
-        </div>`).join('');
-    } else {
-      citiesEl.innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
-    }
-
-    // Extended KPIs
-    document.getElementById('ext-repeat').textContent =
-      ext.repeat_rate != null ? `${ext.repeat_rate}% (${ext.repeat_clients} из ${ext.total_clients})` : '—';
-    document.getElementById('ext-cycle').textContent =
-      ext.avg_cycle_days != null ? `${ext.avg_cycle_days} дн.` : '—';
-    document.getElementById('ext-rating').textContent =
-      ext.avg_rating != null ? `${ext.avg_rating} / 5 ⭐` : '—';
-    document.getElementById('ext-reviews').textContent = ext.reviews_count ?? '—';
-
-    // Avg budget
-    if (ext.avg_budget != null) {
-      const formatted = new Intl.NumberFormat('uk-UA', { style: 'currency', currency: 'UAH', maximumFractionDigits: 0 }).format(ext.avg_budget);
-      document.getElementById('kpi-avg-budget').textContent = formatted;
-      document.getElementById('ext-avg-budget').textContent = formatted;
-    } else {
-      document.getElementById('kpi-avg-budget').textContent = '—';
-      document.getElementById('ext-avg-budget').textContent = '—';
-    }
-  } catch(e) { console.error('Extended analytics error:', e); }
-}
-
-async function loadAll() {
-  setChartDefaults();
-  // Reset skeletons
-  ['funnel','events','models','sources'].forEach(showSkeleton);
-  // Reset daily chart skeleton
-  document.getElementById('chart-daily-skeleton').style.display = '';
-  document.getElementById('chart-daily-skeleton').classList.remove('hidden');
-  document.getElementById('chart-daily').classList.add('hidden');
-  document.getElementById('chart-daily-error').classList.add('hidden');
-  // Reset new chart skeletons
-  ['revenue-bar', 'repeat-clients'].forEach(id => {
-    const sk = document.getElementById(id + '-skeleton');
-    const cv = document.getElementById('chart-' + id);
-    const er = document.getElementById(id + '-error');
-    if (sk) { sk.classList.remove('hidden'); }
-    if (cv) { cv.classList.add('hidden'); }
-    if (er) { er.classList.add('hidden'); }
-  });
-  // Reset models table and CSS funnel
-  const mtSk = document.getElementById('models-table-skeleton');
-  const mtWr = document.getElementById('models-table-wrap');
-  const mtEm = document.getElementById('models-table-empty');
-  if (mtSk) mtSk.style.display = '';
-  if (mtWr) mtWr.style.display = 'none';
-  if (mtEm) mtEm.style.display = 'none';
-  const cfSk = document.getElementById('css-funnel-skeleton');
-  const cfWr = document.getElementById('css-funnel-wrap');
-  const cfEm = document.getElementById('css-funnel-empty');
-  if (cfSk) cfSk.style.display = '';
-  if (cfWr) cfWr.style.display = 'none';
-  if (cfEm) cfEm.style.display = 'none';
-
-  const [stats, basicStats, chart, funnel, topModels, eventTypes, sources, revenueBar, repeatClients] = await Promise.all([
-    safeJson(fetch(`/api/admin/analytics/kpi?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
-    safeJson(fetch(`/api/admin/stats`, {headers:h}).then(r=>r.json())),
-    safeJson(fetch(`/api/admin/orders-chart?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
-    safeJson(fetch(`/api/admin/analytics/funnel?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
-    safeJson(fetch(`/api/admin/analytics/top-models?days=${currentPeriod}&limit=10`, {headers:h}).then(r=>r.json())),
-    safeJson(fetch(`/api/admin/analytics/event-types?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
-    safeJson(fetch(`/api/admin/analytics/sources?days=${currentPeriod}`, {headers:h}).then(r=>r.json())),
-    safeJson(fetch(`/api/admin/analytics/revenue?months=6`, {headers:h}).then(r=>r.json())),
-    safeJson(fetch(`/api/admin/analytics/repeat-clients`, {headers:h}).then(r=>r.json())),
-  ]);
-
-  // ── KPIs ──────────────────────────────────────────────────────────────────
-  document.getElementById('kpi-total').textContent = stats.total ?? basicStats.total_orders ?? 0;
-  document.getElementById('kpi-active').textContent = stats.active ?? basicStats.active_orders ?? 0;
-  document.getElementById('kpi-completed').textContent = stats.completed ?? 0;
-  const conv = (stats.total || basicStats.total_orders || 0) > 0
-    ? Math.round((stats.completed ?? 0) / (stats.total || basicStats.total_orders) * 100) : 0;
-  document.getElementById('kpi-conv').textContent = conv > 0 ? `Завершено (${conv}%)` : 'Завершено';
-  document.getElementById('kpi-clients').textContent = stats.new_clients ?? 0;
-
-  // Today: count from daily_7d last entry (today)
-  const todayData = basicStats.daily_7d || [];
-  const todayCount = todayData.length > 0 ? todayData[todayData.length - 1].count : 0;
-  document.getElementById('kpi-today').textContent = todayCount;
-
-  // Pending = "new" + "reviewing" status counts from kpi status map
-  const pendingCount = (stats.new_count || 0) + (stats.reviewing_count || 0)
-    || basicStats.new_orders || 0;
-  document.getElementById('kpi-pending').textContent = pendingCount;
-
-  // ── Orders by-day bar chart (Chart.js) ────────────────────────────────────
-  const days = chart.days || (basicStats.daily_7d ? basicStats.daily_7d.map(d => ({ day: d.day, label: d.label, count: d.count })) : []);
-  renderDailyChart(days);
-
-  // ── Funnel: horizontal bar ─────────────────────────────────────────────────
-  renderFunnelChart(funnel.stages || [], funnel);
-
-  // ── Event types: doughnut ──────────────────────────────────────────────────
-  renderEventsChart(eventTypes.types || []);
-
-  // ── Top models: horizontal bar ─────────────────────────────────────────────
-  renderModelsChart(topModels.models || []);
-
-  // ── Top models: detailed table ────────────────────────────────────────────
-  renderModelsTable(topModels.models || []);
-
-  // ── CSS Conversion Funnel ─────────────────────────────────────────────────
-  renderCssFunnel(funnel.stages || [], funnel);
-
-  // ── Sources: doughnut ─────────────────────────────────────────────────────
-  renderSourcesChart(sources.sources || []);
-
-  // ── Revenue bar chart ─────────────────────────────────────────────────────
-  renderRevenueBarChart(revenueBar.months || revenueBar.data || []);
-
-  // ── Repeat vs new clients doughnut ────────────────────────────────────────
-  renderRepeatClientsChart(repeatClients.data || null);
-
-  loadExtended();
-}
-
-// ── Funnel horizontal bar chart ──────────────────────────────────────────────
-function renderFunnelChart(stages, meta) {
-  destroyChart('funnel');
-  if (!stages.length) { showError('funnel'); return; }
-
-  // Show conversion rate badge
-  const badge = document.getElementById('funnel-conv-badge');
-  if (badge && meta?.conversion_rate != null) {
-    badge.textContent = `Конверсия ${meta.conversion_rate}%`;
-    badge.style.display = '';
-  }
-  // Show cancelled row
-  const cancelledRow = document.getElementById('funnel-cancelled-row');
-  const cancelledCount = document.getElementById('funnel-cancelled-count');
-  if (cancelledRow && meta?.cancelled != null) {
-    cancelledCount.textContent = meta.cancelled;
-    cancelledRow.style.display = '';
-  }
-
-  const funnelColors = {
-    views:      { bg: 'rgba(139,92,246,0.75)',  border: '#8b5cf6' },
-    new:        { bg: 'rgba(59,130,246,0.75)',  border: '#3b82f6' },
-    reviewing:  { bg: 'rgba(234,179,8,0.75)',   border: '#eab308' },
-    confirmed:  { bg: 'rgba(16,185,129,0.75)',  border: '#10b981' },
-    in_progress:{ bg: 'rgba(249,115,22,0.75)',  border: '#f97316' },
-    completed:  { bg: 'rgba(34,197,94,0.75)',   border: '#22c55e' },
-    cancelled:  { bg: 'rgba(239,68,68,0.75)',   border: '#ef4444' },
-  };
-  const defaultColor = { bg: 'rgba(156,163,175,0.75)', border: '#9ca3af' };
-
-  const labels = stages.map(s => s.label || s.status);
-  const counts = stages.map(s => s.count);
-  const bgs    = stages.map(s => (funnelColors[s.status] || defaultColor).bg);
-  const borders= stages.map(s => (funnelColors[s.status] || defaultColor).border);
-
-  showChart('funnel');
-  const ctx = document.getElementById('chart-funnel').getContext('2d');
-  _charts.funnel = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        label: 'Заявок',
-        data: counts,
-        backgroundColor: bgs,
-        borderColor: borders,
-        borderWidth: 1.5,
-        borderRadius: 6,
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: ctx => ` ${ctx.parsed.x} заявок`
+        </div>`
+              )
+              .join('');
+          } else {
+            citiesEl.innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
           }
-        }
-      },
-      scales: {
-        x: {
-          beginAtZero: true,
-          grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
-          ticks: { precision: 0 }
-        },
-        y: {
-          grid: { display: false },
-          ticks: { font: { size: 12 } }
+
+          // Extended KPIs
+          document.getElementById('ext-repeat').textContent =
+            ext.repeat_rate != null ? `${ext.repeat_rate}% (${ext.repeat_clients} из ${ext.total_clients})` : '—';
+          document.getElementById('ext-cycle').textContent =
+            ext.avg_cycle_days != null ? `${ext.avg_cycle_days} дн.` : '—';
+          document.getElementById('ext-rating').textContent = ext.avg_rating != null ? `${ext.avg_rating} / 5 ⭐` : '—';
+          document.getElementById('ext-reviews').textContent = ext.reviews_count ?? '—';
+
+          // Avg budget
+          if (ext.avg_budget != null) {
+            const formatted = new Intl.NumberFormat('uk-UA', {
+              style: 'currency',
+              currency: 'UAH',
+              maximumFractionDigits: 0,
+            }).format(ext.avg_budget);
+            document.getElementById('kpi-avg-budget').textContent = formatted;
+            document.getElementById('ext-avg-budget').textContent = formatted;
+          } else {
+            document.getElementById('kpi-avg-budget').textContent = '—';
+            document.getElementById('ext-avg-budget').textContent = '—';
+          }
+        } catch (e) {
+          console.error('Extended analytics error:', e);
         }
       }
-    }
-  });
-}
 
-// ── Event types doughnut ──────────────────────────────────────────────────────
-function renderEventsChart(types) {
-  destroyChart('events');
-  if (!types.length) { showError('events'); return; }
-
-  const eventLabels = {
-    fashion_show: 'Показ мод', photo_shoot: 'Съёмка', event: 'Мероприятие',
-    commercial: 'Реклама', runway: 'Подиум', wedding: 'Свадьба',
-    corporate: 'Корпоратив', fashion: 'Мода', other: 'Другое', null: 'Без типа', '': 'Без типа'
-  };
-  const palette = ['#ec4899','#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#84cc16','#f97316'];
-
-  const labels = types.map(t => eventLabels[t.type] || t.type || 'Без типа');
-  const counts = types.map(t => t.count);
-  const total  = counts.reduce((a,b)=>a+b, 0);
-  const colors = types.map((_,i) => palette[i % palette.length]);
-
-  showChart('events');
-  const ctx = document.getElementById('chart-events').getContext('2d');
-  _charts.events = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels,
-      datasets: [{
-        data: counts,
-        backgroundColor: colors,
-        borderColor: isDark() ? '#1f2937' : '#ffffff',
-        borderWidth: 2,
-        hoverOffset: 8,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'right', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const pct = ((ctx.parsed / total) * 100).toFixed(1);
-              return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
-            }
+      async function loadAll() {
+        setChartDefaults();
+        // Reset skeletons
+        ['funnel', 'events', 'models', 'sources'].forEach(showSkeleton);
+        // Reset daily chart skeleton
+        document.getElementById('chart-daily-skeleton').style.display = '';
+        document.getElementById('chart-daily-skeleton').classList.remove('hidden');
+        document.getElementById('chart-daily').classList.add('hidden');
+        document.getElementById('chart-daily-error').classList.add('hidden');
+        // Reset new chart skeletons
+        ['revenue-bar', 'repeat-clients'].forEach(id => {
+          const sk = document.getElementById(id + '-skeleton');
+          const cv = document.getElementById('chart-' + id);
+          const er = document.getElementById(id + '-error');
+          if (sk) {
+            sk.classList.remove('hidden');
           }
-        }
+          if (cv) {
+            cv.classList.add('hidden');
+          }
+          if (er) {
+            er.classList.add('hidden');
+          }
+        });
+        // Reset models table and CSS funnel
+        const mtSk = document.getElementById('models-table-skeleton');
+        const mtWr = document.getElementById('models-table-wrap');
+        const mtEm = document.getElementById('models-table-empty');
+        if (mtSk) mtSk.style.display = '';
+        if (mtWr) mtWr.style.display = 'none';
+        if (mtEm) mtEm.style.display = 'none';
+        const cfSk = document.getElementById('css-funnel-skeleton');
+        const cfWr = document.getElementById('css-funnel-wrap');
+        const cfEm = document.getElementById('css-funnel-empty');
+        if (cfSk) cfSk.style.display = '';
+        if (cfWr) cfWr.style.display = 'none';
+        if (cfEm) cfEm.style.display = 'none';
+
+        const [stats, basicStats, chart, funnel, topModels, eventTypes, sources, revenueBar, repeatClients] =
+          await Promise.all([
+            safeJson(fetch(`/api/admin/analytics/kpi?days=${currentPeriod}`, { headers: h }).then(r => r.json())),
+            safeJson(fetch(`/api/admin/stats`, { headers: h }).then(r => r.json())),
+            safeJson(fetch(`/api/admin/orders-chart?days=${currentPeriod}`, { headers: h }).then(r => r.json())),
+            safeJson(fetch(`/api/admin/analytics/funnel?days=${currentPeriod}`, { headers: h }).then(r => r.json())),
+            safeJson(
+              fetch(`/api/admin/analytics/top-models?days=${currentPeriod}&limit=10`, { headers: h }).then(r =>
+                r.json()
+              )
+            ),
+            safeJson(
+              fetch(`/api/admin/analytics/event-types?days=${currentPeriod}`, { headers: h }).then(r => r.json())
+            ),
+            safeJson(fetch(`/api/admin/analytics/sources?days=${currentPeriod}`, { headers: h }).then(r => r.json())),
+            safeJson(fetch(`/api/admin/analytics/revenue?months=6`, { headers: h }).then(r => r.json())),
+            safeJson(fetch(`/api/admin/analytics/repeat-clients`, { headers: h }).then(r => r.json())),
+          ]);
+
+        // ── KPIs ──────────────────────────────────────────────────────────────────
+        document.getElementById('kpi-total').textContent = stats.total ?? basicStats.total_orders ?? 0;
+        document.getElementById('kpi-active').textContent = stats.active ?? basicStats.active_orders ?? 0;
+        document.getElementById('kpi-completed').textContent = stats.completed ?? 0;
+        const conv =
+          (stats.total || basicStats.total_orders || 0) > 0
+            ? Math.round(((stats.completed ?? 0) / (stats.total || basicStats.total_orders)) * 100)
+            : 0;
+        document.getElementById('kpi-conv').textContent = conv > 0 ? `Завершено (${conv}%)` : 'Завершено';
+        document.getElementById('kpi-clients').textContent = stats.new_clients ?? 0;
+
+        // Today: count from daily_7d last entry (today)
+        const todayData = basicStats.daily_7d || [];
+        const todayCount = todayData.length > 0 ? todayData[todayData.length - 1].count : 0;
+        document.getElementById('kpi-today').textContent = todayCount;
+
+        // Pending = "new" + "reviewing" status counts from kpi status map
+        const pendingCount = (stats.new_count || 0) + (stats.reviewing_count || 0) || basicStats.new_orders || 0;
+        document.getElementById('kpi-pending').textContent = pendingCount;
+
+        // ── Orders by-day bar chart (Chart.js) ────────────────────────────────────
+        const days =
+          chart.days ||
+          (basicStats.daily_7d ? basicStats.daily_7d.map(d => ({ day: d.day, label: d.label, count: d.count })) : []);
+        renderDailyChart(days);
+
+        // ── Funnel: horizontal bar ─────────────────────────────────────────────────
+        renderFunnelChart(funnel.stages || [], funnel);
+
+        // ── Event types: doughnut ──────────────────────────────────────────────────
+        renderEventsChart(eventTypes.types || []);
+
+        // ── Top models: horizontal bar ─────────────────────────────────────────────
+        renderModelsChart(topModels.models || []);
+
+        // ── Top models: detailed table ────────────────────────────────────────────
+        renderModelsTable(topModels.models || []);
+
+        // ── CSS Conversion Funnel ─────────────────────────────────────────────────
+        renderCssFunnel(funnel.stages || [], funnel);
+
+        // ── Sources: doughnut ─────────────────────────────────────────────────────
+        renderSourcesChart(sources.sources || []);
+
+        // ── Revenue bar chart ─────────────────────────────────────────────────────
+        renderRevenueBarChart(revenueBar.months || revenueBar.data || []);
+
+        // ── Repeat vs new clients doughnut ────────────────────────────────────────
+        renderRepeatClientsChart(repeatClients.data || null);
+
+        loadExtended();
       }
-    }
-  });
-}
 
-// ── Top models horizontal bar ─────────────────────────────────────────────────
-function renderModelsChart(models) {
-  destroyChart('models');
-  if (!models.length) { showError('models'); return; }
-
-  const top = models.slice(0, 10);
-  const labels = top.map(m => m.name);
-  const orders    = top.map(m => m.orders || 0);
-  const completed = top.map(m => m.completed || 0);
-
-  showChart('models');
-  const ctx = document.getElementById('chart-models').getContext('2d');
-  _charts.models = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Завершено',
-          data: completed,
-          backgroundColor: 'rgba(34,197,94,0.8)',
-          borderColor: '#22c55e',
-          borderWidth: 1.5,
-          borderRadius: 5,
-        },
-        {
-          label: 'Всего заявок',
-          data: orders,
-          backgroundColor: 'rgba(236,72,153,0.35)',
-          borderColor: '#ec4899',
-          borderWidth: 1.5,
-          borderRadius: 5,
+      // ── Funnel horizontal bar chart ──────────────────────────────────────────────
+      function renderFunnelChart(stages, meta) {
+        destroyChart('funnel');
+        if (!stages.length) {
+          showError('funnel');
+          return;
         }
-      ]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
-        tooltip: {
-          callbacks: {
-            afterBody: (items) => {
-              const idx = items[0]?.dataIndex;
-              if (idx == null) return '';
-              const m = top[idx];
-              const parts = [];
-              if (m.avg_budget) parts.push(`Средний бюджет: ${m.avg_budget.toLocaleString('ru')} ₽`);
-              if (m.city) parts.push(`Город: ${m.city}`);
-              return parts;
+
+        // Show conversion rate badge
+        const badge = document.getElementById('funnel-conv-badge');
+        if (badge && meta?.conversion_rate != null) {
+          badge.textContent = `Конверсия ${meta.conversion_rate}%`;
+          badge.style.display = '';
+        }
+        // Show cancelled row
+        const cancelledRow = document.getElementById('funnel-cancelled-row');
+        const cancelledCount = document.getElementById('funnel-cancelled-count');
+        if (cancelledRow && meta?.cancelled != null) {
+          cancelledCount.textContent = meta.cancelled;
+          cancelledRow.style.display = '';
+        }
+
+        const funnelColors = {
+          views: { bg: 'rgba(139,92,246,0.75)', border: '#8b5cf6' },
+          new: { bg: 'rgba(59,130,246,0.75)', border: '#3b82f6' },
+          reviewing: { bg: 'rgba(234,179,8,0.75)', border: '#eab308' },
+          confirmed: { bg: 'rgba(16,185,129,0.75)', border: '#10b981' },
+          in_progress: { bg: 'rgba(249,115,22,0.75)', border: '#f97316' },
+          completed: { bg: 'rgba(34,197,94,0.75)', border: '#22c55e' },
+          cancelled: { bg: 'rgba(239,68,68,0.75)', border: '#ef4444' },
+        };
+        const defaultColor = { bg: 'rgba(156,163,175,0.75)', border: '#9ca3af' };
+
+        const labels = stages.map(s => s.label || s.status);
+        const counts = stages.map(s => s.count);
+        const bgs = stages.map(s => (funnelColors[s.status] || defaultColor).bg);
+        const borders = stages.map(s => (funnelColors[s.status] || defaultColor).border);
+
+        showChart('funnel');
+        const ctx = document.getElementById('chart-funnel').getContext('2d');
+        _charts.funnel = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Заявок',
+                data: counts,
+                backgroundColor: bgs,
+                borderColor: borders,
+                borderWidth: 1.5,
+                borderRadius: 6,
+              },
+            ],
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: ctx => ` ${ctx.parsed.x} заявок`,
+                },
+              },
             },
-            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.x}`
-          }
-        }
-      },
-      scales: {
-        x: {
-          beginAtZero: true,
-          ticks: { precision: 0 },
-          grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }
-        },
-        y: {
-          grid: { display: false },
-          ticks: { font: { size: 11 } }
-        }
-      }
-    }
-  });
-}
-
-// ── Sources doughnut ──────────────────────────────────────────────────────────
-function renderSourcesChart(sources) {
-  destroyChart('sources');
-  if (!sources.length) { showError('sources'); return; }
-
-  const srcLabels = {
-    website: 'Сайт', bot: 'Telegram бот', contact_form: 'Форма',
-    unknown: 'Неизвестно', '': 'Неизвестно'
-  };
-  const palette = ['#8b5cf6','#06b6d4','#f59e0b','#10b981','#ec4899','#ef4444','#3b82f6','#84cc16'];
-
-  const labels = sources.map(s => srcLabels[s.source] || s.source || 'Неизвестно');
-  const counts = sources.map(s => s.count);
-  const total  = counts.reduce((a,b)=>a+b, 0);
-  const colors = sources.map((_,i) => palette[i % palette.length]);
-
-  showChart('sources');
-  const ctx = document.getElementById('chart-sources').getContext('2d');
-  _charts.sources = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels,
-      datasets: [{
-        data: counts,
-        backgroundColor: colors,
-        borderColor: isDark() ? '#1f2937' : '#ffffff',
-        borderWidth: 2,
-        hoverOffset: 8,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'right', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const pct = ((ctx.parsed / total) * 100).toFixed(1);
-              return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
-            }
-          }
-        }
-      }
-    }
-  });
-}
-
-// ── Daily orders Chart.js bar chart ─────────────────────────────────────────
-function renderDailyChart(data) {
-  destroyChart('daily');
-  const skeleton = document.getElementById('chart-daily-skeleton');
-  const canvas   = document.getElementById('chart-daily');
-  const errEl    = document.getElementById('chart-daily-error');
-  skeleton.classList.add('hidden');
-  if (!data.length) { errEl.classList.remove('hidden'); return; }
-  canvas.classList.remove('hidden');
-  const labels = data.map(d => d.label || (d.day || '').slice(-5));
-  const counts = data.map(d => d.count || 0);
-  _charts['daily'] = new Chart(canvas.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        label: 'Заявок',
-        data: counts,
-        backgroundColor: 'rgba(236,72,153,0.72)',
-        borderColor: '#ec4899',
-        borderWidth: 1.5,
-        borderRadius: 6,
-        hoverBackgroundColor: 'rgba(236,72,153,0.92)',
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: { label: ctx => ` ${ctx.parsed.y} заявок` }
-        }
-      },
-      scales: {
-        x: {
-          grid: { display: false },
-          ticks: {
-            font: { size: 11 },
-            color: isDark() ? '#9ca3af' : '#6b7280',
-            maxRotation: 45,
-            autoSkip: true,
-            maxTicksLimit: 14,
+            scales: {
+              x: {
+                beginAtZero: true,
+                grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+                ticks: { precision: 0 },
+              },
+              y: {
+                grid: { display: false },
+                ticks: { font: { size: 12 } },
+              },
+            },
           },
-          title: {
-            display: true,
-            text: 'Дата',
-            font: { size: 11 },
-            color: isDark() ? '#9ca3af' : '#6b7280',
-            padding: { top: 4 }
-          }
-        },
-        y: {
-          beginAtZero: true,
-          ticks: {
-            precision: 0,
-            font: { size: 11 },
-            color: isDark() ? '#9ca3af' : '#6b7280',
+        });
+      }
+
+      // ── Event types doughnut ──────────────────────────────────────────────────────
+      function renderEventsChart(types) {
+        destroyChart('events');
+        if (!types.length) {
+          showError('events');
+          return;
+        }
+
+        const eventLabels = {
+          fashion_show: 'Показ мод',
+          photo_shoot: 'Съёмка',
+          event: 'Мероприятие',
+          commercial: 'Реклама',
+          runway: 'Подиум',
+          wedding: 'Свадьба',
+          corporate: 'Корпоратив',
+          fashion: 'Мода',
+          other: 'Другое',
+          null: 'Без типа',
+          '': 'Без типа',
+        };
+        const palette = [
+          '#ec4899',
+          '#3b82f6',
+          '#10b981',
+          '#f59e0b',
+          '#8b5cf6',
+          '#ef4444',
+          '#06b6d4',
+          '#84cc16',
+          '#f97316',
+        ];
+
+        const labels = types.map(t => eventLabels[t.type] || t.type || 'Без типа');
+        const counts = types.map(t => t.count);
+        const total = counts.reduce((a, b) => a + b, 0);
+        const colors = types.map((_, i) => palette[i % palette.length]);
+
+        showChart('events');
+        const ctx = document.getElementById('chart-events').getContext('2d');
+        _charts.events = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels,
+            datasets: [
+              {
+                data: counts,
+                backgroundColor: colors,
+                borderColor: isDark() ? '#1f2937' : '#ffffff',
+                borderWidth: 2,
+                hoverOffset: 8,
+              },
+            ],
           },
-          grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
-          title: {
-            display: true,
-            text: 'Заявок',
-            font: { size: 11 },
-            color: isDark() ? '#9ca3af' : '#6b7280',
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'right', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: ctx => {
+                    const pct = ((ctx.parsed / total) * 100).toFixed(1);
+                    return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+
+      // ── Top models horizontal bar ─────────────────────────────────────────────────
+      function renderModelsChart(models) {
+        destroyChart('models');
+        if (!models.length) {
+          showError('models');
+          return;
+        }
+
+        const top = models.slice(0, 10);
+        const labels = top.map(m => m.name);
+        const orders = top.map(m => m.orders || 0);
+        const completed = top.map(m => m.completed || 0);
+
+        showChart('models');
+        const ctx = document.getElementById('chart-models').getContext('2d');
+        _charts.models = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Завершено',
+                data: completed,
+                backgroundColor: 'rgba(34,197,94,0.8)',
+                borderColor: '#22c55e',
+                borderWidth: 1.5,
+                borderRadius: 5,
+              },
+              {
+                label: 'Всего заявок',
+                data: orders,
+                backgroundColor: 'rgba(236,72,153,0.35)',
+                borderColor: '#ec4899',
+                borderWidth: 1.5,
+                borderRadius: 5,
+              },
+            ],
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  afterBody: items => {
+                    const idx = items[0]?.dataIndex;
+                    if (idx == null) return '';
+                    const m = top[idx];
+                    const parts = [];
+                    if (m.avg_budget) parts.push(`Средний бюджет: ${m.avg_budget.toLocaleString('ru')} ₽`);
+                    if (m.city) parts.push(`Город: ${m.city}`);
+                    return parts;
+                  },
+                  label: ctx => `${ctx.dataset.label}: ${ctx.parsed.x}`,
+                },
+              },
+            },
+            scales: {
+              x: {
+                beginAtZero: true,
+                ticks: { precision: 0 },
+                grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+              },
+              y: {
+                grid: { display: false },
+                ticks: { font: { size: 11 } },
+              },
+            },
+          },
+        });
+      }
+
+      // ── Sources doughnut ──────────────────────────────────────────────────────────
+      function renderSourcesChart(sources) {
+        destroyChart('sources');
+        if (!sources.length) {
+          showError('sources');
+          return;
+        }
+
+        const srcLabels = {
+          website: 'Сайт',
+          bot: 'Telegram бот',
+          contact_form: 'Форма',
+          unknown: 'Неизвестно',
+          '': 'Неизвестно',
+        };
+        const palette = ['#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ec4899', '#ef4444', '#3b82f6', '#84cc16'];
+
+        const labels = sources.map(s => srcLabels[s.source] || s.source || 'Неизвестно');
+        const counts = sources.map(s => s.count);
+        const total = counts.reduce((a, b) => a + b, 0);
+        const colors = sources.map((_, i) => palette[i % palette.length]);
+
+        showChart('sources');
+        const ctx = document.getElementById('chart-sources').getContext('2d');
+        _charts.sources = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels,
+            datasets: [
+              {
+                data: counts,
+                backgroundColor: colors,
+                borderColor: isDark() ? '#1f2937' : '#ffffff',
+                borderWidth: 2,
+                hoverOffset: 8,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'right', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: ctx => {
+                    const pct = ((ctx.parsed / total) * 100).toFixed(1);
+                    return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+
+      // ── Daily orders Chart.js bar chart ─────────────────────────────────────────
+      function renderDailyChart(data) {
+        destroyChart('daily');
+        const skeleton = document.getElementById('chart-daily-skeleton');
+        const canvas = document.getElementById('chart-daily');
+        const errEl = document.getElementById('chart-daily-error');
+        skeleton.classList.add('hidden');
+        if (!data.length) {
+          errEl.classList.remove('hidden');
+          return;
+        }
+        canvas.classList.remove('hidden');
+        const labels = data.map(d => d.label || (d.day || '').slice(-5));
+        const counts = data.map(d => d.count || 0);
+        _charts['daily'] = new Chart(canvas.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Заявок',
+                data: counts,
+                backgroundColor: 'rgba(236,72,153,0.72)',
+                borderColor: '#ec4899',
+                borderWidth: 1.5,
+                borderRadius: 6,
+                hoverBackgroundColor: 'rgba(236,72,153,0.92)',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: { label: ctx => ` ${ctx.parsed.y} заявок` },
+              },
+            },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: {
+                  font: { size: 11 },
+                  color: isDark() ? '#9ca3af' : '#6b7280',
+                  maxRotation: 45,
+                  autoSkip: true,
+                  maxTicksLimit: 14,
+                },
+                title: {
+                  display: true,
+                  text: 'Дата',
+                  font: { size: 11 },
+                  color: isDark() ? '#9ca3af' : '#6b7280',
+                  padding: { top: 4 },
+                },
+              },
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  precision: 0,
+                  font: { size: 11 },
+                  color: isDark() ? '#9ca3af' : '#6b7280',
+                },
+                grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+                title: {
+                  display: true,
+                  text: 'Заявок',
+                  font: { size: 11 },
+                  color: isDark() ? '#9ca3af' : '#6b7280',
+                },
+              },
+            },
+          },
+        });
+      }
+
+      async function loadMonthly() {
+        const months = document.getElementById('monthly-months')?.value || 12;
+        const sk = document.getElementById('monthly-skeleton');
+        const wrap = document.getElementById('monthly-chart-wrap');
+        const err = document.getElementById('monthly-error');
+        if (sk) sk.style.display = 'flex';
+        if (wrap) wrap.style.display = 'none';
+        if (err) err.style.display = 'none';
+        try {
+          const data = await (await fetch(`/api/admin/analytics/monthly?months=${months}`, { headers: h })).json();
+          const rows = data.months || [];
+          if (!rows.length) {
+            if (sk) sk.style.display = 'none';
+            if (err) err.style.display = 'block';
+            return;
+          }
+          setChartDefaults();
+          if (_charts['monthly']) {
+            _charts['monthly'].destroy();
+            delete _charts['monthly'];
+          }
+          if (sk) sk.style.display = 'none';
+          if (wrap) wrap.style.display = 'block';
+          const ctx = document.getElementById('monthly-chart').getContext('2d');
+          _charts['monthly'] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: rows.map(r => r.month),
+              datasets: [
+                {
+                  label: 'Всего заявок',
+                  data: rows.map(r => r.orders_count),
+                  backgroundColor: 'rgba(236,72,153,0.7)',
+                  order: 2,
+                },
+                {
+                  label: 'Завершено',
+                  data: rows.map(r => r.completed),
+                  backgroundColor: 'rgba(34,197,94,0.7)',
+                  order: 2,
+                },
+                {
+                  label: 'Отменено',
+                  data: rows.map(r => r.cancelled),
+                  backgroundColor: 'rgba(239,68,68,0.5)',
+                  order: 2,
+                },
+                {
+                  label: 'Выручка (тыс.)',
+                  type: 'line',
+                  data: rows.map(r => Math.round((r.revenue || 0) / 1000)),
+                  borderColor: '#f59e0b',
+                  backgroundColor: 'transparent',
+                  yAxisID: 'y2',
+                  tension: 0.3,
+                  pointRadius: 3,
+                  order: 1,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              interaction: { mode: 'index', intersect: false },
+              plugins: { legend: { position: 'top' } },
+              scales: {
+                y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                y2: {
+                  beginAtZero: true,
+                  position: 'right',
+                  grid: { drawOnChartArea: false },
+                  title: { display: true, text: '₽ тыс.' },
+                },
+              },
+            },
+          });
+        } catch (e) {
+          if (sk) sk.style.display = 'none';
+          if (err) {
+            err.style.display = 'block';
+            err.textContent = 'Ошибка: ' + e.message;
           }
         }
       }
-    }
-  });
-}
 
-async function loadMonthly() {
-  const months = document.getElementById('monthly-months')?.value || 12;
-  const sk = document.getElementById('monthly-skeleton');
-  const wrap = document.getElementById('monthly-chart-wrap');
-  const err = document.getElementById('monthly-error');
-  if (sk) sk.style.display = 'flex';
-  if (wrap) wrap.style.display = 'none';
-  if (err) err.style.display = 'none';
-  try {
-    const data = await (await fetch(`/api/admin/analytics/monthly?months=${months}`, { headers: h })).json();
-    const rows = data.months || [];
-    if (!rows.length) { if (sk) sk.style.display='none'; if (err) err.style.display='block'; return; }
-    setChartDefaults();
-    if (_charts['monthly']) { _charts['monthly'].destroy(); delete _charts['monthly']; }
-    if (sk) sk.style.display = 'none';
-    if (wrap) wrap.style.display = 'block';
-    const ctx = document.getElementById('monthly-chart').getContext('2d');
-    _charts['monthly'] = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: rows.map(r => r.month),
-        datasets: [
-          { label: 'Всего заявок', data: rows.map(r => r.orders_count), backgroundColor: 'rgba(236,72,153,0.7)', order: 2 },
-          { label: 'Завершено', data: rows.map(r => r.completed), backgroundColor: 'rgba(34,197,94,0.7)', order: 2 },
-          { label: 'Отменено', data: rows.map(r => r.cancelled), backgroundColor: 'rgba(239,68,68,0.5)', order: 2 },
-          { label: 'Выручка (тыс.)', type: 'line', data: rows.map(r => Math.round((r.revenue||0)/1000)), borderColor: '#f59e0b', backgroundColor: 'transparent', yAxisID: 'y2', tension: 0.3, pointRadius: 3, order: 1 }
-        ]
-      },
-      options: {
-        responsive: true,
-        interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { position: 'top' } },
-        scales: {
-          y:  { beginAtZero: true, ticks: { stepSize: 1 } },
-          y2: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '₽ тыс.' } }
+      // ── Revenue by Month bar chart ────────────────────────────────────────────────
+      function renderRevenueBarChart(rows) {
+        destroyChart('revenue-bar');
+        const sk = document.getElementById('revenue-bar-skeleton');
+        const cv = document.getElementById('chart-revenue-bar');
+        const er = document.getElementById('revenue-bar-error');
+        if (sk) sk.classList.add('hidden');
+        if (!rows || !rows.length) {
+          if (er) er.classList.remove('hidden');
+          return;
         }
+        if (cv) cv.classList.remove('hidden');
+
+        const labels = rows.map(r => r.month);
+        const revenues = rows.map(r => Math.round(r.revenue || 0));
+        const orderCounts = rows.map(r => r.order_count || 0);
+
+        _charts['revenue-bar'] = new Chart(cv.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Выручка (₽)',
+                data: revenues,
+                backgroundColor: 'rgba(16,185,129,0.72)',
+                borderColor: '#10b981',
+                borderWidth: 1.5,
+                borderRadius: 6,
+                yAxisID: 'y',
+              },
+              {
+                label: 'Заявок',
+                data: orderCounts,
+                type: 'line',
+                borderColor: '#ec4899',
+                backgroundColor: 'transparent',
+                tension: 0.3,
+                pointRadius: 4,
+                yAxisID: 'y1',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: ctx => {
+                    if (ctx.dataset.yAxisID === 'y') return ` Выручка: ${ctx.parsed.y.toLocaleString('ru-RU')} ₽`;
+                    return ` Заявок: ${ctx.parsed.y}`;
+                  },
+                },
+              },
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                position: 'left',
+                ticks: { callback: v => (v >= 1000 ? Math.round(v / 1000) + 'k' : v) + ' ₽' },
+                grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+              },
+              y1: {
+                beginAtZero: true,
+                position: 'right',
+                ticks: { precision: 0 },
+                grid: { drawOnChartArea: false },
+              },
+            },
+          },
+        });
       }
-    });
-  } catch(e) {
-    if (sk) sk.style.display = 'none';
-    if (err) { err.style.display = 'block'; err.textContent = 'Ошибка: ' + e.message; }
-  }
-}
 
-// ── Revenue by Month bar chart ────────────────────────────────────────────────
-function renderRevenueBarChart(rows) {
-  destroyChart('revenue-bar');
-  const sk = document.getElementById('revenue-bar-skeleton');
-  const cv = document.getElementById('chart-revenue-bar');
-  const er = document.getElementById('revenue-bar-error');
-  if (sk) sk.classList.add('hidden');
-  if (!rows || !rows.length) { if (er) er.classList.remove('hidden'); return; }
-  if (cv) cv.classList.remove('hidden');
+      // ── New vs Repeat Clients doughnut ────────────────────────────────────────────
+      function renderRepeatClientsChart(data) {
+        destroyChart('repeat-clients');
+        const sk = document.getElementById('repeat-clients-skeleton');
+        const cv = document.getElementById('chart-repeat-clients');
+        const er = document.getElementById('repeat-clients-error');
+        const summary = document.getElementById('repeat-clients-summary');
+        if (sk) sk.classList.add('hidden');
+        if (!data || data.total === 0) {
+          if (er) er.classList.remove('hidden');
+          return;
+        }
+        if (cv) cv.classList.remove('hidden');
 
-  const labels = rows.map(r => r.month);
-  const revenues = rows.map(r => Math.round(r.revenue || 0));
-  const orderCounts = rows.map(r => r.order_count || 0);
+        const total = data.total || 0;
+        const repeat = data.repeat || 0;
+        const newCount = data.new || total - repeat;
+        const repeatPct = total > 0 ? Math.round((repeat / total) * 100) : 0;
 
-  _charts['revenue-bar'] = new Chart(cv.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Выручка (₽)',
-          data: revenues,
-          backgroundColor: 'rgba(16,185,129,0.72)',
-          borderColor: '#10b981',
-          borderWidth: 1.5,
-          borderRadius: 6,
-          yAxisID: 'y',
-        },
-        {
-          label: 'Заявок',
-          data: orderCounts,
-          type: 'line',
-          borderColor: '#ec4899',
-          backgroundColor: 'transparent',
-          tension: 0.3,
-          pointRadius: 4,
-          yAxisID: 'y1',
+        if (summary) {
+          summary.textContent = `Повторных: ${repeat} (${repeatPct}%) из ${total} уникальных клиентов`;
+          summary.style.display = '';
         }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              if (ctx.dataset.yAxisID === 'y') return ` Выручка: ${ctx.parsed.y.toLocaleString('ru-RU')} ₽`;
-              return ` Заявок: ${ctx.parsed.y}`;
-            }
-          }
-        }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          position: 'left',
-          ticks: { callback: v => (v >= 1000 ? Math.round(v/1000) + 'k' : v) + ' ₽' },
-          grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }
-        },
-        y1: {
-          beginAtZero: true,
-          position: 'right',
-          ticks: { precision: 0 },
-          grid: { drawOnChartArea: false }
-        }
+
+        _charts['repeat-clients'] = new Chart(cv.getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: ['Новые клиенты', 'Повторные клиенты'],
+            datasets: [
+              {
+                data: [newCount, repeat],
+                backgroundColor: ['rgba(59,130,246,0.8)', 'rgba(16,185,129,0.8)'],
+                borderColor: isDark() ? '#1f2937' : '#ffffff',
+                borderWidth: 2,
+                hoverOffset: 8,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'right', labels: { boxWidth: 12, padding: 10, font: { size: 12 } } },
+              tooltip: {
+                callbacks: {
+                  label: ctx => {
+                    const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+                    return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+                  },
+                },
+              },
+            },
+          },
+        });
       }
-    }
-  });
-}
 
-// ── New vs Repeat Clients doughnut ────────────────────────────────────────────
-function renderRepeatClientsChart(data) {
-  destroyChart('repeat-clients');
-  const sk = document.getElementById('repeat-clients-skeleton');
-  const cv = document.getElementById('chart-repeat-clients');
-  const er = document.getElementById('repeat-clients-error');
-  const summary = document.getElementById('repeat-clients-summary');
-  if (sk) sk.classList.add('hidden');
-  if (!data || data.total === 0) { if (er) er.classList.remove('hidden'); return; }
-  if (cv) cv.classList.remove('hidden');
-
-  const total = data.total || 0;
-  const repeat = data.repeat || 0;
-  const newCount = data.new || (total - repeat);
-  const repeatPct = total > 0 ? Math.round((repeat / total) * 100) : 0;
-
-  if (summary) {
-    summary.textContent = `Повторных: ${repeat} (${repeatPct}%) из ${total} уникальных клиентов`;
-    summary.style.display = '';
-  }
-
-  _charts['repeat-clients'] = new Chart(cv.getContext('2d'), {
-    type: 'doughnut',
-    data: {
-      labels: ['Новые клиенты', 'Повторные клиенты'],
-      datasets: [{
-        data: [newCount, repeat],
-        backgroundColor: ['rgba(59,130,246,0.8)', 'rgba(16,185,129,0.8)'],
-        borderColor: isDark() ? '#1f2937' : '#ffffff',
-        borderWidth: 2,
-        hoverOffset: 8,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'right', labels: { boxWidth: 12, padding: 10, font: { size: 12 } } },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
-              return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
-            }
-          }
+      // ── Model performance table ───────────────────────────────────────────────────
+      function renderModelsTable(models) {
+        const sk = document.getElementById('models-table-skeleton');
+        const wrap = document.getElementById('models-table-wrap');
+        const empty = document.getElementById('models-table-empty');
+        if (sk) sk.style.display = 'none';
+        if (!models || !models.length) {
+          if (empty) empty.style.display = '';
+          return;
         }
-      }
-    }
-  });
-}
-
-// ── Model performance table ───────────────────────────────────────────────────
-function renderModelsTable(models) {
-  const sk   = document.getElementById('models-table-skeleton');
-  const wrap = document.getElementById('models-table-wrap');
-  const empty= document.getElementById('models-table-empty');
-  if (sk)   sk.style.display   = 'none';
-  if (!models || !models.length) { if (empty) empty.style.display = ''; return; }
-  const top = models.slice(0, 10);
-  const tbody = document.getElementById('models-table-rows');
-  tbody.innerHTML = top.map((m, i) => {
-    const avgBudget = m.avg_budget > 0
-      ? new Intl.NumberFormat('uk-UA', { style:'currency', currency:'UAH', maximumFractionDigits:0 }).format(m.avg_budget)
-      : '—';
-    const convPct = m.orders > 0 ? Math.round((m.completed / m.orders) * 100) : 0;
-    const convColor = convPct >= 70 ? 'text-green-600' : convPct >= 40 ? 'text-yellow-600' : 'text-red-500';
-    return `<tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
+        const top = models.slice(0, 10);
+        const tbody = document.getElementById('models-table-rows');
+        tbody.innerHTML = top
+          .map((m, i) => {
+            const avgBudget =
+              m.avg_budget > 0
+                ? new Intl.NumberFormat('uk-UA', {
+                    style: 'currency',
+                    currency: 'UAH',
+                    maximumFractionDigits: 0,
+                  }).format(m.avg_budget)
+                : '—';
+            const convPct = m.orders > 0 ? Math.round((m.completed / m.orders) * 100) : 0;
+            const convColor = convPct >= 70 ? 'text-green-600' : convPct >= 40 ? 'text-yellow-600' : 'text-red-500';
+            return `<tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
       <td class="py-2 pr-3 text-gray-400 dark:text-gray-500 font-medium">${i + 1}</td>
       <td class="py-2 pr-3">
         <div class="font-medium text-gray-900 dark:text-white">${escHtml(m.name || '—')}</div>
@@ -1184,40 +1522,70 @@ function renderModelsTable(models) {
         </a>
       </td>
     </tr>`;
-  }).join('');
-  if (wrap) wrap.style.display = '';
-}
+          })
+          .join('');
+        if (wrap) wrap.style.display = '';
+      }
 
-// ── CSS Conversion Funnel ─────────────────────────────────────────────────────
-function renderCssFunnel(stages, meta) {
-  const sk    = document.getElementById('css-funnel-skeleton');
-  const wrap  = document.getElementById('css-funnel-wrap');
-  const empty = document.getElementById('css-funnel-empty');
-  const badge = document.getElementById('css-funnel-conv-rate');
-  if (sk) sk.style.display = 'none';
-  const filteredStages = (stages || []).filter(s => s.status !== 'views');
-  if (!filteredStages.length) { if (empty) empty.style.display = ''; return; }
+      // ── CSS Conversion Funnel ─────────────────────────────────────────────────────
+      function renderCssFunnel(stages, meta) {
+        const sk = document.getElementById('css-funnel-skeleton');
+        const wrap = document.getElementById('css-funnel-wrap');
+        const empty = document.getElementById('css-funnel-empty');
+        const badge = document.getElementById('css-funnel-conv-rate');
+        if (sk) sk.style.display = 'none';
+        const filteredStages = (stages || []).filter(s => s.status !== 'views');
+        if (!filteredStages.length) {
+          if (empty) empty.style.display = '';
+          return;
+        }
 
-  if (badge && meta?.conversion_rate != null) {
-    badge.textContent = `Конверсия: ${meta.conversion_rate}%`;
-    badge.style.display = '';
-  }
+        if (badge && meta?.conversion_rate != null) {
+          badge.textContent = `Конверсия: ${meta.conversion_rate}%`;
+          badge.style.display = '';
+        }
 
-  const maxCount = Math.max(1, ...filteredStages.map(s => s.count));
-  const stageColors = {
-    new:        { bar: 'from-blue-500 to-blue-400',   text: 'text-blue-700 dark:text-blue-300',   bg: 'bg-blue-50 dark:bg-blue-900/20' },
-    reviewing:  { bar: 'from-yellow-500 to-yellow-400', text: 'text-yellow-700 dark:text-yellow-300', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
-    confirmed:  { bar: 'from-emerald-500 to-green-400', text: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
-    in_progress:{ bar: 'from-orange-500 to-orange-400', text: 'text-orange-700 dark:text-orange-300', bg: 'bg-orange-50 dark:bg-orange-900/20' },
-    completed:  { bar: 'from-green-600 to-green-500',  text: 'text-green-700 dark:text-green-300',  bg: 'bg-green-50 dark:bg-green-900/20' },
-  };
-  const defaultColors = { bar: 'from-pink-500 to-pink-400', text: 'text-pink-700 dark:text-pink-300', bg: 'bg-pink-50 dark:bg-pink-900/20' };
+        const maxCount = Math.max(1, ...filteredStages.map(s => s.count));
+        const stageColors = {
+          new: {
+            bar: 'from-blue-500 to-blue-400',
+            text: 'text-blue-700 dark:text-blue-300',
+            bg: 'bg-blue-50 dark:bg-blue-900/20',
+          },
+          reviewing: {
+            bar: 'from-yellow-500 to-yellow-400',
+            text: 'text-yellow-700 dark:text-yellow-300',
+            bg: 'bg-yellow-50 dark:bg-yellow-900/20',
+          },
+          confirmed: {
+            bar: 'from-emerald-500 to-green-400',
+            text: 'text-emerald-700 dark:text-emerald-300',
+            bg: 'bg-emerald-50 dark:bg-emerald-900/20',
+          },
+          in_progress: {
+            bar: 'from-orange-500 to-orange-400',
+            text: 'text-orange-700 dark:text-orange-300',
+            bg: 'bg-orange-50 dark:bg-orange-900/20',
+          },
+          completed: {
+            bar: 'from-green-600 to-green-500',
+            text: 'text-green-700 dark:text-green-300',
+            bg: 'bg-green-50 dark:bg-green-900/20',
+          },
+        };
+        const defaultColors = {
+          bar: 'from-pink-500 to-pink-400',
+          text: 'text-pink-700 dark:text-pink-300',
+          bg: 'bg-pink-50 dark:bg-pink-900/20',
+        };
 
-  wrap.innerHTML = filteredStages.map((s, i) => {
-    const pct = maxCount > 0 ? Math.round((s.count / maxCount) * 100) : 0;
-    const pctFromFirst = i === 0 ? 100 : (filteredStages[0].count > 0 ? Math.round((s.count / filteredStages[0].count) * 100) : 0);
-    const colors = stageColors[s.status] || defaultColors;
-    return `<div class="rounded-lg px-4 py-3 ${colors.bg} flex items-center gap-3">
+        wrap.innerHTML = filteredStages
+          .map((s, i) => {
+            const pct = maxCount > 0 ? Math.round((s.count / maxCount) * 100) : 0;
+            const pctFromFirst =
+              i === 0 ? 100 : filteredStages[0].count > 0 ? Math.round((s.count / filteredStages[0].count) * 100) : 0;
+            const colors = stageColors[s.status] || defaultColors;
+            return `<div class="rounded-lg px-4 py-3 ${colors.bg} flex items-center gap-3">
       <div class="w-48 shrink-0">
         <div class="text-sm font-medium text-gray-800 dark:text-gray-200 mb-1">${escHtml(s.label || s.status)}</div>
         <div class="h-2 bg-white/50 dark:bg-gray-700/50 rounded-full overflow-hidden">
@@ -1232,200 +1600,215 @@ function renderCssFunnel(stages, meta) {
         <span class="text-sm font-semibold ${colors.text}">${pctFromFirst}%</span>
       </div>
     </div>`;
-  }).join('');
-  if (wrap) wrap.style.display = '';
-}
+          })
+          .join('');
+        if (wrap) wrap.style.display = '';
+      }
 
-// ── Time-of-day hourly heatmap ────────────────────────────────────────────────
-async function loadHourlyHeatmap() {
-  try {
-    const data = await fetch(`/api/admin/analytics/hourly?days=90`, { headers: h }).then(r => r.json());
-    const hours = data.hours || [];
-    const maxCnt = Math.max(1, ...hours.map(h => h.cnt));
+      // ── Time-of-day hourly heatmap ────────────────────────────────────────────────
+      async function loadHourlyHeatmap() {
+        try {
+          const data = await fetch(`/api/admin/analytics/hourly?days=90`, { headers: h }).then(r => r.json());
+          const hours = data.hours || [];
+          const maxCnt = Math.max(1, ...hours.map(h => h.cnt));
 
-    const barsEl   = document.getElementById('hourly-bars');
-    const labelsEl = document.getElementById('hourly-labels');
-    const peakEl   = document.getElementById('hourly-peak-label');
+          const barsEl = document.getElementById('hourly-bars');
+          const labelsEl = document.getElementById('hourly-labels');
+          const peakEl = document.getElementById('hourly-peak-label');
 
-    const colors = ['#e5e7eb','#fce7f3','#f9a8d4','#ec4899','#9d174d'];
+          const colors = ['#e5e7eb', '#fce7f3', '#f9a8d4', '#ec4899', '#9d174d'];
 
-    barsEl.innerHTML = hours.map(({ hour, cnt }) => {
-      const intensity = cnt === 0 ? 0 : Math.min(4, Math.ceil((cnt / maxCnt) * 4));
-      const bg = colors[intensity];
-      const heightPct = cnt === 0 ? 20 : Math.max(20, Math.round((cnt / maxCnt) * 100));
-      return `<div title="${hour}:00 — ${cnt} заявок" style="display:flex;align-items:flex-end;height:60px;cursor:default;">
+          barsEl.innerHTML = hours
+            .map(({ hour, cnt }) => {
+              const intensity = cnt === 0 ? 0 : Math.min(4, Math.ceil((cnt / maxCnt) * 4));
+              const bg = colors[intensity];
+              const heightPct = cnt === 0 ? 20 : Math.max(20, Math.round((cnt / maxCnt) * 100));
+              return `<div title="${hour}:00 — ${cnt} заявок" style="display:flex;align-items:flex-end;height:60px;cursor:default;">
         <div style="width:100%;height:${heightPct}%;background:${bg};border-radius:4px 4px 0 0;min-height:4px;transition:height 0.3s;"></div>
       </div>`;
-    }).join('');
+            })
+            .join('');
 
-    labelsEl.innerHTML = hours.map(({ hour }) => {
-      const show = hour % 3 === 0 ? `${hour}h` : '';
-      return `<div style="text-align:center;font-size:9px;color:#9ca3af;">${show}</div>`;
-    }).join('');
+          labelsEl.innerHTML = hours
+            .map(({ hour }) => {
+              const show = hour % 3 === 0 ? `${hour}h` : '';
+              return `<div style="text-align:center;font-size:9px;color:#9ca3af;">${show}</div>`;
+            })
+            .join('');
 
-    // Peak hour label
-    const peakHour = hours.reduce((best, h) => h.cnt > best.cnt ? h : best, hours[0] || { hour: 0, cnt: 0 });
-    if (peakEl && peakHour.cnt > 0) {
-      peakEl.textContent = `Пик: ${peakHour.hour}:00 (${peakHour.cnt} зак.)`;
-    }
-
-    document.getElementById('hourly-skeleton').style.display = 'none';
-    document.getElementById('hourly-grid').style.display = '';
-  } catch (e) {
-    document.getElementById('hourly-skeleton').style.display = 'none';
-    document.getElementById('hourly-empty').style.display = '';
-  }
-}
-
-loadAll();
-loadMonthly();
-loadRevenueTrend();
-loadHeatmap();
-loadClientLtv();
-loadHourlyHeatmap();
-setInterval(loadAll, 60000);
-
-// ── Revenue Trend ─────────────────────────────────────────────────────────────
-let _revenueChart = null;
-async function loadRevenueTrend() {
-  const months = document.getElementById('revenue-months')?.value || '12';
-  document.getElementById('revenue-skeleton').style.display = '';
-  document.getElementById('revenue-chart-wrap').style.display = 'none';
-  document.getElementById('revenue-error').style.display = 'none';
-
-  try {
-    const data = await fetch(`/api/admin/analytics/revenue?months=${months}`, {headers:h}).then(r=>r.json());
-    const rows = data.months || [];
-    if (!rows.length) throw new Error('no data');
-
-    document.getElementById('revenue-skeleton').style.display = 'none';
-    document.getElementById('revenue-chart-wrap').style.display = '';
-
-    if (_revenueChart) { _revenueChart.destroy(); _revenueChart = null; }
-    const ctx = document.getElementById('revenue-chart').getContext('2d');
-    _revenueChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: rows.map(r => r.month),
-        datasets: [
-          {
-            label: 'Выручка (₽)',
-            data: rows.map(r => r.revenue),
-            borderColor: '#10b981',
-            backgroundColor: 'rgba(16,185,129,0.1)',
-            tension: 0.4,
-            fill: true,
-            yAxisID: 'y',
-          },
-          {
-            label: 'Заявок',
-            data: rows.map(r => r.orders),
-            borderColor: '#ec4899',
-            backgroundColor: 'rgba(236,72,153,0.1)',
-            tension: 0.4,
-            fill: false,
-            yAxisID: 'y1',
+          // Peak hour label
+          const peakHour = hours.reduce((best, h) => (h.cnt > best.cnt ? h : best), hours[0] || { hour: 0, cnt: 0 });
+          if (peakEl && peakHour.cnt > 0) {
+            peakEl.textContent = `Пик: ${peakHour.hour}:00 (${peakHour.cnt} зак.)`;
           }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
-          tooltip: {
-            callbacks: {
-              label: ctx => {
-                if (ctx.dataset.yAxisID === 'y') return ` Выручка: ${ctx.parsed.y.toLocaleString('ru-RU')} ₽`;
-                return ` Заявок: ${ctx.parsed.y}`;
-              }
-            }
-          }
-        },
-        scales: {
-          y: {
-            type: 'linear', position: 'left', beginAtZero: true,
-            ticks: { callback: v => v.toLocaleString('ru-RU') + ' ₽' },
-            grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }
-          },
-          y1: {
-            type: 'linear', position: 'right', beginAtZero: true,
-            grid: { drawOnChartArea: false },
-            ticks: { precision: 0 }
-          }
+
+          document.getElementById('hourly-skeleton').style.display = 'none';
+          document.getElementById('hourly-grid').style.display = '';
+        } catch (e) {
+          document.getElementById('hourly-skeleton').style.display = 'none';
+          document.getElementById('hourly-empty').style.display = '';
         }
       }
-    });
-  } catch {
-    document.getElementById('revenue-skeleton').style.display = 'none';
-    document.getElementById('revenue-error').style.display = '';
-  }
-}
 
-// ── Heatmap ───────────────────────────────────────────────────────────────────
-async function loadHeatmap() {
-  const sel = document.getElementById('heatmap-year');
-  if (sel && !sel.options.length) {
-    const y = new Date().getFullYear();
-    for (let i = y; i >= y - 2; i--) {
-      const opt = document.createElement('option');
-      opt.value = i; opt.textContent = i;
-      sel.appendChild(opt);
-    }
-  }
-  const year = sel?.value || new Date().getFullYear();
+      loadAll();
+      loadMonthly();
+      loadRevenueTrend();
+      loadHeatmap();
+      loadClientLtv();
+      loadHourlyHeatmap();
+      setInterval(loadAll, 60000);
 
-  try {
-    const data = await fetch(`/api/admin/analytics/heatmap?year=${year}`, {headers:h}).then(r=>r.json());
-    const heatmap = data.heatmap || {};
-    const maxVal = Math.max(1, ...Object.values(heatmap));
+      // ── Revenue Trend ─────────────────────────────────────────────────────────────
+      let _revenueChart = null;
+      async function loadRevenueTrend() {
+        const months = document.getElementById('revenue-months')?.value || '12';
+        document.getElementById('revenue-skeleton').style.display = '';
+        document.getElementById('revenue-chart-wrap').style.display = 'none';
+        document.getElementById('revenue-error').style.display = 'none';
 
-    const grid = document.getElementById('heatmap-grid');
-    const months = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
-    let html = '<div style="display:flex;gap:4px;flex-wrap:wrap;">';
+        try {
+          const data = await fetch(`/api/admin/analytics/revenue?months=${months}`, { headers: h }).then(r => r.json());
+          const rows = data.months || [];
+          if (!rows.length) throw new Error('no data');
 
-    for (let m = 0; m < 12; m++) {
-      const daysInMonth = new Date(year, m + 1, 0).getDate();
-      html += `<div style="min-width:120px;flex:1;">`;
-      html += `<div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-align:center;">${months[m]}</div>`;
-      html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">';
-      for (let d = 1; d <= daysInMonth; d++) {
-        const dateStr = `${year}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-        const cnt = heatmap[dateStr] || 0;
-        const intensity = cnt === 0 ? 0 : Math.ceil((cnt / maxVal) * 4);
-        const colors = ['#e5e7eb','#fce7f3','#f9a8d4','#ec4899','#9d174d'];
-        const bg = colors[intensity];
-        html += `<div title="${dateStr}: ${cnt} заявок" style="width:100%;aspect-ratio:1;border-radius:2px;background:${bg};cursor:default;"></div>`;
+          document.getElementById('revenue-skeleton').style.display = 'none';
+          document.getElementById('revenue-chart-wrap').style.display = '';
+
+          if (_revenueChart) {
+            _revenueChart.destroy();
+            _revenueChart = null;
+          }
+          const ctx = document.getElementById('revenue-chart').getContext('2d');
+          _revenueChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: rows.map(r => r.month),
+              datasets: [
+                {
+                  label: 'Выручка (₽)',
+                  data: rows.map(r => r.revenue),
+                  borderColor: '#10b981',
+                  backgroundColor: 'rgba(16,185,129,0.1)',
+                  tension: 0.4,
+                  fill: true,
+                  yAxisID: 'y',
+                },
+                {
+                  label: 'Заявок',
+                  data: rows.map(r => r.orders),
+                  borderColor: '#ec4899',
+                  backgroundColor: 'rgba(236,72,153,0.1)',
+                  tension: 0.4,
+                  fill: false,
+                  yAxisID: 'y1',
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: {
+                legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                tooltip: {
+                  callbacks: {
+                    label: ctx => {
+                      if (ctx.dataset.yAxisID === 'y') return ` Выручка: ${ctx.parsed.y.toLocaleString('ru-RU')} ₽`;
+                      return ` Заявок: ${ctx.parsed.y}`;
+                    },
+                  },
+                },
+              },
+              scales: {
+                y: {
+                  type: 'linear',
+                  position: 'left',
+                  beginAtZero: true,
+                  ticks: { callback: v => v.toLocaleString('ru-RU') + ' ₽' },
+                  grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+                },
+                y1: {
+                  type: 'linear',
+                  position: 'right',
+                  beginAtZero: true,
+                  grid: { drawOnChartArea: false },
+                  ticks: { precision: 0 },
+                },
+              },
+            },
+          });
+        } catch {
+          document.getElementById('revenue-skeleton').style.display = 'none';
+          document.getElementById('revenue-error').style.display = '';
+        }
       }
-      html += '</div></div>';
-    }
-    html += '</div>';
 
-    grid.innerHTML = html;
-    document.getElementById('heatmap-skeleton').style.display = 'none';
-    grid.style.display = '';
-  } catch {
-    document.getElementById('heatmap-skeleton').style.display = 'none';
-    document.getElementById('heatmap-error').style.display = '';
-  }
-}
+      // ── Heatmap ───────────────────────────────────────────────────────────────────
+      async function loadHeatmap() {
+        const sel = document.getElementById('heatmap-year');
+        if (sel && !sel.options.length) {
+          const y = new Date().getFullYear();
+          for (let i = y; i >= y - 2; i--) {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = i;
+            sel.appendChild(opt);
+          }
+        }
+        const year = sel?.value || new Date().getFullYear();
 
-// ── Client LTV ────────────────────────────────────────────────────────────────
-async function loadClientLtv() {
-  try {
-    const data = await fetch('/api/admin/analytics/client-ltv', {headers:h}).then(r=>r.json());
-    const clients = data.top_clients || [];
+        try {
+          const data = await fetch(`/api/admin/analytics/heatmap?year=${year}`, { headers: h }).then(r => r.json());
+          const heatmap = data.heatmap || {};
+          const maxVal = Math.max(1, ...Object.values(heatmap));
 
-    document.getElementById('ltv-skeleton').style.display = 'none';
+          const grid = document.getElementById('heatmap-grid');
+          const months = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+          let html = '<div style="display:flex;gap:4px;flex-wrap:wrap;">';
 
-    if (!clients.length) {
-      document.getElementById('ltv-empty').style.display = '';
-      return;
-    }
+          for (let m = 0; m < 12; m++) {
+            const daysInMonth = new Date(year, m + 1, 0).getDate();
+            html += `<div style="min-width:120px;flex:1;">`;
+            html += `<div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-align:center;">${months[m]}</div>`;
+            html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">';
+            for (let d = 1; d <= daysInMonth; d++) {
+              const dateStr = `${year}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+              const cnt = heatmap[dateStr] || 0;
+              const intensity = cnt === 0 ? 0 : Math.ceil((cnt / maxVal) * 4);
+              const colors = ['#e5e7eb', '#fce7f3', '#f9a8d4', '#ec4899', '#9d174d'];
+              const bg = colors[intensity];
+              html += `<div title="${dateStr}: ${cnt} заявок" style="width:100%;aspect-ratio:1;border-radius:2px;background:${bg};cursor:default;"></div>`;
+            }
+            html += '</div></div>';
+          }
+          html += '</div>';
 
-    const tbody = document.getElementById('ltv-rows');
-    tbody.innerHTML = clients.map(c => `
+          grid.innerHTML = html;
+          document.getElementById('heatmap-skeleton').style.display = 'none';
+          grid.style.display = '';
+        } catch {
+          document.getElementById('heatmap-skeleton').style.display = 'none';
+          document.getElementById('heatmap-error').style.display = '';
+        }
+      }
+
+      // ── Client LTV ────────────────────────────────────────────────────────────────
+      async function loadClientLtv() {
+        try {
+          const data = await fetch('/api/admin/analytics/client-ltv', { headers: h }).then(r => r.json());
+          const clients = data.top_clients || [];
+
+          document.getElementById('ltv-skeleton').style.display = 'none';
+
+          if (!clients.length) {
+            document.getElementById('ltv-empty').style.display = '';
+            return;
+          }
+
+          const tbody = document.getElementById('ltv-rows');
+          tbody.innerHTML = clients
+            .map(
+              c => `
       <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
         <td class="py-2 pr-3">
           <div class="font-medium text-gray-900 dark:text-white text-sm">${escHtml(c.name || '—')}</div>
@@ -1438,94 +1821,120 @@ async function loadClientLtv() {
         <td class="py-2 text-right text-sm font-bold text-emerald-600">
           ${c.total_budget > 0 ? c.total_budget.toLocaleString('ru-RU') + ' ₽' : '—'}
         </td>
-      </tr>`).join('');
-    document.getElementById('ltv-table').style.display = '';
-  } catch {
-    document.getElementById('ltv-skeleton').style.display = 'none';
-    document.getElementById('ltv-empty').style.display = '';
-  }
-}
+      </tr>`
+            )
+            .join('');
+          document.getElementById('ltv-table').style.display = '';
+        } catch {
+          document.getElementById('ltv-skeleton').style.display = 'none';
+          document.getElementById('ltv-empty').style.display = '';
+        }
+      }
 
-function escHtml(s) {
-  if (s == null) return '';
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
+      function escHtml(s) {
+        if (s == null) return '';
+        return String(s).replace(
+          /[&<>"']/g,
+          c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+        );
+      }
 
-// ── Conversion funnel (all-time) ──────────────────────────────────────────────
-async function loadFunnel() {
-  try {
-    const d = await fetch('/api/admin/analytics/conversion-funnel', { headers: h }).then(r => r.json());
-    const max = Math.max(...d.stages.map(s => s.count), 1);
-    document.getElementById('funnel-section').innerHTML = d.stages.map(s => `
+      // ── Conversion funnel (all-time) ──────────────────────────────────────────────
+      async function loadFunnel() {
+        try {
+          const d = await fetch('/api/admin/analytics/conversion-funnel', { headers: h }).then(r => r.json());
+          const max = Math.max(...d.stages.map(s => s.count), 1);
+          document.getElementById('funnel-section').innerHTML =
+            d.stages
+              .map(
+                s => `
       <div class="mb-3">
         <div class="flex justify-between text-sm mb-1">
           <span class="font-medium text-gray-800 dark:text-gray-200">${s.name}</span>
           <span class="text-gray-500 dark:text-gray-400">${s.count} (${s.pct}%)</span>
         </div>
         <div class="h-4 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-          <div class="h-full rounded-full bg-gradient-to-r from-yellow-400 to-orange-400" style="width:${max > 0 ? Math.round(s.count / max * 100) : 0}%"></div>
+          <div class="h-full rounded-full bg-gradient-to-r from-yellow-400 to-orange-400" style="width:${max > 0 ? Math.round((s.count / max) * 100) : 0}%"></div>
         </div>
       </div>
-    `).join('') + `<p class="text-xs text-gray-400 dark:text-gray-500 mt-2">❌ Отменено: ${d.cancelled} &nbsp;|&nbsp; Всего: ${d.total}</p>`;
-  } catch (e) { console.error('funnel', e); }
-}
-
-// ── Revenue by month chart ─────────────────────────────────────────────────────
-let _revenueByMonthChart = null;
-async function loadRevenueChart() {
-  try {
-    const d = await fetch('/api/admin/analytics/revenue-by-month', { headers: h }).then(r => r.json());
-    const ctx = document.getElementById('revenue-by-month-chart').getContext('2d');
-    if (_revenueByMonthChart) { _revenueByMonthChart.destroy(); }
-    _revenueByMonthChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: d.months.map(m => m.month),
-        datasets: [{
-          label: 'Выручка',
-          data: d.months.map(m => m.revenue),
-          backgroundColor: 'rgba(212,175,55,0.7)',
-          borderColor: 'rgba(212,175,55,1)',
-          borderWidth: 1,
-          borderRadius: 4,
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString('ru-RU') + ' ₽' } }
+    `
+              )
+              .join('') +
+            `<p class="text-xs text-gray-400 dark:text-gray-500 mt-2">❌ Отменено: ${d.cancelled} &nbsp;|&nbsp; Всего: ${d.total}</p>`;
+        } catch (e) {
+          console.error('funnel', e);
         }
       }
-    });
-  } catch (e) { console.error('revenue chart', e); }
-}
 
-// ── Top cities table ───────────────────────────────────────────────────────────
-async function loadTopCities() {
-  try {
-    const d = await fetch('/api/admin/analytics/top-cities', { headers: h }).then(r => r.json());
-    if (!d.cities || d.cities.length === 0) {
-      document.getElementById('cities-section').innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
-      return;
-    }
-    document.getElementById('cities-section').innerHTML =
-      '<table class="w-full text-sm"><thead><tr class="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">' +
-      '<th class="pb-2 pr-3">#</th><th class="pb-2 pr-3">Город</th><th class="pb-2 pr-3 text-right">Заявок</th><th class="pb-2 text-right">Клиентов</th></tr></thead><tbody>' +
-      d.cities.map((c, i) => `<tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
+      // ── Revenue by month chart ─────────────────────────────────────────────────────
+      let _revenueByMonthChart = null;
+      async function loadRevenueChart() {
+        try {
+          const d = await fetch('/api/admin/analytics/revenue-by-month', { headers: h }).then(r => r.json());
+          const ctx = document.getElementById('revenue-by-month-chart').getContext('2d');
+          if (_revenueByMonthChart) {
+            _revenueByMonthChart.destroy();
+          }
+          _revenueByMonthChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: d.months.map(m => m.month),
+              datasets: [
+                {
+                  label: 'Выручка',
+                  data: d.months.map(m => m.revenue),
+                  backgroundColor: 'rgba(212,175,55,0.7)',
+                  borderColor: 'rgba(212,175,55,1)',
+                  borderWidth: 1,
+                  borderRadius: 4,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString('ru-RU') + ' ₽' } },
+              },
+            },
+          });
+        } catch (e) {
+          console.error('revenue chart', e);
+        }
+      }
+
+      // ── Top cities table ───────────────────────────────────────────────────────────
+      async function loadTopCities() {
+        try {
+          const d = await fetch('/api/admin/analytics/top-cities', { headers: h }).then(r => r.json());
+          if (!d.cities || d.cities.length === 0) {
+            document.getElementById('cities-section').innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
+            return;
+          }
+          document.getElementById('cities-section').innerHTML =
+            '<table class="w-full text-sm"><thead><tr class="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">' +
+            '<th class="pb-2 pr-3">#</th><th class="pb-2 pr-3">Город</th><th class="pb-2 pr-3 text-right">Заявок</th><th class="pb-2 text-right">Клиентов</th></tr></thead><tbody>' +
+            d.cities
+              .map(
+                (c, i) => `<tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
         <td class="py-2 pr-3 text-gray-400">${i + 1}</td>
         <td class="py-2 pr-3 font-medium text-gray-900 dark:text-white">${escHtml(c.city)}</td>
         <td class="py-2 pr-3 text-right text-gray-700 dark:text-gray-300">${c.orders}</td>
         <td class="py-2 text-right text-gray-700 dark:text-gray-300">${c.unique_clients}</td>
-      </tr>`).join('') + '</tbody></table>';
-  } catch (e) { console.error('top cities', e); }
-}
+      </tr>`
+              )
+              .join('') +
+            '</tbody></table>';
+        } catch (e) {
+          console.error('top cities', e);
+        }
+      }
 
-// ── Call new loaders on page init ─────────────────────────────────────────────
-loadFunnel();
-loadRevenueChart();
-loadTopCities();
-</script>
-</body>
+      // ── Call new loaders on page init ─────────────────────────────────────────────
+      loadFunnel();
+      loadRevenueChart();
+      loadTopCities();
+    </script>
+  </body>
 </html>
