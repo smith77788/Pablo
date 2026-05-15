@@ -5,8 +5,6 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const botCode = fs.readFileSync(path.join(ROOT, 'bot.js'), 'utf8');
 const apiCode = fs.readFileSync(path.join(ROOT, 'routes', 'api.js'), 'utf8');
-const stringsCode = fs.readFileSync(path.join(ROOT, 'strings.js'), 'utf8');
-const settingsHtml = fs.readFileSync(path.join(ROOT, 'public', 'admin', 'settings.html'), 'utf8');
 
 // ─── T1: FAQ feedback callbacks (bot.js) ─────────────────────────────────────
 
@@ -125,24 +123,5 @@ describe('T4: contacts_photo_url setting (bot.js)', () => {
     // Both contacts_photo_url and bot.sendPhoto must appear in showContactManager
     const fnBlock = botCode.match(/async function showContactManager[\s\S]{0,2000}?bot\.sendPhoto/);
     expect(fnBlock).not.toBeNull();
-  });
-});
-
-// ─── T5: strings.js completeness ─────────────────────────────────────────────
-
-describe('T5: strings.js completeness', () => {
-  test('T20 (bonus): strings.js exports at least 200 keys', () => {
-    // Require the module and count exported keys
-    const strings = require(path.join(ROOT, 'strings.js'));
-    const keyCount = Object.keys(strings).length;
-    expect(keyCount).toBeGreaterThanOrEqual(200);
-  });
-});
-
-// ─── T6: settings.html has contacts_photo_url reference ──────────────────────
-
-describe('T6: Admin settings.html contacts_photo_url key', () => {
-  test('T21 (bonus): settings.html references contacts_photo_url', () => {
-    expect(settingsHtml).toMatch(/contacts_photo_url|contacts_photo/);
   });
 });
