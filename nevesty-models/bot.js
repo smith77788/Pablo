@@ -11640,90 +11640,116 @@ async function startAiMatch(chatId) {
 
 async function runAiMatch(chatId, userDesc) {
   try {
-    // Get available models
+    // Get available models with full parameters
     const models = await query(
-      'SELECT id, name, age, height, city, category, bio, featured FROM models WHERE available=1 AND (archived=0 OR archived IS NULL) ORDER BY featured DESC, id ASC LIMIT 20'
+      `SELECT id, name, age, height, city, category, bio, hair_color, eye_color, featured
+       FROM models WHERE available=1 AND (archived=0 OR archived IS NULL) ORDER BY featured DESC, id ASC LIMIT 25`
     );
     if (!models.length) return safeSend(chatId, '😔 Каталог пуст\\. Попробуйте позже\\.', { parse_mode: 'MarkdownV2' });
 
-    const catalog = models
-      .map(
-        m =>
-          `ID:${m.id} ${m.name}, ${m.age}р, ${m.height}см, ${m.city || '—'}, ${m.category}${m.bio ? ', ' + m.bio.slice(0, 80) : ''}`
-      )
-      .join('\n');
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-    const prompt = `Ти — AI-асистент модельного агентства. Клієнт описав своє замовлення: "${userDesc}"\n\nДоступні моделі:\n${catalog}\n\nПідбери 3 найкращих моделей для цього замовлення. Поясни чому кожна підходить (1-2 речення). Відповідь лише у форматі:\n1. ID:XX - Ім'я - Причина\n2. ID:XX - Ім'я - Причина\n3. ID:XX - Ім'я - Причина\n\nТільки ці 3 рядки, без зайвого тексту.`;
-
-    const { spawn } = require('child_process');
-    let output = '';
-    let errOut = '';
-    const proc = spawn('claude', ['-p', prompt, '--output-format', 'text'], {
-      cwd: '/home/user/Pablo/nevesty-models',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    proc.stdout.on('data', d => {
-      output += d.toString();
-    });
-    proc.stderr.on('data', d => {
-      errOut += d.toString();
-    });
-
-    proc.on('close', async code => {
-      if (!output.trim() || code !== 0) {
-        console.error('[AI Match] error:', errOut);
-        return safeSend(
-          chatId,
-          '⚠️ AI тимчасово недоступний\\. Спробуйте пізніше або скористайтесь ручним пошуком\\.',
+    if (!ANTHROPIC_API_KEY) {
+      // Fallback: show first 3 without AI
+      const keyboard = models
+        .slice(0, 3)
+        .map(m => [
           {
-            parse_mode: 'MarkdownV2',
-            reply_markup: { inline_keyboard: [[{ text: '🔍 Ручний пошук', callback_data: 'cat_search' }]] },
-          }
-        );
-      }
-
-      // Parse model IDs from response
-      const lines = output
-        .trim()
-        .split('\n')
-        .filter(l => l.trim());
-      const modelIds = lines
-        .map(l => {
-          const m = l.match(/ID:(\d+)/i);
-          return m ? parseInt(m[1]) : null;
-        })
-        .filter(Boolean);
-
-      // Build inline keyboard with matched models
-      const keyboard = [];
-      for (const id of modelIds.slice(0, 3)) {
-        const m = models.find(x => x.id === id);
-        if (m)
-          keyboard.push([
-            { text: `💃 ${m.name} (${m.age}р, ${m.height}см, ${m.city || '—'})`, callback_data: `model_${id}` },
-          ]);
-      }
+            text: `💃 ${m.name} (${m.age || '?'}р, ${m.height || '?'}см, ${m.city || '—'})`,
+            callback_data: `model_${m.id}`,
+          },
+        ]);
       keyboard.push([{ text: '🔍 Розширений пошук', callback_data: 'cat_search' }]);
       keyboard.push([{ text: '🏠 Головне меню', callback_data: 'main_menu' }]);
-
-      const aiResult = esc(output.trim().slice(0, 800));
-      await safeSend(
-        chatId,
-        `🤖 *AI підбір завершено:*\n\n${aiResult}\n\n_Натисніть на модель щоб переглянути профіль:_`,
-        { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
-      );
-    });
-
-    proc.on('error', async err => {
-      console.error('[AI Match] spawn error:', err.message);
-      return safeSend(chatId, '⚠️ AI недоступний\\. Скористайтесь ручним пошуком\\.', {
+      return safeSend(chatId, '🤖 *Рекомендовані моделі:*\n\n_AI недоступний, показую популярні\\._', {
         parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🔍 Пошук', callback_data: 'cat_search' }]] },
+        reply_markup: { inline_keyboard: keyboard },
       });
+    }
+
+    const modelList = models
+      .map((m, i) => {
+        const parts = [];
+        if (m.age) parts.push(`${m.age} лет`);
+        if (m.height) parts.push(`рост ${m.height} см`);
+        if (m.city) parts.push(m.city);
+        if (m.category) parts.push(m.category);
+        if (m.hair_color) parts.push(`волосы: ${m.hair_color}`);
+        if (m.eye_color) parts.push(`глаза: ${m.eye_color}`);
+        const desc = m.bio ? m.bio.slice(0, 80) : 'Профессиональная модель';
+        return `${i + 1}. ${m.name} (${parts.join(', ')}): ${desc}`;
+      })
+      .join('\n');
+
+    const promptContent = `Ты — AI-ассистент модельного агентства Nevesty. Клиент описал задачу: "${userDesc}"\n\nДоступные модели:\n${modelList}\n\nПодбери 3 наиболее подходящих модели. Учитывай: тип мероприятия, город, внешность, категорию.\n\nОтветь строго в JSON:\n{"picks": [{"num": номер, "reason": "1-2 предложения почему подходит"}, {"num": номер, "reason": "..."}, {"num": номер, "reason": "..."}]}\nТолько JSON, без других слов.`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 600,
+        messages: [{ role: 'user', content: promptContent }],
+      }),
     });
+
+    if (!response.ok) throw new Error(`Anthropic API error: ${response.status}`);
+
+    const aiData = await response.json();
+    const rawText = aiData.content?.[0]?.text || '';
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+
+    let picks = [];
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        picks = Array.isArray(parsed.picks) ? parsed.picks : [];
+      } catch (_) {
+        /* ignore parse error, fall through to fallback */
+      }
+    }
+
+    // Build result list from picks or fallback to first 3
+    const pickedModels = picks.length
+      ? picks
+          .slice(0, 3)
+          .map(p => ({ model: models[parseInt(p.num) - 1], reason: p.reason || '' }))
+          .filter(x => x.model)
+      : models.slice(0, 3).map(m => ({ model: m, reason: '' }));
+
+    // Build message text with per-model reasons
+    const lines = pickedModels.map((p, idx) => {
+      const m = p.model;
+      const info = [m.city, m.category].filter(Boolean).join(', ');
+      const reasonLine = p.reason ? `\n   _${esc(p.reason)}_` : '';
+      return `${idx + 1}\\. *${esc(m.name)}* \\(${esc(String(m.age || '?'))}р, ${esc(String(m.height || '?'))}см${info ? ', ' + esc(info) : ''}\\)${reasonLine}`;
+    });
+
+    // Build inline keyboard
+    const keyboard = pickedModels.map(p => [
+      {
+        text: `💃 ${p.model.name} (${p.model.age || '?'}р, ${p.model.height || '?'}см)`,
+        callback_data: `model_${p.model.id}`,
+      },
+    ]);
+    keyboard.push([{ text: '🔍 Розширений пошук', callback_data: 'cat_search' }]);
+    keyboard.push([{ text: '🏠 Головне меню', callback_data: 'main_menu' }]);
+
+    await safeSend(
+      chatId,
+      `🤖 *AI підбір завершено:*\n\n${lines.join('\n\n')}\n\n_Натисніть на модель щоб переглянути профіль:_`,
+      { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
+    );
   } catch (e) {
     console.error('[AI Match] error:', e.message);
-    return safeSend(chatId, '⚠️ Помилка\\. Спробуйте пізніше\\.', { parse_mode: 'MarkdownV2' });
+    return safeSend(chatId, '⚠️ AI тимчасово недоступний\\. Спробуйте пізніше або скористайтесь ручним пошуком\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '🔍 Ручний пошук', callback_data: 'cat_search' }]] },
+    });
   }
 }
 

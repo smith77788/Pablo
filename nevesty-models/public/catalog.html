@@ -344,7 +344,7 @@
       </button>
     </nav>
 
-    <main class="catalog-page" id="main-content">
+    <main class="catalog-page" id="main-content" tabindex="-1">
       <div class="container">
         <nav aria-label="breadcrumb" style="padding-top: 24px; margin-bottom: 8px">
           <ol
@@ -1206,7 +1206,6 @@
           if (!data.ok) throw new Error(data.error || 'Ошибка сервера');
 
           const models = data.models || [];
-          const reason = data.reason || '';
           const resultsEl = document.getElementById('aiMatchResults');
 
           if (!models.length) {
@@ -1215,21 +1214,30 @@
             return;
           }
 
-          let html = '';
-          if (reason)
-            html += `<p style="font-size:0.8rem;color:var(--gold,#c9a96e);margin-bottom:14px;line-height:1.5">💡 ${reason}</p>`;
-          html += '<div style="display:flex;flex-direction:column;gap:10px">';
-          models.forEach(m => {
+          let html = '<div style="display:flex;flex-direction:column;gap:12px">';
+          models.forEach((m, idx) => {
             const photo = m.photo_main
-              ? `<img src="${m.photo_main}" alt="${m.name}" style="width:56px;height:70px;object-fit:cover;border-radius:4px;flex-shrink:0" loading="lazy" decoding="async">`
-              : `<div style="width:56px;height:70px;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0">💃</div>`;
-            html += `<div style="display:flex;gap:14px;align-items:center;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:6px;padding:12px">
+              ? `<img src="${m.photo_main}" alt="${m.name}" style="width:60px;height:75px;object-fit:cover;border-radius:4px;flex-shrink:0" loading="lazy" decoding="async">`
+              : `<div style="width:60px;height:75px;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0">💃</div>`;
+            const params = [
+              m.age ? m.age + ' лет' : '',
+              m.height ? m.height + ' см' : '',
+              m.city || '',
+              m.category || '',
+            ]
+              .filter(Boolean)
+              .join(' · ');
+            const reason = m.ai_reason
+              ? `<div style="font-size:0.75rem;color:var(--gold,#c9a96e);margin-top:5px;line-height:1.4">💡 ${m.ai_reason}</div>`
+              : '';
+            html += `<div style="display:flex;gap:14px;align-items:flex-start;background:var(--bg2,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.1));border-radius:6px;padding:12px">
           ${photo}
           <div style="flex:1;min-width:0">
-            <div style="font-weight:600;font-size:0.9rem;color:var(--text,#f0f0f0)">${m.name}</div>
-            <div style="font-size:0.78rem;color:var(--text-muted,#aaa);margin-top:3px">${m.age ? m.age + ' лет' : ''}${m.height ? ', ' + m.height + ' см' : ''}${m.city ? ', ' + m.city : ''}${m.category ? ' · ' + m.category : ''}</div>
+            <div style="font-weight:600;font-size:0.9rem;color:var(--text,#f0f0f0)">${idx + 1}. ${m.name}</div>
+            <div style="font-size:0.78rem;color:var(--text-muted,#aaa);margin-top:2px">${params}</div>
+            ${reason}
           </div>
-          <a href="/model.html?id=${m.id}" style="flex-shrink:0;padding:8px 14px;background:var(--gold,#c9a96e);color:#000;border-radius:4px;font-size:0.75rem;font-weight:700;text-decoration:none;white-space:nowrap">Смотреть</a>
+          <a href="/model.html?id=${m.id}" style="flex-shrink:0;padding:8px 14px;background:var(--gold,#c9a96e);color:#000;border-radius:4px;font-size:0.75rem;font-weight:700;text-decoration:none;white-space:nowrap;margin-top:2px">Смотреть</a>
         </div>`;
           });
           html += '</div>';

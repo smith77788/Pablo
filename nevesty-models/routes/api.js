@@ -6645,8 +6645,8 @@ router.post('/client/ai-match', aiMatchLimiter, async (req, res) => {
   let models = [];
   try {
     models = await query(
-      `SELECT id, name, age, height, category, bio, params, city, instagram
-       FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY featured DESC LIMIT 20`
+      `SELECT id, name, age, height, category, bio, params, city, instagram, photo_main, hair_color, eye_color
+       FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY featured DESC LIMIT 25`
     );
 
     if (!models.length) return res.json({ ok: true, models: [] });
@@ -6655,10 +6655,17 @@ router.post('/client/ai-match', aiMatchLimiter, async (req, res) => {
     if (!ANTHROPIC_API_KEY) return res.json({ ok: true, models: models.slice(0, 3) });
 
     const modelList = models
-      .map(
-        (m, i) =>
-          `${i + 1}. ${m.name} (${m.age} лет, рост ${m.height} см, ${m.category}, ${m.city || 'Москва'}): ${m.bio || 'Профессиональная модель'}`
-      )
+      .map((m, i) => {
+        const params = [];
+        if (m.age) params.push(`${m.age} лет`);
+        if (m.height) params.push(`рост ${m.height} см`);
+        if (m.city) params.push(m.city);
+        if (m.category) params.push(m.category);
+        if (m.hair_color) params.push(`волосы: ${m.hair_color}`);
+        if (m.eye_color) params.push(`глаза: ${m.eye_color}`);
+        const desc = m.bio ? m.bio.slice(0, 100) : 'Профессиональная модель';
+        return `${i + 1}. ${m.name} (${params.join(', ')}): ${desc}`;
+      })
       .join('\n');
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -6670,11 +6677,11 @@ router.post('/client/ai-match', aiMatchLimiter, async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 512,
+        max_tokens: 800,
         messages: [
           {
             role: 'user',
-            content: `Клиент ищет модель для мероприятия: "${description}"\n\nДоступные модели:\n${modelList}\n\nВерни JSON: {"top3": [номер1, номер2, номер3], "reason": "краткое объяснение"}\nТолько JSON, без других слов.`,
+            content: `Ты — AI-ассистент модельного агентства Nevesty. Клиент описал свою задачу: "${description}"\n\nДоступные модели:\n${modelList}\n\nПодбери 3 наиболее подходящих модели. Учитывай: тип мероприятия, город, внешность, категорию.\n\nОтветь строго в JSON:\n{"picks": [{"num": номер, "reason": "1-2 предложения почему подходит"}, {"num": номер, "reason": "..."}, {"num": номер, "reason": "..."}]}\nТолько JSON, без других слов.`,
           },
         ],
       }),
@@ -6686,10 +6693,20 @@ router.post('/client/ai-match', aiMatchLimiter, async (req, res) => {
     if (!match) return res.json({ ok: true, models: models.slice(0, 3) });
 
     const parsed = JSON.parse(match[0]);
-    const topIndices = (parsed.top3 || [1, 2, 3]).map(n => parseInt(n) - 1).filter(i => i >= 0 && i < models.length);
-    const topModels = topIndices.map(i => models[i]).filter(Boolean);
+    const picks = Array.isArray(parsed.picks) ? parsed.picks : [];
+    const topModels = picks
+      .slice(0, 3)
+      .map(p => {
+        const idx = parseInt(p.num) - 1;
+        if (idx < 0 || idx >= models.length) return null;
+        return { ...models[idx], ai_reason: p.reason || '' };
+      })
+      .filter(Boolean);
 
-    res.json({ ok: true, models: topModels, reason: parsed.reason || '' });
+    // Fallback if picks is empty or malformed
+    if (!topModels.length) return res.json({ ok: true, models: models.slice(0, 3) });
+
+    res.json({ ok: true, models: topModels });
   } catch (e) {
     console.error('[AI Match] Error:', e.message);
     res.json({ ok: true, models: models.slice(0, 3) }); // fallback
