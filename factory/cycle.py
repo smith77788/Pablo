@@ -599,6 +599,32 @@ def run_phase_27_faq_generator(db_path: str) -> dict:
         return {'status': 'error', 'error': str(e)}
 
 
+def run_phase_finance(db_path: str) -> dict:
+    """Finance Department heuristic analysis — revenue forecast, cost analysis, budget plan."""
+    try:
+        import sqlite3
+        from factory.agents.finance_department import FinanceDepartment
+
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute("""
+            SELECT strftime('%Y-%m', created_at) as month,
+                   COALESCE(SUM(budget), 0) as revenue
+            FROM orders
+            WHERE status IN ('confirmed', 'completed')
+            AND created_at >= date('now', '-6 months')
+            GROUP BY month
+            ORDER BY month
+        """).fetchall()
+        conn.close()
+
+        revenue_history = [r[1] for r in rows] if rows else [0]
+        dept = FinanceDepartment()
+        result = dept.run_analysis({'revenue_history': revenue_history, 'costs': {}})
+        return {'status': 'ok', **result}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 # Threshold for auto-apply: variant B must be at least 3% conversion to auto-apply
 SCALE_THRESHOLD_AUTO = 3.0
 
