@@ -306,10 +306,15 @@ async function loadModels() {
                 class="${m.featured ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600 text-sm px-2 py-1 rounded hover:bg-yellow-50 dark:hover:bg-yellow-900/20">
                 <i class="fas fa-star"></i>
               </button>
-              <button onclick="archiveModel(${m.id}, ${m.archived ? 1 : 0})" title="${m.archived ? 'Восстановить' : 'В архив'}"
+              <button onclick="archiveModel(${m.id}, ${m.archived ? 1 : 0})"
+                title="${m.archived ? 'Восстановить из архива' : 'Архивировать — модель будет скрыта из каталога и сохранена в архиве'}"
                 class="${m.archived ? 'text-green-500 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'} text-sm px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700">
                 <i class="fas fa-${m.archived ? 'undo' : 'archive'}"></i>
               </button>
+              ${m.archived ? `<button onclick="deleteModelPermanent(${m.id})" title="Удалить навсегда"
+                class="text-red-400 hover:text-red-600 text-sm px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+                <i class="fas fa-trash"></i>
+              </button>` : ''}
               <button onclick="showModelStats(${m.id})" title="Статистика"
                 class="text-purple-500 hover:text-purple-700 text-sm px-2 py-1 rounded hover:bg-purple-50 dark:hover:bg-purple-900/20">
                 📊
@@ -338,9 +343,19 @@ async function toggleFeatured(id, current) {
   loadModels();
 }
 async function archiveModel(id, archived) {
-  const msg = archived ? 'Восстановить модель из архива?' : 'Переместить модель в архив?';
+  const msg = archived
+    ? 'Восстановить модель из архива?'
+    : 'Архивировать модель? Она будет скрыта из каталога и сохранена в архиве.';
   if (!confirm(msg)) return;
-  await fetch(`/api/admin/models/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ archived: archived ? 0 : 1, ...(archived ? {} : { available: 0 }) }) });
+  const endpoint = archived ? `/api/admin/models/${id}/restore` : `/api/admin/models/${id}/archive`;
+  await fetch(endpoint, { method: 'PATCH', headers });
+  loadModels();
+}
+
+async function deleteModelPermanent(id) {
+  if (!confirm('Удалить модель навсегда? Это действие нельзя отменить.')) return;
+  if (!confirm('Подтвердите: все фото и данные модели будут удалены безвозвратно.')) return;
+  await fetch(`/api/admin/models/${id}`, { method: 'DELETE', headers });
   loadModels();
 }
 

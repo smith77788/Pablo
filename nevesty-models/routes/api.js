@@ -708,7 +708,7 @@ router.get('/models', async (req, res, next) => {
     const _maxH = max_height || height_max;
     const _minA = min_age    || age_min;
     const _maxA = max_age    || age_max;
-    let sql = 'SELECT id, name, age, height, city, category, available, featured, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos, (SELECT COUNT(*) FROM orders WHERE model_id=models.id) as order_count FROM models WHERE 1=1';
+    let sql = 'SELECT id, name, age, height, city, category, available, featured, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos, (SELECT COUNT(*) FROM orders WHERE model_id=models.id) as order_count FROM models WHERE archived=0';
     const params = [];
     if (category && ALLOWED_CATEGORIES.includes(category)) { sql += ' AND category = ?'; params.push(category); }
     if (hair_color) { sql += ' AND hair_color = ?'; params.push(hair_color); }
@@ -924,6 +924,34 @@ router.patch('/admin/models/:id', auth, async (req, res, next) => {
   } catch (e) {
     res.status(500).json({ error: 'DB error' });
   }
+});
+
+// PATCH /admin/models/:id/archive — soft-delete: set archived=1, available=0
+router.patch('/admin/models/:id/archive', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const m = await get('SELECT id, name FROM models WHERE id=?', [id]);
+    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
+    await run('UPDATE models SET archived=1, available=0 WHERE id=?', [id]);
+    cache.delByPrefix('catalog:');
+    await logAudit(req, 'archive', 'model', id, { name: m.name });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// PATCH /admin/models/:id/restore — restore from archive: set archived=0
+router.patch('/admin/models/:id/restore', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const m = await get('SELECT id, name FROM models WHERE id=?', [id]);
+    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
+    await run('UPDATE models SET archived=0 WHERE id=?', [id]);
+    cache.delByPrefix('catalog:');
+    await logAudit(req, 'restore', 'model', id, { name: m.name });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
 });
 
 // ─── Models (admin CRUD) ──────────────────────────────────────────────────────

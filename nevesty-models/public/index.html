@@ -668,18 +668,35 @@ fetch('/api/settings/public').then(r => r.json()).then(d => {
       return;
     }
     const stars = n => '★'.repeat(Math.max(1, Math.min(5, n || 5))) + '☆'.repeat(5 - Math.max(1, Math.min(5, n || 5)));
+    const fmtDate = s => { try { return new Date(s).toLocaleDateString('ru-RU', { year:'numeric', month:'long', day:'numeric' }); } catch { return ''; } };
+    const truncate = (t, len) => { t = String(t || ''); return t.length > len ? t.slice(0, len).trimEnd() + '…' : t; };
+    const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     cont.innerHTML = list.map(r => `
-      <div class="testimonial-card" style="background:var(--bg2);border:1px solid var(--border);padding:28px;border-radius:2px;">
-        <div style="color:#f59e0b;font-size:1.1rem;margin-bottom:12px">${stars(r.rating)}</div>
-        <p style="color:var(--text);font-size:0.9rem;line-height:1.6;margin-bottom:16px">"${r.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}"</p>
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:36px;height:36px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:0.9rem">${(r.client_name||'А').charAt(0).toUpperCase()}</div>
-          <div>
-            <div style="color:var(--white);font-size:0.85rem;font-weight:600">${(r.client_name||'Клиент').replace(/</g,'&lt;')}</div>
-            ${r.model_name ? `<div style="color:var(--text-muted);font-size:0.75rem">Модель: ${r.model_name.replace(/</g,'&lt;')}</div>` : ''}
+      <div class="testimonial-card" style="background:var(--bg2);border:1px solid var(--border);padding:28px;border-radius:2px;display:flex;flex-direction:column;gap:0">
+        <div style="color:#f59e0b;font-size:1.1rem;margin-bottom:10px">${stars(r.rating)}</div>
+        <p style="color:var(--text);font-size:0.9rem;line-height:1.6;margin-bottom:16px;flex:1">"${esc(truncate(r.text, 200))}"</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:36px;height:36px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:0.9rem;flex-shrink:0">${esc((r.client_name||'А').charAt(0).toUpperCase())}</div>
+            <div>
+              <div style="color:var(--white);font-size:0.85rem;font-weight:600">${esc(r.client_name||'Клиент')}</div>
+              ${r.model_name ? `<div style="color:var(--text-muted);font-size:0.75rem">Модель: ${esc(r.model_name)}</div>` : ''}
+            </div>
           </div>
+          ${r.created_at ? `<div style="color:var(--text-muted);font-size:0.72rem;white-space:nowrap">${fmtDate(r.created_at)}</div>` : ''}
         </div>
       </div>`).join('');
+    // Append action buttons after the grid
+    const section = document.getElementById('reviews');
+    if (section && !section.querySelector('.reviews-actions')) {
+      const actions = document.createElement('div');
+      actions.className = 'reviews-actions';
+      actions.style.cssText = 'display:flex;gap:16px;justify-content:center;margin-top:32px;flex-wrap:wrap';
+      actions.innerHTML = `
+        <a href="/catalog.html" class="btn-outline" style="font-size:0.85rem;padding:14px 36px">Все отзывы</a>
+        <a href="https://t.me/Verdiktnikbot" target="_blank" rel="noopener" class="btn-primary" style="font-size:0.85rem;padding:14px 36px">Оставить отзыв</a>`;
+      section.querySelector('.container').appendChild(actions);
+    }
   }).catch(() => { document.getElementById('reviews')?.style && (document.getElementById('reviews').style.display = 'none'); });
 })();
 </script>
