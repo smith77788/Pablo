@@ -686,12 +686,15 @@ const _notifReadSet = new Set(); // lightweight: reset on restart
 
 router.get('/admin/notifications', auth, async (req, res, next) => {
   try {
+    const statusFilter = req.query.status || 'all'; // 'unread' | 'read' | 'all'
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+
     const [newOrders, pendingReviews, unreadOrders] = await Promise.all([
       query(
-        `SELECT id, order_number, client_name, created_at FROM orders WHERE status='new' ORDER BY created_at DESC LIMIT 10`
+        `SELECT id, order_number, client_name, created_at FROM orders WHERE status='new' ORDER BY created_at DESC LIMIT 20`
       ),
       query(
-        `SELECT id, client_name, rating, text, created_at FROM reviews WHERE approved=0 ORDER BY created_at DESC LIMIT 5`
+        `SELECT id, client_name, rating, text, created_at FROM reviews WHERE approved=0 ORDER BY created_at DESC LIMIT 10`
       ),
       query(
         `SELECT DISTINCT o.id, o.order_number, o.client_name, o.created_at
@@ -703,9 +706,10 @@ router.get('/admin/notifications', auth, async (req, res, next) => {
              SELECT 1 FROM messages m2 WHERE m2.order_id = o.id AND m2.sender_type = 'admin' AND m2.created_at > m.created_at
            )
          )
-         ORDER BY o.created_at DESC LIMIT 5`
+         ORDER BY o.created_at DESC LIMIT 10`
       ),
     ]);
+    const allRead = _notifReadSet.has('__all__');
     const notifications = [];
     newOrders.forEach(o => notifications.push({
       id: `order_new_${o.id}`,
@@ -714,16 +718,16 @@ router.get('/admin/notifications', auth, async (req, res, next) => {
       text: o.client_name,
       link: `/admin/orders.html?id=${o.id}`,
       created_at: o.created_at,
-      read: _notifReadSet.has(`order_new_${o.id}`),
+      read: allRead || _notifReadSet.has(`order_new_${o.id}`),
     }));
     pendingReviews.forEach(r => notifications.push({
       id: `review_${r.id}`,
       type: 'pending_review',
       title: `Отзыв на модерации`,
       text: `${r.client_name} — ${'★'.repeat(r.rating)}`,
-      link: `/admin/settings.html#reviews`,
+      link: `/admin/reviews.html`,
       created_at: r.created_at,
-      read: _notifReadSet.has(`review_${r.id}`),
+      read: allRead || _notifReadSet.has(`review_${r.id}`),
     }));
     unreadOrders.forEach(o => notifications.push({
       id: `msg_${o.id}`,
@@ -732,11 +736,17 @@ router.get('/admin/notifications', auth, async (req, res, next) => {
       text: `Заявка ${o.order_number} — ${o.client_name}`,
       link: `/admin/orders.html?id=${o.id}`,
       created_at: o.created_at,
-      read: _notifReadSet.has(`msg_${o.id}`),
+      read: allRead || _notifReadSet.has(`msg_${o.id}`),
     }));
     notifications.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const unreadCount = notifications.filter(n => !n.read).length;
-    res.json({ notifications: notifications.slice(0, 10), unread_count: unreadCount });
+
+    // Apply status filter
+    let filtered = notifications;
+    if (statusFilter === 'unread') filtered = notifications.filter(n => !n.read);
+    else if (statusFilter === 'read') filtered = notifications.filter(n => n.read);
+
+    res.json({ notifications: filtered.slice(0, limit), unread_count: unreadCount, total: notifications.length });
   } catch (e) { next(e); }
 });
 
@@ -746,6 +756,42 @@ router.post('/admin/notifications/read', auth, async (req, res, next) => {
     if (Array.isArray(ids)) ids.forEach(id => _notifReadSet.add(id));
     else _notifReadSet.add('__all__');
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// PATCH /api/admin/notifications/:id/read — mark single notification as read
+router.patch('/admin/notifications/:id/read', auth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    _notifReadSet.add(id);
+    res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
+// PATCH /api/admin/notifications/read-all — mark all notifications as read
+router.patch('/admin/notifications/read-all', auth, async (req, res, next) => {
+  try {
+    // Fetch current notifications to get all IDs, then mark them all
+    _notifReadSet.add('__all__');
+    const [newOrders, pendingReviews, unreadOrders] = await Promise.all([
+      query(`SELECT id FROM orders WHERE status='new' ORDER BY created_at DESC LIMIT 10`),
+      query(`SELECT id FROM reviews WHERE approved=0 ORDER BY created_at DESC LIMIT 5`),
+      query(
+        `SELECT DISTINCT o.id FROM orders o
+         WHERE o.status NOT IN ('completed','cancelled')
+         AND EXISTS (
+           SELECT 1 FROM messages m WHERE m.order_id = o.id AND m.sender_type = 'client'
+           AND NOT EXISTS (
+             SELECT 1 FROM messages m2 WHERE m2.order_id = o.id AND m2.sender_type = 'admin' AND m2.created_at > m.created_at
+           )
+         ) ORDER BY o.created_at DESC LIMIT 5`
+      ),
+    ]);
+    newOrders.forEach(o => _notifReadSet.add(`order_new_${o.id}`));
+    pendingReviews.forEach(r => _notifReadSet.add(`review_${r.id}`));
+    unreadOrders.forEach(o => _notifReadSet.add(`msg_${o.id}`));
+    const count = newOrders.length + pendingReviews.length + unreadOrders.length;
+    res.json({ success: true, count });
   } catch (e) { next(e); }
 });
 
@@ -1290,11 +1336,12 @@ router.post('/admin/models/:id/availability', auth, async (req, res, next) => {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
     }
+    const cleanNote = sanitize(note, 200);
     await run(
       'INSERT OR IGNORE INTO model_busy_dates (model_id, busy_date, reason) VALUES (?,?,?)',
-      [modelId, date, note || null]
+      [modelId, date, cleanNote]
     );
-    await logAudit(req, 'mark_busy', 'model_availability', modelId, { date, note });
+    await logAudit(req, 'mark_busy', 'model_availability', modelId, { date, note: cleanNote });
     res.json({ success: true });
   } catch (e) { next(e); }
 });
@@ -1327,13 +1374,16 @@ router.get('/admin/models/:id/busy-dates', auth, async (req, res, next) => {
 
 router.post('/admin/models/:id/busy-dates', auth, async (req, res, next) => {
   try {
+    const modelId = parseInt(req.params.id);
+    if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
     const { busy_date, reason } = req.body;
     if (!busy_date || !/^\d{4}-\d{2}-\d{2}$/.test(busy_date)) {
       return res.status(400).json({ error: 'busy_date required (YYYY-MM-DD)' });
     }
+    const cleanReason = sanitize(reason, 200);
     await run(
       'INSERT OR IGNORE INTO model_busy_dates (model_id, busy_date, reason) VALUES (?,?,?)',
-      [req.params.id, busy_date, reason || null]
+      [modelId, busy_date, cleanReason]
     );
     res.json({ ok: true });
   } catch (e) { next(e); }

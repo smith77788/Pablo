@@ -45,6 +45,12 @@
       completed: '🎉 Завершена', cancelled: '❌ Отменена', reviewing: '👀 На рассмотрении'
     };
 
+    // XSS-safe HTML escape helper
+    function esc(s) {
+      if (s == null) return '';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     async function searchOrders() {
       const name = document.getElementById('modelNameInput').value.trim();
       if (!name) return;
@@ -57,7 +63,7 @@
         const d = await r.json();
 
         if (!d.orders || !d.orders.length) {
-          res.innerHTML = `<p style="color:var(--text-dim)">${d.message || 'Заявки не найдены'}</p>`;
+          res.innerHTML = `<p style="color:var(--text-dim)">${esc(d.message) || 'Заявки не найдены'}</p>`;
           return;
         }
 
@@ -78,11 +84,11 @@
             const allBusy = [...(r1.busy_dates || []), ...(r2.busy_dates || [])].filter(dt => dt >= todayStr);
             const fmt = dt => {
               try { return new Date(dt + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }); }
-              catch { return dt; }
+              catch { return esc(dt); }
             };
             if (allBusy.length) {
               const dateItems = allBusy.map(dt =>
-                `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);font-size:0.8rem;color:#fca5a5">${fmt(dt)}</span>`
+                `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);font-size:0.8rem;color:#fca5a5">${esc(fmt(dt))}</span>`
               ).join('');
               busyDatesHtml = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px">
                 <div style="font-weight:600;margin-bottom:10px;font-size:0.9rem">📅 Мои занятые даты</div>
@@ -99,17 +105,17 @@
 
         res.innerHTML = busyDatesHtml + `
           <div style="margin-bottom:16px;font-size:0.9rem;color:var(--text-dim)">
-            Найдено заявок: <strong>${d.total}</strong> для <strong>${d.model?.name || name}</strong>
+            Найдено заявок: <strong>${esc(d.total)}</strong> для <strong>${esc(d.model?.name || name)}</strong>
           </div>
           ${d.orders.map(o => `
             <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                <strong>#${o.order_number || o.id}</strong>
-                <span style="font-size:0.8rem">${STATUS_LABELS[o.status] || o.status}</span>
+                <strong>#${esc(o.order_number || o.id)}</strong>
+                <span style="font-size:0.8rem">${esc(STATUS_LABELS[o.status] || o.status)}</span>
               </div>
               <div style="font-size:0.85rem;color:var(--text-dim)">
-                ${o.event_type ? '🎭 ' + o.event_type : ''}
-                ${o.event_date ? ' · 📅 ' + new Date(o.event_date).toLocaleDateString('ru') : ''}
+                ${o.event_type ? '🎭 ' + esc(o.event_type) : ''}
+                ${o.event_date ? ' · 📅 ' + esc(new Date(o.event_date).toLocaleDateString('ru')) : ''}
               </div>
             </div>`).join('')}`;
       } catch {
