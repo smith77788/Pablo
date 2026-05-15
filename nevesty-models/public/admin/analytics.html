@@ -233,6 +233,93 @@
       </div>
     </div>
 
+    <!-- Revenue Trend Chart (full width) -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm chart-card">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div class="flex items-center gap-2">
+          <h3 class="font-semibold text-gray-800 dark:text-white">💰 Выручка по месяцам</h3>
+          <button onclick="exportChart('revenue-chart')" title="Скачать PNG" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 ml-2">
+            <i class="fas fa-download text-sm"></i>
+          </button>
+        </div>
+        <select id="revenue-months" onchange="loadRevenueTrend()" class="text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+          <option value="6">6 месяцев</option>
+          <option value="12" selected>12 месяцев</option>
+          <option value="24">24 месяца</option>
+        </select>
+      </div>
+      <div id="revenue-skeleton" class="animate-pulse flex gap-2 h-48 items-end pb-4">
+        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-24"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-36"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-30"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-40"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-32"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded flex-1 h-48"></div>
+      </div>
+      <div id="revenue-chart-wrap" style="display:none"><canvas id="revenue-chart"></canvas></div>
+      <div id="revenue-error" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных о выручке</div>
+    </div>
+
+    <!-- Order Heatmap -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h3 class="font-semibold text-gray-800 dark:text-white">📅 Тепловая карта заявок</h3>
+        <select id="heatmap-year" onchange="loadHeatmap()" class="text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+        </select>
+      </div>
+      <div id="heatmap-container" class="overflow-x-auto">
+        <div id="heatmap-skeleton" class="animate-pulse grid grid-cols-12 gap-1 h-20">
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-full"></div>
+        </div>
+        <div id="heatmap-grid" style="display:none"></div>
+        <div id="heatmap-error" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
+      </div>
+      <div class="flex items-center gap-2 mt-3">
+        <span class="text-xs text-gray-400 dark:text-gray-500">Меньше</span>
+        <div class="flex gap-1">
+          <div class="w-4 h-4 rounded" style="background:#e5e7eb"></div>
+          <div class="w-4 h-4 rounded" style="background:#fce7f3"></div>
+          <div class="w-4 h-4 rounded" style="background:#f9a8d4"></div>
+          <div class="w-4 h-4 rounded" style="background:#ec4899"></div>
+          <div class="w-4 h-4 rounded" style="background:#9d174d"></div>
+        </div>
+        <span class="text-xs text-gray-400 dark:text-gray-500">Больше</span>
+      </div>
+    </div>
+
+    <!-- Top Clients / LTV -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+      <h3 class="font-semibold text-gray-800 dark:text-white mb-4">👑 Топ клиентов по выручке</h3>
+      <div id="ltv-skeleton" class="animate-pulse space-y-2">
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/4"></div>
+        <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-1/2"></div>
+      </div>
+      <div id="ltv-table" style="display:none" class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left border-b dark:border-gray-700">
+            <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Клиент</th>
+            <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Заявок</th>
+            <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Завершено</th>
+            <th class="py-2 font-medium text-gray-600 dark:text-gray-400 text-right">Сумма</th>
+          </tr></thead>
+          <tbody id="ltv-rows"></tbody>
+        </table>
+      </div>
+      <div id="ltv-empty" style="display:none" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Нет данных</div>
+    </div>
+
   </div><!-- /max-w-7xl -->
 
 <script>
@@ -746,7 +833,176 @@ async function loadMonthly() {
 
 loadAll();
 loadMonthly();
+loadRevenueTrend();
+loadHeatmap();
+loadClientLtv();
 setInterval(loadAll, 60000);
+
+// ── Revenue Trend ─────────────────────────────────────────────────────────────
+let _revenueChart = null;
+async function loadRevenueTrend() {
+  const months = document.getElementById('revenue-months')?.value || '12';
+  document.getElementById('revenue-skeleton').style.display = '';
+  document.getElementById('revenue-chart-wrap').style.display = 'none';
+  document.getElementById('revenue-error').style.display = 'none';
+
+  try {
+    const data = await fetch(`/api/admin/analytics/revenue?months=${months}`, {headers:h}).then(r=>r.json());
+    const rows = data.months || [];
+    if (!rows.length) throw new Error('no data');
+
+    document.getElementById('revenue-skeleton').style.display = 'none';
+    document.getElementById('revenue-chart-wrap').style.display = '';
+
+    if (_revenueChart) { _revenueChart.destroy(); _revenueChart = null; }
+    const ctx = document.getElementById('revenue-chart').getContext('2d');
+    _revenueChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: rows.map(r => r.month),
+        datasets: [
+          {
+            label: 'Выручка (₽)',
+            data: rows.map(r => r.revenue),
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16,185,129,0.1)',
+            tension: 0.4,
+            fill: true,
+            yAxisID: 'y',
+          },
+          {
+            label: 'Заявок',
+            data: rows.map(r => r.orders),
+            borderColor: '#ec4899',
+            backgroundColor: 'rgba(236,72,153,0.1)',
+            tension: 0.4,
+            fill: false,
+            yAxisID: 'y1',
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                if (ctx.dataset.yAxisID === 'y') return ` Выручка: ${ctx.parsed.y.toLocaleString('ru-RU')} ₽`;
+                return ` Заявок: ${ctx.parsed.y}`;
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            type: 'linear', position: 'left', beginAtZero: true,
+            ticks: { callback: v => v.toLocaleString('ru-RU') + ' ₽' },
+            grid: { color: isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }
+          },
+          y1: {
+            type: 'linear', position: 'right', beginAtZero: true,
+            grid: { drawOnChartArea: false },
+            ticks: { precision: 0 }
+          }
+        }
+      }
+    });
+  } catch {
+    document.getElementById('revenue-skeleton').style.display = 'none';
+    document.getElementById('revenue-error').style.display = '';
+  }
+}
+
+// ── Heatmap ───────────────────────────────────────────────────────────────────
+async function loadHeatmap() {
+  const sel = document.getElementById('heatmap-year');
+  if (sel && !sel.options.length) {
+    const y = new Date().getFullYear();
+    for (let i = y; i >= y - 2; i--) {
+      const opt = document.createElement('option');
+      opt.value = i; opt.textContent = i;
+      sel.appendChild(opt);
+    }
+  }
+  const year = sel?.value || new Date().getFullYear();
+
+  try {
+    const data = await fetch(`/api/admin/analytics/heatmap?year=${year}`, {headers:h}).then(r=>r.json());
+    const heatmap = data.heatmap || {};
+    const maxVal = Math.max(1, ...Object.values(heatmap));
+
+    const grid = document.getElementById('heatmap-grid');
+    const months = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+    let html = '<div style="display:flex;gap:4px;flex-wrap:wrap;">';
+
+    for (let m = 0; m < 12; m++) {
+      const daysInMonth = new Date(year, m + 1, 0).getDate();
+      html += `<div style="min-width:120px;flex:1;">`;
+      html += `<div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-align:center;">${months[m]}</div>`;
+      html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">';
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${year}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const cnt = heatmap[dateStr] || 0;
+        const intensity = cnt === 0 ? 0 : Math.ceil((cnt / maxVal) * 4);
+        const colors = ['#e5e7eb','#fce7f3','#f9a8d4','#ec4899','#9d174d'];
+        const bg = colors[intensity];
+        html += `<div title="${dateStr}: ${cnt} заявок" style="width:100%;aspect-ratio:1;border-radius:2px;background:${bg};cursor:default;"></div>`;
+      }
+      html += '</div></div>';
+    }
+    html += '</div>';
+
+    grid.innerHTML = html;
+    document.getElementById('heatmap-skeleton').style.display = 'none';
+    grid.style.display = '';
+  } catch {
+    document.getElementById('heatmap-skeleton').style.display = 'none';
+    document.getElementById('heatmap-error').style.display = '';
+  }
+}
+
+// ── Client LTV ────────────────────────────────────────────────────────────────
+async function loadClientLtv() {
+  try {
+    const data = await fetch('/api/admin/analytics/client-ltv', {headers:h}).then(r=>r.json());
+    const clients = data.top_clients || [];
+
+    document.getElementById('ltv-skeleton').style.display = 'none';
+
+    if (!clients.length) {
+      document.getElementById('ltv-empty').style.display = '';
+      return;
+    }
+
+    const tbody = document.getElementById('ltv-rows');
+    tbody.innerHTML = clients.map(c => `
+      <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
+        <td class="py-2 pr-3">
+          <div class="font-medium text-gray-900 dark:text-white text-sm">${escHtml(c.name || '—')}</div>
+          <div class="text-xs text-gray-400">${escHtml(c.phone || '')}</div>
+        </td>
+        <td class="py-2 pr-3 text-right text-sm text-gray-700 dark:text-gray-300">${c.total_orders}</td>
+        <td class="py-2 pr-3 text-right text-sm">
+          <span class="text-green-600 font-medium">${c.completed}</span>
+        </td>
+        <td class="py-2 text-right text-sm font-bold text-emerald-600">
+          ${c.total_budget > 0 ? c.total_budget.toLocaleString('ru-RU') + ' ₽' : '—'}
+        </td>
+      </tr>`).join('');
+    document.getElementById('ltv-table').style.display = '';
+  } catch {
+    document.getElementById('ltv-skeleton').style.display = 'none';
+    document.getElementById('ltv-empty').style.display = '';
+  }
+}
+
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 </script>
 </body>
 </html>

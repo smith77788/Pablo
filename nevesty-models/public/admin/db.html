@@ -46,6 +46,8 @@
     <header class="topbar">
       <div class="topbar-title">🗄️ База данных</div>
       <div class="topbar-right">
+        <button onclick="runVacuum()" class="topbar-btn" id="vacuumBtn">🧹 VACUUM</button>
+        <button onclick="runBackup()" class="topbar-btn" id="backupBtn">💾 Резервная копия</button>
         <button onclick="loadData()" class="topbar-btn">↺ Обновить</button>
       </div>
     </header>
@@ -187,6 +189,39 @@ async function loadData() {
 }
 
 loadData();
+
+async function runVacuum() {
+  const btn = document.getElementById('vacuumBtn');
+  btn.disabled = true;
+  btn.textContent = '🧹 Выполняется...';
+  try {
+    const result = await _admin.apiFetch('/admin/db-vacuum', { method: 'POST' });
+    _admin.toast(result.message || 'VACUUM выполнен', 'success');
+    loadData();
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🧹 VACUUM';
+  }
+}
+
+async function runBackup() {
+  const btn = document.getElementById('backupBtn');
+  btn.disabled = true;
+  btn.textContent = '💾 Создаётся...';
+  try {
+    const result = await _admin.apiFetch('/admin/db-backup', { method: 'POST' });
+    if (result.success) {
+      _admin.toast(`Резервная копия создана: ${result.filename} (${result.size_mb} MB)`, 'success');
+    }
+  } catch (e) {
+    _admin.toast('Ошибка резервного копирования: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Резервная копия';
+  }
+}
 </script>
 </body>
 </html>

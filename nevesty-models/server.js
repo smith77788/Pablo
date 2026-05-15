@@ -346,6 +346,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 app.use('/api', apiRouter);
+app.use('/api', require('./routes/analytics-extra'));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 async function buildHealthResponse() {
