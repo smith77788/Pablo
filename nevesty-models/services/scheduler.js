@@ -196,6 +196,17 @@ async function runWalCheckpoint() {
   }
 }
 
+// Weekly WAL TRUNCATE checkpoint (Sunday at 4am) — ensures WAL file is fully flushed
+async function runWalCheckpointTruncate() {
+  try {
+    const { run } = require('../database');
+    await run('PRAGMA wal_checkpoint(TRUNCATE)', []);
+    console.log('[Scheduler] WAL checkpoint (TRUNCATE) complete');
+  } catch (e) {
+    console.error('[Scheduler] WAL checkpoint (TRUNCATE) failed:', e.message);
+  }
+}
+
 function runBackup() {
   const script = path.join(__dirname, '../scripts/backup.sh');
   execFile('bash', [script], { timeout: 60000 }, (err, stdout) => {
@@ -280,13 +291,15 @@ function start() {
   // Also run vacuum via shell script weekly (Sunday 03:30) for additional WAL cleanup
   scheduleWeekly(runVacuumScript, 'SQLite VACUUM shell script', 0, 3, 30); // Sunday 03:30
   scheduleEvery(runWalCheckpoint, 'WAL checkpoint (PASSIVE)', 6);
+  // Weekly WAL TRUNCATE checkpoint: Sunday 04:00 (ensures WAL is fully flushed after VACUUM)
+  scheduleWeekly(runWalCheckpointTruncate, 'WAL checkpoint TRUNCATE (Sunday 04:00)', 0, 4, 0);
   scheduleDaily(sendEventReminders, 'Event reminders', 9, 0);
   scheduleEvery(checkFactoryStaleness, 'Factory staleness check', 6);
   // Additional 30-min factory staleness check (faster detection)
   scheduleEveryMinutes(checkFactoryStaleness, 'Factory staleness check (30min)', 30);
   // Bot watchdog: check bot polling every 5 minutes
   scheduleEveryMinutes(checkBotHealth, 'Bot watchdog', 5);
-  console.log('[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (every 6h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min)');
+  console.log('[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min)');
 }
 
 function stop() {

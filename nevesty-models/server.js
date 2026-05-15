@@ -20,6 +20,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
+// Logs go to stdout (Docker/PM2 handles rotation via logrotate or docker logs)
 const LOG_JSON = process.env.NODE_ENV === 'production' || process.env.LOG_JSON === '1';
 
 if (LOG_JSON) {
@@ -425,6 +426,7 @@ async function buildHealthResponse() {
   const cpuUsage = process.cpuUsage();
   let dbStatus = 'ok';
   let dbError = null;
+  let dbLatencyMs = null;
   let dbSizeMb = null;
   let walStatus = null;
   let factoryLastCycle = null;
@@ -438,7 +440,9 @@ async function buildHealthResponse() {
   let ordersByStatus = {};
 
   try {
+    const dbPing = Date.now();
     await dbGet('SELECT 1 as ok');
+    dbLatencyMs = Date.now() - dbPing;
     // Fetch DB metrics in parallel
     const today = new Date().toISOString().slice(0, 10);
     const [todayRow, activeRow, modelsRow, totalOrdersRow, pageCountRow, pageSizeRow, usersRow] = await Promise.all([
@@ -545,8 +549,8 @@ async function buildHealthResponse() {
 
   // Build database sub-object
   const databaseInfo = dbStatus === 'ok'
-    ? { status: 'ok', wal: walStatus, size_mb: dbSizeMb }
-    : { status: 'error', error: dbError };
+    ? { status: 'ok', latency_ms: dbLatencyMs, wal: walStatus, size_mb: dbSizeMb }
+    : { status: 'error', latency_ms: null, error: dbError };
 
   return {
     status: overallStatus,
@@ -592,15 +596,22 @@ async function buildHealthResponse() {
       users: usersCount,
     },
     components: {
-      database: dbStatus,
+      database: dbStatus === 'ok'
+        ? { status: 'ok', latency_ms: dbLatencyMs }
+        : { status: 'error', latency_ms: null, error: dbError },
       bot: botInstance
-        ? 'ok'
+        ? { status: 'ok', polling: true }
         : (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'your_bot_token_from_botfather' && process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here')
-          ? 'configured_not_started'
-          : 'disabled',
-      factory: factoryStatus,
-      factory_last_cycle: factoryLastCycle,
-      cache: cacheStats,
+          ? { status: 'configured_not_started', polling: false }
+          : { status: 'disabled', polling: false },
+      factory: {
+        status: factoryLastCycle === null ? 'never_run' : factoryStale ? 'stale' : factoryStatus === 'unavailable' ? 'unavailable' : 'ok',
+        lastRun: factoryLastCycle,
+        staleSinceHours: factoryStale ? factoryHoursSince : 0,
+      },
+      mailer: { status: process.env.SMTP_HOST ? 'ok' : 'disabled' },
+      scheduler: { status: 'ok' },
+      cache: Object.keys(cacheStats).length ? { status: 'ok', ...cacheStats } : { status: 'disabled' },
     },
     // Structured bot health (matches task spec)
     botHealth: {
