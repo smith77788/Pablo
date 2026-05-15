@@ -171,11 +171,8 @@ Deno.serve(async (req) => {
       if (fb) chats = [Number(fb)];
     }
 
-    let sent = 0;
-    for (const c of chats) {
-      const ok = await tg(token, String(c), text);
-      if (ok) sent++;
-    }
+    const results = await Promise.all(chats.map((c) => tg(token, String(c), text)));
+    const sent = results.filter(Boolean).length;
 
     return new Response(
       JSON.stringify({ ok: true, sent, total_chats: chats.length, text_preview: text.slice(0, 500) }),

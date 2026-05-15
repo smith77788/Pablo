@@ -49,8 +49,7 @@ async function sendBriefToAdmins(sb: any, brief: string, m: MetricsBundle): Prom
     `• Tribunal: ${m.tribunal_cases_24h} кейсів | Інциденти: ${m.open_incidents}` +
     (m.silent_agents > 0 ? ` (silent: ${m.silent_agents})` : "");
 
-  let sent = 0, failed = 0;
-  for (const c of list) {
+  const results = await Promise.all(list.map(async (c) => {
     try {
       const res = await fetch(`${GATEWAY_URL}/sendMessage`, {
         method: "POST",
@@ -61,9 +60,11 @@ async function sendBriefToAdmins(sb: any, brief: string, m: MetricsBundle): Prom
         },
         body: JSON.stringify({ chat_id: c.chat_id, text, parse_mode: "HTML", disable_web_page_preview: true }),
       });
-      if (res.ok) sent++; else failed++;
-    } catch { failed++; }
-  }
+      return res.ok;
+    } catch { return false; }
+  }));
+  const sent = results.filter(Boolean).length;
+  const failed = results.length - sent;
   return { sent, failed };
 }
 
