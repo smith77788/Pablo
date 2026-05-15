@@ -3299,45 +3299,6 @@ def run_cycle() -> dict:
     # Send summary via notify.js (uses bot token from .env, consistent with other notifications)
     _notify_admins_telegram(results, decisions, cycle_id)
 
-    # Notify admin via bot after cycle completes (supplementary direct API call)
-    try:
-        import json as _json_notify
-        import re as _re_notify
-        import urllib.request as _urllib_notify
-        _bot_token_notify = os.getenv('BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
-        _admin_ids_raw_notify = os.getenv('ADMIN_TELEGRAM_IDS', '')
-        if _bot_token_notify and _admin_ids_raw_notify:
-            _admin_ids_notify = [x.strip() for x in _admin_ids_raw_notify.split(',') if x.strip()]
-            _dept_count_notify = len([
-                k for k in results
-                if k not in ('cycle_id', 'started_at', 'completed_at', 'weekly_ceo_summary',
-                             'experiments', 'phases', 'health_score', 'elapsed_s',
-                             'duration_seconds', 'summary', 'ceo_department_focus')
-            ])
-            _summary_lines_notify = [
-                f"🏭 Factory цикл завершено",
-                f"Health: {results.get('health_score', 0)}% | {elapsed}с",
-            ]
-            if 'weekly_ceo_summary' in results:
-                _ceo_excerpt = results['weekly_ceo_summary'][:200]
-                _summary_lines_notify.append(f"CEO: {_ceo_excerpt}")
-            _msg_notify = '\n'.join(_summary_lines_notify)
-            for _admin_id_notify in _admin_ids_notify:
-                try:
-                    _req_notify = _urllib_notify.Request(
-                        f'https://api.telegram.org/bot{_bot_token_notify}/sendMessage',
-                        data=_json_notify.dumps({
-                            'chat_id': _admin_id_notify,
-                            'text': _msg_notify[:4096],
-                        }).encode(),
-                        headers={'Content-Type': 'application/json'},
-                    )
-                    _urllib_notify.urlopen(_req_notify, timeout=5)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
     # ─── Record last-run timestamp in bot_settings for monitoring ────────────
     try:
         import sqlite3 as _sqlite3_lr
