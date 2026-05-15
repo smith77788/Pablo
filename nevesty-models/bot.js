@@ -59,7 +59,7 @@ function isActiveInputState(state) {
   if (['adm_broadcast_msg', 'adm_broadcast_preview', 'adm_broadcast_photo_wait',
        'adm_broadcast_edit_text', 'adm_broadcast_caption',
        'adm_sched_bcast_text', 'adm_sched_bcast_time', 'adm_sched_bcast_segment',
-       'adm_search_order_input', 'adm_search_notes_input', 'adm_search_model_input',
+       'adm_search_order_input', 'adm_order_search_input', 'adm_search_notes_input', 'adm_search_model_input',
        'adm_note_order_id', 'adm_add_admin_id',
        'replying', 'direct_reply', 'msg_to_manager',
        'check_status', 'search_height', 'search_age',
@@ -2983,6 +2983,130 @@ async function searchAdminOrders(chatId, query_text) {
   } catch (e) { console.error('[Bot] searchAdminOrders:', e.message); }
 }
 
+// ─── Admin order search by number (exact ID) ─────────────────────────────────
+
+async function showAdminOrderSearch(chatId) {
+  if (!isAdmin(chatId)) return;
+  await setSession(chatId, 'adm_order_search_input', {});
+  return safeSend(chatId,
+    `🔍 *Поиск по номеру заявки*\n\nВведите номер заявки для поиска:`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_orders__0' }]] }
+    }
+  );
+}
+
+async function handleAdminOrderSearchInput(chatId, text) {
+  if (!isAdmin(chatId)) return;
+  await clearSession(chatId);
+  const orderId = parseInt(text.trim(), 10);
+  if (!orderId || orderId <= 0 || String(orderId) !== text.trim()) {
+    return safeSend(chatId,
+      `❌ Неверный номер заявки\\. Введите положительное целое число\\.`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '🔍 Попробовать снова', callback_data: 'adm_order_search' }],
+          [{ text: '← Заявки',            callback_data: 'adm_orders__0'    }],
+        ]}
+      }
+    );
+  }
+  const order = await get('SELECT id FROM orders WHERE id=?', [orderId]).catch(()=>null);
+  if (!order) {
+    return safeSend(chatId,
+      `❌ Заявка *\\#${esc(String(orderId))}* не найдена\\.`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '🔍 Попробовать снова', callback_data: 'adm_order_search' }],
+          [{ text: '← Заявки',            callback_data: 'adm_orders__0'    }],
+        ]}
+      }
+    );
+  }
+  return showAdminOrder(chatId, orderId);
+}
+
+// ─── Admin orders filter by model ─────────────────────────────────────────────
+
+async function showAdminOrdersFilterModel(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const models = await query(
+      `SELECT m.id, m.name, COUNT(o.id) as cnt
+       FROM models m
+       JOIN orders o ON o.model_id = m.id
+       GROUP BY m.id, m.name
+       ORDER BY cnt DESC
+       LIMIT 10`
+    );
+    if (!models.length) {
+      return safeSend(chatId, '📭 Заявок с привязкой к моделям не найдено\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '← К заявкам', callback_data: 'adm_orders__0' }]] }
+      });
+    }
+    const btns = models.map(m => [{
+      text: `${esc(m.name)} (${m.cnt})`,
+      callback_data: `adm_orders_model_${m.id}`
+    }]);
+    return safeSend(chatId, `🔽 *Фильтр по модели*\n\nВыберите модель:`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        ...btns,
+        [{ text: '← К заявкам', callback_data: 'adm_orders__0' }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showAdminOrdersFilterModel:', e.message); }
+}
+
+async function showAdminOrdersByModel(chatId, modelId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const model = await get('SELECT id, name FROM models WHERE id=?', [modelId]).catch(()=>null);
+    const orders = await query(
+      `SELECT o.*, m.name as model_name,
+        (SELECT COUNT(*) FROM order_notes WHERE order_id=o.id) as note_count
+       FROM orders o
+       LEFT JOIN models m ON o.model_id=m.id
+       WHERE o.model_id=?
+       ORDER BY o.created_at DESC LIMIT 20`,
+      [modelId]
+    );
+    const modelName = model ? model.name : `#${modelId}`;
+    if (!orders.length) {
+      return safeSend(chatId, `📭 Заявок для модели *${esc(modelName)}* не найдено\\.`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '← Фильтр по модели', callback_data: 'adm_orders_filter_model' }],
+          [{ text: '← К заявкам',        callback_data: 'adm_orders__0'           }],
+        ]}
+      });
+    }
+    let text = `💃 *Заявки — ${esc(modelName)}* \\(${orders.length}\\)\n\n`;
+    const btns = orders.map(o => {
+      const icon = STATUS_LABELS[o.status]?.split(' ')[0] || '';
+      const noteBadge = o.note_count > 0 ? ` \\(📝 ${esc(String(o.note_count))}\\)` : '';
+      text += `${icon} *${esc(o.order_number)}* — ${esc(o.client_name)}${noteBadge}\n`;
+      const noteLabel = o.note_count > 0 ? ` (📝 ${o.note_count})` : '';
+      const row = [{ text: `${o.order_number}  ·  ${o.client_name}${noteLabel}`, callback_data: `adm_order_${o.id}` }];
+      if (o.status === 'new')       row.push({ text: '✅ Принять',   callback_data: `adm_quick_confirm_${o.id}` });
+      if (o.status === 'confirmed') row.push({ text: '🏁 Завершить', callback_data: `adm_quick_complete_${o.id}` });
+      return row;
+    });
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        ...btns,
+        [{ text: '← Фильтр по модели', callback_data: 'adm_orders_filter_model' }],
+        [{ text: '← К заявкам',        callback_data: 'adm_orders__0'           }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] showAdminOrdersByModel:', e.message); }
+}
+
 // ─── Note search ──────────────────────────────────────────────────────────────
 
 async function showAdminSearchNotes(chatId) {
@@ -4501,6 +4625,19 @@ function initBot(app) {
       return showAdminOrdersToday(chatId);
     }
 
+    // ── Admin orders filter by model — picker
+    if (data === 'adm_orders_filter_model') {
+      if (!isAdmin(chatId)) return;
+      return showAdminOrdersFilterModel(chatId);
+    }
+
+    // ── Admin orders filter by model — results: adm_orders_model_{id}
+    if (data.startsWith('adm_orders_model_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_orders_model_', ''));
+      if (modelId > 0) return showAdminOrdersByModel(chatId, modelId);
+    }
+
     // ── Admin orders list: adm_orders_{status}_{page}
     if (data.startsWith('adm_orders_')) {
       if (!isAdmin(chatId)) return;
@@ -4508,6 +4645,12 @@ function initBot(app) {
       const page   = parseInt(parts.pop()) || 0;
       const status = parts.join('_');
       return showAdminOrders(chatId, status, page);
+    }
+
+    // ── Admin order search by number
+    if (data === 'adm_order_search') {
+      if (!isAdmin(chatId)) return;
+      return showAdminOrderSearch(chatId);
     }
 
     // ── Admin order status history
@@ -6649,6 +6792,11 @@ function initBot(app) {
       // ── Admin search order input
       if (state === 'adm_search_order_input') {
         return searchAdminOrders(chatId, text);
+      }
+
+      // ── Admin order search by number input
+      if (state === 'adm_order_search_input') {
+        return handleAdminOrderSearchInput(chatId, text);
       }
 
       // ── Admin search notes input

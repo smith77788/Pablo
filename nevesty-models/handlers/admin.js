@@ -312,6 +312,8 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
         ...btns,
         ...(nav.length ? [nav] : []),
         [{ text: '📦 Все новые → В работу', callback_data: 'adm_bulk_new_to_review' }],
+        [{ text: '🔍 Поиск по №',           callback_data: 'adm_order_search'        },
+         { text: '🔽 По модели',             callback_data: 'adm_orders_filter_model' }],
         [{ text: '🔍 Найти заявку', callback_data: 'adm_search_order' },
          { text: '← Меню',         callback_data: 'admin_menu'        }],
       ]}
