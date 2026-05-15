@@ -170,7 +170,7 @@
 
         <!-- Search + export row -->
         <div class="filters-bar">
-          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск по имени или телефону..." />
+          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск: ім'я, телефон, №заявки..." />
           <select class="filter-select" id="statusFilter" style="display:none">
             <option value="">Все статусы</option>
             <option value="new">Новые</option>
@@ -183,6 +183,9 @@
           <select class="filter-select" id="modelFilter" onchange="loadOrders(1)" style="min-width:160px">
             <option value="">Все модели</option>
           </select>
+          <button onclick="setDatePreset('today')" class="btn btn-sm btn-ghost">Сьогодні</button>
+          <button onclick="setDatePreset('week')" class="btn btn-sm btn-ghost">Тиждень</button>
+          <button onclick="setDatePreset('month')" class="btn btn-sm btn-ghost">Місяць</button>
           <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">с</label>
           <input class="filter-input" type="date" id="filterFrom" style="width:130px" onchange="loadOrders(1)" />
           <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">по</label>
@@ -510,7 +513,7 @@ function renderTable(orders) {
           onchange="toggleRow(${o.id}, this.checked)" />
       </td>
       <td><strong>${_admin.escapeHtml(o.order_number)}</strong>${unread}</td>
-      <td>${_admin.escapeHtml(o.client_name)}<br><span style="font-size:0.75rem;color:var(--text-dim)">${_admin.escapeHtml(o.client_phone)}</span></td>
+      <td>${_admin.escapeHtml(o.client_name)}<br><span style="font-size:0.75rem;color:var(--text-dim)">${_admin.escapeHtml(o.client_phone)}</span>${o.internal_note ? `<div style="font-size:0.72rem;color:#888;margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_admin.escapeHtml(o.internal_note)}">📝 ${_admin.escapeHtml(o.internal_note)}</div>` : ''}</td>
       <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
       <td>${o.model_name || '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
@@ -1028,6 +1031,25 @@ document.getElementById('searchInput').addEventListener('input', () => {
   searchTimer = setTimeout(() => loadOrders(1), 400);
 });
 document.getElementById('statusFilter').addEventListener('change', () => loadOrders(1));
+
+function setDatePreset(preset) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const today = fmt(now);
+  const fromEl = document.getElementById('filterFrom');
+  const toEl = document.getElementById('filterTo');
+  if (preset === 'today') {
+    fromEl.value = today; toEl.value = today;
+  } else if (preset === 'week') {
+    const week = new Date(now); week.setDate(now.getDate() - 7);
+    fromEl.value = fmt(week); toEl.value = today;
+  } else if (preset === 'month') {
+    const month = new Date(now); month.setDate(now.getDate() - 30);
+    fromEl.value = fmt(month); toEl.value = today;
+  }
+  loadOrders(1);
+}
 
 function clearFilters() {
   document.getElementById('searchInput').value = '';
