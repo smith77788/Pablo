@@ -1012,6 +1012,68 @@ def run_cycle() -> dict:
         logger.error("Phase 15 experiment tracking error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 22 — SALES DEPT v2: новые агенты с именами (Алиса, Михаил, Екатерина, Дмитрий)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n💼 PHASE 22: SALES DEPT v2 (Алиса/Михаил/Екатерина/Дмитрий)")
+    sales_v2_results = {}
+    try:
+        from factory.agents.sales import (
+            LeadQualifierAgent, ProposalWriterAgent,
+            FollowUpSpecialistAgent, PricingNegotiatorAgent,
+        )
+        sales_v2_context = {"insights": insights, "metrics": all_metrics}
+
+        for AgentClass in [LeadQualifierAgent, ProposalWriterAgent, FollowUpSpecialistAgent, PricingNegotiatorAgent]:
+            try:
+                _agent = AgentClass()
+                _result = _agent.run(sales_v2_context)
+                sales_v2_results[_agent.role] = _result
+                logger.info("[Phase22] %s (%s): ok", _agent.role, _agent.name)
+            except Exception as _ae:
+                logger.error("[Phase22] %s error: %s", AgentClass.__name__, _ae)
+                sales_v2_results[AgentClass.role] = {}
+
+        results["phases"]["sales_v2"] = {
+            "agents": list(sales_v2_results.keys()),
+            "results": sales_v2_results,
+        }
+        active_v2 = [k for k, v in sales_v2_results.items() if v]
+        summary_lines.append(f"💼 Sales v2 (Phase 22): {', '.join(active_v2)}")
+    except Exception as e:
+        logger.error("Phase 22 Sales v2 error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 23 — CREATIVE DEPT v2: новые агенты с именами (Анастасия, Артём, Мария, Ольга)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🎨 PHASE 23: CREATIVE DEPT v2 (Анастасия/Артём/Мария/Ольга)")
+    creative_v2_results = {}
+    try:
+        from factory.agents.creative import (
+            CopywriterAgent, VisualConceptorAgent,
+            BrandVoiceKeeperAgent, StorytellingAgent as StorytellingAgentV2,
+        )
+        creative_v2_context = {"insights": insights, "metrics": all_metrics}
+
+        for AgentClass in [CopywriterAgent, VisualConceptorAgent, BrandVoiceKeeperAgent, StorytellingAgentV2]:
+            try:
+                _agent = AgentClass()
+                _result = _agent.run(creative_v2_context)
+                creative_v2_results[_agent.role] = _result
+                logger.info("[Phase23] %s (%s): ok", _agent.role, _agent.name)
+            except Exception as _ae:
+                logger.error("[Phase23] %s error: %s", AgentClass.__name__, _ae)
+                creative_v2_results[AgentClass.role] = {}
+
+        results["phases"]["creative_v2"] = {
+            "agents": list(creative_v2_results.keys()),
+            "results": creative_v2_results,
+        }
+        active_cv2 = [k for k, v in creative_v2_results.items() if v]
+        summary_lines.append(f"🎨 Creative v2 (Phase 23): {', '.join(active_cv2)}")
+    except Exception as e:
+        logger.error("Phase 23 Creative v2 error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 8 — CEO SYNTHESIS: синтез всех департаментов
     # ════════════════════════════════════════════════════════════════
     logger.info("\n🏆 CEO SYNTHESIS")
