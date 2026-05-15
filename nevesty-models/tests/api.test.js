@@ -93,9 +93,7 @@ describe('Config', () => {
 
 describe('Auth', () => {
   test('POST /api/admin/login with valid credentials → 200 + token', async () => {
-    const res = await request(app)
-      .post('/api/admin/login')
-      .send({ username: 'admin', password: 'admin123' });
+    const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeTruthy();
     expect(res.body.admin).toBeDefined();
@@ -104,9 +102,7 @@ describe('Auth', () => {
   });
 
   test('POST /api/admin/login with wrong password → 401', async () => {
-    const res = await request(app)
-      .post('/api/admin/login')
-      .send({ username: 'admin', password: 'wrongpassword' });
+    const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'wrongpassword' });
     expect(res.status).toBe(401);
     expect(res.body.error).toBeTruthy();
   });
@@ -171,16 +167,16 @@ describe('Public API — Settings', () => {
 // ── Public: Reviews ───────────────────────────────────────────────────────────
 
 describe('Public API — Reviews', () => {
-  test('GET /api/reviews/public → 200, array', async () => {
+  test('GET /api/reviews/public → 200, reviews array', async () => {
     const res = await request(app).get('/api/reviews/public');
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
+    expect(Array.isArray(res.body.reviews)).toBe(true);
   });
 
   test('GET /api/reviews/public?limit=3 → max 3 items', async () => {
     const res = await request(app).get('/api/reviews/public?limit=3');
     expect(res.status).toBe(200);
-    expect(res.body.length).toBeLessThanOrEqual(3);
+    expect(res.body.reviews.length).toBeLessThanOrEqual(3);
   });
 });
 
@@ -206,16 +202,13 @@ async function getCsrfToken() {
 describe('Public API — Orders', () => {
   test('POST /api/orders with valid body → 200 or 201 + order_number', async () => {
     const csrfToken = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrfToken)
-      .send({
-        client_name: 'Тест Клиент',
-        client_phone: '+7 999 123-45-67',
-        event_type: 'photo_shoot',
-        event_date: '2026-08-15',
-        event_duration: 4,
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrfToken).send({
+      client_name: 'Тест Клиент',
+      client_phone: '+7 999 123-45-67',
+      event_type: 'photo_shoot',
+      event_date: '2026-08-15',
+      event_duration: 4,
+    });
     expect([200, 201]).toContain(res.status);
     expect(res.body.order_number).toBeTruthy();
     expect(res.body.id).toBeTruthy();
@@ -268,9 +261,7 @@ describe('Public API — Contact', () => {
 describe('Admin API — Orders', () => {
   test('GET /api/admin/orders → 200 + { orders, total, page, pages }', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/orders')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/orders').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.orders)).toBe(true);
     expect(typeof res.body.total).toBe('number');
@@ -280,9 +271,7 @@ describe('Admin API — Orders', () => {
 
   test('GET /api/admin/orders?page=1&limit=5 → respects limit', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/orders?page=1&limit=5')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/orders?page=1&limit=5').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.orders)).toBe(true);
     expect(res.body.orders.length).toBeLessThanOrEqual(5);
@@ -316,22 +305,19 @@ describe('Admin API — Orders', () => {
 describe('Admin API — Models', () => {
   test('POST /api/admin/models/json → 200 or 201 (create model, auth)', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .post('/api/admin/models/json')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        name: 'Test Model CI',
-        height: 175,
-        weight: 55,
-        bust: 88,
-        waist: 62,
-        hips: 90,
-        shoe_size: '38',
-        age: 23,
-        category: 'fashion',
-        city: 'Kyiv',
-        available: 1,
-      });
+    const res = await request(app).post('/api/admin/models/json').set('Authorization', `Bearer ${adminToken}`).send({
+      name: 'Test Model CI',
+      height: 175,
+      weight: 55,
+      bust: 88,
+      waist: 62,
+      hips: 90,
+      shoe_size: '38',
+      age: 23,
+      category: 'fashion',
+      city: 'Kyiv',
+      available: 1,
+    });
     expect([200, 201]).toContain(res.status);
     expect(res.body.id || res.body.model_id || res.body.success).toBeTruthy();
     createdModelId = res.body.id || createdModelId;
@@ -339,9 +325,7 @@ describe('Admin API — Models', () => {
 
   test('GET /api/admin/models → 200 + models array (auth)', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/models')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/models').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     const models = res.body.models || res.body;
     expect(Array.isArray(models)).toBe(true);
@@ -353,20 +337,18 @@ describe('Admin API — Models', () => {
 describe('Admin API — Stats & Audit', () => {
   test('GET /api/admin/stats → 200 with orders field (auth)', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/stats')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/stats').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(
-      res.body.hasOwnProperty('new_orders') || res.body.hasOwnProperty('orders_today') || res.body.hasOwnProperty('total_orders')
+      res.body.hasOwnProperty('new_orders') ||
+        res.body.hasOwnProperty('orders_today') ||
+        res.body.hasOwnProperty('total_orders')
     ).toBe(true);
   });
 
   test('GET /api/admin/db-stats → 200 with tables array (auth)', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/db-stats')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/db-stats').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.tables)).toBe(true);
     expect(res.body.tables.length).toBeGreaterThan(0);
@@ -374,9 +356,7 @@ describe('Admin API — Stats & Audit', () => {
 
   test('GET /api/admin/audit-log → 200, has rows (auth)', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/audit-log')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/audit-log').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     // endpoint returns { rows: [], total: N } or plain array (both valid)
     const isArray = Array.isArray(res.body);
@@ -386,18 +366,14 @@ describe('Admin API — Stats & Audit', () => {
 
   test('GET /api/admin/managers → 200, array (auth)', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/managers')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/managers').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
   });
 
   test('GET /api/admin/factory-tasks → 200 (auth)', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/factory-tasks')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory-tasks').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.hasOwnProperty('tasks') || Array.isArray(res.body)).toBe(true);
   });

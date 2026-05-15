@@ -45,9 +45,7 @@ beforeAll(async () => {
 
   app = a;
 
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 
   // Get seeded model from demo data
@@ -56,10 +54,13 @@ beforeAll(async () => {
 
   // Ensure at least one approved review exists (database.js seeds some)
   // Also insert a pending review to validate filtering
-  await run(
-    'INSERT OR IGNORE INTO reviews (client_name, rating, text, model_id, approved) VALUES (?,?,?,?,?)',
-    ['Wave53 PendingReviewer', 4, 'Pending review text', null, 0]
-  );
+  await run('INSERT OR IGNORE INTO reviews (client_name, rating, text, model_id, approved) VALUES (?,?,?,?,?)', [
+    'Wave53 PendingReviewer',
+    4,
+    'Pending review text',
+    null,
+    0,
+  ]);
 }, 15000);
 
 // ── Public Reviews — GET /api/reviews ─────────────────────────────────────────
@@ -160,30 +161,30 @@ describe('Recent Reviews — GET /api/reviews/recent', () => {
 // ── Public Reviews Explicit — GET /api/reviews/public ─────────────────────────
 
 describe('Public Reviews Endpoint — GET /api/reviews/public', () => {
-  it('returns HTTP 200 with an array', async () => {
+  it('returns HTTP 200 with reviews array in object', async () => {
     const res = await request(app).get('/api/reviews/public');
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
+    expect(Array.isArray(res.body.reviews)).toBe(true);
   });
 
   it('defaults to 6 items', async () => {
     const res = await request(app).get('/api/reviews/public');
     expect(res.status).toBe(200);
-    expect(res.body.length).toBeLessThanOrEqual(6);
+    expect(res.body.reviews.length).toBeLessThanOrEqual(6);
   });
 
-  it('items include author_name field (alias for client_name)', async () => {
+  it('items include client_name field', async () => {
     const res = await request(app).get('/api/reviews/public');
     expect(res.status).toBe(200);
-    if (res.body.length > 0) {
-      expect(res.body[0]).toHaveProperty('author_name');
+    if (res.body.reviews.length > 0) {
+      expect(res.body.reviews[0]).toHaveProperty('client_name');
     }
   });
 
   it('respects ?limit parameter', async () => {
     const res = await request(app).get('/api/reviews/public?limit=2');
     expect(res.status).toBe(200);
-    expect(res.body.length).toBeLessThanOrEqual(2);
+    expect(res.body.reviews.length).toBeLessThanOrEqual(2);
   });
 });
 
@@ -196,9 +197,7 @@ describe('Admin Reviews — GET /api/admin/reviews', () => {
   });
 
   it('returns paginated reviews for authorized admin', async () => {
-    const res = await request(app)
-      .get('/api/admin/reviews')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('reviews');
     expect(Array.isArray(res.body.reviews)).toBe(true);
@@ -206,18 +205,14 @@ describe('Admin Reviews — GET /api/admin/reviews', () => {
   });
 
   it('filters by ?approved=0 (pending only)', async () => {
-    const res = await request(app)
-      .get('/api/admin/reviews?approved=0')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews?approved=0').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.reviews)).toBe(true);
     res.body.reviews.forEach(r => expect(r.approved).toBe(0));
   });
 
   it('filters by ?approved=1 (approved only)', async () => {
-    const res = await request(app)
-      .get('/api/admin/reviews?approved=1')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews?approved=1').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.reviews)).toBe(true);
     res.body.reviews.forEach(r => expect(r.approved).toBe(1));
@@ -249,9 +244,7 @@ describe('Audit Log Filters — GET /api/admin/audit-log', () => {
   });
 
   it('returns audit log without filters', async () => {
-    const res = await request(app)
-      .get('/api/admin/audit-log')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/audit-log').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('rows');
     expect(Array.isArray(res.body.rows)).toBe(true);
@@ -314,24 +307,18 @@ describe('Audit Log Filters — GET /api/admin/audit-log', () => {
   });
 
   it('filters by ?since=today without error', async () => {
-    const res = await request(app)
-      .get('/api/admin/audit-log?since=today')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/audit-log?since=today').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('rows');
   });
 
   it('filters by ?since=7d without error', async () => {
-    const res = await request(app)
-      .get('/api/admin/audit-log?since=7d')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/audit-log?since=7d').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   it('filters by ?since=30d without error', async () => {
-    const res = await request(app)
-      .get('/api/admin/audit-log?since=30d')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/audit-log?since=30d').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
@@ -344,9 +331,7 @@ describe('Audit Log Filters — GET /api/admin/audit-log', () => {
   });
 
   it('respects ?limit parameter', async () => {
-    const res = await request(app)
-      .get('/api/admin/audit-log?limit=5')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/audit-log?limit=5').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.rows.length).toBeLessThanOrEqual(5);
   });
@@ -369,18 +354,14 @@ describe('Audit Log Export — GET /api/admin/audit/export', () => {
   });
 
   it('returns CSV content for authorized admin', async () => {
-    const res = await request(app)
-      .get('/api/admin/audit/export')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/audit/export').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     const ct = res.headers['content-type'] || '';
     expect(ct).toMatch(/text\/csv/);
   });
 
   it('returns Content-Disposition attachment header', async () => {
-    const res = await request(app)
-      .get('/api/admin/audit/export')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/audit/export').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     const cd = res.headers['content-disposition'] || '';
     expect(cd).toMatch(/attachment/);
@@ -388,9 +369,7 @@ describe('Audit Log Export — GET /api/admin/audit/export', () => {
   });
 
   it('CSV has header row with expected columns', async () => {
-    const res = await request(app)
-      .get('/api/admin/audit/export')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/audit/export').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     const firstLine = res.text.replace(/^﻿/, '').split('\n')[0];
     expect(firstLine).toMatch(/ID/);
