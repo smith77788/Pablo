@@ -1787,6 +1787,76 @@ def run_cycle() -> dict:
         logger.error("Phase 7b Finance+Research heuristic error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 7c — SALES + FINANCE DEPARTMENTS (run_cycle, parallel)
+    # Runs SalesDepartment.run_cycle() and FinanceDepartment.run_cycle()
+    # from sales_dept.py / finance_dept.py (requires Anthropic API key).
+    # Both departments expose the standard run_cycle(context) interface.
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n💼💰 PHASE 7c: SALES + FINANCE run_cycle (parallel)")
+    if not _api_available:
+        logger.info("[Phase7c] Skipped — no real API key")
+    else:
+        try:
+            from factory.agents.sales_dept import SalesDepartment as _SalesDeptCycle
+            from factory.agents.finance_dept import FinanceDepartment as _FinanceDeptCycle
+
+            _dept7c_ctx = {"insights": insights, "metrics": all_metrics, "nevesty_kpis": nevesty_kpis}
+
+            _sales_dept7c = _SalesDeptCycle()
+            _finance_dept7c = _FinanceDeptCycle()
+
+            _dept7c_results = run_departments_parallel({
+                "sales_cycle": type("_SalesCycleRunner", (), {
+                    "run": lambda self: _sales_dept7c.run_cycle(_dept7c_ctx)
+                })(),
+                "finance_cycle": type("_FinanceCycleRunner", (), {
+                    "run": lambda self: _finance_dept7c.run_cycle(_dept7c_ctx)
+                })(),
+            })
+
+            _sales7c = _dept7c_results.get("sales_cycle", {})
+            _finance7c = _dept7c_results.get("finance_cycle", {})
+
+            if _sales7c and not _sales7c.get("error"):
+                results["phases"].setdefault("sales_dept_cycle", {}).update({
+                    "department": _sales7c.get("department", "sales"),
+                    "insights": _sales7c.get("insights", [])[:3],
+                    "recommendations": _sales7c.get("recommendations", [])[:3],
+                    "status": "ok",
+                })
+                logger.info(
+                    "[Phase7c] SalesDept run_cycle: insights=%d, recs=%d",
+                    len(_sales7c.get("insights", [])),
+                    len(_sales7c.get("recommendations", [])),
+                )
+                summary_lines.append(
+                    f"💼 Sales run_cycle (7c): {len(_sales7c.get('insights', []))} insights, "
+                    f"{len(_sales7c.get('recommendations', []))} recs"
+                )
+
+            if _finance7c and not _finance7c.get("error"):
+                results["phases"].setdefault("finance_dept_cycle", {}).update({
+                    "department": _finance7c.get("department", "finance"),
+                    "insights": _finance7c.get("insights", [])[:3],
+                    "recommendations": _finance7c.get("recommendations", [])[:3],
+                    "status": "ok",
+                })
+                logger.info(
+                    "[Phase7c] FinanceDept run_cycle: insights=%d, recs=%d",
+                    len(_finance7c.get("insights", [])),
+                    len(_finance7c.get("recommendations", [])),
+                )
+                summary_lines.append(
+                    f"💰 Finance run_cycle (7c): {len(_finance7c.get('insights', []))} insights, "
+                    f"{len(_finance7c.get('recommendations', []))} recs"
+                )
+
+        except ImportError as _imp7c:
+            logger.warning("[Phase7c] Import error — sales_dept or finance_dept unavailable: %s", _imp7c)
+        except Exception as _e7c:
+            logger.error("[Phase7c] Sales+Finance run_cycle error: %s", _e7c)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 12 — SALES DEPARTMENT (все 4 агента индивидуально)
     # ════════════════════════════════════════════════════════════════
     logger.info("\n💼 PHASE 12: SALES DEPARTMENT (4 agents)")
