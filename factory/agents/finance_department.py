@@ -435,3 +435,63 @@ class BudgetPlanner:
             "total_variance": total_variance,
             "status": status,
         }
+
+
+# ──────────────────────────────────────────────────────────────
+# FinanceDepartment — facade
+# ──────────────────────────────────────────────────────────────
+
+class FinanceDepartment:
+    """Facade that orchestrates all Finance Department heuristic agents."""
+
+    def __init__(self) -> None:
+        self.forecaster = RevenueForecaster()
+        self.optimizer = CostOptimizer()
+        self.pricing = PricingStrategist()
+        self.planner = BudgetPlanner()
+
+    def run_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Run full financial analysis cycle.
+
+        Args:
+            data: dict with keys:
+                revenue_history: list of monthly revenue dicts or floats
+                costs: dict of category -> amount (actual costs)
+
+        Returns:
+            Aggregated analysis results.
+        """
+        revenue_history_raw: list = data.get('revenue_history', [])
+        costs: Dict[str, float] = data.get('costs', {})
+
+        # Normalize revenue history to list-of-dicts format expected by forecaster
+        orders_history: List[Dict[str, Any]] = []
+        for entry in revenue_history_raw:
+            if isinstance(entry, dict):
+                orders_history.append(entry)
+            else:
+                orders_history.append({'revenue': float(entry)})
+
+        forecast_result = self.forecaster.forecast_monthly_revenue(orders_history, months_ahead=3)
+        current_revenue = forecast_result.get('forecast', 0.0)
+
+        cost_analysis = self.optimizer.analyze_cost_structure(
+            expenses=costs,
+            revenue=current_revenue,
+        ) if current_revenue > 0 else {'suggestions': [], 'breakdown': {}}
+
+        budget = self.planner.create_monthly_budget(
+            revenue_forecast=current_revenue,
+            fixed_costs=costs,
+        )
+
+        return {
+            'revenue_forecast_3m': [
+                self.forecaster.forecast_monthly_revenue(orders_history, months_ahead=i).get('forecast', 0.0)
+                for i in range(1, 4)
+            ],
+            'trend': forecast_result.get('trend', 'stable'),
+            'confidence': forecast_result.get('confidence', 'low'),
+            'cost_analysis': cost_analysis,
+            'budget_plan': budget,
+        }
