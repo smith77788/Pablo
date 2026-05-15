@@ -622,6 +622,9 @@
               <button id="favBtn" onclick="toggleFavorite()" aria-label="Добавить в избранное" style="display:block;width:100%;margin-top:10px;padding:14px 24px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">
                 <span aria-hidden="true">❤️</span> В избранное
               </button>
+              <button id="compareBtn" onclick="toggleCompareModel()" aria-label="Добавить к сравнению" style="display:block;width:100%;margin-top:8px;padding:14px 24px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">
+                ⚖️ Добавить к сравнению
+              </button>
               <!-- Social sharing -->
               <div style="display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap">
                 <span style="font-size:0.75rem;color:var(--text-dim);white-space:nowrap">Поделиться:</span>
@@ -1045,6 +1048,71 @@
         }
       }
 
+      // ── Compare ───────────────────────────────────────────────────────────────
+      const COMPARE_KEY = 'nm_compare';
+      const MAX_COMPARE = 3;
+      function getCompareIds() {
+        try { return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]'); } catch { return []; }
+      }
+      function saveCompareIds(ids) {
+        try { localStorage.setItem(COMPARE_KEY, JSON.stringify(ids)); } catch {}
+      }
+      window.toggleCompareModel = function() {
+        const id = parseInt(getParam('id'), 10);
+        if (!id) return;
+        const ids = getCompareIds();
+        const idx = ids.indexOf(id);
+        const btn = document.getElementById('compareBtn');
+        if (idx === -1) {
+          if (ids.length >= MAX_COMPARE) {
+            showToastMsg(`Максимум ${MAX_COMPARE} модели для сравнения`);
+            return;
+          }
+          ids.push(id);
+          saveCompareIds(ids);
+          if (btn) {
+            btn.textContent = '⚖️ Убрать из сравнения';
+            btn.style.color = 'var(--gold)';
+            btn.style.borderColor = 'var(--gold)';
+          }
+          showToastMsg('Добавлено в сравнение ⚖️');
+        } else {
+          ids.splice(idx, 1);
+          saveCompareIds(ids);
+          if (btn) {
+            btn.textContent = '⚖️ Добавить к сравнению';
+            btn.style.color = '';
+            btn.style.borderColor = '';
+          }
+          showToastMsg('Убрано из сравнения');
+        }
+      };
+      function updateCompareBtn() {
+        const id = parseInt(getParam('id'), 10);
+        if (!id) return;
+        const btn = document.getElementById('compareBtn');
+        if (!btn) return;
+        const ids = getCompareIds();
+        if (ids.includes(id)) {
+          btn.textContent = '⚖️ Убрать из сравнения';
+          btn.style.color = 'var(--gold)';
+          btn.style.borderColor = 'var(--gold)';
+        } else {
+          btn.textContent = '⚖️ Добавить к сравнению';
+          btn.style.color = '';
+          btn.style.borderColor = '';
+        }
+      }
+      function showToastMsg(msg) {
+        const c = document.getElementById('toastContainer');
+        if (!c) return;
+        const t = document.createElement('div');
+        t.className = 'toast';
+        t.textContent = msg;
+        c.appendChild(t);
+        setTimeout(() => t.remove(), 3000);
+      }
+
       // ── init ───────────────────────────────────────────────────────────────────
       const modelId = getParam('id');
       if (!modelId || isNaN(parseInt(modelId, 10))) {
@@ -1056,6 +1124,7 @@
         document.addEventListener('DOMContentLoaded', function () {
           loadModel(parseInt(modelId, 10));
           updateFavBtn();
+          updateCompareBtn();
         });
       }
     })();

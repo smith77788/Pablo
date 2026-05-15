@@ -4,8 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Статус заявки — Nevesty Models</title>
-  <meta name="description" content="Проверьте статус вашей заявки в агентстве Nevesty Models по номеру заказа.">
-  <meta name="robots" content="noindex, follow">
+  <meta name="description" content="Проверьте статус вашей заявки в агентстве Nevesty Models по номеру заказа. Отслеживайте этапы выполнения от подачи до завершения.">
+  <meta name="robots" content="noindex">
+  <meta property="og:title" content="Статус заявки — Nevesty Models">
+  <meta property="og:description" content="Проверьте статус вашей заявки в агентстве Nevesty Models по номеру заказа.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
+  <meta property="og:url" content="https://nevesty-models.ru/order-status.html">
+  <meta property="og:site_name" content="Nevesty Models">
+  <meta property="og:locale" content="ru_RU">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@nevesty_models">
   <meta name="theme-color" content="#080808">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -473,6 +482,20 @@
 
   <div class="toast-container" id="toastContainer"></div>
   <script src="/js/main.js" defer></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Nevesty Models",
+    "url": "https://nevesty-models.ru",
+    "logo": "https://nevesty-models.ru/og-image.jpg",
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "contactType": "customer service",
+      "availableLanguage": "Russian"
+    }
+  }
+  </script>
   <script>
   const STATUS_LABELS = {
     new:         'Новая заявка',

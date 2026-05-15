@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Сравнение моделей — Nevesty Models</title>
+  <meta name="description" content="Сравните параметры моделей агентства Nevesty Models: рост, возраст, город, категория.">
+  <meta property="og:title" content="Сравнение моделей — Nevesty Models">
+  <meta property="og:description" content="Сравните параметры профессиональных моделей Nevesty Models.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
+  <meta name="robots" content="noindex, follow">
+  <meta name="theme-color" content="#080808">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/css/main.css" />
+  <script src="/js/darkmode.js"></script>
+  <style>
+    /* ── compare page ── */
+    .compare-page {
+      min-height: 100vh;
+      padding: 100px 0 80px;
+    }
+    .compare-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .compare-header h1 {
+      font-size: clamp(2rem, 5vw, 3rem);
+      color: var(--white);
+      margin-bottom: 12px;
+    }
+    .compare-header p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    /* ── columns table ── */
+    .compare-table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      min-width: 560px;
+    }
+    .compare-table th,
+    .compare-table td {
+      padding: 0;
+      vertical-align: top;
+    }
+
+    /* label column */
+    .compare-table .col-label {
+      width: 140px;
+      min-width: 110px;
+    }
+    /* model columns */
+    .compare-table .col-model {
+      width: calc((100% - 140px) / 3);
+      border-left: 1px solid var(--border);
+    }
+
+    /* ── photo cell ── */
+    .cmp-photo-cell {
+      position: relative;
+      background: var(--bg3);
+    }
+    .cmp-photo-wrap {
+      position: relative;
+      padding-bottom: 133%;
+      overflow: hidden;
+    }
+    .cmp-photo-wrap img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center top;
+    }
+    .cmp-photo-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Playfair Display', serif;
+      font-size: 3rem;
+      color: rgba(201,169,110,0.15);
+    }
+    .cmp-remove-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 30px;
+      height: 30px;
+      background: rgba(0,0,0,0.65);
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, color 0.2s;
+      z-index: 5;
+    }
+    .cmp-remove-btn:hover {
+      background: rgba(200,50,50,0.85);
+      color: #fff;
+    }
+
+    /* ── name row ── */
+    .cmp-name-cell {
+      padding: 16px 14px 10px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+    }
+    .cmp-model-name {
+      font-family: 'Playfair Display', serif;
+      font-size: 1rem;
+      color: var(--white);
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .cmp-category {
+      font-size: 0.65rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+
+    /* ── label cells ── */
+    .cmp-row-label {
+      font-size: 0.65rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 14px 10px 14px 0;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .cmp-value-cell {
+      padding: 14px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.88rem;
+      color: var(--text);
+      background: var(--bg2);
+    }
+    .cmp-value-cell.highlight {
+      color: var(--gold);
+      font-weight: 600;
+    }
+    .cmp-value-em {
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    /* availability dot in cell */
+    .cmp-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+    }
+    .cmp-status::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+    }
+    .cmp-status.free { color: #4caf50; }
+    .cmp-status.busy { color: #f44336; }
+
+    /* ── book button row ── */
+    .cmp-book-cell {
+      padding: 16px 14px;
+      background: var(--bg2);
+    }
+    .cmp-btn-book {
+      display: block;
+      width: 100%;
+      padding: 12px 8px;
+      background: var(--gold);
+      color: var(--bg);
+      font-size: 0.72rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      font-weight: 600;
+      text-align: center;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all var(--transition);
+      margin-bottom: 8px;
+    }
+    .cmp-btn-book:hover {
+      background: var(--gold-light);
+      transform: translateY(-2px);
+    }
+    .cmp-btn-profile {
+      display: block;
+      width: 100%;
+      padding: 10px 8px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      text-align: center;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all var(--transition);
+    }
+    .cmp-btn-profile:hover {
+      border-color: var(--gold);
+      color: var(--gold);
+    }
+
+    /* ── empty slot ── */
+    .cmp-empty-col {
+      vertical-align: top;
+    }
+    .cmp-empty-photo {
+      position: relative;
+      padding-bottom: 133%;
+      background: var(--bg3);
+    }
+    .cmp-empty-content {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: var(--text-dim);
+      font-size: 0.8rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      text-align: center;
+      padding: 24px;
+    }
+    .cmp-add-btn {
+      display: inline-block;
+      padding: 10px 20px;
+      border: 1px solid rgba(201,169,110,0.4);
+      color: var(--gold);
+      font-size: 0.72rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      text-decoration: none;
+      transition: all var(--transition);
+      cursor: pointer;
+      background: none;
+    }
+    .cmp-add-btn:hover {
+      background: rgba(201,169,110,0.08);
+      border-color: var(--gold);
+    }
+
+    /* ── state views ── */
+    .compare-empty-state {
+      text-align: center;
+      padding: 80px 24px;
+    }
+    .compare-empty-icon {
+      font-size: 3.5rem;
+      margin-bottom: 20px;
+      opacity: 0.4;
+    }
+    .compare-empty-state h2 {
+      font-size: 1.8rem;
+      color: var(--white);
+      margin-bottom: 12px;
+    }
+    .compare-empty-state p {
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+
+    /* ── toast ── */
+    .toast-container { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 5000; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+    .toast { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 12px 24px; font-size: 0.85rem; opacity: 0; transform: translateY(12px); transition: all 0.3s ease; white-space: nowrap; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 640px) {
+      .compare-table .col-label { width: 90px; min-width: 80px; }
+      .cmp-row-label { font-size: 0.6rem; padding: 12px 6px 12px 0; }
+      .cmp-value-cell { padding: 12px 10px; font-size: 0.82rem; }
+      .cmp-name-cell { padding: 12px 10px 8px; }
+      .cmp-book-cell { padding: 12px 10px; }
+      .cmp-btn-book, .cmp-btn-profile { font-size: 0.68rem; padding: 10px 4px; }
+    }
+  </style>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+
+  <nav class="navbar scrolled" id="navbar" role="navigation" aria-label="Главное меню">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links" role="list">
+        <a href="/catalog.html">Модели</a>
+        <a href="/pricing.html">Цены</a>
+        <a href="/about.html">О нас</a>
+        <a href="/faq.html">FAQ</a>
+        <a href="/contact.html">Контакты</a>
+        <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
+        <a href="/compare.html" title="Сравнение" style="color:var(--gold)">⚖️ Сравнение</a>
+        <button onclick="DarkMode.toggle()"
+          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
+          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+        </button>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+    </div>
+  </nav>
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <a href="/catalog.html">Модели</a>
+    <a href="/pricing.html">Цены</a>
+    <a href="/about.html">О нас</a>
+    <a href="/faq.html">FAQ</a>
+    <a href="/contact.html">Контакты</a>
+    <a href="/favorites.html">❤️ Избранное</a>
+    <a href="/compare.html">⚖️ Сравнение</a>
+    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
+  </nav>
+
+  <main class="compare-page" id="main-content" role="main">
+    <div class="container">
+
+      <nav aria-label="breadcrumb" style="margin-bottom:24px">
+        <ol style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
+          <li><a href="/" style="color:var(--text-muted);text-decoration:none">Главная</a></li>
+          <li style="color:var(--border)" aria-hidden="true">/</li>
+          <li><a href="/catalog.html" style="color:var(--text-muted);text-decoration:none">Каталог</a></li>
+          <li style="color:var(--border)" aria-hidden="true">/</li>
+          <li style="color:var(--gold)" aria-current="page">Сравнение</li>
+        </ol>
+      </nav>
+
+      <div class="compare-header">
+        <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">⚖️ Сравнение</div>
+        <h1>Сравнение моделей</h1>
+        <p>Выберите до 3 моделей для сравнения параметров</p>
+      </div>
+
+      <!-- empty state -->
+      <div id="emptyState" style="display:none">
+        <div class="compare-empty-state">
+          <div class="compare-empty-icon">⚖️</div>
+          <h2>Нет моделей для сравнения</h2>
+          <p>Добавьте модели через каталог, нажав кнопку «⚖️ Сравнить» на карточке</p>
+          <a href="/catalog.html" class="btn-primary">Перейти в каталог</a>
+        </div>
+      </div>
+
+      <!-- loading skeleton -->
+      <div id="loadingState">
+        <div class="compare-table-wrap">
+          <table class="compare-table" style="opacity:0.4">
+            <tbody>
+              <tr>
+                <td class="col-label"></td>
+                <td class="col-model" style="border-left:1px solid var(--border)">
+                  <div style="padding-bottom:133%;background:var(--bg3);position:relative;overflow:hidden">
+                    <div style="position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(201,169,110,0.07),transparent);animation:nm-shimmer 1.5s infinite"></div>
+                  </div>
+                </td>
+                <td class="col-model" style="border-left:1px solid var(--border)">
+                  <div style="padding-bottom:133%;background:var(--bg3);position:relative;overflow:hidden">
+                    <div style="position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(201,169,110,0.07),transparent);animation:nm-shimmer 1.5s infinite"></div>
+                  </div>
+                </td>
+                <td class="col-model" style="border-left:1px solid var(--border)">
+                  <div style="padding-bottom:133%;background:var(--bg3);position:relative;overflow:hidden">
+                    <div style="position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(201,169,110,0.07),transparent);animation:nm-shimmer 1.5s infinite"></div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- compare table -->
+      <div id="compareContent" style="display:none">
+        <div class="compare-table-wrap">
+          <table class="compare-table" id="compareTable" aria-label="Сравнение параметров моделей">
+            <tbody id="compareBody">
+              <!-- rendered by JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <div style="margin-top:32px;text-align:center">
+          <a href="/catalog.html" class="btn-outline" style="display:inline-block;margin-right:12px">← Вернуться в каталог</a>
+          <button onclick="clearAll()" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:16px 32px;cursor:pointer;font-size:0.75rem;letter-spacing:1.5px;text-transform:uppercase;transition:all 0.3s">
+            Очистить сравнение
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="/js/main.js" defer></script>
+
+  <script>
+  (function () {
+    const COMPARE_KEY = 'nm_compare';
+    const MAX_COMPARE = 3;
+    const CAT_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
+
+    function getCompareIds() {
+      try { return JSON.parse(localStorage.getItem(COMPARE_KEY) || '[]'); } catch { return []; }
+    }
+    function saveCompareIds(ids) {
+      try { localStorage.setItem(COMPARE_KEY, JSON.stringify(ids)); } catch {}
+    }
+
+    function escHtml(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function showToast(msg, duration = 3000) {
+      const c = document.getElementById('toastContainer');
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.textContent = msg;
+      c.appendChild(t);
+      requestAnimationFrame(() => { requestAnimationFrame(() => { t.classList.add('show'); }); });
+      setTimeout(() => {
+        t.classList.remove('show');
+        setTimeout(() => t.remove(), 350);
+      }, duration);
+    }
+
+    // Get IDs from URL ?ids=1,2,3 OR from localStorage
+    function resolveIds() {
+      const p = new URLSearchParams(window.location.search);
+      const idsParam = p.get('ids');
+      if (idsParam) {
+        const ids = idsParam.split(',').map(v => parseInt(v.trim(), 10)).filter(Boolean).slice(0, MAX_COMPARE);
+        saveCompareIds(ids);
+        return ids;
+      }
+      return getCompareIds();
+    }
+
+    async function fetchModel(id) {
+      try {
+        const r = await fetch(`/api/models/${id}`);
+        if (!r.ok) return null;
+        return await r.json();
+      } catch { return null; }
+    }
+
+    function removeModel(id) {
+      let ids = getCompareIds();
+      ids = ids.filter(i => i !== id);
+      saveCompareIds(ids);
+      renderCompare(ids);
+      showToast('Модель убрана из сравнения');
+    }
+    window.removeModel = removeModel;
+
+    function clearAll() {
+      saveCompareIds([]);
+      renderCompare([]);
+      showToast('Сравнение очищено');
+    }
+    window.clearAll = clearAll;
+
+    function buildPhotoRow(models, totalCols) {
+      const labelCell = `<td class="col-label"></td>`;
+      const modelCells = models.map(m => {
+        if (!m) {
+          return `<td class="col-model cmp-empty-col">
+            <div class="cmp-empty-photo">
+              <div class="cmp-empty-content">
+                <span>Слот свободен</span>
+                <a href="/catalog.html" class="cmp-add-btn">+ Добавить</a>
+              </div>
+            </div>
+          </td>`;
+        }
+        return `<td class="col-model cmp-photo-cell">
+          <div class="cmp-photo-wrap">
+            ${m.photo_main
+              ? `<img src="${escHtml(m.photo_main)}" alt="${escHtml(m.name)}" loading="eager">`
+              : `<div class="cmp-photo-placeholder">✦</div>`}
+          </div>
+          <button class="cmp-remove-btn" onclick="removeModel(${m.id})" title="Убрать из сравнения" aria-label="Убрать ${escHtml(m.name)} из сравнения">✕</button>
+        </td>`;
+      });
+      // fill empty slots
+      for (let i = models.length; i < MAX_COMPARE; i++) {
+        modelCells.push(`<td class="col-model cmp-empty-col">
+          <div class="cmp-empty-photo">
+            <div class="cmp-empty-content">
+              <span>Слот свободен</span>
+              <a href="/catalog.html" class="cmp-add-btn">+ Добавить</a>
+            </div>
+          </div>
+        </td>`);
+      }
+      return `<tr>${labelCell}${modelCells.join('')}</tr>`;
+    }
+
+    function buildNameRow(models) {
+      const labelCell = `<td class="col-label"></td>`;
+      const cells = models.map(m => {
+        if (!m) return `<td class="col-model" style="background:var(--bg2);border-bottom:1px solid var(--border)"></td>`;
+        const cat = CAT_LABELS[m.category] || m.category || '';
+        return `<td class="col-model cmp-name-cell">
+          <div class="cmp-model-name">${escHtml(m.name)}</div>
+          ${cat ? `<div class="cmp-category">${escHtml(cat)}</div>` : ''}
+        </td>`;
+      });
+      for (let i = models.length; i < MAX_COMPARE; i++) {
+        cells.push(`<td class="col-model" style="background:var(--bg2);border-bottom:1px solid var(--border)"></td>`);
+      }
+      return `<tr>${labelCell}${cells.join('')}</tr>`;
+    }
+
+    function buildParamRow(label, models, getter, opts = {}) {
+      const labelCell = `<td class="cmp-row-label col-label">${escHtml(label)}</td>`;
+      const values = models.map(m => m ? getter(m) : null);
+
+      // find best value for highlight (numeric)
+      let best = null;
+      if (opts.highlightMax || opts.highlightMin) {
+        const nums = values.filter(v => v !== null && !isNaN(parseFloat(v)));
+        if (nums.length > 1) {
+          const parsed = nums.map(v => parseFloat(v));
+          best = opts.highlightMax ? Math.max(...parsed) : Math.min(...parsed);
+        }
+      }
+
+      const cells = values.map(v => {
+        const empty = v == null || v === '' || v === '—';
+        const isHighlight = !empty && best !== null && parseFloat(v) === best;
+        return `<td class="col-model cmp-value-cell${isHighlight ? ' highlight' : ''}">
+          ${empty ? `<span class="cmp-value-em">—</span>` : escHtml(String(v))}
+        </td>`;
+      });
+      for (let i = models.length; i < MAX_COMPARE; i++) {
+        cells.push(`<td class="col-model cmp-value-cell"><span class="cmp-value-em">—</span></td>`);
+      }
+      return `<tr>${labelCell}${cells.join('')}</tr>`;
+    }
+
+    function buildStatusRow(models) {
+      const labelCell = `<td class="cmp-row-label col-label">Статус</td>`;
+      const cells = models.map(m => {
+        if (!m) return `<td class="col-model cmp-value-cell"><span class="cmp-value-em">—</span></td>`;
+        const cls = m.available ? 'free' : 'busy';
+        const txt = m.available ? 'Свободна' : 'Занята';
+        return `<td class="col-model cmp-value-cell">
+          <span class="cmp-status ${cls}">${txt}</span>
+        </td>`;
+      });
+      for (let i = models.length; i < MAX_COMPARE; i++) {
+        cells.push(`<td class="col-model cmp-value-cell"><span class="cmp-value-em">—</span></td>`);
+      }
+      return `<tr>${labelCell}${cells.join('')}</tr>`;
+    }
+
+    function buildBookRow(models) {
+      const labelCell = `<td class="col-label"></td>`;
+      const cells = models.map(m => {
+        if (!m) return `<td class="col-model cmp-book-cell"></td>`;
+        return `<td class="col-model cmp-book-cell">
+          <a class="cmp-btn-book" href="/booking.html?model_id=${m.id}&model_name=${encodeURIComponent(m.name)}">
+            📋 Забронировать
+          </a>
+          <a class="cmp-btn-profile" href="/model.html?id=${m.id}">
+            Профиль
+          </a>
+        </td>`;
+      });
+      for (let i = models.length; i < MAX_COMPARE; i++) {
+        cells.push(`<td class="col-model cmp-book-cell"></td>`);
+      }
+      return `<tr>${labelCell}${cells.join('')}</tr>`;
+    }
+
+    function buildDividerRow(label) {
+      return `<tr>
+        <td class="col-label" style="padding:18px 0 6px;font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold)">${escHtml(label)}</td>
+        <td class="col-model" colspan="3" style="border-bottom:1px solid var(--border);border-left:1px solid var(--border)"></td>
+      </tr>`;
+    }
+
+    function renderTable(models) {
+      const tbody = document.getElementById('compareBody');
+      let html = '';
+
+      // Photo row
+      html += buildPhotoRow(models, MAX_COMPARE);
+      // Name row
+      html += buildNameRow(models);
+
+      // Divider
+      html += buildDividerRow('Параметры');
+
+      // Param rows
+      html += buildParamRow('Рост', models, m => m.height ? `${m.height} см` : null, { highlightMax: true });
+      html += buildParamRow('Возраст', models, m => m.age ? `${m.age} лет` : null, { highlightMin: true });
+      html += buildParamRow('Город', models, m => m.city || null);
+      html += buildParamRow('Категория', models, m => CAT_LABELS[m.category] || m.category || null);
+      html += buildStatusRow(models);
+      html += buildParamRow('Вес', models, m => m.weight ? `${m.weight} кг` : null);
+      html += buildParamRow('Параметры', models, m => {
+        const parts = [m.bust, m.waist, m.hips].filter(Boolean);
+        return parts.length ? parts.join('/') : null;
+      });
+      html += buildParamRow('Волосы', models, m => m.hair_color || null);
+      html += buildParamRow('Глаза', models, m => m.eye_color || null);
+      html += buildParamRow('Обувь', models, m => m.shoe_size || null);
+
+      // Divider
+      html += buildDividerRow('Действия');
+      // Book row
+      html += buildBookRow(models);
+
+      tbody.innerHTML = html;
+    }
+
+    async function renderCompare(ids) {
+      const loading = document.getElementById('loadingState');
+      const empty = document.getElementById('emptyState');
+      const content = document.getElementById('compareContent');
+
+      if (!ids || ids.length === 0) {
+        loading.style.display = 'none';
+        content.style.display = 'none';
+        empty.style.display = '';
+        return;
+      }
+
+      loading.style.display = '';
+      content.style.display = 'none';
+      empty.style.display = 'none';
+
+      // Fetch all models in parallel
+      const models = await Promise.all(ids.map(id => fetchModel(id)));
+
+      loading.style.display = 'none';
+      content.style.display = '';
+      renderTable(models.filter(Boolean));
+
+      // update URL
+      const p = new URLSearchParams(window.location.search);
+      p.set('ids', ids.join(','));
+      window.history.replaceState({}, '', `${window.location.pathname}?${p.toString()}`);
+    }
+
+    // Init
+    document.addEventListener('DOMContentLoaded', function () {
+      const ids = resolveIds();
+      renderCompare(ids);
+    });
+
+    // Burger menu
+    const burger = document.getElementById('burgerBtn');
+    const mobileMenu = document.getElementById('mobileMenu');
+    const mobileClose = document.getElementById('mobileClose');
+    if (burger) burger.addEventListener('click', () => mobileMenu.classList.toggle('open'));
+    if (mobileClose) mobileClose.addEventListener('click', () => mobileMenu.classList.remove('open'));
+  })();
+  </script>
+
+  <!-- WhatsApp float -->
+  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
+    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
+       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
+       onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
+      <svg style="width:20px;height:20px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      WhatsApp
+    </a>
+  </div>
+  <script>
+  fetch('/api/settings/public').then(r=>r.json()).then(d=>{
+    const wa = d.contacts_whatsapp;
+    if (wa) {
+      const waNum = wa.replace(/\D/g,'');
+      const waUrl = `https://wa.me/${waNum}`;
+      const floatEl = document.getElementById('float-whatsapp');
+      const floatLink = document.getElementById('float-wa-link');
+      if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
+    }
+  }).catch(()=>{});
+  </script>
+</body>
+</html>

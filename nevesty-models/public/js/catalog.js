@@ -309,11 +309,40 @@
         }
       });
 
-      // Insert fav button into the image container
+      // Compare button — positioned top-left on image
+      const cmpActive = window.isInCompare && window.isInCompare(m.id);
+      const cmpBtn = document.createElement('button');
+      cmpBtn.className = 'btn-compare-card';
+      cmpBtn.setAttribute('data-active', cmpActive ? 'true' : 'false');
+      cmpBtn.setAttribute('aria-label', cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению');
+      cmpBtn.title = cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению';
+      cmpBtn.textContent = '⚖️';
+      cmpBtn.style.cssText = `position:absolute;top:8px;left:8px;width:34px;height:34px;border:none;background:${cmpActive ? 'rgba(201,169,110,0.85)' : 'rgba(0,0,0,0.55)'};color:${cmpActive ? 'var(--bg)' : 'var(--text-muted)'};border-radius:50%;font-size:0.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s,color 0.2s;`;
+      cmpBtn.addEventListener('mouseenter', () => {
+        if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(201,169,110,0.4)';
+      });
+      cmpBtn.addEventListener('mouseleave', () => {
+        if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(0,0,0,0.55)';
+      });
+      cmpBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (window.toggleCompare) {
+          const added = window.toggleCompare(m.id, m);
+          cmpBtn.setAttribute('data-active', added ? 'true' : 'false');
+          cmpBtn.title = added ? 'Убрать из сравнения' : 'Добавить к сравнению';
+          cmpBtn.setAttribute('aria-label', added ? 'Убрать из сравнения' : 'Добавить к сравнению');
+          cmpBtn.style.background = added ? 'rgba(201,169,110,0.85)' : 'rgba(0,0,0,0.55)';
+          cmpBtn.style.color = added ? 'var(--bg)' : 'var(--text-muted)';
+        }
+      });
+
+      // Insert fav and compare buttons into the image container
       const imgContainer = article.querySelector('.model-card-img');
       if (imgContainer) {
         imgContainer.style.position = 'relative';
         imgContainer.appendChild(favBtn);
+        imgContainer.appendChild(cmpBtn);
       }
 
       grid.appendChild(article);

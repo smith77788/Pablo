@@ -22,12 +22,14 @@
   <link rel="stylesheet" href="/css/main.css" />
   <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
   <script type="application/ld+json">
+[
   {
     "@context": "https://schema.org",
     "@type": "LocalBusiness",
     "name": "Nevesty Models",
     "@id": "https://nevesty-models.ru",
     "url": "https://nevesty-models.ru",
+    "logo": "https://nevesty-models.ru/og-image.jpg",
     "telephone": "+7-800-555-00-00",
     "email": "info@nevesty-models.ru",
     "priceRange": "₽₽",
@@ -42,8 +44,32 @@
       "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
       "opens": "09:00",
       "closes": "21:00"
-    }]
+    }],
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "contactType": "customer service",
+      "availableLanguage": "Russian"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
+      {"@type": "ListItem", "position": 2, "name": "Контакты", "item": "https://nevesty-models.ru/contact.html"}
+    ]
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Контакты — Nevesty Models",
+    "description": "Свяжитесь с модельным агентством Nevesty Models: телефон, email, Telegram. Режим работы и адрес.",
+    "url": "https://nevesty-models.ru/contact.html",
+    "isPartOf": {"@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru"},
+    "inLanguage": "ru-RU",
+    "dateModified": "2026-05-15"
   }
+]
   </script>
   <style>
     /* ─── CONTACT PAGE ──────────────────────────────────── */
