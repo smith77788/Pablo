@@ -2840,7 +2840,7 @@ async function grantAchievement(chatId, achievementKey) {
       if (ach) {
         await safeSend(chatId,
           `🏆 *Новое достижение\\!*\n\n${esc(ach.icon)} *${esc(ach.title)}*\n_${esc(ach.desc)}_`,
-          { parse_mode: 'MarkdownV2' }
+          { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '🏆 Мои достижения', callback_data: 'my_achievements' }]] } }
         ).catch(()=>{});
       }
     }
@@ -3400,6 +3400,8 @@ function initBot(app) {
         `/wishlist — Вибране\n` +
         `/faq — Часті запитання\n` +
         `/profile — Мій профіль\n` +
+        `/achievements — Мої досягнення\n` +
+        `/referral — Реферальна програма\n` +
         `/cancel — Скасувати поточну дію\n` +
         `/help — Ця довідка\n\n` +
         `_Якщо щось не працює — натисніть «💬 Менеджер» в меню\\._`;
@@ -3456,6 +3458,16 @@ function initBot(app) {
   // ── /reviews ───────────────────────────────────────────────────────────────
   bot.onText(/^\/reviews/, async (msg) => {
     return showPublicReviews(msg.chat.id, 0);
+  });
+
+  // ── /achievements ──────────────────────────────────────────────────────────
+  bot.onText(/^\/achievements/, async (msg) => {
+    return showAchievements(msg.chat.id);
+  });
+
+  // ── /referral ──────────────────────────────────────────────────────────────
+  bot.onText(/^\/referral/, async (msg) => {
+    return showReferralProgram(msg.chat.id);
   });
 
   // ── /msg (admin direct reply) ──────────────────────────────────────────────
@@ -5944,17 +5956,36 @@ async function showUserProfile(chatId, firstName) {
       ? new Date(orders[0].created_at).toLocaleDateString('ru')
       : 'неизвестно';
 
-    const loyalty = await get(`SELECT * FROM loyalty_points WHERE chat_id=?`, [chatId]).catch(() => null);
+    const [loyalty, earnedAchs] = await Promise.all([
+      get(`SELECT * FROM loyalty_points WHERE chat_id=?`, [chatId]).catch(() => null),
+      query(`SELECT achievement_key FROM achievements WHERE chat_id=? ORDER BY achieved_at ASC`, [chatId]).catch(() => []),
+    ]);
+
     const level = !loyalty ? '🥉 Бронзовый'
       : loyalty.total_earned >= 5000 ? '💎 Платиновый'
       : loyalty.total_earned >= 2000 ? '🥇 Золотой'
       : loyalty.total_earned >= 500 ? '🥈 Серебряный'
       : '🥉 Бронзовый';
 
+    // Compute next loyalty level threshold
+    const currentPoints = loyalty?.total_earned || 0;
+    const nextLevelThreshold = currentPoints < 500 ? 500
+      : currentPoints < 2000 ? 2000
+      : currentPoints < 5000 ? 5000
+      : null;
+    const pointsBalance = loyalty?.points || 0;
+
     let text = `👤 *Мой профиль*\n\n`;
     text += `Имя: *${esc(firstName || lastOrderFull?.client_name || 'Гость')}*\n`;
     text += `💫 Уровень: *${esc(level)}*\n`;
-    if (loyalty) text += `🎁 Баллов: *${loyalty.points}*\n`;
+    if (loyalty) {
+      if (nextLevelThreshold) {
+        const toNext = nextLevelThreshold - currentPoints;
+        text += `💎 Баллы: *${pointsBalance}* \\(до следующей награды: ${toNext}\\)\n`;
+      } else {
+        text += `💎 Баллы: *${pointsBalance}* \\(максимальный уровень\\)\n`;
+      }
+    }
     if (lastOrderFull?.client_phone) text += `📞 Телефон: ${esc(lastOrderFull.client_phone)}\n`;
     if (lastOrderFull?.client_email) text += `📧 Email: ${esc(lastOrderFull.client_email)}\n`;
     text += `\n📋 *История заявок:*\n`;
@@ -5970,6 +6001,16 @@ async function showUserProfile(chatId, firstName) {
       }
     }
 
+    // Achievements section
+    text += `\n🏆 *Достижения* \\(${earnedAchs.length}/${ACHIEVEMENTS_LIST.length}\\):\n`;
+    if (earnedAchs.length === 0) {
+      text += `_Выполняйте заявки, чтобы получить достижения\\!_\n`;
+    } else {
+      const earnedKeys = new Set(earnedAchs.map(a => a.achievement_key));
+      const earned = ACHIEVEMENTS_LIST.filter(a => earnedKeys.has(a.key));
+      text += earned.map(a => `${esc(a.icon)} ${esc(a.title)}`).join('  ') + '\n';
+    }
+
     // Last 3 orders for quick access
     const recentBtns = orders.slice(0, 3).map(o => [{
       text: `${o.order_number}  ${STATUS_LABELS[o.status]||o.status}`,
@@ -5983,6 +6024,7 @@ async function showUserProfile(chatId, firstName) {
         [{ text: '📋 Все заявки',        callback_data: 'my_orders'             }],
         [{ text: '🏆 Достижения',        callback_data: 'my_achievements'       },
          { text: '💫 Баллы',             callback_data: 'loyalty'               }],
+        [{ text: '📤 Пригласить друга',  callback_data: 'referral'              }],
         [{ text: '✏️ Изменить имя',     callback_data: 'profile_edit_name'     },
          { text: '✏️ Изменить телефон', callback_data: 'profile_edit_phone'    }],
         [{ text: '✏️ Изменить email',   callback_data: 'profile_edit_email'    }],
