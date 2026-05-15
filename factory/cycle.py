@@ -609,6 +609,68 @@ def run_phase_28_experiments(history_path: str | None = None) -> dict:
         return {'status': 'error', 'error': str(e)}
 
 
+def run_phase_research(db_path: str) -> dict:
+    """Research Department heuristic analysis — market, competitors, trends, insights."""
+    try:
+        import sqlite3
+        from factory.agents.research_department import (
+            MarketResearcher, CompetitorAnalyst, TrendSpotter, InsightSynthesizer
+        )
+
+        researcher = MarketResearcher()
+        analyst = CompetitorAnalyst()
+        spotter = TrendSpotter()
+        synthesizer = InsightSynthesizer()
+
+        # Query DB for top segment and performance data
+        top_segment = "commercial"
+        conv_rate = 0.0
+        avg_budget = 0.0
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            seg_row = conn.execute(
+                "SELECT event_type, COUNT(*) as cnt FROM orders "
+                "WHERE created_at >= date('now', '-30 days') AND event_type IS NOT NULL "
+                "GROUP BY event_type ORDER BY cnt DESC LIMIT 1"
+            ).fetchone()
+            if seg_row:
+                top_segment = seg_row["event_type"] or "commercial"
+
+            stats_row = conn.execute(
+                "SELECT COUNT(CASE WHEN status IN ('confirmed','completed') THEN 1 END) * 1.0 / MAX(COUNT(*), 1) as conv, "
+                "AVG(CASE WHEN budget > 0 THEN budget END) as avg_b FROM orders "
+                "WHERE created_at >= date('now', '-30 days')"
+            ).fetchone()
+            if stats_row:
+                conv_rate = float(stats_row["conv"] or 0)
+                avg_budget = float(stats_row["avg_b"] or 0)
+            conn.close()
+        except Exception:
+            pass
+
+        market = researcher.analyze_market_segment(top_segment)
+        gaps = analyst.identify_competitive_gaps(["fashion", "events", "commercial"])
+        trends = spotter.get_actionable_trends()[:3]
+        insights = synthesizer.synthesize_insights(
+            market, gaps, trends,
+            {"conversion_rate": conv_rate, "avg_budget": avg_budget}
+        )
+
+        return {
+            "status": "ok",
+            "top_segment": top_segment,
+            "market_opportunity_score": market.get("opportunity_score", 0),
+            "top_opportunities": insights.get("top_opportunities", []),
+            "strategic_alerts": insights.get("strategic_alerts", []),
+            "confidence": insights.get("confidence_level", "low"),
+            "conv_rate": conv_rate,
+            "avg_budget": avg_budget,
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 def run_phase_finance(db_path: str) -> dict:
     """Finance Department heuristic analysis — revenue forecast, cost analysis, budget plan."""
     try:
