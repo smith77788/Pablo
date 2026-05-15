@@ -332,6 +332,18 @@ async function initDatabase() {
   )`).catch(()=>{});
   await run(`CREATE INDEX IF NOT EXISTS idx_audit_admin ON audit_log(admin_chat_id)`).catch(()=>{});
 
+  // Refresh tokens table — JWT refresh token storage
+  await run(`CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    admin_id INTEGER NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    revoked INTEGER DEFAULT 0
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash)`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_admin ON refresh_tokens(admin_id)`).catch(() => {});
+
   // Favorites table — wishlist for Telegram bot users
   await run(`CREATE TABLE IF NOT EXISTS favorites (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -492,6 +504,9 @@ async function initDatabase() {
   // Schema v13 — wishlists index & ensure INTEGER chat_id compatibility
   await run(`CREATE INDEX IF NOT EXISTS idx_wishlists_chat_model ON wishlists(chat_id, model_id)`).catch(() => {});
   await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (13, 'wishlists composite index, quick_booking_enabled & wishlist_enabled defaults')`).catch(() => {});
+
+  // Schema v14 — refresh_tokens table
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (14, 'refresh_tokens table for JWT refresh flow')`).catch(() => {});
 
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
