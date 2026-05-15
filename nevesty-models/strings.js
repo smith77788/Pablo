@@ -283,6 +283,38 @@ const STRINGS = {
   adminModelDeleted: '✅ Модель удалена',
   adminSettingsSaved: '✅ Настройки сохранены',
   adminOrderUpdated: status => `✅ Статус изменён на: *${status}*`,
+
+  // ─── Booking step headers (step title arguments for stepHeader) ────────────
+  bookingStepSelectModel: 'Выберите модель',
+  bookingStepEventDetails: 'Детали мероприятия',
+  bookingStepContacts: 'Ваши контакты',
+
+  // ─── Booking step body prompts ─────────────────────────────────────────────
+  bookingSelectModelHint: 'Выберите из списка или нажмите «Менеджер подберёт»:',
+  bookingSelectEventType: 'Выберите тип мероприятия:',
+  bookingSelectDuration: 'Выберите продолжительность мероприятия:',
+  bookingAskLocation:
+    'Введите место проведения \\(город, адрес\\):\n_Примеры: Москва МКАД, ул\\. Арбат 15, студия в Москве_\n\n_/cancel — отменить_',
+  bookingAskLocationShort: '❌ Введите место проведения:',
+  bookingAskBudgetFull:
+    'Укажите бюджет \\(необязательно\\):\n💡 Укажите бюджет в рублях\n_Примеры: 15000, 25000\\-40000, «от 30000»_',
+  bookingAskComments: 'Дополнительные пожелания \\(необязательно\\):',
+  bookingAskTelegram: 'Введите Telegram username для связи \\(необязательно\\):\n_Пример: @username_',
+  bookingManagerLabel: 'Менеджер подберёт',
+
+  // ─── Broadcast segments ────────────────────────────────────────────────────
+  segmentAll: '👥 Все клиенты',
+  segmentCompleted: '✅ Завершившие заявку',
+  segmentActive: '▶️ Активные клиенты',
+
+  // ─── Order status flow messages ────────────────────────────────────────────
+  orderStatusReviewing: orderNum => `🔍 *Заявка ${orderNum} принята в работу\\.*\n\nМы изучаем ваш запрос\\.`,
+  orderStatusInProgress: orderNum => `▶️ *Заявка ${orderNum} выполняется\\.*`,
+
+  // ─── Review filter labels ──────────────────────────────────────────────────
+  reviewFilterPending: 'ожидающих одобрения',
+  reviewFilterApproved: 'одобренных',
+  reviewFilterAll: 'отзывов',
 };
 
 /**
@@ -299,5 +331,24 @@ function getString(key, vars = {}) {
   return str;
 }
 
+/**
+ * Russian plural form selector.
+ * @param {number} n - The number to evaluate
+ * @param {string} one  - Form for 1, 21, 31 … (модель)
+ * @param {string} few  - Form for 2-4, 22-24 … (модели)
+ * @param {string} many - Form for 0, 5-20, 11-19 … (моделей)
+ * @returns {string}
+ * @example ruPlural(3, 'модель', 'модели', 'моделей') // => 'модели'
+ */
+function ruPlural(n, one, few, many) {
+  const mod10 = Math.abs(n) % 10;
+  const mod100 = Math.abs(n) % 100;
+  if (mod100 >= 11 && mod100 <= 19) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
 module.exports = STRINGS;
 module.exports.getString = getString;
+module.exports.ruPlural = ruPlural;

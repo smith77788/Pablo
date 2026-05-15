@@ -679,7 +679,7 @@ async function showAdminClientCard(chatId, clientId) {
   const orders = await query(`SELECT * FROM orders WHERE client_chat_id=? ORDER BY created_at DESC LIMIT 10`, [
     String(clientId),
   ]);
-  if (!orders.length) return safeSend(chatId, '❌ Клиент не найден или нет заявок\\.', { parse_mode: 'MarkdownV2' });
+  if (!orders.length) return safeSend(chatId, STRINGS.clientNotFound, { parse_mode: 'MarkdownV2' });
 
   const client = orders[0];
   const stats = await get(
@@ -1586,7 +1586,7 @@ async function bkStep2Duration(chatId, data) {
   resetSessionTimer(chatId);
   const row1 = DURATIONS.slice(0, 4).map(h => ({ text: `${h} ч.`, callback_data: `bk_dur_${h}` }));
   const row2 = DURATIONS.slice(4).map(h => ({ text: `${h} ч.`, callback_data: `bk_dur_${h}` }));
-  return safeSend(chatId, stepHeader(2, 'Детали мероприятия') + 'Выберите продолжительность мероприятия:', {
+  return safeSend(chatId, stepHeader(2, STRINGS.bookingStepEventDetails) + STRINGS.bookingSelectDuration, {
     parse_mode: 'MarkdownV2',
     reply_markup: {
       inline_keyboard: [
@@ -1603,48 +1603,38 @@ async function bkStep2Duration(chatId, data) {
 async function bkStep2Location(chatId, data) {
   await setSession(chatId, 'bk_s2_loc', data);
   resetSessionTimer(chatId);
-  return safeSend(
-    chatId,
-    stepHeader(2, 'Детали мероприятия') +
-      'Введите место проведения \\(город, адрес\\):\n_Примеры: Москва МКАД, ул\\. Арбат 15, студия в Москве_\n\n_/cancel — отменить_',
-    {
-      parse_mode: 'MarkdownV2',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '← Назад', callback_data: 'bk_back_duration' }],
-          [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
-        ],
-      },
-    }
-  );
+  return safeSend(chatId, stepHeader(2, STRINGS.bookingStepEventDetails) + STRINGS.bookingAskLocation, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '← Назад', callback_data: 'bk_back_duration' }],
+        [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
+      ],
+    },
+  });
 }
 
 // STEP 2e — budget (optional)
 async function bkStep2Budget(chatId, data) {
   await setSession(chatId, 'bk_s2_budget', data);
   resetSessionTimer(chatId);
-  return safeSend(
-    chatId,
-    stepHeader(2, 'Детали мероприятия') +
-      'Укажите бюджет \\(необязательно\\):\n💡 Укажите бюджет в рублях\n_Примеры: 15000, 25000\\-40000, «от 30000»_',
-    {
-      parse_mode: 'MarkdownV2',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '← Назад', callback_data: 'bk_back_location' }],
-          [{ text: STRINGS.btnSkip, callback_data: 'bk_skip_budget' }],
-          [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
-        ],
-      },
-    }
-  );
+  return safeSend(chatId, stepHeader(2, STRINGS.bookingStepEventDetails) + STRINGS.bookingAskBudgetFull, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '← Назад', callback_data: 'bk_back_location' }],
+        [{ text: STRINGS.btnSkip, callback_data: 'bk_skip_budget' }],
+        [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
+      ],
+    },
+  });
 }
 
 // STEP 2f — comments (optional)
 async function bkStep2Comments(chatId, data) {
   await setSession(chatId, 'bk_s2_comments', data);
   resetSessionTimer(chatId);
-  return safeSend(chatId, stepHeader(2, 'Детали мероприятия') + 'Дополнительные пожелания \\(необязательно\\):', {
+  return safeSend(chatId, stepHeader(2, STRINGS.bookingStepEventDetails) + STRINGS.bookingAskComments, {
     parse_mode: 'MarkdownV2',
     reply_markup: {
       inline_keyboard: [
@@ -1662,7 +1652,7 @@ async function bkStep3Name(chatId, data) {
   resetSessionTimer(chatId);
   return safeSend(
     chatId,
-    stepHeader(3, 'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\n${STRINGS.bookingAskName}`,
+    stepHeader(3, STRINGS.bookingStepContacts) + `_${esc(bookingProgress(1, 4))}_\n\n${STRINGS.bookingAskName}`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: {
@@ -1681,7 +1671,7 @@ async function bkStep3Phone(chatId, data) {
   resetSessionTimer(chatId);
   return safeSend(
     chatId,
-    stepHeader(3, 'Ваши контакты') + `_${esc(bookingProgress(2, 4))}_\n\n${STRINGS.bookingAskPhone}`,
+    stepHeader(3, STRINGS.bookingStepContacts) + `_${esc(bookingProgress(2, 4))}_\n\n${STRINGS.bookingAskPhone}`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: {
@@ -1707,7 +1697,7 @@ async function bkStep3Email(chatId, data) {
   const hint = requireEmail === '1' ? '\n_Email обязателен для подтверждения заявки\\._' : '';
   return safeSend(
     chatId,
-    stepHeader(3, 'Ваши контакты') + `_${esc(bookingProgress(3, 4))}_\n\n${STRINGS.bookingAskEmail}${hint}`,
+    stepHeader(3, STRINGS.bookingStepContacts) + `_${esc(bookingProgress(3, 4))}_\n\n${STRINGS.bookingAskEmail}${hint}`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: buttons },
@@ -1722,10 +1712,10 @@ async function bkStep3Telegram(chatId, data, tgUsername) {
   const hint = tgUsername ? `_Ваш username в Telegram: @${esc(tgUsername)}_\n\n` : '';
   return safeSend(
     chatId,
-    stepHeader(3, 'Ваши контакты') +
+    stepHeader(3, STRINGS.bookingStepContacts) +
       `_${esc(bookingProgress(4, 4))}_\n\n` +
       hint +
-      'Введите Telegram username для связи \\(необязательно\\):\n_Пример: @username_',
+      STRINGS.bookingAskTelegram,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: {
@@ -6756,7 +6746,7 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       const orderId = parseInt(data.replace('adm_order_note_', ''));
       const order = await get('SELECT * FROM orders WHERE id=?', [orderId]);
-      if (!order) return bot.answerCallbackQuery(q.id, { text: 'Заявка не найдена' });
+      if (!order) return bot.answerCallbackQuery(q.id, { text: STRINGS.errorOrderNotFound });
       await setSession(chatId, 'adm_note_order_id', { orderId });
       return safeSend(
         chatId,
@@ -10193,7 +10183,7 @@ function initBot(app) {
       }
 
       case 'bk_s2_loc':
-        if (!text || !text.trim()) return safeSend(chatId, '❌ Введите место проведения:');
+        if (!text || !text.trim()) return safeSend(chatId, STRINGS.bookingAskLocationShort);
         d.location = text.trim();
         return bkStep2Budget(chatId, d);
 
