@@ -5971,8 +5971,8 @@ function initBot(app) {
       const csm = data.match(/^calc_share_(\d+)_(\d+)_(.+)$/);
       if (csm) {
         const [, modelsStr, hoursStr, evType] = csm;
-        const calcModels = parseInt(modelsStr);
-        const calcHours = parseInt(hoursStr);
+        const calcModels = Math.min(Math.max(parseInt(modelsStr) || 1, 1), 50);
+        const calcHours = Math.min(Math.max(parseInt(hoursStr) || 1, 1), 48);
         const calcEventLabels = {
           fashion_show: 'Показ мод',
           photo_shoot: 'Фотосессия',
@@ -5981,6 +5981,9 @@ function initBot(app) {
           runway: 'Подиум',
           other: 'Другое',
         };
+        // Validate evType against whitelist to prevent unvalidated data in output/callback_data
+        const VALID_SHARE_EVENT_TYPES = Object.keys(calcEventLabels);
+        if (!VALID_SHARE_EVENT_TYPES.includes(evType)) return bot.answerCallbackQuery(q.id);
         const rates = await getCalcRates();
         const typeMult = rates.type_multipliers[evType] ?? 1.0;
         const modelCost = rates.base_per_hour * calcModels * calcHours * typeMult;
