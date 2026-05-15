@@ -1422,6 +1422,53 @@ def run_cycle() -> dict:
         logger.error("CEO Synthesis phase error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 5.2 — CEO WEEKLY REPORT + EXPERIMENT PROPOSALS (БЛОК 5.3, 5.4)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n📊 PHASE 5.2: CEO WEEKLY REPORT + EXPERIMENT PROPOSALS")
+
+    # CEO weekly report (once per week — Mondays)
+    try:
+        if datetime.now(timezone.utc).weekday() == 0:  # Monday
+            weekly = ceo.generate_weekly_report(nevesty_kpis_raw)
+            if weekly.get('status') != 'already_generated':
+                db.insert("growth_actions", {
+                    "product_id": nevesty_id,
+                    "action_type": "weekly_report",
+                    "channel": "internal",
+                    "content": f"Weekly: {weekly.get('headline', '')}",
+                    "status": "pending",
+                    "priority": 8,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+                results["phases"]["ceo_weekly_report"] = weekly
+                summary_lines.append(f"📊 CEO Weekly: {weekly.get('headline', '')[:60]}")
+                logger.info("[Phase5.2] CEO weekly report: trend=%s", weekly.get("key_metric_trend"))
+    except Exception as e:
+        logger.error("Phase 5.2 CEO weekly report error: %s", e)
+
+    # CEO experiment proposals (every 3rd cycle)
+    try:
+        cycle_count_row = db.fetch_one("SELECT COUNT(*) as c FROM cycles")
+        if cycle_count_row and cycle_count_row.get('c', 0) % 3 == 0:
+            proposed = ceo.propose_experiments(nevesty_kpis_raw)
+            saved_count = 0
+            for exp in proposed[:2]:
+                try:
+                    db.execute(
+                        "INSERT OR IGNORE INTO experiments (hypothesis, metric, status, created_at) "
+                        "VALUES (?, ?, 'proposed', datetime('now'))",
+                        (exp.get('hypothesis', ''), exp.get('metric', 'conversion_rate')),
+                    )
+                    saved_count += 1
+                except Exception:
+                    pass
+            results["phases"]["ceo_experiment_proposals"] = {"proposed": len(proposed), "saved": saved_count}
+            summary_lines.append(f"🧪 CEO эксперименты: {len(proposed)} предложено")
+            logger.info("[Phase5.2] CEO proposed %d experiments, saved %d", len(proposed), saved_count)
+    except Exception as e:
+        logger.error("Phase 5.2 CEO experiment proposals error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 5.3 — EXPERIMENT AUTO-APPLY: detect & promote successful experiments
     # ════════════════════════════════════════════════════════════════
     logger.info("\n🚀 PHASE 5.3: EXPERIMENT AUTO-APPLY")

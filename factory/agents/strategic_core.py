@@ -156,8 +156,8 @@ class StrategicCore(FactoryAgent):
         logger.info("[CEO] Synthesis: health=%s focus=%s", briefing.get("health_score"), briefing.get("next_cycle_focus"))
         return briefing
 
-    def generate_weekly_report(self) -> str:
-        """Generate a weekly summary report from recent decisions and metrics."""
+    def generate_weekly_report_text(self) -> str:
+        """Generate a weekly summary report from recent decisions (returns plain text)."""
         recent_decisions = db.get_recent_decisions(20)
         dec_types = {}
         for d in recent_decisions:
@@ -174,6 +174,152 @@ class StrategicCore(FactoryAgent):
             max_tokens=500,
         )
         return report or "Weekly report unavailable"
+
+    def generate_weekly_report(self, metrics: dict | None = None) -> dict:
+        """Generate a strategic weekly report dict with headline, highlights, concerns.
+
+        Args:
+            metrics: KPI dict with keys like orders_week, revenue_month,
+                     conversion_rate, clients_new_month, avg_rating.
+                     If None, falls back to an empty metrics dict.
+        Returns:
+            dict with keys: week, headline, highlights, concerns,
+                            focus_next_week, key_metric_trend
+        """
+        import json
+        if metrics is None:
+            metrics = {}
+
+        week_str = datetime.now(timezone.utc).strftime('%Y-W%U')
+
+        # Check if already generated this week
+        try:
+            existing = db.fetch_one(
+                "SELECT id FROM ceo_decisions WHERE cycle_id = ?",
+                (f"weekly_{week_str}",)
+            )
+            if existing:
+                return {"status": "already_generated", "week": week_str}
+        except Exception:
+            pass
+
+        prompt = (
+            f"Создай еженедельный стратегический отчёт для модельного агентства Nevesty Models.\n\n"
+            f"Метрики за неделю:\n"
+            f"- Заявок: {metrics.get('orders_week', 0)}\n"
+            f"- Выручка: {metrics.get('revenue_month', 0)} руб.\n"
+            f"- Конверсия: {metrics.get('conversion_rate', 0)}%\n"
+            f"- Новых клиентов: {metrics.get('clients_new_month', 0)}\n"
+            f"- Средний рейтинг: {metrics.get('avg_rating', 0)}\n\n"
+            f'Верни JSON:\n{{"week": "{week_str}",\n'
+            f'  "headline": "Одна строка резюме недели",\n'
+            f'  "highlights": ["достижение 1", "достижение 2"],\n'
+            f'  "concerns": ["проблема 1"],\n'
+            f'  "focus_next_week": "главный приоритет",\n'
+            f'  "key_metric_trend": "positive|negative|stable"}}'
+        )
+
+        try:
+            result = self.think(prompt, max_tokens=600)
+            import re
+            m = re.search(r'\{.*\}', result, re.DOTALL)
+            if m:
+                report = json.loads(m.group())
+                # Save to ceo_decisions for deduplication
+                try:
+                    db.execute(
+                        "INSERT INTO ceo_decisions "
+                        "(cycle_id, decision_text, created_at) "
+                        "VALUES (?, ?, datetime('now'))",
+                        (f"weekly_{week_str}", json.dumps(report, ensure_ascii=False)),
+                    )
+                except Exception:
+                    pass
+                logger.info("[CEO] Weekly report generated: trend=%s", report.get("key_metric_trend"))
+                return report
+        except Exception as _e:
+            logger.warning("[CEO] generate_weekly_report fallback: %s", _e)
+
+        return {
+            "week": week_str,
+            "headline": "Стабильная работа агентства",
+            "highlights": ["Заявки поступают", "Клиенты довольны"],
+            "concerns": [],
+            "focus_next_week": "Увеличить количество заявок",
+            "key_metric_trend": "stable",
+        }
+
+    def propose_experiments(self, metrics: dict | None = None) -> list:
+        """Propose A/B experiments based on current metrics.
+
+        Args:
+            metrics: KPI dict with keys conversion_rate, avg_check, clients_repeat.
+        Returns:
+            List of up to 3 experiment dicts with keys:
+            hypothesis, metric, control, variant, duration_days, expected_lift_pct
+        """
+        import json, re
+        if metrics is None:
+            metrics = {}
+
+        prompt = (
+            f"На основе метрик агентства предложи 3 A/B эксперимента для роста:\n"
+            f"Конверсия: {metrics.get('conversion_rate', 0)}%\n"
+            f"Средний чек: {metrics.get('avg_check', 0)} руб.\n"
+            f"Повторные клиенты: {metrics.get('clients_repeat', 0)}\n\n"
+            f"Формат каждого эксперимента — JSON:\n"
+            f'{{"hypothesis": "...", "metric": "conversion_rate|avg_check|repeat_rate", '
+            f'"control": "текущий вариант", "variant": "тестируемый вариант",'
+            f'"duration_days": 14, "expected_lift_pct": 10}}\n\n'
+            f"Верни JSON массив из 3 экспериментов."
+        )
+        try:
+            result = self.think(prompt, max_tokens=800)
+            m = re.search(r'\[.*\]', result, re.DOTALL)
+            if m:
+                experiments = json.loads(m.group())
+                # Persist proposals to factory DB experiments table
+                for exp in experiments[:3]:
+                    try:
+                        db.execute(
+                            "INSERT OR IGNORE INTO experiments "
+                            "(hypothesis, metric, status, created_at) "
+                            "VALUES (?, ?, 'proposed', datetime('now'))",
+                            (exp.get('hypothesis', 'Test'), exp.get('metric', 'conversion_rate')),
+                        )
+                    except Exception:
+                        pass
+                logger.info("[CEO] Proposed %d experiments", len(experiments[:3]))
+                return experiments[:3]
+        except Exception as _e:
+            logger.warning("[CEO] propose_experiments fallback: %s", _e)
+
+        return [
+            {
+                "hypothesis": "Добавить кнопку быстрого звонка в каталоге",
+                "metric": "conversion_rate",
+                "control": "без кнопки",
+                "variant": "с кнопкой звонка",
+                "duration_days": 14,
+                "expected_lift_pct": 8,
+            },
+            {
+                "hypothesis": "Показывать цену в описании модели",
+                "metric": "avg_check",
+                "control": "без цены",
+                "variant": "с ценой 'от X руб.'",
+                "duration_days": 14,
+                "expected_lift_pct": 5,
+            },
+            {
+                "hypothesis": "Email-напоминание через 30 дней",
+                "metric": "repeat_rate",
+                "control": "без напоминания",
+                "variant": "с email на 30-й день",
+                "duration_days": 30,
+                "expected_lift_pct": 12,
+            },
+        ]
 
     def generate_monthly_report(self) -> dict:
         """Generate a monthly strategic report with KPIs and roadmap."""

@@ -1243,11 +1243,11 @@ class TestStrategicCoreExtended:
             result = ceo.evaluate_experiment(experiment)
         assert result in ('scale', 'iterate', 'kill'), f"Unexpected result: '{result}'"
 
-    def test_generate_weekly_report_with_mock_returns_str(self):
+    def test_generate_weekly_report_text_with_mock_returns_str(self):
         from factory.agents.strategic_core import StrategicCore
         ceo = StrategicCore()
         with patch.object(ceo, 'think', return_value='Mocked weekly report'):
-            report = ceo.generate_weekly_report()
+            report = ceo.generate_weekly_report_text()
         assert isinstance(report, str)
         assert len(report) > 0
 
@@ -1659,3 +1659,92 @@ class TestMetricsCollector:
                     'avg_check', 'pipeline_value', 'models_total', 'clients_unique',
                     'clients_repeat', 'avg_rating', 'db_available', 'collected_at'):
             assert key in metrics, f"Missing KPI key: {key}"
+
+
+class TestCEOWeeklyReport:
+    """Tests for CEO weekly report and experiment proposal methods (БЛОК 5.3, 5.4)."""
+
+    def test_generate_weekly_report_exists(self):
+        from factory.agents.strategic_core import StrategicCore
+        assert hasattr(StrategicCore, 'generate_weekly_report')
+
+    def test_propose_experiments_exists(self):
+        from factory.agents.strategic_core import StrategicCore
+        assert hasattr(StrategicCore, 'propose_experiments')
+
+    def test_generate_weekly_report_fallback(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        agent = StrategicCore.__new__(StrategicCore)
+        mocker.patch('factory.agents.strategic_core.db.fetch_one', return_value=None)
+        mocker.patch('factory.agents.strategic_core.db.execute', return_value=None)
+        mocker.patch.object(agent, 'think', side_effect=Exception("no AI"))
+        result = agent.generate_weekly_report({'orders_week': 5, 'conversion_rate': 60})
+        assert 'week' in result
+        assert 'headline' in result
+        assert 'key_metric_trend' in result
+
+    def test_generate_weekly_report_returns_dict(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        agent = StrategicCore.__new__(StrategicCore)
+        mocker.patch('factory.agents.strategic_core.db.fetch_one', return_value=None)
+        mocker.patch('factory.agents.strategic_core.db.execute', return_value=None)
+        mocker.patch.object(agent, 'think', side_effect=Exception("no AI"))
+        result = agent.generate_weekly_report({})
+        assert isinstance(result, dict)
+
+    def test_generate_weekly_report_already_generated(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        agent = StrategicCore.__new__(StrategicCore)
+        mocker.patch('factory.agents.strategic_core.db.fetch_one', return_value={'id': 1})
+        result = agent.generate_weekly_report({})
+        assert result.get('status') == 'already_generated'
+        assert 'week' in result
+
+    def test_propose_experiments_fallback(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        agent = StrategicCore.__new__(StrategicCore)
+        mocker.patch('factory.agents.strategic_core.db.execute', return_value=None)
+        mocker.patch.object(agent, 'think', side_effect=Exception("no AI"))
+        result = agent.propose_experiments({'conversion_rate': 50, 'avg_check': 45000})
+        assert isinstance(result, list)
+        assert len(result) > 0
+        assert 'hypothesis' in result[0]
+        assert 'metric' in result[0]
+
+    def test_propose_experiments_returns_list(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        agent = StrategicCore.__new__(StrategicCore)
+        mocker.patch('factory.agents.strategic_core.db.execute', return_value=None)
+        mocker.patch.object(agent, 'think', side_effect=Exception("no AI"))
+        result = agent.propose_experiments(None)
+        assert isinstance(result, list)
+        assert len(result) == 3
+
+    def test_propose_experiments_structure(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        agent = StrategicCore.__new__(StrategicCore)
+        mocker.patch('factory.agents.strategic_core.db.execute', return_value=None)
+        mocker.patch.object(agent, 'think', side_effect=Exception("no AI"))
+        result = agent.propose_experiments({})
+        for exp in result:
+            assert 'hypothesis' in exp
+            assert 'metric' in exp
+            assert 'control' in exp
+            assert 'variant' in exp
+            assert 'duration_days' in exp
+            assert 'expected_lift_pct' in exp
+
+    def test_generate_weekly_report_no_metrics(self, mocker):
+        from factory.agents.strategic_core import StrategicCore
+        agent = StrategicCore.__new__(StrategicCore)
+        mocker.patch('factory.agents.strategic_core.db.fetch_one', return_value=None)
+        mocker.patch('factory.agents.strategic_core.db.execute', return_value=None)
+        mocker.patch.object(agent, 'think', side_effect=Exception("no AI"))
+        # Should not raise even with no metrics passed
+        result = agent.generate_weekly_report()
+        assert isinstance(result, dict)
+        assert 'week' in result
+
+    def test_generate_weekly_report_text_exists(self):
+        from factory.agents.strategic_core import StrategicCore
+        assert hasattr(StrategicCore, 'generate_weekly_report_text')
