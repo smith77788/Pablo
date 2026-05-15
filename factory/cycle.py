@@ -343,6 +343,51 @@ def _load_last_cycle_from_history() -> dict:
         return {}
 
 
+def run_phase_25_channel_publisher(phase24_results: dict) -> dict:
+    """Publish one post to Telegram channel if configured."""
+    import urllib.request
+    import urllib.parse
+    import json as json_mod
+    import os
+
+    channel_id = os.environ.get('TELEGRAM_CHANNEL_ID', '').strip()
+    bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '') or os.environ.get('BOT_TOKEN', '')
+
+    if not channel_id or not bot_token:
+        logger.info("Phase 25: TELEGRAM_CHANNEL_ID or BOT_TOKEN not set, skipping channel publish")
+        return {"status": "skipped", "reason": "not_configured"}
+
+    # Pick tips post from phase24 results
+    tips_post = phase24_results.get('tips_post', '')
+    if not tips_post:
+        return {"status": "skipped", "reason": "no_content"}
+
+    # Truncate to 4096 chars (Telegram limit)
+    text = tips_post[:4096]
+
+    # Send via Bot API
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = json_mod.dumps({
+        "chat_id": channel_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }).encode()
+
+    req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'}, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json_mod.loads(resp.read())
+            if result.get('ok'):
+                logger.info(f"Phase 25: Published to channel {channel_id}, message_id={result['result']['message_id']}")
+                return {"status": "published", "channel": channel_id, "message_id": result['result']['message_id']}
+            else:
+                logger.warning(f"Phase 25: Telegram returned error: {result}")
+                return {"status": "error", "detail": str(result)}
+    except Exception as e:
+        logger.warning(f"Phase 25: Channel publish failed: {e}")
+        return {"status": "error", "detail": str(e)}
+
+
 # Threshold for auto-apply: variant B must be at least 3% conversion to auto-apply
 SCALE_THRESHOLD_AUTO = 3.0
 
@@ -2239,6 +2284,7 @@ def run_cycle() -> dict:
         results["phases"]["channel_content"] = {
             "stats_post_chars": _stats_post24["char_count"],
             "tips_post_chars": _tips_post24["char_count"],
+            "tips_post": _tips_post24["text"],
             "calendar_posts_scheduled": len(_calendar24),
             "next_post_format": _calendar24[0]["format"] if _calendar24 else "model_spotlight",
         }
@@ -2248,6 +2294,29 @@ def run_cycle() -> dict:
         )
     except Exception as e:
         logger.error("Phase 24 Channel Content error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 25 — CHANNEL PUBLISHER: publish one post to Telegram channel
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n📢 PHASE 25: CHANNEL PUBLISHER")
+    try:
+        _phase24_results = results.get("phases", {}).get("channel_content", {})
+        _phase25_result = run_phase_25_channel_publisher(_phase24_results)
+        results["phases"]["channel_publisher"] = _phase25_result
+        _p25_status = _phase25_result.get("status", "unknown")
+        if _p25_status == "published":
+            summary_lines.append(
+                f"📢 Channel Publisher (Phase 25): published msg_id={_phase25_result.get('message_id')}"
+            )
+        elif _p25_status == "skipped":
+            summary_lines.append(
+                f"📢 Channel Publisher (Phase 25): skipped ({_phase25_result.get('reason', '')})"
+            )
+        else:
+            summary_lines.append(f"📢 Channel Publisher (Phase 25): {_p25_status}")
+        logger.info("[Phase25] Channel publish result: %s", _phase25_result)
+    except Exception as e:
+        logger.error("Phase 25 Channel Publisher error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
