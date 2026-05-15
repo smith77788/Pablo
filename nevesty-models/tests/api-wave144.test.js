@@ -214,20 +214,30 @@ describe('Поиск моделей (каталог)', () => {
   });
 });
 
-// ─── 3. Wishlist (без аутентификации) ────────────────────────────────────────
+// ─── 3. Wishlist (только через admin auth) ───────────────────────────────────
 
-describe('Wishlist (API без аутентификации)', () => {
+describe('Wishlist (API, admin auth required)', () => {
   const CHAT_ID = 12345;
 
-  it('GET /api/user/wishlist?chat_id=12345 — пустой список', async () => {
+  it('GET /api/user/wishlist без auth — 401', async () => {
     const res = await request(app).get(`/api/user/wishlist?chat_id=${CHAT_ID}`);
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /api/user/wishlist?chat_id=12345 — пустой список', async () => {
+    const res = await request(app)
+      .get(`/api/user/wishlist?chat_id=${CHAT_ID}`)
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBe(0);
   });
 
   it('POST /api/user/wishlist — добавить модель в избранное', async () => {
-    const res = await request(app).post('/api/user/wishlist').send({ chat_id: CHAT_ID, model_id: modelId });
+    const res = await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ chat_id: CHAT_ID, model_id: modelId });
     expect([201, 409]).toContain(res.status);
     if (res.status === 201) {
       expect(res.body.ok).toBe(true);
@@ -235,34 +245,42 @@ describe('Wishlist (API без аутентификации)', () => {
   });
 
   it('GET /api/user/wishlist?chat_id=12345 — модель в избранном', async () => {
-    const res = await request(app).get(`/api/user/wishlist?chat_id=${CHAT_ID}`);
+    const res = await request(app)
+      .get(`/api/user/wishlist?chat_id=${CHAT_ID}`)
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
-    // After add, should have the model
     const found = res.body.find(w => w.model_id === modelId);
     expect(found).toBeTruthy();
   });
 
   it('DELETE /api/user/wishlist/:model_id — удалить из избранного', async () => {
-    const res = await request(app).delete(`/api/user/wishlist/${modelId}?chat_id=${CHAT_ID}`);
+    const res = await request(app)
+      .delete(`/api/user/wishlist/${modelId}?chat_id=${CHAT_ID}`)
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
   });
 
   it('GET /api/user/wishlist?chat_id=12345 — список пуст после удаления', async () => {
-    const res = await request(app).get(`/api/user/wishlist?chat_id=${CHAT_ID}`);
+    const res = await request(app)
+      .get(`/api/user/wishlist?chat_id=${CHAT_ID}`)
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBe(0);
   });
 
   it('GET /api/user/wishlist без chat_id — 400', async () => {
-    const res = await request(app).get('/api/user/wishlist');
+    const res = await request(app).get('/api/user/wishlist').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(400);
   });
 
   it('POST /api/user/wishlist с несуществующей моделью — 404', async () => {
-    const res = await request(app).post('/api/user/wishlist').send({ chat_id: CHAT_ID, model_id: 999999 });
+    const res = await request(app)
+      .post('/api/user/wishlist')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ chat_id: CHAT_ID, model_id: 999999 });
     expect(res.status).toBe(404);
   });
 });

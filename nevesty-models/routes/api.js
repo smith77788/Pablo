@@ -2531,12 +2531,12 @@ router.get('/favorites', async (req, res, next) => {
   }
 });
 
-// ─── User Wishlist — Telegram bot users (chat_id based, no JWT required) ─────
+// ─── User Wishlist — admin-only HTTP view of wishlists (bot uses DB directly) ──
 // GET    /api/user/wishlist?chat_id=123         → list all wishlist entries for user
 // POST   /api/user/wishlist { chat_id, model_id } → add model to wishlist (409 if duplicate)
 // DELETE /api/user/wishlist/:model_id?chat_id=123 → remove model from wishlist
 
-router.get('/user/wishlist', wishlistLimiter, async (req, res, next) => {
+router.get('/user/wishlist', auth, wishlistLimiter, async (req, res, next) => {
   try {
     const chatId = parseInt(req.query.chat_id);
     if (!chatId || chatId <= 0) return res.status(400).json({ error: 'chat_id обязателен' });
@@ -2556,7 +2556,7 @@ router.get('/user/wishlist', wishlistLimiter, async (req, res, next) => {
   }
 });
 
-router.post('/user/wishlist', wishlistLimiter, async (req, res, next) => {
+router.post('/user/wishlist', auth, wishlistLimiter, async (req, res, next) => {
   try {
     const chatId = parseInt(req.body.chat_id);
     const modelId = parseInt(req.body.model_id);
@@ -2585,7 +2585,7 @@ router.post('/user/wishlist', wishlistLimiter, async (req, res, next) => {
   }
 });
 
-router.delete('/user/wishlist/:model_id', wishlistLimiter, async (req, res, next) => {
+router.delete('/user/wishlist/:model_id', auth, wishlistLimiter, async (req, res, next) => {
   try {
     const chatId = parseInt(req.query.chat_id);
     const modelId = parseInt(req.params.model_id);
