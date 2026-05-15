@@ -489,22 +489,41 @@
               <!-- Payment section -->
               <div id="paymentSection" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
                 <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Оплата</div>
+                <div id="paidAtBadge" style="display:none;margin-bottom:8px"></div>
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                   <input type="number" id="paymentAmount" placeholder="Сумма (руб)" min="1" style="width:140px" class="admin-input" />
-                  <button class="btn btn-sm btn-gold" onclick="createPaymentLink()">💳 Создать ссылку на оплату</button>
+                  <button class="btn btn-sm btn-gold" onclick="createPaymentLink()">💳 Создать ссылку</button>
                   <span id="paymentLinkResult" style="font-size:0.8rem;color:var(--success)"></span>
                 </div>
                 <div id="existingPaymentLink" style="margin-top:8px;font-size:0.82rem;display:none">
-                  💳 Ссылка на оплату: <a id="paymentLinkAnchor" href="#" target="_blank" style="color:var(--gold)">открыть</a>
+                  💳 Ссылка: <a id="paymentLinkAnchor" href="#" target="_blank" style="color:var(--gold)">открыть</a>
                   <span id="paymentStatus" style="margin-left:8px;color:var(--text-muted)"></span>
                 </div>
+                <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn btn-sm btn-ghost" onclick="sendInvoice()" id="sendInvoiceBtn" style="border-color:var(--gold);color:var(--gold)">📄 Создать счёт</button>
+                  <span id="invoiceSentInfo" style="font-size:0.78rem;color:var(--text-muted);align-self:center"></span>
+                </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Quick contact actions -->
+          <div class="section-card" id="contactActionsCard" style="display:none;margin-bottom:24px">
+            <div class="section-card-header"><div class="section-card-title">📞 Быстрые действия</div></div>
+            <div class="section-card-body padded">
+              <div style="display:flex;gap:8px;flex-wrap:wrap" id="contactActionBtns"></div>
             </div>
           </div>
 
           <div class="section-card" id="modelCard" style="display:none">
             <div class="section-card-header"><div class="section-card-title">💃 Модель</div></div>
             <div class="section-card-body padded" id="modelInfo"></div>
+          </div>
+
+          <!-- Notes history -->
+          <div class="section-card" id="notesHistoryCard" style="display:none;margin-top:24px">
+            <div class="section-card-header"><div class="section-card-title">📝 История заметок</div></div>
+            <div class="section-card-body padded" id="notesHistoryBody" style="font-size:0.82rem"></div>
           </div>
 
           <!-- Audit log for this order -->
@@ -1019,9 +1038,38 @@ async function openDetail(id) {
       document.getElementById('existingPaymentLink').style.display = 'none';
     }
 
+    // Payment status — paid_at badge
+    const paidBadge = document.getElementById('paidAtBadge');
+    if (paidBadge) {
+      if (o.paid_at) {
+        paidBadge.style.display = '';
+        paidBadge.innerHTML = `<span style="color:#10b981;font-weight:600;font-size:0.82rem">✅ Оплачено</span> <span style="color:var(--text-muted);font-size:0.78rem">${_admin.formatDateTime(o.paid_at)}</span>`;
+      } else if (o.payment_status === 'pending') {
+        paidBadge.style.display = '';
+        paidBadge.innerHTML = `<span style="color:#f59e0b;font-weight:600;font-size:0.82rem">⏳ Ожидает оплаты</span>`;
+      } else {
+        paidBadge.style.display = 'none';
+        paidBadge.innerHTML = '';
+      }
+    }
+
+    // Invoice sent info
+    const invoiceInfo = document.getElementById('invoiceSentInfo');
+    if (invoiceInfo) {
+      if (o.invoice_sent_at) {
+        invoiceInfo.textContent = `Счёт выставлен: ${_admin.formatDateTime(o.invoice_sent_at)}`;
+      } else {
+        invoiceInfo.textContent = '';
+      }
+    }
+
+    // Quick contact action buttons
+    buildContactActions(o);
+
     startChatPoll();
     loadOrderAudit(id);
     loadStatusHistory(id);
+    loadNotesHistory(id);
   } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
 }
 
@@ -1052,12 +1100,80 @@ function buildDetailHTML(o) {
 
 function buildModelHTML(o) {
   return `<div style="display:flex;gap:12px;align-items:center">
-    ${o.model_photo ? `<img src="${o.model_photo}" style="width:60px;height:80px;object-fit:cover;flex-shrink:0" />` : ''}
+    ${o.model_photo ? `<img src="${o.model_photo}" style="width:60px;height:80px;object-fit:cover;flex-shrink:0;border-radius:4px" />` : '<div style="width:60px;height:80px;background:var(--bg2);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.8rem;flex-shrink:0">💃</div>'}
     <div>
-      <strong style="color:var(--text)">${o.model_name}</strong>
+      <strong style="color:var(--text);font-size:0.95rem">${_admin.escapeHtml(o.model_name)}</strong>
       <br><a href="/admin/models.html?id=${o.model_id}" class="btn btn-sm btn-ghost" style="margin-top:8px">Профиль →</a>
+      <a href="/?id=${o.model_id}" target="_blank" class="btn btn-sm btn-ghost" style="margin-top:8px;margin-left:4px">Сайт ↗</a>
     </div>
   </div>`;
+}
+
+function buildContactActions(o) {
+  const card = document.getElementById('contactActionsCard');
+  const btns = document.getElementById('contactActionBtns');
+  if (!card || !btns) return;
+
+  const actions = [];
+  if (o.client_phone) {
+    const phone = _admin.escapeHtml(o.client_phone);
+    const phoneClean = o.client_phone.replace(/\D/g, '');
+    actions.push(`<a href="tel:${phone}" class="btn btn-sm btn-ghost" style="text-decoration:none">📞 Позвонить</a>`);
+    actions.push(`<a href="https://wa.me/${phoneClean}" target="_blank" class="btn btn-sm btn-ghost" style="text-decoration:none;color:#25d366;border-color:#25d366">💬 WhatsApp</a>`);
+  }
+  if (o.client_email) {
+    const email = _admin.escapeHtml(o.client_email);
+    const subject = encodeURIComponent(`Заявка ${o.order_number}`);
+    actions.push(`<a href="mailto:${email}?subject=${subject}" class="btn btn-sm btn-ghost" style="text-decoration:none">📧 Email</a>`);
+  }
+  if (o.client_telegram) {
+    actions.push(`<a href="https://t.me/${_admin.escapeHtml(o.client_telegram)}" target="_blank" class="btn btn-sm btn-ghost" style="text-decoration:none;color:#2fa3e7;border-color:#2fa3e7">✈️ Telegram</a>`);
+  }
+  if (o.client_chat_id) {
+    actions.push(`<a href="tg://user?id=${o.client_chat_id}" class="btn btn-sm btn-ghost" style="text-decoration:none;color:#2fa3e7;border-color:#2fa3e7">✈️ TG Открыть</a>`);
+  }
+
+  if (actions.length) {
+    card.style.display = 'block';
+    btns.innerHTML = actions.join('');
+  } else {
+    card.style.display = 'none';
+  }
+}
+
+async function loadNotesHistory(orderId) {
+  try {
+    const data = await _admin.apiFetch(`/admin/orders/${orderId}/notes`);
+    const notes = data.notes || [];
+    const card = document.getElementById('notesHistoryCard');
+    const body = document.getElementById('notesHistoryBody');
+    if (!card || !body) return;
+    if (!notes.length) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    body.innerHTML = notes.map(n => `
+      <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:4px">${_admin.formatDateTime(n.created_at)}</div>
+        <div style="color:var(--text)">${_admin.escapeHtml(n.admin_note)}</div>
+      </div>`).join('');
+  } catch { /* optional */ }
+}
+
+async function sendInvoice() {
+  if (!currentOrderId) return;
+  const btn = document.getElementById('sendInvoiceBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const result = await _admin.apiFetch(`/admin/orders/${currentOrderId}/send-invoice`, { method: 'POST' });
+    _admin.toast('Счёт выставлен', 'success');
+    const invoiceInfo = document.getElementById('invoiceSentInfo');
+    if (invoiceInfo && result.invoice_sent_at) {
+      invoiceInfo.textContent = `Счёт выставлен: ${_admin.formatDateTime(result.invoice_sent_at)}`;
+    }
+  } catch (e) {
+    _admin.toast('Ошибка: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -1242,12 +1358,21 @@ async function quickStatus(status) {
 }
 
 async function saveInternalNote() {
-  const note = document.getElementById('internalNote').value;
+  const noteEl = document.getElementById('internalNote');
+  const note = noteEl.value;
   try {
     await _admin.apiFetch(`/admin/orders/${currentOrderId}/note`, {
       method: 'PATCH',
       body: JSON.stringify({ note })
     });
+    // Also save as a note in order_notes history
+    if (note.trim()) {
+      await _admin.apiFetch(`/admin/orders/${currentOrderId}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ note: note.trim() })
+      }).catch(() => {});
+      loadNotesHistory(currentOrderId);
+    }
     _admin.toast('Заметка сохранена', 'success');
   } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
 }

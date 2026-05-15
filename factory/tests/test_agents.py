@@ -721,6 +721,577 @@ class TestBaseAgentThinkMocked:
         assert result == ""
 
 
+class TestCustomerSuccessDeptComplete:
+    """Comprehensive tests for Customer Success Department (customer_success_dept.py)."""
+
+    def test_all_four_classes_import(self):
+        from factory.agents.customer_success_dept import (
+            OnboardingSpecialist, RetentionAnalyst,
+            FeedbackCollector, UpsellAdvisor,
+        )
+        assert OnboardingSpecialist is not None
+        assert RetentionAnalyst is not None
+        assert FeedbackCollector is not None
+        assert UpsellAdvisor is not None
+
+    def test_onboarding_specialist_attributes(self):
+        from factory.agents.customer_success_dept import OnboardingSpecialist
+        agent = OnboardingSpecialist()
+        assert agent.department == 'customer_success'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_retention_analyst_attributes(self):
+        from factory.agents.customer_success_dept import RetentionAnalyst
+        agent = RetentionAnalyst()
+        assert agent.department == 'customer_success'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_feedback_collector_attributes(self):
+        from factory.agents.customer_success_dept import FeedbackCollector
+        agent = FeedbackCollector()
+        assert agent.department == 'customer_success'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_upsell_advisor_attributes(self):
+        from factory.agents.customer_success_dept import UpsellAdvisor
+        agent = UpsellAdvisor()
+        assert agent.department == 'customer_success'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_all_agents_have_think_method(self):
+        from factory.agents.customer_success_dept import (
+            OnboardingSpecialist, RetentionAnalyst,
+            FeedbackCollector, UpsellAdvisor,
+        )
+        for cls in (OnboardingSpecialist, RetentionAnalyst, FeedbackCollector, UpsellAdvisor):
+            agent = cls()
+            assert hasattr(agent, 'think') and callable(agent.think), f"{cls.__name__} missing think()"
+
+    def test_onboarding_run_with_mock_returns_dict(self):
+        from factory.agents.customer_success_dept import OnboardingSpecialist
+        agent = OnboardingSpecialist()
+        with patch.object(agent, 'think_json', return_value={'insights': ['a'], 'recommendations': ['b'], 'priority': 8}):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'insights' in result
+        assert 'recommendations' in result
+        assert 'priority' in result
+
+    def test_retention_run_with_mock_returns_dict(self):
+        from factory.agents.customer_success_dept import RetentionAnalyst
+        agent = RetentionAnalyst()
+        with patch.object(agent, 'think_json', return_value={'insights': ['x'], 'recommendations': ['y'], 'priority': 9}):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'insights' in result
+
+    def test_feedback_run_with_mock_returns_dict(self):
+        from factory.agents.customer_success_dept import FeedbackCollector
+        agent = FeedbackCollector()
+        with patch.object(agent, 'think_json', return_value={'insights': ['i'], 'recommendations': ['r'], 'priority': 7}):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'recommendations' in result
+
+    def test_upsell_run_with_mock_returns_dict(self):
+        from factory.agents.customer_success_dept import UpsellAdvisor
+        agent = UpsellAdvisor()
+        with patch.object(agent, 'think_json', return_value={'insights': ['u'], 'recommendations': ['v'], 'priority': 8}):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'priority' in result
+
+    def test_customer_success_department_instantiation(self):
+        from factory.agents.customer_success_dept import (
+            CustomerSuccessDepartment,
+            OnboardingSpecialist, RetentionAnalyst,
+            FeedbackCollector, UpsellAdvisor,
+        )
+        dept = CustomerSuccessDepartment()
+        assert isinstance(dept.onboarding, OnboardingSpecialist)
+        assert isinstance(dept.retention, RetentionAnalyst)
+        assert isinstance(dept.feedback, FeedbackCollector)
+        assert isinstance(dept.upsell, UpsellAdvisor)
+
+    def test_customer_success_department_has_execute_task(self):
+        from factory.agents.customer_success_dept import CustomerSuccessDepartment
+        dept = CustomerSuccessDepartment()
+        assert hasattr(dept, 'execute_task') and callable(dept.execute_task)
+
+    def test_execute_task_returns_dict_with_department_key(self):
+        from factory.agents.customer_success_dept import CustomerSuccessDepartment
+        dept = CustomerSuccessDepartment()
+        with patch.object(dept.upsell, 'suggest_upsell', return_value={}):
+            result = dept.execute_task("апселл", {})
+        assert isinstance(result, dict)
+        assert result.get('department') == 'customer_success'
+        assert 'roles_used' in result
+
+
+class TestFinanceDeptComplete:
+    """Comprehensive tests for Finance Department (finance_dept.py)."""
+
+    def test_all_four_classes_import(self):
+        from factory.agents.finance_dept import (
+            RevenueForecaster, CostOptimizer,
+            PricingStrategist, BudgetPlanner,
+        )
+        assert RevenueForecaster is not None
+        assert CostOptimizer is not None
+        assert PricingStrategist is not None
+        assert BudgetPlanner is not None
+
+    def test_revenue_forecaster_attributes(self):
+        from factory.agents.finance_dept import RevenueForecaster
+        agent = RevenueForecaster()
+        assert agent.department == 'finance'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_cost_optimizer_attributes(self):
+        from factory.agents.finance_dept import CostOptimizer
+        agent = CostOptimizer()
+        assert agent.department == 'finance'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_pricing_strategist_attributes(self):
+        from factory.agents.finance_dept import PricingStrategist
+        agent = PricingStrategist()
+        assert agent.department == 'finance'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_budget_planner_attributes(self):
+        from factory.agents.finance_dept import BudgetPlanner
+        agent = BudgetPlanner()
+        assert agent.department == 'finance'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_all_agents_have_think_method(self):
+        from factory.agents.finance_dept import (
+            RevenueForecaster, CostOptimizer,
+            PricingStrategist, BudgetPlanner,
+        )
+        for cls in (RevenueForecaster, CostOptimizer, PricingStrategist, BudgetPlanner):
+            agent = cls()
+            assert hasattr(agent, 'think') and callable(agent.think), f"{cls.__name__} missing think()"
+
+    def test_revenue_forecaster_run_returns_dict(self):
+        from factory.agents.finance_dept import RevenueForecaster
+        agent = RevenueForecaster()
+        mock_forecast = {'forecast_rub': 150000, 'forecast_low_rub': 100000,
+                         'forecast_high_rub': 220000, 'recommended_actions': ['act1']}
+        with patch.object(agent, 'think_json', return_value=mock_forecast):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'insights' in result
+        assert 'recommendations' in result
+        assert 'priority' in result
+
+    def test_cost_optimizer_run_returns_dict(self):
+        from factory.agents.finance_dept import CostOptimizer
+        agent = CostOptimizer()
+        mock_savings = {'total_potential_savings_rub': 25000, 'payback_period_months': 2, 'quick_wins': []}
+        with patch.object(agent, 'think_json', return_value=mock_savings):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'insights' in result
+
+    def test_pricing_strategist_run_returns_dict(self):
+        from factory.agents.finance_dept import PricingStrategist
+        agent = PricingStrategist()
+        mock_pricing = {'market_analysis': {'segment': 'средний'}, 'pricing_recommendations': [],
+                        'revenue_impact_estimate_rub': 30000}
+        with patch.object(agent, 'think_json', return_value=mock_pricing):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'priority' in result
+
+    def test_budget_planner_run_returns_dict(self):
+        from factory.agents.finance_dept import BudgetPlanner
+        agent = BudgetPlanner()
+        mock_budget = {'total_budget_rub': 200000, 'marketing_budget': {'total_rub': 80000},
+                       'operations_budget': {'total_rub': 70000}, 'reserve_rub': 20000, 'assumptions': []}
+        with patch.object(agent, 'think_json', return_value=mock_budget):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'forecast' in result
+
+    def test_finance_department_instantiation(self):
+        from factory.agents.finance_dept import (
+            FinanceDepartment,
+            RevenueForecaster, CostOptimizer,
+            PricingStrategist, BudgetPlanner,
+        )
+        dept = FinanceDepartment()
+        assert isinstance(dept.forecaster, RevenueForecaster)
+        assert isinstance(dept.optimizer, CostOptimizer)
+        assert isinstance(dept.pricing, PricingStrategist)
+        assert isinstance(dept.planner, BudgetPlanner)
+
+    def test_finance_department_execute_task_returns_dict(self):
+        from factory.agents.finance_dept import FinanceDepartment
+        dept = FinanceDepartment()
+        with patch.object(dept.planner, 'plan_budget', return_value={}):
+            result = dept.execute_task("бюджет", {})
+        assert isinstance(result, dict)
+        assert result.get('department') == 'finance'
+        assert 'roles_used' in result
+
+
+class TestResearchDeptComplete:
+    """Comprehensive tests for Research Department (research_dept.py)."""
+
+    def test_all_four_classes_import(self):
+        from factory.agents.research_dept import (
+            MarketResearcher, CompetitorAnalyst,
+            TrendSpotter, InsightSynthesizer,
+        )
+        assert MarketResearcher is not None
+        assert CompetitorAnalyst is not None
+        assert TrendSpotter is not None
+        assert InsightSynthesizer is not None
+
+    def test_market_researcher_attributes(self):
+        from factory.agents.research_dept import MarketResearcher
+        agent = MarketResearcher()
+        assert agent.department == 'research'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_competitor_analyst_attributes(self):
+        from factory.agents.research_dept import CompetitorAnalyst
+        agent = CompetitorAnalyst()
+        assert agent.department == 'research'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_trend_spotter_attributes(self):
+        from factory.agents.research_dept import TrendSpotter
+        agent = TrendSpotter()
+        assert agent.department == 'research'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_insight_synthesizer_attributes(self):
+        from factory.agents.research_dept import InsightSynthesizer
+        agent = InsightSynthesizer()
+        assert agent.department == 'research'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+
+    def test_all_agents_have_think_method(self):
+        from factory.agents.research_dept import (
+            MarketResearcher, CompetitorAnalyst,
+            TrendSpotter, InsightSynthesizer,
+        )
+        for cls in (MarketResearcher, CompetitorAnalyst, TrendSpotter, InsightSynthesizer):
+            agent = cls()
+            assert hasattr(agent, 'think') and callable(agent.think), f"{cls.__name__} missing think()"
+
+    def test_market_researcher_run_returns_dict(self):
+        from factory.agents.research_dept import MarketResearcher
+        agent = MarketResearcher()
+        mock_data = {'market_size': {'total_rub_bln': 12.5, 'growth_rate_pct': 8, 'online_share_pct': 35},
+                     'market_trends': ['trend1'], 'market_opportunities': []}
+        with patch.object(agent, 'think_json', return_value=mock_data):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'insights' in result
+        assert 'trends' in result
+        assert 'opportunities' in result
+        assert 'priority' in result
+
+    def test_competitor_analyst_run_returns_dict(self):
+        from factory.agents.research_dept import CompetitorAnalyst
+        agent = CompetitorAnalyst()
+        mock_data = {'nevesty_advantages': ['adv1'], 'nevesty_gaps': ['gap1'],
+                     'differentiation_opportunities': [], 'competitive_landscape': 'summary'}
+        with patch.object(agent, 'think_json', return_value=mock_data):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'insights' in result
+
+    def test_trend_spotter_run_returns_dict(self):
+        from factory.agents.research_dept import TrendSpotter
+        agent = TrendSpotter()
+        mock_data = {'fashion_trends': [], 'digital_trends': [], 'seasonal_opportunities': [],
+                     'emerging_opportunities': []}
+        with patch.object(agent, 'think_json', return_value=mock_data):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'trends' in result
+
+    def test_insight_synthesizer_run_returns_dict(self):
+        from factory.agents.research_dept import InsightSynthesizer
+        agent = InsightSynthesizer()
+        mock_data = {'key_insights': [{'insight': 'i1'}], 'priority_actions': [{'action': 'a1'}],
+                     'quick_wins': [], 'north_star_metric': 'конверсия'}
+        with patch.object(agent, 'think_json', return_value=mock_data):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert 'opportunities' in result
+
+    def test_research_department_instantiation(self):
+        from factory.agents.research_dept import (
+            ResearchDepartment,
+            MarketResearcher, CompetitorAnalyst,
+            TrendSpotter, InsightSynthesizer,
+        )
+        dept = ResearchDepartment()
+        assert isinstance(dept.market, MarketResearcher)
+        assert isinstance(dept.competitors, CompetitorAnalyst)
+        assert isinstance(dept.trends, TrendSpotter)
+        assert isinstance(dept.synthesizer, InsightSynthesizer)
+
+    def test_research_department_execute_task_returns_dict(self):
+        from factory.agents.research_dept import ResearchDepartment
+        dept = ResearchDepartment()
+        with patch.object(dept.synthesizer, 'synthesize_insights', return_value={}):
+            result = dept.execute_task("инсайт", {})
+        assert isinstance(result, dict)
+        assert result.get('department') == 'research'
+        assert 'roles_used' in result
+
+
+class TestCreativeDeptComplete:
+    """Comprehensive tests for Creative Department (creative.py)."""
+
+    def test_all_four_agent_classes_import(self):
+        from factory.agents.creative import (
+            CopywriterAgent, VisualConceptorAgent,
+            BrandVoiceKeeperAgent, StorytellingAgent,
+        )
+        assert CopywriterAgent is not None
+        assert VisualConceptorAgent is not None
+        assert BrandVoiceKeeperAgent is not None
+        assert StorytellingAgent is not None
+
+    def test_copywriter_agent_attributes(self):
+        from factory.agents.creative import CopywriterAgent
+        agent = CopywriterAgent()
+        assert agent.department == 'creative'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+        assert hasattr(agent, 'build_prompt') and callable(agent.build_prompt)
+
+    def test_visual_conceptor_attributes(self):
+        from factory.agents.creative import VisualConceptorAgent
+        agent = VisualConceptorAgent()
+        assert agent.department == 'creative'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+        assert hasattr(agent, 'build_prompt') and callable(agent.build_prompt)
+
+    def test_brand_voice_keeper_attributes(self):
+        from factory.agents.creative import BrandVoiceKeeperAgent
+        agent = BrandVoiceKeeperAgent()
+        assert agent.department == 'creative'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+        assert hasattr(agent, 'build_prompt') and callable(agent.build_prompt)
+
+    def test_storytelling_agent_attributes(self):
+        from factory.agents.creative import StorytellingAgent
+        agent = StorytellingAgent()
+        assert agent.department == 'creative'
+        assert isinstance(agent.role, str) and agent.role
+        assert isinstance(agent.name, str) and agent.name
+        assert hasattr(agent, 'run') and callable(agent.run)
+        assert hasattr(agent, 'build_prompt') and callable(agent.build_prompt)
+
+    def test_all_agents_have_think_method(self):
+        from factory.agents.creative import (
+            CopywriterAgent, VisualConceptorAgent,
+            BrandVoiceKeeperAgent, StorytellingAgent,
+        )
+        for cls in (CopywriterAgent, VisualConceptorAgent, BrandVoiceKeeperAgent, StorytellingAgent):
+            agent = cls()
+            assert hasattr(agent, 'think') and callable(agent.think), f"{cls.__name__} missing think()"
+
+    def test_copywriter_run_with_mock(self):
+        from factory.agents.creative import CopywriterAgent
+        agent = CopywriterAgent()
+        with patch.object(agent, 'think', return_value='Mocked copy text'):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert result.get('department') == 'creative'
+        assert result.get('role') == 'Copywriter'
+        assert 'result' in result
+
+    def test_visual_conceptor_run_with_mock(self):
+        from factory.agents.creative import VisualConceptorAgent
+        agent = VisualConceptorAgent()
+        with patch.object(agent, 'think', return_value='Mocked visual concept'):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert result.get('department') == 'creative'
+        assert result.get('role') == 'VisualConceptor'
+
+    def test_brand_voice_keeper_run_with_mock(self):
+        from factory.agents.creative import BrandVoiceKeeperAgent
+        agent = BrandVoiceKeeperAgent()
+        with patch.object(agent, 'think', return_value='Mocked brand voice'):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert result.get('department') == 'creative'
+
+    def test_storytelling_run_with_mock(self):
+        from factory.agents.creative import StorytellingAgent
+        agent = StorytellingAgent()
+        with patch.object(agent, 'think', return_value='Mocked story'):
+            result = agent.run({})
+        assert isinstance(result, dict)
+        assert result.get('department') == 'creative'
+        assert result.get('role') == 'Storytelling'
+
+    def test_creative_department_instantiation_has_four_agents(self):
+        from factory.agents.creative import (
+            CreativeDepartment,
+            CopywriterAgent, VisualConceptorAgent,
+            BrandVoiceKeeperAgent, StorytellingAgent,
+        )
+        dept = CreativeDepartment()
+        assert len(dept.agents) == 4
+        roles = [a.role for a in dept.agents]
+        assert 'Copywriter' in roles
+        assert 'VisualConceptor' in roles
+        assert 'BrandVoiceKeeper' in roles
+        assert 'Storytelling' in roles
+
+    def test_creative_department_run_cycle_returns_dict(self):
+        from factory.agents.creative import CreativeDepartment
+        dept = CreativeDepartment()
+        for agent in dept.agents:
+            agent.think = lambda prompt, **kw: 'Mocked LLM response'
+        result = dept.run_cycle({})
+        assert isinstance(result, dict)
+        assert len(result) == 4
+
+
+class TestStrategicCoreExtended:
+    """Tests for new CEO methods on StrategicCore (strategic_core.py)."""
+
+    def test_strategic_core_imports(self):
+        from factory.agents.strategic_core import StrategicCore
+        assert StrategicCore is not None
+
+    def test_synthesize_dept_reports_exists(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        assert hasattr(ceo, 'synthesize_dept_reports')
+        assert callable(ceo.synthesize_dept_reports)
+
+    def test_generate_weekly_report_exists(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        assert hasattr(ceo, 'generate_weekly_report')
+        assert callable(ceo.generate_weekly_report)
+
+    def test_propose_ab_experiment_exists(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        assert hasattr(ceo, 'propose_ab_experiment')
+        assert callable(ceo.propose_ab_experiment)
+
+    def test_evaluate_experiment_exists(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        assert hasattr(ceo, 'evaluate_experiment')
+        assert callable(ceo.evaluate_experiment)
+
+    def test_evaluate_experiment_scale_when_conv_b_above_5(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        experiment = {'conversion_a': 3.0, 'conversion_b': 6.5}
+        result = ceo.evaluate_experiment(experiment)
+        assert result == 'scale', f"Expected 'scale' for conv_b=6.5, got '{result}'"
+
+    def test_evaluate_experiment_kill_when_conv_b_below_2(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        experiment = {'conversion_a': 4.0, 'conversion_b': 1.0}
+        result = ceo.evaluate_experiment(experiment)
+        assert result == 'kill', f"Expected 'kill' for conv_b=1.0 and conv_a>=conv_b, got '{result}'"
+
+    def test_evaluate_experiment_iterate_in_middle_range_with_mock(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        experiment = {'conversion_a': 3.0, 'conversion_b': 3.5}
+        with patch.object(ceo, 'think_json', return_value={'result': 'iterate'}):
+            result = ceo.evaluate_experiment(experiment)
+        assert result in ('scale', 'iterate', 'kill'), f"Unexpected result: '{result}'"
+
+    def test_generate_weekly_report_with_mock_returns_str(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        with patch.object(ceo, 'think', return_value='Mocked weekly report'):
+            report = ceo.generate_weekly_report()
+        assert isinstance(report, str)
+        assert len(report) > 0
+
+    def test_propose_ab_experiment_with_mock_returns_dict(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        mock_exp = {
+            'name': 'Test CTA',
+            'hypothesis': 'Better button',
+            'variant_a': 'Gold button',
+            'variant_b': 'White button',
+            'metric': 'CTR',
+            'duration_days': 14,
+            'expected_lift_pct': 20,
+        }
+        with patch.object(ceo, 'think_json', return_value=mock_exp):
+            result = ceo.propose_ab_experiment({'context': 'test'})
+        assert isinstance(result, dict)
+        assert 'name' in result
+        assert 'hypothesis' in result
+
+    def test_synthesize_dept_reports_with_mock_returns_dict(self):
+        from factory.agents.strategic_core import StrategicCore
+        ceo = StrategicCore()
+        dept_results = {
+            'creative': {'Copywriter': {'result': 'some creative copy text'}},
+            'sales': 'Some sales summary text',
+        }
+        mock_briefing = {
+            'key_insights': ['insight1'],
+            'priority_issues': ['issue1'],
+            'next_cycle_focus': 'marketing',
+            'recommended_action': 'Launch campaign',
+            'health_score': 75,
+            'summary': 'Business is performing well',
+        }
+        with patch.object(ceo, 'think_json', return_value=mock_briefing), \
+             patch('factory.db.get_recent_decisions', return_value=[]), \
+             patch('factory.db.save_ceo_decision', return_value=None):
+            result = ceo.synthesize_dept_reports(dept_results)
+        assert isinstance(result, dict)
+        assert 'health_score' in result or 'summary' in result
+
+
 class TestCyclePhase21:
     """Tests for Phase 21: CEO Weekly Summary."""
 
