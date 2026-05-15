@@ -74,6 +74,7 @@ const ACTIVE_BOOKING_STATES = new Set([
   'profile_edit_email',
   'ai_match_desc',
   'techspec_input',
+  'ai_budget_desc',
 ]);
 
 // States that have active user input in progress (booking + admin flows)
@@ -4481,33 +4482,69 @@ async function showManagerStats(chatId, managerId) {
   const manager = await get('SELECT id, username, telegram_id, role FROM admins WHERE id=?', [managerId]);
   if (!manager) return safeSend(chatId, 'Менеджер не найден\\.', { parse_mode: 'MarkdownV2' });
 
-  const stats = await get(
-    `SELECT
-       COUNT(*) as total_orders,
-       COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
-       COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled,
-       COUNT(CASE WHEN status IN ('new','confirmed') THEN 1 END) as active,
-       COALESCE(AVG(CASE WHEN status = 'completed' AND CAST(budget AS REAL) > 0 THEN CAST(budget AS REAL) END), 0) as avg_check,
-       COALESCE(SUM(CASE WHEN status = 'completed' THEN CAST(budget AS REAL) ELSE 0 END), 0) as total_revenue
-     FROM orders WHERE manager_id = ?`,
-    [managerId]
-  );
+  const [stats, monthStats, topModels] = await Promise.all([
+    get(
+      `SELECT
+         COUNT(*) as total_orders,
+         COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+         COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled,
+         COUNT(CASE WHEN status IN ('new','confirmed','reviewing','in_progress') THEN 1 END) as active,
+         COALESCE(AVG(CASE WHEN status = 'completed' AND CAST(budget AS REAL) > 0 THEN CAST(budget AS REAL) END), 0) as avg_check,
+         COALESCE(SUM(CASE WHEN status IN ('completed','confirmed') THEN CAST(budget AS REAL) ELSE 0 END), 0) as total_revenue
+       FROM orders WHERE manager_id = ?`,
+      [managerId]
+    ),
+    get(
+      `SELECT
+         COUNT(*) as c,
+         COALESCE(SUM(CASE WHEN status IN ('completed','confirmed') THEN CAST(budget AS REAL) ELSE 0 END), 0) as rev,
+         COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed
+       FROM orders
+       WHERE manager_id = ? AND created_at >= datetime('now','-30 days')`,
+      [managerId]
+    ),
+    query(
+      `SELECT m.name, COUNT(o.id) as cnt
+       FROM orders o JOIN models m ON o.model_id = m.id
+       WHERE o.manager_id = ? AND o.status = 'completed'
+       GROUP BY m.id, m.name ORDER BY cnt DESC LIMIT 3`,
+      [managerId]
+    ).catch(() => []),
+  ]);
 
   const roleLabel =
     manager.role === 'superadmin' ? '👑 Суперадмин' : manager.role === 'manager' ? '👤 Менеджер' : '🔧 Администратор';
 
-  let text = `📊 *Статистика менеджера: ${esc(manager.username)}*\n\n`;
+  let text = `📊 *Статистика менеджера: ${esc(manager.username || String(manager.id))}*\n\n`;
   text += `Роль: ${roleLabel}\n`;
   if (manager.telegram_id) text += `Telegram ID: ${esc(String(manager.telegram_id))}\n`;
-  text += `\n📋 *Заявки:*\n`;
-  text += `• Всего: ${stats?.total_orders || 0}\n`;
-  text += `• Активных: ${stats?.active || 0}\n`;
-  text += `• Завершено: ${stats?.completed || 0}\n`;
-  text += `• Отменено: ${stats?.cancelled || 0}\n`;
-  if (stats?.total_revenue > 0) {
-    text += `\n💰 *Финансы:*\n`;
-    text += `• Общая выручка: ${esc(String(Math.round(stats.total_revenue)))} руб\\.\n`;
-    text += `• Средний чек: ${esc(String(Math.round(stats.avg_check)))} руб\\.\n`;
+
+  text += `\n📋 *Заявки \\(всего\\):*\n`;
+  text += `• Всего: *${stats?.total_orders || 0}*\n`;
+  text += `• Активных: *${stats?.active || 0}*\n`;
+  text += `• Завершено: *${stats?.completed || 0}*\n`;
+  text += `• Отменено: *${stats?.cancelled || 0}*\n`;
+
+  text += `\n📅 *За последние 30 дней:*\n`;
+  text += `• Заявок: *${monthStats?.c || 0}*\n`;
+  text += `• Закрыто: *${monthStats?.completed || 0}*\n`;
+  if ((monthStats?.rev || 0) > 0) {
+    text += `• Выручка: *${esc(Math.round(monthStats.rev).toLocaleString('ru'))} руб\\.*\n`;
+  }
+
+  if ((stats?.total_revenue || 0) > 0) {
+    text += `\n💰 *Финансы \\(всего\\):*\n`;
+    text += `• Общая выручка: *${esc(Math.round(stats.total_revenue).toLocaleString('ru'))} руб\\.*\n`;
+    if ((stats?.avg_check || 0) > 0) {
+      text += `• Средний чек: *${esc(Math.round(stats.avg_check).toLocaleString('ru'))} руб\\.*\n`;
+    }
+  }
+
+  if (topModels.length) {
+    text += `\n🏆 *Топ моделей:*\n`;
+    topModels.forEach((m, i) => {
+      text += `${i + 1}\\. ${esc(m.name)} — ${esc(String(m.cnt))} заказов\n`;
+    });
   }
 
   const kb = [];
@@ -5266,11 +5303,165 @@ async function showPriceCalculator(chatId, params = {}) {
           { text: '🔄 Пересчитать', callback_data: 'calculator' },
         ],
         [{ text: '📤 Поделиться расчётом', callback_data: `calc_share_${models}_${hours}_${eventType}` }],
+        [{ text: '🤖 AI-оценка по описанию', callback_data: 'ai_budget' }],
         [{ text: '💬 Уточнить у менеджера', callback_data: 'msg_manager_start' }],
         [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
       ],
     },
   });
+}
+
+// ─── AI Budget Estimation (БЛОК 12.2) ─────────────────────────────────────────
+
+async function showAiBudgetEstimate(chatId) {
+  return safeSend(
+    chatId,
+    [
+      `🤖 *AI\\-оценка бюджета*`,
+      ``,
+      `Опишите ваше мероприятие в свободной форме, и AI рассчитает примерный бюджет\\.`,
+      ``,
+      `*Что указать:*`,
+      `• Тип мероприятия \\(фотосессия, показ, промо\\.\\.\\)`,
+      `• Количество моделей`,
+      `• Продолжительность`,
+      `• Город / локация`,
+      `• Дополнительные пожелания`,
+      ``,
+      `_Например: «Нужны 2 модели для фотосессии в студии, 4 часа, Москва, продукт — косметика»_`,
+    ].join('\n'),
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [[{ text: '◀️ Назад к калькулятору', callback_data: 'calculator' }]],
+      },
+    }
+  );
+}
+
+async function runAiBudgetEstimate(chatId, description) {
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) {
+    return safeSend(chatId, '⚠️ AI\\-оценка временно недоступна\\. Воспользуйтесь обычным калькулятором\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [[{ text: '🧮 Калькулятор', callback_data: 'calculator' }]],
+      },
+    });
+  }
+
+  await safeSend(chatId, '🤖 Анализирую описание и рассчитываю бюджет\\.\\.\\.', {
+    parse_mode: 'MarkdownV2',
+  });
+
+  try {
+    const rates = await getCalcRates();
+    const systemPrompt = [
+      `Ты — эксперт по бюджетированию модельного агентства Nevesty Models (Россия).`,
+      `Проанализируй описание мероприятия клиента и верни оценку бюджета строго в JSON.`,
+      ``,
+      `Базовые ставки агентства:`,
+      `- Базовая ставка: ${rates.base_per_hour} ₽ / модель / час`,
+      `- Организационный взнос: ${rates.organization_fee} ₽`,
+      `- Эконом-уровень: ×0.8 от базы, Стандарт: ×1.0, Премиум: ×1.35`,
+      `- Множители типа: фотосессия ×1.2, показ мод ×1.5, подиум ×1.3, коммерция ×1.4, мероприятие ×1.0`,
+      ``,
+      `Верни ТОЛЬКО JSON (без лишних слов):`,
+      `{"event_type":"тип на русском","models":число,"hours":число,"tier":"Эконом|Стандарт|Премиум",`,
+      `"min":число_рублей,"max":число_рублей,"confidence":"низкая|средняя|высокая",`,
+      `"notes":"1-2 предложения с пояснением и советом"}`,
+    ].join('\n');
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: description.slice(0, 600) }],
+      }),
+    });
+
+    if (!response.ok) throw new Error(`Anthropic API ${response.status}`);
+
+    const aiData = await response.json();
+    const rawText = aiData.content?.[0]?.text || '';
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+
+    let result = null;
+    if (jsonMatch) {
+      try {
+        result = JSON.parse(jsonMatch[0]);
+      } catch (_) {
+        /* fall through */
+      }
+    }
+
+    if (!result || !result.min || !result.max) {
+      return safeSend(
+        chatId,
+        '⚠️ Не удалось разобрать ответ AI\\. Попробуйте описать подробнее или воспользуйтесь калькулятором\\.',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🧮 Калькулятор', callback_data: 'calculator' }],
+              [{ text: '🔄 Попробовать снова', callback_data: 'ai_budget' }],
+            ],
+          },
+        }
+      );
+    }
+
+    function fmt(n) {
+      return Number(n).toLocaleString('ru-RU');
+    }
+
+    const confidenceLabel = { низкая: '🟡', средняя: '🟢', высокая: '🟢' }[result.confidence] || '⚪';
+    const text = [
+      `🤖 *AI\\-оценка бюджета*`,
+      ``,
+      `📌 *${esc(result.event_type || 'Мероприятие')}*`,
+      `👤 Моделей: *${result.models || '?'}* \\| ⏱ Часов: *${result.hours || '?'}*`,
+      ``,
+      `💰 *от ${esc(fmt(result.min))} до ${esc(fmt(result.max))} ₽*`,
+      ``,
+      `📊 Уровень: *${esc(result.tier || 'Стандарт')}*`,
+      `${confidenceLabel} Точность оценки: *${esc(result.confidence || 'средняя')}*`,
+      ``,
+      result.notes ? `💬 _${esc(result.notes)}_` : '',
+      ``,
+      `_Итоговая стоимость фиксируется в договоре\\._`,
+    ]
+      .filter(l => l !== '')
+      .join('\n');
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📋 Оставить заявку', callback_data: 'booking_start' }],
+          [{ text: '🔍 AI подбор модели', callback_data: 'ai_match' }],
+          [{ text: '🧮 Обычный калькулятор', callback_data: 'calculator' }],
+          [{ text: '🔄 Оценить другое', callback_data: 'ai_budget' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
+        ],
+      },
+    });
+  } catch (err) {
+    console.error('[AI Budget] Error:', err.message);
+    return safeSend(chatId, '⚠️ Ошибка AI\\-оценки\\. Попробуйте позже или воспользуйтесь калькулятором\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [[{ text: '🧮 Калькулятор', callback_data: 'calculator' }]],
+      },
+    });
+  }
 }
 
 // ─── Order Timeline ────────────────────────────────────────────────────────────
@@ -5922,6 +6113,10 @@ function initBot(app) {
     if (data === 'loyalty_leaderboard') return showLoyaltyLeaderboard(chatId);
     if (data === 'referral') return showReferralProgram(chatId);
     if (data === 'calculator') return showPriceCalculator(chatId);
+    if (data === 'ai_budget') {
+      await setSession(chatId, 'state', 'ai_budget_desc');
+      return showAiBudgetEstimate(chatId);
+    }
     if (data === 'noop') return; // label-only buttons
     if (data === 'my_orders') return showMyOrders(chatId);
     if (data === 'check_status') return showStatusInput(chatId);
@@ -9880,6 +10075,20 @@ function initBot(app) {
       await clearSession(chatId);
       await safeSend(chatId, '🤖 Аналізую ваш запит та підбираю моделей\\.\\.\\.', { parse_mode: 'MarkdownV2' });
       return runAiMatch(chatId, desc);
+    }
+
+    // ── AI оценка бюджета: описание мероприятия (БЛОК 12.2)
+    if (state === 'ai_budget_desc') {
+      const desc = text ? text.trim() : '';
+      if (desc.length < 10)
+        return safeSend(chatId, '✏️ Опишите подробнее \\(минимум 10 символов\\):', { parse_mode: 'MarkdownV2' });
+      if (desc.length > 600)
+        return safeSend(chatId, '❌ Описание слишком длинное \\(максимум 600 символов\\)\\.', {
+          parse_mode: 'MarkdownV2',
+        });
+
+      await clearSession(chatId);
+      return runAiBudgetEstimate(chatId, desc);
     }
 
     // ── Edit profile name
