@@ -39,6 +39,7 @@ const ACTIVE_BOOKING_STATES = new Set([
   'leave_review_text', 'bk_quick_name', 'bk_quick_phone',
   'profile_edit_name', 'profile_edit_phone', 'profile_edit_email',
   'ai_match_desc',
+  'techspec_input',
 ]);
 
 // States that have active user input in progress (booking + admin flows)
@@ -301,6 +302,9 @@ async function buildClientKeyboard() {
   const bookingRow = [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }];
   if (quickBookingEnabled !== '0') bookingRow.push({ text: '⚡ Быстрая заявка', callback_data: 'bk_quick' });
   rows.push(bookingRow);
+
+  // Tech spec generator
+  rows.push([{ text: '📋 Тех. задание', callback_data: 'techspec_start' }]);
 
   // Row 3: orders + profile
   rows.push([{ text: '📋 Мои заявки', callback_data: 'my_orders' },
@@ -6482,6 +6486,7 @@ function initBot(app) {
         if (text === '❓ FAQ')                 return showFaq(chatId);
         if (text === '👤 Профиль')             return showUserProfile(chatId, msg.from.first_name);
         if (text === '📞 Контакты')            return showContacts(chatId);
+        if (text === '📋 Тех. задание')        return startTechSpec(chatId);
       }
       // Кнопки администратора
       if (isAdmin(chatId)) {
@@ -9013,6 +9018,73 @@ async function showAdminDashboard(chatId) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ─── FEATURE: AI Tech Spec Generator ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Returns a plain-text spec (for DB storage) and a MarkdownV2-safe display version
+function generateTechSpec(description) {
+  const d = description.toLowerCase();
+  // Extract or guess event type
+  let eventType = 'Другое';
+  if (/корпоратив|корп\./.test(d)) eventType = 'Корпоратив';
+  else if (/фотосесс|фотограф/.test(d)) eventType = 'Фотосессия';
+  else if (/показ|fashion|дефиле/.test(d)) eventType = 'Показ мод';
+  else if (/выставк|конференц/.test(d)) eventType = 'Выставка';
+  else if (/реклам|видео/.test(d)) eventType = 'Реклама';
+
+  // Guess model count
+  let modelCount = '1';
+  const numMatch = d.match(/(\d+)\s*(модел|хостес|деву)/);
+  if (numMatch) modelCount = numMatch[1];
+
+  // Look for budget mentions
+  let budget = 'По запросу';
+  const budgetMatch = description.match(/(\d[\d\s]*(?:тыс|руб|₽|k|000))/i);
+  if (budgetMatch) budget = budgetMatch[1].trim();
+
+  // Look for date
+  let date = 'Уточняется';
+  const dateMatch = description.match(/\d{1,2}[\.\/\-]\d{1,2}(?:[\.\/\-]\d{2,4})?/);
+  if (dateMatch) date = dateMatch[0];
+
+  // Plain-text spec (for DB storage and admin notifications)
+  const plainSpec =
+    `📋 ТЕХНИЧЕСКОЕ ЗАДАНИЕ\n\n` +
+    `Тип мероприятия: ${eventType}\n` +
+    `Количество моделей: ${modelCount}\n` +
+    `Бюджет: ${budget}\n` +
+    `Дата: ${date}\n\n` +
+    `Описание от клиента:\n${description}\n\n` +
+    `Сгенерировано автоматически на основе вашего описания`;
+
+  // MarkdownV2 display (escape all user-provided values)
+  const mdSpec =
+    `📋 *ТЕХНИЧЕСКОЕ ЗАДАНИЕ*\n\n` +
+    `*Тип мероприятия:* ${esc(eventType)}\n` +
+    `*Количество моделей:* ${esc(modelCount)}\n` +
+    `*Бюджет:* ${esc(budget)}\n` +
+    `*Дата:* ${esc(date)}\n\n` +
+    `*Описание от клиента:*\n${esc(description)}\n\n` +
+    `_Сгенерировано автоматически на основе вашего описания_`;
+
+  return { plainSpec, mdSpec };
+}
+
+async function startTechSpec(chatId) {
+  await setSession(chatId, 'techspec_input', {});
+  resetSessionTimer(chatId);
+  return safeSend(chatId,
+    'Опишите ваше мероприятие в свободной форме — дата, место, количество гостей, задачи для моделей, бюджет\\. Я создам техническое задание для агентства\\.',
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '❌ Отмена', callback_data: 'main_menu' }],
+      ]}
+    }
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── Hook new features into the bot after initBot() ──────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -9115,6 +9187,76 @@ function _registerNewFeatures() {
 
     // Quick booking
     if (data === 'bk_quick') return bkQuickStart(chatId);
+
+    // Tech spec generator: start
+    if (data === 'techspec_start') return startTechSpec(chatId);
+
+    // Tech spec generator: confirm — send to manager
+    if (data.startsWith('techspec_confirm_yes_')) {
+      const tsChatId = data.replace('techspec_confirm_yes_', '');
+      if (String(chatId) !== String(tsChatId)) return;
+      const sess = await getSession(chatId);
+      const sd = sessionData(sess);
+      if (!sd || !sd.spec) {
+        return safeSend(chatId, '❌ Данные не найдены\\. Попробуйте ещё раз\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+        });
+      }
+      try {
+        const orderNum = generateOrderNumber();
+        const tsClientName = [q.from.first_name, q.from.last_name].filter(Boolean).join(' ') || 'Клиент (тех. задание)';
+        await run(
+          `INSERT INTO orders (order_number,client_name,client_phone,event_type,comments,client_chat_id,status)
+           VALUES (?,?,?,'other',?,?,'new')`,
+          [orderNum, tsClientName, '', sd.spec, String(chatId)]
+        );
+        const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
+        await clearSession(chatId);
+        await safeSend(chatId,
+          `✅ *Техническое задание отправлено менеджеру\\!*\n\nНомер заявки: *${esc(orderNum)}*\n\nМы свяжемся с вами в ближайшее время\\.`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [
+              [{ text: '📋 Мои заявки',  callback_data: 'my_orders'  }],
+              [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
+            ]}
+          }
+        );
+        if (order) {
+          const adminIds = await getAdminChatIds();
+          const clientName = [q.from.first_name, q.from.last_name].filter(Boolean).join(' ') || 'Клиент';
+          const username = q.from.username ? ` @${q.from.username}` : '';
+          await Promise.allSettled(adminIds.map(id => safeSend(id,
+            `📋 *Новое тех\\. задание от клиента*\n\nОт: ${esc(clientName)}${esc(username)}\nTelegram ID: \`${chatId}\`\n\n${esc(sd.spec)}\n\n📋 Заявка: *${esc(orderNum)}*`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: { inline_keyboard: [
+                [
+                  { text: '✅ Подтвердить', callback_data: `adm_confirm_${order.id}` },
+                  { text: '❌ Отклонить',  callback_data: `adm_reject_${order.id}`  },
+                ],
+                [{ text: '📋 Открыть заявку', callback_data: `adm_order_${order.id}` }],
+              ]}
+            }
+          )));
+        }
+      } catch (e) {
+        console.error('[Bot] techspec submit:', e.message);
+        await clearSession(chatId);
+        return safeSend(chatId, '❌ *Не удалось отправить заявку\\.* Попробуйте позже или напишите менеджеру\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '💬 Менеджер', callback_data: 'contact_mgr' }]] }
+        });
+      }
+      return;
+    }
+
+    // Tech spec generator: cancel
+    if (data.startsWith('techspec_confirm_no_')) {
+      await clearSession(chatId);
+      return showMainMenu(chatId, q.from.first_name);
+    }
 
     // Height search manual input
     if (data === 'search_height_input') return showHeightSearchInput(chatId);
@@ -9273,6 +9415,39 @@ function _registerNewFeatures() {
     const session = await getSession(chatId);
     const state   = session?.state || 'idle';
     const d       = sessionData(session);
+
+    // Tech spec: collect event description
+    if (state === 'techspec_input') {
+      if (!text || text.trim().length < 10) {
+        return safeSend(chatId, '❌ Описание слишком короткое\\. Расскажите подробнее \\(минимум 10 символов\\):', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'main_menu' }]] }
+        });
+      }
+      if (text.trim().length > 2000) {
+        return safeSend(chatId, '❌ Описание слишком длинное \\(максимум 2000 символов\\)\\. Сократите текст:', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'main_menu' }]] }
+        });
+      }
+      const description = text.trim();
+      const { plainSpec, mdSpec } = generateTechSpec(description);
+
+      // Save plain spec to session for DB storage later
+      await setSession(chatId, 'techspec_confirm', { spec: plainSpec, description });
+      return safeSend(chatId,
+        `${mdSpec}\n\nОтправить это техническое задание менеджеру?`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [
+              { text: '✅ Да, отправить', callback_data: `techspec_confirm_yes_${chatId}` },
+              { text: '❌ Нет',           callback_data: `techspec_confirm_no_${chatId}`  },
+            ],
+          ]}
+        }
+      );
+    }
 
     // Quick booking: collect name
     if (state === 'bk_quick_name') {
