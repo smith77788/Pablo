@@ -2449,32 +2449,121 @@ router.delete('/admin/reviews/:id', auth, async (req, res, next) => {
 });
 
 // ─── Admin audit log ─────────────────────────────────────────────────────────
+
+// Map event_type chips to action LIKE patterns
+function auditEventTypeFilter(eventType) {
+  const map = {
+    auth:       ['login%', 'logout%', 'auth%', '%password%', '%totp%', '%2fa%'],
+    orders:     ['%order%', '%booking%', '%заявк%'],
+    models:     ['%model%', '%модел%', '%photo%'],
+    settings:   ['%setting%', '%config%', '%настройк%'],
+    broadcasts: ['%broadcast%', '%рассылк%', '%send_broadcast%'],
+    factory:    ['%factory%', '%agent%', '%ai%', '%generate%'],
+  };
+  return map[eventType] || null;
+}
+
+function auditSinceClause(since) {
+  const now = new Date();
+  if (since === 'today') {
+    const d = now.toISOString().slice(0, 10);
+    return `al.created_at >= '${d} 00:00:00'`;
+  }
+  if (since === '7d') {
+    const d = new Date(now - 7 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+    return `al.created_at >= '${d}'`;
+  }
+  if (since === '30d') {
+    const d = new Date(now - 30 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+    return `al.created_at >= '${d}'`;
+  }
+  return null;
+}
+
 router.get('/admin/audit-log', auth, async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const offset = Math.max(parseInt(req.query.offset) || 0, 0);
     const adminFilter = req.query.admin ? sanitize(req.query.admin, 100) : null;
     const action = req.query.action ? sanitize(req.query.action, 50) : null;
+    const eventType = req.query.event_type || null;
+    const since = req.query.since || null;
 
     let sql = `SELECT al.* FROM audit_log al WHERE 1=1`;
     const params = [];
     if (adminFilter) { sql += ` AND (al.admin_username LIKE ? OR al.admin_chat_id = ?)`; params.push('%' + adminFilter + '%', adminFilter); }
     if (action) { sql += ` AND al.action = ?`; params.push(action); }
+    if (eventType) {
+      const patterns = auditEventTypeFilter(eventType);
+      if (patterns) {
+        sql += ` AND (` + patterns.map(() => `al.action LIKE ?`).join(' OR ') + `)`;
+        params.push(...patterns);
+      }
+    }
+    const sinceClause = since ? auditSinceClause(since) : null;
+    if (sinceClause) sql += ` AND ${sinceClause}`;
     sql += ` ORDER BY al.created_at DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
     const rows = await query(sql, params);
 
-    let countSql = `SELECT COUNT(*) as n FROM audit_log WHERE 1=1`;
+    let countSql = `SELECT COUNT(*) as n FROM audit_log al WHERE 1=1`;
     const countParams = [];
-    if (adminFilter) { countSql += ` AND (admin_username LIKE ? OR admin_chat_id = ?)`; countParams.push('%' + adminFilter + '%', adminFilter); }
-    if (action) { countSql += ` AND action = ?`; countParams.push(action); }
+    if (adminFilter) { countSql += ` AND (al.admin_username LIKE ? OR al.admin_chat_id = ?)`; countParams.push('%' + adminFilter + '%', adminFilter); }
+    if (action) { countSql += ` AND al.action = ?`; countParams.push(action); }
+    if (eventType) {
+      const patterns = auditEventTypeFilter(eventType);
+      if (patterns) {
+        countSql += ` AND (` + patterns.map(() => `al.action LIKE ?`).join(' OR ') + `)`;
+        countParams.push(...patterns);
+      }
+    }
+    if (sinceClause) countSql += ` AND ${sinceClause}`;
     const total = await get(countSql, countParams);
 
     // Also return distinct actions for frontend filter dropdowns
     const actions = await query(`SELECT DISTINCT action FROM audit_log WHERE action IS NOT NULL ORDER BY action`, []);
 
     res.json({ rows, total: total?.n || 0, actions: actions.map(a => a.action) });
+  } catch(e) { next(e); }
+});
+
+// ─── Admin audit log CSV export ───────────────────────────────────────────────
+router.get('/admin/audit/export', auth, async (req, res, next) => {
+  try {
+    const limit = 1000;
+    const eventType = req.query.event_type || null;
+    const since = req.query.since || null;
+
+    let sql = `SELECT al.id, al.action, al.entity, al.entity_type, al.entity_id,
+                      al.created_at, al.ip, al.admin_username, al.admin_chat_id
+               FROM audit_log al WHERE 1=1`;
+    const params = [];
+    if (eventType) {
+      const patterns = auditEventTypeFilter(eventType);
+      if (patterns) {
+        sql += ` AND (` + patterns.map(() => `al.action LIKE ?`).join(' OR ') + `)`;
+        params.push(...patterns);
+      }
+    }
+    const sinceClause = since ? auditSinceClause(since) : null;
+    if (sinceClause) sql += ` AND ${sinceClause}`;
+    sql += ` ORDER BY al.created_at DESC LIMIT ?`;
+    params.push(limit);
+
+    const rows = await query(sql, params);
+
+    const csv = [
+      'ID,Action,Entity,Entity_Type,Entity_ID,Admin,Admin_ChatID,IP,Timestamp',
+      ...rows.map(r => [
+        r.id, r.action, r.entity || '', r.entity_type || '', r.entity_id || '',
+        r.admin_username || '', r.admin_chat_id || '', r.ip || '', r.created_at
+      ].map(v => `"${String(v || '').replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="audit_${Date.now()}.csv"`);
+    res.send('﻿' + csv); // BOM for Excel
   } catch(e) { next(e); }
 });
 
