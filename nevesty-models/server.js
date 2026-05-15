@@ -354,12 +354,28 @@ app.get('/og-image/:modelId', async (req, res) => {
 // ─── Static files ─────────────────────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   maxAge: '7d',
-  etag: true
+  etag: true,
+  setHeaders: (res, filePath) => {
+    // Images served from /uploads — 1 week cache
+    res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+  }
 }));
 app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
   etag: true,
   lastModified: true,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      // HTML: always revalidate
+      res.setHeader('Cache-Control', 'no-cache');
+    } else if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
+      // JS/CSS: 1 day cache
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    } else if (/\.(png|jpe?g|gif|svg|webp|ico|avif)$/i.test(filePath)) {
+      // Images: 1 week cache
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+    }
+  }
 }));
 
 // ─── API ──────────────────────────────────────────────────────────────────────

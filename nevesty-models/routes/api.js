@@ -19,9 +19,11 @@ const { ALLOWED_EVENT_TYPES, ALLOWED_CATEGORIES, VALID_STATUSES } = require('../
 
 // ─── Rate limiters ────────────────────────────────────────────────────────────
 let contactRateLimit = (req, res, next) => next(); // fallback: no-op
-let strictLimiter   = (req, res, next) => next(); // fallback: no-op
-let authLimiter     = (req, res, next) => next(); // fallback: no-op
-let aiMatchLimiter  = (req, res, next) => next(); // fallback: no-op
+let strictLimiter    = (req, res, next) => next(); // fallback: no-op
+let authLimiter      = (req, res, next) => next(); // fallback: no-op
+let aiMatchLimiter   = (req, res, next) => next(); // fallback: no-op
+let contactLimiter   = (req, res, next) => next(); // fallback: no-op — 3/hour for /contact
+let bookingLimiter   = (req, res, next) => next(); // fallback: no-op — 5/hour for /orders
 try {
   const rateLimit = require('express-rate-limit');
   // Contact form: 3 requests per hour per IP
@@ -32,7 +34,17 @@ try {
     legacyHeaders: false,
     message: { error: 'Слишком много сообщений. Попробуйте через час.' },
   });
-  // Strict limit for booking/contact forms: 10 per hour
+  // Dedicated contact limiter (same policy as contactRateLimit)
+  contactLimiter = contactRateLimit;
+  // Booking/orders limiter: 5 requests per hour per IP
+  bookingLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Превышен лимит заявок на бронирование, попробуйте через час' },
+  });
+  // Strict limit for quick-booking: 10 per hour
   strictLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
     max: 10,
@@ -1331,7 +1343,7 @@ router.get('/models/:id/availability', async (req, res, next) => {
 });
 
 // ─── Orders (public) ──────────────────────────────────────────────────────────
-router.post('/orders', strictLimiter, async (req, res, next) => {
+router.post('/orders', bookingLimiter, async (req, res, next) => {
   try {
     const csrfToken = req.headers['x-csrf-token'] || req.body._csrf;
     const { validateToken } = require('../middleware/csrf');
@@ -1941,10 +1953,12 @@ router.get('/settings/public', async (req, res) => {
   try {
     const SAFE_KEYS = [
       'contacts_phone', 'contacts_email', 'contacts_insta', 'contacts_addr',
-      'contacts_whatsapp', 'about', 'greeting', 'agency_name', 'tagline',
+      'contacts_instagram', 'contacts_address',
+      'contacts_whatsapp', 'about', 'about_text', 'greeting', 'agency_name', 'tagline',
       'catalog_per_page', 'site_url', 'manager_hours',
       'pricing_start_from', 'pricing_event_from', 'pricing_premium_from',
-      'ga_measurement_id', 'ym_counter_id'
+      'ga_measurement_id', 'ym_counter_id',
+      'tg_channel', 'telegram_channel_id'
     ];
     const cacheKey = 'settings:public';
     const cached = cache.get(cacheKey);
@@ -1961,6 +1975,31 @@ router.get('/settings/public', async (req, res) => {
     res.json(settings);
   } catch (e) {
     res.status(500).json({ error: 'Settings unavailable' });
+  }
+});
+
+// GET /api/stats/public — public statistics for about page (cached 10 min)
+router.get('/stats/public', async (req, res) => {
+  try {
+    const cacheKey = 'stats:public';
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) return res.json(cached);
+
+    const [modelsRow, ordersRow, citiesRow] = await Promise.all([
+      get('SELECT COUNT(*) as cnt FROM models WHERE active = 1').catch(() => ({ cnt: 0 })),
+      get('SELECT COUNT(*) as cnt FROM orders WHERE status IN (\'confirmed\',\'completed\')').catch(() => ({ cnt: 0 })),
+      get('SELECT COUNT(DISTINCT city) as cnt FROM models WHERE active = 1 AND city IS NOT NULL AND city != \'\'').catch(() => ({ cnt: 0 })),
+    ]);
+
+    const stats = {
+      total_models:    modelsRow?.cnt || 0,
+      completed_orders: ordersRow?.cnt || 0,
+      cities_count:    citiesRow?.cnt || 0,
+    };
+    cache.set(cacheKey, stats, 10 * 60 * 1000); // 10 min TTL
+    res.json(stats);
+  } catch (e) {
+    res.status(500).json({ error: 'Stats unavailable' });
   }
 });
 
@@ -3623,12 +3662,28 @@ router.post('/contact', contactRateLimit, async (req, res, next) => {
       botInstance.notifyNewOrder(orderForBot).catch(e => console.error('Bot notify contact form:', e.message));
     }
 
+    // Also send direct Telegram notification to admin IDs (if bot token configured and botInstance unavailable)
+    if (!botInstance) {
+      const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+      const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(x => x.trim()).filter(Boolean);
+      if (tgToken && adminIds.length) {
+        const tgText = `📬 Новый контакт!\nИмя: ${s.client_name}\nТелефон: ${s.client_phone}\nСообщение: ${s.comments}`;
+        for (const adminId of adminIds) {
+          fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: adminId, text: tgText }),
+          }).catch(e => console.error('[contact] tg direct notify:', e.message));
+        }
+      }
+    }
+
     const adminEmails = mailer.getAdminEmails();
     for (const adminEmail of adminEmails) {
       mailer.sendContactFormEmail(adminEmail, formData).catch(e => console.error('[mailer] contact form error:', e.message));
     }
 
-    res.json({ ok: true, order_number, id: result.id });
+    res.json({ ok: true, message: 'Сообщение отправлено! Мы свяжемся в течение рабочего дня.', order_number, id: result.id });
   } catch (e) { next(e); }
 });
 
