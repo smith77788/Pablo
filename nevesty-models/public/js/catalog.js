@@ -12,6 +12,7 @@
   const citySelect    = document.getElementById('cityFilter');
   const availCheckbox = document.getElementById('availableOnly');
   const sortEl        = document.getElementById('sortSelect');
+  const activeFilterBadge = document.getElementById('activeFilterBadge');
 
   let allModels = [];
 
@@ -50,12 +51,28 @@
       if (filters.maxHeight)   p.set('maxH', filters.maxHeight);
       const qs = p.toString();
       const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-      window.history.replaceState({}, '', newUrl);
+      window.history.pushState({}, '', newUrl);
     }, 300);
   }
 
   const urlParams = getUrlParams();
   let filters = { ...urlParams };
+
+  // ── Active filter count badge ─────────────────────────────────────────────────
+  function updateActiveFilterBadge() {
+    if (!activeFilterBadge) return;
+    let count = 0;
+    if (filters.category) count++;
+    if (filters.hair) count++;
+    if (filters.city) count++;
+    if (filters.ageMin || filters.ageMax) count++;
+    if (filters.minHeight || filters.maxHeight) count++;
+    if (filters.availableOnly) count++;
+    if (filters.search) count++;
+    activeFilterBadge.textContent = count > 0 ? count : '';
+    activeFilterBadge.style.display = count > 0 ? 'inline-block' : 'none';
+    activeFilterBadge.setAttribute('aria-label', count > 0 ? `Активных фильтров: ${count}` : '');
+  }
 
   // ── Show skeleton, load models ───────────────────────────────────────────────
   if (skeleton) skeleton.style.display = '';
@@ -112,6 +129,12 @@
                       (t.dataset.max || '') === (filters.ageMax || '');
       t.classList.toggle('active', matches);
     });
+    // Height tags
+    document.querySelectorAll('#heightFilters .filter-tag').forEach(t => {
+      const matches = (t.dataset.hmin || '') === (filters.minHeight || '') &&
+                      (t.dataset.hmax || '') === (filters.maxHeight || '');
+      t.classList.toggle('active', matches);
+    });
   }
   applyUrlParamsToUI();
 
@@ -119,8 +142,12 @@
   function bindTagGroup(containerId, onSelect) {
     document.querySelectorAll(`#${containerId} .filter-tag`).forEach(el => {
       el.addEventListener('click', () => {
-        document.querySelectorAll(`#${containerId} .filter-tag`).forEach(t => t.classList.remove('active'));
+        document.querySelectorAll(`#${containerId} .filter-tag`).forEach(t => {
+          t.classList.remove('active');
+          t.setAttribute('aria-pressed', 'false');
+        });
         el.classList.add('active');
+        el.setAttribute('aria-pressed', 'true');
         onSelect(el);
         render();
       });
@@ -142,6 +169,14 @@
     if (ageMinEl) ageMinEl.value = '';
     if (ageMaxEl) ageMaxEl.value = '';
     if (window.NM?.analytics) NM.analytics.filterCatalog('age', `${el.dataset.min || ''}–${el.dataset.max || ''}`);
+  });
+  bindTagGroup('heightFilters', el => {
+    filters.minHeight = el.dataset.hmin || '';
+    filters.maxHeight = el.dataset.hmax || '';
+    // Sync numeric height inputs
+    if (minHeightEl) minHeightEl.value = filters.minHeight;
+    if (maxHeightEl) maxHeightEl.value = filters.maxHeight;
+    if (window.NM?.analytics) NM.analytics.filterCatalog('height', `${el.dataset.hmin || ''}–${el.dataset.hmax || ''}`);
   });
 
   // ── City, availability, sort ─────────────────────────────────────────────────
@@ -173,17 +208,31 @@
   }, 250));
   minHeightEl?.addEventListener('input', debounce(() => {
     filters.minHeight = minHeightEl.value;
+    // Deselect height tags when typing
+    document.querySelectorAll('#heightFilters .filter-tag').forEach(t => {
+      t.classList.remove('active');
+      t.setAttribute('aria-pressed', 'false');
+    });
+    const anyTag = document.querySelector('#heightFilters .filter-tag[data-hmin=""]');
+    if (anyTag && !filters.minHeight && !filters.maxHeight) { anyTag.classList.add('active'); anyTag.setAttribute('aria-pressed', 'true'); }
     render();
   }, 400));
   maxHeightEl?.addEventListener('input', debounce(() => {
     filters.maxHeight = maxHeightEl.value;
+    // Deselect height tags when typing
+    document.querySelectorAll('#heightFilters .filter-tag').forEach(t => {
+      t.classList.remove('active');
+      t.setAttribute('aria-pressed', 'false');
+    });
+    const anyTag = document.querySelector('#heightFilters .filter-tag[data-hmin=""]');
+    if (anyTag && !filters.minHeight && !filters.maxHeight) { anyTag.classList.add('active'); anyTag.setAttribute('aria-pressed', 'true'); }
     render();
   }, 400));
   ageMinEl?.addEventListener('input', debounce(() => {
     if (ageMinEl.value) {
       // Numeric range inputs override tag-based age selection
       filters.ageMin = ageMinEl.value;
-      document.querySelectorAll('#ageFilters .filter-tag').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('#ageFilters .filter-tag').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-pressed', 'false'); });
     } else {
       filters.ageMin = '';
     }
@@ -192,7 +241,7 @@
   ageMaxEl?.addEventListener('input', debounce(() => {
     if (ageMaxEl.value) {
       filters.ageMax = ageMaxEl.value;
-      document.querySelectorAll('#ageFilters .filter-tag').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('#ageFilters .filter-tag').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-pressed', 'false'); });
     } else {
       filters.ageMax = '';
     }
@@ -204,6 +253,8 @@
     filters = { category: '', hair: '', city: '', ageMin: '', ageMax: '', availableOnly: false, sort: 'default', search: '', minHeight: '', maxHeight: '' };
     if (ageMinEl) ageMinEl.value = '';
     if (ageMaxEl) ageMaxEl.value = '';
+    if (minHeightEl) minHeightEl.value = '';
+    if (maxHeightEl) maxHeightEl.value = '';
     applyUrlParamsToUI();
     render();
   });
@@ -318,6 +369,9 @@
 
     // Update URL
     updateUrl(filters);
+
+    // Update active filter badge
+    updateActiveFilterBadge();
 
     // Count
     countEl.textContent = `Найдено ${list.length} ${plural(list.length)}`;

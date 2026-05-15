@@ -198,7 +198,10 @@
       <div class="catalog-layout">
         <!-- FILTERS -->
         <aside class="filters-panel" role="search" aria-label="Фильтры каталога">
-          <h3>Фильтры</h3>
+          <h3 style="display:flex;align-items:center;justify-content:space-between">
+            Фильтры
+            <span id="activeFilterBadge" style="display:none;background:var(--gold);color:#000;border-radius:50%;font-size:0.7rem;min-width:20px;height:20px;text-align:center;line-height:20px;padding:0 5px;font-family:'Inter',sans-serif;font-weight:700" aria-label="Активных фильтров"></span>
+          </h3>
           <div class="filter-group">
             <label for="searchInput">Поиск</label>
             <input class="filter-search" type="search" id="searchInput" placeholder="Имя модели..." aria-label="Поиск моделей" role="searchbox" />
@@ -223,9 +226,9 @@
             <div class="filter-options" id="ageFilters">
               <span class="filter-tag active" data-min="" data-max="" role="button" tabindex="0" aria-pressed="true">Любой</span>
               <span class="filter-tag" data-min="18" data-max="22" role="button" tabindex="0" aria-pressed="false">18–22</span>
-              <span class="filter-tag" data-min="22" data-max="26" role="button" tabindex="0" aria-pressed="false">22–26</span>
-              <span class="filter-tag" data-min="26" data-max="30" role="button" tabindex="0" aria-pressed="false">26–30</span>
-              <span class="filter-tag" data-min="30" data-max="" role="button" tabindex="0" aria-pressed="false">30+</span>
+              <span class="filter-tag" data-min="23" data-max="27" role="button" tabindex="0" aria-pressed="false">23–27</span>
+              <span class="filter-tag" data-min="28" data-max="32" role="button" tabindex="0" aria-pressed="false">28–32</span>
+              <span class="filter-tag" data-min="33" data-max="" role="button" tabindex="0" aria-pressed="false">33+</span>
             </div>
             <div class="range-row" style="margin-top:8px">
               <input type="number" id="age-min" placeholder="от" min="18" max="50" class="admin-input" style="padding:8px 10px;" aria-label="Минимальный возраст" />
@@ -245,6 +248,14 @@
           </div>
           <div class="filter-group" role="group" aria-label="Фильтр по росту">
             <label>Рост (см)</label>
+            <div class="filter-options" id="heightFilters" style="margin-bottom:10px">
+              <span class="filter-tag active" data-hmin="" data-hmax="" role="button" tabindex="0" aria-pressed="true">Любой</span>
+              <span class="filter-tag" data-hmin="160" data-hmax="165" role="button" tabindex="0" aria-pressed="false">160–165</span>
+              <span class="filter-tag" data-hmin="166" data-hmax="170" role="button" tabindex="0" aria-pressed="false">166–170</span>
+              <span class="filter-tag" data-hmin="171" data-hmax="175" role="button" tabindex="0" aria-pressed="false">171–175</span>
+              <span class="filter-tag" data-hmin="176" data-hmax="180" role="button" tabindex="0" aria-pressed="false">176–180</span>
+              <span class="filter-tag" data-hmin="181" data-hmax="" role="button" tabindex="0" aria-pressed="false">181+</span>
+            </div>
             <div class="range-row">
               <input type="number" id="minHeight" placeholder="от" min="160" max="195" class="admin-input" style="padding:8px 10px;" aria-label="Минимальный рост" />
               <span aria-hidden="true">—</span>

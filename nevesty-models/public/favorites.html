@@ -47,7 +47,10 @@
         <a href="/#services">Услуги</a>
         <a href="/#about">О нас</a>
         <a href="/#contact">Контакты</a>
-        <a href="/favorites.html" style="color:var(--gold)" aria-label="Избранное (текущая страница)" aria-current="page"><span aria-hidden="true">❤️</span> Избранное</a>
+        <a href="/favorites.html" style="color:var(--gold);display:inline-flex;align-items:center;gap:4px" aria-label="Избранное (текущая страница)" aria-current="page">
+          <span aria-hidden="true">❤️</span> Избранное
+          <span id="fav-nav-badge" style="background:red;color:white;border-radius:50%;padding:0 5px;font-size:0.7rem;min-width:18px;text-align:center;display:inline-block;line-height:18px"></span>
+        </a>
         <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
            style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
            onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
@@ -86,8 +89,25 @@
       <!-- Header -->
       <div style="margin-bottom:32px">
         <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Мой список</div>
-        <h1 style="font-family:'Playfair Display',serif;font-size:clamp(1.8rem,4vw,3rem);color:var(--white);margin-bottom:8px">Избранные модели</h1>
-        <p style="color:var(--text-muted);font-size:0.9rem" id="favCount">Загрузка...</p>
+        <h1 style="font-family:'Playfair Display',serif;font-size:clamp(1.8rem,4vw,3rem);color:var(--white);margin-bottom:8px">
+          Избранные <span id="favCountBadge" style="display:none;font-size:0.55em;background:rgba(201,169,110,0.15);border:1px solid rgba(201,169,110,0.3);color:var(--gold);padding:4px 14px;border-radius:2px;vertical-align:middle;font-family:'Inter',sans-serif;font-weight:400;letter-spacing:1px"></span>
+        </h1>
+        <p style="color:var(--text-muted);font-size:0.9rem;margin-top:6px" id="favCount">Загрузка...</p>
+        <!-- Top action bar (visible when favorites exist) -->
+        <div id="topActions" style="display:none;margin-top:20px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+          <a id="compareAllBtn" href="/compare.html"
+            style="display:inline-flex;align-items:center;gap:8px;padding:10px 20px;background:transparent;border:1px solid var(--gold);color:var(--gold);font-size:0.78rem;letter-spacing:1px;text-transform:uppercase;text-decoration:none;transition:all 0.2s"
+            onmouseover="this.style.background='var(--gold)';this.style.color='var(--bg)'"
+            onmouseout="this.style.background='transparent';this.style.color='var(--gold)'">
+            📊 Сравнить выбранные
+          </a>
+          <button id="clearAllTopBtn"
+            style="display:inline-flex;align-items:center;gap:8px;background:none;border:1px solid var(--border);color:var(--text-muted);padding:10px 20px;font-size:0.78rem;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all 0.2s"
+            onmouseover="this.style.borderColor='#e54d4d';this.style.color='#e54d4d'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
+            🗑 Очистить всё
+          </button>
+        </div>
       </div>
 
       <!-- Loading state -->
@@ -104,22 +124,22 @@
         <div style="font-size:4rem;margin-bottom:24px;opacity:0.4">🤍</div>
         <h2 style="font-family:'Playfair Display',serif;font-size:2rem;color:var(--white);margin-bottom:12px">Список пуст</h2>
         <p style="color:var(--text-muted);margin-bottom:32px;max-width:400px;margin-left:auto;margin-right:auto">
-          Добавляйте понравившихся моделей из каталога, нажимая на кнопку ❤️ на карточке или на странице модели.
+          У вас нет избранных моделей. Откройте каталог и добавьте понравившихся.
         </p>
         <a href="/catalog.html" class="btn-primary">Перейти в каталог</a>
       </div>
 
       <!-- Models grid -->
-      <div class="catalog-grid" id="favGrid" style="display:none"></div>
+      <div class="catalog-grid" id="favGrid" style="display:none" role="list" aria-label="Избранные модели"></div>
 
       <!-- Bottom actions (shown when there are favorites) -->
-      <div id="bottomActions" style="display:none;margin-top:40px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+      <div id="bottomActions" style="display:none;margin-top:40px;gap:16px;flex-wrap:wrap;align-items:center">
         <a href="/catalog.html" class="btn-outline">← В каталог</a>
         <button id="clearAllBtn"
           style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:12px 24px;font-size:0.8rem;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all 0.2s"
           onmouseover="this.style.borderColor='#e54d4d';this.style.color='#e54d4d'"
           onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
-          Очистить список
+          🗑 Очистить всё
         </button>
       </div>
 
@@ -218,6 +238,13 @@
       return 'моделей';
     }
 
+    // ── Nav badge ─────────────────────────────────────────────────────────────
+    function updateNavBadge() {
+      const count = getFavs().length;
+      const badge = document.getElementById('fav-nav-badge');
+      if (badge) badge.textContent = count > 0 ? count : '';
+    }
+
     // ── Compare bar ───────────────────────────────────────────────────────────
     function updateCompareBar() {
       const ids = getCompareIds();
@@ -247,11 +274,33 @@
     });
 
     const favCountEl   = document.getElementById('favCount');
+    const favCountBadgeEl = document.getElementById('favCountBadge');
     const loadingEl    = document.getElementById('loadingState');
     const emptyEl      = document.getElementById('emptyState');
     const gridEl       = document.getElementById('favGrid');
     const bottomEl     = document.getElementById('bottomActions');
+    const topActionsEl = document.getElementById('topActions');
     const clearAllBtn  = document.getElementById('clearAllBtn');
+    const clearAllTopBtn = document.getElementById('clearAllTopBtn');
+    const compareAllBtn  = document.getElementById('compareAllBtn');
+
+    function updateHeadingBadge(n) {
+      if (favCountBadgeEl) {
+        if (n > 0) {
+          favCountBadgeEl.textContent = n;
+          favCountBadgeEl.style.display = 'inline-block';
+        } else {
+          favCountBadgeEl.style.display = 'none';
+        }
+      }
+    }
+
+    function updateCompareAllLink(models) {
+      if (compareAllBtn && models && models.length >= 2) {
+        const ids = models.slice(0, 3).map(m => m.id).join(',');
+        compareAllBtn.href = `/compare.html?models=${ids}`;
+      }
+    }
 
     function renderCard(model, onRemove) {
       const catLabel = CAT_LABELS[model.category] || model.category || '';
@@ -263,7 +312,7 @@
       const article = document.createElement('article');
       article.className = 'model-card';
       article.tabIndex = 0;
-      article.setAttribute('role', 'button');
+      article.setAttribute('role', 'listitem');
       article.setAttribute('aria-label', `Профиль модели ${model.name}`);
       article.addEventListener('click', () => { window.location.href = `/model.html?id=${model.id}`; });
       article.addEventListener('keydown', e => {
@@ -310,20 +359,24 @@
           </div>
         </div>`;
 
-      // ── Remove from favorites button (❌ / ❤️) ─────────────────────────────
+      // ── Remove from favorites button (💔) ──────────────────────────────────
       const removeBtn = document.createElement('button');
       removeBtn.innerHTML = '❤️';
       removeBtn.title = 'Убрать из избранного';
       removeBtn.setAttribute('aria-label', 'Убрать из избранного');
       removeBtn.style.cssText = 'position:absolute;top:8px;right:8px;width:34px;height:34px;border:none;background:rgba(0,0,0,0.55);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;';
-      removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = 'rgba(180,0,0,0.75)'; });
-      removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'rgba(0,0,0,0.55)'; });
+      removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = 'rgba(180,0,0,0.75)'; removeBtn.innerHTML = '💔'; });
+      removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'rgba(0,0,0,0.55)'; removeBtn.innerHTML = '❤️'; });
       removeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
         const favs = getFavs();
-        const updated = favs.filter(f => f.id !== model.id);
+        const updated = favs.filter(f => {
+          const fid = typeof f === 'object' ? f.id : f;
+          return fid != model.id;
+        });
         saveFavs(updated);
+        updateNavBadge();
         article.style.opacity = '0';
         article.style.transform = 'scale(0.95)';
         article.style.transition = 'all 0.25s';
@@ -335,7 +388,7 @@
 
       // ── Compare button (⚖️) ────────────────────────────────────────────────
       const cmpIds = getCompareIds();
-      const cmpActive = cmpIds.includes(model.id);
+      const cmpActive = cmpIds.includes(String(model.id)) || cmpIds.includes(model.id);
       const cmpBtn = document.createElement('button');
       cmpBtn.className = 'fav-cmp-btn';
       cmpBtn.setAttribute('data-active', cmpActive ? 'true' : 'false');
@@ -353,20 +406,22 @@
         e.stopPropagation();
         e.preventDefault();
         const ids = getCompareIds();
-        const idx = ids.indexOf(model.id);
+        const idx = ids.findIndex(id => id == model.id);
         if (idx === -1) {
-          if (ids.length >= 3) { alert('Максимум 3 модели для сравнения'); return; }
+          if (ids.length >= 3) { showToast('Максимум 3 модели для сравнения'); return; }
           ids.push(model.id);
           saveCompareIds(ids);
           cmpBtn.setAttribute('data-active', 'true');
           cmpBtn.style.background = 'rgba(201,169,110,0.85)';
           cmpBtn.title = 'Убрать из сравнения';
+          showToast('Добавлено в сравнение ⚖️');
         } else {
           ids.splice(idx, 1);
           saveCompareIds(ids);
           cmpBtn.setAttribute('data-active', 'false');
           cmpBtn.style.background = 'rgba(0,0,0,0.55)';
           cmpBtn.title = 'Добавить к сравнению';
+          showToast('Убрано из сравнения');
         }
         updateCompareBar();
       });
@@ -380,78 +435,128 @@
       return article;
     }
 
+    function showToast(msg) {
+      const c = document.getElementById('toastContainer');
+      if (!c) return;
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.textContent = msg;
+      c.appendChild(t);
+      setTimeout(() => t.remove(), 2800);
+    }
+
+    function clearAll() {
+      if (!confirm('Очистить весь список избранного?')) return;
+      saveFavs([]);
+      updateNavBadge();
+      gridEl.innerHTML = '';
+      gridEl.style.display = 'none';
+      bottomEl.style.display = 'none';
+      if (topActionsEl) topActionsEl.style.display = 'none';
+      emptyEl.style.display = 'block';
+      favCountEl.textContent = '0 моделей';
+      updateHeadingBadge(0);
+    }
+
     async function init() {
-      const favs = getFavs();
-
-      // Support both old format (array of IDs) and new format (array of objects)
-      // If stored as IDs only, we still need to display something — show empty state
-      const storedModels = favs.filter(f => f && typeof f === 'object' && f.id);
-      const favIds = new Set(storedModels.map(f => f.id));
-
+      const raw = getFavs();
+      updateNavBadge();
       updateCompareBar();
 
-      if (!storedModels.length) {
+      // Support both: array of string/number IDs, or array of objects with .id
+      let favIds = raw.map(f => (typeof f === 'object' && f !== null) ? f.id : f)
+                      .filter(id => id !== undefined && id !== null);
+      favIds = [...new Set(favIds.map(String))]; // dedup as strings
+
+      if (!favIds.length) {
         favCountEl.textContent = '0 моделей';
+        updateHeadingBadge(0);
         loadingEl.style.display = 'none';
         emptyEl.style.display = 'block';
         return;
       }
 
-      // Show loading skeleton while fetching fresh API data
+      // Show loading skeleton while fetching
       loadingEl.style.display = '';
       favCountEl.textContent = 'Загрузка...';
+      updateHeadingBadge(favIds.length);
 
-      // Fetch fresh model data from API to get up-to-date featured/order_count
-      let models = storedModels;
+      // Build a map of stored objects for offline fallback
+      const storedMap = {};
+      raw.forEach(f => {
+        if (typeof f === 'object' && f !== null && f.id) storedMap[String(f.id)] = f;
+      });
+
+      // Fetch fresh data: try batch via /api/models?ids=... first, then fallback to individual
+      let models = [];
       try {
         const resp = await fetch('/api/models');
         if (resp.ok) {
-          const allModels = await resp.json();
-          const apiMap = new Map(allModels.map(m => [m.id, m]));
-          // Merge stored data with fresh API data (API wins for featured/order_count)
-          models = storedModels.map(stored => {
-            const fresh = apiMap.get(stored.id);
-            return fresh ? { ...stored, ...fresh } : stored;
-          });
+          const all = await resp.json();
+          const apiMap = new Map(all.map(m => [String(m.id), m]));
+          models = favIds
+            .map(id => apiMap.get(String(id)) || storedMap[String(id)] || null)
+            .filter(Boolean);
         }
-      } catch (e) { /* fall back to stored data */ }
+      } catch (e) { /* network error - use stored */ }
+
+      // If API failed or returned nothing, use stored objects
+      if (!models.length) {
+        models = favIds.map(id => storedMap[id]).filter(Boolean);
+      }
+
+      // If still nothing, try fetching each individually
+      if (!models.length) {
+        loadingEl.style.display = '';
+        const fetched = await Promise.allSettled(
+          favIds.map(id => fetch(`/api/models/${encodeURIComponent(id)}`).then(r => r.ok ? r.json() : null))
+        );
+        models = fetched.map(r => r.status === 'fulfilled' ? r.value : null).filter(Boolean);
+      }
 
       loadingEl.style.display = 'none';
+
+      if (!models.length) {
+        favCountEl.textContent = '0 моделей';
+        updateHeadingBadge(0);
+        emptyEl.style.display = 'block';
+        return;
+      }
+
       favCountEl.textContent = `${models.length} ${plural(models.length)}`;
+      updateHeadingBadge(models.length);
 
       gridEl.style.display = '';
       bottomEl.style.display = 'flex';
+      if (topActionsEl) topActionsEl.style.display = 'flex';
+      updateCompareAllLink(models);
 
       let currentModels = [...models];
 
       function updateCount() {
         const n = currentModels.length;
         favCountEl.textContent = `${n} ${plural(n)}`;
+        updateHeadingBadge(n);
+        updateCompareAllLink(currentModels);
         if (!n) {
           gridEl.style.display = 'none';
           bottomEl.style.display = 'none';
+          if (topActionsEl) topActionsEl.style.display = 'none';
           emptyEl.style.display = 'block';
         }
       }
 
       models.forEach(model => {
         const card = renderCard(model, (removedId) => {
-          currentModels = currentModels.filter(m => m.id !== removedId);
+          currentModels = currentModels.filter(m => String(m.id) !== String(removedId));
           updateCount();
         });
         gridEl.appendChild(card);
       });
 
-      // Clear all button
-      clearAllBtn.addEventListener('click', () => {
-        if (!confirm('Очистить весь список избранного?')) return;
-        saveFavs([]);
-        gridEl.innerHTML = '';
-        currentModels = [];
-        gridEl.style.display = 'none';
-        bottomEl.style.display = 'none';
-        emptyEl.style.display = 'block';
-        favCountEl.textContent = '0 моделей';
+      // Clear all buttons
+      [clearAllBtn, clearAllTopBtn].forEach(btn => {
+        if (btn) btn.addEventListener('click', clearAll);
       });
     }
 
