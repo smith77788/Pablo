@@ -2167,49 +2167,160 @@ async function showAuditLog(chatId, page = 0) {
 
 // ─── Broadcast ────────────────────────────────────────────────────────────────
 
+function _bcSegmentLabel(segment) {
+  if (segment === 'all')       return 'Все клиенты';
+  if (segment === 'completed') return 'Завершённые заявки';
+  if (segment === 'new')       return 'Новые (без заявок)';
+  if (segment && segment.startsWith('city:')) return `Город: ${segment.slice(5)}`;
+  return 'Все клиенты';
+}
+
+async function _getBroadcastClients(segment) {
+  try {
+    if (segment === 'completed') {
+      return await query(
+        "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND status='completed'"
+      ).catch(() => []);
+    }
+    if (segment && segment.startsWith('city:')) {
+      const city = segment.slice(5);
+      return await query(
+        "SELECT DISTINCT o.client_chat_id FROM orders o JOIN models m ON o.model_id=m.id WHERE m.city=? AND o.client_chat_id IS NOT NULL AND o.client_chat_id != ''",
+        [city]
+      ).catch(() => []);
+    }
+    if (segment === 'new') {
+      return await query(
+        "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND client_chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE status IN ('confirmed','in_progress','completed') AND client_chat_id IS NOT NULL AND client_chat_id != '')"
+      ).catch(() => []);
+    }
+    // default: all
+    return await query(
+      "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''"
+    ).catch(() => []);
+  } catch { return []; }
+}
+
+async function _bcCountRecipients(segment) {
+  const clients = await _getBroadcastClients(segment);
+  return clients.length;
+}
+
 async function showBroadcast(chatId) {
   if (!isAdmin(chatId)) return;
-  const clientCount = await get("SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''").catch(()=>({cnt:0}));
-  const completedCount = await get("SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND status='completed'").catch(()=>({cnt:0}));
+  const [allCount, completedCount, newCount] = await Promise.all([
+    _bcCountRecipients('all'),
+    _bcCountRecipients('completed'),
+    _bcCountRecipients('new'),
+  ]);
 
   return safeSend(chatId,
-    `📢 *Рассылка*\n\nВыберите аудиторию:`,
+    `📢 *Рассылка* — Выберите аудиторию:`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
-        [{ text: `👥 Все клиенты (${clientCount?.cnt || 0})`, callback_data: 'adm_broadcast_all' }],
-        [{ text: `✅ Завершили заявку (${completedCount?.cnt || 0})`, callback_data: 'adm_broadcast_completed' }],
-        [{ text: '📤 Отправить',  callback_data: 'adm_broadcast_text'  },
-         { text: '📷 С фото',     callback_data: 'adm_broadcast_photo' }],
-        [{ text: '← Назад',        callback_data: 'admin_menu'          }],
+        [
+          { text: `👥 Всем клиентам (${allCount})`,     callback_data: 'adm_bc_seg_all'       },
+          { text: `✅ Завершённые (${completedCount})`,  callback_data: 'adm_bc_seg_completed' },
+        ],
+        [
+          { text: '🏙 По городу',                       callback_data: 'adm_bc_seg_city'      },
+          { text: `🆕 Новые (${newCount})`,              callback_data: 'adm_bc_seg_new'       },
+        ],
+        [{ text: '← Назад', callback_data: 'admin_menu' }],
       ]}
     }
   );
 }
 
-async function _getBroadcastClients(segment) {
-  let q = "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''";
-  if (segment === 'completed') q += " AND status='completed'";
-  return query(q).catch(()=>[]);
+async function showBroadcastCitySelection(chatId) {
+  if (!isAdmin(chatId)) return;
+  const citiesSetting = await getSetting('cities_list').catch(() => '');
+  let cityList = citiesSetting
+    ? citiesSetting.split(',').map(c => c.trim()).filter(Boolean).slice(0, 8)
+    : [];
+  if (!cityList.length) {
+    const rows = await query(
+      "SELECT DISTINCT city FROM models WHERE city IS NOT NULL AND city != '' ORDER BY city LIMIT 8"
+    ).catch(() => []);
+    cityList = rows.map(r => r.city);
+  }
+  if (!cityList.length) {
+    return safeSend(chatId, '❌ Нет городов для выбора. Добавьте города в настройках или добавьте моделям города.', {
+      reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_broadcast' }]] }
+    });
+  }
+  const cityButtons = [];
+  for (let i = 0; i < cityList.length; i += 2) {
+    const row = [{ text: `🏙 ${cityList[i]}`, callback_data: `adm_bc_city_${cityList[i]}` }];
+    if (cityList[i + 1]) row.push({ text: `🏙 ${cityList[i + 1]}`, callback_data: `adm_bc_city_${cityList[i + 1]}` });
+    cityButtons.push(row);
+  }
+  cityButtons.push([{ text: '← Назад', callback_data: 'adm_broadcast' }]);
+  return safeSend(chatId, `🏙 *Рассылка по городу*\n\nВыберите город:`, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: cityButtons }
+  });
 }
 
-async function previewBroadcast(chatId, text, photoId = null) {
+async function _askBroadcastText(chatId, segment) {
+  const label = _bcSegmentLabel(segment);
+  const count = await _bcCountRecipients(segment);
+  const sess  = await getSession(chatId);
+  const sd    = sessionData(sess);
+  await setSession(chatId, 'adm_broadcast_msg', { ...sd, broadcastSegment: segment });
+  return safeSend(chatId,
+    `📢 *Рассылка*\nАудитория: *${esc(label)}* \\(${count} получ\\.\\)\n\nВведите текст сообщения:`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_broadcast' }]] }
+    }
+  );
+}
+
+async function _askBroadcastPhoto(chatId) {
+  return safeSend(chatId,
+    `✅ *Текст получен\\!*\n\nДобавить фото к рассылке?`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [
+          { text: '🖼 Добавить фото',    callback_data: 'adm_bc_photo'    },
+          { text: '▶ Отправить без фото', callback_data: 'adm_bc_send_now' },
+        ],
+        [{ text: '❌ Отмена', callback_data: 'adm_broadcast' }],
+      ]}
+    }
+  );
+}
+
+async function previewBroadcast(chatId) {
   const sess = await getSession(chatId);
   const sd   = sessionData(sess);
-  const clientCount = (sd.broadcastRecipients || []).length;
+  const segment    = sd.broadcastSegment || 'all';
+  const text       = sd.broadcastText || '';
+  const photoId    = sd.broadcastPhotoId || null;
+  const label      = _bcSegmentLabel(segment);
+  const recipients = (sd.broadcastRecipients || []);
+  const count      = recipients.length;
 
-  await safeSend(chatId, `📋 *Предпросмотр рассылки*\n\nПолучателей: *${clientCount}*`, { parse_mode: 'MarkdownV2' });
+  const headerText = `📢 *Предпросмотр рассылки:*\nАудитория: *${esc(label)}* \\(${count} получ\\.\\)\n─────`;
+  await safeSend(chatId, headerText, { parse_mode: 'MarkdownV2' });
 
+  const msgBody = text ? `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}` : '📢 *Nevesty Models*';
   if (photoId) {
-    await safePhoto(chatId, photoId, { caption: text.slice(0, 1020), parse_mode: 'MarkdownV2' }).catch(()=>{});
+    await safePhoto(chatId, photoId, { caption: msgBody.slice(0, 1020), parse_mode: 'MarkdownV2' }).catch(() => {});
   } else {
-    await safeSend(chatId, text, { parse_mode: 'MarkdownV2' }).catch(()=>{});
+    await safeSend(chatId, msgBody, { parse_mode: 'MarkdownV2' }).catch(() => {});
   }
 
-  return safeSend(chatId, '📤 Отправить рассылку?', {
+  return safeSend(chatId, '─────\n📤 Отправить рассылку?', {
     reply_markup: { inline_keyboard: [
-      [{ text: `✅ Да, отправить ${clientCount} получателям`, callback_data: 'adm_broadcast_confirm' }],
-      [{ text: '❌ Отмена', callback_data: 'adm_broadcast' }]
+      [
+        { text: '✅ Отправить',      callback_data: 'adm_bc_confirm'        },
+        { text: '✏️ Изменить текст', callback_data: 'adm_bc_edit'           },
+      ],
+      [{ text: '❌ Отменить',        callback_data: 'adm_bc_cancel_preview' }],
     ]}
   });
 }
@@ -2222,9 +2333,9 @@ async function sendBroadcast(chatId, text) {
   if (!clients.length) return safeSend(chatId, '❌ Нет клиентов для рассылки.', {
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
   });
-  const newSd = { ...sd, broadcastRecipients: clients.map(c => c.client_chat_id), broadcastText: text };
+  const newSd = { ...sd, broadcastRecipients: clients.map(c => c.client_chat_id), broadcastText: text, broadcastPhotoId: null };
   await setSession(chatId, 'adm_broadcast_preview', newSd);
-  return previewBroadcast(chatId, `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}`);
+  return _askBroadcastPhoto(chatId);
 }
 
 async function doSendBroadcast(chatId) {
@@ -2232,19 +2343,31 @@ async function doSendBroadcast(chatId) {
   const sd   = sessionData(sess);
   const recipients = sd.broadcastRecipients || [];
   const text = sd.broadcastText || '';
+  const photoId = sd.broadcastPhotoId || null;
   let sent = 0, failed = 0;
   for (const cid of recipients) {
     try {
-      await bot.sendMessage(cid, `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}`, { parse_mode: 'MarkdownV2' });
+      if (photoId) {
+        await bot.sendPhoto(cid, photoId, {
+          caption: text ? `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}` : '📢 *Nevesty Models*',
+          parse_mode: 'MarkdownV2',
+        });
+      } else {
+        await bot.sendMessage(cid, `📢 *Сообщение от Nevesty Models*\n\n${esc(text)}`, { parse_mode: 'MarkdownV2' });
+      }
       sent++;
     } catch { failed++; }
-    await new Promise(r => setTimeout(r, 50)); // rate limit
+    await new Promise(r => setTimeout(r, 60)); // rate limit
   }
   await logAdminAction(chatId, 'broadcast', null, null, { recipients: sent });
   await clearSession(chatId);
-  return safeSend(chatId, `✅ *Рассылка завершена*\n\nОтправлено: ${sent}\nОшибок: ${failed}`, {
-    reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
-  });
+  return safeSend(chatId,
+    `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+    }
+  );
 }
 
 async function sendBroadcastWithPhoto(chatId, photoFileId, caption) {
@@ -2255,33 +2378,14 @@ async function sendBroadcastWithPhoto(chatId, photoFileId, caption) {
   if (!clients.length) return safeSend(chatId, '❌ Нет клиентов для рассылки.', {
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
   });
-  const newSd = { ...sd, broadcastRecipients: clients.map(c => c.client_chat_id), broadcastPhotoId: photoFileId, broadcastCaption: caption };
-  await setSession(chatId, 'adm_broadcast_photo_preview', newSd);
-  return previewBroadcast(chatId, caption ? `📢 *Сообщение от Nevesty Models*\n\n${esc(caption)}` : '📢 *Nevesty Models*', photoFileId);
+  const newSd = { ...sd, broadcastRecipients: clients.map(c => c.client_chat_id), broadcastPhotoId: photoFileId, broadcastText: caption };
+  await setSession(chatId, 'adm_broadcast_preview', newSd);
+  return previewBroadcast(chatId);
 }
 
 async function doSendBroadcastWithPhoto(chatId) {
-  const sess = await getSession(chatId);
-  const sd   = sessionData(sess);
-  const recipients = sd.broadcastRecipients || [];
-  const photoFileId = sd.broadcastPhotoId || sd.broadcast_photo_id;
-  const caption = sd.broadcastCaption || '';
-  let sent = 0, failed = 0;
-  for (const cid of recipients) {
-    try {
-      await bot.sendPhoto(cid, photoFileId, {
-        caption: caption ? `📢 *Сообщение от Nevesty Models*\n\n${esc(caption)}` : '📢 *Nevesty Models*',
-        parse_mode: 'MarkdownV2',
-      });
-      sent++;
-    } catch { failed++; }
-    await new Promise(r => setTimeout(r, 60)); // rate limit
-  }
-  await logAdminAction(chatId, 'broadcast', null, null, { recipients: sent });
-  await clearSession(chatId);
-  return safeSend(chatId, `✅ *Рассылка с фото завершена*\n\nОтправлено: ${sent}\nОшибок: ${failed}`, {
-    reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
-  });
+  // Delegate to unified doSendBroadcast
+  return doSendBroadcast(chatId);
 }
 
 // ─── Scheduled Broadcasts ────────────────────────────────────────────────────
@@ -3852,34 +3956,100 @@ function initBot(app) {
 
     // ── Audit log
     if (data === 'adm_audit_log') { if (!isAdmin(chatId)) return; return showAuditLog(chatId, 0); }
-    // ── Broadcast segment selection
-    if (data === 'adm_broadcast_all') {
+    // ── Broadcast: new segment selection (adm_bc_seg_*)
+    if (data === 'adm_bc_seg_all') {
+      if (!isAdmin(chatId)) return;
+      await bot.answerCallbackQuery(q.id, { text: '👥 Все клиенты' }).catch(() => {});
+      return _askBroadcastText(chatId, 'all');
+    }
+    if (data === 'adm_bc_seg_completed') {
+      if (!isAdmin(chatId)) return;
+      await bot.answerCallbackQuery(q.id, { text: '✅ Завершённые заявки' }).catch(() => {});
+      return _askBroadcastText(chatId, 'completed');
+    }
+    if (data === 'adm_bc_seg_city') {
+      if (!isAdmin(chatId)) return;
+      await bot.answerCallbackQuery(q.id, { text: '🏙 По городу' }).catch(() => {});
+      return showBroadcastCitySelection(chatId);
+    }
+    if (data === 'adm_bc_seg_new') {
+      if (!isAdmin(chatId)) return;
+      await bot.answerCallbackQuery(q.id, { text: '🆕 Новые клиенты' }).catch(() => {});
+      return _askBroadcastText(chatId, 'new');
+    }
+    // ── Broadcast: city chosen
+    if (data.startsWith('adm_bc_city_')) {
+      if (!isAdmin(chatId)) return;
+      const city = data.slice('adm_bc_city_'.length);
+      await bot.answerCallbackQuery(q.id, { text: `🏙 Город: ${city}` }).catch(() => {});
+      return _askBroadcastText(chatId, `city:${city}`);
+    }
+    // ── Broadcast: ask about photo after text entered
+    if (data === 'adm_bc_photo') {
       if (!isAdmin(chatId)) return;
       const sess = await getSession(chatId);
       const sd   = sessionData(sess);
-      await setSession(chatId, sess.state || 'idle', { ...sd, broadcastSegment: 'all' });
-      await bot.answerCallbackQuery(q.id, { text: '👥 Выбрано: все клиенты' }).catch(()=>{});
+      await setSession(chatId, 'adm_broadcast_photo_wait', { ...sd });
+      return safeSend(chatId,
+        `🖼 *Рассылка — добавить фото*\n\nОтправьте фото:`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_broadcast' }]] }
+        }
+      );
+    }
+    if (data === 'adm_bc_send_now') {
+      if (!isAdmin(chatId)) return;
+      // Send without photo — go straight to preview
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      if (!sd.broadcastText && !sd.broadcastRecipients) return showBroadcast(chatId);
+      return previewBroadcast(chatId);
+    }
+    // ── Broadcast: confirm send
+    if (data === 'adm_bc_confirm') {
+      if (!isAdmin(chatId)) return;
+      return doSendBroadcast(chatId);
+    }
+    // ── Broadcast: edit text
+    if (data === 'adm_bc_edit') {
+      if (!isAdmin(chatId)) return;
+      const sess = await getSession(chatId);
+      const sd   = sessionData(sess);
+      const segment = sd.broadcastSegment || 'all';
+      await setSession(chatId, 'adm_broadcast_msg', { ...sd });
+      return safeSend(chatId,
+        `✏️ *Изменить текст рассылки*\n\nВведите новый текст:`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_broadcast' }]] }
+        }
+      );
+    }
+    // ── Broadcast: cancel from preview
+    if (data === 'adm_bc_cancel_preview') {
+      if (!isAdmin(chatId)) return;
+      await clearSession(chatId);
+      await bot.answerCallbackQuery(q.id, { text: '❌ Рассылка отменена' }).catch(() => {});
       return showBroadcast(chatId);
+    }
+    // ── Broadcast segment selection (legacy — kept for back-compat)
+    if (data === 'adm_broadcast_all') {
+      if (!isAdmin(chatId)) return;
+      await bot.answerCallbackQuery(q.id, { text: '👥 Выбрано: все клиенты' }).catch(() => {});
+      return _askBroadcastText(chatId, 'all');
     }
     if (data === 'adm_broadcast_completed') {
       if (!isAdmin(chatId)) return;
-      const sess = await getSession(chatId);
-      const sd   = sessionData(sess);
-      await setSession(chatId, sess.state || 'idle', { ...sd, broadcastSegment: 'completed' });
-      await bot.answerCallbackQuery(q.id, { text: '✅ Выбрано: завершившие заявку' }).catch(()=>{});
-      return showBroadcast(chatId);
+      await bot.answerCallbackQuery(q.id, { text: '✅ Завершившие заявку' }).catch(() => {});
+      return _askBroadcastText(chatId, 'completed');
     }
-    // ── Broadcast confirm (send after preview)
+    // ── Broadcast confirm (legacy)
     if (data === 'adm_broadcast_confirm') {
       if (!isAdmin(chatId)) return;
-      const sess = await getSession(chatId);
-      const sd   = sessionData(sess);
-      if (sess.state === 'adm_broadcast_photo_preview') {
-        return doSendBroadcastWithPhoto(chatId);
-      }
       return doSendBroadcast(chatId);
     }
-    // ── Broadcast type selection
+    // ── Broadcast type selection (legacy)
     if (data === 'adm_broadcast_text') {
       if (!isAdmin(chatId)) return;
       const sess2 = await getSession(chatId);
@@ -3889,7 +4059,7 @@ function initBot(app) {
         `📝 *Рассылка — текст*\n\nВведите текст сообщения для рассылки:`,
         {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] }
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_broadcast' }]] }
         }
       );
     }
@@ -3902,7 +4072,7 @@ function initBot(app) {
         `🖼 *Рассылка — фото*\n\nОтправьте фото для рассылки:`,
         {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'admin_menu' }]] }
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_broadcast' }]] }
         }
       );
     }
@@ -4708,8 +4878,15 @@ function initBot(app) {
       await clearSession(chatId);
       return showPhotoGalleryManager(chatId, modelId);
     }
-    // ── Broadcast with photo: step 1 — receive photo
+    // ── Broadcast with photo: receive photo
     if (state === 'adm_broadcast_photo_wait') {
+      // New flow: text already set, go straight to preview
+      if (d.broadcastText !== undefined || d.broadcastRecipients) {
+        d.broadcastPhotoId = fileId;
+        await setSession(chatId, 'adm_broadcast_preview', d);
+        return previewBroadcast(chatId);
+      }
+      // Legacy flow: ask for caption
       d.broadcast_photo_id = fileId;
       await setSession(chatId, 'adm_broadcast_caption', d);
       return safeSend(chatId,
