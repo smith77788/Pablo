@@ -15,6 +15,8 @@ const {
 } = require('./utils/constants');
 let mailer;
 try { mailer = require('./services/mailer'); } catch { mailer = null; }
+let smsService;
+try { smsService = require('./services/sms'); } catch { smsService = null; }
 
 const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const SITE_URL  = process.env.SITE_URL || 'http://localhost:3000';
@@ -1596,9 +1598,10 @@ async function showAdminSettings(chatId, section) {
 
   // ── Уведомления ───────────────────────────────────────────────────────────
   if (section === 'notifs') {
-    const [notifNew, notifSt, notifRev, notifMsg] = await Promise.all([
+    const [notifNew, notifSt, notifRev, notifMsg, notifSms] = await Promise.all([
       getSetting('notif_new_order'), getSetting('notif_status'),
       getSetting('notif_new_review'), getSetting('notif_new_message'),
+      getSetting('sms_notifications_enabled'),
     ]);
     const on = v => v === '1' ? '✅' : '❌';
     const text =
@@ -1606,7 +1609,8 @@ async function showAdminSettings(chatId, section) {
       `${on(notifNew)} Новые заявки\n` +
       `${on(notifSt)} Изменения статуса\n` +
       `${on(notifRev)} Новые отзывы\n` +
-      `${on(notifMsg)} Сообщения клиентов`;
+      `${on(notifMsg)} Сообщения клиентов\n` +
+      `${on(notifSms)} SMS уведомления`;
     return safeSend(chatId, text, {
       reply_markup: { inline_keyboard: [
         [{ text: notifNew==='1' ? '🔕 Заявки ВЫКЛ'    : '🔔 Заявки ВКЛ',
@@ -1617,6 +1621,8 @@ async function showAdminSettings(chatId, section) {
            callback_data: notifRev==='1' ? 'adm_notif_review_off' : 'adm_notif_review_on' }],
         [{ text: notifMsg==='1' ? '🔕 Сообщения ВЫКЛ' : '🔔 Сообщения ВКЛ',
            callback_data: notifMsg==='1' ? 'adm_notif_msg_off'    : 'adm_notif_msg_on'    }],
+        [{ text: notifSms==='1' ? '🔕 SMS ВЫКЛ'       : '📱 SMS ВКЛ',
+           callback_data: notifSms==='1' ? 'adm_notif_sms_off'    : 'adm_notif_sms_on'    }],
         [{ text: '← Настройки', callback_data: 'adm_settings' }],
       ]}
     });
@@ -3153,7 +3159,7 @@ async function adminChangeStatus(chatId, orderId, newStatus) {
     await logAdminAction(chatId, 'change_order_status', 'order', orderId, { from: oldStatus, to: newStatus });
 
     const order = await get('SELECT * FROM orders WHERE id=?', [orderId]);
-    if (order?.client_chat_id) notifyStatusChange(order.client_chat_id, order.order_number, newStatus);
+    if (order?.client_chat_id) notifyStatusChange(order.client_chat_id, order.order_number, newStatus, order.client_phone || null);
 
     // Send custom booking confirmation message from settings
     if (newStatus === 'confirmed' && order?.client_chat_id) {
@@ -4512,9 +4518,16 @@ function initBot(app) {
     if (data.startsWith('adm_notif_')) {
       if (!isAdmin(chatId)) return;
       const [, , key, onoff] = data.split('_');
-      const settingKey = key === 'new' ? 'notif_new_order' : 'notif_status';
+      const settingKeyMap = {
+        new:    'notif_new_order',
+        st:     'notif_status',
+        review: 'notif_new_review',
+        msg:    'notif_new_message',
+        sms:    'sms_notifications_enabled',
+      };
+      const settingKey = settingKeyMap[key] || 'notif_status';
       await setSetting(settingKey, onoff === 'on' ? '1' : '0');
-      return showAdminSettings(chatId);
+      return showAdminSettings(chatId, 'notifs');
     }
 
     // ── Add admin Telegram ID
@@ -5742,7 +5755,7 @@ async function notifyNewOrder(order) {
   })));
 }
 
-async function notifyStatusChange(clientChatId, orderNumber, newStatus) {
+async function notifyStatusChange(clientChatId, orderNumber, newStatus, clientPhone = null) {
   if (!bot || !clientChatId) return;
 
   // Check client notification preferences
@@ -5806,6 +5819,24 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus) {
   } catch {}
 
   await safeSend(clientChatId, text, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
+
+  // SMS уведомление при подтверждении или завершении заявки
+  if (smsService && clientPhone) {
+    const smsEnabled = await getSetting('sms_notifications_enabled').catch(() => null);
+    if (smsEnabled === '1') {
+      if (newStatus === 'confirmed') {
+        const smsText = `Nevesty Models: ваша заявка ${orderNumber} подтверждена! Менеджер свяжется с вами.`;
+        smsService.sendSMS(clientPhone, smsText).catch(e =>
+          console.error('[SMS] notify confirm:', e.message)
+        );
+      } else if (newStatus === 'completed') {
+        const smsText = `Nevesty Models: заявка ${orderNumber} завершена! Спасибо, что выбрали нас.`;
+        smsService.sendSMS(clientPhone, smsText).catch(e =>
+          console.error('[SMS] notify complete:', e.message)
+        );
+      }
+    }
+  }
 
   // Отправляем отдельное приглашение к отзыву с задержкой (если отзывы включены и клиент прошёл порог)
   if (reviewsEnabledForCompleted && reviewOrderId) {
