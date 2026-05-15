@@ -275,6 +275,61 @@ const reviewFollowup = async () => {
 setInterval(reviewFollowup, 6 * 60 * 60 * 1000);
 setTimeout(reviewFollowup, 30000); // Один раз после старта
 
+// ─── Задача: выполнение запланированных рассылок (каждые 5 минут) ────────────
+
+const processScheduledBroadcasts = async () => {
+  try {
+    const pending = await dbAll(
+      `SELECT * FROM scheduled_broadcasts WHERE status='pending' AND scheduled_at <= datetime('now') LIMIT 10`
+    ).catch(() => []);
+
+    if (!pending.length) return;
+
+    const bot = getBot();
+    if (!bot) return;
+
+    for (const bcast of pending) {
+      try {
+        // Mark as processing to avoid double-send
+        await dbRun("UPDATE scheduled_broadcasts SET status='processing' WHERE id=? AND status='pending'", [bcast.id]).catch(() => {});
+
+        // Get recipients by segment
+        let recipientsQuery = "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''";
+        if (bcast.segment === 'completed') {
+          recipientsQuery += " AND status='completed'";
+        } else if (bcast.segment === 'active') {
+          recipientsQuery += " AND status IN ('new','reviewing','confirmed','in_progress')";
+        }
+        const recipients = await dbAll(recipientsQuery).catch(() => []);
+
+        let sent = 0, failed = 0;
+        const msgText = `📢 *Сообщение от Nevesty Models*\n\n${escapeMarkdown(bcast.text)}`;
+
+        for (const r of recipients) {
+          try {
+            await bot.sendMessage(r.client_chat_id, msgText, { parse_mode: 'MarkdownV2' });
+            sent++;
+          } catch { failed++; }
+          await new Promise(resolve => setTimeout(resolve, 60)); // Rate limit: ~16 msg/sec
+        }
+
+        await dbRun("UPDATE scheduled_broadcasts SET status='sent' WHERE id=?", [bcast.id]).catch(() => {});
+        console.log(`[Scheduler] Scheduled broadcast #${bcast.id} sent: ${sent} ok, ${failed} failed`);
+        notify(`📅 Запланированная рассылка #${bcast.id} отправлена: ${sent} получателей`);
+      } catch (e) {
+        await dbRun("UPDATE scheduled_broadcasts SET status='error' WHERE id=?", [bcast.id]).catch(() => {});
+        console.error(`[Scheduler] Scheduled broadcast #${bcast.id} error:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[Scheduler] processScheduledBroadcasts error:', e.message);
+  }
+};
+
+// Проверять каждые 5 минут
+setInterval(processScheduledBroadcasts, 5 * 60 * 1000);
+setTimeout(processScheduledBroadcasts, 60000); // Первый запуск через 1 мин после старта
+
 // ─── Задача: еженедельный re-engagement неактивных клиентов ──────────────────
 
 // Таск 3: Понедельник 10:00 — re-engagement клиентов

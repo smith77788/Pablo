@@ -212,6 +212,7 @@ const KB_MAIN_ADMIN = (badge, score) => {
       [{ text: `🤖 Организм${health}`,       callback_data: 'adm_organism'   },
        { text: '⚙️ Настройки',              callback_data: 'adm_settings'   }],
       [{ text: '📢 Рассылка',               callback_data: 'adm_broadcast'  },
+       { text: '📅 Рассылки',              callback_data: 'adm_sched_bcast'},
        { text: '📤 Экспорт заявок',         callback_data: 'adm_export'     }],
       [{ text: '➕ Добавить модель',         callback_data: 'adm_addmodel'   },
        { text: '👑 Администраторы',          callback_data: 'adm_admins'     }],
@@ -1094,7 +1095,14 @@ async function showAdminOrder(chatId, orderId) {
       { text: '👤 Назначить менеджера', callback_data: `adm_assign_mgr_${orderId}` },
       { text: '📝 Добавить заметку',    callback_data: `adm_note_${orderId}` },
     ]);
-    keyboard.push([{ text: '🕐 История статусов', callback_data: `adm_order_history_${orderId}` }]);
+    keyboard.push([
+      { text: '📋 Все заметки',         callback_data: `adm_notes_${orderId}_0` },
+      { text: '🕐 История статусов',    callback_data: `adm_order_history_${orderId}` },
+    ]);
+    // Quick replies button — shown when order has a client chat ID
+    if (o.client_chat_id) {
+      keyboard.push([{ text: '⚡ Быстрые ответы', callback_data: `adm_qr_${o.client_chat_id}` }]);
+    }
     keyboard.push([{ text: '← К заявкам', callback_data: 'adm_orders__0' }]);
 
     return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } });
@@ -1358,6 +1366,7 @@ async function showAdminModel(chatId, modelId) {
        { text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${m.id}` }],
       [{ text: '📋 Дублировать', callback_data: `adm_duplicate_${m.id}` },
        { text: '⭐ ' + (m.featured ? 'Убрать из топа' : 'В топ'), callback_data: `adm_featured_${m.id}` }],
+      [{ text: '📊 Статистика модели', callback_data: `adm_model_stats_${m.id}` }],
       [archiveBtn],
       [{ text: '← К моделям', callback_data: 'adm_models_p_0_name_0' }],
     ]};
@@ -2189,6 +2198,144 @@ async function doSendBroadcastWithPhoto(chatId) {
   await clearSession(chatId);
   return safeSend(chatId, `✅ *Рассылка с фото завершена*\n\nОтправлено: ${sent}\nОшибок: ${failed}`, {
     reply_markup: { inline_keyboard: [[{ text: '← Меню', callback_data: 'admin_menu' }]] }
+  });
+}
+
+// ─── Scheduled Broadcasts ────────────────────────────────────────────────────
+
+async function showScheduledBroadcasts(chatId) {
+  if (!isAdmin(chatId)) return;
+  const broadcasts = await query(
+    `SELECT * FROM scheduled_broadcasts ORDER BY scheduled_at ASC LIMIT 20`
+  ).catch(() => []);
+
+  let text = `📅 *Запланированные рассылки*\n\n`;
+  if (!broadcasts.length) {
+    text += '_Нет запланированных рассылок_';
+  } else {
+    for (const b of broadcasts) {
+      const dt = b.scheduled_at ? new Date(b.scheduled_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+      const statusEmoji = b.status === 'sent' ? '✅' : b.status === 'cancelled' ? '❌' : '⏳';
+      const segLabel = b.segment === 'completed' ? 'Завершившие' : b.segment === 'active' ? 'Активные' : 'Все';
+      text += `${statusEmoji} *${esc(dt)}* \\[${esc(segLabel)}\\]\n${esc(String(b.text || '').slice(0, 60))}${(b.text || '').length > 60 ? '…' : ''}\n\n`;
+    }
+  }
+
+  const keyboard = [];
+  for (const b of broadcasts.filter(b => b.status === 'pending')) {
+    keyboard.push([{ text: `❌ Отменить #${b.id} (${new Date(b.scheduled_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})`, callback_data: `sched_bcast_cancel_${b.id}` }]);
+  }
+  keyboard.push([{ text: '➕ Создать рассылку', callback_data: 'adm_new_sched_bcast' }]);
+  keyboard.push([{ text: '← Назад', callback_data: 'admin_menu' }]);
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+// ─── Model Stats (admin) ──────────────────────────────────────────────────────
+
+async function showModelStats(chatId, modelId) {
+  if (!isAdmin(chatId)) return;
+  const m = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(() => null);
+  if (!m) return safeSend(chatId, '❌ Модель не найдена.');
+
+  const [totalOrders, completedOrders, cancelledOrders, avgBudget, avgRating, topCities] = await Promise.all([
+    get('SELECT COUNT(*) as n FROM orders WHERE model_id=?', [modelId]).catch(() => ({ n: 0 })),
+    get("SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status='completed'", [modelId]).catch(() => ({ n: 0 })),
+    get("SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status='cancelled'", [modelId]).catch(() => ({ n: 0 })),
+    get('SELECT AVG(CAST(REPLACE(REPLACE(budget,\' \',\'\'),\'₽\',\'\') AS REAL)) as avg FROM orders WHERE model_id=? AND budget IS NOT NULL AND budget != \'\'', [modelId]).catch(() => ({ avg: null })),
+    get('SELECT AVG(rating) as avg, COUNT(*) as cnt FROM reviews WHERE model_id=? AND approved=1', [modelId]).catch(() => ({ avg: null, cnt: 0 })),
+    query('SELECT location, COUNT(*) as cnt FROM orders WHERE model_id=? AND location IS NOT NULL AND location != \'\' GROUP BY location ORDER BY cnt DESC LIMIT 3', [modelId]).catch(() => []),
+  ]);
+
+  let text = `📊 *Статистика модели*\n\n`;
+  text += `💃 *${esc(m.name)}*\n`;
+  if (m.city) text += `📍 ${esc(m.city)}\n`;
+  text += `\n`;
+  text += `📋 Заявок всего: *${totalOrders?.n || 0}*\n`;
+  text += `✅ Завершено: *${completedOrders?.n || 0}*\n`;
+  text += `❌ Отменено: *${cancelledOrders?.n || 0}*\n`;
+  text += `👁 Просмотров: *${m.view_count || 0}*\n`;
+  if (avgBudget?.avg) text += `💰 Средний бюджет: *${esc(Math.round(avgBudget.avg).toLocaleString('ru'))} ₽*\n`;
+  if (avgRating?.cnt > 0) {
+    const stars = '⭐'.repeat(Math.round(avgRating.avg));
+    text += `${stars} Рейтинг: *${esc(Number(avgRating.avg).toFixed(1))}* \\(${avgRating.cnt} отзывов\\)\n`;
+  } else {
+    text += `⭐ Отзывов пока нет\n`;
+  }
+  if (topCities.length) {
+    text += `\n🏙 *Топ городов:*\n`;
+    for (const c of topCities) {
+      text += `• ${esc(c.location)} \\(${c.cnt}\\)\n`;
+    }
+  }
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '← К карточке модели', callback_data: `adm_model_${modelId}` }],
+      [{ text: '← Модели', callback_data: 'adm_models_0' }],
+    ]}
+  });
+}
+
+// ─── Quick Replies ────────────────────────────────────────────────────────────
+
+const QUICK_REPLY_TEMPLATES = [
+  '✅ Ваша заявка принята! Менеджер свяжется с вами в ближайшее время.',
+  '📞 Уточним детали в ближайшее время. Пожалуйста, будьте на связи.',
+  '🕐 Свяжемся с вами сегодня — ждите звонка или сообщения.',
+  '💃 Предложим вам подходящую модель — уже подбираем варианты!',
+];
+
+async function showQuickReplies(chatId, clientChatId) {
+  if (!isAdmin(chatId)) return;
+  const keyboard = QUICK_REPLY_TEMPLATES.map((t, i) => [{
+    text: t.slice(0, 50),
+    callback_data: `qr_send_${i}_${clientChatId}`
+  }]);
+  keyboard.push([{ text: '❌ Закрыть', callback_data: 'adm_orders__0' }]);
+
+  return safeSend(chatId, `💬 *Быстрые ответы*\nВыберите шаблон для клиента \\(ID: ${esc(String(clientChatId))}\\):`, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+// ─── All order notes (paginated) ──────────────────────────────────────────────
+
+async function showAllOrderNotes(chatId, orderId, page = 0) {
+  if (!isAdmin(chatId)) return;
+  const LIMIT = 5;
+  const [order, notes, total] = await Promise.all([
+    get('SELECT order_number FROM orders WHERE id=?', [orderId]).catch(() => null),
+    query('SELECT * FROM order_notes WHERE order_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?', [orderId, LIMIT, page * LIMIT]).catch(() => []),
+    get('SELECT COUNT(*) as n FROM order_notes WHERE order_id=?', [orderId]).catch(() => ({ n: 0 })),
+  ]);
+  if (!order) return safeSend(chatId, '❌ Заявка не найдена.');
+
+  let text = `📝 *Все заметки*\nЗаявка *${esc(order.order_number)}*\n\n`;
+  if (!notes.length) {
+    text += '_Заметок пока нет_';
+  } else {
+    for (const n of notes) {
+      const dt = n.created_at ? new Date(n.created_at).toLocaleString('ru', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+      text += `_${esc(dt)}_\n${esc(n.admin_note)}\n\n`;
+    }
+  }
+
+  const nav = [];
+  if (page > 0) nav.push({ text: '◀ Назад', callback_data: `adm_notes_${orderId}_${page - 1}` });
+  if ((page + 1) * LIMIT < (total?.n || 0)) nav.push({ text: 'Вперёд ▶', callback_data: `adm_notes_${orderId}_${page + 1}` });
+  const keyboard = [];
+  if (nav.length) keyboard.push(nav);
+  keyboard.push([{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]);
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard }
   });
 }
 
@@ -3186,6 +3333,88 @@ function initBot(app) {
       }
     }
     if (data === 'adm_broadcast') { if (!isAdmin(chatId)) return; return showBroadcast(chatId); }
+
+    // ── Scheduled broadcasts
+    if (data === 'adm_sched_bcast') { if (!isAdmin(chatId)) return; return showScheduledBroadcasts(chatId); }
+    if (data === 'adm_new_sched_bcast') {
+      if (!isAdmin(chatId)) return;
+      await setSession(chatId, 'adm_sched_bcast_text', {});
+      return safeSend(chatId, `📅 *Новая запланированная рассылка*\n\nВведите текст рассылки:`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_sched_bcast' }]] }
+      });
+    }
+    if (data.startsWith('sched_bcast_cancel_')) {
+      if (!isAdmin(chatId)) return;
+      const sbId = parseInt(data.replace('sched_bcast_cancel_', ''));
+      await run("UPDATE scheduled_broadcasts SET status='cancelled' WHERE id=? AND status='pending'", [sbId]).catch(() => {});
+      await bot.answerCallbackQuery(q.id, { text: '❌ Рассылка отменена' }).catch(() => {});
+      return showScheduledBroadcasts(chatId);
+    }
+    // Segment selection for scheduled broadcast
+    if (data.startsWith('adm_sched_bcast_seg_')) {
+      if (!isAdmin(chatId)) return;
+      const seg = data.replace('adm_sched_bcast_seg_', '');
+      const sess = await getSession(chatId);
+      const d2 = sessionData(sess);
+      d2.sched_segment = seg;
+      // Save to DB
+      await run(
+        `INSERT INTO scheduled_broadcasts (text, scheduled_at, segment, created_by) VALUES (?,?,?,?)`,
+        [d2.sched_text, d2.sched_time, seg, String(chatId)]
+      ).catch(() => {});
+      await clearSession(chatId);
+      const segLabel = seg === 'completed' ? 'Завершившие заявку' : seg === 'active' ? 'Активные клиенты' : 'Все клиенты';
+      return safeSend(chatId,
+        `✅ *Рассылка запланирована\\!*\n\nВремя: *${esc(d2.sched_time)}*\nСегмент: *${esc(segLabel)}*\n\nТекст: _${esc(String(d2.sched_text || '').slice(0, 100))}_`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '📅 Все рассылки', callback_data: 'adm_sched_bcast' }]] }
+        }
+      );
+    }
+
+    // ── Model stats
+    if (data.startsWith('adm_model_stats_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_model_stats_', ''));
+      return showModelStats(chatId, modelId);
+    }
+
+    // ── All order notes (paginated)
+    if (data.startsWith('adm_notes_')) {
+      if (!isAdmin(chatId)) return;
+      const parts = data.replace('adm_notes_', '').split('_');
+      const pg = parseInt(parts.pop()) || 0;
+      const oId = parseInt(parts.join('_')) || 0;
+      return showAllOrderNotes(chatId, oId, pg);
+    }
+
+    // ── Quick replies: send template to client
+    if (data.startsWith('qr_send_')) {
+      if (!isAdmin(chatId)) return;
+      const rest = data.replace('qr_send_', '');
+      const underscoreIdx = rest.indexOf('_');
+      const tplIdx = parseInt(rest.slice(0, underscoreIdx));
+      const clientChatId = rest.slice(underscoreIdx + 1);
+      const tpl = QUICK_REPLY_TEMPLATES[tplIdx];
+      if (!tpl || !clientChatId) return;
+      try {
+        await safeSend(clientChatId, `💬 *Сообщение от менеджера:*\n\n${esc(tpl)}`, { parse_mode: 'MarkdownV2' });
+        await bot.answerCallbackQuery(q.id, { text: '✅ Шаблон отправлен!' }).catch(() => {});
+      } catch {
+        await bot.answerCallbackQuery(q.id, { text: '❌ Не удалось отправить' }).catch(() => {});
+      }
+      return;
+    }
+
+    // ── Show quick replies for client
+    if (data.startsWith('adm_qr_')) {
+      if (!isAdmin(chatId)) return;
+      const clientChatId = data.replace('adm_qr_', '');
+      return showQuickReplies(chatId, clientChatId);
+    }
+
     // ── Audit log
     if (data === 'adm_audit_log') { if (!isAdmin(chatId)) return; return showAuditLog(chatId, 0); }
     // ── Broadcast segment selection
@@ -4034,6 +4263,42 @@ function initBot(app) {
         return safeSend(chatId, `✅ Telegram ID \`${newId}\` добавлен!\n\n⚠️ Для постоянного добавления — также добавьте его в ADMIN_TELEGRAM_IDS в .env файле.`, {
           reply_markup: { inline_keyboard: [[{ text: '← Администраторы', callback_data: 'adm_admins' }]] }
         });
+      }
+
+      // ── Scheduled broadcast: step 1 — text input
+      if (state === 'adm_sched_bcast_text') {
+        if (!text || text.length < 2) return safeSend(chatId, '❌ Текст слишком короткий. Введите текст рассылки:');
+        await setSession(chatId, 'adm_sched_bcast_time', { sched_text: text });
+        return safeSend(chatId,
+          `📅 Текст принят\\!\n\nВведите дату и время рассылки в формате:\n\`2026\\-05\\-20 14:00\``,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_sched_bcast' }]] }
+          }
+        );
+      }
+
+      // ── Scheduled broadcast: step 2 — time input
+      if (state === 'adm_sched_bcast_time') {
+        const timeMatch = text.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})$/);
+        if (!timeMatch) {
+          return safeSend(chatId, '❌ Неверный формат\\. Введите дату в формате `2026-05-20 14:00`:', { parse_mode: 'MarkdownV2' });
+        }
+        const scheduledAt = `${timeMatch[1]} ${timeMatch[2]}:00`;
+        const sessData = { ...d, sched_time: scheduledAt };
+        await setSession(chatId, 'adm_sched_bcast_segment', sessData);
+        return safeSend(chatId,
+          `⏰ Время: *${esc(scheduledAt)}*\n\nВыберите сегмент получателей:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [
+              [{ text: '👥 Все клиенты',         callback_data: 'adm_sched_bcast_seg_all'       }],
+              [{ text: '✅ Завершившие заявку',   callback_data: 'adm_sched_bcast_seg_completed' }],
+              [{ text: '▶️ Активные клиенты',     callback_data: 'adm_sched_bcast_seg_active'    }],
+              [{ text: '❌ Отмена',               callback_data: 'adm_sched_bcast'               }],
+            ]}
+          }
+        );
       }
 
       // ── Broadcast text

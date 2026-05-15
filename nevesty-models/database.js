@@ -2,6 +2,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const { cache, TTL_SETTINGS } = require('./services/cache');
 
 const DB_PATH = path.join(__dirname, 'data.db');
 let db;
@@ -351,6 +352,18 @@ async function initDatabase() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`).catch(()=>{});
 
+  // Scheduled broadcasts table
+  await run(`CREATE TABLE IF NOT EXISTS scheduled_broadcasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    scheduled_at DATETIME NOT NULL,
+    segment TEXT DEFAULT 'all',
+    status TEXT DEFAULT 'pending',
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_sched_bcast_status ON scheduled_broadcasts(status, scheduled_at)`).catch(() => {});
+
   // Migrations — add columns that may not exist in older DBs
   await run(`ALTER TABLE models ADD COLUMN city TEXT`).catch(() => {});
   await run(`ALTER TABLE models ADD COLUMN featured INTEGER DEFAULT 0`).catch(() => {});
@@ -365,6 +378,12 @@ async function initDatabase() {
   await run(`ALTER TABLE orders ADD COLUMN utm_source TEXT DEFAULT ''`).catch(() => {});
   await run(`ALTER TABLE orders ADD COLUMN utm_medium TEXT DEFAULT ''`).catch(() => {});
   await run(`ALTER TABLE orders ADD COLUMN utm_campaign TEXT DEFAULT ''`).catch(() => {});
+
+  // Payment columns on orders (migration v8)
+  await run(`ALTER TABLE orders ADD COLUMN payment_id TEXT DEFAULT NULL`).catch(() => {});
+  await run(`ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT NULL`).catch(() => {});
+  await run(`ALTER TABLE orders ADD COLUMN paid_at DATETIME DEFAULT NULL`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_orders_payment_id ON orders(payment_id)`).catch(() => {});
 
   // Indexes for frequent queries
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
@@ -477,4 +496,34 @@ function closeDatabase() {
   });
 }
 
-module.exports = { initDatabase, query, run, get, generateOrderNumber, closeDatabase };
+// ─── Cached setting helpers ───────────────────────────────────────────────────
+/**
+ * Read one key from bot_settings, with in-memory TTL cache.
+ * @param {string} key
+ * @param {number} [ttlMs=TTL_SETTINGS]
+ * @returns {Promise<string|null>}
+ */
+async function getSetting(key, ttlMs = TTL_SETTINGS) {
+  const cacheKey = `setting:${key}`;
+  const cached = cache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const row = await get('SELECT value FROM bot_settings WHERE key = ?', [key]);
+  const value = row ? row.value : null;
+  cache.set(cacheKey, value, ttlMs);
+  return value;
+}
+
+/**
+ * Write one key to bot_settings and invalidate its cache entry.
+ * @param {string} key
+ * @param {string} value
+ */
+async function setSetting(key, value) {
+  await run(
+    'INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
+    [key, String(value ?? '')]
+  );
+  cache.del(`setting:${key}`);
+}
+
+module.exports = { initDatabase, query, run, get, generateOrderNumber, closeDatabase, getSetting, setSetting };
