@@ -604,6 +604,32 @@ fetch('/api/settings/public').then(r=>r.json()).then(d=>{
     if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
   }
 }).catch(()=>{});
+// Load approved reviews
+(function loadReviews() {
+  const cont = document.getElementById('reviews-container');
+  if (!cont) return;
+  cont.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:24px">Загрузка отзывов…</div>';
+  fetch('/api/reviews?limit=6').then(r => r.ok ? r.json() : []).then(list => {
+    if (!Array.isArray(list) || !list.length) {
+      cont.innerHTML = '';
+      document.getElementById('reviews')?.style && (document.getElementById('reviews').style.display = 'none');
+      return;
+    }
+    const stars = n => '★'.repeat(Math.max(1, Math.min(5, n || 5))) + '☆'.repeat(5 - Math.max(1, Math.min(5, n || 5)));
+    cont.innerHTML = list.map(r => `
+      <div class="testimonial-card" style="background:var(--bg2);border:1px solid var(--border);padding:28px;border-radius:2px;">
+        <div style="color:#f59e0b;font-size:1.1rem;margin-bottom:12px">${stars(r.rating)}</div>
+        <p style="color:var(--text);font-size:0.9rem;line-height:1.6;margin-bottom:16px">"${r.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}"</p>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:0.9rem">${(r.client_name||'А').charAt(0).toUpperCase()}</div>
+          <div>
+            <div style="color:var(--white);font-size:0.85rem;font-weight:600">${(r.client_name||'Клиент').replace(/</g,'&lt;')}</div>
+            ${r.model_name ? `<div style="color:var(--text-muted);font-size:0.75rem">Модель: ${r.model_name.replace(/</g,'&lt;')}</div>` : ''}
+          </div>
+        </div>
+      </div>`).join('');
+  }).catch(() => { document.getElementById('reviews')?.style && (document.getElementById('reviews').style.display = 'none'); });
+})();
 </script>
 
   <!-- Floating WhatsApp Button -->
