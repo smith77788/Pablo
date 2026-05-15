@@ -2094,6 +2094,69 @@ def run_cycle() -> dict:
         logger.error("Phase 22 Finance Department error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # Phase 23: Research Department Analysis
+    # ════════════════════════════════════════════════════════════════
+    try:
+        from factory.agents.research_department import (
+            MarketResearcher, CompetitorAnalyst, TrendSpotter, InsightSynthesizer
+        )
+        _researcher23 = MarketResearcher()
+        _analyst23 = CompetitorAnalyst()
+        _spotter23 = TrendSpotter()
+        _synthesizer23 = InsightSynthesizer()
+
+        # Determine top segment from orders
+        _top_segment23 = "commercial"
+        try:
+            if db_conn:
+                _seg_row = db_conn.execute(
+                    "SELECT event_type, COUNT(*) as cnt FROM orders "
+                    "WHERE created_at >= date('now', '-30 days') AND event_type IS NOT NULL "
+                    "GROUP BY event_type ORDER BY cnt DESC LIMIT 1"
+                ).fetchone()
+                if _seg_row:
+                    _top_segment23 = _seg_row["event_type"] or "commercial"
+        except Exception:
+            pass
+
+        _market23 = _researcher23.analyze_market_segment("commercial")
+        _gaps23 = _analyst23.identify_competitive_gaps(["fashion", "events", "commercial"])
+        _trends23 = _spotter23.get_actionable_trends()[:3]
+
+        _conv_rate23 = 0.0
+        _avg_budget23 = 0.0
+        try:
+            if db_conn:
+                _stats_row = db_conn.execute(
+                    "SELECT COUNT(CASE WHEN status IN ('confirmed','completed') THEN 1 END) * 1.0 / MAX(COUNT(*), 1) as conv, "
+                    "AVG(CASE WHEN budget > 0 THEN budget END) as avg_b FROM orders "
+                    "WHERE created_at >= date('now', '-30 days')"
+                ).fetchone()
+                if _stats_row:
+                    _conv_rate23 = float(_stats_row["conv"] or 0)
+                    _avg_budget23 = float(_stats_row["avg_b"] or 0)
+        except Exception:
+            pass
+
+        _insights23 = _synthesizer23.synthesize_insights(
+            _market23, _gaps23, _trends23,
+            {"conversion_rate": _conv_rate23, "avg_budget": _avg_budget23}
+        )
+        results["phases"]["research_department"] = {
+            "top_segment": _top_segment23,
+            "market_opportunity_score": _market23.get("opportunity_score", 0),
+            "top_opportunities": _insights23.get("top_opportunities", []),
+            "strategic_alerts": _insights23.get("strategic_alerts", []),
+            "confidence": _insights23.get("confidence_level", "low"),
+        }
+        summary_lines.append(
+            f"🔬 Research Dept (Phase 23): segment={_top_segment23}, "
+            f"opp_score={_market23.get('opportunity_score', 0)}, alerts={len(_insights23.get('strategic_alerts', []))}"
+        )
+    except Exception as e:
+        logger.error("Phase 23 Research Department error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)
