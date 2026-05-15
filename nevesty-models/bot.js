@@ -430,6 +430,7 @@ const showAdminStats = _adminHandlers.showAdminStats;
 const showAdminModels = _adminHandlers.showAdminModels;
 const showAdminOrders = _adminHandlers.showAdminOrders;
 const showAdminOrdersToday = _adminHandlers.showAdminOrdersToday;
+const showAdminOrdersWeek = _adminHandlers.showAdminOrdersWeek;
 const showAdminReviewsPanel = _adminHandlers.showAdminReviews;
 
 // ─── Keyboards ────────────────────────────────────────────────────────────────
@@ -6384,6 +6385,12 @@ function initBot(app) {
     if (data === 'adm_orders_today') {
       if (!isAdmin(chatId)) return;
       return showAdminOrdersToday(chatId);
+    }
+
+    // ── Admin orders week filter
+    if (data === 'adm_orders_week') {
+      if (!isAdmin(chatId)) return;
+      return showAdminOrdersWeek(chatId);
     }
 
     // ── Admin orders filter by model — picker
