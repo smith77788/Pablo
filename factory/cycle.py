@@ -1078,10 +1078,29 @@ def run_cycle() -> dict:
     results["summary"] = "\n".join(summary_lines)
 
     icon = "💚" if results["health_score"] >= 70 else "🟡" if results["health_score"] >= 50 else "🔴"
+
+    # Build enriched Telegram report with business metrics
+    nm_metrics = raw_insights.get("nevesty_models", {})
+    metric_lines = []
+    if nm_metrics.get("orders_7d") is not None:
+        growth = nm_metrics.get("orders_growth_pct", 0)
+        growth_str = f"({'↑' if growth >= 0 else '↓'}{abs(growth):.0f}%)"
+        metric_lines.append(f"📋 Заявок за 7д: {nm_metrics['orders_7d']} {growth_str}")
+    if nm_metrics.get("revenue_30d"):
+        metric_lines.append(f"💰 Выручка (30д): {nm_metrics['revenue_30d']:,} ₽")
+    if nm_metrics.get("repeat_client_rate_pct") is not None:
+        metric_lines.append(f"🔁 Повторные: {nm_metrics['repeat_client_rate_pct']}%")
+    if nm_metrics.get("reviews_avg_rating"):
+        metric_lines.append(f"⭐ Рейтинг: {nm_metrics['reviews_avg_rating']}/5")
+
+    dept_focus = results.get("ceo_department_focus", "")
+    focus_line = f"\n🎯 Фокус: {dept_focus}" if dept_focus else ""
+
     tg_report = (
         f"{icon} AI Office цикл завершён\n"
-        f"Health: {results['health_score']}% | {elapsed}с\n\n"
-        + "\n".join(summary_lines[:8])
+        f"Health: {results['health_score']}% | {elapsed}с{focus_line}\n\n"
+        + ("\n".join(metric_lines) + "\n\n" if metric_lines else "")
+        + "\n".join(summary_lines[:6])
     )
 
     db.execute(
