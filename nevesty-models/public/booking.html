@@ -1,761 +1,1409 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <!-- Flash-prevention: apply theme class before first paint -->
-  <script>try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Оформить заявку — Nevesty Models</title>
-  <meta name="description" content="Забронировать профессиональную модель для фотосессии, мероприятия или показа мод. Заявка онлайн — менеджер ответит в течение часа.">
-  <meta property="og:title" content="Заявка на модель — Nevesty Models">
-  <meta property="og:description" content="Оставьте заявку на бронирование модели. Быстро и удобно.">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
-  <meta property="og:url" content="https://nevesty-models.ru/booking.html">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@nevesty_models">
-  <meta name="robots" content="index, follow">
-  <meta name="theme-color" content="#080808">
-  <link rel="canonical" href="https://nevesty-models.ru/booking.html">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
-  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
-  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
-  <link rel="preload" href="/css/main.css" as="style">
-  <link rel="stylesheet" href="/css/main.css" />
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843' }
-          }
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Flash-prevention: apply theme class before first paint -->
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light') {
+          document.documentElement.classList.add('light');
+        } else if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Оформить заявку — Nevesty Models</title>
+    <meta
+      name="description"
+      content="Забронировать профессиональную модель для фотосессии, мероприятия или показа мод. Заявка онлайн — менеджер ответит в течение часа."
+    />
+    <meta property="og:title" content="Заявка на модель — Nevesty Models" />
+    <meta property="og:description" content="Оставьте заявку на бронирование модели. Быстро и удобно." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg" />
+    <meta property="og:url" content="https://nevesty-models.ru/booking.html" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@nevesty_models" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#080808" />
+    <link rel="canonical" href="https://nevesty-models.ru/booking.html" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.tailwindcss.com" />
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
+    <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
+    <link rel="preload" href="/css/main.css" as="style" />
+    <link rel="stylesheet" href="/css/main.css" />
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              pink: {
+                50: '#fdf2f8',
+                100: '#fce7f3',
+                200: '#fbcfe8',
+                300: '#f9a8d4',
+                400: '#f472b6',
+                500: '#ec4899',
+                600: '#db2777',
+                700: '#be185d',
+                800: '#9d174d',
+                900: '#831843',
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      /* ── Progress bar ── */
+      .booking-progress-bar {
+        max-width: 640px;
+        margin: 0 auto 48px;
+        height: 3px;
+        background: var(--border);
+        position: relative;
+        overflow: hidden;
+      }
+      .booking-progress-fill {
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        background: linear-gradient(90deg, var(--gold-dark), var(--gold));
+        transition: width 0.5s ease;
+        width: 0%;
+      }
+
+      /* ── Step indicator enhancements ── */
+      .booking-step-num {
+        font-weight: 600;
+      }
+      /* Done steps show a checkmark instead of the number */
+      .booking-step.done .booking-step-num {
+        font-size: 0; /* hide the number text */
+        position: relative;
+      }
+      .booking-step.done .booking-step-num::after {
+        content: '✓';
+        font-size: 1rem;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      }
+
+      /* ── Step badge (model/service count) ── */
+      .booking-step-badge {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--gold);
+        color: var(--bg);
+        font-size: 0.6rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        animation: badgeIn 0.2s ease;
+      }
+      @keyframes badgeIn {
+        from {
+          transform: scale(0);
+        }
+        to {
+          transform: scale(1);
         }
       }
-    }
-  </script>
-  <style>
-    /* ── Progress bar ── */
-    .booking-progress-bar {
-      max-width: 640px; margin: 0 auto 48px; height: 3px;
-      background: var(--border); position: relative; overflow: hidden;
-    }
-    .booking-progress-fill {
-      position: absolute; left: 0; top: 0; height: 100%;
-      background: linear-gradient(90deg, var(--gold-dark), var(--gold));
-      transition: width 0.5s ease; width: 0%;
-    }
 
-    /* ── Step indicator enhancements ── */
-    .booking-step-num { font-weight: 600; }
-    /* Done steps show a checkmark instead of the number */
-    .booking-step.done .booking-step-num {
-      font-size: 0;           /* hide the number text */
-      position: relative;
-    }
-    .booking-step.done .booking-step-num::after {
-      content: '✓';
-      font-size: 1rem;
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-    }
+      /* ── Mini selected-models bar (shown in step 3+) ── */
+      #miniModelBar {
+        display: none;
+        margin-bottom: 16px;
+        padding: 10px 14px;
+        background: rgba(201, 169, 110, 0.07);
+        border-left: 3px solid var(--gold);
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        animation: stepSlideIn 0.25s ease forwards;
+      }
+      #miniModelBar strong {
+        color: var(--gold);
+      }
+      #miniModelBar .mini-bar-edit {
+        margin-left: 8px;
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 0.75rem;
+        text-decoration: underline;
+      }
+      #miniModelBar .mini-bar-edit:hover {
+        color: var(--gold);
+      }
 
-    /* ── Step badge (model/service count) ── */
-    .booking-step-badge {
-      position: absolute; top: -6px; right: -6px;
-      width: 18px; height: 18px; border-radius: 50%;
-      background: var(--gold); color: var(--bg);
-      font-size: 0.6rem; font-weight: 700;
-      display: flex; align-items: center; justify-content: center;
-      line-height: 1; animation: badgeIn 0.2s ease;
-    }
-    @keyframes badgeIn {
-      from { transform: scale(0); } to { transform: scale(1); }
-    }
+      /* ── Prefilled model card ── */
+      #prefilledModelCard {
+        display: none;
+        margin-bottom: 20px;
+      }
+      .prefilled-model-card {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        background: rgba(201, 169, 110, 0.07);
+        border: 1px solid var(--gold);
+        padding: 16px;
+        position: relative;
+      }
+      .prefilled-model-thumb {
+        width: 64px;
+        height: 80px;
+        flex-shrink: 0;
+        overflow: hidden;
+        background: var(--bg3);
+      }
+      .prefilled-model-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .prefilled-model-info {
+        flex: 1;
+      }
+      .prefilled-model-tag {
+        font-size: 0.65rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 4px;
+      }
+      .prefilled-model-info strong {
+        display: block;
+        font-size: 1rem;
+        color: var(--white);
+        margin-bottom: 2px;
+      }
+      .prefilled-model-info span {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
+      .prefilled-model-clear {
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 1rem;
+        padding: 4px 8px;
+        flex-shrink: 0;
+        transition: color var(--transition);
+      }
+      .prefilled-model-clear:hover {
+        color: var(--text);
+      }
 
-    /* ── Mini selected-models bar (shown in step 3+) ── */
-    #miniModelBar {
-      display: none; margin-bottom: 16px;
-      padding: 10px 14px;
-      background: rgba(201,169,110,0.07); border-left: 3px solid var(--gold);
-      font-size: 0.8rem; color: var(--text-muted);
-      animation: stepSlideIn 0.25s ease forwards;
-    }
-    #miniModelBar strong { color: var(--gold); }
-    #miniModelBar .mini-bar-edit {
-      margin-left: 8px; color: var(--text-dim); cursor: pointer;
-      font-size: 0.75rem; text-decoration: underline;
-    }
-    #miniModelBar .mini-bar-edit:hover { color: var(--gold); }
+      /* ── Model select thumb placeholder ── */
+      .model-select-thumb-placeholder {
+        width: 100%;
+        height: 100%;
+        background: var(--bg3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(201, 169, 110, 0.3);
+        font-size: 1.4rem;
+      }
+      .model-select-check {
+        margin-left: auto;
+        flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--gold);
+        color: var(--bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.7rem;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      .model-select-card.selected .model-select-check {
+        opacity: 1;
+      }
 
-    /* ── Prefilled model card ── */
-    #prefilledModelCard { display: none; margin-bottom: 20px; }
-    .prefilled-model-card {
-      display: flex; align-items: center; gap: 16px;
-      background: rgba(201,169,110,0.07); border: 1px solid var(--gold);
-      padding: 16px; position: relative;
-    }
-    .prefilled-model-thumb {
-      width: 64px; height: 80px; flex-shrink: 0; overflow: hidden; background: var(--bg3);
-    }
-    .prefilled-model-thumb img { width: 100%; height: 100%; object-fit: cover; }
-    .prefilled-model-info { flex: 1; }
-    .prefilled-model-tag {
-      font-size: 0.65rem; letter-spacing: 2px; text-transform: uppercase;
-      color: var(--gold); margin-bottom: 4px;
-    }
-    .prefilled-model-info strong { display: block; font-size: 1rem; color: var(--white); margin-bottom: 2px; }
-    .prefilled-model-info span { font-size: 0.8rem; color: var(--text-muted); }
-    .prefilled-model-clear {
-      background: none; border: none; color: var(--text-dim); cursor: pointer;
-      font-size: 1rem; padding: 4px 8px; flex-shrink: 0;
-      transition: color var(--transition);
-    }
-    .prefilled-model-clear:hover { color: var(--text); }
+      /* ── Service option cards ── */
+      #serviceOptions {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-bottom: 24px;
+        cursor: pointer;
+      }
+      .service-option-card {
+        border: 1px solid var(--border);
+        cursor: pointer;
+        padding: 16px 12px;
+        text-align: center;
+        transition: all var(--transition);
+        user-select: none;
+        background: var(--bg2);
+      }
+      .service-option-card:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+        background: var(--bg3);
+      }
+      .service-option-card.selected {
+        border-color: var(--gold);
+        background: rgba(201, 169, 110, 0.07);
+      }
+      .service-option-icon {
+        font-size: 1.6rem;
+        margin-bottom: 8px;
+        line-height: 1;
+      }
+      .service-option-label {
+        font-size: 0.72rem;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+        line-height: 1.3;
+      }
+      .service-option-card.selected .service-option-label {
+        color: var(--gold);
+      }
+      @media (max-width: 640px) {
+        #serviceOptions {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
 
-    /* ── Model select thumb placeholder ── */
-    .model-select-thumb-placeholder {
-      width: 100%; height: 100%; background: var(--bg3);
-      display: flex; align-items: center; justify-content: center;
-      color: rgba(201,169,110,0.3); font-size: 1.4rem;
-    }
-    .model-select-check {
-      margin-left: auto; flex-shrink: 0;
-      width: 20px; height: 20px; border-radius: 50%;
-      background: var(--gold); color: var(--bg);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.7rem; opacity: 0; transition: opacity 0.2s;
-    }
-    .model-select-card.selected .model-select-check { opacity: 1; }
+      /* ── Summary enhancements ── */
+      .summary-model-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--border);
+      }
+      .summary-model-card img {
+        width: 48px;
+        height: 60px;
+        object-fit: cover;
+        flex-shrink: 0;
+      }
+      .summary-model-card span {
+        font-size: 0.9rem;
+        color: var(--white);
+      }
+      .summary-divider {
+        height: 1px;
+        background: var(--border);
+        margin: 8px 0 4px;
+      }
+      .summary-row--block {
+        flex-direction: column;
+        gap: 6px;
+      }
+      .summary-row--block label {
+        margin-bottom: 0;
+      }
+      .summary-row--block span {
+        color: var(--text-muted);
+        font-size: 0.82rem;
+        line-height: 1.6;
+      }
 
-    /* ── Service option cards ── */
-    #serviceOptions {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-      margin-bottom: 24px; cursor: pointer;
-    }
-    .service-option-card {
-      border: 1px solid var(--border); cursor: pointer; padding: 16px 12px;
-      text-align: center; transition: all var(--transition); user-select: none;
-      background: var(--bg2);
-    }
-    .service-option-card:hover { border-color: rgba(201,169,110,0.4); background: var(--bg3); }
-    .service-option-card.selected {
-      border-color: var(--gold); background: rgba(201,169,110,0.07);
-    }
-    .service-option-icon { font-size: 1.6rem; margin-bottom: 8px; line-height: 1; }
-    .service-option-label {
-      font-size: 0.72rem; letter-spacing: 0.5px; color: var(--text-muted);
-      line-height: 1.3;
-    }
-    .service-option-card.selected .service-option-label { color: var(--gold); }
-    @media (max-width: 640px) {
-      #serviceOptions { grid-template-columns: repeat(2, 1fr); }
-    }
+      /* ── Success step enhancements ── */
+      .success-redirect-note {
+        font-size: 0.8rem;
+        color: var(--text-dim);
+        margin-top: 16px;
+      }
+      .success-redirect-note span {
+        color: var(--gold);
+      }
 
-    /* ── Summary enhancements ── */
-    .summary-model-card {
-      display: flex; align-items: center; gap: 12px;
-      margin-bottom: 20px; padding-bottom: 20px;
-      border-bottom: 1px solid var(--border);
-    }
-    .summary-model-card img {
-      width: 48px; height: 60px; object-fit: cover; flex-shrink: 0;
-    }
-    .summary-model-card span { font-size: 0.9rem; color: var(--white); }
-    .summary-divider {
-      height: 1px; background: var(--border); margin: 8px 0 4px;
-    }
-    .summary-row--block {
-      flex-direction: column; gap: 6px;
-    }
-    .summary-row--block label { margin-bottom: 0; }
-    .summary-row--block span { color: var(--text-muted); font-size: 0.82rem; line-height: 1.6; }
+      /* ── Character counter ── */
+      .char-counter {
+        display: flex;
+        justify-content: flex-end;
+        font-size: 0.72rem;
+        color: var(--text-dim);
+        margin-top: 4px;
+      }
 
-    /* ── Success step enhancements ── */
-    .success-redirect-note {
-      font-size: 0.8rem; color: var(--text-dim); margin-top: 16px;
-    }
-    .success-redirect-note span { color: var(--gold); }
+      /* ── Duration stepper ── */
+      .duration-stepper {
+        display: flex;
+        align-items: center;
+        gap: 0;
+      }
+      .duration-stepper button {
+        width: 40px;
+        height: 48px;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 1.2rem;
+        transition: all var(--transition);
+        flex-shrink: 0;
+      }
+      .duration-stepper button:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .duration-stepper input {
+        border-left: none;
+        border-right: none;
+        text-align: center;
+        flex: 1;
+      }
 
-    /* ── Character counter ── */
-    .char-counter {
-      display: flex; justify-content: flex-end;
-      font-size: 0.72rem; color: var(--text-dim); margin-top: 4px;
-    }
+      /* ── Booking step done label ── */
+      .booking-step.done .booking-step-label {
+        color: var(--gold-dark);
+      }
 
-    /* ── Duration stepper ── */
-    .duration-stepper {
-      display: flex; align-items: center; gap: 0;
-    }
-    .duration-stepper button {
-      width: 40px; height: 48px; background: var(--bg3);
-      border: 1px solid var(--border); color: var(--text-muted);
-      cursor: pointer; font-size: 1.2rem; transition: all var(--transition);
-      flex-shrink: 0;
-    }
-    .duration-stepper button:hover { border-color: var(--gold); color: var(--gold); }
-    .duration-stepper input {
-      border-left: none; border-right: none; text-align: center;
-      flex: 1;
-    }
+      /* ── Phone hint ── */
+      .phone-hint {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+        margin-top: 5px;
+        line-height: 1.5;
+      }
 
-    /* ── Booking step done label ── */
-    .booking-step.done .booking-step-label { color: var(--gold-dark); }
+      /* ── Summary edit button ── */
+      .summary-edit-btn {
+        margin-left: auto;
+        flex-shrink: 0;
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 0.9rem;
+        padding: 0 4px;
+        transition: color var(--transition);
+        line-height: 1;
+      }
+      .summary-edit-btn:hover {
+        color: var(--gold);
+      }
 
-    /* ── Phone hint ── */
-    .phone-hint {
-      font-size: 0.72rem; color: var(--text-dim); margin-top: 5px; line-height: 1.5;
-    }
+      /* ── 5-step indicator: tighter lines ── */
+      @media (min-width: 641px) {
+        .booking-steps .booking-step-line {
+          width: 52px;
+        }
+      }
+      @media (max-width: 640px) {
+        .booking-steps .booking-step-line {
+          width: 18px;
+        }
+      }
 
-    /* ── Summary edit button ── */
-    .summary-edit-btn {
-      margin-left: auto; flex-shrink: 0;
-      background: none; border: none; color: var(--text-dim);
-      cursor: pointer; font-size: 0.9rem; padding: 0 4px;
-      transition: color var(--transition);
-      line-height: 1;
-    }
-    .summary-edit-btn:hover { color: var(--gold); }
+      /* ── Multi-model chips ── */
+      .model-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+        min-height: 0;
+      }
+      .model-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(201, 169, 110, 0.12);
+        border: 1px solid var(--gold);
+        padding: 5px 10px 5px 6px;
+        font-size: 0.78rem;
+        color: var(--gold);
+        animation: chipIn 0.2s ease;
+      }
+      @keyframes chipIn {
+        from {
+          opacity: 0;
+          transform: scale(0.85);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      .model-chip-thumb {
+        width: 24px;
+        height: 30px;
+        object-fit: cover;
+        flex-shrink: 0;
+      }
+      .model-chip-remove {
+        background: none;
+        border: none;
+        color: var(--gold);
+        cursor: pointer;
+        font-size: 0.7rem;
+        padding: 0 2px;
+        line-height: 1;
+        transition: color var(--transition);
+      }
+      .model-chip-remove:hover {
+        color: #e05c5c;
+      }
 
-    /* ── 5-step indicator: tighter lines ── */
-    @media (min-width: 641px) {
-      .booking-steps .booking-step-line { width: 52px; }
-    }
-    @media (max-width: 640px) {
-      .booking-steps .booking-step-line { width: 18px; }
-    }
+      /* ── "Add another model" link ── */
+      .btn-add-model {
+        font-size: 0.75rem;
+        color: var(--gold);
+        text-decoration: none;
+        letter-spacing: 0.5px;
+        border-bottom: 1px dashed rgba(201, 169, 110, 0.4);
+        transition:
+          border-color var(--transition),
+          color var(--transition);
+      }
+      .btn-add-model:hover {
+        color: var(--gold-light);
+        border-color: var(--gold-light);
+      }
 
-    /* ── Multi-model chips ── */
-    .model-chips {
-      display: flex; flex-wrap: wrap; gap: 8px;
-      margin-bottom: 16px; min-height: 0;
-    }
-    .model-chip {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: rgba(201,169,110,0.12); border: 1px solid var(--gold);
-      padding: 5px 10px 5px 6px; font-size: 0.78rem; color: var(--gold);
-      animation: chipIn 0.2s ease;
-    }
-    @keyframes chipIn {
-      from { opacity: 0; transform: scale(0.85); }
-      to   { opacity: 1; transform: scale(1); }
-    }
-    .model-chip-thumb {
-      width: 24px; height: 30px; object-fit: cover; flex-shrink: 0;
-    }
-    .model-chip-remove {
-      background: none; border: none; color: var(--gold); cursor: pointer;
-      font-size: 0.7rem; padding: 0 2px; line-height: 1;
-      transition: color var(--transition);
-    }
-    .model-chip-remove:hover { color: #e05c5c; }
-
-    /* ── "Add another model" link ── */
-    .btn-add-model {
-      font-size: 0.75rem; color: var(--gold); text-decoration: none;
-      letter-spacing: 0.5px; border-bottom: 1px dashed rgba(201,169,110,0.4);
-      transition: border-color var(--transition), color var(--transition);
-    }
-    .btn-add-model:hover { color: var(--gold-light); border-color: var(--gold-light); }
-
-    /* ── File upload button ── */
-    .file-upload-btn {
-      display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
-      border: 1px dashed var(--border); padding: 10px 16px;
-      font-size: 0.82rem; color: var(--text-muted);
-      transition: all var(--transition); width: 100%;
-      background: var(--bg2);
-    }
-    .file-upload-btn:hover, .file-upload-btn:focus {
-      border-color: var(--gold); color: var(--gold); outline: none;
-    }
-    .file-upload-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
-    .file-upload-icon { font-size: 1.1rem; }
-    .file-upload-name {
-      font-size: 0.78rem; color: var(--gold); margin-top: 6px;
-      min-height: 1.2em; word-break: break-all;
-    }
-  </style>
-  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
-  <!-- Google Analytics 4 (loads only if consent given) -->
-  <script>
-    window._ga_id = ''; // loaded from API
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ga_measurement_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      window._ga_id = d.ga_measurement_id;
-      var s = document.createElement('script');
-      s.async = true;
-      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
-      document.head.appendChild(s);
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      window.gtag = gtag;
-      gtag('js', new Date());
-      gtag('config', d.ga_measurement_id, { 'send_page_view': true });
-      window._ga_ready = true;
-    }).catch(()=>{});
-  </script>
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      window.YM_ID = d.ym_counter_id;
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-  <!-- Analytics wrapper -->
-  <script src="/js/analytics.js"></script>
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-  <nav class="navbar scrolled" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links">
-        <a href="/catalog.html">Модели</a>
-        <a href="/about.html">О нас</a>
-        <a href="/reviews.html">Отзывы</a>
-        <a href="/pricing.html">Цены</a>
-        <a href="/contact.html">Контакты</a>
-        <a href="/cabinet.html" style="font-size:0.9rem" aria-label="Мои заявки"><span aria-hidden="true">👤</span> Мои заявки</a>
-        <button onclick="DarkMode.toggle()"
-          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
-          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+      /* ── File upload button ── */
+      .file-upload-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        border: 1px dashed var(--border);
+        padding: 10px 16px;
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        transition: all var(--transition);
+        width: 100%;
+        background: var(--bg2);
+      }
+      .file-upload-btn:hover,
+      .file-upload-btn:focus {
+        border-color: var(--gold);
+        color: var(--gold);
+        outline: none;
+      }
+      .file-upload-btn:focus-visible {
+        outline: 2px solid var(--gold);
+        outline-offset: 2px;
+      }
+      .file-upload-icon {
+        font-size: 1.1rem;
+      }
+      .file-upload-name {
+        font-size: 0.78rem;
+        color: var(--gold);
+        margin-top: 6px;
+        min-height: 1.2em;
+        word-break: break-all;
+      }
+    </style>
+    <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+    <!-- Google Analytics 4 (loads only if consent given) -->
+    <script>
+      window._ga_id = ''; // loaded from API
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ga_measurement_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          window._ga_id = d.ga_measurement_id;
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=' + d.ga_measurement_id;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+          function gtag() {
+            dataLayer.push(arguments);
+          }
+          window.gtag = gtag;
+          gtag('js', new Date());
+          gtag('config', d.ga_measurement_id, { send_page_view: true });
+          window._ga_ready = true;
+        })
+        .catch(() => {});
+    </script>
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          window.YM_ID = d.ym_counter_id;
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+    <!-- Analytics wrapper -->
+    <script src="/js/analytics.js"></script>
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+    <nav class="navbar scrolled" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links">
+          <a href="/catalog.html">Модели</a>
+          <a href="/about.html">О нас</a>
+          <a href="/reviews.html">Отзывы</a>
+          <a href="/pricing.html">Цены</a>
+          <a href="/contact.html">Контакты</a>
+          <a href="/cabinet.html" style="font-size: 0.9rem" aria-label="Мои заявки"
+            ><span aria-hidden="true">👤</span> Мои заявки</a
+          >
+          <button
+            onclick="DarkMode.toggle()"
+            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            aria-label="Переключить тему"
+            title="Dark/Light mode"
+            style="background: none; border: none; cursor: pointer; padding: 4px 8px"
+          >
+            <span class="dark-mode-icon" style="font-size: 1.1rem">🌙</span>
+          </button>
+          <a
+            href="/booking.html"
+            class="btn-nav"
+            style="color: var(--bg); background: var(--gold); border-color: var(--gold)"
+            >Заказать</a
+          >
+        </div>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
+          <span></span><span></span><span></span>
         </button>
-        <a href="/booking.html" class="btn-nav" style="color:var(--bg);background:var(--gold);border-color:var(--gold)">Заказать</a>
       </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu">
-        <span></span><span></span><span></span>
-      </button>
-    </div>
-  </nav>
+    </nav>
 
-  <!-- MOBILE MENU -->
-  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-    <a href="/catalog.html">Модели</a>
-    <a href="/about.html">О нас</a>
-    <a href="/reviews.html">Отзывы</a>
-    <a href="/pricing.html">Цены</a>
-    <a href="/contact.html">Контакты</a>
-    <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
-    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
-  </nav>
+    <!-- MOBILE MENU -->
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/about.html">О нас</a>
+      <a href="/reviews.html">Отзывы</a>
+      <a href="/pricing.html">Цены</a>
+      <a href="/contact.html">Контакты</a>
+      <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+    </nav>
 
-  <main class="booking-page" id="main-content">
-    <div class="container">
-      <div class="booking-header">
-        <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Бронирование</div>
-        <h1>Оформить заявку</h1>
-        <p style="color:var(--text-muted)">Заполните форму — менеджер свяжется с вами в течение 1 часа</p>
-      </div>
-
-      <!-- ARIA live region for screen reader step announcements -->
-      <div id="stepAnnouncement" role="status" aria-live="polite" aria-atomic="true" class="sr-only"></div>
-
-      <!-- Selected model banner (shown when coming from model.html via ?model_name=) -->
-      <div id="selected-model-banner" style="max-width:640px;margin:0 auto 24px;background:rgba(201,169,110,0.08);border:1px solid var(--gold);padding:14px 20px;font-size:0.85rem;font-weight:500;color:var(--gold);display:none"></div>
-
-      <!-- STEPS INDICATOR -->
-      <div class="booking-steps" id="stepsBar" role="list" aria-label="Шаги оформления">
-        <div class="booking-step active" data-step="1" role="listitem" aria-current="step">
-          <div class="booking-step-num">1</div>
-          <div class="booking-step-label">Событие</div>
-        </div>
-        <div class="booking-step-line" id="line1" aria-hidden="true"></div>
-        <div class="booking-step" data-step="2" role="listitem">
-          <div class="booking-step-num">2</div>
-          <div class="booking-step-label">Модель</div>
-        </div>
-        <div class="booking-step-line" id="line2" aria-hidden="true"></div>
-        <div class="booking-step" data-step="3" role="listitem">
-          <div class="booking-step-num">3</div>
-          <div class="booking-step-label">Детали</div>
-        </div>
-        <div class="booking-step-line" id="line3" aria-hidden="true"></div>
-        <div class="booking-step" data-step="4" role="listitem">
-          <div class="booking-step-num">4</div>
-          <div class="booking-step-label">Контакты</div>
-        </div>
-        <div class="booking-step-line" id="line4" aria-hidden="true"></div>
-        <div class="booking-step" data-step="5" role="listitem">
-          <div class="booking-step-num">5</div>
-          <div class="booking-step-label">Подтверждение</div>
-        </div>
-      </div>
-
-      <!-- PROGRESS BAR -->
-      <div class="booking-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Прогресс оформления">
-        <div class="booking-progress-fill" id="progressFill"></div>
-      </div>
-
-      <!-- Mini bar: shown on steps 3-5 to remind user of selected event + models -->
-      <div id="miniModelBar" role="region" aria-label="Выбранные параметры" style="max-width:640px;margin:0 auto;"></div>
-
-      <div class="booking-form-wrap">
-
-        <!-- ══════════ STEP 1 — EVENT TYPE ══════════ -->
-        <div class="booking-section active" id="step1" role="region" aria-label="Шаг 1: Тип события">
-          <h3>Тип события</h3>
-          <p class="hint">Выберите тип мероприятия, для которого нужна модель</p>
-
-          <div id="serviceOptions" role="group" aria-label="Тип мероприятия">
-            <div class="service-option-card" data-value="photo_shoot"
-                 role="radio" aria-checked="false" tabindex="0"
-                 onclick="window._booking.selectService('photo_shoot')"
-                 onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('photo_shoot')">
-              <div class="service-option-icon" aria-hidden="true">👗</div>
-              <div class="service-option-label">Фотосессия</div>
-            </div>
-            <div class="service-option-card" data-value="event"
-                 role="radio" aria-checked="false" tabindex="0"
-                 onclick="window._booking.selectService('event')"
-                 onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('event')">
-              <div class="service-option-icon" aria-hidden="true">🎪</div>
-              <div class="service-option-label">Мероприятие</div>
-            </div>
-            <div class="service-option-card" data-value="fashion_show"
-                 role="radio" aria-checked="false" tabindex="0"
-                 onclick="window._booking.selectService('fashion_show')"
-                 onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('fashion_show')">
-              <div class="service-option-icon" aria-hidden="true">👠</div>
-              <div class="service-option-label">Показ мод</div>
-            </div>
-            <div class="service-option-card" data-value="commercial"
-                 role="radio" aria-checked="false" tabindex="0"
-                 onclick="window._booking.selectService('commercial')"
-                 onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('commercial')">
-              <div class="service-option-icon" aria-hidden="true">📢</div>
-              <div class="service-option-label">Реклама</div>
-            </div>
-            <div class="service-option-card" data-value="runway"
-                 role="radio" aria-checked="false" tabindex="0"
-                 onclick="window._booking.selectService('runway')"
-                 onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('runway')">
-              <div class="service-option-icon" aria-hidden="true">✦</div>
-              <div class="service-option-label">Подиум</div>
-            </div>
-            <div class="service-option-card" data-value="other"
-                 role="radio" aria-checked="false" tabindex="0"
-                 onclick="window._booking.selectService('other')"
-                 onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectService('other')">
-              <div class="service-option-icon" aria-hidden="true">💍</div>
-              <div class="service-option-label">Другое</div>
-            </div>
+    <main class="booking-page" id="main-content">
+      <div class="container">
+        <div class="booking-header">
+          <div
+            style="
+              font-size: 0.7rem;
+              letter-spacing: 3px;
+              text-transform: uppercase;
+              color: var(--gold);
+              margin-bottom: 12px;
+            "
+          >
+            Бронирование
           </div>
-
-          <div class="booking-nav">
-            <span></span>
-            <button class="btn-next" onclick="window._booking.nextStep()" aria-label="Перейти к шагу 2">Далее →</button>
-          </div>
+          <h1>Оформить заявку</h1>
+          <p style="color: var(--text-muted)">Заполните форму — менеджер свяжется с вами в течение 1 часа</p>
         </div>
 
-        <!-- ══════════ STEP 2 — MODEL SELECTION ══════════ -->
-        <div class="booking-section" id="step2" role="region" aria-label="Шаг 2: Выбор модели">
-          <h3>Выберите модель</h3>
-          <p class="hint">Можно выбрать несколько моделей. Необязательно — оформите без выбора конкретной модели.</p>
+        <!-- ARIA live region for screen reader step announcements -->
+        <div id="stepAnnouncement" role="status" aria-live="polite" aria-atomic="true" class="sr-only"></div>
 
-          <!-- Pre-filled model card (shown when ?model_id= param is present) -->
-          <div id="prefilledModelCard"></div>
+        <!-- Selected model banner (shown when coming from model.html via ?model_name=) -->
+        <div
+          id="selected-model-banner"
+          style="
+            max-width: 640px;
+            margin: 0 auto 24px;
+            background: rgba(201, 169, 110, 0.08);
+            border: 1px solid var(--gold);
+            padding: 14px 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--gold);
+            display: none;
+          "
+        ></div>
 
-          <!-- Selected models chips -->
-          <div id="selectedModelChips" class="model-chips" role="list" aria-label="Выбранные модели" style="display:none"></div>
+        <!-- Resume banner: shown when an unfinished draft is found in localStorage -->
+        <div
+          id="booking-resume-banner"
+          style="
+            display: none;
+            max-width: 640px;
+            margin: 0 auto 20px;
+            background: rgba(201, 169, 110, 0.1);
+            border: 1px solid var(--gold);
+            border-radius: 10px;
+            padding: 14px 20px;
+            font-size: 0.85rem;
+            color: var(--gold);
+          "
+        >
+          <span>У вас есть незавершённая заявка.</span>
+          <button
+            onclick="window._bookingLS.restore()"
+            style="
+              margin-left: 12px;
+              background: var(--gold);
+              color: #111;
+              border: none;
+              border-radius: 6px;
+              padding: 4px 14px;
+              cursor: pointer;
+              font-size: 0.82rem;
+            "
+          >
+            Продолжить →
+          </button>
+          <button
+            onclick="window._bookingLS.clearAndHide()"
+            style="
+              margin-left: 6px;
+              background: transparent;
+              color: var(--text-muted);
+              border: none;
+              cursor: pointer;
+              font-size: 0.82rem;
+            "
+          >
+            Начать заново
+          </button>
+        </div>
 
-          <div class="model-select-none selected" id="noModelOption"
-               role="button" tabindex="0" aria-label="Менеджер подберёт модель сам"
-               onclick="window._booking.selectModel(null)"
-               onkeydown="if(event.key==='Enter'||event.key===' ')window._booking.selectModel(null)">
-            ✦ Не выбрана — подберём сами
+        <!-- STEPS INDICATOR -->
+        <div class="booking-steps" id="stepsBar" role="list" aria-label="Шаги оформления">
+          <div class="booking-step active" data-step="1" role="listitem" aria-current="step">
+            <div class="booking-step-num">1</div>
+            <div class="booking-step-label">Событие</div>
           </div>
-          <div style="margin-top:12px;font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px;text-align:center">— или выберите из каталога —</div>
-          <div class="model-select-grid" id="modelSelectGrid" role="group" aria-label="Список моделей">
-            <!-- injected by JS -->
+          <div class="booking-step-line" id="line1" aria-hidden="true"></div>
+          <div class="booking-step" data-step="2" role="listitem">
+            <div class="booking-step-num">2</div>
+            <div class="booking-step-label">Модель</div>
           </div>
-          <div style="margin-top:12px;text-align:center">
-            <a href="/catalog.html" class="btn-add-model" aria-label="Открыть каталог для выбора модели">
-              + Добавить ещё модель из каталога →
-            </a>
+          <div class="booking-step-line" id="line2" aria-hidden="true"></div>
+          <div class="booking-step" data-step="3" role="listitem">
+            <div class="booking-step-num">3</div>
+            <div class="booking-step-label">Детали</div>
           </div>
-          <div class="booking-nav">
-            <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
-            <button class="btn-next" onclick="window._booking.nextStep()" aria-label="Перейти к шагу 3">Далее →</button>
+          <div class="booking-step-line" id="line3" aria-hidden="true"></div>
+          <div class="booking-step" data-step="4" role="listitem">
+            <div class="booking-step-num">4</div>
+            <div class="booking-step-label">Контакты</div>
+          </div>
+          <div class="booking-step-line" id="line4" aria-hidden="true"></div>
+          <div class="booking-step" data-step="5" role="listitem">
+            <div class="booking-step-num">5</div>
+            <div class="booking-step-label">Подтверждение</div>
           </div>
         </div>
 
-        <!-- ══════════ STEP 3 — DATE & BUDGET ══════════ -->
-        <div class="booking-section" id="step3" role="region" aria-label="Шаг 3: Дата и бюджет">
-          <h3>Дата и бюджет</h3>
-          <p class="hint">Укажите дату мероприятия и дополнительные детали</p>
+        <!-- PROGRESS BAR -->
+        <div
+          class="booking-progress-bar"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+          aria-label="Прогресс оформления"
+        >
+          <div class="booking-progress-fill" id="progressFill"></div>
+        </div>
 
-          <div class="form-row">
-            <div class="form-group">
-              <label for="event_date">Дата мероприятия <span class="req">*</span></label>
-              <input type="date" class="form-control" id="event_date" aria-required="true" />
-            </div>
-            <div class="form-group">
-              <label for="event_duration">Продолжительность (ч)</label>
-              <div class="duration-stepper">
-                <button type="button" aria-label="Уменьшить"
-                  onclick="const el=document.getElementById('event_duration');el.value=Math.max(1,+el.value-1)">−</button>
-                <input type="number" class="form-control" id="event_duration" value="4" min="1" max="24"
-                       aria-label="Количество часов" />
-                <button type="button" aria-label="Увеличить"
-                  onclick="const el=document.getElementById('event_duration');el.value=Math.min(24,+el.value+1)">+</button>
+        <!-- Mini bar: shown on steps 3-5 to remind user of selected event + models -->
+        <div
+          id="miniModelBar"
+          role="region"
+          aria-label="Выбранные параметры"
+          style="max-width: 640px; margin: 0 auto"
+        ></div>
+
+        <div class="booking-form-wrap">
+          <!-- ══════════ STEP 1 — EVENT TYPE ══════════ -->
+          <div class="booking-section active" id="step1" role="region" aria-label="Шаг 1: Тип события">
+            <h3>Тип события</h3>
+            <p class="hint">Выберите тип мероприятия, для которого нужна модель</p>
+
+            <div id="serviceOptions" role="group" aria-label="Тип мероприятия">
+              <div
+                class="service-option-card"
+                data-value="photo_shoot"
+                role="radio"
+                aria-checked="false"
+                tabindex="0"
+                onclick="window._booking.selectService('photo_shoot')"
+                onkeydown="
+                  if (event.key === 'Enter' || event.key === ' ') window._booking.selectService('photo_shoot');
+                "
+              >
+                <div class="service-option-icon" aria-hidden="true">👗</div>
+                <div class="service-option-label">Фотосессия</div>
+              </div>
+              <div
+                class="service-option-card"
+                data-value="event"
+                role="radio"
+                aria-checked="false"
+                tabindex="0"
+                onclick="window._booking.selectService('event')"
+                onkeydown="if (event.key === 'Enter' || event.key === ' ') window._booking.selectService('event');"
+              >
+                <div class="service-option-icon" aria-hidden="true">🎪</div>
+                <div class="service-option-label">Мероприятие</div>
+              </div>
+              <div
+                class="service-option-card"
+                data-value="fashion_show"
+                role="radio"
+                aria-checked="false"
+                tabindex="0"
+                onclick="window._booking.selectService('fashion_show')"
+                onkeydown="
+                  if (event.key === 'Enter' || event.key === ' ') window._booking.selectService('fashion_show');
+                "
+              >
+                <div class="service-option-icon" aria-hidden="true">👠</div>
+                <div class="service-option-label">Показ мод</div>
+              </div>
+              <div
+                class="service-option-card"
+                data-value="commercial"
+                role="radio"
+                aria-checked="false"
+                tabindex="0"
+                onclick="window._booking.selectService('commercial')"
+                onkeydown="if (event.key === 'Enter' || event.key === ' ') window._booking.selectService('commercial');"
+              >
+                <div class="service-option-icon" aria-hidden="true">📢</div>
+                <div class="service-option-label">Реклама</div>
+              </div>
+              <div
+                class="service-option-card"
+                data-value="runway"
+                role="radio"
+                aria-checked="false"
+                tabindex="0"
+                onclick="window._booking.selectService('runway')"
+                onkeydown="if (event.key === 'Enter' || event.key === ' ') window._booking.selectService('runway');"
+              >
+                <div class="service-option-icon" aria-hidden="true">✦</div>
+                <div class="service-option-label">Подиум</div>
+              </div>
+              <div
+                class="service-option-card"
+                data-value="other"
+                role="radio"
+                aria-checked="false"
+                tabindex="0"
+                onclick="window._booking.selectService('other')"
+                onkeydown="if (event.key === 'Enter' || event.key === ' ') window._booking.selectService('other');"
+              >
+                <div class="service-option-icon" aria-hidden="true">💍</div>
+                <div class="service-option-label">Другое</div>
               </div>
             </div>
-          </div>
 
-          <div class="form-group">
-            <label for="budget">Бюджет <span style="color:var(--text-dim);font-size:0.65rem;text-transform:none;letter-spacing:0">(необязательно)</span></label>
-            <input type="text" class="form-control" id="budget" placeholder="₽ (необязательно)"
-              oninput="clearBudgetEstimate()" />
-            <div id="budget-estimate-hint" style="display:none;margin-top:8px;padding:10px 14px;background:rgba(212,175,55,0.08);border-left:3px solid var(--gold);border-radius:6px;font-size:0.85rem;color:var(--text-dim)">
-              <span id="budget-estimate-text"></span>
+            <div class="booking-nav">
+              <span></span>
+              <button class="btn-next" onclick="window._booking.nextStep()" aria-label="Перейти к шагу 2">
+                Далее →
+              </button>
             </div>
           </div>
 
-          <div class="form-group">
-            <label for="location">Место проведения</label>
-            <input type="text" class="form-control" id="location" placeholder="Город, адрес или площадка" />
-          </div>
+          <!-- ══════════ STEP 2 — MODEL SELECTION ══════════ -->
+          <div class="booking-section" id="step2" role="region" aria-label="Шаг 2: Выбор модели">
+            <h3>Выберите модель</h3>
+            <p class="hint">Можно выбрать несколько моделей. Необязательно — оформите без выбора конкретной модели.</p>
 
-          <div class="form-group">
-            <label for="comments">Дополнительные пожелания</label>
-            <textarea class="form-control" id="comments"
-              placeholder="Особые требования, дресс-код, тематика проекта..."
-              maxlength="500"></textarea>
-            <div class="char-counter"><span id="charCount">0</span> / 500</div>
-          </div>
+            <!-- Pre-filled model card (shown when ?model_id= param is present) -->
+            <div id="prefilledModelCard"></div>
 
-          <!-- TOR / File attachment -->
-          <div class="form-group">
-            <label for="tor_file">
-              Прикрепить ТЗ / Бриф
-              <span style="color:var(--text-dim);font-size:0.65rem;text-transform:none;letter-spacing:0">(PDF / DOC, до 5 МБ, необязательно)</span>
-            </label>
-            <label class="file-upload-btn" for="tor_file" role="button" tabindex="0"
-              onkeydown="if(event.key==='Enter'||event.key===' ')document.getElementById('tor_file').click()">
-              <span class="file-upload-icon" aria-hidden="true">📎</span>
-              <span>Выбрать файл</span>
-            </label>
-            <input type="file" id="tor_file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;" aria-label="Прикрепить техническое задание" />
-            <div id="tor_file_name" class="file-upload-name" aria-live="polite"></div>
-          </div>
+            <!-- Selected models chips -->
+            <div
+              id="selectedModelChips"
+              class="model-chips"
+              role="list"
+              aria-label="Выбранные модели"
+              style="display: none"
+            ></div>
 
-          <div class="booking-nav">
-            <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
-            <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
-          </div>
-        </div>
-
-        <!-- ══════════ STEP 4 — CONTACTS ══════════ -->
-        <div class="booking-section" id="step4" role="region" aria-label="Шаг 4: Контактные данные">
-          <h3>Контактные данные</h3>
-          <p class="hint">Ваши данные необходимы для связи. Мы не передаём их третьим лицам.</p>
-
-          <div class="form-group">
-            <label for="client_name">Ваше имя <span class="req">*</span></label>
-            <input type="text" class="form-control" id="client_name"
-              placeholder="Иван Иванов" autocomplete="name" aria-required="true" />
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label for="client_phone">Телефон <span class="req">*</span></label>
-              <input type="tel" class="form-control" id="client_phone"
-                placeholder="+7 (999) 000-00-00"
-                autocomplete="tel" inputmode="tel" aria-required="true" />
-              <div class="phone-hint">Формат: +7 XXX XXX-XX-XX (не менее 10 цифр)</div>
+            <div
+              class="model-select-none selected"
+              id="noModelOption"
+              role="button"
+              tabindex="0"
+              aria-label="Менеджер подберёт модель сам"
+              onclick="window._booking.selectModel(null)"
+              onkeydown="if (event.key === 'Enter' || event.key === ' ') window._booking.selectModel(null);"
+            >
+              ✦ Не выбрана — подберём сами
             </div>
-            <div class="form-group">
-              <label for="client_email">Email</label>
-              <input type="email" class="form-control" id="client_email"
-                placeholder="your@email.com" autocomplete="email" />
+            <div
+              style="
+                margin-top: 12px;
+                font-size: 0.75rem;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                color: var(--text-dim);
+                margin-bottom: 12px;
+                text-align: center;
+              "
+            >
+              — или выберите из каталога —
             </div>
-          </div>
-
-          <div class="form-group">
-            <label for="client_telegram">Telegram</label>
-            <input type="text" class="form-control" id="client_telegram"
-              placeholder="@username" autocomplete="off" />
-            <div class="form-note"><span aria-hidden="true">💡</span> Укажите username для уведомлений о статусе заявки через Telegram</div>
-          </div>
-
-          <div class="booking-nav">
-            <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
-            <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
-          </div>
-        </div>
-
-        <!-- ══════════ STEP 5 — CONFIRM ══════════ -->
-        <div class="booking-section" id="step5" role="region" aria-label="Шаг 5: Подтверждение заявки">
-          <h3>Подтверждение заявки</h3>
-          <p class="hint">Проверьте данные перед отправкой</p>
-
-          <div class="order-summary" id="orderSummary" aria-live="polite">
-            <!-- injected by JS -->
-          </div>
-
-          <div style="margin-bottom:20px;padding:16px;border:1px solid var(--border);font-size:0.8rem;color:var(--text-muted);line-height:1.7">
-            Отправляя заявку, вы соглашаетесь на обработку персональных данных и связь по указанным контактам.
-          </div>
-
-          <div class="booking-nav">
-            <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
-            <button class="btn-next" id="submitBtn" onclick="window._booking.submit()">Отправить заявку ✓</button>
-          </div>
-        </div>
-
-        <!-- ══════════ STEP 6 — SUCCESS ══════════ -->
-        <div class="booking-section" id="step6" role="region" aria-label="Заявка принята">
-          <div class="success-box">
-            <div class="success-icon" aria-hidden="true" role="presentation">✦</div>
-            <h3>Заявка принята!</h3>
-            <p>Ваш номер заявки:</p>
-            <div class="order-num-display" id="orderNumDisplay" aria-live="polite">—</div>
-            <p>Менеджер свяжется с вами в течение 1 часа.</p>
-            <p style="margin-top:8px">Сохраните номер заявки для отслеживания статуса.</p>
-
-            <div class="tg-connect" id="tgConnectBox">
-              <p>📱 Подключите Telegram для уведомлений о статусе заявки</p>
-              <a class="btn-telegram" id="tgConnectLink" href="#" target="_blank" rel="noopener">
-                ✈ Открыть в Telegram
+            <div class="model-select-grid" id="modelSelectGrid" role="group" aria-label="Список моделей">
+              <!-- injected by JS -->
+            </div>
+            <div style="margin-top: 12px; text-align: center">
+              <a href="/catalog.html" class="btn-add-model" aria-label="Открыть каталог для выбора модели">
+                + Добавить ещё модель из каталога →
               </a>
             </div>
-
-            <div style="margin-top:24px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-              <a href="/" class="btn-outline">На главную</a>
-              <a href="/catalog.html" class="btn-primary">Каталог моделей</a>
-            </div>
-            <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-              <a id="statusPageLink" href="/order-status.html" class="btn-outline" style="font-size:0.75rem;padding:10px 20px"><span aria-hidden="true">🔍</span> Проверить статус заявки</a>
-              <a id="cabinetLink" href="/cabinet.html" class="btn-outline" style="font-size:0.75rem;padding:10px 20px"><span aria-hidden="true">👤</span> Все мои заявки</a>
-            </div>
-            <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-              <button id="bookAnotherBtn" class="btn-outline" style="font-size:0.75rem;padding:10px 20px;cursor:pointer">
-                ✦ Забронировать ещё модель
-              </button>
-              <button id="shareBookingBtn" class="btn-outline" style="font-size:0.75rem;padding:10px 20px;cursor:pointer;display:none" aria-label="Поделиться заявкой">
-                🔗 Поделиться
+            <div class="booking-nav">
+              <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
+              <button class="btn-next" onclick="window._booking.nextStep()" aria-label="Перейти к шагу 3">
+                Далее →
               </button>
             </div>
-            <div id="cabinetPhoneHint" style="display:none;margin-top:12px;font-size:0.78rem;color:var(--text-dim)">
-              Для просмотра всех заявок — <a id="cabinetPhoneLink" href="/cabinet.html" style="color:var(--gold);text-decoration:none">откройте личный кабинет →</a>
+          </div>
+
+          <!-- ══════════ STEP 3 — DATE & BUDGET ══════════ -->
+          <div class="booking-section" id="step3" role="region" aria-label="Шаг 3: Дата и бюджет">
+            <h3>Дата и бюджет</h3>
+            <p class="hint">Укажите дату мероприятия и дополнительные детали</p>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="event_date">Дата мероприятия <span class="req">*</span></label>
+                <input type="date" class="form-control" id="event_date" aria-required="true" />
+              </div>
+              <div class="form-group">
+                <label for="event_duration">Продолжительность (ч)</label>
+                <div class="duration-stepper">
+                  <button
+                    type="button"
+                    aria-label="Уменьшить"
+                    onclick="
+                      const el = document.getElementById('event_duration');
+                      el.value = Math.max(1, +el.value - 1);
+                    "
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    class="form-control"
+                    id="event_duration"
+                    value="4"
+                    min="1"
+                    max="24"
+                    aria-label="Количество часов"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Увеличить"
+                    onclick="
+                      const el = document.getElementById('event_duration');
+                      el.value = Math.min(24, +el.value + 1);
+                    "
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <p class="success-redirect-note">
-              Автоматический переход на главную через <span id="redirectCountdown">10</span> сек…
-            </p>
+            <div class="form-group">
+              <label for="budget"
+                >Бюджет
+                <span style="color: var(--text-dim); font-size: 0.65rem; text-transform: none; letter-spacing: 0"
+                  >(необязательно)</span
+                ></label
+              >
+              <input
+                type="text"
+                class="form-control"
+                id="budget"
+                placeholder="₽ (необязательно)"
+                oninput="clearBudgetEstimate()"
+              />
+              <div
+                id="budget-estimate-hint"
+                style="
+                  display: none;
+                  margin-top: 8px;
+                  padding: 10px 14px;
+                  background: rgba(212, 175, 55, 0.08);
+                  border-left: 3px solid var(--gold);
+                  border-radius: 6px;
+                  font-size: 0.85rem;
+                  color: var(--text-dim);
+                "
+              >
+                <span id="budget-estimate-text"></span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="location">Место проведения</label>
+              <input type="text" class="form-control" id="location" placeholder="Город, адрес или площадка" />
+            </div>
+
+            <div class="form-group">
+              <label for="comments">Дополнительные пожелания</label>
+              <textarea
+                class="form-control"
+                id="comments"
+                placeholder="Особые требования, дресс-код, тематика проекта..."
+                maxlength="500"
+              ></textarea>
+              <div class="char-counter"><span id="charCount">0</span> / 500</div>
+            </div>
+
+            <!-- TOR / File attachment -->
+            <div class="form-group">
+              <label for="tor_file">
+                Прикрепить ТЗ / Бриф
+                <span style="color: var(--text-dim); font-size: 0.65rem; text-transform: none; letter-spacing: 0"
+                  >(PDF / DOC, до 5 МБ, необязательно)</span
+                >
+              </label>
+              <label
+                class="file-upload-btn"
+                for="tor_file"
+                role="button"
+                tabindex="0"
+                onkeydown="if (event.key === 'Enter' || event.key === ' ') document.getElementById('tor_file').click();"
+              >
+                <span class="file-upload-icon" aria-hidden="true">📎</span>
+                <span>Выбрать файл</span>
+              </label>
+              <input
+                type="file"
+                id="tor_file"
+                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                style="position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden"
+                aria-label="Прикрепить техническое задание"
+              />
+              <div id="tor_file_name" class="file-upload-name" aria-live="polite"></div>
+            </div>
+
+            <div class="booking-nav">
+              <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
+              <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
+            </div>
+          </div>
+
+          <!-- ══════════ STEP 4 — CONTACTS ══════════ -->
+          <div class="booking-section" id="step4" role="region" aria-label="Шаг 4: Контактные данные">
+            <h3>Контактные данные</h3>
+            <p class="hint">Ваши данные необходимы для связи. Мы не передаём их третьим лицам.</p>
+
+            <div class="form-group">
+              <label for="client_name">Ваше имя <span class="req">*</span></label>
+              <input
+                type="text"
+                class="form-control"
+                id="client_name"
+                placeholder="Иван Иванов"
+                autocomplete="name"
+                aria-required="true"
+              />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="client_phone">Телефон <span class="req">*</span></label>
+                <input
+                  type="tel"
+                  class="form-control"
+                  id="client_phone"
+                  placeholder="+7 (999) 000-00-00"
+                  autocomplete="tel"
+                  inputmode="tel"
+                  aria-required="true"
+                />
+                <div class="phone-hint">Формат: +7 XXX XXX-XX-XX (не менее 10 цифр)</div>
+              </div>
+              <div class="form-group">
+                <label for="client_email">Email</label>
+                <input
+                  type="email"
+                  class="form-control"
+                  id="client_email"
+                  placeholder="your@email.com"
+                  autocomplete="email"
+                />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="client_telegram">Telegram</label>
+              <input type="text" class="form-control" id="client_telegram" placeholder="@username" autocomplete="off" />
+              <div class="form-note">
+                <span aria-hidden="true">💡</span> Укажите username для уведомлений о статусе заявки через Telegram
+              </div>
+            </div>
+
+            <div class="booking-nav">
+              <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
+              <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
+            </div>
+          </div>
+
+          <!-- ══════════ STEP 5 — CONFIRM ══════════ -->
+          <div class="booking-section" id="step5" role="region" aria-label="Шаг 5: Подтверждение заявки">
+            <h3>Подтверждение заявки</h3>
+            <p class="hint">Проверьте данные перед отправкой</p>
+
+            <div class="order-summary" id="orderSummary" aria-live="polite">
+              <!-- injected by JS -->
+            </div>
+
+            <div
+              style="
+                margin-bottom: 20px;
+                padding: 16px;
+                border: 1px solid var(--border);
+                font-size: 0.8rem;
+                color: var(--text-muted);
+                line-height: 1.7;
+              "
+            >
+              Отправляя заявку, вы соглашаетесь на обработку персональных данных и связь по указанным контактам.
+            </div>
+
+            <div class="booking-nav">
+              <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
+              <button class="btn-next" id="submitBtn" onclick="window._booking.submit()">Отправить заявку ✓</button>
+            </div>
+          </div>
+
+          <!-- ══════════ STEP 6 — SUCCESS ══════════ -->
+          <div class="booking-section" id="step6" role="region" aria-label="Заявка принята">
+            <div class="success-box">
+              <div class="success-icon" aria-hidden="true" role="presentation">✦</div>
+              <h3>Заявка принята!</h3>
+              <p>Ваш номер заявки:</p>
+              <div class="order-num-display" id="orderNumDisplay" aria-live="polite">—</div>
+              <p>Менеджер свяжется с вами в течение 1 часа.</p>
+              <p style="margin-top: 8px">Сохраните номер заявки для отслеживания статуса.</p>
+
+              <div class="tg-connect" id="tgConnectBox">
+                <p>📱 Подключите Telegram для уведомлений о статусе заявки</p>
+                <a class="btn-telegram" id="tgConnectLink" href="#" target="_blank" rel="noopener">
+                  ✈ Открыть в Telegram
+                </a>
+              </div>
+
+              <div style="margin-top: 24px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap">
+                <a href="/" class="btn-outline">На главную</a>
+                <a href="/catalog.html" class="btn-primary">Каталог моделей</a>
+              </div>
+              <div style="margin-top: 16px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap">
+                <a
+                  id="statusPageLink"
+                  href="/order-status.html"
+                  class="btn-outline"
+                  style="font-size: 0.75rem; padding: 10px 20px"
+                  ><span aria-hidden="true">🔍</span> Проверить статус заявки</a
+                >
+                <a
+                  id="cabinetLink"
+                  href="/cabinet.html"
+                  class="btn-outline"
+                  style="font-size: 0.75rem; padding: 10px 20px"
+                  ><span aria-hidden="true">👤</span> Все мои заявки</a
+                >
+              </div>
+              <div style="margin-top: 16px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap">
+                <button
+                  id="bookAnotherBtn"
+                  class="btn-outline"
+                  style="font-size: 0.75rem; padding: 10px 20px; cursor: pointer"
+                >
+                  ✦ Забронировать ещё модель
+                </button>
+                <button
+                  id="shareBookingBtn"
+                  class="btn-outline"
+                  style="font-size: 0.75rem; padding: 10px 20px; cursor: pointer; display: none"
+                  aria-label="Поделиться заявкой"
+                >
+                  🔗 Поделиться
+                </button>
+              </div>
+              <div
+                id="cabinetPhoneHint"
+                style="display: none; margin-top: 12px; font-size: 0.78rem; color: var(--text-dim)"
+              >
+                Для просмотра всех заявок —
+                <a id="cabinetPhoneLink" href="/cabinet.html" style="color: var(--gold); text-decoration: none"
+                  >откройте личный кабинет →</a
+                >
+              </div>
+
+              <p class="success-redirect-note">
+                Автоматический переход на главную через <span id="redirectCountdown">10</span> сек…
+              </p>
+            </div>
           </div>
         </div>
+        <!-- /.booking-form-wrap -->
 
-      </div><!-- /.booking-form-wrap -->
-
-      <!-- STATUS CHECKER -->
-      <div style="max-width:640px;margin:48px auto 0;border-top:1px solid var(--border);padding-top:40px" id="status">
-        <h3 style="font-size:1.3rem;color:var(--white);margin-bottom:8px">Проверить статус заявки</h3>
-        <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:20px">Введите номер заявки (формат: NM-2024-1234)</p>
-        <div style="display:flex;gap:12px">
-          <label for="statusInput" class="sr-only">Номер заявки</label>
-          <input type="text" class="form-control" id="statusInput"
-                 placeholder="NM-2024-1234" style="flex:1"
-                 onkeydown="if(event.key==='Enter')window._booking.checkStatus()" />
-          <button class="btn-primary" onclick="window._booking.checkStatus()" style="padding:12px 24px;font-size:0.8rem">Проверить</button>
+        <!-- STATUS CHECKER -->
+        <div
+          style="max-width: 640px; margin: 48px auto 0; border-top: 1px solid var(--border); padding-top: 40px"
+          id="status"
+        >
+          <h3 style="font-size: 1.3rem; color: var(--white); margin-bottom: 8px">Проверить статус заявки</h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px">
+            Введите номер заявки (формат: NM-2024-1234)
+          </p>
+          <div style="display: flex; gap: 12px">
+            <label for="statusInput" class="sr-only">Номер заявки</label>
+            <input
+              type="text"
+              class="form-control"
+              id="statusInput"
+              placeholder="NM-2024-1234"
+              style="flex: 1"
+              onkeydown="if (event.key === 'Enter') window._booking.checkStatus();"
+            />
+            <button
+              class="btn-primary"
+              onclick="window._booking.checkStatus()"
+              style="padding: 12px 24px; font-size: 0.8rem"
+            >
+              Проверить
+            </button>
+          </div>
+          <div id="statusResult" style="margin-top: 16px" aria-live="polite"></div>
         </div>
-        <div id="statusResult" style="margin-top:16px" aria-live="polite"></div>
       </div>
+    </main>
 
+    <div class="toast-container" id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
+    <!-- Booking localStorage autosave: key constant, save/load/clear helpers -->
+    <script>
+      (function () {
+        var BOOKING_STORAGE = 'nm_booking_progress';
+        var DRAFT_TTL = 24 * 60 * 60 * 1000;
+
+        function saveBookingProgress(data) {
+          try {
+            data.timestamp = Date.now();
+            localStorage.setItem(BOOKING_STORAGE, JSON.stringify(data));
+          } catch (_) {}
+        }
+
+        function loadBookingProgress() {
+          try {
+            var raw = localStorage.getItem(BOOKING_STORAGE);
+            if (!raw) return null;
+            var parsed = JSON.parse(raw);
+            if (parsed.timestamp && Date.now() - parsed.timestamp > DRAFT_TTL) {
+              localStorage.removeItem(BOOKING_STORAGE);
+              return null;
+            }
+            return parsed;
+          } catch (_) {
+            return null;
+          }
+        }
+
+        function clearBookingProgress() {
+          try {
+            localStorage.removeItem(BOOKING_STORAGE);
+          } catch (_) {}
+        }
+
+        window._bookingLS = {
+          key: BOOKING_STORAGE,
+          save: saveBookingProgress,
+          load: loadBookingProgress,
+          clear: clearBookingProgress,
+          restore: function () {
+            var banner = document.getElementById('booking-resume-banner');
+            if (banner) banner.style.display = 'none';
+            // booking.js already restores state from localStorage on init
+          },
+          clearAndHide: function () {
+            clearBookingProgress();
+            var banner = document.getElementById('booking-resume-banner');
+            if (banner) banner.style.display = 'none';
+            // Reload to reset the form to step 1
+            window.location.reload();
+          },
+        };
+
+        // Show resume banner if a valid draft exists
+        document.addEventListener('DOMContentLoaded', function () {
+          var draft = loadBookingProgress();
+          var banner = document.getElementById('booking-resume-banner');
+          if (draft && banner && draft.step && draft.step > 1) {
+            banner.style.display = 'block';
+          }
+        });
+      })();
+    </script>
+    <script src="/js/main.js" defer></script>
+    <script src="/js/booking.js" defer></script>
+    <script src="/js/telegram-webapp.js" defer></script>
+    <script src="/js/darkmode.js"></script>
+    <script type="application/ld+json">
+      [
+        {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/" },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Бронирование",
+              "item": "https://nevesty-models.ru/booking.html"
+            }
+          ]
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "Nevesty Models",
+          "url": "https://nevesty-models.ru",
+          "logo": "https://nevesty-models.ru/og-image.jpg",
+          "contactPoint": {
+            "@type": "ContactPoint",
+            "contactType": "customer service",
+            "availableLanguage": "Russian"
+          }
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "Service",
+          "name": "Аренда профессиональных моделей",
+          "provider": { "@type": "Organization", "name": "Nevesty Models" },
+          "areaServed": { "@type": "Country", "name": "Russia" },
+          "offers": [
+            {
+              "@type": "Offer",
+              "name": "Старт",
+              "priceSpecification": { "@type": "PriceSpecification", "minPrice": 8000, "priceCurrency": "RUB" }
+            },
+            {
+              "@type": "Offer",
+              "name": "Мероприятие",
+              "priceSpecification": { "@type": "PriceSpecification", "minPrice": 15000, "priceCurrency": "RUB" }
+            },
+            {
+              "@type": "Offer",
+              "name": "Премиум",
+              "priceSpecification": { "@type": "PriceSpecification", "minPrice": 30000, "priceCurrency": "RUB" }
+            }
+          ]
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          "name": "Оформить заявку — Nevesty Models",
+          "description": "Забронировать модель в агентстве Nevesty Models. Простая форма заявки — ответим в течение часа.",
+          "url": "https://nevesty-models.ru/booking.html",
+          "isPartOf": { "@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru" },
+          "inLanguage": "ru-RU",
+          "dateModified": "2026-05-15"
+        }
+      ]
+    </script>
+    <!-- Floating WhatsApp Button -->
+    <div id="float-whatsapp" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 400">
+      <a
+        id="float-wa-link"
+        href="#"
+        target="_blank"
+        rel="noopener"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #25d366;
+          color: #fff;
+          padding: 14px 20px;
+          border-radius: 50px;
+          box-shadow: 0 4px 16px rgba(37, 211, 102, 0.4);
+          text-decoration: none;
+          font-size: 0.85rem;
+          font-weight: 600;
+          transition: all 0.2s;
+        "
+        onmouseover="this.style.background = '#1da851'"
+        onmouseout="this.style.background = '#25D366'"
+      >
+        <svg style="width: 22px; height: 22px; flex-shrink: 0" fill="currentColor" viewBox="0 0 24 24">
+          <path
+            d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"
+          />
+        </svg>
+        Написать в WhatsApp
+      </a>
     </div>
-  </main>
-
-  <div class="toast-container" id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
-  <script src="/js/main.js" defer></script>
-  <script src="/js/booking.js" defer></script>
-  <script src="/js/telegram-webapp.js" defer></script>
-  <script src="/js/darkmode.js"></script>
-  <script type="application/ld+json">
-[
-  {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "itemListElement": [
-      {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
-      {"@type": "ListItem", "position": 2, "name": "Бронирование", "item": "https://nevesty-models.ru/booking.html"}
-    ]
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "Nevesty Models",
-    "url": "https://nevesty-models.ru",
-    "logo": "https://nevesty-models.ru/og-image.jpg",
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "contactType": "customer service",
-      "availableLanguage": "Russian"
-    }
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "Service",
-    "name": "Аренда профессиональных моделей",
-    "provider": {"@type": "Organization", "name": "Nevesty Models"},
-    "areaServed": {"@type": "Country", "name": "Russia"},
-    "offers": [
-      {"@type": "Offer", "name": "Старт", "priceSpecification": {"@type": "PriceSpecification", "minPrice": 8000, "priceCurrency": "RUB"}},
-      {"@type": "Offer", "name": "Мероприятие", "priceSpecification": {"@type": "PriceSpecification", "minPrice": 15000, "priceCurrency": "RUB"}},
-      {"@type": "Offer", "name": "Премиум", "priceSpecification": {"@type": "PriceSpecification", "minPrice": 30000, "priceCurrency": "RUB"}}
-    ]
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "WebPage",
-    "name": "Оформить заявку — Nevesty Models",
-    "description": "Забронировать модель в агентстве Nevesty Models. Простая форма заявки — ответим в течение часа.",
-    "url": "https://nevesty-models.ru/booking.html",
-    "isPartOf": {"@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru"},
-    "inLanguage": "ru-RU",
-    "dateModified": "2026-05-15"
-  }
-]
-  </script>
-  <!-- Floating WhatsApp Button -->
-  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
-    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
-       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
-       onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
-      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      Написать в WhatsApp
-    </a>
-  </div>
-  <script>
-    fetch('/api/settings/public').then(r => r.json()).then(d => {
-      if (d.contacts_whatsapp) {
-        const waNum = d.contacts_whatsapp.replace(/\D/g, '');
-        const floatEl = document.getElementById('float-whatsapp');
-        const floatLink = document.getElementById('float-wa-link');
-        if (floatEl && floatLink) { floatLink.href = `https://wa.me/${waNum}`; floatEl.style.display = 'block'; }
-      }
-    }).catch(() => {});
-  </script>
-  <script src="/js/cookie-consent.js" defer></script>
-  <script src="/js/chat-widget.js" defer></script>
-</body>
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (d.contacts_whatsapp) {
+            const waNum = d.contacts_whatsapp.replace(/\D/g, '');
+            const floatEl = document.getElementById('float-whatsapp');
+            const floatLink = document.getElementById('float-wa-link');
+            if (floatEl && floatLink) {
+              floatLink.href = `https://wa.me/${waNum}`;
+              floatEl.style.display = 'block';
+            }
+          }
+        })
+        .catch(() => {});
+    </script>
+    <script src="/js/cookie-consent.js" defer></script>
+    <script src="/js/chat-widget.js" defer></script>
+  </body>
 </html>
