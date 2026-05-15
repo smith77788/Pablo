@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Цены и Калькулятор — Nevesty Models</title>
+  <meta name="description" content="Узнайте стоимость услуг модельного агентства Nevesty Models. Интерактивный калькулятор цен для вашего мероприятия.">
+  <meta property="og:title" content="Цены — Nevesty Models">
+  <meta property="og:description" content="Рассчитайте стоимость модели для вашего мероприятия. Прозрачное ценообразование.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
+  <meta property="og:url" content="https://nevesty-models.ru/pricing.html">
+  <meta property="og:site_name" content="Nevesty Models">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#080808">
+  <link rel="canonical" href="https://nevesty-models.ru/pricing.html">
+  <meta name="robots" content="index, follow">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    /* ─── Page hero ─────────────────────────── */
+    .page-hero {
+      padding: 80px 20px 48px;
+      text-align: center;
+      background: linear-gradient(180deg, rgba(201,169,110,0.05) 0%, transparent 100%);
+      border-bottom: 1px solid rgba(201,169,110,0.1);
+    }
+    .page-hero h1 { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; margin: 0 0 12px; }
+    .page-hero h1 em { color: var(--gold); font-style: normal; }
+    .page-hero p { color: var(--text-muted); font-size: 1.05rem; max-width: 520px; margin: 0 auto; }
+
+    /* ─── Pricing cards ─────────────────────── */
+    .pricing-section { padding: 64px 20px; }
+    .pricing-section h2 { text-align:center; font-size: 1.6rem; margin-bottom: 8px; }
+    .pricing-section .sub { text-align:center; color:var(--text-muted); font-size:0.9rem; margin-bottom: 40px; }
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    .pricing-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 32px 28px;
+      transition: border-color 0.3s, transform 0.3s;
+      position: relative;
+    }
+    .pricing-card:hover { border-color: rgba(201,169,110,0.5); transform: translateY(-4px); }
+    .pricing-card.featured {
+      border-color: rgba(201,169,110,0.5);
+      background: linear-gradient(135deg, rgba(201,169,110,0.05) 0%, var(--card-bg) 100%);
+    }
+    .pricing-badge {
+      position: absolute; top: 0; right: 20px;
+      background: var(--gold); color: #000;
+      padding: 4px 12px; font-size: 0.7rem; font-weight: 700;
+      letter-spacing: 1px; text-transform: uppercase;
+    }
+    .pricing-name { font-size: 0.75rem; letter-spacing: 2px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; }
+    .pricing-price { font-size: 2.2rem; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .pricing-price span { font-size: 1rem; font-weight: 400; color: var(--text-muted); }
+    .pricing-duration { font-size: 0.8rem; color: var(--gold); margin-bottom: 20px; }
+    .pricing-divider { height: 1px; background: var(--border); margin: 20px 0; }
+    .pricing-feature {
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 0.85rem; color: var(--text-muted); padding: 6px 0;
+    }
+    .pricing-feature::before { content: '✓'; color: var(--gold); flex-shrink: 0; font-weight: 700; }
+    .pricing-cta { margin-top: 28px; display: block; text-align: center; width: 100%; }
+
+    /* ─── Calculator ────────────────────────── */
+    .calc-section {
+      padding: 64px 20px;
+      background: rgba(201,169,110,0.03);
+      border-top: 1px solid rgba(201,169,110,0.1);
+      border-bottom: 1px solid rgba(201,169,110,0.1);
+    }
+    .calc-section h2 { text-align:center; font-size: 1.6rem; margin-bottom: 8px; }
+    .calc-section .sub { text-align:center; color:var(--text-muted); font-size:0.9rem; margin-bottom: 40px; }
+    .calc-wrap {
+      max-width: 720px; margin: 0 auto;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+    }
+    .calc-form { background: var(--card-bg); border: 1px solid var(--border); padding: 32px; }
+    .calc-result { background: var(--card-bg); border: 1px solid rgba(201,169,110,0.3); padding: 32px; }
+    .calc-title { font-size: 0.75rem; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); margin-bottom: 20px; }
+    .calc-row { margin-bottom: 18px; }
+    .calc-label { font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 8px; }
+    .calc-select {
+      width: 100%; background: var(--bg);
+      border: 1px solid var(--border); color: var(--text);
+      padding: 10px 14px; font-size: 0.9rem; outline: none;
+      transition: border-color 0.2s; appearance: none;
+      cursor: pointer;
+    }
+    .calc-select:focus { border-color: var(--gold); }
+    .option-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .option-btn {
+      flex: 1; min-width: 80px; padding: 8px 12px;
+      background: var(--bg2); border: 1px solid var(--border);
+      color: var(--text-muted); font-size: 0.82rem; cursor: pointer;
+      transition: all 0.2s; text-align: center;
+    }
+    .option-btn.active { border-color: var(--gold); color: var(--gold); background: rgba(201,169,110,0.08); }
+    .option-btn:hover:not(.active) { border-color: rgba(201,169,110,0.4); color: var(--text); }
+
+    .result-price { font-size: 2.8rem; font-weight: 700; color: var(--gold); margin: 8px 0 4px; }
+    .result-note { font-size: 0.78rem; color: var(--text-dim); }
+    .result-breakdown { margin-top: 20px; }
+    .result-item {
+      display: flex; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 0.82rem; color: var(--text-muted);
+    }
+    .result-item:last-child { border-bottom: none; }
+    .result-item strong { color: var(--text); }
+    .result-label { font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 4px; }
+    .calc-guarantee {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(201,169,110,0.06); border: 1px solid rgba(201,169,110,0.15);
+      padding: 12px 16px; margin-top: 20px; font-size: 0.8rem; color: var(--text-muted);
+    }
+    .calc-guarantee::before { content: '✦'; color: var(--gold); }
+
+    /* ─── FAQ row ───────────────────────────── */
+    .faq-mini { padding: 48px 20px; max-width: 720px; margin: 0 auto; }
+    .faq-mini h2 { font-size: 1.4rem; margin-bottom: 24px; }
+    .faq-mini-item { border-bottom: 1px solid var(--border); }
+    .faq-mini-q {
+      width: 100%; background: none; border: none; color: var(--text);
+      padding: 18px 0; font-size: 0.9rem; text-align: left; cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .faq-mini-q .icon { color: var(--gold); font-size: 1.1rem; flex-shrink: 0; transition: transform 0.3s; }
+    .faq-mini-a {
+      color: var(--text-muted); font-size: 0.85rem; line-height: 1.7;
+      padding: 0 0 16px; display: none;
+    }
+    .faq-mini-item.open .icon { transform: rotate(45deg); }
+    .faq-mini-item.open .faq-mini-a { display: block; }
+
+    @media (max-width: 640px) {
+      .calc-wrap { grid-template-columns: 1fr; }
+      .calc-result { order: -1; }
+      .pricing-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+
+  <nav class="navbar" id="navbar" role="navigation" aria-label="Главное меню">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links" role="list">
+        <a href="/catalog.html">Модели</a>
+        <a href="/pricing.html" class="active-nav">Цены</a>
+        <a href="/about.html">О нас</a>
+        <a href="/faq.html">FAQ</a>
+        <a href="/contact.html">Контакты</a>
+        <a href="/cabinet.html" style="font-size:0.9rem" title="Мои заявки">👤 Мои заявки</a>
+        <button onclick="DarkMode.toggle()"
+          style="background:none;border:none;cursor:pointer;padding:4px 8px;"
+          aria-label="Переключить тему">
+          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+        </button>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+    </div>
+  </nav>
+
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <a href="/">Главная</a>
+    <a href="/catalog.html">Модели</a>
+    <a href="/pricing.html">Цены</a>
+    <a href="/about.html">О нас</a>
+    <a href="/faq.html">FAQ</a>
+    <a href="/contact.html">Контакты</a>
+    <a href="/cabinet.html">👤 Мои заявки</a>
+    <a href="/booking.html" class="btn-nav" style="margin-top:12px">Заказать модель</a>
+  </nav>
+
+  <main id="main-content">
+
+    <!-- Hero -->
+    <div class="page-hero">
+      <h1>Прозрачные <em>цены</em></h1>
+      <p>Стоимость услуг зависит от формата мероприятия, длительности и категории модели. Воспользуйтесь калькулятором.</p>
+    </div>
+
+    <!-- Pricing packages -->
+    <section class="pricing-section" aria-labelledby="pricing-heading">
+      <h2 id="pricing-heading">Пакеты услуг</h2>
+      <p class="sub">Фиксированные пакеты — отправная точка для расчёта</p>
+      <div class="pricing-grid">
+
+        <div class="pricing-card">
+          <div class="pricing-name">Старт</div>
+          <div class="pricing-price">от 8 000 <span>₽</span></div>
+          <div class="pricing-duration">за 2 часа</div>
+          <div class="pricing-divider"></div>
+          <div class="pricing-feature">Фотосессия или съёмка</div>
+          <div class="pricing-feature">1 модель категории Standard</div>
+          <div class="pricing-feature">Помощь в выборе образа</div>
+          <div class="pricing-feature">Менеджер онлайн</div>
+          <a href="/booking.html?package=start" class="btn-gold pricing-cta">Выбрать</a>
+        </div>
+
+        <div class="pricing-card featured">
+          <div class="pricing-badge">Популярное</div>
+          <div class="pricing-name">Мероприятие</div>
+          <div class="pricing-price">от 15 000 <span>₽</span></div>
+          <div class="pricing-duration">за 4 часа</div>
+          <div class="pricing-divider"></div>
+          <div class="pricing-feature">Корпоратив, показ или презентация</div>
+          <div class="pricing-feature">1–3 модели на выбор</div>
+          <div class="pricing-feature">Подготовка и брифинг</div>
+          <div class="pricing-feature">Менеджер на связи 24/7</div>
+          <div class="pricing-feature">Замена при форс-мажоре</div>
+          <a href="/booking.html?package=event" class="btn-gold pricing-cta">Выбрать</a>
+        </div>
+
+        <div class="pricing-card">
+          <div class="pricing-name">Премиум</div>
+          <div class="pricing-price">от 30 000 <span>₽</span></div>
+          <div class="pricing-duration">от 6 часов</div>
+          <div class="pricing-divider"></div>
+          <div class="pricing-feature">Подиум, реклама, VIP-событие</div>
+          <div class="pricing-feature">Топ-модели агентства</div>
+          <div class="pricing-feature">Сопровождение куратора</div>
+          <div class="pricing-feature">Приоритетный выбор даты</div>
+          <div class="pricing-feature">Гарантия по договору</div>
+          <a href="/booking.html?package=premium" class="btn-gold pricing-cta">Выбрать</a>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Calculator -->
+    <section class="calc-section" aria-labelledby="calc-heading">
+      <h2 id="calc-heading">Калькулятор стоимости</h2>
+      <p class="sub">Укажите параметры — мы рассчитаем примерную стоимость</p>
+      <div class="calc-wrap">
+
+        <div class="calc-form">
+          <div class="calc-title">Параметры</div>
+
+          <div class="calc-row">
+            <label class="calc-label">Тип мероприятия</label>
+            <div class="option-group" id="eventGroup">
+              <button class="option-btn active" data-key="event" data-val="photo">📸 Фото/съёмка</button>
+              <button class="option-btn" data-key="event" data-val="event">🎉 Мероприятие</button>
+              <button class="option-btn" data-key="event" data-val="runway">👗 Показ мод</button>
+              <button class="option-btn" data-key="event" data-val="promo">📢 Промо/реклама</button>
+            </div>
+          </div>
+
+          <div class="calc-row">
+            <label class="calc-label">Длительность</label>
+            <div class="option-group" id="hoursGroup">
+              <button class="option-btn active" data-key="hours" data-val="2">2 часа</button>
+              <button class="option-btn" data-key="hours" data-val="4">4 часа</button>
+              <button class="option-btn" data-key="hours" data-val="6">6 часов</button>
+              <button class="option-btn" data-key="hours" data-val="8">8 часов</button>
+            </div>
+          </div>
+
+          <div class="calc-row">
+            <label class="calc-label">Категория модели</label>
+            <div class="option-group" id="categoryGroup">
+              <button class="option-btn active" data-key="category" data-val="standard">Standard</button>
+              <button class="option-btn" data-key="category" data-val="premium">Premium</button>
+              <button class="option-btn" data-key="category" data-val="top">Top</button>
+            </div>
+          </div>
+
+          <div class="calc-row">
+            <label class="calc-label">Количество моделей</label>
+            <div class="option-group" id="countGroup">
+              <button class="option-btn active" data-key="count" data-val="1">1</button>
+              <button class="option-btn" data-key="count" data-val="2">2</button>
+              <button class="option-btn" data-key="count" data-val="3">3</button>
+              <button class="option-btn" data-key="count" data-val="5">5+</button>
+            </div>
+          </div>
+
+          <div class="calc-row">
+            <label class="calc-label">Дополнительно</label>
+            <div class="option-group" style="flex-direction:column">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--text-muted)">
+                <input type="checkbox" id="chkMakeup" style="accent-color:var(--gold)"> Профессиональный макияж (+3000₽)
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--text-muted)">
+                <input type="checkbox" id="chkTravel" style="accent-color:var(--gold)"> Выезд за пределы города (+5000₽)
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--text-muted)">
+                <input type="checkbox" id="chkUrgent" style="accent-color:var(--gold)"> Срочное бронирование (< 24ч) (+20%)
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="calc-result">
+          <div class="calc-title">Расчёт</div>
+          <div class="result-label">Примерная стоимость</div>
+          <div class="result-price" id="resultPrice">8 000 ₽</div>
+          <div class="result-note" id="resultNote">Стартовая цена. Точная стоимость — после консультации.</div>
+          <div class="result-breakdown" id="breakdown">
+            <div class="result-item"><span>Базовая ставка</span><strong id="bBase">8 000 ₽</strong></div>
+            <div class="result-item" id="rowExtra" style="display:none"><span>Доп. опции</span><strong id="bExtra">0 ₽</strong></div>
+            <div class="result-item" id="rowUrgent" style="display:none"><span>Срочность (+20%)</span><strong id="bUrgent">0 ₽</strong></div>
+          </div>
+          <div class="calc-guarantee">
+            Финальная цена фиксируется в договоре. Предоплата не требуется.
+          </div>
+          <a id="calcBookBtn" href="/booking.html" class="btn-gold" style="display:block;text-align:center;margin-top:24px;width:100%;box-sizing:border-box">
+            Забронировать за эту цену
+          </a>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section style="padding: 64px 20px 80px;">
+      <div class="faq-mini">
+        <h2>Частые вопросы о ценах</h2>
+
+        <div class="faq-mini-item">
+          <button class="faq-mini-q" onclick="toggleFaq(this)">
+            Есть ли скрытые платежи?
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-mini-a">Нет. Все расходы обговариваются до подписания договора. Стоимость проезда, реквизита и макияжа обсуждается заранее и фиксируется письменно.</div>
+        </div>
+
+        <div class="faq-mini-item">
+          <button class="faq-mini-q" onclick="toggleFaq(this)">
+            Нужна ли предоплата?
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-mini-a">Для подтверждения брони крупных мероприятий может потребоваться частичная предоплата (30–50%). Для стандартных съёмок оплата по факту.</div>
+        </div>
+
+        <div class="faq-mini-item">
+          <button class="faq-mini-q" onclick="toggleFaq(this)">
+            Что входит в почасовую ставку?
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-mini-a">В базовую ставку входят: работа модели, консультация менеджера, подготовка к съёмке. Студия, реквизит и транспорт рассчитываются отдельно.</div>
+        </div>
+
+        <div class="faq-mini-item">
+          <button class="faq-mini-q" onclick="toggleFaq(this)">
+            Можно ли получить скидку?
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-mini-a">Да — при заблаговременном бронировании (14+ дней), постоянным клиентам (от 3 заявок), а также при заказе нескольких моделей сразу. Уточняйте у менеджера.</div>
+        </div>
+
+        <div class="faq-mini-item">
+          <button class="faq-mini-q" onclick="toggleFaq(this)">
+            Как происходит отмена?
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-mini-a">Бесплатная отмена до 48 часов до мероприятия. При отмене менее чем за 24 часа может удерживаться до 30% стоимости. Все условия прописаны в договоре.</div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section style="padding: 48px 20px 80px; text-align:center; background: rgba(201,169,110,0.03); border-top:1px solid rgba(201,169,110,0.1);">
+      <h2 style="font-size:1.8rem; margin-bottom:12px;">Готовы обсудить детали?</h2>
+      <p style="color:var(--text-muted); margin-bottom:28px; max-width:420px; margin-left:auto; margin-right:auto;">Напишите нам — ответим в течение 15 минут и подберём модель под ваш бюджет.</p>
+      <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+        <a href="/booking.html" class="btn-gold">Оставить заявку</a>
+        <a href="/contact.html" class="btn-outline">Написать менеджеру</a>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer" role="contentinfo">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="footer-logo">NEVESTY MODELS</span>
+        <span class="footer-tagline">Профессиональные модели для ваших мероприятий</span>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <span class="footer-col-title">Агентство</span>
+          <a href="/about.html">О нас</a>
+          <a href="/contact.html">Контакты</a>
+          <a href="/faq.html">FAQ</a>
+          <a href="/pricing.html">Цены</a>
+        </div>
+        <div class="footer-col">
+          <span class="footer-col-title">Клиентам</span>
+          <a href="/catalog.html">Каталог моделей</a>
+          <a href="/booking.html">Оставить заявку</a>
+          <a href="/cabinet.html">Мои заявки</a>
+          <a href="/favorites.html">Избранное</a>
+        </div>
+        <div class="footer-col">
+          <span class="footer-col-title">Правовое</span>
+          <a href="/privacy.html">Политика конфиденциальности</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2014–2026 Nevesty Models</span>
+    </div>
+  </footer>
+
+  <script src="/js/darkmode.js"></script>
+  <script src="/js/analytics.js"></script>
+  <script>
+    // ─── Calculator logic ─────────────────────────────────────────────────────
+    const BASE = {
+      photo:  { 2: 8000,  4: 14000, 6: 20000, 8: 26000 },
+      event:  { 2: 12000, 4: 18000, 6: 28000, 8: 38000 },
+      runway: { 2: 15000, 4: 24000, 6: 35000, 8: 48000 },
+      promo:  { 2: 20000, 4: 32000, 6: 48000, 8: 65000 },
+    };
+    const CAT_MULT = { standard: 1, premium: 1.4, top: 2 };
+
+    let params = { event: 'photo', hours: 2, category: 'standard', count: 1 };
+
+    function fmt(n) { return n.toLocaleString('ru-RU') + ' ₽'; }
+
+    function calc() {
+      const base = (BASE[params.event]?.[params.hours] || 8000) * CAT_MULT[params.category] * params.count;
+      let extra = 0;
+      if (document.getElementById('chkMakeup').checked) extra += 3000 * params.count;
+      if (document.getElementById('chkTravel').checked) extra += 5000;
+      let urgent = 0;
+      if (document.getElementById('chkUrgent').checked) urgent = Math.round((base + extra) * 0.2);
+      const total = Math.round(base + extra + urgent);
+
+      document.getElementById('resultPrice').textContent = fmt(total);
+      document.getElementById('bBase').textContent = fmt(Math.round(base));
+
+      if (extra > 0) {
+        document.getElementById('rowExtra').style.display = '';
+        document.getElementById('bExtra').textContent = fmt(extra);
+      } else {
+        document.getElementById('rowExtra').style.display = 'none';
+      }
+      if (urgent > 0) {
+        document.getElementById('rowUrgent').style.display = '';
+        document.getElementById('bUrgent').textContent = fmt(urgent);
+      } else {
+        document.getElementById('rowUrgent').style.display = 'none';
+      }
+
+      const budgetParam = `&budget=${encodeURIComponent(fmt(total).replace(' ₽','').replace(/\s/g,''))}`;
+      document.getElementById('calcBookBtn').href = `/booking.html?event_type=${params.event}${budgetParam}`;
+    }
+
+    // Option buttons
+    document.querySelectorAll('.option-btn[data-key]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.key;
+        const val = btn.dataset.val;
+        document.querySelectorAll(`.option-btn[data-key="${key}"]`).forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        if (key === 'hours') params.hours = parseInt(val);
+        else if (key === 'count') params.count = parseInt(val);
+        else params[key] = val;
+        calc();
+      });
+    });
+
+    document.getElementById('chkMakeup').addEventListener('change', calc);
+    document.getElementById('chkTravel').addEventListener('change', calc);
+    document.getElementById('chkUrgent').addEventListener('change', calc);
+
+    // ─── FAQ mini ─────────────────────────────────────────────────────────────
+    function toggleFaq(btn) {
+      const item = btn.closest('.faq-mini-item');
+      item.classList.toggle('open');
+    }
+
+    // ─── Mobile menu ──────────────────────────────────────────────────────────
+    document.getElementById('burgerBtn').addEventListener('click', () => {
+      document.getElementById('mobileMenu').classList.toggle('open');
+    });
+    document.getElementById('mobileClose').addEventListener('click', () => {
+      document.getElementById('mobileMenu').classList.remove('open');
+    });
+
+    calc();
+
+    // Analytics
+    if (typeof NM !== 'undefined') {
+      NM.analytics.event('page_view', { page: 'pricing' });
+    }
+  </script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "PriceSpecification",
+    "name": "Услуги модельного агентства Nevesty Models",
+    "priceCurrency": "RUB",
+    "minPrice": 8000,
+    "description": "Стоимость услуг модельного агентства: фотосессии, мероприятия, показы мод",
+    "url": "https://nevesty-models.ru/pricing.html"
+  }
+  </script>
+</body>
+</html>
