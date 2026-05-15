@@ -1869,8 +1869,8 @@
                 s => `
       <div class="mb-3">
         <div class="flex justify-between text-sm mb-1">
-          <span class="font-medium text-gray-800 dark:text-gray-200">${s.name}</span>
-          <span class="text-gray-500 dark:text-gray-400">${s.count} (${s.pct}%)</span>
+          <span class="font-medium text-gray-800 dark:text-gray-200">${escHtml(s.name)}</span>
+          <span class="text-gray-500 dark:text-gray-400">${escHtml(String(s.count))} (${escHtml(String(s.pct))}%)</span>
         </div>
         <div class="h-4 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
           <div class="h-full rounded-full bg-gradient-to-r from-yellow-400 to-orange-400" style="width:${max > 0 ? Math.round((s.count / max) * 100) : 0}%"></div>

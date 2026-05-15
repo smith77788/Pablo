@@ -1239,8 +1239,8 @@
         <strong>${_admin.escapeHtml(o.order_number)}</strong>${unread}${urgency}
       </td>
       <td>${_admin.escapeHtml(o.client_name)}<br><span style="font-size:0.75rem;color:var(--text-dim)">${_admin.escapeHtml(o.client_phone)}</span>${o.internal_note ? `<div style="font-size:0.72rem;color:#888;margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_admin.escapeHtml(o.internal_note)}">📝 ${_admin.escapeHtml(o.internal_note)}</div>` : ''}</td>
-      <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
-      <td>${o.model_name || '<span style="color:var(--text-dim)">—</span>'}</td>
+      <td>${_admin.escapeHtml(_admin.EVENT_LABELS[o.event_type] || o.event_type)}</td>
+      <td>${o.model_name ? _admin.escapeHtml(o.model_name) : '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${colorBadge(o.status)}</td>
       <td>${paymentBadge(o)}</td>

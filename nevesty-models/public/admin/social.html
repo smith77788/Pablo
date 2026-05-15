@@ -460,11 +460,15 @@
             } catch {}
 
             const hashtags = p.hashtags
-              ? `<span style="color:var(--gold);font-size:0.72rem">${p.hashtags.split(/\s+/).slice(0, 5).join(' ')}</span>`
+              ? `<span style="color:var(--gold);font-size:0.72rem">${p.hashtags
+                  .split(/\s+/)
+                  .slice(0, 5)
+                  .map(h => escapeHtml(h))
+                  .join(' ')}</span>`
               : '';
-            const scheduled = p.scheduled_at ? `📅 ${new Date(p.scheduled_at).toLocaleString('ru')}` : '';
-            const published = p.published_at ? `✅ ${new Date(p.published_at).toLocaleString('ru')}` : '';
-            const modelName = p.model_name ? `💃 ${p.model_name}` : '';
+            const scheduled = p.scheduled_at ? `📅 ${escapeHtml(new Date(p.scheduled_at).toLocaleString('ru'))}` : '';
+            const published = p.published_at ? `✅ ${escapeHtml(new Date(p.published_at).toLocaleString('ru'))}` : '';
+            const modelName = p.model_name ? `💃 ${escapeHtml(p.model_name)}` : '';
 
             const canPublish = p.status === 'draft' || p.status === 'scheduled';
             const actionBtns = `
@@ -474,7 +478,7 @@
       `;
 
             const thumbHtml = p.media_url
-              ? `<div class="post-thumb"><img src="${p.media_url}" onerror="this.parentElement.innerHTML='📸'" alt="" /></div>`
+              ? `<div class="post-thumb"><img src="${escapeHtml(p.media_url)}" onerror="this.parentElement.innerHTML='📸'" alt="" /></div>`
               : `<div class="post-thumb">📸</div>`;
 
             return `<div class="post-card" id="post-${p.id}">
@@ -483,8 +487,8 @@
           <div class="post-caption">${escapeHtml(p.caption || '')}</div>
           ${hashtags ? `<div style="margin-bottom:6px">${hashtags}</div>` : ''}
           <div class="post-meta">
-            <span class="badge-platform">${p.platform || 'instagram'}</span>
-            <span class="post-badge ${statusClass[p.status] || 'badge-draft'}">${statusLabel[p.status] || p.status}</span>
+            <span class="badge-platform">${escapeHtml(p.platform || 'instagram')}</span>
+            <span class="post-badge ${statusClass[p.status] || 'badge-draft'}">${escapeHtml(statusLabel[p.status] || p.status)}</span>
             ${scheduled ? `<span>${scheduled}</span>` : ''}
             ${published ? `<span>${published}</span>` : ''}
             ${modelName ? `<span>${modelName}</span>` : ''}
