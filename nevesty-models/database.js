@@ -332,6 +332,18 @@ async function initDatabase() {
   )`).catch(()=>{});
   await run(`CREATE INDEX IF NOT EXISTS idx_audit_admin ON audit_log(admin_chat_id)`).catch(()=>{});
 
+  // Client OTP verification codes — for cabinet phone login
+  await run(`CREATE TABLE IF NOT EXISTS client_otp (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT NOT NULL,
+    code TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used INTEGER DEFAULT 0,
+    attempts INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_client_otp_phone ON client_otp(phone, expires_at)`).catch(() => {});
+
   // Refresh tokens table — JWT refresh token storage
   await run(`CREATE TABLE IF NOT EXISTS refresh_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

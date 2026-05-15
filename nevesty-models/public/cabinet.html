@@ -351,23 +351,49 @@
 
       <!-- ══════════ LOGIN PANEL ══════════ -->
       <div class="cabinet-login" id="loginPanel">
-        <div class="cabinet-login-icon">👤</div>
-        <h2>Найти мои заявки</h2>
-        <p>Введите номер телефона, который вы указали при оформлении заявки — мы найдём все ваши обращения.</p>
-        <label for="phoneInput" class="sr-only">Номер телефона</label>
-        <input
-          type="tel"
-          class="cabinet-phone-input"
-          id="phoneInput"
-          placeholder="+7 (999) 000-00-00"
-          inputmode="tel"
-          autocomplete="tel"
-          aria-label="Ваш номер телефона"
-        />
-        <div class="cabinet-login-hint">Формат: +7 (XXX) XXX-XX-XX или 8XXXXXXXXXX</div>
-        <button class="cabinet-login-btn" id="searchBtn" onclick="Cabinet.search()">
-          Найти мои заявки
-        </button>
+        <!-- Step 1: Phone entry -->
+        <div id="stepPhone">
+          <div class="cabinet-login-icon">👤</div>
+          <h2>Войти в личный кабинет</h2>
+          <p>Введите номер телефона, указанный при оформлении заявки — мы отправим код подтверждения.</p>
+          <label for="phoneInput" class="sr-only">Номер телефона</label>
+          <input
+            type="tel"
+            class="cabinet-phone-input"
+            id="phoneInput"
+            placeholder="+7 (999) 000-00-00"
+            inputmode="tel"
+            autocomplete="tel"
+            aria-label="Ваш номер телефона"
+          />
+          <div class="cabinet-login-hint">Формат: +7 (XXX) XXX-XX-XX или 8XXXXXXXXXX</div>
+          <button class="cabinet-login-btn" id="searchBtn" onclick="Cabinet.requestCode()">
+            Получить код
+          </button>
+        </div>
+        <!-- Step 2: OTP code entry -->
+        <div id="stepCode" style="display:none">
+          <div class="cabinet-login-icon">📱</div>
+          <h2>Введите код</h2>
+          <p id="otpHint">Код отправлен на ваш номер. Действует 10 минут.</p>
+          <input
+            type="text"
+            class="cabinet-phone-input"
+            id="otpInput"
+            placeholder="000000"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="6"
+            aria-label="Код подтверждения"
+            style="letter-spacing:6px;text-align:center;font-size:1.5rem"
+          />
+          <button class="cabinet-login-btn" id="verifyBtn" onclick="Cabinet.verifyCode()">
+            Войти
+          </button>
+          <button onclick="Cabinet.backToPhone()" style="background:none;border:none;color:var(--text-dim);font-size:0.8rem;cursor:pointer;margin-top:8px;display:block;text-align:center;width:100%">
+            ← Изменить номер
+          </button>
+        </div>
         <div class="cabinet-login-error" id="loginError" role="alert"></div>
       </div>
 
@@ -754,8 +780,8 @@
       header.setAttribute('aria-expanded', String(!isOpen));
     }
 
-    // ── Search ────────────────────────────────────────────────────
-    async function search() {
+    // ── OTP Step 1: Request code ──────────────────────────────────
+    async function requestCode() {
       const raw = (document.getElementById('phoneInput').value || '').trim();
       if (!raw) { showError('Введите номер телефона'); return; }
       const phone10 = normalizePhone(raw);
@@ -765,40 +791,111 @@
 
       const btn = document.getElementById('searchBtn');
       btn.disabled = true;
-      btn.textContent = 'Поиск…';
-      showSkeleton();
+      btn.textContent = 'Отправка…';
 
+      try {
+        const r = await fetch('/api/client/request-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: '7' + phone10 })
+        });
+        const data = await r.json();
+        if (!r.ok) { showError(data.error || 'Ошибка сервера'); return; }
+
+        // Show OTP step
+        document.getElementById('stepPhone').style.display = 'none';
+        document.getElementById('stepCode').style.display = '';
+        if (data.code_debug) {
+          document.getElementById('otpHint').textContent = `Тестовый режим: ваш код ${data.code_debug}`;
+        }
+        document.getElementById('otpInput').focus();
+      } catch (e) {
+        showError('Ошибка соединения. Попробуйте позже.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Получить код';
+      }
+    }
+
+    // ── OTP Step 2: Verify code ───────────────────────────────────
+    async function verifyCode() {
+      const code = (document.getElementById('otpInput').value || '').trim();
+      const phone10 = normalizePhone(_phone);
+      if (!code || code.length !== 6) { showError('Введите 6-значный код'); return; }
+      hideError();
+
+      const btn = document.getElementById('verifyBtn');
+      btn.disabled = true;
+      btn.textContent = 'Проверяем…';
+
+      try {
+        const r = await fetch('/api/client/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: '7' + phone10, code })
+        });
+        const data = await r.json();
+        if (!r.ok) { showError(data.error || 'Неверный код'); return; }
+
+        // Store client token and load orders
+        sessionStorage.setItem('cabinet_phone', _phone);
+        sessionStorage.setItem('cabinet_token', data.token);
+        showSkeleton();
+        await loadOrders(phone10);
+      } catch (e) {
+        showError('Ошибка соединения. Попробуйте позже.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Войти';
+      }
+    }
+
+    function backToPhone() {
+      document.getElementById('stepPhone').style.display = '';
+      document.getElementById('stepCode').style.display = 'none';
+      document.getElementById('otpInput').value = '';
+      hideError();
+    }
+
+    // ── Load orders (after auth) ──────────────────────────────────
+    async function loadOrders(phone10) {
       try {
         const r = await fetch(`/api/client/orders?phone=${encodeURIComponent('7' + phone10)}`);
         const data = await r.json();
-        if (!r.ok) {
-          showLogin();
-          showError(data.error || 'Ошибка сервера');
-          return;
-        }
+        if (!r.ok) { showLogin(); showError(data.error || 'Ошибка сервера'); return; }
         _orders = data.orders || [];
-        // Save to sessionStorage for page reload
-        sessionStorage.setItem('cabinet_phone', raw);
+        sessionStorage.setItem('cabinet_phone', _phone);
         showOrders();
         renderOrders(_orders);
-        // Start WS monitoring for real-time order updates
         wsConnect(phone10);
       } catch (e) {
         showLogin();
         showError('Ошибка соединения. Попробуйте позже.');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Найти мои заявки';
       }
+    }
+
+    // ── Legacy search (kept for auto-login from session) ──────────
+    async function search() {
+      const raw = (document.getElementById('phoneInput').value || '').trim();
+      if (!raw) { showError('Введите номер телефона'); return; }
+      const phone10 = normalizePhone(raw);
+      if (!phone10) { showError('Некорректный формат номера. Укажите 10 цифр.'); return; }
+      _phone = raw;
+      hideError();
+      showSkeleton();
+      await loadOrders(phone10);
     }
 
     // ── Logout ────────────────────────────────────────────────────
     function logout() {
       wsDisconnect();
       sessionStorage.removeItem('cabinet_phone');
+      sessionStorage.removeItem('cabinet_token');
       _phone  = '';
       _orders = [];
       document.getElementById('phoneInput').value = '';
+      document.getElementById('stepPhone').style.display = '';
+      document.getElementById('stepCode').style.display = 'none';
       showLogin();
     }
 
@@ -986,7 +1083,7 @@
     }
 
     // Expose public API
-    window.Cabinet = { search, logout, toggleCard, openReview, closeReview, setStar, submitReview, startPolling, stopPolling };
+    window.Cabinet = { search, requestCode, verifyCode, backToPhone, logout, toggleCard, openReview, closeReview, setStar, submitReview, startPolling, stopPolling };
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', init);

@@ -2267,6 +2267,97 @@ function normalizePhone(raw) {
   return null;
 }
 
+// ─── Client OTP auth ──────────────────────────────────────────────────────────
+const clientOtpLimiter = (() => {
+  try {
+    const rateLimit = require('express-rate-limit');
+    return rateLimit({ windowMs: 60 * 1000, max: 3, standardHeaders: true, legacyHeaders: false,
+      message: { error: 'Слишком много запросов. Повторите через минуту.' } });
+  } catch { return (req, res, next) => next(); }
+})();
+
+// POST /api/client/request-code — send OTP to phone
+router.post('/client/request-code', clientOtpLimiter, async (req, res, next) => {
+  try {
+    const rawPhone = (req.body.phone || '').trim();
+    const phone10 = normalizePhone(rawPhone);
+    if (!phone10) return res.status(400).json({ error: 'Укажите корректный номер телефона' });
+
+    // Check if phone has any orders in the system
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const ph = patterns.map(() => '?').join(',');
+    const order = await get(`SELECT id FROM orders WHERE client_phone IN (${ph}) LIMIT 1`, patterns);
+    if (!order) return res.status(404).json({ error: 'Заявки с этим номером не найдены' });
+
+    // Generate 6-digit code
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    // Expire old codes for this phone
+    await run("DELETE FROM client_otp WHERE phone=?", [phone10]).catch(() => {});
+    await run(
+      "INSERT INTO client_otp (phone, code, expires_at) VALUES (?, ?, datetime('now', '+10 minutes'))",
+      [phone10, code]
+    );
+
+    // Try to send SMS
+    const sms = require('../services/sms');
+    const phoneE164 = '+7' + phone10;
+    await sms.sendSMS(phoneE164, `Ваш код для входа в личный кабинет Nevesty Models: ${code}. Действует 10 минут.`)
+      .catch(e => console.log('[OTP] SMS send skipped:', e.message));
+
+    // In dev/test — return code (only if no SMS API configured)
+    const isDev = !process.env.SMS_RU_API_ID;
+    res.json({ ok: true, ...(isDev ? { code_debug: code } : {}) });
+  } catch (e) { next(e); }
+});
+
+// POST /api/client/verify — verify OTP and get session token
+router.post('/client/verify', clientOtpLimiter, async (req, res, next) => {
+  try {
+    const rawPhone = (req.body.phone || '').trim();
+    const code = (req.body.code || '').trim();
+    const phone10 = normalizePhone(rawPhone);
+    if (!phone10 || !code) return res.status(400).json({ error: 'Укажите телефон и код' });
+
+    const otp = await get(
+      "SELECT * FROM client_otp WHERE phone=? AND used=0 AND expires_at > CURRENT_TIMESTAMP ORDER BY created_at DESC LIMIT 1",
+      [phone10]
+    );
+    if (!otp) return res.status(401).json({ error: 'Код не найден или истёк. Запросите новый.' });
+
+    // Increment attempts
+    await run("UPDATE client_otp SET attempts=attempts+1 WHERE id=?", [otp.id]);
+    if (otp.attempts >= 5) {
+      await run("UPDATE client_otp SET used=1 WHERE id=?", [otp.id]);
+      return res.status(429).json({ error: 'Превышено число попыток. Запросите новый код.' });
+    }
+
+    if (otp.code !== code) return res.status(401).json({ error: 'Неверный код' });
+
+    // Mark used
+    await run("UPDATE client_otp SET used=1 WHERE id=?", [otp.id]);
+
+    // Issue short-lived client JWT (1 hour)
+    const token = jwt.sign(
+      { phone: phone10, type: 'client' },
+      process.env.JWT_SECRET || 'secret',
+      { expiresIn: '1h' }
+    );
+    res.json({ ok: true, token, phone: '+7' + phone10 });
+  } catch (e) { next(e); }
+});
+
+// Client auth middleware
+function clientAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Bearer ')) return res.status(401).json({ error: 'Требуется авторизация' });
+  try {
+    const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET || 'secret');
+    if (payload.type !== 'client') return res.status(401).json({ error: 'Неверный тип токена' });
+    req.clientPhone = payload.phone;
+    next();
+  } catch { return res.status(401).json({ error: 'Токен недействителен или истёк' }); }
+}
+
 // GET /api/client/orders?phone=79991234567
 router.get('/client/orders', clientRateLimit, async (req, res, next) => {
   try {
