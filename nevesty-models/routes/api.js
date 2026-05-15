@@ -2514,6 +2514,22 @@ router.patch('/admin/orders/:id/payment', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Send invoice (mark invoice_sent_at) ─────────────────────────────────────
+router.post('/admin/orders/:id/send-invoice', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const order = await get('SELECT id, order_number, client_chat_id, client_name FROM orders WHERE id=?', [id]);
+    if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
+    await run(
+      `UPDATE orders SET invoice_sent_at=datetime('now'), updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+      [id]
+    );
+    await logAudit(req, 'invoice_sent', 'order', id, { order_number: order.order_number });
+    res.json({ ok: true, invoice_sent_at: new Date().toISOString() });
+  } catch (e) { next(e); }
+});
+
 // ─── Order status patch ────────────────────────────────────────────────────────
 router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
   try {
