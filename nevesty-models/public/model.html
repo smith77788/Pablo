@@ -1139,6 +1139,11 @@
       function saveFavs(arr) {
         try { localStorage.setItem(FAV_KEY, JSON.stringify(arr)); } catch {}
       }
+      function updateFavNavBadge() {
+        const count = getFavs().length;
+        const badge = document.getElementById('fav-nav-badge');
+        if (badge) badge.textContent = count > 0 ? count : '';
+      }
       window.toggleFavorite = function() {
         const id = parseInt(getParam('id'), 10);
         if (!id) return;
@@ -1160,11 +1165,13 @@
           } : { id };
           favs.push(modelData);
           saveFavs(favs);
+          updateFavNavBadge();
           if (window.NM?.analytics) NM.analytics.addToFavorites(id, _currentModel?.name || '');
-          if (btn) { btn.innerHTML = '<span aria-hidden="true">💔</span> Убрать из избранного'; btn.style.color = '#e07070'; btn.style.borderColor = '#e07070'; }
+          if (btn) { btn.innerHTML = '<span aria-hidden="true">💔</span> В избранном'; btn.style.color = '#e07070'; btn.style.borderColor = '#e07070'; }
         } else {
           favs.splice(idx, 1);
           saveFavs(favs);
+          updateFavNavBadge();
           if (btn) { btn.innerHTML = '<span aria-hidden="true">❤️</span> В избранное'; btn.style.color = ''; btn.style.borderColor = ''; }
         }
       };
@@ -1176,7 +1183,7 @@
         const favs = getFavs();
         const inFav = favs.some(f => (typeof f === 'object' ? f.id === id : f === id));
         if (inFav) {
-          btn.innerHTML = '<span aria-hidden="true">💔</span> Убрать из избранного';
+          btn.innerHTML = '<span aria-hidden="true">💔</span> В избранном';
           btn.style.color = '#e07070';
           btn.style.borderColor = '#e07070';
         } else {
@@ -1184,6 +1191,7 @@
           btn.style.color = '';
           btn.style.borderColor = '';
         }
+        updateFavNavBadge();
       }
 
       // ── Compare ───────────────────────────────────────────────────────────────

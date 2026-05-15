@@ -2366,6 +2366,50 @@ router.get('/admin/messages/recent', auth, async (req, res, next) => {
 });
 
 // ─── Order detail (admin, with model join) ───────────────────────────────────
+// ─── Paginated client messages list (admin) ──────────────────────────────────
+router.get('/admin/messages', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const filter = req.query.filter || 'all'; // all | unread | today
+
+    let sql = `
+      SELECT m.id, m.order_id, m.content, m.created_at, m.sender_type,
+             o.order_number, o.client_name, o.client_chat_id
+      FROM messages m
+      JOIN orders o ON m.order_id = o.id
+      WHERE m.sender_type = 'client'
+    `;
+    const params = [];
+
+    if (filter === 'unread') {
+      sql += ` AND NOT EXISTS (
+        SELECT 1 FROM messages m2
+        WHERE m2.order_id = m.order_id AND m2.sender_type = 'admin'
+          AND m2.created_at > m.created_at
+      )`;
+    } else if (filter === 'today') {
+      sql += ` AND date(m.created_at) = date('now')`;
+    }
+
+    sql += ` ORDER BY m.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = await query(sql, params);
+
+    let countSql = `SELECT COUNT(*) as n FROM messages m JOIN orders o ON m.order_id = o.id WHERE m.sender_type = 'client'`;
+    const countParams = [];
+    if (filter === 'unread') {
+      countSql += ` AND NOT EXISTS (SELECT 1 FROM messages m2 WHERE m2.order_id = m.order_id AND m2.sender_type = 'admin' AND m2.created_at > m.created_at)`;
+    } else if (filter === 'today') {
+      countSql += ` AND date(m.created_at) = date('now')`;
+    }
+    const total = await get(countSql, countParams);
+
+    res.json({ ok: true, messages: rows, total: total?.n || 0 });
+  } catch (e) { next(e); }
+});
+
 router.get('/admin/orders/:id/detail', auth, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
