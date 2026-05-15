@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Избранные модели — Nevesty Models</title>
+  <meta name="description" content="Ваш список избранных моделей агентства Nevesty Models.">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#080808">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+
+  <!-- NAVBAR -->
+  <nav class="navbar scrolled" id="navbar">
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+      <div class="nav-links">
+        <a href="/catalog.html">Модели</a>
+        <a href="/#services">Услуги</a>
+        <a href="/#about">О нас</a>
+        <a href="/#contact">Контакты</a>
+        <a href="/favorites.html" style="color:var(--gold)" title="Избранное">❤️ Избранное</a>
+        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
+           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
+           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
+          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+          <span>WhatsApp</span>
+        </a>
+        <a href="/booking.html" class="btn-nav">Заказать</a>
+      </div>
+      <div class="nav-burger" id="burgerBtn"><span></span><span></span><span></span></div>
+    </div>
+  </nav>
+
+  <!-- MOBILE MENU -->
+  <nav class="nav-mobile" id="mobileMenu">
+    <span class="nav-mobile-close" id="mobileClose">✕</span>
+    <a href="/catalog.html">Модели</a>
+    <a href="/#services">Услуги</a>
+    <a href="/#about">О нас</a>
+    <a href="/favorites.html" style="color:var(--gold)">❤️ Избранное</a>
+    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
+  </nav>
+
+  <!-- PAGE CONTENT -->
+  <div style="padding-top:60px;min-height:100vh" id="main-content">
+    <div class="container" style="padding-top:32px;padding-bottom:80px">
+
+      <!-- Breadcrumbs -->
+      <nav aria-label="breadcrumb" style="margin-bottom:8px">
+        <ol style="display:flex;list-style:none;padding:0;margin:0;gap:8px;font-size:0.75rem;color:var(--text-dim)">
+          <li><a href="/" style="color:var(--text-muted);text-decoration:none">Главная</a></li>
+          <li style="color:var(--border)" aria-hidden="true">/</li>
+          <li style="color:var(--gold)" aria-current="page">Избранное</li>
+        </ol>
+      </nav>
+
+      <!-- Header -->
+      <div style="margin-bottom:32px">
+        <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Мой список</div>
+        <h1 style="font-family:'Playfair Display',serif;font-size:clamp(1.8rem,4vw,3rem);color:var(--white);margin-bottom:8px">Избранные модели</h1>
+        <p style="color:var(--text-muted);font-size:0.9rem" id="favCount">Загрузка...</p>
+      </div>
+
+      <!-- Loading state -->
+      <div id="loadingState" style="display:none">
+        <div class="catalog-grid">
+          <div class="model-card-skeleton"></div>
+          <div class="model-card-skeleton"></div>
+          <div class="model-card-skeleton"></div>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="emptyState" style="display:none;text-align:center;padding:80px 24px">
+        <div style="font-size:4rem;margin-bottom:24px;opacity:0.4">🤍</div>
+        <h2 style="font-family:'Playfair Display',serif;font-size:2rem;color:var(--white);margin-bottom:12px">Список пуст</h2>
+        <p style="color:var(--text-muted);margin-bottom:32px;max-width:400px;margin-left:auto;margin-right:auto">
+          Добавляйте понравившихся моделей из каталога, нажимая на кнопку ❤️ на карточке или на странице модели.
+        </p>
+        <a href="/catalog.html" class="btn-primary">Перейти в каталог</a>
+      </div>
+
+      <!-- Models grid -->
+      <div class="catalog-grid" id="favGrid" style="display:none"></div>
+
+      <!-- Bottom actions (shown when there are favorites) -->
+      <div id="bottomActions" style="display:none;margin-top:40px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+        <a href="/catalog.html" class="btn-outline">← В каталог</a>
+        <button id="clearAllBtn"
+          style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:12px 24px;font-size:0.8rem;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all 0.2s"
+          onmouseover="this.style.borderColor='#e54d4d';this.style.color='#e54d4d'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
+          Очистить список
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Floating WhatsApp Button -->
+  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
+    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
+       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
+       onmouseover="this.style.background='#1da851';this.style.boxShadow='0 6px 20px rgba(37,211,102,0.5)'"
+       onmouseout="this.style.background='#25D366';this.style.boxShadow='0 4px 16px rgba(37,211,102,0.4)'">
+      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Написать в WhatsApp
+    </a>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="/js/main.js" defer></script>
+
+  <script>
+  (function () {
+    const FAV_KEY = 'nm_favorites';
+    const CAT_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
+
+    function getFavIds() {
+      try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; }
+    }
+    function saveFavIds(ids) {
+      try { localStorage.setItem(FAV_KEY, JSON.stringify(ids)); } catch {}
+    }
+
+    function escHtml(s) {
+      if (s == null) return '';
+      return String(s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function plural(n) {
+      const m10 = n % 10, m100 = n % 100;
+      if (m100 >= 11 && m100 <= 19) return 'моделей';
+      if (m10 === 1) return 'модель';
+      if (m10 >= 2 && m10 <= 4) return 'модели';
+      return 'моделей';
+    }
+
+    const favCountEl   = document.getElementById('favCount');
+    const loadingEl    = document.getElementById('loadingState');
+    const emptyEl      = document.getElementById('emptyState');
+    const gridEl       = document.getElementById('favGrid');
+    const bottomEl     = document.getElementById('bottomActions');
+    const clearAllBtn  = document.getElementById('clearAllBtn');
+
+    function renderCard(model, onRemove) {
+      const catLabel = CAT_LABELS[model.category] || model.category || '';
+      const statusText = model.available ? 'Свободна' : 'Занята';
+      const statusColor = model.available ? '#4caf50' : '#f44336';
+      const measures = [model.bust, model.waist, model.hips].filter(Boolean).join('/');
+
+      const article = document.createElement('article');
+      article.className = 'model-card';
+      article.tabIndex = 0;
+      article.setAttribute('role', 'button');
+      article.setAttribute('aria-label', `Профиль модели ${model.name}`);
+      article.addEventListener('click', () => { window.location.href = `/model.html?id=${model.id}`; });
+      article.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.href = `/model.html?id=${model.id}`; }
+      });
+
+      article.innerHTML = `
+        <div class="model-avail${model.available ? '' : ' unavailable'}" aria-hidden="true"></div>
+        <div class="model-card-img" style="position:relative">
+          ${model.photo_main
+            ? `<img src="${escHtml(model.photo_main)}" alt="${escHtml(model.name)}" loading="lazy" />`
+            : `<div class="model-card-placeholder" aria-hidden="true">${escHtml(model.name[0])}</div>`}
+          <div class="model-card-overlay" aria-hidden="true">
+            <div class="model-card-tag">${escHtml(catLabel)}</div>
+            ${measures ? `<div style="font-size:0.78rem;color:#ccc;margin-top:4px">${escHtml(measures)}</div>` : ''}
+          </div>
+        </div>
+        <div class="model-card-info">
+          <div class="model-card-name">${escHtml(model.name)}</div>
+          <div class="model-card-chips">
+            ${model.height ? `<span class="mc-chip">${model.height} см</span>` : ''}
+            ${model.age    ? `<span class="mc-chip">${model.age} лет</span>` : ''}
+            ${model.city   ? `<span class="mc-chip mc-city">${escHtml(model.city)}</span>` : ''}
+          </div>
+          <div class="model-card-bottom">
+            <span style="font-size:0.7rem;color:${statusColor};letter-spacing:1px;text-transform:uppercase">${statusText}</span>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <a href="/model.html?id=${model.id}"
+               class="btn-book-model" style="flex:1;text-align:center"
+               onclick="event.stopPropagation()"
+               aria-label="Открыть профиль модели ${escHtml(model.name)}">
+              Подробнее
+            </a>
+            <a href="/booking.html?model=${model.id}"
+               style="flex:1;text-align:center;display:block;padding:10px 12px;background:var(--gold);color:var(--bg);font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;font-weight:600;text-decoration:none;transition:all 0.2s"
+               onclick="event.stopPropagation()"
+               onmouseover="this.style.background='var(--gold-light)'"
+               onmouseout="this.style.background='var(--gold)'">
+              Заказать
+            </a>
+          </div>
+        </div>`;
+
+      // Remove from favorites button
+      const removeBtn = document.createElement('button');
+      removeBtn.innerHTML = '❤️';
+      removeBtn.title = 'Убрать из избранного';
+      removeBtn.setAttribute('aria-label', 'Убрать из избранного');
+      removeBtn.style.cssText = 'position:absolute;top:8px;right:8px;width:34px;height:34px;border:none;background:rgba(0,0,0,0.55);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;';
+      removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = 'rgba(0,0,0,0.8)'; });
+      removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'rgba(0,0,0,0.55)'; });
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const ids = getFavIds();
+        const idx = ids.indexOf(model.id);
+        if (idx !== -1) { ids.splice(idx, 1); saveFavIds(ids); }
+        article.style.opacity = '0';
+        article.style.transform = 'scale(0.95)';
+        article.style.transition = 'all 0.25s';
+        setTimeout(() => {
+          article.remove();
+          onRemove(model.id);
+        }, 250);
+      });
+
+      const imgContainer = article.querySelector('.model-card-img');
+      if (imgContainer) imgContainer.appendChild(removeBtn);
+
+      return article;
+    }
+
+    async function init() {
+      const ids = getFavIds();
+
+      if (!ids.length) {
+        favCountEl.textContent = '0 моделей';
+        emptyEl.style.display = 'block';
+        return;
+      }
+
+      loadingEl.style.display = 'block';
+      favCountEl.textContent = `${ids.length} ${plural(ids.length)}`;
+
+      // Fetch models in parallel
+      const results = await Promise.allSettled(
+        ids.map(id => fetch(`/api/models/${id}`).then(r => r.ok ? r.json() : null))
+      );
+
+      loadingEl.style.display = 'none';
+
+      const models = results
+        .map(r => r.status === 'fulfilled' ? r.value : null)
+        .filter(Boolean);
+
+      if (!models.length) {
+        // All IDs were invalid — clear storage
+        saveFavIds([]);
+        emptyEl.style.display = 'block';
+        favCountEl.textContent = '0 моделей';
+        return;
+      }
+
+      gridEl.style.display = '';
+      bottomEl.style.display = 'flex';
+
+      let currentModels = [...models];
+
+      function updateCount() {
+        const n = currentModels.length;
+        favCountEl.textContent = `${n} ${plural(n)}`;
+        if (!n) {
+          gridEl.style.display = 'none';
+          bottomEl.style.display = 'none';
+          emptyEl.style.display = 'block';
+        }
+      }
+
+      models.forEach(model => {
+        const card = renderCard(model, (removedId) => {
+          currentModels = currentModels.filter(m => m.id !== removedId);
+          updateCount();
+        });
+        gridEl.appendChild(card);
+      });
+
+      // Clear all button
+      clearAllBtn.addEventListener('click', () => {
+        if (!confirm('Очистить весь список избранного?')) return;
+        saveFavIds([]);
+        gridEl.innerHTML = '';
+        currentModels = [];
+        gridEl.style.display = 'none';
+        bottomEl.style.display = 'none';
+        emptyEl.style.display = 'block';
+        favCountEl.textContent = '0 моделей';
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+
+    // WhatsApp button
+    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
+      const wa = d.contacts_whatsapp;
+      if (wa) {
+        const waNum = wa.replace(/\D/g,'');
+        const waUrl = `https://wa.me/${waNum}`;
+        const btn = document.getElementById('whatsapp-btn');
+        if (btn) { btn.href = waUrl; btn.style.display = 'flex'; }
+        const floatEl = document.getElementById('float-whatsapp');
+        const floatLink = document.getElementById('float-wa-link');
+        if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
+      }
+    }).catch(()=>{});
+  })();
+  </script>
+</body>
+</html>

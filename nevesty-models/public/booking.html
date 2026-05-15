@@ -17,7 +17,22 @@
   <link rel="canonical" href="https://nevesty-models.ru/booking.html">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
   <link rel="stylesheet" href="/css/main.css" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843' }
+          }
+        }
+      }
+    }
+  </script>
   <style>
     /* ── Progress bar ── */
     .booking-progress-bar {
@@ -185,6 +200,11 @@
         <a href="/#services">Услуги</a>
         <a href="/#about">О нас</a>
         <a href="/#contact">Контакты</a>
+        <button onclick="DarkMode.toggle()"
+          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          aria-label="Переключить тему" title="Dark/Light mode" style="background:none;border:none;cursor:pointer;padding:4px 8px;">
+          <span class="dark-mode-icon" style="font-size:1.1rem">🌙</span>
+        </button>
         <a href="/booking.html" class="btn-nav" style="color:var(--bg);background:var(--gold);border-color:var(--gold)">Заказать</a>
       </div>
       <div class="nav-burger" id="burgerBtn">
@@ -481,5 +501,6 @@
   <script src="/js/main.js" defer></script>
   <script src="/js/booking.js" defer></script>
   <script src="/js/telegram-webapp.js" defer></script>
+  <script src="/js/darkmode.js"></script>
 </body>
 </html>

@@ -1154,25 +1154,50 @@ async function showOrganismStatus(chatId) {
   } catch (e) { console.error('[Bot] showOrganismStatus:', e.message); }
 }
 
-async function showAdminModels(chatId, page) {
+async function showAdminModels(chatId, page, opts = {}) {
   try {
-    const all = await query('SELECT * FROM models ORDER BY id DESC LIMIT 500');
+    const showArchived = opts.archived || false;
+    const sort = opts.sort || 'name';
+    const sortMap = { orders: 'order_count DESC', views: 'view_count DESC', name: 'name ASC' };
+    const orderBy = sortMap[sort] || 'name ASC';
+    const archiveFilter = showArchived ? 'archived=1' : 'archived=0';
+
     const perPage = 8;
-    const slice = all.slice(page*perPage, page*perPage+perPage);
-    let text = `💃 *Модели агентства* \\(всего: ${all.length}\\)\n\n`;
+    const offset  = page * perPage;
+    const [countRow, slice] = await Promise.all([
+      get(`SELECT COUNT(*) as n FROM models WHERE ${archiveFilter}`),
+      query(`SELECT * FROM models WHERE ${archiveFilter} ORDER BY ${orderBy} LIMIT ? OFFSET ?`, [perPage, offset]),
+    ]);
+    const total = countRow?.n || 0;
+
+    const title = showArchived ? '📦 *Архив моделей*' : '💃 *Модели агентства*';
+    let text = `${title} \\(всего: ${total}\\)\n\n`;
     const btns = slice.map(m => {
-      text += `${m.available ? '🟢' : '🔴'} *${esc(m.name)}* — ${m.height}см, ${esc(m.category)}\n`;
+      text += `${m.available ? '🟢' : '🔴'}${m.archived ? ' 📦' : ''} *${esc(m.name)}* — ${m.height}см, ${esc(m.category)}\n`;
       return [{ text: `${m.available?'🟢':'🔴'} ${m.name}`, callback_data: `adm_model_${m.id}` }];
     });
+
     const nav = [];
-    if (page > 0)                         nav.push({ text:'◀️', callback_data:`adm_models_${page-1}` });
-    if ((page+1)*perPage < all.length)    nav.push({ text:'▶️', callback_data:`adm_models_${page+1}` });
-    return safeSend(chatId, text, {
+    if (page > 0)              nav.push({ text: '◀️', callback_data: `adm_models_p_${page-1}_${sort}_${showArchived?1:0}` });
+    if ((page+1)*perPage < total) nav.push({ text: '▶️', callback_data: `adm_models_p_${page+1}_${sort}_${showArchived?1:0}` });
+
+    const sortRow = [
+      { text: `${sort==='name'?'✅ ':''}🔤 Алфавит`,   callback_data: `adm_models_p_0_name_${showArchived?1:0}` },
+      { text: `${sort==='orders'?'✅ ':''}📊 Заказы`,   callback_data: `adm_models_p_0_orders_${showArchived?1:0}` },
+      { text: `${sort==='views'?'✅ ':''}👁 Просмотры`, callback_data: `adm_models_p_0_views_${showArchived?1:0}` },
+    ];
+    const archiveToggle = showArchived
+      ? [{ text: '💃 Активные модели', callback_data: 'adm_models_p_0_name_0' }]
+      : [{ text: '📦 Архив',           callback_data: 'adm_models_p_0_name_1' }];
+
+    return safeSend(chatId, text || `${title}\n_Список пуст\\._`, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
         ...btns,
         ...(nav.length ? [nav] : []),
-        [{ text:'← Меню', callback_data:'admin_menu' }],
+        sortRow,
+        [{ text: '🔍 Поиск по имени', callback_data: 'adm_search_model' }, ...archiveToggle],
+        [{ text: '← Меню', callback_data: 'admin_menu' }],
       ]}
     });
   } catch (e) { console.error('[Bot] showAdminModels:', e.message); }
@@ -1214,10 +1239,17 @@ async function showAdminModel(chatId, modelId) {
     text += `📈 Успешность: ${successRate}%  👁 Просмотров: ${viewCount}\n`;
     if (m.bio) text += `\n_${esc(m.bio)}_`;
 
+    const archiveBtn = m.archived
+      ? { text: '📤 Восстановить', callback_data: `adm_restore_${m.id}` }
+      : { text: '📦 В архив',      callback_data: `adm_archive_${m.id}` };
+
     const keyboard = { inline_keyboard: [
       [{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${m.id}` },
        { text: m.available ? '🔴 Недоступна' : '🟢 Доступна', callback_data: `adm_toggle_${m.id}` }],
-      [{ text: '← К моделям', callback_data: 'adm_models_0' }],
+      [{ text: '📋 Дублировать', callback_data: `adm_duplicate_${m.id}` },
+       { text: '⭐ ' + (m.featured ? 'Убрать из топа' : 'В топ'), callback_data: `adm_featured_${m.id}` }],
+      [archiveBtn],
+      [{ text: '← К моделям', callback_data: 'adm_models_p_0_name_0' }],
     ]};
 
     // Галерея: photo_main + photos[]
@@ -3672,32 +3704,21 @@ async function sendMessageToClient(clientChatId, orderNumber, text) {
 
 // ─── FAQ ──────────────────────────────────────────────────────────────────────
 
-async function showFaq(chatId) {
-  const text =
-    `FAQ - Часто задаваемые вопросы\n\n` +
-    `1. Как заказать модель?\n` +
-    `Нажмите "Оформить заявку" в главном меню, выберите модель и заполните форму. Менеджер свяжется с вами в течение 1 часа.\n\n` +
-    `2. Какова минимальная длительность работы?\n` +
-    `Минимальный заказ — 1 час. Доступны варианты 1, 2, 3, 4, 6, 8 и 12 часов.\n\n` +
-    `3. Какие типы мероприятий доступны?\n` +
-    `Показы мод, фотосессии, корпоративы и мероприятия, коммерческие съёмки, подиум и другие форматы.\n\n` +
-    `4. Как отследить статус заявки?\n` +
-    `Используйте команду /status НОМЕР-ЗАЯВКИ или кнопку "Проверить статус" в меню. Номер заявки приходит сразу после оформления.\n\n` +
-    `5. Можно ли выбрать конкретную модель?\n` +
-    `Да! В каталоге доступны все свободные модели с параметрами. Либо укажите пожелания, и менеджер подберёт подходящий вариант.\n\n` +
-    `6. В каких городах работает агентство?\n` +
-    `Мы работаем по всей России. Укажите город при оформлении заявки — менеджер уточнит условия выезда.\n\n` +
-    `7. Как происходит оплата?\n` +
-    `Оплата обсуждается с менеджером после подтверждения заявки. Принимаем банковский перевод и наличные.\n\n` +
-    `8. Можно ли отменить заявку?\n` +
-    `Да, свяжитесь с менеджером или напишите в чат. Отмена возможна не позднее чем за 24 часа до мероприятия без штрафных санкций.`;
+const FAQ_ITEMS = [
+  { q: 'Как оформить заявку?', a: 'Выберите модель в каталоге → нажмите «Оформить заявку» → заполните форму. Менеджер свяжется с вами в течение часа.' },
+  { q: 'Какова минимальная стоимость?', a: 'Стоимость зависит от типа мероприятия и длительности. Примерные цены: от 15 000 ₽ за 4 часа.' },
+  { q: 'Можно ли отменить заявку?', a: 'Да, вы можете отменить заявку до подтверждения. После подтверждения — по согласованию с менеджером.' },
+  { q: 'Нужно ли платить заранее?', a: 'Форма оплаты обсуждается индивидуально. Возможна оплата частично или полностью по факту.' },
+  { q: 'Как долго ждать ответа?', a: 'Менеджеры работают с 9:00 до 21:00. Обычно отвечаем в течение 30-60 минут.' },
+];
 
-  return safeSend(chatId, text, {
-    reply_markup: { inline_keyboard: [
-      [{ text: '📝 Оформить заявку', callback_data: 'bk_start'   }],
-      [{ text: '📞 Контакты',        callback_data: 'contacts'   }],
-      [{ text: '🏠 Главное меню',    callback_data: 'main_menu'  }],
-    ]}
+async function showFaq(chatId) {
+  const keyboard = FAQ_ITEMS.map((faq, i) => [{ text: `❓ ${faq.q}`, callback_data: `faq_${i}` }]);
+  keyboard.push([{ text: '🏠 Главное меню', callback_data: 'main_menu' }]);
+
+  return safeSend(chatId, '❓ *Часто задаваемые вопросы*\n\nВыберите вопрос:', {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard }
   });
 }
 
@@ -3773,11 +3794,31 @@ async function showUserProfile(chatId, firstName) {
         ...recentBtns,
         [{ text: '📋 Все заявки',        callback_data: 'my_orders'             }],
         [{ text: '✏️ Изменить контакты', callback_data: 'profile_edit_contacts' }],
+        [{ text: '🔔 Уведомления',        callback_data: 'client_notif_settings' }],
         [{ text: '📝 Новая заявка',       callback_data: 'bk_start'             }],
         [{ text: '🏠 Главное меню',       callback_data: 'main_menu'            }],
       ]}
     });
   } catch (e) { console.error('[Bot] showUserProfile:', e.message); }
+}
+
+// ─── Client notification preferences ─────────────────────────────────────────
+
+async function showClientNotificationSettings(chatId) {
+  const prefs = await get('SELECT * FROM client_prefs WHERE chat_id=?', [chatId])
+    .catch(() => null) || { notify_status: 1, notify_promo: 1, notify_review: 1 };
+
+  const onOff = v => v ? '🔔 Вкл' : '🔕 Выкл';
+
+  return safeSend(chatId, '🔔 *Настройки уведомлений*\n\nВыберите что вы хотите получать:', {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: `${onOff(prefs.notify_status)} Статус заявки`, callback_data: 'client_notif_status' }],
+      [{ text: `${onOff(prefs.notify_promo)} Акции и предложения`, callback_data: 'client_notif_promo' }],
+      [{ text: `${onOff(prefs.notify_review)} Просьба оставить отзыв`, callback_data: 'client_notif_review' }],
+      [{ text: '← Назад', callback_data: 'profile' }]
+    ]}
+  });
 }
 
 // ─── AI Factory Panel ─────────────────────────────────────────────────────────
@@ -4175,22 +4216,37 @@ async function showAboutUs(chatId) {
 // ─── Прайс-лист ───────────────────────────────────────────────────────────────
 
 async function showPricing(chatId) {
-  const pricing = await getSetting('pricing').catch(() =>
-    'Fashion/Commercial — от 5000₽/час\nEvents — от 8000₽/час\nRunway — от 10000₽/час'
-  );
-  return safeSend(chatId,
-    `💰 *Прайс\\-лист Nevesty Models*\n\n${esc(pricing)}\n\n` +
-    `_Точная стоимость зависит от типа съёмки, длительности и модели\\._\n\n` +
-    `Для точного расчёта — оставьте заявку или напишите менеджеру\\.`,
-    {
-      parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [
-        [{ text: '📝 Оставить заявку',    callback_data: 'bk_start'    }],
-        [{ text: '💬 Спросить менеджера', callback_data: 'contact_mgr' }],
-        [{ text: '🏠 Меню',               callback_data: 'main_menu'   }],
-      ]}
-    }
-  );
+  const pricing = await getSetting('pricing').catch(() => '');
+  const pricingText = pricing || `💰 *Наши пакеты услуг*
+
+🥉 *Базовый пакет*
+• 1 модель на 4 часа
+• Базовый образ
+• Подходит для небольших мероприятий
+💵 от 15 000 ₽
+
+🥈 *Стандартный пакет*
+• 1\\-2 модели на 8 часов
+• Профессиональный образ
+• Фото\\-съёмка включена
+💵 от 30 000 ₽
+
+🥇 *Премиум пакет*
+• 3\\+ модели, любое время
+• Полный стилинг и визаж
+• Личный менеджер
+💵 от 60 000 ₽
+
+_Цены ориентировочные\\. Точная стоимость согласовывается индивидуально\\._`;
+
+  return safeSend(chatId, pricingText, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
+      [{ text: '📞 Связаться с менеджером', callback_data: 'msg_manager_start' }],
+      [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]
+    ]}
+  });
 }
 
 // ─── Каталог по городу ────────────────────────────────────────────────────────

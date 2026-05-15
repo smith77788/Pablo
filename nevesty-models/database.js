@@ -268,6 +268,8 @@ async function initDatabase() {
   await run(`ALTER TABLE models ADD COLUMN phone TEXT`).catch(() => {});
   await run(`ALTER TABLE models ADD COLUMN order_count INTEGER DEFAULT 0`).catch(() => {});
   await run(`ALTER TABLE models ADD COLUMN view_count INTEGER DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE models ADD COLUMN archived INTEGER DEFAULT 0`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_models_archived ON models(archived)`).catch(() => {});
 
   // UTM tracking columns on orders
   await run(`ALTER TABLE orders ADD COLUMN utm_source TEXT DEFAULT ''`).catch(() => {});

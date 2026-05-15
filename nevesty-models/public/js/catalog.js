@@ -172,6 +172,16 @@
 
   const CAT_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
 
+  // ── Favorites helpers ─────────────────────────────────────────────────────────
+  const FAV_KEY = 'nm_favorites';
+  function getFavIds() {
+    try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; }
+  }
+  function saveFavIds(ids) {
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(ids)); } catch {}
+  }
+  function isFav(id) { return getFavIds().includes(id); }
+
   // ── Render ───────────────────────────────────────────────────────────────────
   function render() {
     const q    = (filters.search || searchInput?.value || '').toLowerCase().trim();
@@ -221,21 +231,28 @@
       return;
     }
 
-    grid.innerHTML = list.map(m => {
+    grid.innerHTML = '';
+    list.forEach(m => {
       const statusClass = m.available ? 'status-free' : 'status-busy';
       const statusText  = m.available ? 'Свободна' : 'Занята';
       const catLabel    = CAT_LABELS[m.category] || m.category || '';
       const measures    = [m.bust, m.waist, m.hips].filter(Boolean).join('/');
+      const favd        = isFav(m.id);
 
-      return `
-        <article class="model-card" tabindex="0" role="button"
-          aria-label="Подробнее о модели ${escHtml(m.name)}"
-          onclick="openModelModal(${m.id})"
-          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openModelModal(${m.id})}">
+      const article = document.createElement('article');
+      article.className = 'model-card';
+      article.tabIndex = 0;
+      article.setAttribute('role', 'button');
+      article.setAttribute('aria-label', `Подробнее о модели ${m.name}`);
+      article.addEventListener('click', () => openModelModal(m.id));
+      article.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openModelModal(m.id); }
+      });
 
+      article.innerHTML = `
           <div class="model-avail${m.available ? '' : ' unavailable'}" aria-hidden="true"></div>
 
-          <div class="model-card-img">
+          <div class="model-card-img" style="position:relative">
             ${m.photo_main
               ? `<img src="${escHtml(m.photo_main)}" alt="${escHtml(m.name)}" loading="lazy" />`
               : `<div class="model-card-placeholder" aria-hidden="true">${escHtml(m.name[0])}</div>`}
@@ -262,9 +279,45 @@
                aria-label="Открыть профиль модели ${escHtml(m.name)}">
               Подробнее
             </a>
-          </div>
-        </article>`;
-    }).join('');
+          </div>`;
+
+      // Fav button — positioned top-right on image
+      const favBtn = document.createElement('button');
+      favBtn.setAttribute('aria-label', favd ? 'Убрать из избранного' : 'В избранное');
+      favBtn.title = favd ? 'Убрать из избранного' : 'В избранное';
+      favBtn.innerHTML = favd ? '❤️' : '🤍';
+      favBtn.style.cssText = `position:absolute;top:8px;right:8px;width:34px;height:34px;border:none;background:rgba(0,0,0,0.55);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;`;
+      favBtn.addEventListener('mouseenter', () => { favBtn.style.background = 'rgba(0,0,0,0.8)'; });
+      favBtn.addEventListener('mouseleave', () => { favBtn.style.background = 'rgba(0,0,0,0.55)'; });
+      favBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const ids = getFavIds();
+        const idx = ids.indexOf(m.id);
+        if (idx === -1) {
+          ids.push(m.id);
+          saveFavIds(ids);
+          favBtn.innerHTML = '❤️';
+          favBtn.title = 'Убрать из избранного';
+          favBtn.setAttribute('aria-label', 'Убрать из избранного');
+        } else {
+          ids.splice(idx, 1);
+          saveFavIds(ids);
+          favBtn.innerHTML = '🤍';
+          favBtn.title = 'В избранное';
+          favBtn.setAttribute('aria-label', 'В избранное');
+        }
+      });
+
+      // Insert fav button into the image container
+      const imgContainer = article.querySelector('.model-card-img');
+      if (imgContainer) {
+        imgContainer.style.position = 'relative';
+        imgContainer.appendChild(favBtn);
+      }
+
+      grid.appendChild(article);
+    });
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
