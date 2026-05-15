@@ -22,3 +22,8 @@ tests/
 *.spec.js
 nevesty-models-full.tar.gz
 public/nevesty-models-full.tar.gz
+# Deployment / ops scripts — not needed inside the container
+deploy.sh
+nginx.conf
+nginx/
+README.md

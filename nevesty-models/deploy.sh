@@ -3,7 +3,7 @@
 # Nevesty Models — Production Setup & Deploy Script
 # Usage: ./deploy.sh
 # =============================================================================
-set -e
+set -euo pipefail
 
 # --------------------------------------------------------------------------
 # Trap for unexpected errors
@@ -17,6 +17,16 @@ cd "$SCRIPT_DIR"
 echo "============================================="
 echo "  Nevesty Models — Production Deploy"
 echo "============================================="
+echo ""
+
+# --------------------------------------------------------------------------
+# 0. Git — pull latest changes from the current branch
+# --------------------------------------------------------------------------
+CURRENT_BRANCH="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD)"
+echo "[ 0/9 ] Pulling latest changes (branch: ${CURRENT_BRANCH})..."
+git -C "$SCRIPT_DIR" fetch origin
+git -C "$SCRIPT_DIR" pull origin "$CURRENT_BRANCH"
+echo "   ✔ Repository up to date ($(git -C "$SCRIPT_DIR" rev-parse --short HEAD))"
 echo ""
 
 # --------------------------------------------------------------------------
@@ -38,7 +48,7 @@ fi
 # 2. npm install --production
 # --------------------------------------------------------------------------
 echo "[ 2/9 ] Installing production dependencies..."
-npm install --production
+npm ci --omit=dev
 echo "   ✔ Dependencies installed"
 
 # --------------------------------------------------------------------------
@@ -98,6 +108,39 @@ pm2 save
 echo "   ✔ Process list saved"
 
 # --------------------------------------------------------------------------
+# Health check — verify app is responding before declaring success
+# --------------------------------------------------------------------------
+echo ""
+echo "   Waiting for server to be ready..."
+
+# Detect PORT from .env (fallback to 3000) early so health check can use it
+APP_PORT=3000
+if [ -f ".env" ]; then
+  PARSED_PORT="$(grep -E '^PORT=' .env | head -1 | cut -d'=' -f2 | tr -d '[:space:]')"
+  if [ -n "${PARSED_PORT:-}" ]; then
+    APP_PORT="$PARSED_PORT"
+  fi
+fi
+
+HEALTH_URL="http://localhost:${APP_PORT}/api/health"
+ATTEMPTS=0
+MAX_ATTEMPTS=15    # 15 × 2s = 30s max wait
+until curl -sf "$HEALTH_URL" > /dev/null 2>&1; do
+  ATTEMPTS=$((ATTEMPTS + 1))
+  if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
+    echo ""
+    echo "   ❌ Health check failed after ${MAX_ATTEMPTS} attempts: ${HEALTH_URL}"
+    echo "   Check logs: pm2 logs nevesty-models"
+    exit 1
+  fi
+  echo -n "."
+  sleep 2
+done
+echo ""
+echo "   ✔ Health check passed (${HEALTH_URL})"
+echo ""
+
+# --------------------------------------------------------------------------
 # 9. PM2 startup hint
 # --------------------------------------------------------------------------
 echo "[ 9/9 ] PM2 startup configuration..."
@@ -110,17 +153,6 @@ echo ""
 echo "   Copy-paste the generated sudo command and execute it."
 echo "   Then run: pm2 save"
 echo ""
-
-# --------------------------------------------------------------------------
-# Detect PORT from .env (fallback to 3000)
-# --------------------------------------------------------------------------
-APP_PORT=3000
-if [ -f ".env" ]; then
-  PARSED_PORT="$(grep -E '^PORT=' .env | head -1 | cut -d'=' -f2 | tr -d '[:space:]')"
-  if [ -n "$PARSED_PORT" ]; then
-    APP_PORT="$PARSED_PORT"
-  fi
-fi
 
 SITE_URL_VAL="http://localhost:${APP_PORT}"
 if [ -f ".env" ]; then
