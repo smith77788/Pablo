@@ -96,3 +96,34 @@ class FeedbackCollector(FactoryAgent):
             context=review_data
         )
         return {"role": self.role, "analysis": analysis, "review_data": review_data}
+
+
+class UpsellAdvisor(FactoryAgent):
+    """Identifies upsell and cross-sell opportunities for existing clients."""
+    department = "customer_success"
+    role = "UpsellAdvisor"
+
+    def run(self, **kwargs) -> dict:
+        data_db = kwargs.get("data_db")
+        order_data: dict = {}
+        if data_db:
+            try:
+                row = data_db.execute("""
+                    SELECT AVG(price) as avg_order_value,
+                           COUNT(*) as total_orders,
+                           COUNT(DISTINCT client_chat_id) as unique_clients
+                    FROM orders WHERE status='completed'
+                """).fetchone()
+                order_data = dict(row) if row else {}
+            except Exception:
+                pass
+
+        analysis = self.think(
+            f"Identify upsell and cross-sell opportunities for a modeling agency. "
+            f"Order data: {order_data}. "
+            f"Provide: 1) top upsell offers to existing clients, 2) cross-sell service bundles, "
+            f"3) optimal timing and scripts for upsell conversations, "
+            f"4) estimated revenue uplift from upsell strategy.",
+            context=order_data
+        )
+        return {"role": self.role, "analysis": analysis, "order_data": order_data}
