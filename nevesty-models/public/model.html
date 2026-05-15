@@ -580,6 +580,14 @@
               <span class="model-section-title">Портфолио</span>
               <div class="model-gallery-grid" id="galleryGrid"></div>
             </div>
+
+            <!-- Reviews -->
+            <div id="model-reviews" class="mt-8" style="margin-top:40px">
+              <span class="model-section-title">Отзывы о работе с моделью</span>
+              <div id="reviews-list" style="display:flex;flex-direction:column;gap:16px">
+                <div style="color:var(--text-dim);font-size:0.9rem">Загрузка отзывов...</div>
+              </div>
+            </div>
           </div>
 
           <!-- Right: CTA sidebar -->
@@ -593,6 +601,16 @@
               <button id="favBtn" onclick="toggleFavorite()" style="display:block;width:100%;margin-top:10px;padding:14px 24px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">
                 ❤️ В избранное
               </button>
+              <!-- Social sharing -->
+              <div style="display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap">
+                <span style="font-size:0.75rem;color:var(--text-dim);white-space:nowrap">Поделиться:</span>
+                <button onclick="shareModel('vk')"
+                  style="padding:6px 14px;background:#4C75A3;color:#fff;font-size:0.75rem;border:none;border-radius:6px;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">VK</button>
+                <button onclick="shareModel('tg')"
+                  style="padding:6px 14px;background:#2CA5E0;color:#fff;font-size:0.75rem;border:none;border-radius:6px;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Telegram</button>
+                <button id="copy-btn" onclick="shareModel('copy')"
+                  style="padding:6px 14px;background:var(--bg3);color:var(--text-muted);font-size:0.75rem;border:1px solid var(--border);border-radius:6px;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Копировать</button>
+              </div>
               <hr class="model-cta-divider">
               <div class="model-cta-contact">
                 Есть вопросы?<br>
@@ -694,6 +712,7 @@
         document.head.appendChild(schemaScript);
 
         renderModel(model);
+        loadModelReviews(model.id);
       }
 
       function renderModel(m) {
@@ -849,6 +868,53 @@
         if (e.key === 'ArrowLeft') window.prevPhoto();
         if (e.key === 'ArrowRight') window.nextPhoto();
       });
+
+      // ── Reviews ───────────────────────────────────────────────────────────────
+      function escHtml(s) {
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      }
+      async function loadModelReviews(modelId) {
+        try {
+          const resp = await fetch(`/api/reviews?model_id=${modelId}&limit=5`);
+          const data = await resp.json();
+          const container = el('reviews-list');
+          if (!container) return;
+          const reviews = Array.isArray(data) ? data : (data.reviews || []);
+          if (!reviews.length) {
+            container.innerHTML = '<p style="color:var(--text-dim);font-size:0.9rem">Пока нет отзывов</p>';
+            return;
+          }
+          container.innerHTML = reviews.map(r => `
+            <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <div style="width:40px;height:40px;background:rgba(201,169,110,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700;font-size:1rem;flex-shrink:0">
+                  ${escHtml((r.client_name || 'А')[0].toUpperCase())}
+                </div>
+                <div>
+                  <div style="font-weight:600;color:var(--white);font-size:0.9rem">${escHtml(r.client_name || 'Анонимно')}</div>
+                  <div style="font-size:0.85rem;color:var(--gold)">${'★'.repeat(r.rating || 5)}${'☆'.repeat(5-(r.rating||5))}</div>
+                </div>
+              </div>
+              <p style="color:var(--text-muted);font-size:0.9rem;line-height:1.7;margin:0">${escHtml(r.text || '')}</p>
+              ${r.created_at ? `<div style="font-size:0.75rem;color:var(--text-dim);margin-top:10px">${new Date(r.created_at).toLocaleDateString('ru-RU')}</div>` : ''}
+            </div>
+          `).join('');
+        } catch (e) { /* silent fail */ }
+      }
+
+      // ── Social sharing ────────────────────────────────────────────────────────
+      window.shareModel = function(platform) {
+        const url = encodeURIComponent(window.location.href);
+        const title = encodeURIComponent(document.title);
+        if (platform === 'vk') window.open(`https://vk.com/share.php?url=${url}&title=${title}`, '_blank', 'noopener');
+        if (platform === 'tg') window.open(`https://t.me/share/url?url=${url}&text=${title}`, '_blank', 'noopener');
+        if (platform === 'copy') {
+          navigator.clipboard.writeText(window.location.href).then(() => {
+            const btn = document.getElementById('copy-btn');
+            if (btn) { btn.textContent = '✓ Скопировано'; setTimeout(() => { btn.textContent = 'Копировать'; }, 2000); }
+          }).catch(() => {});
+        }
+      };
 
       // ── Favorites (wishlist) ───────────────────────────────────────────────────
       const FAV_KEY = 'nm_favorites';
