@@ -12,8 +12,10 @@
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
         step: state.step,
         model_id: state.model_id,
+        model_ids: state.model_ids,
         model_name: state.model_name,
         model_photo: state.model_photo,
+        selected_models: state.selected_models,
         event_type: state.event_type,
         event_date: state.event_date,
         event_duration: state.event_duration,
@@ -44,8 +46,10 @@
   const state = {
     step: 1,
     model_id:        _draft?.model_id        ?? null,
+    model_ids:       _draft?.model_ids        ?? [],
     model_name:      _draft?.model_name      ?? null,
     model_photo:     _draft?.model_photo     ?? null,
+    selected_models: _draft?.selected_models  ?? [],  // array of {id, name, photo}
     event_type:      _draft?.event_type      ?? '',
     event_date:      _draft?.event_date      ?? '',
     event_duration:  _draft?.event_duration  ?? '4',
@@ -56,6 +60,7 @@
     client_phone:    _draft?.client_phone    ?? '',
     client_email:    _draft?.client_email    ?? '',
     client_telegram: _draft?.client_telegram ?? '',
+    tor_file:        null,  // File object — not persisted in sessionStorage
   };
 
   const EVENT_LABELS = {
@@ -120,6 +125,7 @@
       phoneEl.value = newVal;
       const diff = newVal.length - oldVal.length;
       try { phoneEl.setSelectionRange(selStart + diff, selStart + diff); } catch (_) {}
+      clearFieldError('client_phone');
     });
 
     phoneEl.addEventListener('keydown', (e) => {
@@ -131,7 +137,21 @@
 
     phoneEl.addEventListener('blur', () => {
       if (phoneEl.value === '+7 (' || phoneEl.value === '+7') phoneEl.value = '';
+      validatePhoneField();
     });
+  }
+
+  /* ─── Phone validation on blur ───────────────────── */
+  function validatePhoneField() {
+    const ph = document.getElementById('client_phone');
+    if (!ph) return;
+    const val = ph.value.trim();
+    if (!val) return;
+    if (countDigits(val) < 10) {
+      markError('client_phone', 'Номер должен содержать не менее 10 цифр');
+    } else {
+      clearFieldError('client_phone');
+    }
   }
 
   /* ─── Real-time email validation ────────────────── */
@@ -139,6 +159,7 @@
   if (emailEl) {
     let emailTimeout;
     const emailHint = document.createElement('div');
+    emailHint.className = 'field-inline-hint';
     emailHint.style.cssText = 'font-size:0.72rem;margin-top:5px;line-height:1.5;';
     emailEl.parentNode.appendChild(emailHint);
 
@@ -157,6 +178,87 @@
 
     emailEl.addEventListener('input', () => { clearTimeout(emailTimeout); emailTimeout = setTimeout(checkEmail, 400); });
     emailEl.addEventListener('blur', () => { clearTimeout(emailTimeout); checkEmail(); });
+  }
+
+  /* ─── Budget: positive-number validation on blur ─── */
+  const budgetEl = document.getElementById('budget');
+  if (budgetEl) {
+    budgetEl.addEventListener('blur', () => {
+      const val = budgetEl.value.trim();
+      if (!val) return;
+      const num = parseFloat(val.replace(/[^\d.]/g, ''));
+      if (isNaN(num) || num <= 0) {
+        markError('budget', 'Введите корректный положительный бюджет');
+      } else {
+        clearFieldError('budget');
+      }
+    });
+    budgetEl.addEventListener('input', () => clearFieldError('budget'));
+  }
+
+  /* ─── Event date: validate future on blur ─────── */
+  if (dateInput) {
+    dateInput.addEventListener('blur', () => {
+      const val = dateInput.value;
+      if (!val) return;
+      if (val < today) {
+        markError('event_date', 'Дата мероприятия должна быть в будущем');
+      } else {
+        clearFieldError('event_date');
+      }
+    });
+    dateInput.addEventListener('input', () => clearFieldError('event_date'));
+  }
+
+  /* ─── Client name: real-time validation ─────────── */
+  const nameEl = document.getElementById('client_name');
+  if (nameEl) {
+    nameEl.addEventListener('blur', () => {
+      const val = nameEl.value.trim();
+      if (val && val.length < 2) {
+        markError('client_name', 'Имя должно содержать не менее 2 символов');
+      } else {
+        clearFieldError('client_name');
+      }
+    });
+    nameEl.addEventListener('input', () => clearFieldError('client_name'));
+  }
+
+  /* ─── TOR file input ──────────────────────────── */
+  const torFileInput = document.getElementById('tor_file');
+  const torFileName = document.getElementById('tor_file_name');
+  if (torFileInput) {
+    torFileInput.addEventListener('change', () => {
+      const file = torFileInput.files[0];
+      if (!file) {
+        state.tor_file = null;
+        if (torFileName) torFileName.textContent = '';
+        return;
+      }
+      // Validate type
+      const allowed = ['application/pdf', 'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+      if (!allowed.includes(file.type) && !/\.(pdf|doc|docx)$/i.test(file.name)) {
+        markError('tor_file', 'Допустимые форматы: PDF, DOC, DOCX');
+        torFileInput.value = '';
+        state.tor_file = null;
+        if (torFileName) torFileName.textContent = '';
+        return;
+      }
+      // Validate size (5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        markError('tor_file', 'Файл слишком большой. Максимум 5 МБ');
+        torFileInput.value = '';
+        state.tor_file = null;
+        if (torFileName) torFileName.textContent = '';
+        return;
+      }
+      clearFieldError('tor_file');
+      state.tor_file = file;
+      if (torFileName) {
+        torFileName.textContent = '📎 ' + file.name + ' (' + (file.size / 1024).toFixed(0) + ' КБ)';
+      }
+    });
   }
 
   /* ─── Auto-save on input for step 3 & 4 fields ─────── */
@@ -199,8 +301,9 @@
     const subset = models.slice(0, 8);
     grid.innerHTML = subset.map(m => `
       <div class="model-select-card" id="mc_${m.id}" role="button" tabindex="0"
-           onclick="_booking.selectModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')"
-           onkeydown="if(event.key==='Enter'||event.key===' ')_booking.selectModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')">
+           aria-label="${escHtml(m.name)}"
+           onclick="_booking.toggleModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')"
+           onkeydown="if(event.key==='Enter'||event.key===' ')_booking.toggleModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')">
         <div class="model-select-thumb">
           ${m.photo_main
             ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" loading="lazy" />`
@@ -221,16 +324,168 @@
     restoreModelFromDraft();
   });
 
+  /* ─── Render selected model chips ───────────────── */
+  function renderModelChips() {
+    const chipsEl = document.getElementById('selectedModelChips');
+    if (!chipsEl) return;
+
+    if (state.selected_models.length === 0) {
+      chipsEl.innerHTML = '';
+      chipsEl.style.display = 'none';
+      return;
+    }
+
+    chipsEl.style.display = 'flex';
+    chipsEl.innerHTML = state.selected_models.map(m => `
+      <div class="model-chip" data-id="${m.id}">
+        ${m.photo ? `<img src="${escHtml(m.photo)}" alt="${escHtml(m.name)}" class="model-chip-thumb" />` : ''}
+        <span>${escHtml(m.name)}</span>
+        <button type="button" class="model-chip-remove" aria-label="Убрать ${escHtml(m.name)}"
+          onclick="_booking.removeModel(${m.id})">✕</button>
+      </div>`).join('');
+
+    // Update noModelOption visibility
+    const noOpt = document.getElementById('noModelOption');
+    if (noOpt) {
+      noOpt.classList.toggle('selected', state.selected_models.length === 0);
+    }
+  }
+
+  /* ─── Toggle a model in multi-select ──────────── */
+  function toggleModel(id, name, photo) {
+    const existingIdx = state.selected_models.findIndex(m => m.id === id);
+    if (existingIdx >= 0) {
+      // Deselect
+      state.selected_models.splice(existingIdx, 1);
+    } else {
+      // Select
+      state.selected_models.push({ id, name, photo });
+    }
+
+    // Sync legacy model_id/name/photo to first selected (for backward compat)
+    if (state.selected_models.length > 0) {
+      state.model_id    = state.selected_models[0].id;
+      state.model_name  = state.selected_models[0].name;
+      state.model_photo = state.selected_models[0].photo;
+    } else {
+      state.model_id    = null;
+      state.model_name  = null;
+      state.model_photo = null;
+    }
+
+    state.model_ids = state.selected_models.map(m => m.id);
+
+    // Update card UI
+    document.querySelectorAll('.model-select-card').forEach(c => {
+      const cid = parseInt(c.id.replace('mc_', ''), 10);
+      const isSelected = state.selected_models.some(m => m.id === cid);
+      c.classList.toggle('selected', isSelected);
+      c.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    });
+
+    // noModelOption
+    const noOpt = document.getElementById('noModelOption');
+    if (noOpt) noOpt.classList.toggle('selected', state.selected_models.length === 0);
+
+    renderModelChips();
+    saveDraft();
+
+    // Clear prefilled card if user manually deselects a pre-filled model
+    if (state.selected_models.length === 0) {
+      const card = document.getElementById('prefilledModelCard');
+      if (card) card.style.display = 'none';
+    }
+  }
+
+  /* ─── Remove a model from selection ─────────── */
+  function removeModel(id) {
+    const idx = state.selected_models.findIndex(m => m.id === id);
+    if (idx >= 0) state.selected_models.splice(idx, 1);
+
+    state.model_ids = state.selected_models.map(m => m.id);
+    if (state.selected_models.length > 0) {
+      state.model_id    = state.selected_models[0].id;
+      state.model_name  = state.selected_models[0].name;
+      state.model_photo = state.selected_models[0].photo;
+    } else {
+      state.model_id = null; state.model_name = null; state.model_photo = null;
+    }
+
+    // Update card visual
+    const card = document.getElementById(`mc_${id}`);
+    if (card) {
+      card.classList.remove('selected');
+      card.setAttribute('aria-pressed', 'false');
+    }
+    const noOpt = document.getElementById('noModelOption');
+    if (noOpt) noOpt.classList.toggle('selected', state.selected_models.length === 0);
+
+    renderModelChips();
+    saveDraft();
+  }
+
+  /* ─── Legacy selectModel (kept for compatibility) ── */
+  function selectModel(id, name, photo) {
+    if (!id) {
+      // "No model" selected
+      state.selected_models = [];
+      state.model_id    = null;
+      state.model_name  = null;
+      state.model_photo = null;
+      state.model_ids   = [];
+      document.querySelectorAll('.model-select-card').forEach(c => {
+        c.classList.remove('selected');
+        c.setAttribute('aria-pressed', 'false');
+      });
+      document.getElementById('noModelOption')?.classList.add('selected');
+      const card = document.getElementById('prefilledModelCard');
+      if (card) card.style.display = 'none';
+      renderModelChips();
+      saveDraft();
+      return;
+    }
+
+    // Add as single selection (replacing existing for pre-fill compat)
+    if (!state.selected_models.some(m => m.id === id)) {
+      state.selected_models.push({ id, name: name || '', photo: photo || '' });
+    }
+    state.model_id    = id;
+    state.model_name  = name  || null;
+    state.model_photo = photo || null;
+    state.model_ids   = state.selected_models.map(m => m.id);
+
+    document.querySelectorAll('.model-select-card').forEach(c => {
+      const cid = parseInt(c.id.replace('mc_', ''), 10);
+      const isSel = state.selected_models.some(m => m.id === cid);
+      c.classList.toggle('selected', isSel);
+      c.setAttribute('aria-pressed', isSel ? 'true' : 'false');
+    });
+    document.getElementById('noModelOption')?.classList.remove('selected');
+    renderModelChips();
+    saveDraft();
+  }
+
   /* ─── Restore model selection from draft ─── */
   function restoreModelFromDraft() {
     if (!_draft) return;
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('model') || urlParams.get('model_id')) return;
 
-    if (_draft.model_id) {
+    if (_draft.selected_models && _draft.selected_models.length > 0) {
+      _draft.selected_models.forEach(m => {
+        const card = document.getElementById(`mc_${m.id}`);
+        if (card) {
+          card.classList.add('selected');
+          card.setAttribute('aria-pressed', 'true');
+        }
+      });
+      document.getElementById('noModelOption')?.classList.remove('selected');
+      renderModelChips();
+    } else if (_draft.model_id) {
       const card = document.getElementById(`mc_${_draft.model_id}`);
       if (card) {
         card.classList.add('selected');
+        card.setAttribute('aria-pressed', 'true');
         document.getElementById('noModelOption')?.classList.remove('selected');
       }
     }
@@ -261,10 +516,12 @@
     document.getElementById('draftDiscard').addEventListener('click', () => {
       clearDraft();
       Object.assign(state, {
-        model_id: null, model_name: null, model_photo: null,
+        model_id: null, model_ids: [], model_name: null, model_photo: null,
+        selected_models: [],
         event_type: '', event_date: '', event_duration: '4',
         location: '', budget: '', comments: '',
         client_name: '', client_phone: '', client_email: '', client_telegram: '',
+        tor_file: null,
       });
       banner.remove();
       goToStepInstant(1);
@@ -310,12 +567,13 @@
     }
   }
 
-  /* ─── Parse URL params & pre-select model / event type ─── */
+  /* ─── Parse URL params & pre-select model / event type / city ─── */
   function initFromUrlParams() {
     const urlParams = new URLSearchParams(window.location.search);
     const urlModel     = urlParams.get('model') || urlParams.get('model_id');
     const urlModelName = urlParams.get('model_name');
     const urlEventType = urlParams.get('event_type');
+    const urlCity      = urlParams.get('city');
 
     // Show selected model banner if model_name is passed
     if (urlModelName) {
@@ -323,6 +581,16 @@
       if (banner) {
         banner.textContent = `📸 Выбрана модель: ${decodeURIComponent(urlModelName)}`;
         banner.style.display = 'block';
+      }
+    }
+
+    // Pre-fill city / location
+    if (urlCity) {
+      const locEl = document.getElementById('location');
+      if (locEl && !locEl.value) {
+        locEl.value = decodeURIComponent(urlCity);
+        state.location = locEl.value;
+        saveDraft();
       }
     }
 
@@ -369,22 +637,6 @@
     container.style.display = 'block';
   }
 
-  function selectModel(id, name, photo) {
-    state.model_id    = id;
-    state.model_name  = name  || null;
-    state.model_photo = photo || null;
-    saveDraft();
-    document.querySelectorAll('.model-select-card').forEach(c => c.classList.remove('selected'));
-    document.getElementById('noModelOption')?.classList.remove('selected');
-    if (id) {
-      document.getElementById(`mc_${id}`)?.classList.add('selected');
-    } else {
-      document.getElementById('noModelOption')?.classList.add('selected');
-      const card = document.getElementById('prefilledModelCard');
-      if (card) card.style.display = 'none';
-    }
-  }
-
   /* ─── Validation helpers ──────────────────────────── */
   function clearErrors() {
     document.querySelectorAll('.field-error-msg').forEach(el => el.remove());
@@ -396,6 +648,14 @@
       el.style.borderColor = '';
       el.removeAttribute('data-error');
     });
+  }
+
+  function clearFieldError(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.borderColor = '';
+    el.removeAttribute('data-error');
+    el.parentNode.querySelectorAll('.field-error-msg').forEach(n => n.remove());
   }
 
   function markError(id, msg) {
@@ -441,22 +701,23 @@
       }
     }
     if (n === 2) {
-      // Restore model highlight
-      if (state.model_id) {
-        const card = document.getElementById(`mc_${state.model_id}`);
-        if (card) {
-          card.classList.add('selected');
-          document.getElementById('noModelOption')?.classList.remove('selected');
-        }
-      }
+      // Restore multi-model highlight
+      document.querySelectorAll('.model-select-card').forEach(c => {
+        const cid = parseInt(c.id.replace('mc_', ''), 10);
+        const isSel = state.selected_models.some(m => m.id === cid);
+        c.classList.toggle('selected', isSel);
+        c.setAttribute('aria-pressed', isSel ? 'true' : 'false');
+      });
+      document.getElementById('noModelOption')?.classList.toggle('selected', state.selected_models.length === 0);
+      renderModelChips();
     }
     if (n === 3) {
       const dateEl = document.getElementById('event_date');
       if (dateEl) { dateEl.value = state.event_date || ''; dateEl.min = today; }
       const durEl = document.getElementById('event_duration');
       if (durEl) durEl.value = state.event_duration || '4';
-      const budgetEl = document.getElementById('budget');
-      if (budgetEl) budgetEl.value = state.budget || '';
+      const budgetEl2 = document.getElementById('budget');
+      if (budgetEl2) budgetEl2.value = state.budget || '';
       const locEl = document.getElementById('location');
       if (locEl) locEl.value = state.location || '';
       const comm = document.getElementById('comments');
@@ -465,10 +726,14 @@
         const cc = document.getElementById('charCount');
         if (cc) cc.textContent = comm.value.length;
       }
+      // Restore TOR file display
+      if (torFileName && state.tor_file) {
+        torFileName.textContent = '📎 ' + state.tor_file.name;
+      }
     }
     if (n === 4) {
-      const nameEl = document.getElementById('client_name');
-      if (nameEl) nameEl.value = state.client_name || '';
+      const nameEl2 = document.getElementById('client_name');
+      if (nameEl2) nameEl2.value = state.client_name || '';
       const ph = document.getElementById('client_phone');
       if (ph) ph.value = state.client_phone || '';
       const emailEle = document.getElementById('client_email');
@@ -499,14 +764,30 @@
       saveDraft();
     }
 
-    // Step 3 validation: date must be selected
+    // Step 3 validation: date must be selected and in future
     if (state.step === 3) {
       const dateVal = document.getElementById('event_date')?.value || '';
+      let hasError = false;
       if (!dateVal) {
         markError('event_date', 'Укажите дату мероприятия');
-        toast('Укажите дату мероприятия', 'error');
-        return;
+        hasError = true;
+      } else if (dateVal < today) {
+        markError('event_date', 'Дата мероприятия должна быть в будущем');
+        hasError = true;
       }
+
+      // Budget validation (if filled)
+      const budgetVal = document.getElementById('budget')?.value.trim() || '';
+      if (budgetVal) {
+        const num = parseFloat(budgetVal.replace(/[^\d.]/g, ''));
+        if (isNaN(num) || num <= 0) {
+          markError('budget', 'Введите корректный положительный бюджет');
+          hasError = true;
+        }
+      }
+
+      if (hasError) { toast('Проверьте правильность заполнения полей', 'error'); return; }
+
       state.event_date     = dateVal;
       state.event_duration = document.getElementById('event_duration')?.value || '4';
       state.budget         = document.getElementById('budget')?.value         || '';
@@ -602,14 +883,28 @@
     const summaryEl = document.getElementById('orderSummary');
     if (!summaryEl) return;
 
+    // Build model display
     let modelHTML = '';
-    if (state.model_id && state.model_photo) {
+    if (state.selected_models.length > 0) {
+      modelHTML = `<div class="summary-model-card">`;
+      state.selected_models.forEach(m => {
+        if (m.photo) {
+          modelHTML += `<img src="${escHtml(m.photo)}" alt="${escHtml(m.name)}" style="width:48px;height:60px;object-fit:cover;flex-shrink:0;margin-right:8px;" />`;
+        }
+      });
+      const names = state.selected_models.map(m => escHtml(m.name)).join(', ');
+      modelHTML += `<span>${names}</span></div>`;
+    } else if (state.model_id && state.model_photo) {
       modelHTML = `
         <div class="summary-model-card">
           <img src="${state.model_photo}" alt="${escHtml(state.model_name)}" />
           <span>${escHtml(state.model_name)}</span>
         </div>`;
     }
+
+    const modelDisplay = state.selected_models.length > 0
+      ? state.selected_models.map(m => escHtml(m.name)).join(', ')
+      : escHtml(state.model_name || 'Менеджер подберёт');
 
     summaryEl.innerHTML = `
       ${modelHTML}
@@ -619,14 +914,15 @@
         <button class="summary-edit-btn" onclick="window._booking.goToStepPublic(1)" title="Изменить">✎</button>
       </div>
       <div class="summary-row">
-        <label>Модель</label>
-        <span>${escHtml(state.model_name || 'Менеджер подберёт')}</span>
+        <label>Модель${state.selected_models.length > 1 ? 'и' : ''}</label>
+        <span>${modelDisplay}</span>
         <button class="summary-edit-btn" onclick="window._booking.goToStepPublic(2)" title="Изменить">✎</button>
       </div>
       ${state.event_date ? `<div class="summary-row"><label>Дата</label><span>${formatDate(state.event_date)}</span><button class="summary-edit-btn" onclick="window._booking.goToStepPublic(3)" title="Изменить">✎</button></div>` : ''}
       <div class="summary-row"><label>Продолжительность</label><span>${state.event_duration} ч</span></div>
       ${state.location ? `<div class="summary-row"><label>Место</label><span>${escHtml(state.location)}</span></div>` : ''}
       ${state.budget   ? `<div class="summary-row"><label>Бюджет</label><span>${escHtml(state.budget)}</span></div>` : ''}
+      ${state.tor_file ? `<div class="summary-row"><label>ТЗ / Файл</label><span>📎 ${escHtml(state.tor_file.name)}</span></div>` : ''}
       <div class="summary-divider"></div>
       <div class="summary-row">
         <label>Имя</label>
@@ -674,12 +970,16 @@
     try {
       const csrfToken = await getCsrfToken();
 
+      // Use first model_id for backward compat with API, send model_ids as comma-separated too
+      const modelIdForApi = state.selected_models.length > 0 ? state.selected_models[0].id : (state.model_id || null);
+      const modelIdsStr   = state.model_ids.length > 1 ? state.model_ids.join(',') : null;
+
       const body = {
         client_name:     state.client_name,
         client_phone:    state.client_phone,
         client_email:    state.client_email    || null,
         client_telegram: state.client_telegram || null,
-        model_id:        state.model_id        || null,
+        model_id:        modelIdForApi,
         event_type:      state.event_type,
         event_date:      state.event_date       || null,
         event_duration:  +state.event_duration  || 4,
@@ -687,6 +987,12 @@
         budget:          state.budget           || null,
         comments:        state.comments         || null,
       };
+
+      // Include additional model IDs in comments if multiple selected
+      if (modelIdsStr) {
+        const modelNames = state.selected_models.map(m => m.name).join(', ');
+        body.comments = (body.comments ? body.comments + '\n\n' : '') + `[Выбранные модели: ${modelNames}]`;
+      }
 
       // Attach UTM parameters if available
       if (window.NM && NM.analytics) {
@@ -698,11 +1004,27 @@
         }
       }
 
-      const result = await apiFetch('/orders', {
-        method: 'POST',
-        body: JSON.stringify(body),
-        headers: { 'x-csrf-token': csrfToken },
-      });
+      let result;
+
+      // If there's a TOR file, use FormData
+      if (state.tor_file) {
+        const formData = new FormData();
+        Object.entries(body).forEach(([k, v]) => { if (v !== null && v !== undefined) formData.append(k, v); });
+        formData.append('tor_file', state.tor_file, state.tor_file.name);
+        formData.append('_csrf', csrfToken);
+        const resp = await fetch('/api/orders', { method: 'POST', body: formData, headers: { 'x-csrf-token': csrfToken } });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.error || 'Ошибка при отправке заявки');
+        }
+        result = await resp.json();
+      } else {
+        result = await apiFetch('/orders', {
+          method: 'POST',
+          body: JSON.stringify(body),
+          headers: { 'x-csrf-token': csrfToken },
+        });
+      }
 
       clearDraft();
 
@@ -710,6 +1032,7 @@
         NM.analytics.event('booking_submitted', {
           event_type: state.event_type,
           model_id:   state.model_id,
+          model_count: state.selected_models.length,
           ...NM.analytics.getSavedUTM()
         });
       }
@@ -718,8 +1041,49 @@
       const orderNumDisplay = document.getElementById('orderNumDisplay');
       if (orderNumDisplay) orderNumDisplay.textContent = orderNum;
 
+      // Update status link with order number
       const statusLink = document.getElementById('statusPageLink');
       if (statusLink) statusLink.href = `/order-status.html?number=${encodeURIComponent(orderNum)}`;
+
+      // "Book another model" button — reset to step 1
+      const bookAnotherBtn = document.getElementById('bookAnotherBtn');
+      if (bookAnotherBtn) {
+        bookAnotherBtn.addEventListener('click', () => {
+          clearDraft();
+          Object.assign(state, {
+            model_id: null, model_ids: [], model_name: null, model_photo: null,
+            selected_models: [],
+            event_type: '', event_date: '', event_duration: '4',
+            location: '', budget: '', comments: '',
+            client_name: '', client_phone: '', client_email: '', client_telegram: '',
+            tor_file: null,
+          });
+          document.getElementById('step6')?.classList.remove('active');
+          goToStepInstant(1);
+        });
+      }
+
+      // Share booking confirmation
+      const shareBtn = document.getElementById('shareBookingBtn');
+      if (shareBtn) {
+        const shareUrl = `${location.origin}/order-status.html?number=${encodeURIComponent(orderNum)}`;
+        const shareText = `Моя заявка ${orderNum} — Nevesty Models`;
+        if (navigator.share) {
+          shareBtn.style.display = 'inline-flex';
+          shareBtn.addEventListener('click', async () => {
+            try { await navigator.share({ title: shareText, url: shareUrl }); } catch (_) {}
+          });
+        } else {
+          shareBtn.style.display = 'inline-flex';
+          shareBtn.title = 'Скопировать ссылку';
+          shareBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(shareUrl).then(() => {
+              shareBtn.textContent = '✓ Скопировано';
+              setTimeout(() => { shareBtn.textContent = '🔗 Поделиться'; }, 2000);
+            }).catch(() => {});
+          });
+        }
+      }
 
       const cabinetLink     = document.getElementById('cabinetLink');
       const cabinetPhoneHint = document.getElementById('cabinetPhoneHint');
@@ -756,9 +1120,9 @@
       document.getElementById('step6')?.classList.add('active');
       window.scrollTo({ top: 0, behavior: 'smooth' });
 
-      // Auto-redirect to homepage after 5 seconds
+      // Auto-redirect to homepage after 10 seconds (extended from 5 to give time to interact)
       const countdownEl = document.getElementById('redirectCountdown');
-      let countdown = 5;
+      let countdown = 10;
       if (countdownEl) {
         countdownEl.textContent = countdown;
         const timer = setInterval(() => {
@@ -766,6 +1130,10 @@
           countdownEl.textContent = countdown;
           if (countdown <= 0) { clearInterval(timer); window.location.href = '/'; }
         }, 1000);
+        // Cancel redirect if user interacts with success page
+        ['bookAnotherBtn', 'shareBookingBtn', 'statusPageLink', 'cabinetLink'].forEach(id => {
+          document.getElementById(id)?.addEventListener('click', () => clearInterval(timer), { once: true });
+        });
       }
     } catch (e) {
       if (typeof toast === 'function') toast(e.message || 'Ошибка при отправке заявки', 'error');
@@ -806,5 +1174,8 @@
   /* ─── Public API ─────────────────────────────────── */
   function goToStepPublic(n) { goToStep(n, n < state.step); }
 
-  window._booking = { nextStep, prevStep, selectModel, selectService, submit, checkStatus, goToStepPublic };
+  window._booking = {
+    nextStep, prevStep, selectModel, selectService, submit, checkStatus,
+    goToStepPublic, toggleModel, removeModel,
+  };
 })();

@@ -372,10 +372,13 @@
         <!-- ══════════ STEP 2 — MODEL SELECTION ══════════ -->
         <div class="booking-section" id="step2" role="region" aria-label="Шаг 2: Выбор модели">
           <h3>Выберите модель</h3>
-          <p class="hint">Необязательно — можно оформить заявку без выбора конкретной модели</p>
+          <p class="hint">Можно выбрать несколько моделей. Необязательно — оформите без выбора конкретной модели.</p>
 
           <!-- Pre-filled model card (shown when ?model_id= param is present) -->
           <div id="prefilledModelCard"></div>
+
+          <!-- Selected models chips -->
+          <div id="selectedModelChips" class="model-chips" role="list" aria-label="Выбранные модели" style="display:none"></div>
 
           <div class="model-select-none selected" id="noModelOption"
                role="button" tabindex="0" aria-label="Менеджер подберёт модель сам"
@@ -386,6 +389,11 @@
           <div style="margin-top:12px;font-size:0.75rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px;text-align:center">— или выберите из каталога —</div>
           <div class="model-select-grid" id="modelSelectGrid" role="group" aria-label="Список моделей">
             <!-- injected by JS -->
+          </div>
+          <div style="margin-top:12px;text-align:center">
+            <a href="/catalog.html" class="btn-add-model" aria-label="Открыть каталог для выбора модели">
+              + Добавить ещё модель из каталога →
+            </a>
           </div>
           <div class="booking-nav">
             <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
@@ -432,6 +440,22 @@
               placeholder="Особые требования, дресс-код, тематика проекта..."
               maxlength="500"></textarea>
             <div class="char-counter"><span id="charCount">0</span> / 500</div>
+          </div>
+
+          <!-- TOR / File attachment -->
+          <div class="form-group">
+            <label for="tor_file">
+              Прикрепить ТЗ / Бриф
+              <span style="color:var(--text-dim);font-size:0.65rem;text-transform:none;letter-spacing:0">(PDF / DOC, до 5 МБ, необязательно)</span>
+            </label>
+            <label class="file-upload-btn" for="tor_file" role="button" tabindex="0"
+              onkeydown="if(event.key==='Enter'||event.key===' ')document.getElementById('tor_file').click()">
+              <span class="file-upload-icon" aria-hidden="true">📎</span>
+              <span>Выбрать файл</span>
+            </label>
+            <input type="file" id="tor_file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;" aria-label="Прикрепить техническое задание" />
+            <div id="tor_file_name" class="file-upload-name" aria-live="polite"></div>
           </div>
 
           <div class="booking-nav">
