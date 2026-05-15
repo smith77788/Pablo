@@ -19,6 +19,25 @@ class MarketResearcher(FactoryAgent):
 фотографы и бренды для промо-акций. Анализируешь географию: Москва, СПб, города-миллионники.
 Выявляешь незакрытые потребности клиентов и рыночные ниши. Всё на русском языке."""
 
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента."""
+        try:
+            data = self.research_market(context)
+            ms = data.get("market_size", {})
+            segments = data.get("key_segments", [])
+            return {
+                "insights": [
+                    f"Рынок: {ms.get('total_rub_bln', '?')} млрд руб., рост {ms.get('growth_rate_pct', '?')}%/год",
+                    f"Онлайн-доля: {ms.get('online_share_pct', '?')}%",
+                ],
+                "trends": data.get("market_trends", []),
+                "opportunities": [o.get("opportunity", "") for o in data.get("market_opportunities", [])],
+                "priority": 7,
+            }
+        except Exception as e:
+            logger.error("[research/market_researcher] run error: %s", e)
+            return {"insights": [], "trends": [], "opportunities": [], "priority": 7}
+
     def research_market(self, context: dict) -> dict:
         """Исследует рынок агентств моделей в России."""
         try:
@@ -59,6 +78,23 @@ class CompetitorAnalyst(FactoryAgent):
 Оцениваешь их сильные и слабые стороны: портфолио, цены, скорость работы, клиентский сервис,
 онлайн-присутствие, уникальные предложения. Находишь конкурентные преимущества для Nevesty Models.
 Всё на русском языке."""
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента."""
+        try:
+            data = self.analyze_competitors(context)
+            advantages = data.get("nevesty_advantages", [])
+            gaps = data.get("nevesty_gaps", [])
+            opps = [o.get("opportunity", "") for o in data.get("differentiation_opportunities", [])]
+            return {
+                "insights": advantages[:2] + [f"Слабость: {g}" for g in gaps[:1]],
+                "trends": [data.get("competitive_landscape", "")],
+                "opportunities": opps,
+                "priority": 8,
+            }
+        except Exception as e:
+            logger.error("[research/competitor_analyst] run error: %s", e)
+            return {"insights": [], "trends": [], "opportunities": [], "priority": 8}
 
     def analyze_competitors(self, context: dict) -> dict:
         """Анализирует конкурентов и их позиции на рынке."""
@@ -101,6 +137,23 @@ class TrendSpotter(FactoryAgent):
 моделей (diversity, инклюзивность, нестандартные типажи), изменениями в Instagram и TikTok алгоритмах,
 ростом influencer-маркетинга, трендами на корпоративах в России (2024-2025).
 Переводишь тренды в конкретные рекомендации для бизнеса. Всё на русском языке."""
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента."""
+        try:
+            data = self.spot_trends(context)
+            fashion = [t.get("trend", "") for t in data.get("fashion_trends", [])]
+            digital = [t.get("recommendation", "") for t in data.get("digital_trends", [])]
+            seasonal = [f"{s.get('period')}: {s.get('event_type')}" for s in data.get("seasonal_opportunities", [])]
+            return {
+                "insights": fashion[:2],
+                "trends": digital[:2] + data.get("emerging_opportunities", [])[:2],
+                "opportunities": seasonal[:2],
+                "priority": 6,
+            }
+        except Exception as e:
+            logger.error("[research/trend_spotter] run error: %s", e)
+            return {"insights": [], "trends": [], "opportunities": [], "priority": 6}
 
     def spot_trends(self, context: dict) -> dict:
         """Отслеживает тренды в fashion и event индустрии."""
@@ -147,6 +200,23 @@ class InsightSynthesizer(FactoryAgent):
 Превращаешь разрозненную информацию в чёткие, actionable рекомендации для команды.
 Умеешь выделять главное, расставлять приоритеты, формулировать конкретные следующие шаги.
 Мыслишь стратегически, но даёшь тактические рекомендации с конкретными KPI. Всё на русском языке."""
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента."""
+        try:
+            data = self.synthesize_insights(context)
+            key_insights = [i.get("insight", "") for i in data.get("key_insights", [])]
+            priority_actions = [a.get("action", "") for a in data.get("priority_actions", [])]
+            quick_wins = [w.get("action", "") for w in data.get("quick_wins", [])]
+            return {
+                "insights": key_insights[:3],
+                "trends": [data.get("north_star_metric", "")],
+                "opportunities": priority_actions[:2] + quick_wins[:1],
+                "priority": 9,
+            }
+        except Exception as e:
+            logger.error("[research/insight_synthesizer] run error: %s", e)
+            return {"insights": [], "trends": [], "opportunities": [], "priority": 9}
 
     def synthesize_insights(self, context: dict) -> dict:
         """Синтезирует инсайты из всех источников в actionable рекомендации."""

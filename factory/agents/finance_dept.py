@@ -20,6 +20,23 @@ class RevenueForecaster(FactoryAgent):
 средний чек и частоту повторных заказов. Даёшь реалистичные прогнозы с верхней и нижней границей.
 Всё на русском языке."""
 
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента."""
+        try:
+            forecast = self.forecast_revenue(context)
+            return {
+                "insights": [
+                    f"Прогноз выручки: {forecast.get('forecast_rub', '?')} руб.",
+                    f"Диапазон: {forecast.get('forecast_low_rub', '?')}–{forecast.get('forecast_high_rub', '?')} руб.",
+                ],
+                "recommendations": forecast.get("recommended_actions", []),
+                "priority": 9,
+                "forecast": forecast,
+            }
+        except Exception as e:
+            logger.error("[finance/revenue_forecaster] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 9, "forecast": {}}
+
     def forecast_revenue(self, context: dict) -> dict:
         """Прогноз выручки на следующий месяц."""
         try:
@@ -54,6 +71,24 @@ class CostOptimizer(FactoryAgent):
 Ищешь дублирующиеся траты, слишком дорогие сервисы, возможности автоматизации вместо ручного труда.
 Предлагаешь конкретные меры с оценкой экономии в рублях. Всё на русском языке."""
 
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента."""
+        try:
+            savings = self.find_cost_savings(context)
+            quick_wins = [w.get("action", "") for w in savings.get("quick_wins", [])]
+            return {
+                "insights": [
+                    f"Потенциальная экономия: {savings.get('total_potential_savings_rub', '?')} руб.",
+                    f"Срок окупаемости: {savings.get('payback_period_months', '?')} мес.",
+                ],
+                "recommendations": quick_wins[:3],
+                "priority": 7,
+                "forecast": {"total_savings_rub": savings.get("total_potential_savings_rub", 0)},
+            }
+        except Exception as e:
+            logger.error("[finance/cost_optimizer] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 7, "forecast": {}}
+
     def find_cost_savings(self, context: dict) -> dict:
         """Находит возможности оптимизации расходов."""
         try:
@@ -86,6 +121,25 @@ class PricingStrategist(FactoryAgent):
 Типы мероприятий: корпоративы, свадьбы, выставки, промо-акции, показы мод, фотосессии.
 Анализируешь позиционирование (эконом, средний, премиум сегмент) и предлагаешь корректировку цен
 для максимизации прибыли и конкурентоспособности. Всё на русском языке."""
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента."""
+        try:
+            pricing = self.analyze_pricing(context)
+            recs = pricing.get("pricing_recommendations", [])
+            rec_texts = [f"{r.get('service')}: {r.get('recommended_price_rub')} руб." for r in recs[:2]]
+            return {
+                "insights": [
+                    f"Сегмент: {pricing.get('market_analysis', {}).get('segment', '?')}",
+                    f"Потенциальный доп. доход: {pricing.get('revenue_impact_estimate_rub', '?')} руб./мес.",
+                ],
+                "recommendations": rec_texts,
+                "priority": 8,
+                "forecast": {"revenue_impact_rub": pricing.get("revenue_impact_estimate_rub", 0)},
+            }
+        except Exception as e:
+            logger.error("[finance/pricing_strategist] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 8, "forecast": {}}
 
     def analyze_pricing(self, context: dict) -> dict:
         """Анализирует ценообразование и предлагает корректировки."""
@@ -122,6 +176,32 @@ class BudgetPlanner(FactoryAgent):
 основные каналы продвижения — Instagram, ВКонтакте, Telegram, SEO, сарафанное радио.
 Распределяешь бюджет между каналами с учётом ROI каждого, создаёшь резервы на непредвиденное.
 Даёшь конкретные цифры в рублях. Всё на русском языке."""
+
+    def run(self, context: dict) -> dict:
+        """Универсальный метод запуска агента."""
+        try:
+            budget = self.plan_budget(context)
+            mkt = budget.get("marketing_budget", {})
+            ops = budget.get("operations_budget", {})
+            return {
+                "insights": [
+                    f"Общий бюджет квартала: {budget.get('total_budget_rub', '?')} руб.",
+                    f"Маркетинг: {mkt.get('total_rub', '?')} руб., операции: {ops.get('total_rub', '?')} руб.",
+                ],
+                "recommendations": [
+                    f"Резерв: {budget.get('reserve_rub', '?')} руб. на непредвиденное",
+                ] + [a for a in budget.get("assumptions", [])[:2]],
+                "priority": 6,
+                "forecast": {
+                    "total_budget_rub": budget.get("total_budget_rub", 0),
+                    "marketing_rub": mkt.get("total_rub", 0),
+                    "operations_rub": ops.get("total_rub", 0),
+                    "reserve_rub": budget.get("reserve_rub", 0),
+                },
+            }
+        except Exception as e:
+            logger.error("[finance/budget_planner] run error: %s", e)
+            return {"insights": [], "recommendations": [], "priority": 6, "forecast": {}}
 
     def plan_budget(self, context: dict) -> dict:
         """Планирует бюджет на маркетинг и операции."""

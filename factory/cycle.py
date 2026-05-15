@@ -223,6 +223,70 @@ def _load_metrics_trend(metric_key: str, last_n: int = 5) -> list:
     return trend
 
 
+def _check_previous_actions_completion(prev_cycle: dict) -> str:
+    """Сравнивает рекомендации прошлого цикла с текущими метриками.
+
+    Возвращает текстовый отчёт для CEO о выполнении предыдущих growth_actions.
+    """
+    if not prev_cycle:
+        return "Предыдущий цикл отсутствует — первый запуск."
+
+    try:
+        ceo_prev = prev_cycle.get("phases", {}).get("ceo_synthesis", {})
+        prev_actions = ceo_prev.get("growth_actions", [])
+        prev_focus = ceo_prev.get("weekly_focus", "")
+        prev_health = ceo_prev.get("health_score", "?")
+        prev_ts = prev_cycle.get("timestamp", "неизвестно")[:19]
+
+        if not prev_actions:
+            return f"Цикл {prev_ts}: growth_actions не зафиксированы (health_score={prev_health})."
+
+        lines = [
+            f"Прошлый цикл [{prev_ts}]: health_score={prev_health}, фокус='{prev_focus}'",
+            f"Запланировано growth_actions: {len(prev_actions)}",
+            "",
+            "Рекомендации прошлого цикла:",
+        ]
+        for i, action in enumerate(prev_actions[:5], start=1):
+            dept = action.get("department", "?")
+            act_text = action.get("action", "—")
+            impact = action.get("expected_impact", "?")
+            lines.append(f"  {i}. [{dept}] {act_text} (ожидаемый эффект: {impact})")
+
+        lines.append("")
+        lines.append(
+            "CEO: оцени выполнение каждого из этих действий — что было сделано, "
+            "что дало результат, что провалилось и почему."
+        )
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.warning("_check_previous_actions_completion error: %s", e)
+        return "Ошибка при анализе предыдущего цикла."
+
+
+def _load_last_cycle_from_history() -> dict:
+    """Загружает данные предыдущего (предпоследнего) цикла из истории."""
+    import json
+    from pathlib import Path
+
+    history_dir = Path(__file__).parent / "history"
+    if not history_dir.exists():
+        return {}
+
+    cycles = sorted(history_dir.glob("cycle_*.json"))
+    # Берём предпоследний ([-2]), т.к. текущий ещё пишется
+    if len(cycles) < 2:
+        return {}
+
+    try:
+        with open(cycles[-2]) as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning("Failed to load prev cycle: %s", e)
+        return {}
+
+
 def run_cycle() -> dict:
     """Один полный цикл AI-офиса. Возвращает сводку."""
     cycle_start = time.time()
@@ -556,16 +620,25 @@ def run_cycle() -> dict:
             name = "ceo_synthesis"
             system_prompt = (
                 "Ты — CEO агентства моделей Nevesty Models. "
-                "Принимаешь стратегические решения на основе данных всех департаментов. "
+                "Отвечаешь за стратегическое направление компании. "
+                "Принимаешь решения на основе данных всех 9+ департаментов: аналитики, маркетинга, "
+                "продаж, операций, технологий, финансов, исследований, клиентского успеха и HR. "
+                "По итогам каждого цикла ты ОБЯЗАН: "
+                "1) Указать один конкретный эксперимент который нужно запустить в следующем цикле. "
+                "2) Выбрать один KPI который критично улучшить (с конкретным целевым значением). "
+                "3) Назвать одну главную причину успеха или неудачи прошлого цикла. "
                 "Мыслишь чётко, расставляешь приоритеты, даёшь конкретные указания команде. "
                 "Всё на русском языке."
             )
 
         ceo_agent = CEOSynthesisAgent()
 
-        # Load trend data for CEO context
+        # Load trend data and previous cycle for CEO context
         prev_cycles = _load_metrics_trend('phases.ceo_synthesis.health_score', last_n=3)
         trend_info = f"Тренд health_score за последние циклы: {[c.get('value') for c in prev_cycles]}" if prev_cycles else "Первый цикл (история отсутствует)"
+
+        prev_cycle_data = _load_last_cycle_from_history()
+        prev_actions_report = _check_previous_actions_completion(prev_cycle_data)
 
         context_str = json.dumps(all_department_results, ensure_ascii=False, indent=2, default=str)
 
@@ -576,12 +649,24 @@ def run_cycle() -> dict:
 
 {trend_info}
 
+Анализ предыдущего цикла:
+{prev_actions_report}
+
 Структура меморандума (строго следуй):
 ## 📊 Ключевые метрики
 - 3 главных показателя этой недели
 
 ## 🎯 Главное решение недели
 - Одно конкретное действие которое нужно выполнить
+
+## 🧪 Эксперимент следующего цикла
+- Один конкретный эксперимент с гипотезой и метрикой успеха
+
+## 📈 Приоритетный KPI
+- Один KPI с текущим значением и целевым
+
+## 🔍 Причина успеха/неудачи прошлого цикла
+- Одна конкретная причина с объяснением
 
 ## ⚠️ Риски
 - Главный риск (1 пункт)
@@ -592,7 +677,7 @@ def run_cycle() -> dict:
 ## 📋 Задачи команде
 - 3 конкретных задачи для операционной команды
 
-Пиши кратко, по делу, как настоящий CEO. Максимум 300 слов."""
+Пиши кратко, по делу, как настоящий CEO. Максимум 400 слов."""
 
         ceo_synthesis_prompt = (
             "Ты — CEO агентства моделей Nevesty Models. Получи отчёты всех департаментов и сделай выводы.\n\n"
@@ -600,10 +685,15 @@ def run_cycle() -> dict:
             + memo_prompt
             + "\n\nОТЧЁТЫ ДЕПАРТАМЕНТОВ:\n"
             + context_str
+            + "\n\nАНАЛИЗ ПРЕДЫДУЩЕГО ЦИКЛА:\n"
+            + prev_actions_report
             + "\n\nВерни JSON:\n"
             '{\n'
             '  "health_score": 75,\n'
             '  "weekly_focus": "Улучшить конверсию из просмотра каталога в заявку",\n'
+            '  "next_cycle_experiment": {"hypothesis": "...", "metric": "...", "department": "..."},\n'
+            '  "priority_kpi": {"name": "конверсия в заявку", "current": "2%", "target": "4%"},\n'
+            '  "prev_cycle_lesson": "Одна причина успеха или неудачи прошлого цикла",\n'
             '  "growth_actions": [\n'
             '    {"priority": 1, "action": "...", "department": "marketing", "expected_impact": "высокий"},\n'
             '    {"priority": 2, "action": "...", "department": "sales", "expected_impact": "средний"}\n'
@@ -637,6 +727,9 @@ def run_cycle() -> dict:
                         "health_score": ceo_synthesis.get("health_score"),
                         "weekly_focus": weekly_focus,
                         "memo": memo_text,
+                        "next_cycle_experiment": ceo_synthesis.get("next_cycle_experiment", {}),
+                        "priority_kpi": ceo_synthesis.get("priority_kpi", {}),
+                        "prev_cycle_lesson": ceo_synthesis.get("prev_cycle_lesson", ""),
                         "growth_actions": ceo_synthesis.get("growth_actions", []),
                         "risks": ceo_synthesis.get("risks", []),
                         "opportunities": ceo_synthesis.get("opportunities", []),
@@ -651,11 +744,25 @@ def run_cycle() -> dict:
             growth_actions_list = ceo_synthesis.get("growth_actions", [])
             actions_count = len(growth_actions_list)
             summary_lines.append(f"📋 CEO Growth Actions: {actions_count}")
+
+            # New CEO intelligence fields
+            next_exp = ceo_synthesis.get("next_cycle_experiment", {})
+            priority_kpi = ceo_synthesis.get("priority_kpi", {})
+            prev_lesson = ceo_synthesis.get("prev_cycle_lesson", "")
+            if next_exp:
+                summary_lines.append(f"🧪 Эксперимент: {next_exp.get('hypothesis', '—')[:60]}")
+            if priority_kpi:
+                summary_lines.append(f"📈 KPI: {priority_kpi.get('name', '—')} → {priority_kpi.get('target', '—')}")
+            if prev_lesson:
+                summary_lines.append(f"🔍 Урок: {prev_lesson[:80]}")
+
             logger.info(
-                "[CEOSynthesis] health=%s, focus=%s, actions=%s",
+                "[CEOSynthesis] health=%s, focus=%s, actions=%s, experiment=%s, kpi=%s",
                 ceo_synthesis.get("health_score"),
                 weekly_focus[:60] if weekly_focus else "—",
                 actions_count,
+                next_exp.get("hypothesis", "—")[:50] if next_exp else "—",
+                priority_kpi.get("name", "—") if priority_kpi else "—",
             )
 
             # Sync growth actions to bot DB and send CEO memo to Telegram
