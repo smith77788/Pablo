@@ -104,6 +104,17 @@
         </div>
       </div>
 
+      <!-- Telegram channel content -->
+      <div class="section-card" style="margin-bottom:24px" id="content-posts-card">
+        <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between">
+          <div class="section-card-title">📢 Контент для Telegram-канала</div>
+          <button class="topbar-btn" onclick="loadContent()">↺ Обновить</button>
+        </div>
+        <div class="section-card-body" id="content-posts-body">
+          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
+        </div>
+      </div>
+
       <!-- Experiment Results -->
       <div class="section-card" style="margin-bottom:24px" id="exp-results-card">
         <div class="section-card-header">
@@ -310,6 +321,40 @@ async function runCycle() {
   btn.textContent = '▶ Запустить цикл';
 }
 
+async function loadContent() {
+  const body = document.getElementById('content-posts-body');
+  try {
+    const rows = await _admin.apiFetch('/admin/factory-content');
+    if (!rows || !rows.length) {
+      body.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет сгенерированных постов. Запустите цикл Factory (Phase 14 — ContentGenerator).</div>';
+      return;
+    }
+    const statusColor = { pending: 'var(--gold)', done: 'var(--success)', skipped: 'var(--text-dim)' };
+    body.innerHTML = rows.map(r => `
+      <div style="border-bottom:1px solid var(--border);padding:16px;display:flex;gap:12px;align-items:flex-start">
+        <div style="flex:1">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+            <span style="font-size:0.75rem;background:rgba(201,169,110,0.15);color:var(--gold);padding:2px 8px;border-radius:10px">${_admin.escapeHtml(r.action_type||'post')}</span>
+            <span style="font-size:0.72rem;color:var(--text-dim)">${(r.created_at||'').slice(0,16).replace('T',' ')}</span>
+            <span style="font-size:0.72rem;color:${statusColor[r.status]||'var(--text-muted)'}">${r.status||'pending'}</span>
+          </div>
+          <p style="font-size:0.88rem;color:var(--text-muted);line-height:1.6;margin:0;white-space:pre-wrap">${_admin.escapeHtml((r.content||'').slice(0,600))}${(r.content||'').length>600?'…':''}</p>
+        </div>
+        <button onclick="copyPost(${r.id})" title="Скопировать" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;flex-shrink:0">📋</button>
+      </div>`).join('');
+
+    // Store posts for copy
+    window._contentPosts = rows;
+  } catch(e) {
+    body.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Постов нет (${_admin.escapeHtml(e.message)})</div>`;
+  }
+}
+
+function copyPost(id) {
+  const post = (window._contentPosts||[]).find(p => p.id === id);
+  if (post) _admin.copyToClipboard(post.content || '');
+}
+
 async function loadExperiments() {
   const body = document.getElementById('exp-results-body');
   try {
@@ -340,6 +385,7 @@ async function loadExperiments() {
 }
 
 loadData();
+loadContent();
 loadExperiments();
 setInterval(loadData, 30000);
 </script>

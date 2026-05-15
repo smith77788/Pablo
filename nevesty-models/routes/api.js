@@ -1741,6 +1741,26 @@ router.get('/admin/factory-experiments', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// ─── Factory channel posts (reads factory.db growth_actions for content) ─────
+router.get('/admin/factory-content', auth, async (req, res, next) => {
+  try {
+    const Database = require('better-sqlite3');
+    const factoryDbPath = require('path').join(__dirname, '../../factory/factory.db');
+    let rows = [];
+    try {
+      const fdb = new Database(factoryDbPath, { readonly: true });
+      rows = fdb.prepare(`
+        SELECT id, action_type, channel, action as content, status, created_at
+        FROM growth_actions
+        WHERE channel = 'telegram' AND action IS NOT NULL
+        ORDER BY created_at DESC LIMIT 20
+      `).all();
+      fdb.close();
+    } catch (_) {}
+    res.json(rows);
+  } catch(e) { next(e); }
+});
+
 // ─── DB stats endpoint ────────────────────────────────────────────────────────
 router.get('/admin/db-stats', auth, async (req, res, next) => {
   try {
