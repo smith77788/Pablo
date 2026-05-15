@@ -444,4 +444,18 @@
 
   render();
   _updateFavBadge();
+
+  // Auto-open model when page loaded via /model/:id SSR route
+  const autoOpenId = document.body.getAttribute('data-open-model');
+  if (autoOpenId) {
+    // Wait for models to load then open the modal
+    const waitAndOpen = () => {
+      if (typeof openModelModal === 'function') {
+        openModelModal(parseInt(autoOpenId));
+      } else {
+        setTimeout(waitAndOpen, 200);
+      }
+    };
+    setTimeout(waitAndOpen, 300);
+  }
 })();
