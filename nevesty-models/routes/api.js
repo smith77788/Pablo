@@ -50,6 +50,9 @@ try {
 let botInstance = null;
 function setBot(bot) { botInstance = bot; }
 
+// ─── MarkdownV2 escape helper ─────────────────────────────────────────────────
+const escMd = s => String(s || '').replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
+
 // ─── Audit log helper ─────────────────────────────────────────────────────────
 async function logAudit(req, action, entity, entityId, details) {
   try {
@@ -1277,9 +1280,7 @@ router.post('/admin/notify', auth, async (req, res, next) => {
     const text = sanitize(req.body.text, 1000);
     if (!text) return res.status(400).json({ error: 'Текст не может быть пустым' });
     if (botInstance?.notifyAdmin) {
-      // Escape both username and text for MarkdownV2 to prevent injection
-      const escMd = s => String(s || '').replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
-      await botInstance.notifyAdmin(`📢 *${escMd(req.admin.username)}:*\n${escMd(text)}`);
+      await botInstance.notifyAdmin(`📢 *${escMd(req.admin.username)}:*\n${escMd(text)}`, { parse_mode: 'MarkdownV2' });
     }
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -2474,7 +2475,8 @@ router.post('/client/review', clientRateLimit, async (req, res, next) => {
     if (botInstance?.notifyAdmin) {
       const stars = '⭐'.repeat(ratingNum);
       botInstance.notifyAdmin(
-        `💬 *Новый отзыв* (заявка ${order.order_number})\n${stars}\n_${reviewText.slice(0, 200)}_`
+        `💬 *Новый отзыв* \\(заявка ${escMd(order.order_number)}\\)\n${stars}\n_${escMd(reviewText.slice(0, 200))}_`,
+        { parse_mode: 'MarkdownV2' }
       ).catch(() => {});
     }
 
@@ -2656,8 +2658,8 @@ router.post('/webhooks/yookassa', async (req, res, next) => {
           }
           if (botInstance?.notifyAdmin) {
             botInstance.notifyAdmin(
-              `💳 *Оплата получена!* Заявка ${ord.order_number}
-Клиент: ${ord.client_name}`
+              `💳 *Оплата получена\\!* Заявка ${escMd(ord.order_number)}\nКлиент: ${escMd(ord.client_name)}`,
+              { parse_mode: 'MarkdownV2' }
             ).catch(() => {});
           }
         }
@@ -2718,8 +2720,8 @@ router.post('/webhooks/stripe', async (req, res, next) => {
           }
           if (botInstance?.notifyAdmin) {
             botInstance.notifyAdmin(
-              `💳 *Оплата Stripe получена!* Заявка ${ord.order_number}
-Клиент: ${ord.client_name}`
+              `💳 *Оплата Stripe получена\\!* Заявка ${escMd(ord.order_number)}\nКлиент: ${escMd(ord.client_name)}`,
+              { parse_mode: 'MarkdownV2' }
             ).catch(() => {});
           }
         }
