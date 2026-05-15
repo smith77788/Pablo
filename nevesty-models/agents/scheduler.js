@@ -306,6 +306,41 @@ setInterval(() => {
   }
 }, 60 * 1000); // каждую минуту
 
+// ─── Напоминание о незавершённых заявках (каждые 6 часов) ────────────────────
+
+setInterval(async () => {
+  try {
+    const staleBookings = await dbAll(`
+      SELECT s.chat_id, s.state, s.updated_at
+      FROM telegram_sessions s
+      WHERE s.state LIKE 'bk_%'
+        AND datetime(s.updated_at) < datetime('now', '-2 hours')
+        AND CAST(s.chat_id AS INTEGER) > 0
+    `).catch(() => []);
+
+    for (const s of staleBookings) {
+      try {
+        const TelegramBot = require('node-telegram-bot-api');
+        const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
+        await bot.sendMessage(s.chat_id,
+          '⏰ Вы начали оформлять заявку, но не завершили\\. Продолжить?', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '📋 Продолжить заявку', callback_data: 'bk_start' }],
+            [{ text: '❌ Отмена', callback_data: 'cancel_booking' }]
+          ]}
+        });
+      } catch {} // Ignore if user blocked bot
+    }
+
+    if (staleBookings.length > 0) {
+      console.log(`[Scheduler] Booking reminders sent: ${staleBookings.length}`);
+    }
+  } catch (e) {
+    console.error('[Scheduler] booking reminder error:', e.message);
+  }
+}, 6 * 60 * 60 * 1000);
+
 // ─── Запуск ──────────────────────────────────────────────────────────────────
 
 console.log('🧬 Living Organism Scheduler запущен (28 агентов, каждые 15 мин)');

@@ -369,6 +369,7 @@ async function showModel(chatId, modelId) {
       inline_keyboard: [
         m.available ? [{ text: '📝 Заказать эту модель', callback_data: `bk_model_${m.id}` }] : [],
         contactBtn,
+        [{ text: m.available ? '📅 Уточнить доступность' : '📞 Узнать о доступности', callback_data: `ask_availability_${m.id}` }],
         [{ text: '❤️ В избранное', callback_data: `fav_add_${m.id}` },
          { text: '💔 Убрать',      callback_data: `fav_remove_${m.id}` }],
         [{ text: '⚖️ Сравнить', callback_data: `compare_add_${m.id}` }],
@@ -3233,6 +3234,74 @@ function initBot(app) {
       return safeSend(chatId, '📞 Введите новый номер телефона:', {
         reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'profile' }]] }
       });
+    }
+
+    // ── Настройки уведомлений клиента
+    if (data === 'client_notif_settings') return showClientNotificationSettings(chatId);
+
+    if (data === 'client_notif_status') {
+      const prefs = await get('SELECT * FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null) || { notify_status: 1 };
+      await run(
+        `INSERT INTO client_prefs (chat_id, notify_status) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET notify_status=excluded.notify_status, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, prefs.notify_status ? 0 : 1]
+      ).catch(() => {});
+      return showClientNotificationSettings(chatId);
+    }
+
+    if (data === 'client_notif_promo') {
+      const prefs = await get('SELECT * FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null) || { notify_promo: 1 };
+      await run(
+        `INSERT INTO client_prefs (chat_id, notify_promo) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET notify_promo=excluded.notify_promo, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, prefs.notify_promo ? 0 : 1]
+      ).catch(() => {});
+      return showClientNotificationSettings(chatId);
+    }
+
+    if (data === 'client_notif_review') {
+      const prefs = await get('SELECT * FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null) || { notify_review: 1 };
+      await run(
+        `INSERT INTO client_prefs (chat_id, notify_review) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET notify_review=excluded.notify_review, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, prefs.notify_review ? 0 : 1]
+      ).catch(() => {});
+      return showClientNotificationSettings(chatId);
+    }
+
+    // ── Доступность модели
+    if (data.startsWith('ask_availability_')) {
+      const modelId = parseInt(data.replace('ask_availability_', ''));
+      const m = await get('SELECT name, available FROM models WHERE id=?', [modelId]).catch(() => null);
+      if (!m) return;
+      const availText = m.available
+        ? `✅ *${esc(m.name)}* доступна для заказа\\!\n\nЧтобы уточнить конкретные даты — напишите менеджеру или оформите заявку\\.`
+        : `⏳ *${esc(m.name)}* временно занята\\.\n\nОставьте заявку и мы уточним ближайшие свободные даты\\.`;
+      return safeSend(chatId, availText, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📋 Оформить заявку', callback_data: `bk_model_${modelId}` }],
+          [{ text: '📞 Менеджер', callback_data: 'msg_manager_start' }],
+          [{ text: '← К модели', callback_data: `cat_model_${modelId}` }]
+        ]}
+      });
+    }
+
+    // ── FAQ: отдельный вопрос
+    if (data.startsWith('faq_')) {
+      const idx = parseInt(data.replace('faq_', ''));
+      const faq = FAQ_ITEMS[idx];
+      if (!faq) return;
+      return safeSend(chatId, `*${esc(faq.q)}*\n\n${esc(faq.a)}`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '← Все вопросы', callback_data: 'faq' }],
+          [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }]
+        ]}
+      });
+    }
+
+    // ── Отмена незавершённой заявки (из напоминания)
+    if (data === 'cancel_booking') {
+      await clearSession(chatId);
+      return showMainMenu(chatId, q.from.first_name);
     }
   });
 

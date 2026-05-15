@@ -251,6 +251,16 @@ async function initDatabase() {
     await run('INSERT OR IGNORE INTO bot_settings (key,value) VALUES (?,?)', [key, value]);
   }
 
+  // Client notification preferences
+  await run(`CREATE TABLE IF NOT EXISTS client_prefs (
+    chat_id INTEGER PRIMARY KEY,
+    notify_status INTEGER DEFAULT 1,
+    notify_promo INTEGER DEFAULT 1,
+    notify_review INTEGER DEFAULT 1,
+    language TEXT DEFAULT 'ru',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+
   // Favorites table — wishlist for Telegram bot users
   await run(`CREATE TABLE IF NOT EXISTS favorites (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
