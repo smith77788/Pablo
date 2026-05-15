@@ -531,11 +531,11 @@ async function showAdminReviews(chatId, filter = 'pending', page = 0) {
       [PER_PAGE, page * PER_PAGE]
     ).catch(() => []);
 
-    // Filter tab buttons
+    // Filter tab buttons (rev_filter_* callbacks, also handled by adm_rev_* aliases in bot.js)
     const filterBtns = [
-      { text: filter === 'pending' ? '⏳ Ожидают ✓' : '⏳ Ожидают', callback_data: 'adm_rev_pending' },
-      { text: filter === 'approved' ? '✅ Одобренные ✓' : '✅ Одобренные', callback_data: 'adm_rev_approved' },
-      { text: filter === 'all' ? '📋 Все ✓' : '📋 Все', callback_data: 'adm_rev_all' },
+      { text: filter === 'pending' ? '🕐 Ожидают ✓' : '🕐 Ожидают', callback_data: 'rev_filter_pending' },
+      { text: filter === 'approved' ? '✅ Одобренные ✓' : '✅ Одобренные', callback_data: 'rev_filter_approved' },
+      { text: filter === 'all' ? '📋 Все ✓' : '📋 Все', callback_data: 'rev_filter_all' },
     ];
 
     if (!rows.length) {
@@ -552,11 +552,13 @@ async function showAdminReviews(chatId, filter = 'pending', page = 0) {
 
     for (const r of rows) {
       const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 1)));
-      const preview = r.text ? r.text.slice(0, 150) + (r.text.length > 150 ? '…' : '') : '—';
+      const preview = r.text ? r.text.slice(0, 100) + (r.text.length > 100 ? '…' : '') : '—';
       const statusIcon = r.approved ? '✅' : r.status === 'rejected' ? '❌' : '⏳';
-      const modelInfo = r.model_name ? ` \\| Модель: ${esc(r.model_name)}` : '';
+      const statusLabel = r.approved ? 'Одобрен' : r.status === 'rejected' ? 'Отклонён' : 'Ожидает';
+      const modelInfo = r.model_name ? ` \\| ${esc(r.model_name)}` : '';
+      const clientName = r.client_name || '—';
       text += `${statusIcon} *\\#${esc(String(r.id))}* ${stars}${modelInfo}\n`;
-      text += `👤 Клиент: \`${esc(String(r.client_chat_id || '—'))}\`\n`;
+      text += `👤 ${esc(clientName)} _\\(${esc(statusLabel)}\\)_\n`;
       text += `_${esc(preview)}_\n\n`;
 
       keyboard.push([

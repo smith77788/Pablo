@@ -7832,15 +7832,15 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       return showAdminReviewsPanel(chatId, 'pending', 0);
     }
-    if (data === 'adm_reviews_pending' || data === 'adm_rev_pending') {
+    if (data === 'adm_reviews_pending' || data === 'adm_rev_pending' || data === 'rev_filter_pending') {
       if (!isAdmin(chatId)) return;
       return showAdminReviewsPanel(chatId, 'pending', 0);
     }
-    if (data === 'adm_reviews_approved' || data === 'adm_rev_approved') {
+    if (data === 'adm_reviews_approved' || data === 'adm_rev_approved' || data === 'rev_filter_approved') {
       if (!isAdmin(chatId)) return;
       return showAdminReviewsPanel(chatId, 'approved', 0);
     }
-    if (data === 'adm_rev_all') {
+    if (data === 'adm_rev_all' || data === 'rev_filter_all') {
       if (!isAdmin(chatId)) return;
       return showAdminReviewsPanel(chatId, 'all', 0);
     }
@@ -7931,12 +7931,34 @@ function initBot(app) {
       } catch {}
       return showAdminReviewsPanel(chatId, 'pending', 0);
     }
+    if (data.startsWith('rev_delete_confirm_')) {
+      if (!isAdmin(chatId)) return;
+      const id = parseInt(data.replace('rev_delete_confirm_', ''));
+      if (!id || isNaN(id)) return bot.answerCallbackQuery(q.id, { text: '⚠️ Ошибка ID' }).catch(() => {});
+      await run('DELETE FROM reviews WHERE id=?', [id]).catch(() => {});
+      await bot.answerCallbackQuery(q.id, { text: '🗑️ Отзыв удалён' }).catch(() => {});
+      return showAdminReviewsPanel(chatId, 'all', 0);
+    }
     if (data.startsWith('rev_delete_')) {
       if (!isAdmin(chatId)) return;
       const id = parseInt(data.replace('rev_delete_', ''));
-      await run('DELETE FROM reviews WHERE id=?', [id]).catch(() => {});
-      await bot.answerCallbackQuery(q.id, { text: '🗑️ Удалён' }).catch(() => {});
-      return showAdminReviewsPanel(chatId, 'all', 0);
+      if (!id || isNaN(id)) return bot.answerCallbackQuery(q.id, { text: '⚠️ Ошибка ID' }).catch(() => {});
+      await bot.answerCallbackQuery(q.id).catch(() => {});
+      const rev = await get('SELECT id, client_name, rating FROM reviews WHERE id=?', [id]).catch(() => null);
+      const label = rev
+        ? esc(`#${rev.id} (${rev.client_name || '—'}, ${'⭐'.repeat(Math.min(5, rev.rating || 1))})`)
+        : esc(`#${id}`);
+      return safeSend(chatId, `🗑️ *Удалить отзыв ${label}?*\n\n_Это действие необратимо\\._`, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✅ Да, удалить', callback_data: `rev_delete_confirm_${id}` },
+              { text: '❌ Отмена', callback_data: 'adm_reviews' },
+            ],
+          ],
+        },
+      });
     }
     if (data.startsWith('rev_reply_')) {
       if (!isAdmin(chatId)) return;
