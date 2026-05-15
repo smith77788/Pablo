@@ -689,6 +689,61 @@
         font-size: 0.88rem;
         color: var(--text-muted);
       }
+
+      /* ── Pulse animation for "new" status badge ── */
+      @keyframes pulse-badge {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.55;
+        }
+      }
+      .status-badge.new {
+        animation: pulse-badge 2s ease-in-out infinite;
+      }
+
+      /* ── Toast notifications ── */
+      .toast-container {
+        position: fixed;
+        bottom: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        pointer-events: none;
+        width: 90vw;
+        max-width: 400px;
+      }
+      .toast {
+        background: rgba(40, 40, 50, 0.96);
+        color: #e2e2e2;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: 0.84rem;
+        border-left: 3px solid var(--gold, #d4af37);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        opacity: 0;
+        transform: translateY(12px);
+        transition:
+          opacity 0.3s ease,
+          transform 0.3s ease;
+        pointer-events: auto;
+        width: 100%;
+        text-align: center;
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .toast.toast-error {
+        border-left-color: #ef4444;
+        color: #fca5a5;
+      }
     </style>
     <!-- Google Analytics 4 (loads only if consent given) -->
     <script>
@@ -1227,7 +1282,13 @@
           d.className = 'toast' + (type === 'error' ? ' toast-error' : '');
           d.textContent = msg;
           tc.appendChild(d);
-          setTimeout(() => d.remove(), 4000);
+          // Trigger enter animation
+          setTimeout(() => d.classList.add('show'), 10);
+          // Fade out and remove
+          setTimeout(() => {
+            d.classList.remove('show');
+            setTimeout(() => d.remove(), 350);
+          }, 4000);
         }
 
         // ── Panel switching ───────────────────────────────────────────
@@ -1830,6 +1891,15 @@
 
           // Start polling fallback for order status updates
           startPolling();
+
+          // Pause polling when tab is hidden, resume when visible
+          document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+              stopPolling();
+            } else if (_phone) {
+              startPolling();
+            }
+          });
         }
 
         // Expose public API
