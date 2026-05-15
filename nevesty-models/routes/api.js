@@ -5777,6 +5777,46 @@ router.get('/admin/analytics/repeat-clients', auth, async (req, res) => {
   }
 });
 
+// ─── Analytics: Client Segmentation (RFM-inspired) ───────────────────────────
+router.get('/admin/analytics/client-segments', auth, async (req, res, next) => {
+  try {
+    const [vip, active, dormant, oneTime] = await Promise.all([
+      // VIP: 3+ completed orders
+      get(`SELECT COUNT(DISTINCT client_chat_id) as n FROM orders
+           WHERE client_chat_id IS NOT NULL AND status='completed'
+           GROUP BY client_chat_id HAVING COUNT(*)>=3`).then(() =>
+        get(`SELECT COUNT(*) as n FROM (
+          SELECT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND status='completed'
+          GROUP BY client_chat_id HAVING COUNT(*)>=3)`)
+      ),
+      // Active: ordered in last 60 days, < 3 completed orders
+      get(`SELECT COUNT(DISTINCT client_chat_id) as n FROM orders
+           WHERE client_chat_id IS NOT NULL
+             AND created_at >= datetime('now','-60 days')`),
+      // Dormant: had orders but nothing in last 90 days
+      get(`SELECT COUNT(*) as n FROM (
+          SELECT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL
+          GROUP BY client_chat_id
+          HAVING MAX(created_at) < datetime('now','-90 days'))`),
+      // One-time: exactly 1 order total
+      get(`SELECT COUNT(*) as n FROM (
+          SELECT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL
+          GROUP BY client_chat_id HAVING COUNT(*)=1)`),
+    ]);
+    res.json({
+      ok: true,
+      segments: {
+        vip: vip?.n || 0,
+        active: active?.n || 0,
+        dormant: dormant?.n || 0,
+        one_time: oneTime?.n || 0,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── Analytics: Heatmap (orders per day) ─────────────────────────────────────
 router.get('/admin/analytics/heatmap', auth, async (req, res, next) => {
   try {
