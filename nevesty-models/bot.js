@@ -2707,11 +2707,12 @@ async function showAdminSettings(chatId, section) {
     } catch (_) {}
     const on = v => (v === '0' ? '❌' : '✅');
     const text =
-      `📱 Соцсети\n\n` +
-      `📸 Instagram: ${insta || '—'}\n` +
+      `*📱 Соцсети*\n\n` +
+      `📸 Instagram: ${esc(insta || '—')}\n` +
       `${on(instaEnabled ?? '1')} Instagram включён\n` +
-      `📋 Постов в очереди: ${socialCount}`;
+      `📋 Постов в очереди: ${esc(String(socialCount))}`;
     return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
           [
@@ -5918,7 +5919,7 @@ function initBot(app) {
         reply_markup: {
           inline_keyboard: [
             [{ text: '✅ Да, отменить', callback_data: 'bk_cancel_confirm' }],
-            [{ text: '↩️ Вернуться', callback_data: 'main_menu' }],
+            [{ text: '↩️ Продолжить оформление', callback_data: 'bk_resume' }],
           ],
         },
       });
