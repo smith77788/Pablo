@@ -1105,7 +1105,8 @@ async function showModel(chatId, modelId, backBtn = null) {
     if (galleryUrls.length >= 2) {
       // Медиагруппа — caption только на первом фото
       const totalPhotos = galleryUrls.length;
-      const media = galleryUrls.slice(0, 8).map((url, i) => {
+      const maxPhotos = parseInt((await getSetting('model_max_photos').catch(() => '8')) || '8', 10) || 8;
+      const media = galleryUrls.slice(0, maxPhotos).map((url, i) => {
         const item = { type: 'photo', media: url };
         if (i === 0) {
           // Add photo count to caption header
@@ -2162,7 +2163,8 @@ async function showAdminModel(chatId, modelId) {
     if (m.photo_main && !galleryUrls.includes(m.photo_main)) galleryUrls.unshift(m.photo_main);
 
     if (galleryUrls.length >= 2) {
-      const media = galleryUrls.slice(0, 8).map((url, i, arr) => {
+      const maxPhotos = parseInt((await getSetting('model_max_photos').catch(() => '8')) || '8', 10) || 8;
+      const media = galleryUrls.slice(0, maxPhotos).map((url, i, arr) => {
         const item = { type: 'photo', media: url };
         if (i === arr.length - 1) {
           item.caption = text;
@@ -11651,14 +11653,12 @@ async function runAiMatch(chatId, userDesc) {
 
     if (!ANTHROPIC_API_KEY) {
       // Fallback: show first 3 without AI
-      const keyboard = models
-        .slice(0, 3)
-        .map(m => [
-          {
-            text: `💃 ${m.name} (${m.age || '?'}р, ${m.height || '?'}см, ${m.city || '—'})`,
-            callback_data: `model_${m.id}`,
-          },
-        ]);
+      const keyboard = models.slice(0, 3).map(m => [
+        {
+          text: `💃 ${m.name} (${m.age || '?'}р, ${m.height || '?'}см, ${m.city || '—'})`,
+          callback_data: `model_${m.id}`,
+        },
+      ]);
       keyboard.push([{ text: '🔍 Розширений пошук', callback_data: 'cat_search' }]);
       keyboard.push([{ text: '🏠 Головне меню', callback_data: 'main_menu' }]);
       return safeSend(chatId, '🤖 *Рекомендовані моделі:*\n\n_AI недоступний, показую популярні\\._', {
