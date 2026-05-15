@@ -480,6 +480,7 @@ async function initDatabase() {
   await run(`ALTER TABLE scheduled_broadcasts ADD COLUMN photo_url TEXT`).catch(() => {});
 
   // Indexes for frequent queries
+  await run(`CREATE INDEX IF NOT EXISTS idx_orders_manager ON orders(manager_id)`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_model_id ON orders(model_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_orders_client_chat ON orders(client_chat_id)`);
@@ -621,6 +622,23 @@ async function initDatabase() {
   if (reviewCount.n === 0) {
     await seedSampleReviews();
   }
+
+  // VACUUM every Sunday at 03:00
+  function scheduleVacuum() {
+    const now = new Date();
+    const nextSunday = new Date(now);
+    nextSunday.setDate(now.getDate() + (7 - now.getDay()) % 7 || 7);
+    nextSunday.setHours(3, 0, 0, 0);
+    const delay = nextSunday - now;
+    setTimeout(() => {
+      db.run('VACUUM', (err) => {
+        if (err) console.error('[DB] VACUUM error:', err.message);
+        else console.log('[DB] VACUUM completed');
+      });
+      scheduleVacuum(); // reschedule
+    }, delay);
+  }
+  scheduleVacuum();
 
   console.log('Database initialized');
 }
