@@ -260,9 +260,15 @@ app.use('/api', apiRouter);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 async function buildHealthResponse() {
+  const os = require('os');
   const pkg = require('./package.json');
   const mem = process.memoryUsage();
   const memMb = Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10;
+  const loadAvg = os.loadavg();
+  const freeMemMb = Math.round(os.freemem() / 1024 / 1024);
+  const totalMemMb = Math.round(os.totalmem() / 1024 / 1024);
+  const memUsedMb = Math.round(mem.rss / 1024 / 1024);
+  const memAlertMb = parseInt(process.env.MEMORY_ALERT_MB || '500');
   let dbStatus = 'ok';
   let factoryLastCycle = null;
   let ordersToday = 0;
@@ -309,10 +315,25 @@ async function buildHealthResponse() {
   const overallStatus = dbStatus === 'ok' ? 'ok' : 'degraded';
   return {
     status: overallStatus,
+    uptime_sec: uptime,
     timestamp: new Date().toISOString(),
     uptime,
     uptimeHuman: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
     version: pkg.version || '1.0.0',
+    memory: {
+      rss_mb: memUsedMb,
+      heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
+      heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024),
+      free_mb: freeMemMb,
+      total_mb: totalMemMb,
+      alert: memUsedMb > memAlertMb,
+    },
+    cpu: {
+      load_1m: Math.round(loadAvg[0] * 100) / 100,
+      load_5m: Math.round(loadAvg[1] * 100) / 100,
+      cores: os.cpus().length,
+    },
+    db: { status: dbStatus },
     components: {
       database: dbStatus,
       bot: botInstance ? 'ok' : 'not_initialized',
@@ -322,7 +343,7 @@ async function buildHealthResponse() {
     },
     metrics: {
       memory_mb: memMb,
-      memory_rss_mb: Math.round(mem.rss / 1024 / 1024),
+      memory_rss_mb: memUsedMb,
       orders_today: ordersToday,
       active_orders: activeOrders,
       models_count: modelsCount,
@@ -330,11 +351,7 @@ async function buildHealthResponse() {
     // Legacy fields kept for compatibility
     database: dbStatus,
     bot: botInstance ? 'connected' : 'not_initialized',
-    memory: {
-      rss: Math.round(mem.rss / 1024 / 1024) + 'MB',
-      heapUsed: Math.round(mem.heapUsed / 1024 / 1024) + 'MB',
-    },
-    memory_mb: Math.round(mem.rss / 1024 / 1024),
+    memory_mb: memUsedMb,
     ts: new Date().toISOString(),
   };
 }

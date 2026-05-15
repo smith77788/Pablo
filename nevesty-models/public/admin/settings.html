@@ -491,6 +491,16 @@
               </select>
             </div>
 
+            <div class="admin-form-group" style="margin-top:16px">
+              <label>Сортировка каталога</label>
+              <select class="admin-input" id="catalog_sort">
+                <option value="featured">По топу (featured першими)</option>
+                <option value="name">По алфавіту</option>
+                <option value="newest">По новизні</option>
+                <option value="rating">По рейтингу</option>
+              </select>
+            </div>
+
             <div class="toggle-row" style="margin-top:8px">
               <div class="toggle-row-info">
                 <div class="toggle-row-title">Показывать город</div>
@@ -1136,6 +1146,8 @@ async function loadSettings() {
     // Select fields
     const sortEl = document.getElementById('catalog_default_sort');
     if (sortEl) { const v = val('catalog_default_sort'); if (v) sortEl.value = v; }
+    const catalogSortEl = document.getElementById('catalog_sort');
+    if (catalogSortEl) { catalogSortEl.value = val('catalog_sort') || 'featured'; }
 
     // Toggle fields
     const toggleFields = [
@@ -1371,6 +1383,7 @@ async function saveCatalog(btn) {
       body: JSON.stringify({
         catalog_per_page:     document.getElementById('catalog_per_page').value,
         catalog_default_sort: document.getElementById('catalog_default_sort').value,
+        catalog_sort:         document.getElementById('catalog_sort')?.value || 'featured',
         catalog_show_city:    document.getElementById('catalog_show_city').checked  ? '1' : '0',
         catalog_badge_top:    document.getElementById('catalog_badge_top').checked  ? '1' : '0',
         cities_list:          document.getElementById('cities_list').value,
