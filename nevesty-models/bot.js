@@ -13301,359 +13301,368 @@ function _registerNewFeatures() {
 
   // ── Additional callback_query handlers ─────────────────────────────────────
   bot.on('callback_query', async q => {
-    const chatId = q.message.chat.id;
-    const msgId = q.message.message_id;
-    const data = q.data;
     try {
-      await bot.answerCallbackQuery(q.id);
-    } catch {}
-
-    // Favorites / Wishlist list
-    if (data === 'fav_list') {
-      return showWishlist(chatId, 0);
-    }
-    if (data.startsWith('fav_list_')) {
-      const page = parseInt(data.replace('fav_list_', '')) || 0;
-      return showWishlist(chatId, page);
-    }
-
-    // View model from wishlist
-    if (data.startsWith('fav_view_')) {
-      return showModel(chatId, parseInt(data.replace('fav_view_', '')));
-    }
-
-    // Wishlist clear — ask confirmation
-    if (data === 'fav_clear') {
-      return safeSend(chatId, '🗑 *Очистить список избранного?*\n\nВсе модели будут удалены из вашего списка\\.', {
-        parse_mode: 'MarkdownV2',
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '✅ Да, очистить', callback_data: 'fav_clear_yes' },
-              { text: '❌ Отмена', callback_data: 'fav_list_0' },
-            ],
-          ],
-        },
-      });
-    }
-
-    // Wishlist clear — confirmed
-    if (data === 'fav_clear_yes') {
+      const chatId = q.message.chat.id;
+      const msgId = q.message.message_id;
+      const data = q.data;
       try {
-        await bot.answerCallbackQuery(q.id, { text: '🗑 Список очищен' });
+        await bot.answerCallbackQuery(q.id);
       } catch {}
-      await run('DELETE FROM wishlists WHERE chat_id=?', [String(chatId)]).catch(() => {});
-      await run('DELETE FROM favorites WHERE chat_id=?', [String(chatId)]).catch(() => {});
-      return safeSend(chatId, '🗑 *Список избранного очищен\\.*\n\nВы можете добавить новые модели из каталога\\.', {
-        parse_mode: 'MarkdownV2',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '💃 Перейти в каталог', callback_data: 'cat_cat__0' }],
-            [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
-          ],
-        },
-      });
-    }
 
-    // Favorites add — add to wishlists, answer callback with toast, edit keyboard
-    if (data.startsWith('fav_add_')) {
-      const favModelId = parseInt(data.replace('fav_add_', ''));
-      if (!favModelId || favModelId <= 0) return;
-      const favModel = await get('SELECT id, name FROM models WHERE id=?', [favModelId]).catch(() => null);
-      if (!favModel) {
+      // Favorites / Wishlist list
+      if (data === 'fav_list') {
+        return showWishlist(chatId, 0);
+      }
+      if (data.startsWith('fav_list_')) {
+        const page = parseInt(data.replace('fav_list_', '')) || 0;
+        return showWishlist(chatId, page);
+      }
+
+      // View model from wishlist
+      if (data.startsWith('fav_view_')) {
+        return showModel(chatId, parseInt(data.replace('fav_view_', '')));
+      }
+
+      // Wishlist clear — ask confirmation
+      if (data === 'fav_clear') {
+        return safeSend(chatId, '🗑 *Очистить список избранного?*\n\nВсе модели будут удалены из вашего списка\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '✅ Да, очистить', callback_data: 'fav_clear_yes' },
+                { text: '❌ Отмена', callback_data: 'fav_list_0' },
+              ],
+            ],
+          },
+        });
+      }
+
+      // Wishlist clear — confirmed
+      if (data === 'fav_clear_yes') {
         try {
-          await bot.answerCallbackQuery(q.id, { text: '❌ Модель не найдена', show_alert: true });
+          await bot.answerCallbackQuery(q.id, { text: '🗑 Список очищен' });
+        } catch {}
+        await run('DELETE FROM wishlists WHERE chat_id=?', [String(chatId)]).catch(() => {});
+        await run('DELETE FROM favorites WHERE chat_id=?', [String(chatId)]).catch(() => {});
+        return safeSend(chatId, '🗑 *Список избранного очищен\\.*\n\nВы можете добавить новые модели из каталога\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '💃 Перейти в каталог', callback_data: 'cat_cat__0' }],
+              [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
+            ],
+          },
+        });
+      }
+
+      // Favorites add — add to wishlists, answer callback with toast, edit keyboard
+      if (data.startsWith('fav_add_')) {
+        const favModelId = parseInt(data.replace('fav_add_', ''));
+        if (!favModelId || favModelId <= 0) return;
+        const favModel = await get('SELECT id, name FROM models WHERE id=?', [favModelId]).catch(() => null);
+        if (!favModel) {
+          try {
+            await bot.answerCallbackQuery(q.id, { text: '❌ Модель не найдена', show_alert: true });
+          } catch {}
+          return;
+        }
+        await addToWishlist(chatId, favModelId);
+        try {
+          await bot.answerCallbackQuery(q.id, { text: STRINGS.wishlistAdded });
+        } catch {}
+        try {
+          const favKb = (q.message.reply_markup?.inline_keyboard || []).map(row =>
+            row.map(btn =>
+              btn.callback_data === `fav_add_${favModelId}`
+                ? { text: '💔 Убрать из избранного', callback_data: `fav_remove_${favModelId}` }
+                : btn
+            )
+          );
+          await bot.editMessageReplyMarkup({ inline_keyboard: favKb }, { chat_id: chatId, message_id: msgId });
         } catch {}
         return;
       }
-      await addToWishlist(chatId, favModelId);
-      try {
-        await bot.answerCallbackQuery(q.id, { text: STRINGS.wishlistAdded });
-      } catch {}
-      try {
-        const favKb = (q.message.reply_markup?.inline_keyboard || []).map(row =>
-          row.map(btn =>
-            btn.callback_data === `fav_add_${favModelId}`
-              ? { text: '💔 Убрать из избранного', callback_data: `fav_remove_${favModelId}` }
-              : btn
-          )
-        );
-        await bot.editMessageReplyMarkup({ inline_keyboard: favKb }, { chat_id: chatId, message_id: msgId });
-      } catch {}
-      return;
-    }
 
-    // Favorites remove — remove from wishlists, answer callback with toast, edit keyboard
-    if (data.startsWith('fav_remove_')) {
-      const remModelId = parseInt(data.replace('fav_remove_', ''));
-      if (!remModelId || remModelId <= 0) return;
-      await removeFromWishlist(chatId, remModelId);
-      try {
-        await bot.answerCallbackQuery(q.id, { text: STRINGS.wishlistRemoved });
-      } catch {}
-      try {
-        const remKb = q.message.reply_markup?.inline_keyboard || [];
-        if (remKb.some(row => row.some(btn => btn.callback_data === `fav_view_${remModelId}`))) {
-          return showWishlist(chatId, 0);
-        }
-        const newRemKb = remKb.map(row =>
-          row.map(btn =>
-            btn.callback_data === `fav_remove_${remModelId}`
-              ? { text: '❤️ В избранное', callback_data: `fav_add_${remModelId}` }
-              : btn
-          )
-        );
-        await bot.editMessageReplyMarkup({ inline_keyboard: newRemKb }, { chat_id: chatId, message_id: msgId });
-      } catch {}
-      return;
-    }
-
-    // Category search
-    if (data.startsWith('cat_search_cat_')) {
-      const cat = data.replace('cat_search_cat_', '');
-      if (!['fashion', 'commercial', 'events'].includes(cat)) return;
-      return showCatalog(chatId, cat, 0);
-    }
-
-    // Quick booking
-    if (data === 'bk_quick') return bkQuickStart(chatId);
-
-    // Tech spec generator: start
-    if (data === 'techspec_start') return startTechSpec(chatId);
-
-    // Tech spec generator: confirm — send to manager
-    if (data.startsWith('techspec_confirm_yes_')) {
-      const tsChatId = data.replace('techspec_confirm_yes_', '');
-      if (String(chatId) !== String(tsChatId)) return;
-      const sess = await getSession(chatId);
-      const sd = sessionData(sess);
-      if (!sd || !sd.spec) {
-        return safeSend(chatId, '❌ Данные не найдены\\. Попробуйте ещё раз\\.', {
-          parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
-        });
-      }
-      try {
-        const orderNum = generateOrderNumber();
-        const tsClientName = [q.from.first_name, q.from.last_name].filter(Boolean).join(' ') || 'Клиент (тех. задание)';
-        await run(
-          `INSERT INTO orders (order_number,client_name,client_phone,event_type,comments,client_chat_id,status)
-           VALUES (?,?,?,'other',?,?,'new')`,
-          [orderNum, tsClientName, '', sd.spec, String(chatId)]
-        );
-        const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
-        await clearSession(chatId);
-        await safeSend(
-          chatId,
-          `✅ *Техническое задание отправлено менеджеру\\!*\n\nНомер заявки: *${esc(orderNum)}*\n\nМы свяжемся с вами в ближайшее время\\.`,
-          {
-            parse_mode: 'MarkdownV2',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }],
-                [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
-              ],
-            },
+      // Favorites remove — remove from wishlists, answer callback with toast, edit keyboard
+      if (data.startsWith('fav_remove_')) {
+        const remModelId = parseInt(data.replace('fav_remove_', ''));
+        if (!remModelId || remModelId <= 0) return;
+        await removeFromWishlist(chatId, remModelId);
+        try {
+          await bot.answerCallbackQuery(q.id, { text: STRINGS.wishlistRemoved });
+        } catch {}
+        try {
+          const remKb = q.message.reply_markup?.inline_keyboard || [];
+          if (remKb.some(row => row.some(btn => btn.callback_data === `fav_view_${remModelId}`))) {
+            return showWishlist(chatId, 0);
           }
-        );
-        if (order) {
-          const adminIds = await getAdminChatIds();
-          const clientName = [q.from.first_name, q.from.last_name].filter(Boolean).join(' ') || 'Клиент';
-          const username = q.from.username ? ` @${q.from.username}` : '';
-          await Promise.allSettled(
-            adminIds.map(id =>
-              safeSend(
-                id,
-                `📋 *Новое тех\\. задание от клиента*\n\nОт: ${esc(clientName)}${esc(username)}\nTelegram ID: \`${chatId}\`\n\n${esc(sd.spec)}\n\n📋 Заявка: *${esc(orderNum)}*`,
-                {
-                  parse_mode: 'MarkdownV2',
-                  reply_markup: {
-                    inline_keyboard: [
-                      [
-                        { text: '✅ Подтвердить', callback_data: `adm_confirm_${order.id}` },
-                        { text: '❌ Отклонить', callback_data: `adm_reject_${order.id}` },
-                      ],
-                      [{ text: '📋 Открыть заявку', callback_data: `adm_order_${order.id}` }],
-                    ],
-                  },
-                }
-              )
+          const newRemKb = remKb.map(row =>
+            row.map(btn =>
+              btn.callback_data === `fav_remove_${remModelId}`
+                ? { text: '❤️ В избранное', callback_data: `fav_add_${remModelId}` }
+                : btn
             )
           );
+          await bot.editMessageReplyMarkup({ inline_keyboard: newRemKb }, { chat_id: chatId, message_id: msgId });
+        } catch {}
+        return;
+      }
+
+      // Category search
+      if (data.startsWith('cat_search_cat_')) {
+        const cat = data.replace('cat_search_cat_', '');
+        if (!['fashion', 'commercial', 'events'].includes(cat)) return;
+        return showCatalog(chatId, cat, 0);
+      }
+
+      // Quick booking
+      if (data === 'bk_quick') return bkQuickStart(chatId);
+
+      // Tech spec generator: start
+      if (data === 'techspec_start') return startTechSpec(chatId);
+
+      // Tech spec generator: confirm — send to manager
+      if (data.startsWith('techspec_confirm_yes_')) {
+        const tsChatId = data.replace('techspec_confirm_yes_', '');
+        if (String(chatId) !== String(tsChatId)) return;
+        const sess = await getSession(chatId);
+        const sd = sessionData(sess);
+        if (!sd || !sd.spec) {
+          return safeSend(chatId, '❌ Данные не найдены\\. Попробуйте ещё раз\\.', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
+          });
         }
-      } catch (e) {
-        console.error('[Bot] techspec submit:', e.message);
+        try {
+          const orderNum = generateOrderNumber();
+          const tsClientName =
+            [q.from.first_name, q.from.last_name].filter(Boolean).join(' ') || 'Клиент (тех. задание)';
+          await run(
+            `INSERT INTO orders (order_number,client_name,client_phone,event_type,comments,client_chat_id,status)
+           VALUES (?,?,?,'other',?,?,'new')`,
+            [orderNum, tsClientName, '', sd.spec, String(chatId)]
+          );
+          const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
+          await clearSession(chatId);
+          await safeSend(
+            chatId,
+            `✅ *Техническое задание отправлено менеджеру\\!*\n\nНомер заявки: *${esc(orderNum)}*\n\nМы свяжемся с вами в ближайшее время\\.`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }],
+                  [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
+                ],
+              },
+            }
+          );
+          if (order) {
+            const adminIds = await getAdminChatIds();
+            const clientName = [q.from.first_name, q.from.last_name].filter(Boolean).join(' ') || 'Клиент';
+            const username = q.from.username ? ` @${q.from.username}` : '';
+            await Promise.allSettled(
+              adminIds.map(id =>
+                safeSend(
+                  id,
+                  `📋 *Новое тех\\. задание от клиента*\n\nОт: ${esc(clientName)}${esc(username)}\nTelegram ID: \`${chatId}\`\n\n${esc(sd.spec)}\n\n📋 Заявка: *${esc(orderNum)}*`,
+                  {
+                    parse_mode: 'MarkdownV2',
+                    reply_markup: {
+                      inline_keyboard: [
+                        [
+                          { text: '✅ Подтвердить', callback_data: `adm_confirm_${order.id}` },
+                          { text: '❌ Отклонить', callback_data: `adm_reject_${order.id}` },
+                        ],
+                        [{ text: '📋 Открыть заявку', callback_data: `adm_order_${order.id}` }],
+                      ],
+                    },
+                  }
+                )
+              )
+            );
+          }
+        } catch (e) {
+          console.error('[Bot] techspec submit:', e.message);
+          await clearSession(chatId);
+          return safeSend(chatId, '❌ *Не удалось отправить заявку\\.* Попробуйте позже или напишите менеджеру\\.', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '💬 Менеджер', callback_data: 'contact_mgr' }]] },
+          });
+        }
+        return;
+      }
+
+      // Tech spec generator: cancel
+      if (data.startsWith('techspec_confirm_no_')) {
         await clearSession(chatId);
-        return safeSend(chatId, '❌ *Не удалось отправить заявку\\.* Попробуйте позже или напишите менеджеру\\.', {
+        return showMainMenu(chatId, q.from.first_name);
+      }
+
+      // Height search manual input
+      if (data === 'search_height_input') return showHeightSearchInput(chatId);
+
+      // srch_height / srch_age — text-input prompts (alias callbacks)
+      if (data === 'srch_height') {
+        await setSession(chatId, 'search_height', {});
+        return safeSend(chatId, '📏 Введите диапазон роста, например: *165\\-175*\nИли просто одно число: *170*', {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '💬 Менеджер', callback_data: 'contact_mgr' }]] },
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'cat_search' }]] },
         });
       }
-      return;
-    }
-
-    // Tech spec generator: cancel
-    if (data.startsWith('techspec_confirm_no_')) {
-      await clearSession(chatId);
-      return showMainMenu(chatId, q.from.first_name);
-    }
-
-    // Height search manual input
-    if (data === 'search_height_input') return showHeightSearchInput(chatId);
-
-    // srch_height / srch_age — text-input prompts (alias callbacks)
-    if (data === 'srch_height') {
-      await setSession(chatId, 'search_height', {});
-      return safeSend(chatId, '📏 Введите диапазон роста, например: *165\\-175*\nИли просто одно число: *170*', {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'cat_search' }]] },
-      });
-    }
-    if (data === 'srch_age') {
-      await setSession(chatId, 'search_age', {});
-      return safeSend(chatId, '🎂 Введите диапазон возраста, например: *22\\-28*\nИли одно число: *25*', {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'cat_search' }]] },
-      });
-    }
-
-    // Admin dashboard
-    if (data === 'adm_dashboard') {
-      if (!isAdmin(chatId)) return;
-      return showAdminDashboard(chatId);
-    }
-
-    // ── Model comparison
-    if (data.startsWith('compare_add_')) {
-      const modelId = parseInt(data.replace('compare_add_', ''));
-      return addToCompare(chatId, modelId);
-    }
-    if (data === 'compare_show') {
-      return showComparison(chatId);
-    }
-    if (data === 'compare_clear') {
-      _compareLists.delete(String(chatId));
-      return safeSend(chatId, '🗑 Список сравнения очищен\.', {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] },
-      });
-    }
-
-    // ── AI bio generator
-    if (data.startsWith('adm_ai_bio_apply_')) {
-      if (!isAdmin(chatId)) return;
-      const modelId = parseInt(data.replace('adm_ai_bio_apply_', ''));
-      const session = await getSession(chatId);
-      const d = sessionData(session);
-      const bio = d?.ai_bio;
-      if (!bio) {
-        return safeSend(chatId, '❌ Описание не найдено\. Сгенерируйте заново\.', {
+      if (data === 'srch_age') {
+        await setSession(chatId, 'search_age', {});
+        return safeSend(chatId, '🎂 Введите диапазон возраста, например: *22\\-28*\nИли одно число: *25*', {
           parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [[{ text: '🤖 Сгенерировать', callback_data: `adm_ai_bio_${modelId}` }]] },
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'cat_search' }]] },
         });
       }
-      await run('UPDATE models SET bio=? WHERE id=?', [bio, modelId]).catch(() => {});
-      await clearSession(chatId);
-      return safeSend(chatId, '✅ Описание сохранено\!', {
-        parse_mode: 'MarkdownV2',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${modelId}` }],
-            [{ text: '← Карточка', callback_data: `adm_model_${modelId}` }],
-          ],
-        },
-      });
-    }
-    if (data.startsWith('adm_ai_bio_')) {
-      if (!isAdmin(chatId)) return;
-      const modelId = parseInt(data.replace('adm_ai_bio_', ''));
-      return generateAiBio(chatId, modelId);
-    }
 
-    // ── Model confirm booking: mdl_confirm_{orderId}
-    if (data.startsWith('mdl_confirm_')) {
-      const orderId = parseInt(data.replace('mdl_confirm_', ''));
-      if (!orderId) return;
-      const order = await get(
-        `SELECT o.*,m.name as model_name,m.telegram_chat_id as model_chat_id
+      // Admin dashboard
+      if (data === 'adm_dashboard') {
+        if (!isAdmin(chatId)) return;
+        return showAdminDashboard(chatId);
+      }
+
+      // ── Model comparison
+      if (data.startsWith('compare_add_')) {
+        const modelId = parseInt(data.replace('compare_add_', ''));
+        return addToCompare(chatId, modelId);
+      }
+      if (data === 'compare_show') {
+        return showComparison(chatId);
+      }
+      if (data === 'compare_clear') {
+        _compareLists.delete(String(chatId));
+        return safeSend(chatId, '🗑 Список сравнения очищен\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] },
+        });
+      }
+
+      // ── AI bio generator
+      if (data.startsWith('adm_ai_bio_apply_')) {
+        if (!isAdmin(chatId)) return;
+        const modelId = parseInt(data.replace('adm_ai_bio_apply_', ''));
+        const session = await getSession(chatId);
+        const d = sessionData(session);
+        const bio = d?.ai_bio;
+        if (!bio) {
+          return safeSend(chatId, '❌ Описание не найдено\. Сгенерируйте заново\.', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '🤖 Сгенерировать', callback_data: `adm_ai_bio_${modelId}` }]] },
+          });
+        }
+        await run('UPDATE models SET bio=? WHERE id=?', [bio, modelId]).catch(() => {});
+        await clearSession(chatId);
+        return safeSend(chatId, '✅ Описание сохранено\!', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '✏️ Редактировать', callback_data: `adm_editmodel_${modelId}` }],
+              [{ text: '← Карточка', callback_data: `adm_model_${modelId}` }],
+            ],
+          },
+        });
+      }
+      if (data.startsWith('adm_ai_bio_')) {
+        if (!isAdmin(chatId)) return;
+        const modelId = parseInt(data.replace('adm_ai_bio_', ''));
+        return generateAiBio(chatId, modelId);
+      }
+
+      // ── Model confirm booking: mdl_confirm_{orderId}
+      if (data.startsWith('mdl_confirm_')) {
+        const orderId = parseInt(data.replace('mdl_confirm_', ''));
+        if (!orderId) return;
+        const order = await get(
+          `SELECT o.*,m.name as model_name,m.telegram_chat_id as model_chat_id
          FROM orders o LEFT JOIN models m ON o.model_id=m.id
          WHERE o.id=?`,
-        [orderId]
-      ).catch(() => null);
-      if (!order) return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
-      // Verify the sender is indeed the assigned model
-      if (String(order.model_chat_id) !== String(chatId)) {
-        return safeSend(chatId, '❌ Эта заявка не назначена вам\\.', { parse_mode: 'MarkdownV2' });
+          [orderId]
+        ).catch(() => null);
+        if (!order) return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
+        // Verify the sender is indeed the assigned model
+        if (String(order.model_chat_id) !== String(chatId)) {
+          return safeSend(chatId, '❌ Эта заявка не назначена вам\\.', { parse_mode: 'MarkdownV2' });
+        }
+        const noteText = 'Модель подтвердила участие';
+        get('SELECT * FROM order_notes WHERE order_id=? AND admin_note=? LIMIT 1', [orderId, noteText])
+          .then(existing => {
+            if (!existing) {
+              run('INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)', [orderId, noteText]).catch(() => {});
+            }
+          })
+          .catch(() => {});
+        await safeSend(
+          chatId,
+          `✅ *Вы подтвердили участие в заявке \\#${esc(order.order_number || String(orderId))}*\n\nМенеджер будет уведомлён\\.`,
+          { parse_mode: 'MarkdownV2' }
+        );
+        // Notify all admins
+        const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+        for (const adminId of adminIds) {
+          safeSend(
+            adminId,
+            `✅ Модель *${esc(order.model_name || '—')}* подтвердила заявку *\\#${esc(order.order_number || String(orderId))}*`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]],
+              },
+            }
+          ).catch(() => {});
+        }
+        return;
       }
-      const noteText = 'Модель подтвердила участие';
-      get('SELECT * FROM order_notes WHERE order_id=? AND admin_note=? LIMIT 1', [orderId, noteText])
-        .then(existing => {
-          if (!existing) {
-            run('INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)', [orderId, noteText]).catch(() => {});
-          }
-        })
-        .catch(() => {});
-      await safeSend(
-        chatId,
-        `✅ *Вы подтвердили участие в заявке \\#${esc(order.order_number || String(orderId))}*\n\nМенеджер будет уведомлён\\.`,
-        { parse_mode: 'MarkdownV2' }
-      );
-      // Notify all admins
-      const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
-      for (const adminId of adminIds) {
-        safeSend(
-          adminId,
-          `✅ Модель *${esc(order.model_name || '—')}* подтвердила заявку *\\#${esc(order.order_number || String(orderId))}*`,
-          {
-            parse_mode: 'MarkdownV2',
-            reply_markup: { inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]] },
-          }
-        ).catch(() => {});
-      }
-      return;
-    }
 
-    // ── Model reject booking: mdl_reject_{orderId}
-    if (data.startsWith('mdl_reject_')) {
-      const orderId = parseInt(data.replace('mdl_reject_', ''));
-      if (!orderId) return;
-      const order = await get(
-        `SELECT o.*,m.name as model_name,m.telegram_chat_id as model_chat_id
+      // ── Model reject booking: mdl_reject_{orderId}
+      if (data.startsWith('mdl_reject_')) {
+        const orderId = parseInt(data.replace('mdl_reject_', ''));
+        if (!orderId) return;
+        const order = await get(
+          `SELECT o.*,m.name as model_name,m.telegram_chat_id as model_chat_id
          FROM orders o LEFT JOIN models m ON o.model_id=m.id
          WHERE o.id=?`,
-        [orderId]
-      ).catch(() => null);
-      if (!order) return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
-      // Verify the sender is indeed the assigned model
-      if (String(order.model_chat_id) !== String(chatId)) {
-        return safeSend(chatId, '❌ Эта заявка не назначена вам\\.', { parse_mode: 'MarkdownV2' });
+          [orderId]
+        ).catch(() => null);
+        if (!order) return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
+        // Verify the sender is indeed the assigned model
+        if (String(order.model_chat_id) !== String(chatId)) {
+          return safeSend(chatId, '❌ Эта заявка не назначена вам\\.', { parse_mode: 'MarkdownV2' });
+        }
+        const noteText = 'Модель отклонила участие';
+        get('SELECT * FROM order_notes WHERE order_id=? AND admin_note=? LIMIT 1', [orderId, noteText])
+          .then(existing => {
+            if (!existing) {
+              run('INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)', [orderId, noteText]).catch(() => {});
+            }
+          })
+          .catch(() => {});
+        await safeSend(
+          chatId,
+          `❌ *Вы отклонили участие в заявке \\#${esc(order.order_number || String(orderId))}*\n\nМенеджер будет уведомлён\\.`,
+          { parse_mode: 'MarkdownV2' }
+        );
+        // Notify all admins
+        const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+        for (const adminId of adminIds) {
+          safeSend(
+            adminId,
+            `❌ Модель *${esc(order.model_name || '—')}* отклонила заявку *\\#${esc(order.order_number || String(orderId))}*\\. Необходимо выбрать другую модель\\.`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]],
+              },
+            }
+          ).catch(() => {});
+        }
+        return;
       }
-      const noteText = 'Модель отклонила участие';
-      get('SELECT * FROM order_notes WHERE order_id=? AND admin_note=? LIMIT 1', [orderId, noteText])
-        .then(existing => {
-          if (!existing) {
-            run('INSERT INTO order_notes (order_id, admin_note) VALUES (?,?)', [orderId, noteText]).catch(() => {});
-          }
-        })
-        .catch(() => {});
-      await safeSend(
-        chatId,
-        `❌ *Вы отклонили участие в заявке \\#${esc(order.order_number || String(orderId))}*\n\nМенеджер будет уведомлён\\.`,
-        { parse_mode: 'MarkdownV2' }
-      );
-      // Notify all admins
-      const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
-      for (const adminId of adminIds) {
-        safeSend(
-          adminId,
-          `❌ Модель *${esc(order.model_name || '—')}* отклонила заявку *\\#${esc(order.order_number || String(orderId))}*\\. Необходимо выбрать другую модель\\.`,
-          {
-            parse_mode: 'MarkdownV2',
-            reply_markup: { inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]] },
-          }
-        ).catch(() => {});
-      }
-      return;
+    } catch (e) {
+      console.error('[Bot] _registerNewFeatures callback_query unhandled:', e.message);
     }
   });
 
