@@ -1,90 +1,108 @@
-const CACHE_NAME = 'nm-v3';
+'use strict';
+
+const STATIC_CACHE = 'nevesty-static-v4';
+const API_CACHE    = 'nevesty-api-v1';
+const IMAGE_CACHE  = 'nevesty-images-v1';
+
+// All current caches — anything else will be deleted on activate
+const CURRENT_CACHES = [STATIC_CACHE, API_CACHE, IMAGE_CACHE, 'nm-pending-forms'];
+
 const PRECACHE_URLS = [
   '/',
   '/index.html',
   '/catalog.html',
+  '/model.html',
+  '/booking.html',
   '/pricing.html',
   '/about.html',
-  '/booking.html',
+  '/contact.html',
+  '/reviews.html',
+  '/404.html',
+  '/offline.html',
   '/cabinet.html',
   '/cases.html',
-  '/reviews.html',
   '/faq.html',
-  '/contact.html',
   '/favorites.html',
   '/order-status.html',
-  '/offline.html',
+  '/compare.html',
+  '/search.html',
+  '/privacy.html',
+  '/webapp.html',
   '/css/main.css',
+  '/js/main.js',
+  '/js/catalog.js',
+  '/js/booking.js',
   '/js/analytics.js',
   '/js/darkmode.js',
-  '/js/booking.js'
+  '/js/cookie-consent.js',
+  '/manifest.json',
 ];
 
-// Install: precache static assets
+// ── Install: precache static assets ──────────────────────────────────────────
 self.addEventListener('install', event => {
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(PRECACHE_URLS))
-      .then(() => self.skipWaiting())
+    caches.open(STATIC_CACHE).then(cache =>
+      cache.addAll(
+        PRECACHE_URLS.map(url => new Request(url, { credentials: 'same-origin' }))
+      ).catch(err => console.warn('[SW] Precache partial failure:', err))
+    )
   );
 });
 
-// Activate: clean up old caches
+// ── Activate: delete stale caches ────────────────────────────────────────────
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys =>
+    caches.keys().then(names =>
       Promise.all(
-        keys
-          .filter(key => key !== CACHE_NAME)
-          .map(key => caches.delete(key))
+        names
+          .filter(name => !CURRENT_CACHES.includes(name))
+          .map(name => caches.delete(name))
       )
     ).then(() => self.clients.claim())
   );
 });
 
-// Fetch strategy
+// ── Fetch routing ─────────────────────────────────────────────────────────────
 self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Only handle same-origin and uploads
-  if (url.origin !== location.origin) return;
+  // Only handle same-origin GET requests
+  if (request.method !== 'GET') return;
+  if (url.origin !== self.location.origin) return;
 
-  // Images from /uploads/ — CacheFirst with 7-day TTL
+  // Uploads: CacheFirst with 7-day TTL
   if (url.pathname.startsWith('/uploads/')) {
-    event.respondWith(cacheFirstWithTTL(request, 7 * 24 * 60 * 60 * 1000));
+    event.respondWith(cacheFirstWithTTL(request, IMAGE_CACHE, 7 * 24 * 60 * 60 * 1000));
     return;
   }
 
-  // Static assets (CSS, JS, fonts, SVG, icons) — CacheFirst
-  if (
-    url.pathname.match(/\.(css|js|woff2?|ttf|otf|svg|png|jpg|jpeg|webp|ico)$/)
-  ) {
-    event.respondWith(cacheFirst(request));
+  // API: NetworkFirst with 5-second timeout, fallback to API_CACHE
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(networkFirstWithTimeout(request, API_CACHE, 5000));
     return;
   }
 
-  // HTML pages and API — NetworkFirst
-  if (
-    request.headers.get('accept')?.includes('text/html') ||
-    url.pathname.startsWith('/api/')
-  ) {
-    event.respondWith(networkFirst(request));
+  // Static assets (CSS, JS, fonts, images, icons): CacheFirst
+  if (url.pathname.match(/\.(css|js|woff2?|ttf|otf|svg|png|jpg|jpeg|webp|ico)$/)) {
+    event.respondWith(cacheFirst(request, STATIC_CACHE));
     return;
   }
 
-  // Default — NetworkFirst
-  event.respondWith(networkFirst(request));
+  // HTML navigation and everything else: NetworkFirst
+  event.respondWith(networkFirst(request, STATIC_CACHE));
 });
 
-// CacheFirst strategy
-async function cacheFirst(request) {
-  const cached = await caches.match(request);
+// ── Strategy: CacheFirst ──────────────────────────────────────────────────────
+async function cacheFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
   if (cached) return cached;
+
   try {
     const response = await fetch(request);
     if (response.ok) {
-      const cache = await caches.open(CACHE_NAME);
       cache.put(request, response.clone());
     }
     return response;
@@ -93,29 +111,26 @@ async function cacheFirst(request) {
   }
 }
 
-// CacheFirst with TTL for images
-async function cacheFirstWithTTL(request, ttlMs) {
-  const cache = await caches.open(CACHE_NAME);
+// ── Strategy: CacheFirst with TTL (for /uploads/) ────────────────────────────
+async function cacheFirstWithTTL(request, cacheName, ttlMs) {
+  const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
   if (cached) {
     const dateHeader = cached.headers.get('sw-cached-date');
-    if (dateHeader) {
-      const age = Date.now() - parseInt(dateHeader, 10);
-      if (age < ttlMs) return cached;
-    } else {
+    if (!dateHeader || Date.now() - parseInt(dateHeader, 10) < ttlMs) {
       return cached;
     }
   }
+
   try {
     const response = await fetch(request);
     if (response.ok) {
-      // Clone with added timestamp header
       const headers = new Headers(response.headers);
       headers.set('sw-cached-date', String(Date.now()));
       const timestamped = new Response(await response.blob(), {
         status: response.status,
         statusText: response.statusText,
-        headers
+        headers,
       });
       cache.put(request, timestamped);
     }
@@ -126,35 +141,60 @@ async function cacheFirstWithTTL(request, ttlMs) {
   }
 }
 
-// NetworkFirst strategy
-async function networkFirst(request) {
+// ── Strategy: NetworkFirst ────────────────────────────────────────────────────
+async function networkFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
   try {
     const response = await fetch(request);
-    if (response.ok && request.method === 'GET') {
-      const cache = await caches.open(CACHE_NAME);
+    if (response.ok) {
       cache.put(request, response.clone());
     }
     return response;
   } catch {
-    const cached = await caches.match(request);
+    const cached = await cache.match(request);
     if (cached) return cached;
     return offlineFallback(request);
   }
 }
 
-// Offline fallback
-async function offlineFallback(request) {
-  if (request.headers.get('accept')?.includes('text/html')) {
-    const cached = await caches.match('/offline.html');
+// ── Strategy: NetworkFirst with timeout (for /api/) ───────────────────────────
+async function networkFirstWithTimeout(request, cacheName, timeoutMs) {
+  const cache = await caches.open(cacheName);
+
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('SW timeout')), timeoutMs)
+  );
+
+  try {
+    const response = await Promise.race([fetch(request), timeoutPromise]);
+    if (response.ok) {
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await cache.match(request);
     if (cached) return cached;
+    return new Response(JSON.stringify({ error: 'Нет подключения к сети' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  }
+}
+
+// ── Offline fallback ──────────────────────────────────────────────────────────
+async function offlineFallback(request) {
+  const accept = request.headers.get('accept') || '';
+  if (accept.includes('text/html') || request.mode === 'navigate') {
+    const page = await caches.match('/offline.html');
+    if (page) return page;
   }
   return new Response('Нет подключения к сети', {
     status: 503,
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
   });
 }
 
-// Background Sync — retry failed form submissions
+// ── Background Sync — retry failed form submissions ───────────────────────────
 self.addEventListener('sync', event => {
   if (event.tag === 'nm-form-sync') {
     event.waitUntil(replayPendingForms());
@@ -165,8 +205,7 @@ async function replayPendingForms() {
   let pending = [];
   try {
     const cache = await caches.open('nm-pending-forms');
-    const keys = await cache.keys();
-    pending = keys;
+    pending = await cache.keys();
   } catch { return; }
 
   for (const req of pending) {
@@ -177,16 +216,20 @@ async function replayPendingForms() {
         await cache.delete(req);
       }
     } catch {
-      // Keep in cache, will retry on next sync
+      // Keep in queue — will retry on next sync event
     }
   }
 }
 
-// Push Notifications — stub for future use
+// ── Push Notifications ────────────────────────────────────────────────────────
 self.addEventListener('push', event => {
   if (!event.data) return;
   let data = {};
-  try { data = event.data.json(); } catch { data = { title: 'Nevesty Models', body: event.data.text() }; }
+  try {
+    data = event.data.json();
+  } catch {
+    data = { title: 'Nevesty Models', body: event.data.text() };
+  }
 
   const options = {
     body: data.body || 'У вас новое сообщение',
@@ -194,7 +237,7 @@ self.addEventListener('push', event => {
     badge: '/icons/icon-192.svg',
     tag: data.tag || 'nm-notification',
     data: { url: data.url || '/' },
-    actions: data.actions || []
+    actions: data.actions || [],
   };
 
   event.waitUntil(

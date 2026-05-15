@@ -1,22 +1,22 @@
 {
   "name": "Nevesty Models",
   "short_name": "Nevesty",
-  "description": "Агентство профессиональных моделей — Fashion, Commercial, Events",
+  "description": "Профессиональное модельное агентство — бронирование онлайн",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#080808",
   "theme_color": "#C9A96E",
   "lang": "ru",
   "orientation": "portrait-primary",
+  "categories": ["business", "lifestyle"],
   "icons": [
     {"src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "maskable any"},
     {"src": "/icons/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable any"}
   ],
   "screenshots": [
-    {"src": "/og-image.jpg", "sizes": "1200x630", "type": "image/jpeg", "form_factor": "wide", "label": "Nevesty Models — главная страница"},
+    {"src": "/og-image.jpg", "sizes": "1200x630", "type": "image/jpeg", "form_factor": "wide",   "label": "Nevesty Models — главная страница"},
     {"src": "/og-image.jpg", "sizes": "1200x630", "type": "image/jpeg", "form_factor": "narrow", "label": "Nevesty Models — каталог моделей"}
   ],
-  "categories": ["business", "lifestyle"],
   "shortcuts": [
     {
       "name": "Каталог моделей",
@@ -26,7 +26,7 @@
       "icons": [{"src": "/icons/icon-192.svg", "sizes": "192x192"}]
     },
     {
-      "name": "Оставить заявку",
+      "name": "Забронировать",
       "short_name": "Заявка",
       "description": "Оформить бронирование модели",
       "url": "/booking.html",
