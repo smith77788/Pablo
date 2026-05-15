@@ -1484,6 +1484,37 @@ router.patch('/admin/models/:id/restore', auth, async (req, res, next) => {
   }
 });
 
+// POST aliases for archive/restore (PATCH routes above are canonical)
+router.post('/admin/models/:id/archive', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const m = await get('SELECT id, name FROM models WHERE id=?', [id]);
+    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
+    await run('UPDATE models SET archived=1, available=0 WHERE id=?', [id]);
+    cache.delByPrefix('catalog:');
+    await logAudit(req, 'archive', 'model', id, { name: m.name });
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/admin/models/:id/restore', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const m = await get('SELECT id, name FROM models WHERE id=?', [id]);
+    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
+    await run('UPDATE models SET archived=0 WHERE id=?', [id]);
+    cache.delByPrefix('catalog:');
+    await logAudit(req, 'restore', 'model', id, { name: m.name });
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── Models (admin CRUD) ──────────────────────────────────────────────────────
 router.post(
   '/admin/models',
@@ -4777,6 +4808,15 @@ router.post('/admin/factory/run', auth, async (req, res, next) => {
       env: { ...process.env },
     });
     proc.unref();
+    // Notify admins via Telegram that a cycle was manually triggered
+    if (botInstance?.notifyAdmin) {
+      botInstance
+        .notifyAdmin(
+          `🏭 *AI Factory* — цикл запущен вручную\nАдмин: *${escMd(req.admin?.username || 'unknown')}*\nРезультат придёт через несколько минут\\.`,
+          { parse_mode: 'MarkdownV2' }
+        )
+        .catch(() => {});
+    }
     res.json({ message: 'Цикл Factory запущен в фоне. Результаты появятся через несколько минут.' });
   } catch (e) {
     next(e);
@@ -5115,6 +5155,71 @@ router.get('/admin/factory/status', auth, async (req, res, next) => {
     }
   } catch (e) {
     res.json({ available: false, status: 'error', error: e.message });
+  }
+});
+
+// ─── Factory cycle-complete webhook (Factory → Bot notification) ──────────────
+// POST /api/admin/factory/cycle-complete
+// Called by factory after each AI cycle. Sends summary to all admins via Telegram.
+// Auth: Bearer JWT (admin token) OR FACTORY_WEBHOOK_SECRET header x-factory-secret
+router.post('/admin/factory/cycle-complete', async (req, res, next) => {
+  try {
+    // Accept either a valid admin JWT OR the FACTORY_WEBHOOK_SECRET header
+    const factorySecret = process.env.FACTORY_WEBHOOK_SECRET;
+    const headerSecret = req.headers['x-factory-secret'];
+    const authHeader = req.headers['authorization'] || '';
+    let authorized = false;
+
+    if (factorySecret && headerSecret === factorySecret) {
+      authorized = true;
+    } else if (authHeader.startsWith('Bearer ')) {
+      const token = authHeader.slice(7);
+      try {
+        if (!process.env.JWT_SECRET) throw new Error('no secret');
+        jwt.verify(token, process.env.JWT_SECRET);
+        authorized = true;
+      } catch (_) {}
+    }
+
+    if (!authorized) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { summary, insights, actions, duration_seconds } = req.body || {};
+
+    if (!summary && !insights && !actions) {
+      return res.status(400).json({ error: 'Provide at least summary, insights or actions' });
+    }
+
+    // Build MarkdownV2 notification
+    const dur = Number.isFinite(Number(duration_seconds)) ? Math.round(Number(duration_seconds)) : null;
+    let msg = `🤖 *AI Factory — Цикл завершён*\n`;
+    if (dur !== null) msg += `\n⏱ Длительность: ${escMd(String(dur))} сек`;
+    if (summary) msg += `\n📝 ${escMd(String(summary))}`;
+
+    if (Array.isArray(insights) && insights.length > 0) {
+      msg += `\n\n📊 *Инсайты:*`;
+      insights.slice(0, 5).forEach(i => {
+        msg += `\n• ${escMd(String(i))}`;
+      });
+    }
+
+    if (Array.isArray(actions) && actions.length > 0) {
+      msg += `\n\n🎯 *Действия:*`;
+      actions.slice(0, 5).forEach(a => {
+        msg += `\n• ${escMd(String(a))}`;
+      });
+    }
+
+    msg += `\n\n[Подробнее в панели](/admin/factory)`;
+
+    if (botInstance?.notifyAdmin) {
+      await botInstance.notifyAdmin(msg, { parse_mode: 'MarkdownV2' });
+    }
+
+    res.json({ ok: true, notified: !!botInstance?.notifyAdmin });
+  } catch (e) {
+    next(e);
   }
 });
 
