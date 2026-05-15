@@ -2728,6 +2728,24 @@ html.light .services {
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s infinite;
 }
+.skeleton-text.short {
+  width: 60%;
+}
+
+/* ─── DARK MODE (prefers-color-scheme: dark) ─────────────────────────── */
+/* Site is dark by default. This block ensures explicit dark-preference
+   users get the canonical dark palette even if no html class is set.   */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --border-color: #2d3748;
+    --card-bg: #0f3460;
+    --accent: #e94560;
+  }
+}
 
 /* ─── COOKIE BANNER (gold accent) ────────────────────────── */
 .cookie-banner {
