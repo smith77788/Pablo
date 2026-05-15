@@ -78,6 +78,14 @@ try {
   app.use(helmet.frameguard({ action: 'sameorigin' }));
 } catch {}
 
+// ─── X-Request-ID (audit tracing) ────────────────────────────────────────────
+const { randomUUID } = require('crypto');
+app.use((req, res, next) => {
+  req.id = req.headers['x-request-id'] || randomUUID();
+  res.setHeader('X-Request-ID', req.id);
+  next();
+});
+
 // ─── Admin route security headers ────────────────────────────────────────────
 app.use('/admin', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -97,7 +105,7 @@ try {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later.' },
-    skip: (req) => req.path.startsWith('/api/admin/') && !!req.headers.authorization,
+    skip: (req) => req.path.startsWith('/api/health') || (req.path.startsWith('/api/admin/') && !!req.headers.authorization),
   });
 
   // Auth endpoints — strict (5 per 15 minutes per IP)
