@@ -487,6 +487,32 @@
           <div class="stat-card-value" id="s_deal_days">—</div>
           <div class="stat-card-icon">📅</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Конверсія</div>
+          <div class="stat-card-value gold" id="s_conversion">—</div>
+          <div class="stat-card-icon">📈</div>
+          <div class="kpi-delta" id="d_trend"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Середній бюджет</div>
+          <div class="stat-card-value" id="s_avg_budget">—</div>
+          <div class="stat-card-icon">💳</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Цикл угоди (дн.)</div>
+          <div class="stat-card-value" id="s_avg_cycle">—</div>
+          <div class="stat-card-icon">⏱️</div>
+        </div>
+      </div>
+
+      <!-- ══════════════════ TOP MODELS ══════════════════ -->
+      <div class="section-card" style="margin-bottom:24px" id="topModelsCard">
+        <div class="section-card-header">
+          <div class="section-card-title">🏆 Топ моделей по заявкам</div>
+        </div>
+        <div class="section-card-body padded" id="topModelsList">
+          <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+        </div>
       </div>
 
       <!-- ══════════════════ RECENT ACTIVITY FEED ══════════════════ -->
@@ -803,6 +829,49 @@ async function loadDashboard() {
     setVal('s_active', stats.active_orders);
     setVal('s_models', `${stats.available_models}/${stats.total_models}`);
     setVal('s_unread', stats.unread_messages || 0);
+
+    // Enhanced metrics
+    if (stats.conversion_rate !== undefined) {
+      setVal('s_conversion', stats.conversion_rate.toFixed(1) + '%');
+    }
+    if (stats.avg_order_budget) {
+      setVal('s_avg_budget', Math.round(stats.avg_order_budget).toLocaleString('ru-RU') + ' ₽');
+    }
+    if (stats.avg_cycle_days) {
+      setVal('s_avg_cycle', stats.avg_cycle_days + ' дн');
+    }
+
+    // Orders trend indicator
+    const trend = stats.orders_trend;
+    const dTrend = document.getElementById('d_trend');
+    if (trend && dTrend) {
+      const arrow = trend.direction === 'up' ? '↑' : trend.direction === 'down' ? '↓' : '→';
+      const sign  = trend.delta >= 0 ? '+' : '';
+      dTrend.textContent = `${arrow} ${sign}${trend.delta} за 7 дн (вс пред.)`;
+      dTrend.className = 'kpi-delta' + (trend.direction === 'down' ? ' down' : '');
+    }
+
+    // Top models list
+    const topModelsEl = document.getElementById('topModelsList');
+    if (topModelsEl && stats.top_models && stats.top_models.length) {
+      const maxCount = stats.top_models[0].order_count || 1;
+      topModelsEl.innerHTML = stats.top_models.map((m, i) => {
+        const pct = maxCount > 0 ? Math.round((m.order_count / maxCount) * 100) : 0;
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        return `<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <span style="width:24px;text-align:center;font-size:1rem">${medal}</span>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <a href="/admin/models.html?id=${m.id}" style="color:var(--text);text-decoration:none;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%">${_admin.escapeHtml(m.name || '—')}</a>
+              <span style="font-size:0.8rem;color:var(--text-dim);white-space:nowrap">${m.order_count} заявок</span>
+            </div>
+            <div style="background:var(--border);border-radius:2px;height:4px"><div style="background:var(--gold);width:${pct}%;height:4px;border-radius:2px;transition:width 0.5s"></div></div>
+          </div>
+        </div>`;
+      }).join('');
+    } else if (topModelsEl) {
+      topModelsEl.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Нет данных</div>';
+    }
 
     // 🔔 New orders badge pill + quick-action badge
     const pill     = document.getElementById('newOrdersPill');

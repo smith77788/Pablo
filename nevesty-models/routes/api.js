@@ -508,12 +508,30 @@ router.get('/admin/agent-logs', auth, async (req, res, next) => {
 // ─── Stats ────────────────────────────────────────────────────────────────────
 router.get('/admin/stats', auth, async (req, res, next) => {
   try {
-    const [total, newO, active, totalM, availM] = await Promise.all([
+    const [total, newO, active, totalM, availM, convRow, avgBudgetRow, trend7d, trendPrev7d, avgCycleRow] = await Promise.all([
       get('SELECT COUNT(*) as n FROM orders'),
       get("SELECT COUNT(*) as n FROM orders WHERE status = 'new'"),
       get("SELECT COUNT(*) as n FROM orders WHERE status IN ('reviewing','confirmed','in_progress')"),
       get('SELECT COUNT(*) as n FROM models'),
       get("SELECT COUNT(*) as n FROM models WHERE available = 1"),
+      // conversion: (confirmed+in_progress+completed) / total
+      get(`SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status IN ('confirmed','in_progress','completed') THEN 1 ELSE 0 END) as converted
+           FROM orders`),
+      // avg budget of confirmed/completed orders (budget stored as text, try to parse)
+      get(`SELECT ROUND(AVG(CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','.') AS REAL)), 0) as avg_budget
+           FROM orders
+           WHERE status IN ('confirmed','completed')
+           AND budget IS NOT NULL AND budget != ''
+           AND CAST(REPLACE(REPLACE(REPLACE(budget,'₽',''),' ',''),',','.') AS REAL) > 0`),
+      // orders last 7 days
+      get(`SELECT COUNT(*) as n FROM orders WHERE created_at >= date('now', '-6 days')`),
+      // orders previous 7 days (7-14 days ago)
+      get(`SELECT COUNT(*) as n FROM orders WHERE created_at >= date('now', '-13 days') AND created_at < date('now', '-6 days')`),
+      // avg days from new to completed
+      get(`SELECT ROUND(AVG(CAST(julianday(updated_at) - julianday(created_at) AS REAL)), 1) as avg_days
+           FROM orders WHERE status = 'completed'`),
     ]);
     // Orders by status (for chart)
     const byStatus = await query(
@@ -553,6 +571,29 @@ router.get('/admin/stats', auth, async (req, res, next) => {
       const label = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
       daily7dFull.push({ day: key, label, count: daily7dMap[key] || 0 });
     }
+    // Top 5 models by order count
+    const topModels = await query(
+      `SELECT m.id, m.name, COUNT(o.id) as order_count
+       FROM models m
+       LEFT JOIN orders o ON m.id = o.model_id
+       GROUP BY m.id
+       ORDER BY order_count DESC
+       LIMIT 5`
+    );
+    // orders_by_status object
+    const ordersByStatus = {};
+    byStatus.forEach(r => { ordersByStatus[r.status] = r.count; });
+
+    // Compute derived metrics
+    const totalOrders = convRow.total || 0;
+    const converted   = convRow.converted || 0;
+    const convRate    = totalOrders > 0 ? Math.round((converted / totalOrders) * 1000) / 10 : 0;
+
+    const cur7  = trend7d.n || 0;
+    const prev7 = trendPrev7d.n || 0;
+    const trendDir = cur7 > prev7 ? 'up' : cur7 < prev7 ? 'down' : 'flat';
+    const trendDelta = cur7 - prev7;
+
     res.json({
       total_orders: total.n,
       new_orders: newO.n,
@@ -562,7 +603,19 @@ router.get('/admin/stats', auth, async (req, res, next) => {
       unread_messages: unread?.n || 0,
       by_status: byStatus,
       recent,
-      daily_7d: daily7dFull
+      daily_7d: daily7dFull,
+      // Enhanced metrics
+      conversion_rate: convRate,
+      avg_order_budget: avgBudgetRow?.avg_budget || null,
+      top_models: topModels,
+      orders_by_status: ordersByStatus,
+      orders_trend: {
+        direction: trendDir,
+        delta: trendDelta,
+        current_7d: cur7,
+        previous_7d: prev7,
+      },
+      avg_cycle_days: avgCycleRow?.avg_days || null,
     });
   } catch (e) { next(e); }
 });
