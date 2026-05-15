@@ -275,6 +275,7 @@
           ${photoSrc
             ? `<img src="${escHtml(photoSrc)}" alt="${escHtml(model.name)}" loading="lazy" />`
             : `<div class="model-card-placeholder" aria-hidden="true">${escHtml((model.name||'?')[0])}</div>`}
+          ${model.featured ? '<span class="badge-top">⭐ Топ</span>' : ''}
           <div class="model-card-overlay" aria-hidden="true">
             <div class="model-card-tag">${escHtml(catLabel)}</div>
             ${measures ? `<div style="font-size:0.78rem;color:#ccc;margin-top:4px">${escHtml(measures)}</div>` : ''}
@@ -289,6 +290,7 @@
           </div>
           <div class="model-card-bottom">
             <span style="font-size:0.7rem;color:${statusColor};letter-spacing:1px;text-transform:uppercase">${statusText}</span>
+            ${model.order_count > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.7" title="Завершённых заказов">📋 ${model.order_count} заказов</span>` : ''}
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
             <a href="/model.html?id=${model.id}"
@@ -377,21 +379,41 @@
       return article;
     }
 
-    function init() {
+    async function init() {
       const favs = getFavs();
 
       // Support both old format (array of IDs) and new format (array of objects)
       // If stored as IDs only, we still need to display something — show empty state
-      const models = favs.filter(f => f && typeof f === 'object' && f.id);
+      const storedModels = favs.filter(f => f && typeof f === 'object' && f.id);
+      const favIds = new Set(storedModels.map(f => f.id));
 
       updateCompareBar();
 
-      if (!models.length) {
+      if (!storedModels.length) {
         favCountEl.textContent = '0 моделей';
         loadingEl.style.display = 'none';
         emptyEl.style.display = 'block';
         return;
       }
+
+      // Show loading skeleton while fetching fresh API data
+      loadingEl.style.display = '';
+      favCountEl.textContent = 'Загрузка...';
+
+      // Fetch fresh model data from API to get up-to-date featured/order_count
+      let models = storedModels;
+      try {
+        const resp = await fetch('/api/models');
+        if (resp.ok) {
+          const allModels = await resp.json();
+          const apiMap = new Map(allModels.map(m => [m.id, m]));
+          // Merge stored data with fresh API data (API wins for featured/order_count)
+          models = storedModels.map(stored => {
+            const fresh = apiMap.get(stored.id);
+            return fresh ? { ...stored, ...fresh } : stored;
+          });
+        }
+      } catch (e) { /* fall back to stored data */ }
 
       loadingEl.style.display = 'none';
       favCountEl.textContent = `${models.length} ${plural(models.length)}`;

@@ -623,6 +623,13 @@ select.form-control option { background: var(--bg2); }
 .exp-junior { background: rgba(33,150,243,0.1);  color: #64b5f6; border: 1px solid rgba(33,150,243,0.25); }
 .exp-mid    { background: rgba(255,193,7,0.1);   color: #ffca28; border: 1px solid rgba(255,193,7,0.25); }
 .exp-senior { background: rgba(201,169,110,0.1); color: var(--gold); border: 1px solid rgba(201,169,110,0.3); }
+.badge-top {
+  position: absolute; top: 8px; left: 8px; z-index: 4; pointer-events: none;
+  background: var(--gold); color: #000;
+  font-size: 0.7rem; font-weight: 700;
+  padding: 3px 8px; border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+}
 .btn-book-model {
   display: block; width: 100%; text-align: center;
   padding: 9px 16px; font-size: 0.75rem; letter-spacing: 1px; text-transform: uppercase;

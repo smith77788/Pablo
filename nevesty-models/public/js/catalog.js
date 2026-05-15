@@ -364,7 +364,7 @@
                   return `<picture><source srcset="${escHtml(thumb)}" type="image/webp" /><img src="${escHtml(fullWebp)}" alt="${escHtml(m.name)} — фото модели" loading="lazy" /></picture>`;
                 })()
               : `<div class="model-card-placeholder" aria-hidden="true">${escHtml(m.name[0])}</div>`}
-            ${m.featured ? `<div style="position:absolute;top:8px;left:8px;background:var(--gold);color:#000;font-size:0.7rem;font-weight:700;padding:3px 8px;border-radius:10px;z-index:4;pointer-events:none">⭐ Топ</div>` : ''}
+            ${m.featured ? '<span class="badge-top">⭐ Топ</span>' : ''}
             <div class="model-card-overlay" aria-hidden="true">
               <div class="model-card-tag">${escHtml(catLabel)}</div>
               ${measures ? `<div style="font-size:0.78rem;color:#ccc;margin-top:4px">${escHtml(measures)}</div>` : ''}
@@ -381,7 +381,7 @@
             <div class="model-card-bottom">
               ${experienceBadge(m)}
               <span class="model-status-badge ${statusClass}">${statusText}</span>
-              ${m.order_count > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.7">📋 ${m.order_count}</span>` : ''}
+              ${m.order_count > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.7" title="Завершённых заказов">📋 ${m.order_count} заказов</span>` : ''}
             </div>
             <a href="/model.html?id=${m.id}"
                class="btn-book-model"
