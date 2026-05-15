@@ -239,7 +239,7 @@ def init_db() -> None:
 
 # ─── Generic CRUD helpers ─────────────────────────────────────────────────────
 
-def insert(table: str, data: dict) -> int:
+def insert(table: str, data: dict[str, Any]) -> int:
     data = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in data.items()}
     cols = ", ".join(data.keys())
     placeholders = ", ".join("?" * len(data))
@@ -249,7 +249,7 @@ def insert(table: str, data: dict) -> int:
         return cur.lastrowid or 0
 
 
-def update(table: str, row_id: int, data: dict) -> None:
+def update(table: str, row_id: int, data: dict[str, Any]) -> None:
     data = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in data.items()}
     data["updated_at"] = _now()
     sets = ", ".join(f"{k}=?" for k in data)
@@ -258,19 +258,19 @@ def update(table: str, row_id: int, data: dict) -> None:
         conn.commit()
 
 
-def fetch_all(sql: str, params: tuple = ()) -> list[dict]:
+def fetch_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
 
-def fetch_one(sql: str, params: tuple = ()) -> dict | None:
+def fetch_one(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
     with get_conn() as conn:
         row = conn.execute(sql, params).fetchone()
         return dict(row) if row else None
 
 
-def execute(sql: str, params: tuple = ()) -> None:
+def execute(sql: str, params: tuple[Any, ...] = ()) -> None:
     with get_conn() as conn:
         conn.execute(sql, params)
         conn.commit()

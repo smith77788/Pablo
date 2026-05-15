@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import subprocess
-from typing import Any, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class FactoryAgent:
     def __init__(self) -> None:
         pass
 
-    def think(self, prompt: str, context: dict | None = None, max_tokens: int = 2048) -> str:
+    def think(self, prompt: str, context: dict[str, Any] | None = None, max_tokens: int = 2048) -> str:
         """Вызывает Claude (SDK или CLI) и возвращает текст ответа."""
         # Fast-fail when no real API key and CLI not available — avoids long timeouts
         if not _sdk_client and not _is_real_api_key(_raw_key):
@@ -104,7 +104,7 @@ class FactoryAgent:
             logger.error("[%s/%s] CLI error: %s", self.department, self.role, e)
             return ""
 
-    def think_json(self, prompt: str, context: dict | None = None, max_tokens: int = 2048) -> dict[str, Any]:
+    def think_json(self, prompt: str, context: dict[str, Any] | None = None, max_tokens: int = 2048) -> dict[str, Any]:
         """Вызывает Claude и парсит JSON из ответа."""
         full_prompt = prompt + "\n\nОтветь ТОЛЬКО валидным JSON без пояснений."
         raw = self.think(full_prompt, context, max_tokens)

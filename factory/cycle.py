@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import time
 from datetime import datetime, timezone
+from typing import Any
 
 from factory import db
 from factory.agents.strategic_core import StrategicCore
@@ -24,7 +26,7 @@ NEVESTY_PRODUCT_NAME = "Nevesty Models Bot"
 def _ensure_nevesty_product() -> int:
     existing = db.fetch_one("SELECT id FROM products WHERE name=?", (NEVESTY_PRODUCT_NAME,))
     if existing:
-        return existing["id"]
+        return int(existing["id"])
     return db.insert("products", {
         "name": NEVESTY_PRODUCT_NAME,
         "description": "Telegram-бот агентства моделей. Бронирование моделей для мероприятий.",
@@ -38,7 +40,7 @@ def _ensure_nevesty_product() -> int:
     })
 
 
-def _load_dept(name: str):
+def _load_dept(name: str) -> Any | None:
     """Ленивая загрузка департамента (чтобы не падать при отсутствии ключа)."""
     try:
         if name == "marketing":
@@ -82,7 +84,7 @@ def _load_dept(name: str):
     return None
 
 
-def _send_ceo_memo_to_telegram(memo_text: str, health_score: int, growth_actions: list) -> None:
+def _send_ceo_memo_to_telegram(memo_text: str, health_score: int, growth_actions: list[dict[str, Any]]) -> None:
     """Отправляет CEO Memo в Telegram всем администраторам."""
     try:
         import os
@@ -138,7 +140,7 @@ def _send_telegram_to_admins(text: str) -> bool:
     return success
 
 
-def _sync_experiments_to_db(experiments: list, bot_db_path: str | None = None) -> None:
+def _sync_experiments_to_db(experiments: list[dict[str, Any]], bot_db_path: str | None = None) -> None:
     """Save A/B experiment proposals to nevesty-models DB."""
     import os
     import sqlite3
@@ -171,7 +173,7 @@ def _sync_experiments_to_db(experiments: list, bot_db_path: str | None = None) -
         logger.warning("Failed to sync experiments: %s", e)
 
 
-def _sync_growth_actions_to_bot_db(growth_actions: list, bot_db_path: str) -> None:
+def _sync_growth_actions_to_bot_db(growth_actions: list[dict[str, Any]], bot_db_path: str) -> None:
     """Копирует growth actions из factory.db в bot БД для отображения в боте."""
     import os
     import sqlite3 as _sqlite3
@@ -235,7 +237,7 @@ def _save_ceo_memo_to_settings(
         logger.error("Failed to save CEO memo to settings: %s", e)
 
 
-def _save_cycle_to_history(results: dict) -> None:
+def _save_cycle_to_history(results: dict[str, Any]) -> None:
     """Save this cycle's results to JSON history file."""
     import json
     from pathlib import Path
@@ -259,7 +261,7 @@ def _save_cycle_to_history(results: dict) -> None:
         logger.warning("Failed to save cycle history: %s", e)
 
 
-def _load_metrics_trend(metric_key: str, last_n: int = 5) -> list:
+def _load_metrics_trend(metric_key: str, last_n: int = 5) -> list[dict[str, Any]]:
     """Load metric trend from last N cycles."""
     import json
     from pathlib import Path
@@ -284,7 +286,7 @@ def _load_metrics_trend(metric_key: str, last_n: int = 5) -> list:
     return trend
 
 
-def _check_previous_actions_completion(prev_cycle: dict) -> str:
+def _check_previous_actions_completion(prev_cycle: dict[str, Any]) -> str:
     """Сравнивает рекомендации прошлого цикла с текущими метриками.
 
     Возвращает текстовый отчёт для CEO о выполнении предыдущих growth_actions.
@@ -326,7 +328,7 @@ def _check_previous_actions_completion(prev_cycle: dict) -> str:
         return "Ошибка при анализе предыдущего цикла."
 
 
-def _load_last_cycle_from_history() -> dict:
+def _load_last_cycle_from_history() -> dict[str, Any]:
     """Загружает данные предыдущего (предпоследнего) цикла из истории."""
     import json
     from pathlib import Path
@@ -342,13 +344,14 @@ def _load_last_cycle_from_history() -> dict:
 
     try:
         with open(cycles[-2]) as f:
-            return json.load(f)
+            result: dict[str, Any] = json.load(f)
+            return result
     except Exception as e:
         logger.warning("Failed to load prev cycle: %s", e)
         return {}
 
 
-def _format_weekly_report(cycle_results: list, nevesty_kpis: dict | None = None) -> str:
+def _format_weekly_report(cycle_results: list[dict[str, Any]], nevesty_kpis: dict[str, Any] | None = None) -> str:
     """Generate a weekly summary from the last 7 cycle results.
 
     Args:
@@ -373,8 +376,8 @@ def _format_weekly_report(cycle_results: list, nevesty_kpis: dict | None = None)
     success_rate = round((1 - errors / max(total_phases, 1)) * 100)
 
     # Extract health scores from history for trend
-    health_scores = [
-        r.get("health_score")
+    health_scores: list[float] = [
+        float(r["health_score"])
         for r in cycle_results[-7:]
         if isinstance(r.get("health_score"), (int, float))
     ]
@@ -463,7 +466,7 @@ def _format_weekly_report(cycle_results: list, nevesty_kpis: dict | None = None)
     return "\n".join(lines)
 
 
-def _format_monthly_report(cycle_results: list, db_path: str, nevesty_kpis: dict | None = None) -> str:
+def _format_monthly_report(cycle_results: list[dict[str, Any]], db_path: str, nevesty_kpis: dict[str, Any] | None = None) -> str:
     """Generate a monthly summary with DB metrics and period comparison.
 
     Args:
@@ -480,8 +483,8 @@ def _format_monthly_report(cycle_results: list, db_path: str, nevesty_kpis: dict
     ]
 
     # Collect avg factory health from cycle history
-    health_scores = [
-        r.get("health_score")
+    health_scores: list[float] = [
+        float(r["health_score"])
         for r in cycle_results
         if isinstance(r.get("health_score"), (int, float))
     ]
@@ -617,7 +620,7 @@ def run_phase_ceo_reports(
     }
 
 
-def run_phase_25_channel_publisher(phase24_results: dict) -> dict:
+def run_phase_25_channel_publisher(phase24_results: dict[str, Any]) -> dict[str, Any]:
     """Publish one post to Telegram channel if configured."""
     import urllib.request
     import urllib.parse
@@ -662,7 +665,7 @@ def run_phase_25_channel_publisher(phase24_results: dict) -> dict:
         return {"status": "error", "detail": str(e)}
 
 
-def _generate_heuristic_bio(model: dict) -> str:
+def _generate_heuristic_bio(model: dict[str, Any]) -> str:
     """Generate a professional model bio from parameters."""
     name = model.get('name') or 'Модель'
     city = model.get('city') or 'Москва'
@@ -910,7 +913,7 @@ def _auto_apply_successful_experiments(nevesty_id: int) -> list[str]:
     return applied_names
 
 
-def _maybe_generate_weekly_summary(cycle_id: str, results: dict) -> dict | None:
+def _maybe_generate_weekly_summary(cycle_id: str, results: dict[str, Any]) -> dict[str, Any] | None:
     """Generate a weekly factory summary if none has been created in the last 7 days.
 
     Saves to factory_reports table and returns a summary dict, or None if skipped.
@@ -1007,7 +1010,7 @@ def _maybe_generate_weekly_summary(cycle_id: str, results: dict) -> dict | None:
         return None
 
 
-def get_monthly_metrics(data_db) -> dict:
+def get_monthly_metrics(data_db: sqlite3.Connection) -> dict[str, Any]:
     """Get order metrics for current month from data.db."""
     import datetime as _dt
     try:
@@ -1025,7 +1028,7 @@ def get_monthly_metrics(data_db) -> dict:
         return {}
 
 
-def get_top_models(data_db, limit: int = 5) -> list:
+def get_top_models(data_db: sqlite3.Connection, limit: int = 5) -> list[dict[str, Any]]:
     """Get top models by orders this month."""
     import datetime as _dt
     try:
@@ -1042,7 +1045,7 @@ def get_top_models(data_db, limit: int = 5) -> list:
         return []
 
 
-def get_revenue_trend(data_db) -> list:
+def get_revenue_trend(data_db: sqlite3.Connection) -> list[dict[str, Any]]:
     """Get last 3 months order counts for trend."""
     try:
         rows = data_db.execute("""
@@ -1056,7 +1059,7 @@ def get_revenue_trend(data_db) -> list:
         return []
 
 
-def _notify_admins_telegram(briefing: dict, decisions: list, cycle_id: str) -> None:
+def _notify_admins_telegram(briefing: dict[str, Any], decisions: list[dict[str, Any]], cycle_id: str) -> None:
     """Send enriched factory cycle summary to all Telegram admins via notify.js."""
     import os
     import subprocess
@@ -1167,7 +1170,7 @@ def _notify_admins_telegram(briefing: dict, decisions: list, cycle_id: str) -> N
             pass  # Don't fail the cycle on notification error
 
 
-def run_departments_parallel(departments: dict) -> dict:
+def run_departments_parallel(departments: dict[str, Any]) -> dict[str, Any]:
     """Run multiple department .run() callables in parallel using ThreadPoolExecutor.
 
     Args:
@@ -1191,11 +1194,11 @@ def run_departments_parallel(departments: dict) -> dict:
     return results
 
 
-def run_cycle() -> dict:
+def run_cycle() -> dict[str, Any]:
     """Один полный цикл AI-офиса. Возвращает сводку."""
     cycle_start = time.time()
     cycle_id = datetime.now(timezone.utc).isoformat()
-    summary_lines = []
+    summary_lines: list[str] = []
 
     logger.info("=" * 60)
     logger.info("🏢 AI OFFICE CYCLE: %s", cycle_id)
