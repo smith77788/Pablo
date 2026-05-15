@@ -30,6 +30,7 @@ const ACTIVE_BOOKING_STATES = new Set([
   'bk_s3_email', 'bk_s3_tg', 'bk_s4',
   'leave_review_text', 'bk_quick_name', 'bk_quick_phone',
   'profile_edit_name', 'profile_edit_phone',
+  'ai_match_desc',
 ]);
 
 function resetSessionTimer(chatId) {
@@ -263,6 +264,7 @@ async function buildClientKeyboard() {
   if (searchEnabled !== '0') {
     rows.push([{ text: '🔍 Поиск по параметрам', callback_data: 'cat_search' },
                { text: '📏 Поиск по росту', callback_data: 'search_height_input' }]);
+    rows.push([{ text: '🤖 AI подбор', callback_data: 'ai_match' }]);
   }
 
   // Row 9: pricing + manager
@@ -4649,6 +4651,9 @@ function initBot(app) {
     // ── Поиск модели по параметрам (мульти-фильтр, БЛОК 2.4)
     if (data === 'cat_search') return showSearchMenu(chatId);
 
+    // ── AI подбор моделей
+    if (data === 'ai_match') return startAiMatch(chatId);
+
     // Height filter: srch_h_{min}_{max}
     if (data.startsWith('srch_h_')) {
       const parts = data.replace('srch_h_', '').split('_');
@@ -5344,6 +5349,17 @@ function initBot(app) {
           reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
         }
       );
+    }
+
+    // ── AI підбір моделей: опис замовлення
+    if (state === 'ai_match_desc') {
+      const desc = text ? text.trim() : '';
+      if (desc.length < 10) return safeSend(chatId, 'Опишіть детальніше \\(мінімум 10 символів\\):', { parse_mode: 'MarkdownV2' });
+      if (desc.length > 500) return safeSend(chatId, '❌ Опис занадто довгий \\(максимум 500 символів\\)\\.', { parse_mode: 'MarkdownV2' });
+
+      await clearSession(chatId);
+      await safeSend(chatId, '🤖 Аналізую ваш запит та підбираю моделей\\.\\.\\.', { parse_mode: 'MarkdownV2' });
+      return runAiMatch(chatId, desc);
     }
 
     // ── Edit profile name
@@ -6445,6 +6461,82 @@ async function showSearchResults(chatId, filters, page = 0) {
       ]}
     });
   } catch (e) { console.error('[Bot] showSearchResults:', e.message); }
+}
+
+// ─── AI підбір моделей ────────────────────────────────────────────────────────
+
+async function startAiMatch(chatId) {
+  await setSession(chatId, 'state', 'ai_match_desc');
+  return safeSend(chatId,
+    '🤖 *AI подбор модели*\n\nОпишите ваше мероприятие — и AI подберёт лучших моделей из каталога\\.\n\n_Например: "Корпоратив на 50 человек в Москве, нужны 2 модели для встречи гостей, бюджет 30000₽"_\n\n💡 Чем подробнее описание — тем точнее подбор\\.\n\n_Или /cancel для отмены_',
+    { parse_mode: 'MarkdownV2' }
+  );
+}
+
+async function runAiMatch(chatId, userDesc) {
+  try {
+    // Get available models
+    const models = await query('SELECT id, name, age, height, city, category, bio, featured FROM models WHERE available=1 AND (archived=0 OR archived IS NULL) ORDER BY featured DESC, id ASC LIMIT 20');
+    if (!models.length) return safeSend(chatId, '😔 Каталог пуст\\. Попробуйте позже\\.', { parse_mode: 'MarkdownV2' });
+
+    const catalog = models.map(m =>
+      `ID:${m.id} ${m.name}, ${m.age}р, ${m.height}см, ${m.city||'—'}, ${m.category}${m.bio ? ', ' + m.bio.slice(0, 80) : ''}`
+    ).join('\n');
+
+    const prompt = `Ти — AI-асистент модельного агентства. Клієнт описав своє замовлення: "${userDesc}"\n\nДоступні моделі:\n${catalog}\n\nПідбери 3 найкращих моделей для цього замовлення. Поясни чому кожна підходить (1-2 речення). Відповідь лише у форматі:\n1. ID:XX - Ім'я - Причина\n2. ID:XX - Ім'я - Причина\n3. ID:XX - Ім'я - Причина\n\nТільки ці 3 рядки, без зайвого тексту.`;
+
+    const { spawn } = require('child_process');
+    let output = ''; let errOut = '';
+    const proc = spawn('claude', ['-p', prompt, '--output-format', 'text'], {
+      cwd: '/home/user/Pablo/nevesty-models',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    proc.stdout.on('data', d => { output += d.toString(); });
+    proc.stderr.on('data', d => { errOut += d.toString(); });
+
+    proc.on('close', async (code) => {
+      if (!output.trim() || code !== 0) {
+        console.error('[AI Match] error:', errOut);
+        return safeSend(chatId, '⚠️ AI тимчасово недоступний\\. Спробуйте пізніше або скористайтесь ручним пошуком\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '🔍 Ручний пошук', callback_data: 'cat_search' }]] }
+        });
+      }
+
+      // Parse model IDs from response
+      const lines = output.trim().split('\n').filter(l => l.trim());
+      const modelIds = lines.map(l => {
+        const m = l.match(/ID:(\d+)/i);
+        return m ? parseInt(m[1]) : null;
+      }).filter(Boolean);
+
+      // Build inline keyboard with matched models
+      const keyboard = [];
+      for (const id of modelIds.slice(0, 3)) {
+        const m = models.find(x => x.id === id);
+        if (m) keyboard.push([{ text: `💃 ${m.name} (${m.age}р, ${m.height}см, ${m.city||'—'})`, callback_data: `model_${id}` }]);
+      }
+      keyboard.push([{ text: '🔍 Розширений пошук', callback_data: 'cat_search' }]);
+      keyboard.push([{ text: '🏠 Головне меню', callback_data: 'main_menu' }]);
+
+      const aiResult = esc(output.trim().slice(0, 800));
+      await safeSend(chatId,
+        `🤖 *AI підбір завершено:*\n\n${aiResult}\n\n_Натисніть на модель щоб переглянути профіль:_`,
+        { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
+      );
+    });
+
+    proc.on('error', async (err) => {
+      console.error('[AI Match] spawn error:', err.message);
+      return safeSend(chatId, '⚠️ AI недоступний\\. Скористайтесь ручним пошуком\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '🔍 Пошук', callback_data: 'cat_search' }]] }
+      });
+    });
+  } catch (e) {
+    console.error('[AI Match] error:', e.message);
+    return safeSend(chatId, '⚠️ Помилка\\. Спробуйте пізніше\\.', { parse_mode: 'MarkdownV2' });
+  }
 }
 
 // ─── Публичные отзывы ─────────────────────────────────────────────────────────
