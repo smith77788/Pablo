@@ -4602,6 +4602,41 @@ function initBot(app) {
       return showAdminModelCalendar(chatId, modelId);
     }
 
+    // ── Admin model calendar
+    if (data.startsWith('adm_model_cal_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_model_cal_', ''));
+      return showAdminModelCalendar(chatId, modelId);
+    }
+
+    // ── Admin: add busy period (start state)
+    if (data.startsWith('adm_add_busy_')) {
+      if (!isAdmin(chatId)) return;
+      const modelId = parseInt(data.replace('adm_add_busy_', ''));
+      await setSession(chatId, `adm_add_busy_${modelId}`, { modelId });
+      return safeSend(chatId,
+        `📅 *Добавить занятый период*\n\nВведите дату или диапазон дат и причину через пробел:\n\n` +
+        `_Примеры:_\n\`15\\.05\\.2026 Съёмка Nike\`\n\`15\\.05\\.2026\\-20\\.05\\.2026 Мероприятие\``,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: `adm_model_cal_${modelId}` }]] }
+        }
+      );
+    }
+
+    // ── Admin: delete busy date
+    if (data.startsWith('adm_del_busy_')) {
+      if (!isAdmin(chatId)) return;
+      // format: adm_del_busy_{modelId}_{YYYY-MM-DD}
+      const rest = data.replace('adm_del_busy_', '');
+      const underIdx = rest.indexOf('_');
+      const modelId = parseInt(rest.slice(0, underIdx));
+      const busyDate = rest.slice(underIdx + 1);
+      await run('DELETE FROM model_busy_dates WHERE model_id=? AND busy_date=?', [modelId, busyDate]).catch(() => {});
+      await bot.answerCallbackQuery(q.id, { text: '🗑 Дата удалена' }).catch(() => {});
+      return showAdminModelCalendar(chatId, modelId);
+    }
+
     // ── All order notes (paginated)
     if (data.startsWith('adm_notes_')) {
       if (!isAdmin(chatId)) return;
