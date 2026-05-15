@@ -27,4 +27,4 @@ USER factory
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
   CMD python3 -c "import os; exit(0 if os.path.isdir('/app') else 1)"
 
-CMD ["python", "factory_main.py"]
+CMD ["python", "-m", "factory.factory_main"]
