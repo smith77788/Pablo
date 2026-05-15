@@ -1345,6 +1345,47 @@ def run_cycle() -> dict:
         logger.error("Phase 18 Finance weekly error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 19 — RESEARCH ANALYSIS (weekly, Wednesdays)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🔬 PHASE 19: RESEARCH ANALYSIS (Wednesdays)")
+    try:
+        import datetime as _dt19
+        _today19 = _dt19.date.today()
+        if _today19.weekday() == 2:  # Wednesday
+            import sqlite3 as _sqlite3_19
+            _bot_db_19 = "/home/user/Pablo/nevesty-models/data.db"
+            _data_db_19 = None
+            if os.path.exists(_bot_db_19):
+                _data_db_19 = _sqlite3_19.connect(_bot_db_19)
+                _data_db_19.row_factory = _sqlite3_19.Row
+
+            from factory.agents.research import MarketResearcher as _Res_Market, \
+                TrendSpotter as _Res_Trend, InsightSynthesizer as _Res_Insight
+            research19_results = []
+            for _AgentCls in [_Res_Market, _Res_Trend, _Res_Insight]:
+                try:
+                    _agent = _AgentCls()
+                    _result = _agent.run(data_db=_data_db_19)
+                    research19_results.append(_result)
+                    logger.info("[Phase19] %s completed", _AgentCls.__name__)
+                except Exception as _ae:
+                    logger.error("[Phase19] %s error: %s", _AgentCls.__name__, _ae)
+
+            if _data_db_19:
+                _data_db_19.close()
+
+            results["phases"]["research_weekly"] = {
+                "agents_run": len(research19_results),
+                "roles": [r.get("role") for r in research19_results],
+            }
+            summary_lines.append(f"🔬 Research Weekly (Phase 19): {len(research19_results)} агента")
+            logger.info("[Phase19] Research analysis: %d agents ran", len(research19_results))
+        else:
+            logger.info("[Phase19] Skipping Research weekly analysis (not Wednesday, weekday=%d)", _today19.weekday())
+    except Exception as e:
+        logger.error("Phase 19 Research weekly error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)

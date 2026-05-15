@@ -884,6 +884,7 @@ async function bkStep2EventType(chatId, data) {
 // STEP 2b — date
 async function bkStep2Date(chatId, data) {
   await setSession(chatId, 'bk_s2_date', data);
+  resetSessionTimer(chatId);
   return safeSend(chatId,
     stepHeader(2,'Детали мероприятия') +
     `✅ Тип: *${esc(EVENT_TYPES[data.event_type]||data.event_type)}*\n\nВведите дату мероприятия:\n_Пример: 25\\.06\\.2025_`,
@@ -897,6 +898,7 @@ async function bkStep2Date(chatId, data) {
 // STEP 2c — duration
 async function bkStep2Duration(chatId, data) {
   await setSession(chatId, 'bk_s2_dur', data);
+  resetSessionTimer(chatId);
   const row1 = DURATIONS.slice(0,4).map(h => ({ text: `${h} ч.`, callback_data: `bk_dur_${h}` }));
   const row2 = DURATIONS.slice(4).map(h => ({ text: `${h} ч.`, callback_data: `bk_dur_${h}` }));
   return safeSend(chatId,
@@ -911,8 +913,9 @@ async function bkStep2Duration(chatId, data) {
 // STEP 2d — location
 async function bkStep2Location(chatId, data) {
   await setSession(chatId, 'bk_s2_loc', data);
+  resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(2,'Детали мероприятия') + 'Введите место проведения \\(город, адрес\\):',
+    stepHeader(2,'Детали мероприятия') + 'Введите место проведения \\(город, адрес\\):\n_Пример: Москва, ул\\. Арбат 15_\n\n_/cancel — отменить_',
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] }
@@ -923,8 +926,9 @@ async function bkStep2Location(chatId, data) {
 // STEP 2e — budget (optional)
 async function bkStep2Budget(chatId, data) {
   await setSession(chatId, 'bk_s2_budget', data);
+  resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(2,'Детали мероприятия') + 'Укажите бюджет \\(необязательно\\):',
+    stepHeader(2,'Детали мероприятия') + 'Укажите бюджет \\(необязательно\\):\n_Пример: 50 000 руб\\. или от 30 000_',
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [
@@ -938,6 +942,7 @@ async function bkStep2Budget(chatId, data) {
 // STEP 2f — comments (optional)
 async function bkStep2Comments(chatId, data) {
   await setSession(chatId, 'bk_s2_comments', data);
+  resetSessionTimer(chatId);
   return safeSend(chatId,
     stepHeader(2,'Детали мероприятия') + 'Дополнительные пожелания \\(необязательно\\):',
     {
@@ -955,7 +960,7 @@ async function bkStep3Name(chatId, data) {
   await setSession(chatId, 'bk_s3_name', data);
   resetSessionTimer(chatId);
   return safeSend(chatId,
-    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\nВведите ваше имя и фамилию:`,
+    stepHeader(3,'Ваши контакты') + `_${esc(bookingProgress(1, 4))}_\n\nВведите ваше имя и фамилию:\n_Пример: Мария Иванова_\n\n_/cancel — отменить_`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] }
