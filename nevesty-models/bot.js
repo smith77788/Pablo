@@ -7228,6 +7228,7 @@ function _registerNewFeatures() {
     // Favorites add — add to wishlists, answer callback with toast, edit keyboard
     if (data.startsWith('fav_add_')) {
       const favModelId = parseInt(data.replace('fav_add_', ''));
+      if (!favModelId || favModelId <= 0) return;
       const favModel = await get('SELECT id, name FROM models WHERE id=?', [favModelId]).catch(() => null);
       if (!favModel) {
         try { await bot.answerCallbackQuery(q.id, { text: '❌ Модель не найдена', show_alert: true }); } catch {}
@@ -7249,6 +7250,7 @@ function _registerNewFeatures() {
     // Favorites remove — remove from wishlists, answer callback with toast, edit keyboard
     if (data.startsWith('fav_remove_')) {
       const remModelId = parseInt(data.replace('fav_remove_', ''));
+      if (!remModelId || remModelId <= 0) return;
       await removeFromWishlist(chatId, remModelId);
       try { await bot.answerCallbackQuery(q.id, { text: '💔 Убрано из избранного' }); } catch {}
       try {

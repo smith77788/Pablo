@@ -715,7 +715,15 @@ router.get('/models', async (req, res, next) => {
     if (search) { sql += ' AND (name LIKE ? OR bio LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
     sql += ' ORDER BY available DESC, id DESC LIMIT 200';
     const models = await query(sql, params);
-    const result = models.map(m => ({ ...m, photos: JSON.parse(m.photos || '[]') }));
+    const result = models.map(m => {
+      const photos = JSON.parse(m.photos || '[]');
+      return {
+        ...m,
+        photos,
+        photo_thumb: deriveThumbUrl(m.photo_main),
+        photos_thumbs: photos.map(deriveThumbUrl),
+      };
+    });
     cache.set(cacheKey, result, TTL_CATALOG);
     res.setHeader('X-Cache', 'MISS');
     res.json(result);
@@ -772,7 +780,14 @@ router.get('/models/:id', async (req, res, next) => {
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const m = await get('SELECT * FROM models WHERE id = ?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
-    res.json({ ...m, photos: JSON.parse(m.photos || '[]') });
+    const photos = JSON.parse(m.photos || '[]');
+    res.json({
+      ...m,
+      photos,
+      // Thumbnail paths derived from full paths — available for list views
+      photo_thumb: deriveThumbUrl(m.photo_main),
+      photos_thumbs: photos.map(deriveThumbUrl),
+    });
     // Increment view count asynchronously after response is sent
     run('UPDATE models SET view_count = COALESCE(view_count, 0) + 1 WHERE id=?', [id]).catch(() => {});
   } catch (e) { next(e); }
@@ -912,12 +927,12 @@ router.post('/admin/models', auth, upload.fields([{ name: 'photo_main', maxCount
     if (category && !ALLOWED_CATEGORIES.includes(category)) return res.status(400).json({ error: 'Недопустимая категория' });
     let photo_main = null;
     if (req.files?.photo_main?.[0]) {
-      const converted = await convertToWebP(req.files.photo_main[0].path);
-      photo_main = `/uploads/${path.basename(converted)}`;
+      const { full } = await convertToWebPWithThumb(req.files.photo_main[0].path);
+      photo_main = `/uploads/${path.basename(full)}`;
     }
     const photoFiles = req.files?.photos || [];
-    const convertedPhotos = await Promise.all(photoFiles.map(f => convertToWebP(f.path)));
-    const photos = convertedPhotos.map(p => `/uploads/${path.basename(p)}`);
+    const convertedPhotos = await Promise.all(photoFiles.map(f => convertToWebPWithThumb(f.path)));
+    const photos = convertedPhotos.map(({ full }) => `/uploads/${path.basename(full)}`);
     const result = await run(
       `INSERT INTO models (name,age,height,weight,bust,waist,hips,shoe_size,hair_color,eye_color,bio,photo_main,photos,instagram,category,available)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -940,13 +955,15 @@ router.put('/admin/models/:id', auth, upload.fields([{ name: 'photo_main', maxCo
     let photo_main = existing.photo_main;
     if (req.files?.photo_main?.[0]) {
       deleteFile(existing.photo_main);
-      const converted = await convertToWebP(req.files.photo_main[0].path);
-      photo_main = `/uploads/${path.basename(converted)}`;
+      // Also delete old thumbnail if it exists
+      if (existing.photo_main) deleteFile(deriveThumbUrl(existing.photo_main));
+      const { full } = await convertToWebPWithThumb(req.files.photo_main[0].path);
+      photo_main = `/uploads/${path.basename(full)}`;
     }
     let photos = JSON.parse(existing.photos || '[]');
     if (req.files?.photos?.length) {
-      const convertedPhotos = await Promise.all(req.files.photos.map(f => convertToWebP(f.path)));
-      photos = [...photos, ...convertedPhotos.map(p => `/uploads/${path.basename(p)}`)];
+      const convertedPhotos = await Promise.all(req.files.photos.map(f => convertToWebPWithThumb(f.path)));
+      photos = [...photos, ...convertedPhotos.map(({ full }) => `/uploads/${path.basename(full)}`)];
     }
     await run(
       `UPDATE models SET name=?,age=?,height=?,weight=?,bust=?,waist=?,hips=?,shoe_size=?,hair_color=?,eye_color=?,bio=?,photo_main=?,photos=?,instagram=?,category=?,available=? WHERE id=?`,
