@@ -38,6 +38,7 @@
     }
     .badge-status.pending   { background: rgba(255,193,7,0.15); color: #ffc107; border: 1px solid rgba(255,193,7,0.3); }
     .badge-status.sent      { background: rgba(40,167,69,0.15);  color: #28a745; border: 1px solid rgba(40,167,69,0.3); }
+    .badge-status.done      { background: rgba(40,167,69,0.15);  color: #28a745; border: 1px solid rgba(40,167,69,0.3); }
     .badge-status.cancelled { background: rgba(200,50,50,0.15);  color: #e05555; border: 1px solid rgba(200,50,50,0.3); }
     .badge-status.sending   { background: rgba(0,123,255,0.15);  color: #007bff; border: 1px solid rgba(0,123,255,0.3); }
     .create-form {
@@ -198,7 +199,7 @@ const SEGMENT_LABELS = {
   active: 'Активные 30д',
   new: 'Новые'
 };
-const STATUS_LABELS = { pending: 'Ожидает', sending: 'Отправляется', sent: 'Отправлено', cancelled: 'Отменено' };
+const STATUS_LABELS = { pending: 'Ожидает', sending: 'Отправляется', sent: 'Отправлено', done: 'Завершено', cancelled: 'Отменено' };
 
 function segmentLabel(seg) {
   if (!seg) return '—';
@@ -209,8 +210,9 @@ function segmentLabel(seg) {
 }
 
 function deliveryPct(row) {
-  const sent = row.sent_count || 0;
-  const err  = row.error_count || 0;
+  // Support both scheduled_broadcasts (sent_count/error_count) and bot_broadcasts (delivered/failed)
+  const sent = row.delivered != null ? (row.delivered || 0) : (row.sent_count || 0);
+  const err  = row.failed   != null ? (row.failed   || 0) : (row.error_count || 0);
   const total = sent + err;
   if (total === 0) return null;
   const pct = Math.round(sent / total * 100);
@@ -254,26 +256,36 @@ function renderBroadcasts(rows) {
 
   cont.innerHTML = filtered.map(r => {
     const dp = deliveryPct(r);
+    const deliveredVal = r.delivered != null ? r.delivered : r.sent_count;
+    const failedVal    = r.failed   != null ? r.failed   : r.error_count;
+    const dateStr = (r.started_at || r.scheduled_at || r.created_at || '').slice(0,16).replace('T',' ');
+    const finishedStr = r.finished_at ? r.finished_at.slice(0,16).replace('T',' ') : (r.sent_at ? r.sent_at.slice(0,16).replace('T',' ') : null);
+    const sentBy = r.sent_by || r.created_by || '—';
+    const sourceBadge = r.source === 'bot'
+      ? `<span style="font-size:0.7rem;background:rgba(0,123,255,0.12);color:#5aacff;border:1px solid rgba(0,123,255,0.25);border-radius:20px;padding:2px 8px">🤖 Бот</span>`
+      : `<span style="font-size:0.7rem;background:rgba(100,100,100,0.1);color:var(--text-dim);border:1px solid var(--border);border-radius:20px;padding:2px 8px">⏰ Планировщик</span>`;
     return `
       <div class="broadcast-card">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
           <div class="broadcast-text">${_admin.escapeHtml(r.text || '')}</div>
-          ${r.status === 'pending'
+          ${r.status === 'pending' && r.source !== 'bot'
             ? `<button onclick="cancelBroadcast(${r.id})" class="btn btn-sm" style="color:#e05555;border-color:rgba(200,50,50,0.3);white-space:nowrap;flex-shrink:0">❌ Отменить</button>`
             : ''}
         </div>
         <div class="broadcast-meta">
           <span class="badge-status ${r.status || 'pending'}">${STATUS_LABELS[r.status] || r.status}</span>
+          ${sourceBadge}
           <span class="broadcast-segment">${_admin.escapeHtml(segmentLabel(r.segment))}</span>
-          <span style="color:var(--text-dim)">📅 ${(r.scheduled_at || r.created_at || '').slice(0,16).replace('T',' ')}</span>
-          ${r.sent_at ? `<span style="color:var(--text-dim)">✓ ${r.sent_at.slice(0,16).replace('T',' ')}</span>` : ''}
-          <span style="color:var(--text-dim)">👤 ${_admin.escapeHtml(r.created_by || '—')}</span>
+          <span style="color:var(--text-dim)">📅 ${dateStr}</span>
+          ${finishedStr ? `<span style="color:var(--text-dim)">✓ ${finishedStr}</span>` : ''}
+          <span style="color:var(--text-dim)">👤 ${_admin.escapeHtml(sentBy)}</span>
           ${r.photo_url ? `<span style="color:var(--text-dim)">🖼 С фото</span>` : ''}
+          ${r.total_recipients ? `<span style="color:var(--text-dim)">👥 ${r.total_recipients} получ.</span>` : ''}
         </div>
-        ${(r.sent_count != null || r.error_count != null) ? `
+        ${(deliveredVal != null || failedVal != null) ? `
         <div class="stats-row" style="margin-top:8px">
-          ${r.sent_count != null  ? `<span class="stat-chip ok">✅ ${r.sent_count} доставлено</span>` : ''}
-          ${r.error_count != null && r.error_count > 0 ? `<span class="stat-chip err">❌ ${r.error_count} ошибок</span>` : ''}
+          ${deliveredVal != null ? `<span class="stat-chip ok">✅ Доставлено: ${deliveredVal}</span>` : ''}
+          ${failedVal != null && failedVal > 0 ? `<span class="stat-chip err">❌ Ошибок: ${failedVal}</span>` : ''}
           ${dp ? `<span class="stat-chip pct">${dp.sent} / ${dp.total} (${dp.pct}%)</span>` : ''}
         </div>` : ''}
       </div>

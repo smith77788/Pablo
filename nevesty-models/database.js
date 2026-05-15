@@ -441,6 +441,23 @@ async function initDatabase() {
   )`).catch(() => {});
   await run(`CREATE INDEX IF NOT EXISTS idx_sched_bcast_status ON scheduled_broadcasts(status, scheduled_at)`).catch(() => {});
 
+  // Bot direct broadcasts — tracks manual broadcasts sent from Telegram bot admin panel
+  await run(`CREATE TABLE IF NOT EXISTS bot_broadcasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message TEXT NOT NULL,
+    photo_id TEXT,
+    segment TEXT DEFAULT 'all',
+    sent_by TEXT,
+    total_recipients INTEGER DEFAULT 0,
+    delivered INTEGER DEFAULT 0,
+    failed INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending',
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_bot_bcast_started ON bot_broadcasts(started_at DESC)`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (17, 'bot_broadcasts table for direct Telegram admin broadcasts')`).catch(() => {});
+
   // Schema v16 — TOTP 2FA for admins
   await run(`ALTER TABLE admins ADD COLUMN totp_secret TEXT DEFAULT NULL`).catch(() => {});
   await run(`ALTER TABLE admins ADD COLUMN totp_enabled INTEGER DEFAULT 0`).catch(() => {});

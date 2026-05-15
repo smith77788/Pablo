@@ -1254,7 +1254,67 @@ router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ─── Model busy dates (calendar) ──────────────────────────────────────────────
+// ─── Model availability (calendar) — new REST-style endpoints ─────────────────
+// GET  /api/admin/models/:id/availability?month=YYYY-MM
+router.get('/admin/models/:id/availability', auth, async (req, res, next) => {
+  try {
+    const modelId = parseInt(req.params.id);
+    if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    const { month } = req.query;
+    let targetMonth = month;
+    if (!targetMonth) {
+      const now = new Date();
+      targetMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+    if (!/^\d{4}-\d{2}$/.test(targetMonth)) {
+      return res.status(400).json({ error: 'month must be YYYY-MM' });
+    }
+    const [yr, mo] = targetMonth.split('-').map(Number);
+    const firstDay = `${targetMonth}-01`;
+    const lastDay = new Date(yr, mo, 0);
+    const lastDayStr = `${targetMonth}-${String(lastDay.getDate()).padStart(2, '0')}`;
+    const rows = await query(
+      `SELECT busy_date, reason FROM model_busy_dates WHERE model_id=? AND busy_date BETWEEN ? AND ? ORDER BY busy_date`,
+      [modelId, firstDay, lastDayStr]
+    );
+    res.json({ month: targetMonth, busy_dates: rows.map(r => r.busy_date) });
+  } catch (e) { next(e); }
+});
+
+// POST /api/admin/models/:id/availability  body: { date, note }
+router.post('/admin/models/:id/availability', auth, async (req, res, next) => {
+  try {
+    const modelId = parseInt(req.params.id);
+    if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    const { date, note } = req.body;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
+    }
+    await run(
+      'INSERT OR IGNORE INTO model_busy_dates (model_id, busy_date, reason) VALUES (?,?,?)',
+      [modelId, date, note || null]
+    );
+    await logAudit(req, 'mark_busy', 'model_availability', modelId, { date, note });
+    res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
+// DELETE /api/admin/models/:id/availability/:date
+router.delete('/admin/models/:id/availability/:date', auth, async (req, res, next) => {
+  try {
+    const modelId = parseInt(req.params.id);
+    if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    const { date } = req.params;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    }
+    await run('DELETE FROM model_busy_dates WHERE model_id=? AND busy_date=?', [modelId, date]);
+    await logAudit(req, 'unmark_busy', 'model_availability', modelId, { date });
+    res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
+// ─── Model busy dates (calendar) — legacy endpoints kept for backwards compat ──
 router.get('/admin/models/:id/busy-dates', auth, async (req, res, next) => {
   try {
     const dates = await query(
@@ -1462,15 +1522,42 @@ router.post('/models/:id/view', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Public: check model availability for a date
+// Public: check model availability for a date OR get busy dates for a month
+// GET /api/models/:id/availability?date=YYYY-MM-DD  → single date check
+// GET /api/models/:id/availability?month=YYYY-MM    → list of busy dates in month
 router.get('/models/:id/availability', async (req, res, next) => {
   try {
-    const { date } = req.query;
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const { date, month } = req.query;
+    const modelId = parseInt(req.params.id);
+    if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+
+    // Month mode: return all busy dates for given month (default = current month)
+    if (month || !date) {
+      let targetMonth = month;
+      if (!targetMonth) {
+        const now = new Date();
+        targetMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      }
+      if (!/^\d{4}-\d{2}$/.test(targetMonth)) {
+        return res.status(400).json({ error: 'month must be YYYY-MM' });
+      }
+      const [yr, mo] = targetMonth.split('-').map(Number);
+      const firstDay = `${targetMonth}-01`;
+      const lastDay = new Date(yr, mo, 0); // last day of month
+      const lastDayStr = `${targetMonth}-${String(lastDay.getDate()).padStart(2, '0')}`;
+      const rows = await query(
+        `SELECT busy_date, reason FROM model_busy_dates WHERE model_id=? AND busy_date BETWEEN ? AND ? ORDER BY busy_date`,
+        [modelId, firstDay, lastDayStr]
+      );
+      return res.json({ month: targetMonth, busy_dates: rows.map(r => r.busy_date) });
+    }
+
+    // Single date mode (legacy)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
     }
-    const busy  = await get('SELECT id FROM model_busy_dates WHERE model_id=? AND busy_date=?', [req.params.id, date]);
-    const model = await get('SELECT available FROM models WHERE id=?', [req.params.id]);
+    const busy  = await get('SELECT id FROM model_busy_dates WHERE model_id=? AND busy_date=?', [modelId, date]);
+    const model = await get('SELECT available FROM models WHERE id=?', [modelId]);
     res.json({ available: !busy && model && model.available === 1 });
   } catch (e) { next(e); }
 });
@@ -2044,16 +2131,46 @@ router.post('/admin/notify', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// GET /api/admin/broadcasts — list all scheduled_broadcasts with stats
+// GET /api/admin/broadcasts — list scheduled_broadcasts + direct bot_broadcasts with stats
 router.get('/admin/broadcasts', auth, async (req, res, next) => {
   try {
     const limit = Math.min(50, parseInt(req.query.limit) || 20);
+    const [scheduled, direct] = await Promise.all([
+      query(
+        `SELECT id, text, photo_url, segment, scheduled_at AS started_at, status,
+                sent_count AS delivered, error_count AS failed, sent_at AS finished_at,
+                created_at, 'scheduled' AS source, created_by AS sent_by,
+                (sent_count + error_count) AS total_recipients
+         FROM scheduled_broadcasts ORDER BY created_at DESC LIMIT ?`,
+        [limit]
+      ),
+      query(
+        `SELECT id, message AS text, photo_id AS photo_url, segment, started_at, status,
+                delivered, failed, finished_at,
+                started_at AS created_at, 'bot' AS source, sent_by,
+                total_recipients
+         FROM bot_broadcasts ORDER BY started_at DESC LIMIT ?`,
+        [limit]
+      ),
+    ]);
+    // Merge and sort by created_at descending, take top `limit`
+    const all = [...scheduled, ...direct]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, limit);
+    res.json(all);
+  } catch (e) { next(e); }
+});
+
+// GET /api/admin/bot-broadcasts — direct bot broadcast history with delivery stats
+router.get('/admin/bot-broadcasts', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(50, parseInt(req.query.limit) || 20);
     const rows = await query(
-      `SELECT id, text, photo_url, segment, scheduled_at, status, sent_count, error_count, sent_at, created_at
-       FROM scheduled_broadcasts ORDER BY created_at DESC LIMIT ?`,
+      `SELECT id, message, photo_id, segment, sent_by, total_recipients, delivered, failed, status, started_at, finished_at
+       FROM bot_broadcasts ORDER BY started_at DESC LIMIT ?`,
       [limit]
     );
-    res.json(rows);
+    res.json({ broadcasts: rows });
   } catch (e) { next(e); }
 });
 

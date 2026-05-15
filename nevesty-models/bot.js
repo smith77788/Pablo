@@ -2603,6 +2603,20 @@ async function doSendBroadcast(chatId) {
   const recipients = sd.broadcastRecipients || [];
   const text = sd.broadcastText || '';
   const photoId = sd.broadcastPhotoId || null;
+  const segment = sd.broadcastSegment || 'all';
+
+  // Create broadcast record in DB
+  let broadcastId = null;
+  try {
+    const bcRow = await run(
+      `INSERT INTO bot_broadcasts (message, photo_id, segment, sent_by, total_recipients, status)
+       VALUES (?, ?, ?, ?, ?, 'sending')`,
+      [text, photoId || null, segment, String(chatId), recipients.length]
+    );
+    broadcastId = bcRow.id;
+  } catch (e) {
+    console.error('[Broadcast] Failed to create broadcast record:', e.message);
+  }
 
   // Notify admin that sending started
   await safeSend(chatId, `📤 Начинаю рассылку для *${recipients.length}* получателей\\.\\.\\.`, { parse_mode: 'MarkdownV2' }).catch(() => {});
@@ -2615,7 +2629,16 @@ async function doSendBroadcast(chatId) {
     await new Promise(r => setTimeout(r, 10)); // 10ms delay between sends
   }
   const durationSec = Math.round((Date.now() - startTime) / 1000);
-  await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, segment: sd.broadcastSegment, duration: durationSec });
+
+  // Update broadcast record with final stats
+  if (broadcastId) {
+    run(
+      `UPDATE bot_broadcasts SET delivered=?, failed=?, status='done', finished_at=datetime('now') WHERE id=?`,
+      [sent, failed, broadcastId]
+    ).catch(e => console.error('[Broadcast] Failed to update broadcast stats:', e.message));
+  }
+
+  await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, segment, duration: durationSec });
   await clearSession(chatId);
   return safeSend(chatId,
     `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*\n⏱ Время: *${durationSec}с*`,
