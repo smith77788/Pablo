@@ -8184,11 +8184,14 @@ async function publishFactoryPost(chatId, postId) {
 async function showFactoryPanel(chatId) {
   if (!isAdmin(chatId)) return;
   try {
-    const [lastCycle, lastDecision, pendingCount, runningExp] = await Promise.all([
+    const [lastCycle, lastDecision, pendingCount, runningExp, topActions, weeklyReport, proposedExp] = await Promise.all([
       factoryDbGet('SELECT * FROM cycles ORDER BY started_at DESC LIMIT 1'),
       factoryDbGet("SELECT * FROM decisions ORDER BY created_at DESC LIMIT 1"),
       factoryDbGet("SELECT COUNT(*) as n FROM growth_actions WHERE status='pending'"),
       factoryDbGet("SELECT COUNT(*) as n FROM experiments WHERE status='running'"),
+      factoryDbAll("SELECT action_type, channel, priority, action FROM growth_actions WHERE status='pending' ORDER BY priority DESC, created_at DESC LIMIT 5"),
+      factoryDbGet("SELECT report_json FROM factory_reports WHERE report_type='weekly' ORDER BY created_at DESC LIMIT 1"),
+      factoryDbGet("SELECT hypothesis, effort, expected_lift FROM experiments WHERE status='proposed' ORDER BY created_at DESC LIMIT 1"),
     ]);
 
     const score = lastCycle?.health_score ?? '—';
@@ -8198,9 +8201,47 @@ async function showFactoryPanel(chatId) {
       ? new Date(lastCycle.finished_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
       : '—';
 
+    // Key insights: extract top 3 lines from cycle summary
+    let insightsSection = '';
+    if (lastCycle?.summary) {
+      const lines = lastCycle.summary.split('\n').map(l => l.trim()).filter(l => l.length > 3);
+      const top3 = lines.slice(0, 3);
+      if (top3.length) {
+        insightsSection = '\n\n📌 Инсайты последнего цикла:\n' + top3.map(l => `  • ${l.slice(0, 90)}`).join('\n');
+      }
+    }
+
+    // Recent growth actions (top 5)
+    let actionsSection = '';
+    if (topActions && topActions.length) {
+      const channelIcon = { telegram: '📱', instagram: '📸', tiktok: '🎵', seo: '🔍', email: '📧', direct: '📞' };
+      actionsSection = '\n\n💡 Топ Growth Actions:\n' + topActions.map((a, i) =>
+        `  ${i + 1}. ${channelIcon[a.channel] || '•'} [${a.channel}/${a.action_type}] p${a.priority} — ${(a.action || '').slice(0, 60)}`
+      ).join('\n');
+    }
+
+    // CEO focus department from weekly report
+    let ceoFocusSection = '';
+    try {
+      const reportData = weeklyReport?.report_json ? JSON.parse(weeklyReport.report_json) : null;
+      if (reportData?.last_ceo_focus || reportData?.top_department) {
+        const focus = reportData.last_ceo_focus || reportData.top_department;
+        ceoFocusSection = `\n\n🎯 Фокус CEO (следующий цикл): ${focus}`;
+      }
+    } catch (_) {}
+
+    // Current A/B experiment proposal
+    let abSection = '';
+    if (proposedExp) {
+      abSection = `\n\n🧪 A/B предложение: ${(proposedExp.hypothesis || '').slice(0, 80)}` +
+        (proposedExp.effort ? ` [усилие: ${proposedExp.effort}]` : '');
+    }
+
     const decisionLine = lastDecision
       ? `\n🧠 Решение CEO: ${lastDecision.decision_type} — ${(lastDecision.rationale || '').slice(0, 80)}`
       : '';
+
+    const adminUrl = (SITE_URL || 'http://localhost:3000').replace(/\/$/, '') + '/admin/factory.html';
 
     const text =
       `🏭 AI Startup Factory\n\n` +
@@ -8208,21 +8249,31 @@ async function showFactoryPanel(chatId) {
       `🕐 Последний цикл: ${cycleTime} (${elapsed})\n` +
       `💡 Действий в очереди: ${pendingCount?.n ?? 0}\n` +
       `🧪 Экспериментов активных: ${runningExp?.n ?? 0}` +
-      decisionLine;
+      decisionLine +
+      insightsSection +
+      actionsSection +
+      ceoFocusSection +
+      abSection;
 
-    return safeSend(chatId, text, {
-      reply_markup: { inline_keyboard: [
-        [{ text: '🔄 Запустить цикл', callback_data: 'adm_factory_run' },
-         { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' }],
-        [{ text: '🧪 Эксперименты',  callback_data: 'adm_factory_exp' },
-         { text: '📋 Решения CEO',   callback_data: 'adm_factory_decisions' }],
-        [{ text: '🎯 AI Задачи',     callback_data: 'adm_factory_tasks' },
-         { text: '🧪 A/B Тесты',    callback_data: 'adm_experiments' }],
-        [{ text: '📋 Growth Actions', callback_data: 'adm_factory_actions' },
-         { text: '📢 Контент в канал', callback_data: 'adm_factory_content' }],
-        [{ text: '← Меню', callback_data: 'admin_menu' }],
-      ]}
-    });
+    const keyboard = [
+      [{ text: '🔄 Запустить цикл', callback_data: 'adm_factory_run' },
+       { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' }],
+      [{ text: '🧪 Эксперименты',  callback_data: 'adm_factory_exp' },
+       { text: '📋 Решения CEO',   callback_data: 'adm_factory_decisions' }],
+      [{ text: '🎯 AI Задачи',     callback_data: 'adm_factory_tasks' },
+       { text: '🧪 A/B Тесты',    callback_data: 'adm_experiments' }],
+      [{ text: '📋 Growth Actions', callback_data: 'adm_factory_actions' },
+       { text: '📢 Контент в канал', callback_data: 'adm_factory_content' }],
+      [{ text: '← Меню', callback_data: 'admin_menu' }],
+    ];
+    // Add detail link only for HTTPS sites (web_app requires HTTPS)
+    if (SITE_URL && SITE_URL.startsWith('https://')) {
+      keyboard.splice(keyboard.length - 1, 0, [
+        { text: '📊 Детали', web_app: { url: adminUrl } },
+      ]);
+    }
+
+    return safeSend(chatId, text, { reply_markup: { inline_keyboard: keyboard } });
   } catch (e) {
     console.error('[Factory] showFactoryPanel:', e.message);
     return safeSend(chatId, '🏭 AI Factory ещё не запущен.\n\nЗапустите: `pm2 start nevesty-factory`', {
@@ -8396,6 +8447,8 @@ async function showFactoryTasks(chatId, page) {
 }
 
 // ─── A/B Experiments (synced from AI Factory) ────────────────────────────────
+// Note (БЛОК 5.5): showFactoryTasks IS the factory queue viewer — it shows pending
+// tasks with [✅ Выполнено] and [🗑 Пропустить] buttons. Accessible via adm_factory_tasks.
 
 async function showAdminExperiments(chatId) {
   if (!isAdmin(chatId)) return;
