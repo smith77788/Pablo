@@ -811,6 +811,26 @@
           grid-template-columns: 1fr;
         }
       }
+      @media (max-width: 600px) {
+        .today-stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .today-stat:nth-child(2) {
+          border-right: none;
+        }
+        .today-stat:nth-child(3) {
+          border-top: 1px solid var(--border);
+        }
+        .today-stat:nth-child(4) {
+          border-top: 1px solid var(--border);
+        }
+        .kpi-row2 {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .kpi-card-value {
+          font-size: 1.5rem;
+        }
+      }
     </style>
   </head>
   <body>

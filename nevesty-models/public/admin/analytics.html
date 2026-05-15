@@ -670,6 +670,15 @@
           <div class="skeleton h-6 w-3/4 rounded"></div>
         </div>
       </div>
+
+      <!-- Client Segmentation (БЛОК 12.4) -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">👥 Сегментация клиентов</h2>
+        <div id="segments-section">
+          <div class="skeleton h-6 w-full rounded mb-2"></div>
+          <div class="skeleton h-6 w-3/4 rounded"></div>
+        </div>
+      </div>
     </div>
     <!-- /max-w-7xl -->
 
@@ -1980,11 +1989,68 @@
         }
       }
 
+      // ── Client Segmentation loader (БЛОК 12.4) ───────────────────────────────────
+      async function loadSegments() {
+        try {
+          const d = await fetch('/api/admin/analytics/client-segments', { headers: h }).then(r => r.json());
+          const el = document.getElementById('segments-section');
+          if (!d.ok) {
+            el.innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
+            return;
+          }
+          const s = d.segments;
+          const total = (s.vip || 0) + (s.active || 0) + (s.dormant || 0) + (s.one_time || 0);
+          el.innerHTML = `
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              ${[
+                {
+                  label: '⭐ VIP',
+                  value: s.vip || 0,
+                  color: 'text-yellow-600 dark:text-yellow-400',
+                  desc: '3+ заказов',
+                },
+                {
+                  label: '🟢 Активные',
+                  value: s.active || 0,
+                  color: 'text-green-600 dark:text-green-400',
+                  desc: 'за 60 дней',
+                },
+                {
+                  label: '😴 Спящие',
+                  value: s.dormant || 0,
+                  color: 'text-blue-500 dark:text-blue-400',
+                  desc: '90+ дней без заказов',
+                },
+                {
+                  label: '🆕 Разовые',
+                  value: s.one_time || 0,
+                  color: 'text-gray-500 dark:text-gray-400',
+                  desc: '1 заказ',
+                },
+              ]
+                .map(
+                  seg => `
+                <div class="bg-gray-50 dark:bg-gray-750 rounded-lg p-3 text-center">
+                  <div class="text-xs text-gray-400 dark:text-gray-500 mb-1">${seg.label}</div>
+                  <div class="text-2xl font-bold ${seg.color}">${seg.value}</div>
+                  <div class="text-xs text-gray-400">${total > 0 ? Math.round((seg.value / total) * 100) : 0}% · ${seg.desc}</div>
+                </div>`
+                )
+                .join('')}
+            </div>`;
+        } catch (e) {
+          console.error('segments', e);
+          document.getElementById('segments-section').innerHTML =
+            '<p class="text-sm text-gray-400">Ошибка загрузки</p>';
+        }
+      }
+
       // ── Call new loaders on page init ─────────────────────────────────────────────
       loadFunnel();
       loadRevenueChart();
       loadTopCities();
       loadForecast();
+      loadSegments();
     </script>
   </body>
 </html>
