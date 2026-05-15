@@ -168,3 +168,187 @@ class CustomerSuccessDepartment:
             "suggestions": suggestions,
             "reason": reason,
         }
+
+    # ------------------------------------------------------------------ #
+    # execute_task — agent-style orchestrator entry point                  #
+    # ------------------------------------------------------------------ #
+
+    def execute_task(self, task: str, context: Dict[str, Any] | None) -> Dict[str, Any]:
+        """Orchestrate all CS specialist roles for a given task.
+
+        Returns a combined result with insights from every specialist,
+        a list of roles_used, and a UTC timestamp.
+        """
+        ctx: Dict[str, Any] = context or {}
+        task_lower = (task or "").lower()
+
+        # Run all specialists and collect their insights
+        onboarding = OnboardingSpecialist()
+        retention = RetentionAnalyst()
+        feedback = FeedbackCollector()
+        upsell = UpsellAdvisor()
+
+        onboarding_result = onboarding.run(ctx)
+        retention_result = retention.run(ctx)
+        feedback_result = feedback.run(ctx)
+        upsell_result = upsell.run(ctx)
+
+        all_insights: List[str] = []
+        for r in (onboarding_result, retention_result, feedback_result, upsell_result):
+            insights = r.get("insights", [])
+            if isinstance(insights, list):
+                all_insights.extend(insights)
+            elif isinstance(insights, str):
+                all_insights.append(insights)
+
+        return {
+            "task": task,
+            "roles_used": [
+                onboarding.role,
+                retention.role,
+                feedback.role,
+                upsell.role,
+            ],
+            "insights": all_insights,
+            "details": {
+                "onboarding": onboarding_result,
+                "retention": retention_result,
+                "feedback": feedback_result,
+                "upsell": upsell_result,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Agent-style specialist classes
+# Each wraps the heuristic logic and exposes a uniform .run(context) -> dict
+# interface consumed by CustomerSuccessDepartment.execute_task above.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _BaseCSAgent:
+    """Shared base for all Customer Success agent specialists."""
+
+    department: str = "customer_success"
+    role: str = "cs_agent"
+
+    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:  # pragma: no cover
+        raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _safe_ctx(context: Dict[str, Any] | None) -> Dict[str, Any]:
+        return context or {}
+
+    @staticmethod
+    def _now_iso() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+
+class OnboardingSpecialist(_BaseCSAgent):
+    """Generates onboarding welcome messages for new clients."""
+
+    role: str = "onboarding_specialist"
+
+    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:
+        ctx = self._safe_ctx(context)
+        kpis = ctx.get("nevesty_kpis", {}) or {}
+        clients_total = kpis.get("clients_total", 0)
+
+        insights: List[str] = [
+            "Відправити вітальне повідомлення нового клієнту протягом 1 години після заявки.",
+            "Призначити персонального менеджера для супроводу клієнта.",
+        ]
+        if clients_total and clients_total > 100:
+            insights.append(
+                f"Велика база ({clients_total} клієнтів): розгляньте автоматизацію онбордингу."
+            )
+
+        return {
+            "role": self.role,
+            "insights": insights,
+            "timestamp": self._now_iso(),
+        }
+
+
+class RetentionAnalyst(_BaseCSAgent):
+    """Analyses client retention risk and recommends re-engagement actions."""
+
+    role: str = "retention_analyst"
+
+    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:
+        ctx = self._safe_ctx(context)
+        kpis = ctx.get("nevesty_kpis", {}) or {}
+        repeat_rate = kpis.get("repeat_client_rate", None)
+
+        insights: List[str] = [
+            "Проаналізувати клієнтів, що не замовляли понад 90 днів.",
+            "Запустити реактиваційну кампанію з персональними пропозиціями.",
+        ]
+        if repeat_rate is not None and repeat_rate < 20:
+            insights.append(
+                f"Повторний рейтинг клієнтів {repeat_rate}% — нижче норми. "
+                "Переглянути програму лояльності."
+            )
+
+        return {
+            "role": self.role,
+            "insights": insights,
+            "timestamp": self._now_iso(),
+        }
+
+
+class FeedbackCollector(_BaseCSAgent):
+    """Collects and analyses client feedback after each event."""
+
+    role: str = "feedback_collector"
+
+    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:
+        ctx = self._safe_ctx(context)
+        kpis = ctx.get("nevesty_kpis", {}) or {}
+        orders_month = kpis.get("orders_this_month", 0)
+
+        insights: List[str] = [
+            "Надіслати запит на відгук через 24 години після заходу.",
+            "Збирати NPS-оцінки для відстеження задоволеності клієнтів.",
+        ]
+        if orders_month and orders_month > 20:
+            insights.append(
+                f"Цього місяця {orders_month} замовлень: розгляньте автоматизований збір відгуків."
+            )
+
+        return {
+            "role": self.role,
+            "insights": insights,
+            "timestamp": self._now_iso(),
+        }
+
+
+class UpsellAdvisor(_BaseCSAgent):
+    """Recommends upsell and cross-sell opportunities based on client data."""
+
+    role: str = "upsell_advisor"
+
+    def run(self, context: Dict[str, Any] | None) -> Dict[str, Any]:
+        ctx = self._safe_ctx(context)
+        kpis = ctx.get("nevesty_kpis", {}) or {}
+        avg_check = kpis.get("avg_check", 0)
+
+        insights: List[str] = [
+            "Пропонуйте пакет «Все включено» клієнтам з бюджетом понад 30 000 грн.",
+            "Рекомендуйте додаткового фотографа або стиліста при корпоративних подіях.",
+        ]
+        if avg_check and avg_check > 50_000:
+            insights.append(
+                f"Середній чек {avg_check} грн — висока цінність. "
+                "Запропонуйте VIP-пакет з особистим менеджером."
+            )
+
+        return {
+            "role": self.role,
+            "insights": insights,
+            "timestamp": self._now_iso(),
+        }

@@ -319,3 +319,202 @@ class TestSuggestUpsell:
     def test_model_count_none_no_crash(self, dept):
         result = dept.suggest_upsell({"event_type": "корпоратив", "model_count": None})
         assert isinstance(result, dict)
+
+
+# ══════════════════════════════════════════════════════════════
+# Agent-style specialist classes (БЛОК 5.2)
+# ══════════════════════════════════════════════════════════════
+
+from factory.agents.customer_success_department import (  # noqa: E402
+    OnboardingSpecialist,
+    RetentionAnalyst,
+    FeedbackCollector,
+    UpsellAdvisor,
+)
+
+
+class TestOnboardingSpecialist:
+    def test_instantiation(self):
+        assert OnboardingSpecialist() is not None
+
+    def test_department(self):
+        assert OnboardingSpecialist().department == "customer_success"
+
+    def test_role(self):
+        assert OnboardingSpecialist().role == "onboarding_specialist"
+
+    def test_run_returns_dict(self):
+        assert isinstance(OnboardingSpecialist().run({}), dict)
+
+    def test_run_has_insights(self):
+        assert "insights" in OnboardingSpecialist().run({})
+
+    def test_run_none_context(self):
+        assert isinstance(OnboardingSpecialist().run(None), dict)
+
+    def test_run_has_timestamp(self):
+        result = OnboardingSpecialist().run({})
+        assert "timestamp" in result
+        assert isinstance(result["timestamp"], str)
+
+    def test_run_with_metrics(self):
+        ctx = {"nevesty_kpis": {"clients_total": 50, "orders_this_month": 10}}
+        result = OnboardingSpecialist().run(ctx)
+        assert isinstance(result, dict)
+
+    def test_run_large_client_base_extra_insight(self):
+        ctx = {"nevesty_kpis": {"clients_total": 200}}
+        result = OnboardingSpecialist().run(ctx)
+        combined = " ".join(result["insights"])
+        assert "автоматиза" in combined or "200" in combined
+
+    def test_insights_is_list(self):
+        result = OnboardingSpecialist().run({})
+        assert isinstance(result["insights"], list)
+        assert len(result["insights"]) >= 1
+
+
+class TestRetentionAnalyst:
+    def test_instantiation(self):
+        assert RetentionAnalyst() is not None
+
+    def test_department(self):
+        assert RetentionAnalyst().department == "customer_success"
+
+    def test_role(self):
+        assert RetentionAnalyst().role == "retention_analyst"
+
+    def test_run_returns_dict(self):
+        assert isinstance(RetentionAnalyst().run({}), dict)
+
+    def test_run_has_insights(self):
+        assert "insights" in RetentionAnalyst().run({})
+
+    def test_run_none_context(self):
+        assert isinstance(RetentionAnalyst().run(None), dict)
+
+    def test_run_has_timestamp(self):
+        assert "timestamp" in RetentionAnalyst().run({})
+
+    def test_low_repeat_rate_extra_insight(self):
+        ctx = {"nevesty_kpis": {"repeat_client_rate": 10}}
+        result = RetentionAnalyst().run(ctx)
+        combined = " ".join(result["insights"])
+        assert "лояльност" in combined or "10%" in combined or "10" in combined
+
+
+class TestFeedbackCollector:
+    def test_instantiation(self):
+        assert FeedbackCollector() is not None
+
+    def test_department(self):
+        assert FeedbackCollector().department == "customer_success"
+
+    def test_role(self):
+        assert FeedbackCollector().role == "feedback_collector"
+
+    def test_run_returns_dict(self):
+        assert isinstance(FeedbackCollector().run({}), dict)
+
+    def test_run_has_insights(self):
+        assert "insights" in FeedbackCollector().run({})
+
+    def test_run_none_context(self):
+        assert isinstance(FeedbackCollector().run(None), dict)
+
+    def test_run_has_timestamp(self):
+        assert "timestamp" in FeedbackCollector().run({})
+
+    def test_high_order_count_extra_insight(self):
+        ctx = {"nevesty_kpis": {"orders_this_month": 25}}
+        result = FeedbackCollector().run(ctx)
+        combined = " ".join(result["insights"])
+        assert "автоматиз" in combined or "25" in combined
+
+
+class TestUpsellAdvisor:
+    def test_instantiation(self):
+        assert UpsellAdvisor() is not None
+
+    def test_department(self):
+        assert UpsellAdvisor().department == "customer_success"
+
+    def test_role(self):
+        assert UpsellAdvisor().role == "upsell_advisor"
+
+    def test_run_returns_dict(self):
+        assert isinstance(UpsellAdvisor().run({}), dict)
+
+    def test_run_has_insights(self):
+        assert "insights" in UpsellAdvisor().run({})
+
+    def test_run_none_context(self):
+        assert isinstance(UpsellAdvisor().run(None), dict)
+
+    def test_run_has_timestamp(self):
+        assert "timestamp" in UpsellAdvisor().run({})
+
+    def test_run_with_kpis(self):
+        ctx = {"nevesty_kpis": {"avg_check": 25000, "repeat_client_rate": 30}}
+        result = UpsellAdvisor().run(ctx)
+        assert isinstance(result, dict)
+
+    def test_high_avg_check_vip_suggestion(self):
+        ctx = {"nevesty_kpis": {"avg_check": 60000}}
+        result = UpsellAdvisor().run(ctx)
+        combined = " ".join(result["insights"])
+        assert "VIP" in combined or "60000" in combined or "менеджер" in combined
+
+
+class TestCustomerSuccessDepartmentExecuteTask:
+    def test_instantiation(self):
+        assert CustomerSuccessDepartment() is not None
+
+    def test_execute_task_returns_dict(self):
+        result = CustomerSuccessDepartment().execute_task("improve retention", {})
+        assert isinstance(result, dict)
+
+    def test_execute_task_has_roles_used(self):
+        result = CustomerSuccessDepartment().execute_task("test", {})
+        assert "roles_used" in result
+        assert len(result["roles_used"]) >= 2
+
+    def test_execute_task_has_insights(self):
+        result = CustomerSuccessDepartment().execute_task("grow", {})
+        assert "insights" in result
+
+    def test_execute_task_has_timestamp(self):
+        result = CustomerSuccessDepartment().execute_task("test", {})
+        assert "timestamp" in result
+
+    def test_execute_task_none_context(self):
+        result = CustomerSuccessDepartment().execute_task("test", None)
+        assert isinstance(result, dict)
+
+    def test_execute_task_roles_include_all_specialists(self):
+        result = CustomerSuccessDepartment().execute_task("retention", {})
+        roles = result.get("roles_used", [])
+        assert any("onboard" in r for r in roles)
+        assert any("retention" in r for r in roles)
+        assert any("feedback" in r for r in roles)
+        assert any("upsell" in r for r in roles)
+
+    def test_execute_task_has_details(self):
+        result = CustomerSuccessDepartment().execute_task("upsell campaign", {})
+        assert "details" in result
+
+    def test_execute_task_details_has_all_keys(self):
+        result = CustomerSuccessDepartment().execute_task("test", {})
+        details = result.get("details", {})
+        for key in ("onboarding", "retention", "feedback", "upsell"):
+            assert key in details
+
+    def test_execute_task_insights_combined_from_all_agents(self):
+        result = CustomerSuccessDepartment().execute_task("full review", {})
+        assert len(result["insights"]) >= 4
+
+    def test_execute_task_with_kpis_context(self):
+        ctx = {"nevesty_kpis": {"clients_total": 150, "repeat_client_rate": 15, "avg_check": 55000}}
+        result = CustomerSuccessDepartment().execute_task("analyse", ctx)
+        assert isinstance(result, dict)
+        assert len(result["insights"]) >= 4
