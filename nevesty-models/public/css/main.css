@@ -1314,6 +1314,79 @@ html.dark {
   --white: #ffffff;
 }
 
+/* Forced light via html.light class (overrides system dark preference) */
+html.light {
+  --bg:  #f8f5f0;
+  --bg2: #f0ece4;
+  --bg3: #e8e2d8;
+  --border: #d4c9b8;
+  --text: #1a1814;
+  --text-muted: #5a5040;
+  --text-dim: #8a7860;
+  --white: #1a1814;
+}
+html.light body {
+  background: var(--bg);
+  color: var(--text);
+}
+html.light .navbar {
+  background: rgba(248,245,240,0.9);
+  border-bottom: 1px solid var(--border);
+}
+html.light .navbar.scrolled {
+  background: rgba(248,245,240,0.97);
+}
+html.light .nav-mobile {
+  background: var(--bg);
+}
+html.light .model-card,
+html.light .service-card,
+html.light .pricing-card,
+html.light .testimonial-card,
+html.light .booking-section,
+html.light .filters-panel {
+  background: var(--bg3);
+  border-color: var(--border);
+}
+html.light .form-control,
+html.light .filter-search,
+html.light .range-row input {
+  background: var(--bg2);
+  border-color: var(--border);
+  color: var(--text);
+}
+html.light .modal {
+  background: var(--bg2);
+}
+html.light .footer {
+  background: var(--bg2);
+  border-color: var(--border);
+}
+html.light .section-header h2,
+html.light .hero h1,
+html.light .modal-info h2 {
+  color: var(--text);
+}
+html.light .model-card-skeleton::after {
+  background: linear-gradient(90deg, transparent 0%, rgba(201,169,110,0.15) 50%, transparent 100%);
+}
+html.light .model-card-skeleton {
+  background: var(--bg3);
+}
+html.light .skeleton {
+  background: linear-gradient(90deg, var(--bg3) 0%, var(--bg2) 40%, rgba(201,169,110,0.1) 50%, var(--bg2) 60%, var(--bg3) 100%);
+  background-size: 600px 100%;
+}
+html.light .toast {
+  background: var(--bg2);
+  border-color: var(--border);
+  color: var(--text);
+}
+html.light .stats-bar,
+html.light .services {
+  background: var(--bg2);
+}
+
 /* ─── SKELETON CARD (catalog-specific class) ─────────────── */
 .skeleton-card {
   background: linear-gradient(90deg, var(--bg3) 25%, var(--bg2) 50%, var(--bg3) 75%);
