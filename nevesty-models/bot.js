@@ -3873,6 +3873,12 @@ function initBot(app) {
     return showReferralProgram(msg.chat.id);
   });
 
+  // ── /factory_content (admin: view & send AI-generated posts) ─────────────────
+  bot.onText(/^\/factory_content/, async (msg) => {
+    if (!isAdmin(msg.chat.id)) return;
+    return showFactoryContent(msg.chat.id);
+  });
+
   // ── /msg (admin direct reply) ──────────────────────────────────────────────
   bot.onText(/\/msg (\S+) (.+)/, async (msg, match) => {
     if (!isAdmin(msg.chat.id)) return;
@@ -4587,6 +4593,10 @@ function initBot(app) {
       const underIdx = rest.indexOf('_');
       const modelId = parseInt(rest.slice(0, underIdx));
       const busyDate = rest.slice(underIdx + 1);
+      // Validate date format to avoid operating on unexpected input
+      if (!modelId || modelId <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(busyDate)) {
+        return bot.answerCallbackQuery(q.id, { text: '❌ Неверный формат данных' }).catch(() => {});
+      }
       await run('DELETE FROM model_busy_dates WHERE model_id=? AND busy_date=?', [modelId, busyDate]).catch(() => {});
       await bot.answerCallbackQuery(q.id, { text: '🗑 Дата удалена' }).catch(() => {});
       return showAdminModelCalendar(chatId, modelId);
@@ -5319,6 +5329,22 @@ function initBot(app) {
       return;
     }
 
+    // ── Factory content (AI posts)
+    if (data === 'adm_factory_content') {
+      if (!isAdmin(chatId)) return;
+      return showFactoryContent(chatId);
+    }
+    if (data.startsWith('adm_fc_pub_')) {
+      if (!isAdmin(chatId)) return;
+      const postId = parseInt(data.replace('adm_fc_pub_', ''));
+      return publishFactoryPost(chatId, postId);
+    }
+    if (data.startsWith('adm_fc_preview_')) {
+      if (!isAdmin(chatId)) return;
+      const postId = parseInt(data.replace('adm_fc_preview_', ''));
+      return previewFactoryPost(chatId, postId);
+    }
+
     // ── Agent feed
     if (data.startsWith('agent_feed_')) {
       if (!isAdmin(chatId)) return;
@@ -5605,6 +5631,69 @@ function initBot(app) {
         [chatId, newVal]
       ).catch(() => {});
       return showClientNotificationSettings(chatId);
+    }
+
+    // ── Настройки клиента
+    if (data === 'client_settings') return showClientSettings(chatId);
+
+    if (data === 'client_settings_privacy') {
+      const prefs = await get('SELECT profile_hidden FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null) || { profile_hidden: 0 };
+      const newVal = prefs.profile_hidden ? 0 : 1;
+      await run(
+        `INSERT INTO client_prefs (chat_id, profile_hidden) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET profile_hidden=excluded.profile_hidden, updated_at=CURRENT_TIMESTAMP`,
+        [chatId, newVal]
+      ).catch(() => {});
+      return showClientSettings(chatId);
+    }
+
+    if (data === 'client_settings_lang') {
+      const langEnabled = await getSetting('bot_language').catch(() => null);
+      if (langEnabled !== 'multi') {
+        return safeSend(chatId, '🌐 Мультиязычность пока недоступна\\.\n\nСледите за обновлениями\\!', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'client_settings' }]] },
+        });
+      }
+      return safeSend(chatId, '🌐 *Язык интерфейса*\n\nВыберите язык:', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [
+          [{ text: '🇷🇺 Русский ✓', callback_data: 'noop' }],
+          [{ text: '🇬🇧 English — Coming soon', callback_data: 'noop' }],
+          [{ text: '← Назад', callback_data: 'client_settings' }],
+        ]},
+      });
+    }
+
+    if (data === 'client_settings_delete') {
+      return safeSend(chatId,
+        '⚠️ *Удаление аккаунта*\n\n' +
+        'Все ваши данные \\(профиль, история заявок, баллы\\) будут удалены\\.\n' +
+        'Это действие *необратимо*\\.\n\n' +
+        'Подтвердите удаление:',
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '🗑 Да, удалить аккаунт', callback_data: 'client_settings_delete_confirm' }],
+            [{ text: '❌ Отмена',              callback_data: 'client_settings'                 }],
+          ]},
+        }
+      );
+    }
+
+    if (data === 'client_settings_delete_confirm') {
+      try {
+        await run('DELETE FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => {});
+        await run('DELETE FROM sessions WHERE chat_id=?', [chatId]).catch(() => {});
+        await run('UPDATE orders SET client_chat_id=NULL WHERE client_chat_id=?', [chatId]).catch(() => {});
+        await run('DELETE FROM wishlists WHERE chat_id=?', [chatId]).catch(() => {});
+        return safeSend(chatId,
+          '🗑 Ваш аккаунт удалён\\.\n\nСпасибо, что пользовались нашим сервисом\\!\n' +
+          'Для новой регистрации просто напишите /start\\.',
+          { parse_mode: 'MarkdownV2' }
+        );
+      } catch (e) {
+        return safeSend(chatId, '⚠️ Не удалось удалить аккаунт\\. Попробуйте позже\\.', { parse_mode: 'MarkdownV2' });
+      }
     }
 
     // ── Доступность модели
@@ -6468,7 +6557,7 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus, clientPh
   if (!bot || !clientChatId) return;
 
   // Check client notification preferences
-  const clientPrefs = await get('SELECT notify_status FROM client_prefs WHERE chat_id=?', [clientChatId]).catch(() => null);
+  const clientPrefs = await get('SELECT notify_status, notify_review_invites FROM client_prefs WHERE chat_id=?', [clientChatId]).catch(() => null);
   if (clientPrefs && clientPrefs.notify_status === 0) {
     // Client opted out of status notifications
     return;
@@ -6500,7 +6589,8 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus, clientPh
         get('SELECT id FROM orders WHERE order_number=?', [orderNumber]).catch(()=>null),
       ]);
       reviewOrderId = order?.id || null;
-      if (reviewsEnabled === '1' && order) {
+      const reviewInvitesAllowed = !clientPrefs || clientPrefs.notify_review_invites !== 0;
+      if (reviewsEnabled === '1' && order && reviewInvitesAllowed) {
         reviewsEnabledForCompleted = true;
         keyboard.inline_keyboard.unshift([
           { text: '⭐ Оставить отзыв', callback_data: `leave_review_${order.id}` }
@@ -6737,20 +6827,51 @@ async function showUserProfile(chatId, firstName) {
 
 async function showClientNotificationSettings(chatId) {
   const prefs = await get('SELECT * FROM client_prefs WHERE chat_id=?', [chatId])
-    .catch(() => null) || { notify_status: 1, notify_promo: 1, notify_review: 1, notify_reminders: 1 };
+    .catch(() => null) || {
+      notify_marketing: 1, notify_status: 1,
+      notify_reminders: 1, notify_review_invites: 1,
+    };
 
-  const onOff = v => (v === undefined || v === null || v) ? '🔔 Вкл' : '🔕 Выкл';
+  // 1 (or null/undefined) = on, 0 = off
+  const onOff = v => (v === undefined || v === null || v === 1 || v === true) ? '🔔 Вкл' : '🔕 Выкл';
 
   return safeSend(chatId, '🔔 *Настройки уведомлений*\n\nВыберите что вы хотите получать:', {
     parse_mode: 'MarkdownV2',
     reply_markup: { inline_keyboard: [
-      [{ text: `${onOff(prefs.notify_status)} Статус заявки`, callback_data: 'client_notif_status' }],
-      [{ text: `${onOff(prefs.notify_promo)} Акции и предложения`, callback_data: 'client_notif_promo' }],
-      [{ text: `${onOff(prefs.notify_review)} Просьба оставить отзыв`, callback_data: 'client_notif_review' }],
-      [{ text: `${onOff(prefs.notify_reminders !== 0 ? prefs.notify_reminders : 0)} Напоминания о мероприятиях`, callback_data: 'client_notif_reminders' }],
-      [{ text: '← Назад', callback_data: 'profile' }]
+      [{ text: `📢 ${onOff(prefs.notify_marketing)} Рассылки от агентства`,     callback_data: 'client_notif_marketing'       }],
+      [{ text: `🔔 ${onOff(prefs.notify_status)} Изменение статуса заявки`,      callback_data: 'client_notif_status'           }],
+      [{ text: `⏰ ${onOff(prefs.notify_reminders)} Напоминания о мероприятиях`, callback_data: 'client_notif_reminders'        }],
+      [{ text: `📝 ${onOff(prefs.notify_review_invites)} Приглашения оставить отзыв`, callback_data: 'client_notif_review_invites' }],
+      [{ text: '← Назад', callback_data: 'client_settings' }],
     ]}
   });
+}
+
+// ─── Client settings menu ─────────────────────────────────────────────────────
+
+async function showClientSettings(chatId) {
+  const prefs = await get('SELECT profile_hidden FROM client_prefs WHERE chat_id=?', [chatId])
+    .catch(() => null) || { profile_hidden: 0 };
+
+  const langEnabled = await getSetting('bot_language').catch(() => null);
+  const privacyLabel = prefs.profile_hidden ? '🔒 Профиль скрыт' : '👁 Профиль виден';
+
+  const keyboard = [
+    [{ text: `${privacyLabel} — переключить`,      callback_data: 'client_settings_privacy' }],
+    [{ text: '🔔 Уведомления',                     callback_data: 'client_notif_settings'   }],
+    [{ text: langEnabled === 'multi' ? '🌐 Язык / Language' : '🌐 Язык (скоро)', callback_data: 'client_settings_lang' }],
+    [{ text: '🗑 Удалить аккаунт',                 callback_data: 'client_settings_delete'  }],
+    [{ text: '← Назад',                            callback_data: 'profile'                 }],
+  ];
+
+  return safeSend(chatId,
+    '⚙️ *Настройки аккаунта*\n\n' +
+    'Управляйте приватностью, уведомлениями и языком интерфейса\\.',
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: keyboard },
+    }
+  );
 }
 
 // ─── AI Factory Panel ─────────────────────────────────────────────────────────
@@ -6814,6 +6935,7 @@ async function showFactoryPanel(chatId) {
          { text: '📋 Решения CEO',   callback_data: 'adm_factory_decisions' }],
         [{ text: '🎯 AI Задачи',     callback_data: 'adm_factory_tasks' },
          { text: '🧪 A/B Тесты',    callback_data: 'adm_experiments' }],
+        [{ text: '📢 Контент в канал', callback_data: 'adm_factory_content' }],
         [{ text: '← Меню', callback_data: 'admin_menu' }],
       ]}
     });
@@ -8073,6 +8195,64 @@ async function showAdminDashboard(chatId) {
       ]}
     });
   } catch (e) { console.error('[Bot] showAdminDashboard:', e.message); }
+}
+
+// ─── Factory Content: AI-generated posts for channel ─────────────────────────
+
+async function showFactoryContent(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const posts = await query(
+      "SELECT id, title, body, status, created_at FROM factory_posts ORDER BY created_at DESC LIMIT 10"
+    ).catch(() => []);
+    if (!posts.length) {
+      return safeSend(chatId, '📢 *Контент для канала*\n\nНет сгенерированных постов\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
+      });
+    }
+    const lines = posts.map((p, i) =>
+      `${i + 1}\\. ${esc(p.title || 'Без заголовка')} — ${esc(p.status || 'draft')}`
+    ).join('\n');
+    const keyboard = posts.map(p => ([
+      { text: `👁 ${(p.title || 'Пост').slice(0, 20)}`, callback_data: `adm_fc_preview_${p.id}` },
+      { text: '📢 Опубл.', callback_data: `adm_fc_pub_${p.id}` },
+    ]));
+    keyboard.push([{ text: '← Factory', callback_data: 'adm_factory' }]);
+    return safeSend(chatId, `📢 *Контент для канала*\n\n${lines}`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  } catch (e) { console.error('[Bot] showFactoryContent:', e.message); }
+}
+
+async function previewFactoryPost(chatId, postId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const post = await get('SELECT * FROM factory_posts WHERE id=?', [postId]).catch(() => null);
+    if (!post) return safeSend(chatId, '❌ Пост не найден');
+    const text = `📝 *Предпросмотр поста*\n\n*${esc(post.title || '')}*\n\n${esc(post.body || '')}`;
+    return safeSend(chatId, text.slice(0, 4000), {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📢 Опубликовать', callback_data: `adm_fc_pub_${postId}` }],
+        [{ text: '← Назад', callback_data: 'adm_factory_content' }],
+      ]}
+    });
+  } catch (e) { console.error('[Bot] previewFactoryPost:', e.message); }
+}
+
+async function publishFactoryPost(chatId, postId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const post = await get('SELECT * FROM factory_posts WHERE id=?', [postId]).catch(() => null);
+    if (!post) return safeSend(chatId, '❌ Пост не найден');
+    await run("UPDATE factory_posts SET status='published', published_at=CURRENT_TIMESTAMP WHERE id=?", [postId]).catch(() => {});
+    return safeSend(chatId, `✅ Пост опубликован\\.`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← Контент', callback_data: 'adm_factory_content' }]] }
+    });
+  } catch (e) { console.error('[Bot] publishFactoryPost:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
