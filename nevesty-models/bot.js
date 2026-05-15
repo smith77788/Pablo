@@ -3340,18 +3340,36 @@ function initBot(app) {
   // ── /cancel ────────────────────────────────────────────────────────────────
   bot.onText(/\/cancel/, async (msg) => {
     const chatId = msg.chat.id;
+    // Get the current state BEFORE clearing so we can give contextual feedback
+    const cancelSession = await getSession(chatId);
+    const cancelState   = cancelSession?.state || 'idle';
     await clearSession(chatId);
+
+    // Choose a contextual cancellation message based on what was being done
+    let cancelMsg;
+    if (cancelState.startsWith('bk_model') || cancelState === 'bk_s1') {
+      cancelMsg = '✅ Бронирование отменено\\. Возвращаю в каталог\\.';
+    } else if (cancelState.startsWith('bk_')) {
+      cancelMsg = '✅ Бронирование отменено\\.';
+    } else if (cancelState === 'msg_to_manager') {
+      cancelMsg = '✅ Сообщение менеджеру отменено\\.';
+    } else if (cancelState.startsWith('leave_review')) {
+      cancelMsg = '✅ Написание отзыва отменено\\.';
+    } else if (cancelState.startsWith('profile_edit')) {
+      cancelMsg = '✅ Редактирование профиля отменено\\.';
+    } else if (cancelState.startsWith('adm_')) {
+      cancelMsg = '✅ Действие отменено\\.';
+    } else {
+      cancelMsg = '✅ Действие отменено\\.';
+    }
+
+    const menuBtn = { reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] } };
+
     if (isAdmin(chatId)) {
-      return safeSend(chatId, '❌ Действие отменено\\.', {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
-      });
+      return safeSend(chatId, cancelMsg, { parse_mode: 'MarkdownV2', ...menuBtn });
     }
     const clientKb = await buildClientKeyboard();
-    await safeSend(chatId, '❌ Дія скасована\\.', {
-      parse_mode: 'MarkdownV2',
-      reply_markup: REPLY_KB_CLIENT,
-    });
+    await safeSend(chatId, cancelMsg, { parse_mode: 'MarkdownV2', ...menuBtn });
     return safeSend(chatId, '↩️ *Повертаємось до головного меню\\.*\n\n_Оберіть дію нижче або скористайтесь кнопками клавіатури\\._', {
       parse_mode: 'MarkdownV2',
       reply_markup: clientKb,
@@ -5113,10 +5131,26 @@ function initBot(app) {
     const state   = session?.state || 'idle';
     const d       = sessionData(session);
 
-    // ── Session timeout: сброс если сессия не активна > 30 минут ────────────
+    // ── Session timeout: предупреждение если бронирование активно > 30 минут ──
     if (state !== 'idle' && session?.updated_at) {
       const updatedAt = new Date(session.updated_at).getTime();
       if (!isNaN(updatedAt) && Date.now() - updatedAt > SESSION_TIMEOUT_MS) {
+        if (state.startsWith('bk_')) {
+          // Booking session > 30 min — warn and ask to continue or restart
+          return safeSend(chatId,
+            '⏰ Ваша сессия бронирования активна уже более 30 минут\\. Продолжить или начать заново?',
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '▶ Продолжить',     callback_data: 'session_continue' }],
+                  [{ text: '🔄 Начать заново',  callback_data: 'session_restart'  }],
+                ]
+              }
+            }
+          );
+        }
+        // Non-booking session expired — silently reset and show menu
         clearTimeout(sessionTimers.get(chatId));
         sessionTimers.delete(chatId);
         await clearSession(chatId);
@@ -5560,12 +5594,27 @@ function initBot(app) {
         return bkStep3Phone(chatId, d);
 
       case 'bk_s3_phone':
-        if (!/^[\d\s+\-()]{7,20}$/.test(text)) return safeSend(chatId, '❌ Введите корректный номер телефона:');
+        if (!/^[\d\s+\-()]{7,20}$/.test(text)) return safeSend(chatId,
+          '❌ Формат номера неверный\\. Введите номер в формате: \\+7 999 123\\-45\\-67 или 89991234567',
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'bk_cancel' }]] }
+          }
+        );
         d.client_phone = text;
         return bkStep3Email(chatId, d);
 
       case 'bk_s3_email':
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return safeSend(chatId, '❌ Некорректный email. Введите email или нажмите «Пропустить»:');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return safeSend(chatId,
+          '❌ Неверный формат email\\. Пример: name@mail\\.ru\n\nВведите корректный email или нажмите «Пропустить»\\.',
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [
+              [{ text: '⏭ Пропустить', callback_data: 'bk_skip_email' }],
+              [{ text: '❌ Отменить',   callback_data: 'bk_cancel'     }],
+            ]}
+          }
+        );
         d.client_email = text;
         return bkStep3Telegram(chatId, d, msg.from.username);
 
