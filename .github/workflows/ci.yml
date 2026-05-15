@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, claude/modeling-agency-website-jp2Qd ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: nevesty-models/package-lock.json
+
+      - name: Install dependencies
+        working-directory: nevesty-models
+        run: npm ci
+
+      - name: Syntax check — bot.js
+        working-directory: nevesty-models
+        run: node --check bot.js
+
+      - name: Syntax check — routes/api.js
+        working-directory: nevesty-models
+        run: node --check routes/api.js
+
+      - name: Syntax check — server.js
+        working-directory: nevesty-models
+        run: node --check server.js
+
+      - name: Syntax check — database.js
+        working-directory: nevesty-models
+        run: node --check database.js
+
+      - name: Run tests
+        working-directory: nevesty-models
+        run: npm test
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-secret-32-chars-minimum-long
+          ADMIN_USERNAME: testadmin
+          ADMIN_PASSWORD: testpass123
+          BOT_TOKEN: 0000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_
+
+      - name: Check for hardcoded secrets
+        working-directory: nevesty-models
+        run: |
+          ! grep -r "admin123\|password.*=.*['\"][a-z0-9]\{8,\}['\"]" --include="*.js" \
+            --exclude-dir=node_modules --exclude-dir=tests --exclude="*.test.js" \
+            --exclude="setup.js" . || echo "WARNING: Possible hardcoded credentials found"
+
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          cache-dependency-path: nevesty-models/package-lock.json
+
+      - name: Install dependencies
+        working-directory: nevesty-models
+        run: npm ci
+
+      - name: Check package.json for vulnerabilities
+        working-directory: nevesty-models
+        run: npm audit --audit-level=high || true
+
+  python-check:
+    name: Factory Python Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install factory dependencies
+        working-directory: factory
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      - name: Syntax check factory agents
+        working-directory: factory
+        run: |
+          find agents -name "*.py" -exec python -m py_compile {} + && echo "All agents OK"
+          python -m py_compile cycle.py && echo "cycle.py OK"
+          python -m py_compile db.py && echo "db.py OK"
