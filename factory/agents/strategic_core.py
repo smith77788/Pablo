@@ -175,6 +175,86 @@ class StrategicCore(FactoryAgent):
         )
         return report or "Weekly report unavailable"
 
+    def generate_monthly_report(self) -> dict:
+        """Generate a monthly strategic report with KPIs and roadmap."""
+        recent_decisions = db.get_recent_decisions(50)
+        dec_types: dict[str, int] = {}
+        for d in recent_decisions:
+            t = d.get("decision_type", "other")
+            dec_types[t] = dec_types.get(t, 0) + 1
+
+        active_products = db.get_active_products()
+        running_experiments = db.get_running_experiments()
+
+        report = self.think_json(
+            "Ты CEO. Составь ежемесячный стратегический отчёт. Верни JSON:\n"
+            "{\n"
+            '  "period": "Месяц ГГГГ",\n'
+            '  "executive_summary": "2-3 предложения итога месяца",\n'
+            '  "kpis": {"total_decisions": N, "experiments_run": N, "active_products": N},\n'
+            '  "achievements": ["достижение 1", "достижение 2", "достижение 3"],\n'
+            '  "challenges": ["проблема 1", "проблема 2"],\n'
+            '  "next_month_goals": ["цель 1", "цель 2", "цель 3"],\n'
+            '  "strategic_direction": "куда движемся в следующем месяце",\n'
+            '  "health_trend": "improving|stable|declining"\n'
+            "}",
+            context={
+                "decisions_by_type": dec_types,
+                "active_products": len(active_products),
+                "running_experiments": len(running_experiments),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            max_tokens=700,
+        )
+
+        if not isinstance(report, dict):
+            report = {
+                "period": datetime.now(timezone.utc).strftime("%B %Y"),
+                "executive_summary": "Monthly report unavailable",
+                "kpis": {"total_decisions": len(recent_decisions), "experiments_run": len(running_experiments), "active_products": len(active_products)},
+                "achievements": [],
+                "challenges": [],
+                "next_month_goals": [],
+                "strategic_direction": "Continue current strategy",
+                "health_trend": "stable",
+            }
+
+        cycle_id = f"monthly_{datetime.now(timezone.utc).strftime('%Y_%m')}"
+        db.save_ceo_decision(
+            cycle_id=cycle_id,
+            decision_text=report.get("executive_summary", ""),
+            metadata={"type": "monthly_report", **report},
+        )
+        logger.info("[CEO] Monthly report: trend=%s direction=%s", report.get("health_trend"), report.get("strategic_direction", "")[:40])
+        return report
+
+    def track_decision_execution(self, decision_id: int) -> dict:
+        """Check if a previous decision has been executed and its impact."""
+        decisions = db.fetch_all(
+            "SELECT * FROM decisions WHERE id=? LIMIT 1", (decision_id,)
+        )
+        if not decisions:
+            return {"error": "Decision not found"}
+
+        decision = decisions[0]
+        status = self.think_json(
+            "Оцени выполнение стратегического решения. Верни JSON:\n"
+            '{"executed": true/false, "impact": "описание влияния", "completion_pct": 0-100, "blockers": []}',
+            context={
+                "decision_type": decision.get("decision_type"),
+                "rationale": decision.get("rationale"),
+                "payload": decision.get("payload"),
+                "created_at": decision.get("created_at"),
+            },
+            max_tokens=300,
+        )
+        if isinstance(status, dict):
+            db.run(
+                "UPDATE decisions SET executed=? WHERE id=?",
+                (1 if status.get("executed") else 0, decision_id),
+            )
+        return status or {"executed": False, "impact": "Unknown", "completion_pct": 0, "blockers": []}
+
     def propose_ab_experiment(self, context: dict) -> dict:
         """Propose a new A/B experiment based on current performance."""
         experiment = self.think_json(
