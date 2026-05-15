@@ -343,6 +343,132 @@ def _load_last_cycle_from_history() -> dict:
         return {}
 
 
+def _format_weekly_report(cycle_results: list) -> str:
+    """Generate a weekly summary from the last 7 cycle results."""
+    if not cycle_results:
+        return "Нет данных за неделю."
+
+    total_cycles = len(cycle_results)
+    total_phases = sum(len(r.get("phases", {})) for r in cycle_results)
+    errors = sum(
+        1 for r in cycle_results
+        for v in r.get("phases", {}).values()
+        if isinstance(v, dict) and v.get("status") == "error"
+    )
+
+    lines = [
+        "📊 ЕЖЕНЕДЕЛЬНЫЙ ОТЧЁТ CEO",
+        f"Циклов выполнено: {total_cycles}",
+        f"Фаз обработано: {total_phases}",
+        f"Ошибок: {errors}",
+        f"Успешность: {round((1 - errors / max(total_phases, 1)) * 100)}%",
+        "",
+        "🎯 Ключевые достижения недели:",
+    ]
+
+    # Collect highlights from each cycle
+    highlights: set = set()
+    for r in cycle_results[-7:]:
+        for phase_name, phase_data in r.get("phases", {}).items():
+            if isinstance(phase_data, dict) and phase_data.get("status") == "ok":
+                highlights.add(f"✓ {phase_name.replace('_', ' ').title()}")
+
+    lines.extend(list(highlights)[:5])
+    lines.append("")
+    lines.append("📈 Рекомендации на следующую неделю:")
+    lines.append("• Фокус на конверсии заявок")
+    lines.append("• Обновление каталога моделей")
+    lines.append("• Анализ отзывов клиентов")
+
+    return "\n".join(lines)
+
+
+def _format_monthly_report(cycle_results: list, db_path: str) -> str:
+    """Generate a monthly summary with DB metrics."""
+    lines = [
+        "📊 ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ CEO",
+        f"Всего циклов за месяц: {len(cycle_results)}",
+        "",
+    ]
+
+    try:
+        import sqlite3 as _sqlite3_monthly
+        conn = _sqlite3_monthly.connect(db_path)
+        # Orders this month
+        orders_month = conn.execute(
+            "SELECT COUNT(*) FROM orders WHERE created_at >= date('now', '-30 days')"
+        ).fetchone()[0]
+        # Revenue this month
+        revenue = conn.execute(
+            "SELECT COALESCE(SUM(budget),0) FROM orders WHERE status IN ('confirmed','completed') "
+            "AND created_at >= date('now', '-30 days')"
+        ).fetchone()[0]
+        # New clients
+        new_clients = conn.execute(
+            "SELECT COUNT(DISTINCT client_chat_id) FROM orders WHERE created_at >= date('now', '-30 days')"
+        ).fetchone()[0]
+        conn.close()
+
+        lines += [
+            f"📋 Заявок за месяц: {orders_month}",
+            f"💰 Выручка: {int(revenue):,} ₽".replace(",", " "),
+            f"👥 Новых клиентов: {new_clients}",
+            "",
+            "🎯 Стратегические цели:",
+            "• Увеличить конверсию на 15%",
+            "• Расширить каталог на 10+ моделей",
+            "• Запустить реферальную программу",
+        ]
+    except Exception as e:
+        lines.append(f"(Ошибка получения метрик: {e})")
+
+    return "\n".join(lines)
+
+
+def run_phase_ceo_reports(db_path: str, history_path: str | None = None) -> dict:
+    """Generate CEO weekly and monthly reports from cycle history."""
+    import json as _json_ceo
+    import os as _os_ceo
+    from pathlib import Path as _Path_ceo
+
+    # Load cycle history from factory/history/ directory
+    cycle_results: list = []
+    if history_path:
+        if _os_ceo.path.exists(history_path):
+            try:
+                with open(history_path) as f:
+                    cycle_results = _json_ceo.load(f)
+            except Exception:
+                cycle_results = []
+    else:
+        # Load from standard history directory
+        history_dir = _Path_ceo(__file__).parent / "history"
+        if history_dir.exists():
+            cycles = sorted(history_dir.glob("cycle_*.json"))[-30:]
+            for cycle_file in cycles:
+                try:
+                    with open(cycle_file) as f:
+                        data = _json_ceo.load(f)
+                    cycle_results.append({
+                        "timestamp": data.get("timestamp") or data.get("cycle_id", ""),
+                        "phases": data.get("phases", {}),
+                    })
+                except Exception:
+                    pass
+
+    weekly = _format_weekly_report(cycle_results)
+    monthly = _format_monthly_report(cycle_results, db_path)
+
+    return {
+        "status": "ok",
+        "weekly_report": weekly,
+        "monthly_report": monthly,
+        "weekly_lines": len(weekly.splitlines()),
+        "monthly_lines": len(monthly.splitlines()),
+        "cycles_loaded": len(cycle_results),
+    }
+
+
 def run_phase_25_channel_publisher(phase24_results: dict) -> dict:
     """Publish one post to Telegram channel if configured."""
     import urllib.request
@@ -2440,6 +2566,36 @@ def run_cycle() -> dict:
         summary_lines.append(f"Phase27 FAQ: {phase27_result.get('suggestions', 0)} new suggestions")
     except Exception as e:
         results["phases"]["faq_generator"] = {"status": "error", "error": str(e)}
+
+    # ════════════════════════════════════════════════════════════════
+    # PHASE 5.3 (БЛОК 5.3) — CEO WEEKLY + MONTHLY REPORTS (heuristic)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n📊 PHASE 5.3: CEO WEEKLY + MONTHLY REPORTS")
+    try:
+        _ceo_reports = run_phase_ceo_reports(
+            db_path="/home/user/Pablo/nevesty-models/data.db",
+        )
+        results["ceo_weekly_report"] = _ceo_reports.get("weekly_report", "")
+        results["ceo_monthly_report"] = _ceo_reports.get("monthly_report", "")
+        results["phases"]["ceo_reports_block53"] = {
+            "status": _ceo_reports.get("status"),
+            "cycles_loaded": _ceo_reports.get("cycles_loaded", 0),
+            "weekly_lines": _ceo_reports.get("weekly_lines", 0),
+            "monthly_lines": _ceo_reports.get("monthly_lines", 0),
+        }
+        summary_lines.append(
+            f"📊 CEO Reports: weekly {_ceo_reports.get('weekly_lines', 0)} lines, "
+            f"monthly {_ceo_reports.get('monthly_lines', 0)} lines"
+        )
+        logger.info(
+            "[Phase5.3] CEO Reports: weekly=%d lines, monthly=%d lines, cycles=%d",
+            _ceo_reports.get("weekly_lines", 0),
+            _ceo_reports.get("monthly_lines", 0),
+            _ceo_reports.get("cycles_loaded", 0),
+        )
+    except Exception as e:
+        results["ceo_reports_error"] = str(e)
+        logger.error("Phase 5.3 CEO Reports error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
