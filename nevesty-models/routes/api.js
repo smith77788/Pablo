@@ -1839,6 +1839,51 @@ router.get('/export/orders', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// ─── Model CSV import ─────────────────────────────────────────────────────────
+router.post('/admin/models/import-csv', auth, upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'CSV file required' });
+    const content = req.file.buffer ? req.file.buffer.toString('utf8') : fs.readFileSync(req.file.path, 'utf8');
+    const lines = content.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return res.status(400).json({ error: 'CSV must have header + at least 1 data row' });
+
+    // Parse header
+    const parseRow = (line) => {
+      const result = []; let cur = ''; let inQuote = false;
+      for (const ch of line) {
+        if (ch === '"') { inQuote = !inQuote; }
+        else if (ch === ',' && !inQuote) { result.push(cur.trim()); cur = ''; }
+        else { cur += ch; }
+      }
+      result.push(cur.trim());
+      return result;
+    };
+
+    const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+    const ALLOWED = ['name','age','height','weight','bust','waist','hips','shoe_size','hair_color','eye_color','bio','city','category','instagram','available','photo_main'];
+
+    let created = 0; const errors = [];
+    for (let i = 1; i < lines.length; i++) {
+      const row = parseRow(lines[i]);
+      if (row.every(c => !c)) continue;
+      const obj = {};
+      headers.forEach((h, idx) => { if (ALLOWED.includes(h)) obj[h] = row[idx] || null; });
+      if (!obj.name) { errors.push(`Row ${i + 1}: name required`); continue; }
+      if (!ALLOWED_CATEGORIES.includes(obj.category)) obj.category = 'fashion';
+      obj.available = obj.available === '0' || obj.available === 'false' || obj.available === 'нет' ? 0 : 1;
+      const cols = Object.keys(obj); const vals = Object.values(obj);
+      const placeholders = cols.map(() => '?').join(',');
+      await run(`INSERT INTO models (${cols.join(',')}) VALUES (${placeholders})`, vals).catch(e => {
+        errors.push(`Row ${i + 1}: ${e.message}`);
+      });
+      created++;
+    }
+    // Clean up temp file if multer wrote to disk
+    if (req.file.path) fs.unlink(req.file.path, () => {});
+    res.json({ created, errors, total: lines.length - 1 });
+  } catch (e) { next(e); }
+});
+
 router.get('/export/models', auth, async (req, res, next) => {
   try {
     const models = await query('SELECT id, name, age, height, city, category, available, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos FROM models ORDER BY name');

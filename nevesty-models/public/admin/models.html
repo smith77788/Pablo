@@ -19,11 +19,17 @@
       <h1 class="text-xl font-bold text-gray-900 dark:text-white">💃 Управление моделями</h1>
       <span id="models-count" class="text-sm text-gray-500 dark:text-gray-400"></span>
     </div>
-    <button onclick="openAddModal()"
-      class="flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg text-sm font-medium">
-      <i class="fas fa-plus"></i>
-      Добавить модель
-    </button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label title="Импорт моделей из CSV" style="cursor:pointer;padding:8px 12px;background:#1f2937;color:#9ca3af;border-radius:6px;font-size:0.8rem;font-weight:500;display:flex;align-items:center;gap:6px">
+        <i class="fas fa-file-csv"></i> CSV импорт
+        <input type="file" accept=".csv" style="display:none" onchange="importCSV(this)">
+      </label>
+      <button onclick="openAddModal()"
+        class="flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg text-sm font-medium">
+        <i class="fas fa-plus"></i>
+        Добавить модель
+      </button>
+    </div>
   </div>
 
   <!-- Filters & Search -->
@@ -429,6 +435,28 @@ async function editModel(id) {
   document.getElementById('f-available').checked = !!m.available;
   document.getElementById('f-featured').checked = !!m.featured;
   openModal();
+}
+
+async function importCSV(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  input.value = '';
+  try {
+    const token = localStorage.getItem('admin_token');
+    const r = await fetch('/api/admin/models/import-csv', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData
+    });
+    const data = await r.json();
+    if (!r.ok) { alert('Ошибка импорта: ' + (data.error || r.status)); return; }
+    const msg = `✅ Импортировано: ${data.created} из ${data.total} моделей` +
+      (data.errors && data.errors.length ? `\n⚠️ Ошибки:\n${data.errors.slice(0,5).join('\n')}` : '');
+    alert(msg);
+    loadModels();
+  } catch (e) { alert('Ошибка соединения: ' + e.message); }
 }
 
 function openAddModal() {
