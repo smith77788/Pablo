@@ -1,6 +1,7 @@
-/* Catalog page — filters: name, category, city, age range, hair, height, availability */
+/* Catalog page — filters: name, category, city, age range, hair, height, availability, sort */
 (async function () {
   const grid          = document.getElementById('catalogGrid');
+  const skeleton      = document.getElementById('catalogSkeleton');
   const countEl       = document.getElementById('catalogCount');
   const searchInput   = document.getElementById('searchInput');
   const resetBtn      = document.getElementById('resetFilters');
@@ -11,25 +12,69 @@
   const sortEl        = document.getElementById('sortSelect');
 
   let allModels = [];
-  let filters = {
-    category: '',
-    hair: '',
-    city: '',
-    ageMin: '',
-    ageMax: '',
-    availableOnly: false,
-    sort: 'default',
-  };
 
-  // ── Load models ──────────────────────────────────────────────────────────────
+  // ── Read URL params ──────────────────────────────────────────────────────────
+  function getUrlParams() {
+    const p = new URLSearchParams(window.location.search);
+    return {
+      category:      p.get('category') || '',
+      hair:          p.get('hair') || '',
+      city:          p.get('city') || '',
+      ageMin:        p.get('ageMin') || '',
+      ageMax:        p.get('ageMax') || '',
+      availableOnly: p.get('available') === '1',
+      sort:          p.get('sort') || 'default',
+      search:        p.get('q') || '',
+      minHeight:     p.get('minH') || '',
+      maxHeight:     p.get('maxH') || '',
+    };
+  }
+
+  // ── Write URL params (debounced) ─────────────────────────────────────────────
+  let urlUpdateTimer;
+  function updateUrl(filters) {
+    clearTimeout(urlUpdateTimer);
+    urlUpdateTimer = setTimeout(() => {
+      const p = new URLSearchParams();
+      if (filters.category)    p.set('category', filters.category);
+      if (filters.hair)        p.set('hair', filters.hair);
+      if (filters.city)        p.set('city', filters.city);
+      if (filters.ageMin)      p.set('ageMin', filters.ageMin);
+      if (filters.ageMax)      p.set('ageMax', filters.ageMax);
+      if (filters.availableOnly) p.set('available', '1');
+      if (filters.sort && filters.sort !== 'default') p.set('sort', filters.sort);
+      if (filters.search)      p.set('q', filters.search);
+      if (filters.minHeight)   p.set('minH', filters.minHeight);
+      if (filters.maxHeight)   p.set('maxH', filters.maxHeight);
+      const qs = p.toString();
+      const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }, 300);
+  }
+
+  const urlParams = getUrlParams();
+  let filters = { ...urlParams };
+
+  // ── Show skeleton, load models ───────────────────────────────────────────────
+  if (skeleton) skeleton.style.display = '';
+  if (grid)     grid.style.display = 'none';
+  countEl.textContent = 'Загрузка...';
+
   try {
     const res = await fetch('/api/models');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     allModels = await res.json();
   } catch (e) {
+    if (skeleton) skeleton.style.display = 'none';
+    if (grid) grid.style.display = '';
     grid.innerHTML = '<p class="no-results">Ошибка загрузки. Попробуйте обновить страницу.</p>';
+    countEl.textContent = '';
     return;
   }
+
+  // Hide skeleton, show grid
+  if (skeleton) skeleton.style.display = 'none';
+  if (grid) grid.style.display = '';
 
   // ── Populate city dropdown dynamically ───────────────────────────────────────
   const cities = [...new Set(allModels.map(m => m.city).filter(Boolean))].sort((a, b) =>
@@ -41,6 +86,32 @@
     opt.textContent = city;
     citySelect.appendChild(opt);
   });
+
+  // ── Apply initial values from URL ────────────────────────────────────────────
+  function applyUrlParamsToUI() {
+    if (searchInput)   searchInput.value = filters.search || '';
+    if (minHeightEl)   minHeightEl.value = filters.minHeight || '';
+    if (maxHeightEl)   maxHeightEl.value = filters.maxHeight || '';
+    if (citySelect)    citySelect.value  = filters.city || '';
+    if (availCheckbox) availCheckbox.checked = filters.availableOnly;
+    if (sortEl)        sortEl.value      = filters.sort || 'default';
+
+    // Category tags
+    document.querySelectorAll('#categoryFilters .filter-tag').forEach(t => {
+      t.classList.toggle('active', t.dataset.value === (filters.category || ''));
+    });
+    // Hair tags
+    document.querySelectorAll('#hairFilters .filter-tag').forEach(t => {
+      t.classList.toggle('active', t.dataset.value === (filters.hair || ''));
+    });
+    // Age tags
+    document.querySelectorAll('#ageFilters .filter-tag').forEach(t => {
+      const matches = (t.dataset.min || '') === (filters.ageMin || '') &&
+                      (t.dataset.max || '') === (filters.ageMax || '');
+      t.classList.toggle('active', matches);
+    });
+  }
+  applyUrlParamsToUI();
 
   // ── Filter-tag helpers ───────────────────────────────────────────────────────
   function bindTagGroup(containerId, onSelect) {
@@ -71,32 +142,28 @@
     let t;
     return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
   }
-  searchInput?.addEventListener('input', debounce(render, 250));
-  minHeightEl?.addEventListener('input', debounce(render, 400));
-  maxHeightEl?.addEventListener('input', debounce(render, 400));
+  searchInput?.addEventListener('input', debounce(() => {
+    filters.search = searchInput.value.trim();
+    render();
+  }, 250));
+  minHeightEl?.addEventListener('input', debounce(() => {
+    filters.minHeight = minHeightEl.value;
+    render();
+  }, 400));
+  maxHeightEl?.addEventListener('input', debounce(() => {
+    filters.maxHeight = maxHeightEl.value;
+    render();
+  }, 400));
 
   // ── Reset ────────────────────────────────────────────────────────────────────
   resetBtn?.addEventListener('click', () => {
-    filters = { category: '', hair: '', city: '', ageMin: '', ageMax: '', availableOnly: false, sort: 'default' };
-
-    // Deactivate all tags, then activate the "all/any" defaults
-    document.querySelectorAll('#categoryFilters .filter-tag').forEach(t => t.classList.toggle('active', t.dataset.value === ''));
-    document.querySelectorAll('#hairFilters .filter-tag').forEach(t => t.classList.toggle('active', t.dataset.value === ''));
-    document.querySelectorAll('#ageFilters .filter-tag').forEach(t => t.classList.toggle('active', t.dataset.min === '' && t.dataset.max === ''));
-
-    if (searchInput)   searchInput.value    = '';
-    if (minHeightEl)   minHeightEl.value    = '';
-    if (maxHeightEl)   maxHeightEl.value    = '';
-    if (citySelect)    citySelect.value     = '';
-    if (availCheckbox) availCheckbox.checked = false;
-    if (sortEl)        sortEl.value         = 'default';
+    filters = { category: '', hair: '', city: '', ageMin: '', ageMax: '', availableOnly: false, sort: 'default', search: '', minHeight: '', maxHeight: '' };
+    applyUrlParamsToUI();
     render();
   });
 
   // ── Experience label ─────────────────────────────────────────────────────────
   function experienceBadge(m) {
-    // Derive experience from bio length / category as a heuristic
-    // In absence of a dedicated field, use age: <21 = Junior, 21-25 = Middle, 26+ = Senior
     if (!m.age) return '';
     if (m.age < 21)  return '<span class="exp-badge exp-junior">Начинающая</span>';
     if (m.age <= 25) return '<span class="exp-badge exp-mid">Опыт</span>';
@@ -107,9 +174,9 @@
 
   // ── Render ───────────────────────────────────────────────────────────────────
   function render() {
-    const q    = (searchInput?.value || '').toLowerCase().trim();
-    const minH = parseInt(minHeightEl?.value) || 0;
-    const maxH = parseInt(maxHeightEl?.value) || 999;
+    const q    = (filters.search || searchInput?.value || '').toLowerCase().trim();
+    const minH = parseInt(filters.minHeight || minHeightEl?.value) || 0;
+    const maxH = parseInt(filters.maxHeight || maxHeightEl?.value) || 999;
     const minA = filters.ageMin ? parseInt(filters.ageMin) : 0;
     const maxA = filters.ageMax ? parseInt(filters.ageMax) : 999;
 
@@ -128,13 +195,18 @@
 
     // Sort
     switch (filters.sort) {
+      case 'featured':    list = [...list].sort((a, b) => (b.available - a.available) || (b.id - a.id)); break;
+      case 'name_asc':    list = [...list].sort((a, b) => a.name.localeCompare(b.name, 'ru')); break;
+      case 'newest':      list = [...list].sort((a, b) => b.id - a.id); break;
+      case 'available':   list = [...list].sort((a, b) => b.available - a.available); break;
       case 'height_asc':  list = [...list].sort((a, b) => (a.height || 0) - (b.height || 0)); break;
       case 'height_desc': list = [...list].sort((a, b) => (b.height || 0) - (a.height || 0)); break;
-      case 'name_asc':    list = [...list].sort((a, b) => a.name.localeCompare(b.name, 'ru')); break;
-      case 'available':   list = [...list].sort((a, b) => b.available - a.available); break;
       case 'age_asc':     list = [...list].sort((a, b) => (a.age || 99) - (b.age || 99)); break;
       default: break;
     }
+
+    // Update URL
+    updateUrl(filters);
 
     // Count
     countEl.textContent = `Найдено ${list.length} ${plural(list.length)}`;

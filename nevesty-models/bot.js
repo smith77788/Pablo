@@ -335,6 +335,9 @@ async function showModel(chatId, modelId) {
       reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] }
     });
 
+    // Increment view counter (fire-and-forget)
+    run('UPDATE models SET view_count = COALESCE(view_count,0) + 1 WHERE id=?', [modelId]).catch(() => {});
+
     const lines = [];
     if (m.age)                       lines.push(`📅 Возраст: *${m.age}* лет`);
     if (m.height)                    lines.push(`📏 Рост: *${m.height}* см`);
@@ -346,6 +349,8 @@ async function showModel(chatId, modelId) {
     if (m.category)                  lines.push(`🏷 Категория: *${esc(m.category)}*`);
     if (m.city)                      lines.push(`🏙 Город: *${esc(m.city)}*`);
     if (m.instagram)                 lines.push(`📸 @${esc(m.instagram)}`);
+    const viewCount = (m.view_count || 0) + 1; // +1 for the just-incremented count
+    if (viewCount > 0)               lines.push(`👁 Просмотров: *${viewCount}*`);
 
     const avail   = m.available ? '🟢 Доступна для заказа' : '🔴 Временно недоступна';
     const star    = m.featured ? '⭐ ' : '';
@@ -365,6 +370,7 @@ async function showModel(chatId, modelId) {
         contactBtn,
         [{ text: '❤️ В избранное', callback_data: `fav_add_${m.id}` },
          { text: '💔 Убрать',      callback_data: `fav_remove_${m.id}` }],
+        [{ text: '⚖️ Сравнить', callback_data: `compare_add_${m.id}` }],
         [{ text: '← Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Меню', callback_data: 'main_menu' }],
       ].filter(r => r.length)
     };

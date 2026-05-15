@@ -120,9 +120,18 @@ app.get('*', (req, res) => {
   if (!path.extname(filePath)) filePath += '.html';
   const fullPath = path.join(__dirname, 'public', filePath);
   res.sendFile(fullPath, err => {
-    if (err) res.sendFile(path.join(__dirname, 'public', '404.html'), e2 => {
-      if (e2) res.status(404).send('Not found');
-    });
+    if (err) {
+      res.status(404).sendFile(path.join(__dirname, 'public', '404.html'), e2 => {
+        if (e2) res.status(404).send('Not found');
+      });
+    }
+  });
+});
+
+// ─── Explicit 404 handler (catches unmatched routes after all middleware) ──────
+app.use((req, res) => {
+  res.status(404).sendFile(path.join(__dirname, 'public', '404.html'), err => {
+    if (err) res.status(404).send('Not found');
   });
 });
 

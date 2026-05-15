@@ -463,6 +463,9 @@
 
       const orderNum = result.order_number;
       document.getElementById('orderNumDisplay').textContent = orderNum;
+      // Update link to status page with order number
+      const statusLink = document.getElementById('statusPageLink');
+      if (statusLink) statusLink.href = `/order-status.html?number=${encodeURIComponent(orderNum)}`;
 
       // Haptic success feedback in Telegram Mini App
       window._tgHaptic?.success();
