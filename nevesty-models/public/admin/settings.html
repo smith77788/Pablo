@@ -186,6 +186,17 @@
         <input class="admin-input" type="search" id="settingsSearch" placeholder="🔍 Поиск настроек..." oninput="filterSettings(this.value)" style="max-width:360px" />
       </div>
 
+      <!-- Sections overview panel -->
+      <div class="card mb-4" id="settings-sections-panel" style="margin-bottom:20px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);">
+          <h5 style="margin:0;font-size:0.88rem;color:var(--text)">Все настройки по разделам</h5>
+          <button class="btn btn-sm btn-ghost" onclick="loadSections()" style="font-size:0.78rem;">&#x1F504; Загрузить</button>
+        </div>
+        <div class="card-body" id="sections-content" style="padding:14px 16px;">
+          <p style="margin:0;color:var(--text-muted);font-size:0.82rem;">Нажмите «Загрузить» для просмотра всех настроек по категориям</p>
+        </div>
+      </div>
+
       <!-- Tab navigation -->
       <div class="settings-tabs" role="tablist">
         <button class="tab-btn active" role="tab" aria-selected="true"  onclick="switchTab('profile')"    id="tab-profile">👤 Профиль</button>
@@ -2322,6 +2333,34 @@ async function disableTotp() {
     err.textContent = 'Ошибка соединения';
   } finally {
     btn.disabled = false; btn.textContent = 'Отключить 2FA';
+  }
+}
+
+/* ─── Sections overview ───────────────────────────────────── */
+async function loadSections() {
+  const el = document.getElementById('sections-content');
+  el.innerHTML = '<p style="margin:0;color:var(--text-muted);font-size:0.82rem;">Загрузка...</p>';
+  try {
+    const r = await fetch('/api/admin/settings/sections', { headers: h });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    el.innerHTML = Object.entries(d.sections).map(([key, section]) => `
+      <div style="margin-bottom:16px;">
+        <div style="font-size:0.72rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid rgba(201,169,110,0.15);">${section.label}</div>
+        <table style="width:100%;border-collapse:collapse;">
+          ${Object.keys(section.settings).length === 0
+            ? '<tr><td colspan="2" style="color:var(--text-dim);font-size:0.78rem;padding:4px 0;font-style:italic;">Нет значений в базе данных</td></tr>'
+            : Object.entries(section.settings).map(([k, v]) => `
+            <tr>
+              <td style="width:40%;color:var(--text-muted);font-size:0.78rem;padding:3px 0;vertical-align:top;">${k}</td>
+              <td style="font-size:0.82rem;padding:3px 0 3px 8px;color:var(--text);word-break:break-all;">${v !== null && v !== undefined ? String(v).slice(0, 80) + (String(v).length > 80 ? '…' : '') : '<em style="color:var(--text-dim)">не задано</em>'}</td>
+            </tr>
+          `).join('')}
+        </table>
+      </div>
+    `).join('<hr style="border-color:var(--border);margin:8px 0;">');
+  } catch(e) {
+    el.innerHTML = `<p style="margin:0;color:var(--error);font-size:0.82rem;">Ошибка загрузки: ${e.message}</p>`;
   }
 }
 

@@ -2512,6 +2512,92 @@ router.get('/admin/settings', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// GET /api/admin/settings/sections — returns all settings grouped by section
+router.get('/admin/settings/sections', auth, async (req, res, next) => {
+  try {
+    const sections = {
+      contacts: {
+        label: 'Контакты и тексты',
+        settings: {}
+      },
+      catalog: {
+        label: 'Каталог и модели',
+        settings: {}
+      },
+      booking: {
+        label: 'Бронирование',
+        settings: {}
+      },
+      reviews: {
+        label: 'Отзывы',
+        settings: {}
+      },
+      notifications: {
+        label: 'Уведомления',
+        settings: {}
+      },
+      bot: {
+        label: 'Бот и интерфейс',
+        settings: {}
+      }
+    };
+
+    const settingKeys = [
+      // contacts
+      'agency_phone', 'agency_email', 'contacts_instagram', 'contacts_address',
+      'welcome_text', 'about_text', 'manager_hours', 'manager_reply',
+      'contacts_whatsapp', 'site_url',
+      // catalog
+      'catalog_per_page', 'catalog_sort', 'catalog_show_city',
+      'catalog_top_badge', 'catalog_title',
+      // booking
+      'quick_booking_enabled', 'booking_autoconfirm', 'booking_min_budget',
+      'booking_require_email', 'booking_confirm_msg',
+      // reviews
+      'reviews_enabled', 'reviews_auto_approve', 'reviews_min_completed',
+      'reviews_prompt_text',
+      // notifications
+      'notifications_new_orders', 'notifications_statuses',
+      'notifications_reviews', 'notifications_messages',
+      // bot
+      'language', 'welcome_photo_url', 'main_menu_text',
+      'wishlist_enabled', 'search_enabled'
+    ];
+
+    const sectionMap = {
+      agency_phone: 'contacts', agency_email: 'contacts', contacts_instagram: 'contacts',
+      contacts_address: 'contacts', welcome_text: 'contacts', about_text: 'contacts',
+      manager_hours: 'contacts', manager_reply: 'contacts', contacts_whatsapp: 'contacts',
+      site_url: 'contacts',
+      catalog_per_page: 'catalog', catalog_sort: 'catalog', catalog_show_city: 'catalog',
+      catalog_top_badge: 'catalog', catalog_title: 'catalog',
+      quick_booking_enabled: 'booking', booking_autoconfirm: 'booking',
+      booking_min_budget: 'booking', booking_require_email: 'booking',
+      booking_confirm_msg: 'booking',
+      reviews_enabled: 'reviews', reviews_auto_approve: 'reviews',
+      reviews_min_completed: 'reviews', reviews_prompt_text: 'reviews',
+      notifications_new_orders: 'notifications', notifications_statuses: 'notifications',
+      notifications_reviews: 'notifications', notifications_messages: 'notifications',
+      language: 'bot', welcome_photo_url: 'bot', main_menu_text: 'bot',
+      wishlist_enabled: 'bot', search_enabled: 'bot'
+    };
+
+    const rows = await query(
+      `SELECT key, value FROM bot_settings WHERE key IN (${settingKeys.map(() => '?').join(',')})`,
+      settingKeys
+    );
+
+    rows.forEach(row => {
+      const section = sectionMap[row.key];
+      if (section && sections[section]) {
+        sections[section].settings[row.key] = row.value;
+      }
+    });
+
+    res.json({ sections });
+  } catch (e) { next(e); }
+});
+
 // GET /api/admin/settings/export — exports all settings as JSON file
 router.get('/admin/settings/export', auth, async (req, res, next) => {
   try {
