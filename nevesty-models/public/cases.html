@@ -1,548 +1,742 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <!-- Flash-prevention: apply theme class before first paint -->
-  <script>try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Портфолио и Кейсы — Nevesty Models</title>
-  <meta name="description" content="Примеры работ модельного агентства Nevesty Models: fashion-показы, корпоративы, фотосессии и рекламные съёмки.">
-  <meta property="og:title" content="Портфолио — Nevesty Models">
-  <meta property="og:description" content="Наши кейсы: fashion-показы, корпоративы, фотосессии для брендов и рекламные кампании.">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg">
-  <meta property="og:url" content="https://nevesty-models.ru/cases.html">
-  <meta property="og:site_name" content="Nevesty Models">
-  <meta property="og:locale" content="ru_RU">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="theme-color" content="#080808">
-  <link rel="canonical" href="https://nevesty-models.ru/cases.html">
-  <meta name="robots" content="index, follow">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preload" href="/css/main.css" as="style">
-  <link rel="stylesheet" href="/css/main.css" />
-  <style>
-    .page-hero {
-      padding: 80px 20px 56px;
-      text-align: center;
-      background: linear-gradient(180deg, rgba(201,169,110,0.05) 0%, transparent 100%);
-      border-bottom: 1px solid rgba(201,169,110,0.1);
-    }
-    .page-hero h1 { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; margin: 0 0 12px; }
-    .page-hero h1 em { color: var(--gold); font-style: normal; }
-    .page-hero p { color: var(--text-muted); font-size: 1.05rem; max-width: 540px; margin: 0 auto 28px; }
-
-    /* Filter tabs */
-    .cat-tabs {
-      display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
-      margin: 0 0 40px;
-    }
-    .cat-tab {
-      padding: 8px 20px; border: 1px solid var(--border);
-      background: none; color: var(--text-muted); cursor: pointer;
-      font-size: 0.82rem; letter-spacing: 0.5px; transition: all 0.2s;
-    }
-    .cat-tab.active, .cat-tab:hover {
-      border-color: var(--gold); color: var(--gold);
-      background: rgba(201,169,110,0.07);
-    }
-
-    /* Cases grid */
-    .cases-section { padding: 56px 20px 80px; }
-    .cases-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-      gap: 24px;
-      max-width: 1100px; margin: 0 auto;
-    }
-    .case-card {
-      background: var(--card-bg); border: 1px solid var(--border);
-      overflow: hidden; transition: transform 0.3s, border-color 0.3s;
-      cursor: pointer;
-    }
-    .case-card:hover { transform: translateY(-4px); border-color: rgba(201,169,110,0.4); }
-    .case-img {
-      width: 100%; height: 220px; object-fit: cover;
-      background: rgba(201,169,110,0.08);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 3rem; color: rgba(201,169,110,0.3);
-    }
-    .case-body { padding: 20px; }
-    .case-cat {
-      font-size: 0.68rem; letter-spacing: 2px; text-transform: uppercase;
-      color: var(--gold); margin-bottom: 8px;
-    }
-    .case-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; }
-    .case-desc { font-size: 0.82rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px; }
-    .case-meta {
-      display: flex; gap: 16px; font-size: 0.75rem; color: var(--text-dim);
-      border-top: 1px solid var(--border); padding-top: 14px;
-    }
-    .case-meta span { display: flex; align-items: center; gap: 4px; }
-
-    /* Stats row */
-    .stats-strip {
-      background: rgba(201,169,110,0.04);
-      border-top: 1px solid rgba(201,169,110,0.1);
-      border-bottom: 1px solid rgba(201,169,110,0.1);
-      padding: 40px 20px;
-    }
-    .stats-strip-inner {
-      display: flex; justify-content: center; flex-wrap: wrap; gap: 48px;
-      max-width: 800px; margin: 0 auto;
-    }
-    .stat-big { text-align: center; }
-    .stat-big-num { font-size: 2.8rem; font-weight: 700; color: var(--gold); line-height: 1; }
-    .stat-big-lbl { font-size: 0.8rem; color: var(--text-muted); margin-top: 6px; }
-
-    /* CTA */
-    .cta-strip { padding: 64px 20px; text-align: center; }
-    .cta-strip h2 { font-size: 1.8rem; margin-bottom: 12px; }
-    .cta-strip p { color: var(--text-muted); max-width: 420px; margin: 0 auto 28px; }
-
-    @media (max-width: 640px) {
-      .cases-grid { grid-template-columns: 1fr; }
-      .stats-strip-inner { gap: 28px; }
-    }
-  </style>
-  <!-- Yandex.Metrica (loads only if consent given) -->
-  <script>
-    fetch('/api/settings/public').then(r=>r.json()).then(d=>{
-      if (!d.ym_counter_id) return;
-      if (localStorage.getItem('cookie_consent') !== 'accepted') return;
-      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();
-      for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-      (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
-      ym(d.ym_counter_id,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
-    }).catch(()=>{});
-  </script>
-  <!-- /Yandex.Metrica -->
-</head>
-<body>
-
-  <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-
-  <nav class="navbar" id="navbar" role="navigation" aria-label="Главное меню">
-    <div class="nav-inner">
-      <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links" role="list">
-        <a href="/catalog.html">Модели</a>
-        <a href="/pricing.html">Цены</a>
-        <a href="/about.html">О нас</a>
-        <a href="/faq.html">FAQ</a>
-        <a href="/contact.html">Контакты</a>
-        <a href="/favorites.html" title="Избранное" aria-label="Избранное" style="font-size:1.1rem">❤️</a>
-        <a href="/cabinet.html" style="font-size:0.9rem">👤 Мои заявки</a>
-        <button onclick="DarkMode.toggle()" style="background:none;border:none;cursor:pointer;padding:4px 8px;"
-          aria-label="Переключить тему"><span class="dark-mode-icon" style="font-size:1.1rem">🌙</span></button>
-        <a href="/booking.html" class="btn-nav">Заказать</a>
-      </div>
-      <button class="nav-burger" id="burgerBtn" aria-label="Открыть меню" aria-expanded="false" aria-controls="mobileMenu">
-        <span></span><span></span><span></span>
-      </button>
-    </div>
-  </nav>
-
-  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
-    <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-    <a href="/catalog.html">Модели</a>
-    <a href="/pricing.html">Цены</a>
-    <a href="/about.html">О нас</a>
-    <a href="/faq.html">FAQ</a>
-    <a href="/contact.html">Контакты</a>
-    <a href="/favorites.html">❤️ Избранное</a>
-    <a href="/cabinet.html">👤 Мои заявки</a>
-    <a href="/booking.html" style="color:var(--gold)">Заказать</a>
-  </nav>
-
-  <main id="main-content">
-
-    <!-- Hero -->
-    <div class="page-hero">
-      <h1>Наши <em>кейсы</em></h1>
-      <p>Реализованные проекты с командой Nevesty Models: показы, фотосессии, корпоративные мероприятия и рекламные кампании.</p>
-      <div class="cat-tabs" role="tablist">
-        <button class="cat-tab active" data-cat="all" onclick="filterCases('all', this)">Все</button>
-        <button class="cat-tab" data-cat="fashion" onclick="filterCases('fashion', this)">Fashion</button>
-        <button class="cat-tab" data-cat="commercial" onclick="filterCases('commercial', this)">Коммерческие</button>
-        <button class="cat-tab" data-cat="events" onclick="filterCases('events', this)">Мероприятия</button>
-        <button class="cat-tab" data-cat="photo" onclick="filterCases('photo', this)">Фотосессии</button>
-      </div>
-    </div>
-
-    <!-- Stats strip -->
-    <div class="stats-strip" aria-label="Статистика агентства">
-      <div class="stats-strip-inner">
-        <div class="stat-big"><div class="stat-big-num">500+</div><div class="stat-big-lbl">Реализованных проектов</div></div>
-        <div class="stat-big"><div class="stat-big-num">200+</div><div class="stat-big-lbl">Моделей в агентстве</div></div>
-        <div class="stat-big"><div class="stat-big-num">10</div><div class="stat-big-lbl">Лет на рынке</div></div>
-        <div class="stat-big"><div class="stat-big-num">15+</div><div class="stat-big-lbl">Городов России</div></div>
-      </div>
-    </div>
-
-    <!-- Cases grid -->
-    <section class="cases-section" aria-labelledby="cases-heading">
-      <h2 id="cases-heading" class="sr-only">Кейсы агентства</h2>
-      <div class="cases-grid" id="casesGrid">
-
-        <article class="case-card" data-cat="fashion">
-          <div class="case-img" role="img" aria-label="Показ мод Moscow Fashion Week">🎭</div>
-          <div class="case-body">
-            <div class="case-cat">Fashion</div>
-            <h3 class="case-title">Moscow Fashion Week 2025</h3>
-            <p class="case-desc">Предоставили 12 моделей для показа молодого российского дизайнера. Подготовка к показу заняла 3 дня — кастинг, примерки, репетиции.</p>
-            <div class="case-meta">
-              <span>📍 Москва</span>
-              <span>👥 12 моделей</span>
-              <span>⏱ 2 дня</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="case-card" data-cat="commercial">
-          <div class="case-img" role="img" aria-label="Рекламная кампания для fashion-бренда">📸</div>
-          <div class="case-body">
-            <div class="case-cat">Коммерческая съёмка</div>
-            <h3 class="case-title">Рекламная кампания LIMÉ</h3>
-            <p class="case-desc">Комплексная съёмка лукбука для крупного российского бренда одежды. 3 дня съёмок, 5 моделей, 200+ образов для каталога сезона.</p>
-            <div class="case-meta">
-              <span>📍 Санкт-Петербург</span>
-              <span>👥 5 моделей</span>
-              <span>⏱ 3 дня</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="case-card" data-cat="events">
-          <div class="case-img" role="img" aria-label="Корпоративное мероприятие">🎉</div>
-          <div class="case-body">
-            <div class="case-cat">Корпоратив</div>
-            <h3 class="case-title">Юбилей Сбербанка — 500 гостей</h3>
-            <p class="case-desc">Хостес и промо-модели на торжественном вечере крупного банка. Встреча гостей, навигация по площадке, сопровождение VIP-персон.</p>
-            <div class="case-meta">
-              <span>📍 Москва</span>
-              <span>👥 8 хостес</span>
-              <span>⏱ 1 вечер</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="case-card" data-cat="photo">
-          <div class="case-img" role="img" aria-label="Свадебная фотосессия">💐</div>
-          <div class="case-body">
-            <div class="case-cat">Фотосессия</div>
-            <h3 class="case-title">Свадебный лукбук для салона</h3>
-            <p class="case-desc">Съёмка коллекции свадебных платьев для московского салона. Студийная и уличная локации, 3 образа на каждой модели.</p>
-            <div class="case-meta">
-              <span>📍 Москва</span>
-              <span>👥 3 модели</span>
-              <span>⏱ 1 день</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="case-card" data-cat="fashion">
-          <div class="case-img" role="img" aria-label="Показ в универмаге">🛍</div>
-          <div class="case-body">
-            <div class="case-cat">Fashion</div>
-            <h3 class="case-title">Показ в ЦУМ — новая коллекция</h3>
-            <p class="case-desc">Еженедельные показы новых коллекций международных брендов. Постоянное партнёрство — 6 моделей каждую неделю на протяжении сезона.</p>
-            <div class="case-meta">
-              <span>📍 Москва</span>
-              <span>👥 6 моделей</span>
-              <span>⏱ Регулярно</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="case-card" data-cat="commercial">
-          <div class="case-img" role="img" aria-label="Видеореклама для телевизора">🎬</div>
-          <div class="case-body">
-            <div class="case-cat">Видеопроизводство</div>
-            <h3 class="case-title">ТВ-ролик для фармацевтики</h3>
-            <p class="case-desc">Актриса-модель для рекламного ролика крупного фармацевтического бренда. Кастинг из 40 кандидатов, финальная съёмка заняла 1 день.</p>
-            <div class="case-meta">
-              <span>📍 Москва</span>
-              <span>👥 1 модель</span>
-              <span>⏱ 1 день</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="case-card" data-cat="events">
-          <div class="case-img" role="img" aria-label="Промо-акция в торговом центре">🏬</div>
-          <div class="case-body">
-            <div class="case-cat">Промо</div>
-            <h3 class="case-title">Промо-акция Samsung в ТРЦ</h3>
-            <p class="case-desc">Промоутеры и модели для презентации новой линейки телефонов. 10 точек по Москве, 15 промоутеров, 2 недели активного промо.</p>
-            <div class="case-meta">
-              <span>📍 Москва</span>
-              <span>👥 15 промоутеров</span>
-              <span>⏱ 2 недели</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="case-card" data-cat="photo">
-          <div class="case-img" role="img" aria-label="Модельное портфолио">✨</div>
-          <div class="case-body">
-            <div class="case-cat">Фотосессия</div>
-            <h3 class="case-title">Портфолио для beauty-бренда</h3>
-            <p class="case-desc">Имиджевая фотосессия для отечественного бренда косметики. Минималистичный стиль, акцент на продукт. Результат — серия из 50 фото.</p>
-            <div class="case-meta">
-              <span>📍 Екатеринбург</span>
-              <span>👥 2 модели</span>
-              <span>⏱ 1 день</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="case-card" data-cat="events">
-          <div class="case-img" role="img" aria-label="Выставка и конференция">📊</div>
-          <div class="case-body">
-            <div class="case-cat">B2B Мероприятие</div>
-            <h3 class="case-title">Стенд на выставке INTERCHARM</h3>
-            <p class="case-desc">Хостес и демонстраторы продукции на крупнейшей beauty-выставке России. Профессиональное знание продукта, работа с иностранными гостями.</p>
-            <div class="case-meta">
-              <span>📍 Москва, Крокус</span>
-              <span>👥 4 хостес</span>
-              <span>⏱ 3 дня</span>
-            </div>
-          </div>
-        </article>
-
-      </div>
-    </section>
-
-    <!-- Clients logos placeholder -->
-    <section style="padding: 48px 20px; text-align:center; border-top: 1px solid var(--border);">
-      <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--text-dim);margin-bottom:28px">Нам доверяют</div>
-      <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:32px;align-items:center;max-width:800px;margin:0 auto;">
-        <div style="font-size:1.1rem;font-weight:700;color:var(--text-dim);letter-spacing:2px">LIMÉ</div>
-        <div style="font-size:1.1rem;font-weight:700;color:var(--text-dim);letter-spacing:2px">SAMSUNG</div>
-        <div style="font-size:1.1rem;font-weight:700;color:var(--text-dim);letter-spacing:2px">СБЕРБАНК</div>
-        <div style="font-size:1.1rem;font-weight:700;color:var(--text-dim);letter-spacing:2px">ЦУМ</div>
-        <div style="font-size:1.1rem;font-weight:700;color:var(--text-dim);letter-spacing:2px">INTERCHARM</div>
-        <div style="font-size:1.1rem;font-weight:700;color:var(--text-dim);letter-spacing:2px">AVON</div>
-      </div>
-    </section>
-
-    <!-- CTA -->
-    <div class="cta-strip">
-      <h2>Обсудим ваш проект?</h2>
-      <p>Расскажите о задаче — подберём команду, которая идеально подойдёт под формат и бюджет.</p>
-      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
-        <a href="/booking.html" class="btn-gold">Оставить заявку</a>
-        <a href="/contact.html" class="btn-outline">Написать менеджеру</a>
-      </div>
-    </div>
-
-  </main>
-
-  <!-- Footer -->
-  <footer class="footer" role="contentinfo">
-    <div class="footer-inner">
-      <div class="footer-brand">
-        <span class="footer-logo">NEVESTY MODELS</span>
-        <span class="footer-tagline">Профессиональные модели для ваших мероприятий</span>
-      </div>
-      <div class="footer-links">
-        <div class="footer-col">
-          <span class="footer-col-title">Агентство</span>
-          <a href="/about.html">О нас</a>
-          <a href="/cases.html">Кейсы</a>
-          <a href="/contact.html">Контакты</a>
-          <a href="/pricing.html">Цены</a>
-        </div>
-        <div class="footer-col">
-          <span class="footer-col-title">Клиентам</span>
-          <a href="/catalog.html">Каталог моделей</a>
-          <a href="/booking.html">Оставить заявку</a>
-          <a href="/cabinet.html">Мои заявки</a>
-          <a href="/faq.html">FAQ</a>
-        </div>
-        <div class="footer-col">
-          <span class="footer-col-title">Правовое</span>
-          <a href="/privacy.html">Конфиденциальность</a>
-        </div>
-      </div>
-    </div>
-    <div class="footer-bottom">
-      <span>© 2014–2026 Nevesty Models</span>
-    </div>
-  </footer>
-
-  <script src="/js/darkmode.js"></script>
-  <script src="/js/analytics.js"></script>
-  <script>
-    function filterCases(cat, btn) {
-      document.querySelectorAll('.cat-tab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      document.querySelectorAll('.case-card').forEach(card => {
-        const show = cat === 'all' || card.dataset.cat === cat;
-        card.style.display = show ? '' : 'none';
-        if (show) {
-          card.style.animation = 'fadeIn 0.3s ease-out';
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Flash-prevention: apply theme class before first paint -->
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light') {
+          document.documentElement.classList.add('light');
+        } else if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
         }
-      });
-    }
-
-    document.getElementById('burgerBtn').addEventListener('click', () => {
-      document.getElementById('mobileMenu').classList.toggle('open');
-      document.getElementById('burgerBtn').setAttribute('aria-expanded',
-        document.getElementById('mobileMenu').classList.contains('open'));
-    });
-    document.getElementById('mobileClose').addEventListener('click', () => {
-      document.getElementById('mobileMenu').classList.remove('open');
-    });
-
-    if (typeof NM !== 'undefined') NM.analytics.event('page_view', {page: 'cases'});
-  </script>
-
-  <script type="application/ld+json">
-  [
-    {
-      "@context": "https://schema.org",
-      "@type": "CollectionPage",
-      "name": "Кейсы модельного агентства Nevesty Models",
-      "description": "Портфолио реализованных проектов: fashion-показы, корпоративы, рекламные съёмки",
-      "url": "https://nevesty-models.ru/cases.html",
-      "isPartOf": {
-        "@type": "WebSite",
-        "name": "Nevesty Models",
-        "url": "https://nevesty-models.ru"
-      },
-      "breadcrumb": {
-        "@type": "BreadcrumbList",
-        "itemListElement": [
-          {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/"},
-          {"@type": "ListItem", "position": 2, "name": "Кейсы", "item": "https://nevesty-models.ru/cases.html"}
-        ]
+      } catch (e) {}
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Портфолио и Кейсы — Nevesty Models</title>
+    <meta
+      name="description"
+      content="Примеры работ модельного агентства Nevesty Models: fashion-показы, корпоративы, фотосессии и рекламные съёмки."
+    />
+    <meta property="og:title" content="Портфолио — Nevesty Models" />
+    <meta
+      property="og:description"
+      content="Наши кейсы: fashion-показы, корпоративы, фотосессии для брендов и рекламные кампании."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://nevesty-models.ru/og-image.jpg" />
+    <meta property="og:url" content="https://nevesty-models.ru/cases.html" />
+    <meta property="og:site_name" content="Nevesty Models" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@nevesty_models" />
+    <meta name="twitter:title" content="Портфолио — Nevesty Models" />
+    <meta
+      name="twitter:description"
+      content="Наши кейсы: fashion-показы, корпоративы, фотосессии для брендов и рекламные кампании."
+    />
+    <meta name="theme-color" content="#080808" />
+    <link rel="canonical" href="https://nevesty-models.ru/cases.html" />
+    <meta name="robots" content="index, follow" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" href="/css/main.css" as="style" />
+    <link rel="stylesheet" href="/css/main.css" />
+    <style>
+      .page-hero {
+        padding: 80px 20px 56px;
+        text-align: center;
+        background: linear-gradient(180deg, rgba(201, 169, 110, 0.05) 0%, transparent 100%);
+        border-bottom: 1px solid rgba(201, 169, 110, 0.1);
       }
-    },
-    {
-      "@context": "https://schema.org",
-      "@type": "ItemList",
-      "name": "Реализованные проекты Nevesty Models",
-      "url": "https://nevesty-models.ru/cases.html",
-      "numberOfItems": 9,
-      "itemListElement": [
+      .page-hero h1 {
+        font-size: clamp(2rem, 5vw, 3.5rem);
+        font-weight: 700;
+        margin: 0 0 12px;
+      }
+      .page-hero h1 em {
+        color: var(--gold);
+        font-style: normal;
+      }
+      .page-hero p {
+        color: var(--text-muted);
+        font-size: 1.05rem;
+        max-width: 540px;
+        margin: 0 auto 28px;
+      }
+
+      /* Filter tabs */
+      .cat-tabs {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin: 0 0 40px;
+      }
+      .cat-tab {
+        padding: 8px 20px;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 0.82rem;
+        letter-spacing: 0.5px;
+        transition: all 0.2s;
+      }
+      .cat-tab.active,
+      .cat-tab:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+        background: rgba(201, 169, 110, 0.07);
+      }
+
+      /* Cases grid */
+      .cases-section {
+        padding: 56px 20px 80px;
+      }
+      .cases-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 24px;
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      .case-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        overflow: hidden;
+        transition:
+          transform 0.3s,
+          border-color 0.3s;
+        cursor: pointer;
+      }
+      .case-card:hover {
+        transform: translateY(-4px);
+        border-color: rgba(201, 169, 110, 0.4);
+      }
+      .case-img {
+        width: 100%;
+        height: 220px;
+        object-fit: cover;
+        background: rgba(201, 169, 110, 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 3rem;
+        color: rgba(201, 169, 110, 0.3);
+      }
+      .case-body {
+        padding: 20px;
+      }
+      .case-cat {
+        font-size: 0.68rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 8px;
+      }
+      .case-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .case-desc {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        margin-bottom: 16px;
+      }
+      .case-meta {
+        display: flex;
+        gap: 16px;
+        font-size: 0.75rem;
+        color: var(--text-dim);
+        border-top: 1px solid var(--border);
+        padding-top: 14px;
+      }
+      .case-meta span {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      /* Stats row */
+      .stats-strip {
+        background: rgba(201, 169, 110, 0.04);
+        border-top: 1px solid rgba(201, 169, 110, 0.1);
+        border-bottom: 1px solid rgba(201, 169, 110, 0.1);
+        padding: 40px 20px;
+      }
+      .stats-strip-inner {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 48px;
+        max-width: 800px;
+        margin: 0 auto;
+      }
+      .stat-big {
+        text-align: center;
+      }
+      .stat-big-num {
+        font-size: 2.8rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1;
+      }
+      .stat-big-lbl {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 6px;
+      }
+
+      /* CTA */
+      .cta-strip {
+        padding: 64px 20px;
+        text-align: center;
+      }
+      .cta-strip h2 {
+        font-size: 1.8rem;
+        margin-bottom: 12px;
+      }
+      .cta-strip p {
+        color: var(--text-muted);
+        max-width: 420px;
+        margin: 0 auto 28px;
+      }
+
+      @media (max-width: 640px) {
+        .cases-grid {
+          grid-template-columns: 1fr;
+        }
+        .stats-strip-inner {
+          gap: 28px;
+        }
+      }
+    </style>
+    <!-- Yandex.Metrica (loads only if consent given) -->
+    <script>
+      fetch('/api/settings/public')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ym_counter_id) return;
+          if (localStorage.getItem('cookie_consent') !== 'accepted') return;
+          (function (m, e, t, r, i, k, a) {
+            m[i] =
+              m[i] ||
+              function () {
+                (m[i].a = m[i].a || []).push(arguments);
+              };
+            m[i].l = 1 * new Date();
+            for (var j = 0; j < document.scripts.length; j++) {
+              if (document.scripts[j].src === r) {
+                return;
+              }
+            }
+            ((k = e.createElement(t)),
+              (a = e.getElementsByTagName(t)[0]),
+              (k.async = 1),
+              (k.src = r),
+              a.parentNode.insertBefore(k, a));
+          })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+          ym(d.ym_counter_id, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, webvisor: true });
+        })
+        .catch(() => {});
+    </script>
+    <!-- /Yandex.Metrica -->
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+
+    <nav class="navbar" id="navbar" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links" role="list">
+          <a href="/catalog.html">Модели</a>
+          <a href="/pricing.html">Цены</a>
+          <a href="/about.html">О нас</a>
+          <a href="/faq.html">FAQ</a>
+          <a href="/contact.html">Контакты</a>
+          <a href="/favorites.html" title="Избранное" aria-label="Избранное" style="font-size: 1.1rem">❤️</a>
+          <a href="/cabinet.html" style="font-size: 0.9rem">👤 Мои заявки</a>
+          <button
+            onclick="DarkMode.toggle()"
+            style="background: none; border: none; cursor: pointer; padding: 4px 8px"
+            aria-label="Переключить тему"
+          >
+            <span class="dark-mode-icon" style="font-size: 1.1rem">🌙</span>
+          </button>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
+        </div>
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </nav>
+
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Модели</a>
+      <a href="/pricing.html">Цены</a>
+      <a href="/about.html">О нас</a>
+      <a href="/faq.html">FAQ</a>
+      <a href="/contact.html">Контакты</a>
+      <a href="/favorites.html">❤️ Избранное</a>
+      <a href="/cabinet.html">👤 Мои заявки</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+    </nav>
+
+    <main id="main-content">
+      <!-- Hero -->
+      <div class="page-hero">
+        <h1>Наши <em>кейсы</em></h1>
+        <p>
+          Реализованные проекты с командой Nevesty Models: показы, фотосессии, корпоративные мероприятия и рекламные
+          кампании.
+        </p>
+        <div class="cat-tabs" role="tablist">
+          <button class="cat-tab active" data-cat="all" onclick="filterCases('all', this)">Все</button>
+          <button class="cat-tab" data-cat="fashion" onclick="filterCases('fashion', this)">Fashion</button>
+          <button class="cat-tab" data-cat="commercial" onclick="filterCases('commercial', this)">Коммерческие</button>
+          <button class="cat-tab" data-cat="events" onclick="filterCases('events', this)">Мероприятия</button>
+          <button class="cat-tab" data-cat="photo" onclick="filterCases('photo', this)">Фотосессии</button>
+        </div>
+      </div>
+
+      <!-- Stats strip -->
+      <div class="stats-strip" aria-label="Статистика агентства">
+        <div class="stats-strip-inner">
+          <div class="stat-big">
+            <div class="stat-big-num">500+</div>
+            <div class="stat-big-lbl">Реализованных проектов</div>
+          </div>
+          <div class="stat-big">
+            <div class="stat-big-num">200+</div>
+            <div class="stat-big-lbl">Моделей в агентстве</div>
+          </div>
+          <div class="stat-big">
+            <div class="stat-big-num">10</div>
+            <div class="stat-big-lbl">Лет на рынке</div>
+          </div>
+          <div class="stat-big">
+            <div class="stat-big-num">15+</div>
+            <div class="stat-big-lbl">Городов России</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cases grid -->
+      <section class="cases-section" aria-labelledby="cases-heading">
+        <h2 id="cases-heading" class="sr-only">Кейсы агентства</h2>
+        <div class="cases-grid" id="casesGrid">
+          <article class="case-card" data-cat="fashion">
+            <div class="case-img" role="img" aria-label="Показ мод Moscow Fashion Week">🎭</div>
+            <div class="case-body">
+              <div class="case-cat">Fashion</div>
+              <h3 class="case-title">Moscow Fashion Week 2025</h3>
+              <p class="case-desc">
+                Предоставили 12 моделей для показа молодого российского дизайнера. Подготовка к показу заняла 3 дня —
+                кастинг, примерки, репетиции.
+              </p>
+              <div class="case-meta">
+                <span>📍 Москва</span>
+                <span>👥 12 моделей</span>
+                <span>⏱ 2 дня</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="case-card" data-cat="commercial">
+            <div class="case-img" role="img" aria-label="Рекламная кампания для fashion-бренда">📸</div>
+            <div class="case-body">
+              <div class="case-cat">Коммерческая съёмка</div>
+              <h3 class="case-title">Рекламная кампания LIMÉ</h3>
+              <p class="case-desc">
+                Комплексная съёмка лукбука для крупного российского бренда одежды. 3 дня съёмок, 5 моделей, 200+ образов
+                для каталога сезона.
+              </p>
+              <div class="case-meta">
+                <span>📍 Санкт-Петербург</span>
+                <span>👥 5 моделей</span>
+                <span>⏱ 3 дня</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="case-card" data-cat="events">
+            <div class="case-img" role="img" aria-label="Корпоративное мероприятие">🎉</div>
+            <div class="case-body">
+              <div class="case-cat">Корпоратив</div>
+              <h3 class="case-title">Юбилей Сбербанка — 500 гостей</h3>
+              <p class="case-desc">
+                Хостес и промо-модели на торжественном вечере крупного банка. Встреча гостей, навигация по площадке,
+                сопровождение VIP-персон.
+              </p>
+              <div class="case-meta">
+                <span>📍 Москва</span>
+                <span>👥 8 хостес</span>
+                <span>⏱ 1 вечер</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="case-card" data-cat="photo">
+            <div class="case-img" role="img" aria-label="Свадебная фотосессия">💐</div>
+            <div class="case-body">
+              <div class="case-cat">Фотосессия</div>
+              <h3 class="case-title">Свадебный лукбук для салона</h3>
+              <p class="case-desc">
+                Съёмка коллекции свадебных платьев для московского салона. Студийная и уличная локации, 3 образа на
+                каждой модели.
+              </p>
+              <div class="case-meta">
+                <span>📍 Москва</span>
+                <span>👥 3 модели</span>
+                <span>⏱ 1 день</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="case-card" data-cat="fashion">
+            <div class="case-img" role="img" aria-label="Показ в универмаге">🛍</div>
+            <div class="case-body">
+              <div class="case-cat">Fashion</div>
+              <h3 class="case-title">Показ в ЦУМ — новая коллекция</h3>
+              <p class="case-desc">
+                Еженедельные показы новых коллекций международных брендов. Постоянное партнёрство — 6 моделей каждую
+                неделю на протяжении сезона.
+              </p>
+              <div class="case-meta">
+                <span>📍 Москва</span>
+                <span>👥 6 моделей</span>
+                <span>⏱ Регулярно</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="case-card" data-cat="commercial">
+            <div class="case-img" role="img" aria-label="Видеореклама для телевизора">🎬</div>
+            <div class="case-body">
+              <div class="case-cat">Видеопроизводство</div>
+              <h3 class="case-title">ТВ-ролик для фармацевтики</h3>
+              <p class="case-desc">
+                Актриса-модель для рекламного ролика крупного фармацевтического бренда. Кастинг из 40 кандидатов,
+                финальная съёмка заняла 1 день.
+              </p>
+              <div class="case-meta">
+                <span>📍 Москва</span>
+                <span>👥 1 модель</span>
+                <span>⏱ 1 день</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="case-card" data-cat="events">
+            <div class="case-img" role="img" aria-label="Промо-акция в торговом центре">🏬</div>
+            <div class="case-body">
+              <div class="case-cat">Промо</div>
+              <h3 class="case-title">Промо-акция Samsung в ТРЦ</h3>
+              <p class="case-desc">
+                Промоутеры и модели для презентации новой линейки телефонов. 10 точек по Москве, 15 промоутеров, 2
+                недели активного промо.
+              </p>
+              <div class="case-meta">
+                <span>📍 Москва</span>
+                <span>👥 15 промоутеров</span>
+                <span>⏱ 2 недели</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="case-card" data-cat="photo">
+            <div class="case-img" role="img" aria-label="Модельное портфолио">✨</div>
+            <div class="case-body">
+              <div class="case-cat">Фотосессия</div>
+              <h3 class="case-title">Портфолио для beauty-бренда</h3>
+              <p class="case-desc">
+                Имиджевая фотосессия для отечественного бренда косметики. Минималистичный стиль, акцент на продукт.
+                Результат — серия из 50 фото.
+              </p>
+              <div class="case-meta">
+                <span>📍 Екатеринбург</span>
+                <span>👥 2 модели</span>
+                <span>⏱ 1 день</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="case-card" data-cat="events">
+            <div class="case-img" role="img" aria-label="Выставка и конференция">📊</div>
+            <div class="case-body">
+              <div class="case-cat">B2B Мероприятие</div>
+              <h3 class="case-title">Стенд на выставке INTERCHARM</h3>
+              <p class="case-desc">
+                Хостес и демонстраторы продукции на крупнейшей beauty-выставке России. Профессиональное знание продукта,
+                работа с иностранными гостями.
+              </p>
+              <div class="case-meta">
+                <span>📍 Москва, Крокус</span>
+                <span>👥 4 хостес</span>
+                <span>⏱ 3 дня</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- Clients logos placeholder -->
+      <section style="padding: 48px 20px; text-align: center; border-top: 1px solid var(--border)">
+        <div
+          style="
+            font-size: 0.7rem;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 28px;
+          "
+        >
+          Нам доверяют
+        </div>
+        <div
+          style="
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 32px;
+            align-items: center;
+            max-width: 800px;
+            margin: 0 auto;
+          "
+        >
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-dim); letter-spacing: 2px">LIMÉ</div>
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-dim); letter-spacing: 2px">SAMSUNG</div>
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-dim); letter-spacing: 2px">СБЕРБАНК</div>
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-dim); letter-spacing: 2px">ЦУМ</div>
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-dim); letter-spacing: 2px">INTERCHARM</div>
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-dim); letter-spacing: 2px">AVON</div>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <div class="cta-strip">
+        <h2>Обсудим ваш проект?</h2>
+        <p>Расскажите о задаче — подберём команду, которая идеально подойдёт под формат и бюджет.</p>
+        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap">
+          <a href="/booking.html" class="btn-gold">Оставить заявку</a>
+          <a href="/contact.html" class="btn-outline">Написать менеджеру</a>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer" role="contentinfo">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <span class="footer-logo">NEVESTY MODELS</span>
+          <span class="footer-tagline">Профессиональные модели для ваших мероприятий</span>
+        </div>
+        <div class="footer-links">
+          <div class="footer-col">
+            <span class="footer-col-title">Агентство</span>
+            <a href="/about.html">О нас</a>
+            <a href="/cases.html">Кейсы</a>
+            <a href="/contact.html">Контакты</a>
+            <a href="/pricing.html">Цены</a>
+          </div>
+          <div class="footer-col">
+            <span class="footer-col-title">Клиентам</span>
+            <a href="/catalog.html">Каталог моделей</a>
+            <a href="/booking.html">Оставить заявку</a>
+            <a href="/cabinet.html">Мои заявки</a>
+            <a href="/faq.html">FAQ</a>
+          </div>
+          <div class="footer-col">
+            <span class="footer-col-title">Правовое</span>
+            <a href="/privacy.html">Конфиденциальность</a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2014–2026 Nevesty Models</span>
+      </div>
+    </footer>
+
+    <script src="/js/darkmode.js"></script>
+    <script src="/js/analytics.js"></script>
+    <script>
+      function filterCases(cat, btn) {
+        document.querySelectorAll('.cat-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.case-card').forEach(card => {
+          const show = cat === 'all' || card.dataset.cat === cat;
+          card.style.display = show ? '' : 'none';
+          if (show) {
+            card.style.animation = 'fadeIn 0.3s ease-out';
+          }
+        });
+      }
+
+      document.getElementById('burgerBtn').addEventListener('click', () => {
+        document.getElementById('mobileMenu').classList.toggle('open');
+        document
+          .getElementById('burgerBtn')
+          .setAttribute('aria-expanded', document.getElementById('mobileMenu').classList.contains('open'));
+      });
+      document.getElementById('mobileClose').addEventListener('click', () => {
+        document.getElementById('mobileMenu').classList.remove('open');
+      });
+
+      if (typeof NM !== 'undefined') NM.analytics.event('page_view', { page: 'cases' });
+    </script>
+
+    <script type="application/ld+json">
+      [
         {
-          "@type": "ListItem",
-          "position": 1,
-          "item": {
-            "@type": "CreativeWork",
-            "name": "Moscow Fashion Week 2025",
-            "description": "Предоставили 12 моделей для показа молодого российского дизайнера. Подготовка к показу заняла 3 дня — кастинг, примерки, репетиции.",
-            "locationCreated": {"@type": "Place", "name": "Москва"},
-            "genre": "Fashion",
-            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
+          "@context": "https://schema.org",
+          "@type": "CollectionPage",
+          "name": "Кейсы модельного агентства Nevesty Models",
+          "description": "Портфолио реализованных проектов: fashion-показы, корпоративы, рекламные съёмки",
+          "url": "https://nevesty-models.ru/cases.html",
+          "isPartOf": {
+            "@type": "WebSite",
+            "name": "Nevesty Models",
+            "url": "https://nevesty-models.ru"
+          },
+          "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Главная", "item": "https://nevesty-models.ru/" },
+              { "@type": "ListItem", "position": 2, "name": "Кейсы", "item": "https://nevesty-models.ru/cases.html" }
+            ]
           }
         },
         {
-          "@type": "ListItem",
-          "position": 2,
-          "item": {
-            "@type": "CreativeWork",
-            "name": "Рекламная кампания LIMÉ",
-            "description": "Комплексная съёмка лукбука для крупного российского бренда одежды. 3 дня съёмок, 5 моделей, 200+ образов для каталога сезона.",
-            "locationCreated": {"@type": "Place", "name": "Санкт-Петербург"},
-            "genre": "Коммерческая съёмка",
-            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
-          }
-        },
-        {
-          "@type": "ListItem",
-          "position": 3,
-          "item": {
-            "@type": "CreativeWork",
-            "name": "Юбилей Сбербанка — 500 гостей",
-            "description": "Хостес и промо-модели на торжественном вечере крупного банка. Встреча гостей, навигация по площадке, сопровождение VIP-персон.",
-            "locationCreated": {"@type": "Place", "name": "Москва"},
-            "genre": "Корпоратив",
-            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
-          }
-        },
-        {
-          "@type": "ListItem",
-          "position": 4,
-          "item": {
-            "@type": "CreativeWork",
-            "name": "Свадебный лукбук для салона",
-            "description": "Съёмка коллекции свадебных платьев для московского салона. Студийная и уличная локации, 3 образа на каждой модели.",
-            "locationCreated": {"@type": "Place", "name": "Москва"},
-            "genre": "Фотосессия",
-            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
-          }
-        },
-        {
-          "@type": "ListItem",
-          "position": 5,
-          "item": {
-            "@type": "CreativeWork",
-            "name": "Показ в ЦУМ — новая коллекция",
-            "description": "Еженедельные показы новых коллекций международных брендов. Постоянное партнёрство — 6 моделей каждую неделю на протяжении сезона.",
-            "locationCreated": {"@type": "Place", "name": "Москва"},
-            "genre": "Fashion",
-            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
-          }
-        },
-        {
-          "@type": "ListItem",
-          "position": 6,
-          "item": {
-            "@type": "CreativeWork",
-            "name": "ТВ-ролик для фармацевтики",
-            "description": "Актриса-модель для рекламного ролика крупного фармацевтического бренда. Кастинг из 40 кандидатов, финальная съёмка заняла 1 день.",
-            "locationCreated": {"@type": "Place", "name": "Москва"},
-            "genre": "Видеопроизводство",
-            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
-          }
-        },
-        {
-          "@type": "ListItem",
-          "position": 7,
-          "item": {
-            "@type": "CreativeWork",
-            "name": "Промо-акция Samsung в ТРЦ",
-            "description": "Промоутеры и модели для презентации новой линейки телефонов. 10 точек по Москве, 15 промоутеров, 2 недели активного промо.",
-            "locationCreated": {"@type": "Place", "name": "Москва"},
-            "genre": "Промо",
-            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
-          }
-        },
-        {
-          "@type": "ListItem",
-          "position": 8,
-          "item": {
-            "@type": "CreativeWork",
-            "name": "Портфолио для beauty-бренда",
-            "description": "Имиджевая фотосессия для отечественного бренда косметики. Минималистичный стиль, акцент на продукт. Результат — серия из 50 фото.",
-            "locationCreated": {"@type": "Place", "name": "Екатеринбург"},
-            "genre": "Фотосессия",
-            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
-          }
-        },
-        {
-          "@type": "ListItem",
-          "position": 9,
-          "item": {
-            "@type": "CreativeWork",
-            "name": "Стенд на выставке INTERCHARM",
-            "description": "Хостес и демонстраторы продукции на крупнейшей beauty-выставке России. Профессиональное знание продукта, работа с иностранными гостями.",
-            "locationCreated": {"@type": "Place", "name": "Москва, Крокус Экспо"},
-            "genre": "B2B Мероприятие",
-            "provider": {"@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru"}
-          }
+          "@context": "https://schema.org",
+          "@type": "ItemList",
+          "name": "Реализованные проекты Nevesty Models",
+          "url": "https://nevesty-models.ru/cases.html",
+          "numberOfItems": 9,
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "item": {
+                "@type": "CreativeWork",
+                "name": "Moscow Fashion Week 2025",
+                "description": "Предоставили 12 моделей для показа молодого российского дизайнера. Подготовка к показу заняла 3 дня — кастинг, примерки, репетиции.",
+                "locationCreated": { "@type": "Place", "name": "Москва" },
+                "genre": "Fashion",
+                "provider": { "@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru" }
+              }
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "item": {
+                "@type": "CreativeWork",
+                "name": "Рекламная кампания LIMÉ",
+                "description": "Комплексная съёмка лукбука для крупного российского бренда одежды. 3 дня съёмок, 5 моделей, 200+ образов для каталога сезона.",
+                "locationCreated": { "@type": "Place", "name": "Санкт-Петербург" },
+                "genre": "Коммерческая съёмка",
+                "provider": { "@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru" }
+              }
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "item": {
+                "@type": "CreativeWork",
+                "name": "Юбилей Сбербанка — 500 гостей",
+                "description": "Хостес и промо-модели на торжественном вечере крупного банка. Встреча гостей, навигация по площадке, сопровождение VIP-персон.",
+                "locationCreated": { "@type": "Place", "name": "Москва" },
+                "genre": "Корпоратив",
+                "provider": { "@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru" }
+              }
+            },
+            {
+              "@type": "ListItem",
+              "position": 4,
+              "item": {
+                "@type": "CreativeWork",
+                "name": "Свадебный лукбук для салона",
+                "description": "Съёмка коллекции свадебных платьев для московского салона. Студийная и уличная локации, 3 образа на каждой модели.",
+                "locationCreated": { "@type": "Place", "name": "Москва" },
+                "genre": "Фотосессия",
+                "provider": { "@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru" }
+              }
+            },
+            {
+              "@type": "ListItem",
+              "position": 5,
+              "item": {
+                "@type": "CreativeWork",
+                "name": "Показ в ЦУМ — новая коллекция",
+                "description": "Еженедельные показы новых коллекций международных брендов. Постоянное партнёрство — 6 моделей каждую неделю на протяжении сезона.",
+                "locationCreated": { "@type": "Place", "name": "Москва" },
+                "genre": "Fashion",
+                "provider": { "@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru" }
+              }
+            },
+            {
+              "@type": "ListItem",
+              "position": 6,
+              "item": {
+                "@type": "CreativeWork",
+                "name": "ТВ-ролик для фармацевтики",
+                "description": "Актриса-модель для рекламного ролика крупного фармацевтического бренда. Кастинг из 40 кандидатов, финальная съёмка заняла 1 день.",
+                "locationCreated": { "@type": "Place", "name": "Москва" },
+                "genre": "Видеопроизводство",
+                "provider": { "@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru" }
+              }
+            },
+            {
+              "@type": "ListItem",
+              "position": 7,
+              "item": {
+                "@type": "CreativeWork",
+                "name": "Промо-акция Samsung в ТРЦ",
+                "description": "Промоутеры и модели для презентации новой линейки телефонов. 10 точек по Москве, 15 промоутеров, 2 недели активного промо.",
+                "locationCreated": { "@type": "Place", "name": "Москва" },
+                "genre": "Промо",
+                "provider": { "@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru" }
+              }
+            },
+            {
+              "@type": "ListItem",
+              "position": 8,
+              "item": {
+                "@type": "CreativeWork",
+                "name": "Портфолио для beauty-бренда",
+                "description": "Имиджевая фотосессия для отечественного бренда косметики. Минималистичный стиль, акцент на продукт. Результат — серия из 50 фото.",
+                "locationCreated": { "@type": "Place", "name": "Екатеринбург" },
+                "genre": "Фотосессия",
+                "provider": { "@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru" }
+              }
+            },
+            {
+              "@type": "ListItem",
+              "position": 9,
+              "item": {
+                "@type": "CreativeWork",
+                "name": "Стенд на выставке INTERCHARM",
+                "description": "Хостес и демонстраторы продукции на крупнейшей beauty-выставке России. Профессиональное знание продукта, работа с иностранными гостями.",
+                "locationCreated": { "@type": "Place", "name": "Москва, Крокус Экспо" },
+                "genre": "B2B Мероприятие",
+                "provider": { "@type": "Organization", "name": "Nevesty Models", "url": "https://nevesty-models.ru" }
+              }
+            }
+          ]
         }
       ]
-    }
-  ]
-  </script>
-</body>
+    </script>
+  </body>
 </html>
