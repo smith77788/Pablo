@@ -552,6 +552,7 @@
     document.querySelectorAll('.faq-accordion-item.open').forEach(function(el) {
       el.classList.remove('open');
       el.querySelector('.faq-accordion-body').classList.remove('open');
+      el.querySelector('.faq-accordion-body').setAttribute('aria-hidden', 'true');
       el.querySelector('.faq-accordion-btn').setAttribute('aria-expanded', 'false');
     });
 
@@ -559,6 +560,7 @@
     if (!isOpen) {
       item.classList.add('open');
       body.classList.add('open');
+      body.setAttribute('aria-hidden', 'false');
       btn.setAttribute('aria-expanded', 'true');
     }
   }
@@ -567,13 +569,15 @@
   function buildAccordion(items, query) {
     if (!items.length) return '';
     return items.map(function(item, i) {
+      var btnId = 'faq-btn-' + i;
       return '<div class="faq-accordion-item" role="listitem">' +
-        '<button class="faq-accordion-btn" aria-expanded="false"' +
+        '<button class="faq-accordion-btn" id="' + btnId + '" aria-expanded="false"' +
         ' aria-controls="faq-answer-' + i + '" onclick="toggleItem(this)">' +
         '<span class="faq-accordion-q">' + highlight(item.q, query) + '</span>' +
         '<span class="faq-accordion-icon" aria-hidden="true">+</span>' +
         '</button>' +
-        '<div class="faq-accordion-body" id="faq-answer-' + i + '" role="region">' +
+        '<div class="faq-accordion-body" id="faq-answer-' + i + '" role="region"' +
+        ' aria-labelledby="' + btnId + '" aria-hidden="true">' +
         '<div class="faq-accordion-answer"><p>' + highlight(item.a, query) + '</p></div>' +
         '</div>' +
         '</div>';

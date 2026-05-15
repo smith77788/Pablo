@@ -533,6 +533,7 @@ if (reviewsContainer) {
         if (otherBtn && otherAns) {
           otherBtn.setAttribute('aria-expanded', 'false');
           otherAns.hidden = true;
+          otherAns.setAttribute('aria-hidden', 'true');
           if (otherIcon) otherIcon.textContent = '+';
         }
       });
@@ -541,6 +542,7 @@ if (reviewsContainer) {
       if (!isOpen) {
         btn.setAttribute('aria-expanded', 'true');
         answer.hidden = false;
+        answer.setAttribute('aria-hidden', 'false');
         const icon = btn.querySelector('.faq-icon');
         if (icon) icon.textContent = '−';
       }

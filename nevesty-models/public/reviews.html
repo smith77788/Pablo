@@ -214,10 +214,10 @@
     <!-- Filters -->
     <div style="display:flex;gap:12px;margin-bottom:28px;flex-wrap:wrap;align-items:center">
       <span style="color:var(--text-muted);font-size:0.85rem">Фильтр:</span>
-      <button class="filter-tag active" data-rating="">Все оценки</button>
-      <button class="filter-tag" data-rating="5">★★★★★</button>
-      <button class="filter-tag" data-rating="4">★★★★</button>
-      <button class="filter-tag" data-rating="3">★★★</button>
+      <button class="filter-tag active" data-rating="" aria-pressed="true">Все оценки</button>
+      <button class="filter-tag" data-rating="5" aria-pressed="false"><span aria-hidden="true">★★★★★</span><span class="sr-only">5 звёзд</span></button>
+      <button class="filter-tag" data-rating="4" aria-pressed="false"><span aria-hidden="true">★★★★</span><span class="sr-only">4 звезды</span></button>
+      <button class="filter-tag" data-rating="3" aria-pressed="false"><span aria-hidden="true">★★★</span><span class="sr-only">3 звезды</span></button>
     </div>
 
     <!-- Grid -->
@@ -306,7 +306,9 @@ function esc(s) {
 }
 
 function starStr(r) {
-  return '★'.repeat(r) + '☆'.repeat(5 - r);
+  var filled = r || 0;
+  var stars = '★'.repeat(filled) + '☆'.repeat(5 - filled);
+  return '<span role="img" aria-label="Рейтинг: ' + filled + ' из 5 звёзд">' + stars + '</span>';
 }
 
 function timeSince(dateStr) {
@@ -402,8 +404,12 @@ async function loadReviews() {
 // Filter buttons
 document.querySelectorAll('[data-rating]').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('[data-rating]').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('[data-rating]').forEach(b => {
+      b.classList.remove('active');
+      b.setAttribute('aria-pressed', 'false');
+    });
     btn.classList.add('active');
+    btn.setAttribute('aria-pressed', 'true');
     currentRating = btn.dataset.rating;
     displayCount = 12;
     renderReviews();
