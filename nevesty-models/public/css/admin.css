@@ -893,6 +893,46 @@ textarea:focus-visible {
   .admin-model-grid { grid-template-columns: 1fr; }
 }
 
+/* ─── ORDER FILTERS (generic aliases) ───────────────── */
+.order-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.filter-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 20px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.filter-btn.active,
+.filter-btn:hover {
+  background: var(--accent-color, #6c63ff);
+  color: white;
+  border-color: var(--accent-color, #6c63ff);
+}
+
+.order-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.order-search input {
+  flex: 1;
+  max-width: 300px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
 /* ─── PRINT ──────────────────────────────────────── */
 @media print {
   .sidebar, .topbar, .sidebar-toggle { display: none !important; }
