@@ -7378,7 +7378,8 @@ async function showUserProfile(chatId, firstName) {
     ];
 
     if (!orders.length) {
-      let emptyText = `👤 *Мой профиль*\n\n`;
+      let emptyText = `_🏠 Главная › 👤 Профиль_\n\n`;
+      emptyText += `👤 *Мой профиль*\n\n`;
       emptyText += `Имя: *${esc(displayName)}*\n`;
       emptyText += `📱 Телефон: ${displayPhone ? esc(displayPhone) : '_\\(не указан\\)_'}\n`;
       emptyText += `📧 Email: ${displayEmail ? esc(displayEmail) : '_\\(не указан\\)_'}\n`;
@@ -7431,7 +7432,8 @@ async function showUserProfile(chatId, firstName) {
       : null;
     const pointsBalance = loyalty?.points || 0;
 
-    let text = `👤 *Мой профиль*\n\n`;
+    let text = `_🏠 Главная › 👤 Профиль_\n\n`;
+    text += `👤 *Мой профиль*\n\n`;
     text += `Имя: *${esc(displayName)}*\n`;
     text += `📱 Телефон: ${displayPhone ? esc(displayPhone) : '_\\(не указан\\)_'}\n`;
     text += `📧 Email: ${displayEmail ? esc(displayEmail) : '_\\(не указан\\)_'}\n`;
@@ -8184,13 +8186,14 @@ async function showCatalogByCity(chatId, city, page = 0) {
     if ((page+1)*perPage < total) nav.push({ text: '▶️', callback_data: `cat_city_${city}_${page+1}` });
 
     return safeSend(chatId,
-      `🏙 *Модели — ${esc(city)}*\n\nНайдено: ${total}`,
+      `_🏠 Главная › 💃 Каталог › 🏙️ ${esc(city)}_\n\n🏙 *Модели — ${esc(city)}*\n\nНайдено: ${total}`,
       {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [
           ...modelBtns,
           ...(nav.length ? [nav] : []),
-          [{ text: '🏠 Меню', callback_data: 'main_menu' }],
+          [{ text: '← Каталог', callback_data: 'cat_cat__0' }],
+          [{ text: '🏠 Меню',   callback_data: 'main_menu'  }],
         ]}
       }
     );
@@ -8615,7 +8618,8 @@ async function showPublicReviews(chatId, page) {
     ).catch(()=>[]);
 
     const totalPages = Math.ceil(total / perPage);
-    let text = `⭐ *Отзывы клиентов \\(${total}\\)*\n\n`;
+    let text = `_🏠 Главная › ⭐ Отзывы \\(стр\\. ${page + 1}/${totalPages}\\)_\n\n`;
+    text += `⭐ *Отзывы клиентов \\(${total}\\)*\n\n`;
     reviews.forEach(r => {
       const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 5)));
       const date  = r.created_at ? new Date(r.created_at).toLocaleDateString('ru') : '';
@@ -8838,7 +8842,8 @@ async function showWishlist(chatId, page = 0) {
 
     const totalRow = await get('SELECT COUNT(*) as c FROM wishlists WHERE chat_id=?', [String(chatId)]).catch(() => ({ c: items.length }));
 
-    let text = `❤️ *Избранные модели* \\(${totalRow.c}\\)\n\n`;
+    let text = `_🏠 Главная › ❤️ Избранное_\n\n`;
+    text += `❤️ *Избранные модели* \\(${totalRow.c}\\)\n\n`;
     const keyboard = [];
     for (const m of items) {
       const star = m.featured ? '⭐ ' : '';
