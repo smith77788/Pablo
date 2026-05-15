@@ -22,7 +22,6 @@ let contactRateLimit = (req, res, next) => next(); // fallback: no-op
 let strictLimiter    = (req, res, next) => next(); // fallback: no-op
 let authLimiter      = (req, res, next) => next(); // fallback: no-op
 let aiMatchLimiter   = (req, res, next) => next(); // fallback: no-op
-let contactLimiter   = (req, res, next) => next(); // fallback: no-op — 3/hour for /contact
 let bookingLimiter   = (req, res, next) => next(); // fallback: no-op — 5/hour for /orders
 try {
   const rateLimit = require('express-rate-limit');
@@ -34,8 +33,6 @@ try {
     legacyHeaders: false,
     message: { error: 'Слишком много сообщений. Попробуйте через час.' },
   });
-  // Dedicated contact limiter (same policy as contactRateLimit)
-  contactLimiter = contactRateLimit;
   // Booking/orders limiter: 5 requests per hour per IP
   bookingLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
@@ -218,13 +215,6 @@ function deriveThumbUrl(photoUrl) {
   const basename = path.basename(photoUrl);
   const dir = path.dirname(photoUrl); // e.g. /uploads
   return `${dir}/thumbs/${basename}`;
-}
-
-// ─── CSV helpers ──────────────────────────────────────────────────────────────
-function csvCell(v) {
-  let s = (v == null ? '' : String(v));
-  if (/^[=+\-@]/.test(s)) s = "'" + s;
-  return '"' + s.replace(/"/g, '""') + '"';
 }
 
 const storage = multer.diskStorage({
@@ -3509,8 +3499,8 @@ router.post('/client/verify', clientOtpLimiter, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Client auth middleware
-function clientAuth(req, res, next) {
+// Client auth middleware (reserved for future JWT-protected client routes)
+function _clientAuth(req, res, next) {
   const header = req.headers.authorization || '';
   if (!header.startsWith('Bearer ')) return res.status(401).json({ error: 'Требуется авторизация' });
   try {
