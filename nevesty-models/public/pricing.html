@@ -342,6 +342,15 @@
           <a id="calcBookBtn" href="/booking.html" class="btn-gold" style="display:block;text-align:center;margin-top:24px;width:100%;box-sizing:border-box">
             Забронировать за эту цену
           </a>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button id="calcSaveBtn" onclick="saveCalc()" style="flex:1;padding:10px;background:rgba(201,169,110,0.1);border:1px solid rgba(201,169,110,0.3);color:var(--gold);font-size:0.8rem;cursor:pointer;transition:all 0.2s" title="Сохранить расчёт в сессии">
+              💾 Сохранить
+            </button>
+            <button id="calcShareBtn" onclick="shareCalc()" style="flex:1;padding:10px;background:rgba(201,169,110,0.1);border:1px solid rgba(201,169,110,0.3);color:var(--gold);font-size:0.8rem;cursor:pointer;transition:all 0.2s" title="Скопировать ссылку с параметрами">
+              🔗 Поделиться
+            </button>
+          </div>
+          <div id="calcSavedMsg" style="display:none;font-size:0.75rem;color:var(--gold);text-align:center;margin-top:6px;opacity:0.8"></div>
         </div>
 
       </div>
@@ -486,8 +495,92 @@
         document.getElementById('rowUrgent').style.display = 'none';
       }
 
-      const budgetParam = `&budget=${encodeURIComponent(fmt(total).replace(' ₽','').replace(/\s/g,''))}`;
+      const budgetRaw = Math.round(base + extra + urgent);
+      const shareUrl = buildShareUrl(budgetRaw);
+      const budgetParam = `&budget=${encodeURIComponent(String(budgetRaw))}`;
       document.getElementById('calcBookBtn').href = `/booking.html?event_type=${params.event}${budgetParam}`;
+    }
+
+    function buildShareUrl(total) {
+      const u = new URL(window.location.href.split('?')[0]);
+      u.searchParams.set('event', params.event);
+      u.searchParams.set('hours', params.hours);
+      u.searchParams.set('category', params.category);
+      u.searchParams.set('count', params.count);
+      if (document.getElementById('chkMakeup').checked)  u.searchParams.set('makeup', '1');
+      if (document.getElementById('chkTravel').checked)  u.searchParams.set('travel', '1');
+      if (document.getElementById('chkUrgent').checked)  u.searchParams.set('urgent', '1');
+      return u.toString();
+    }
+
+    function saveCalc() {
+      const price = document.getElementById('resultPrice').textContent;
+      const data = {
+        event: params.event,
+        hours: params.hours,
+        category: params.category,
+        count: params.count,
+        makeup: document.getElementById('chkMakeup').checked,
+        travel: document.getElementById('chkTravel').checked,
+        urgent: document.getElementById('chkUrgent').checked,
+        price,
+        savedAt: Date.now()
+      };
+      try { sessionStorage.setItem('nm_calc_save', JSON.stringify(data)); } catch {}
+      const msg = document.getElementById('calcSavedMsg');
+      if (msg) { msg.textContent = '✓ Расчёт сохранён. Он будет доступен при переходе на страницу бронирования.'; msg.style.display = 'block'; }
+      const btn = document.getElementById('calcSaveBtn');
+      if (btn) { btn.textContent = '✓ Сохранено'; btn.style.borderColor = 'var(--gold)'; }
+      setTimeout(() => { if (btn) btn.textContent = '💾 Сохранить'; }, 3000);
+    }
+
+    function shareCalc() {
+      const price = document.getElementById('resultPrice').textContent;
+      const url = buildShareUrl();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+          const btn = document.getElementById('calcShareBtn');
+          const msg = document.getElementById('calcSavedMsg');
+          if (btn) { btn.textContent = '✓ Ссылка скопирована'; }
+          if (msg) { msg.textContent = '🔗 Ссылка с расчётом скопирована в буфер обмена.'; msg.style.display = 'block'; }
+          setTimeout(() => { if (btn) btn.textContent = '🔗 Поделиться'; }, 3000);
+        }).catch(() => { window.prompt('Скопируйте ссылку:', url); });
+      } else {
+        window.prompt('Скопируйте ссылку:', url);
+      }
+    }
+
+    function restoreFromUrl() {
+      const p = new URLSearchParams(window.location.search);
+      const evtVal = p.get('event');
+      const hoursVal = p.get('hours');
+      const catVal = p.get('category');
+      const cntVal = p.get('count');
+      if (!evtVal && !hoursVal && !catVal && !cntVal) return;
+
+      function setGroup(key, val) {
+        const btns = document.querySelectorAll(`.option-btn[data-key="${key}"]`);
+        btns.forEach(b => {
+          b.classList.toggle('active', b.dataset.val === String(val));
+        });
+      }
+
+      if (evtVal && ['photo','event','runway','promo'].includes(evtVal)) {
+        params.event = evtVal; setGroup('event', evtVal);
+      }
+      if (hoursVal && [2,4,6,8].includes(parseInt(hoursVal))) {
+        params.hours = parseInt(hoursVal); setGroup('hours', hoursVal);
+      }
+      if (catVal && ['standard','premium','top'].includes(catVal)) {
+        params.category = catVal; setGroup('category', catVal);
+      }
+      if (cntVal && [1,2,3,5].includes(parseInt(cntVal))) {
+        params.count = parseInt(cntVal); setGroup('count', cntVal);
+      }
+      if (p.get('makeup') === '1') document.getElementById('chkMakeup').checked = true;
+      if (p.get('travel') === '1') document.getElementById('chkTravel').checked = true;
+      if (p.get('urgent') === '1') document.getElementById('chkUrgent').checked = true;
+      calc();
     }
 
     // Option buttons
@@ -523,6 +616,7 @@
     });
 
     calc();
+    restoreFromUrl();
 
     // ─── Load dynamic pricing from settings ──────────────────────────────────
     fetch('/api/settings/public').then(r => r.json()).then(settings => {

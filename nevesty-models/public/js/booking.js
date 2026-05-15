@@ -574,6 +574,7 @@
     const urlModelName = urlParams.get('model_name');
     const urlEventType = urlParams.get('event_type');
     const urlCity      = urlParams.get('city');
+    const urlBudget    = urlParams.get('budget');
 
     // Show selected model banner if model_name is passed
     if (urlModelName) {
@@ -591,6 +592,36 @@
         locEl.value = decodeURIComponent(urlCity);
         state.location = locEl.value;
         saveDraft();
+      }
+    }
+
+    // Pre-fill budget from URL (e.g. redirected from pricing calculator)
+    if (urlBudget) {
+      const budgetNum = parseFloat(urlBudget.replace(/[^\d.]/g, ''));
+      if (budgetNum > 0) {
+        // Restore sessionStorage saved calc if available and budget matches
+        let calcLabel = urlBudget;
+        try {
+          const saved = JSON.parse(sessionStorage.getItem('nm_calc_save') || 'null');
+          if (saved && saved.price) calcLabel = saved.price;
+        } catch {}
+        state.budget = calcLabel;
+        // Will be rendered when step 3 is shown; also apply immediately if field exists
+        const budgetEl = document.getElementById('budget');
+        if (budgetEl && !budgetEl.value) budgetEl.value = calcLabel;
+        saveDraft();
+
+        // Show a subtle banner when redirected from pricing page
+        if (urlParams.get('from') === 'pricing' || urlParams.has('budget')) {
+          const wrap = document.querySelector('.booking-form-wrap') || document.body;
+          if (wrap && !document.getElementById('pricingCalcBanner')) {
+            const banner = document.createElement('div');
+            banner.id = 'pricingCalcBanner';
+            banner.style.cssText = 'background:rgba(201,169,110,0.1);border:1px solid rgba(201,169,110,0.25);color:var(--gold);font-size:0.8rem;padding:10px 16px;margin-bottom:16px;border-radius:2px;text-align:center';
+            banner.textContent = `💰 Расчётная стоимость из калькулятора: ${calcLabel} ₽`;
+            wrap.insertBefore(banner, wrap.firstChild);
+          }
+        }
       }
     }
 
