@@ -420,15 +420,21 @@ router.get('/models', async (req, res, next) => {
       return res.json(cached);
     }
 
-    const { category, hair_color, min_height, max_height, min_age, max_age, city, available, search } = req.query;
+    const { category, hair_color, min_height, max_height, min_age, max_age, city, available, search,
+            height_min, height_max, age_min, age_max } = req.query;
+    // Support both naming conventions: min_height/max_height and height_min/height_max
+    const _minH = min_height || height_min;
+    const _maxH = max_height || height_max;
+    const _minA = min_age    || age_min;
+    const _maxA = max_age    || age_max;
     let sql = 'SELECT id, name, age, height, city, category, available, featured, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos, (SELECT COUNT(*) FROM orders WHERE model_id=models.id) as order_count FROM models WHERE 1=1';
     const params = [];
     if (category && ALLOWED_CATEGORIES.includes(category)) { sql += ' AND category = ?'; params.push(category); }
     if (hair_color) { sql += ' AND hair_color = ?'; params.push(hair_color); }
-    if (min_height && !isNaN(+min_height)) { sql += ' AND height >= ?'; params.push(+min_height); }
-    if (max_height && !isNaN(+max_height)) { sql += ' AND height <= ?'; params.push(+max_height); }
-    if (min_age && !isNaN(+min_age)) { sql += ' AND age >= ?'; params.push(+min_age); }
-    if (max_age && !isNaN(+max_age)) { sql += ' AND age <= ?'; params.push(+max_age); }
+    if (_minH && !isNaN(+_minH)) { sql += ' AND height >= ?'; params.push(+_minH); }
+    if (_maxH && !isNaN(+_maxH)) { sql += ' AND height <= ?'; params.push(+_maxH); }
+    if (_minA && !isNaN(+_minA)) { sql += ' AND age >= ?'; params.push(+_minA); }
+    if (_maxA && !isNaN(+_maxA)) { sql += ' AND age <= ?'; params.push(+_maxA); }
     if (city) { sql += ' AND city = ?'; params.push(city); }
     if (available === '1') { sql += ' AND available = 1'; }
     if (available === '0') { sql += ' AND available = 0'; }

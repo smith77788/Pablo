@@ -7,6 +7,8 @@
   const resetBtn      = document.getElementById('resetFilters');
   const minHeightEl   = document.getElementById('minHeight');
   const maxHeightEl   = document.getElementById('maxHeight');
+  const ageMinEl      = document.getElementById('age-min');
+  const ageMaxEl      = document.getElementById('age-max');
   const citySelect    = document.getElementById('cityFilter');
   const availCheckbox = document.getElementById('availableOnly');
   const sortEl        = document.getElementById('sortSelect');
@@ -136,6 +138,9 @@
   bindTagGroup('ageFilters', el => {
     filters.ageMin = el.dataset.min || '';
     filters.ageMax = el.dataset.max || '';
+    // Clear numeric age inputs when a tag is selected
+    if (ageMinEl) ageMinEl.value = '';
+    if (ageMaxEl) ageMaxEl.value = '';
     if (window.NM?.analytics) NM.analytics.filterCatalog('age', `${el.dataset.min || ''}–${el.dataset.max || ''}`);
   });
 
@@ -174,10 +179,31 @@
     filters.maxHeight = maxHeightEl.value;
     render();
   }, 400));
+  ageMinEl?.addEventListener('input', debounce(() => {
+    if (ageMinEl.value) {
+      // Numeric range inputs override tag-based age selection
+      filters.ageMin = ageMinEl.value;
+      document.querySelectorAll('#ageFilters .filter-tag').forEach(t => t.classList.remove('active'));
+    } else {
+      filters.ageMin = '';
+    }
+    render();
+  }, 400));
+  ageMaxEl?.addEventListener('input', debounce(() => {
+    if (ageMaxEl.value) {
+      filters.ageMax = ageMaxEl.value;
+      document.querySelectorAll('#ageFilters .filter-tag').forEach(t => t.classList.remove('active'));
+    } else {
+      filters.ageMax = '';
+    }
+    render();
+  }, 400));
 
   // ── Reset ────────────────────────────────────────────────────────────────────
   resetBtn?.addEventListener('click', () => {
     filters = { category: '', hair: '', city: '', ageMin: '', ageMax: '', availableOnly: false, sort: 'default', search: '', minHeight: '', maxHeight: '' };
+    if (ageMinEl) ageMinEl.value = '';
+    if (ageMaxEl) ageMaxEl.value = '';
     applyUrlParamsToUI();
     render();
   });

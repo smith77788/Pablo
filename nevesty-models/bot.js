@@ -6758,6 +6758,22 @@ function _registerNewFeatures() {
     // Height search manual input
     if (data === 'search_height_input') return showHeightSearchInput(chatId);
 
+    // srch_height / srch_age — text-input prompts (alias callbacks)
+    if (data === 'srch_height') {
+      await setSession(chatId, 'search_height', {});
+      return safeSend(chatId,
+        '📏 Введите диапазон роста, например: *165\\-175*\nИли просто одно число: *170*',
+        { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'cat_search' }]] } }
+      );
+    }
+    if (data === 'srch_age') {
+      await setSession(chatId, 'search_age', {});
+      return safeSend(chatId,
+        '🎂 Введите диапазон возраста, например: *22\\-28*\nИли одно число: *25*',
+        { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'cat_search' }]] } }
+      );
+    }
+
     // Admin dashboard
     if (data === 'adm_dashboard') {
       if (!isAdmin(chatId)) return;
@@ -6854,6 +6870,30 @@ function _registerNewFeatures() {
       } else {
         return safeSend(chatId,
           '❌ Неверный формат\\. Введите диапазон, например: *170\\-180* или одно значение *175*',
+          { parse_mode: 'MarkdownV2' }
+        );
+      }
+    }
+
+    // Age search: manual range input (via srch_age callback)
+    if (state === 'search_age') {
+      const clean = text.replace(/\s/g, '');
+      const rangeMatch  = clean.match(/^(\d{1,2})-(\d{1,2})$/);
+      const singleMatch = clean.match(/^(\d{1,2})$/);
+      if (rangeMatch) {
+        await clearSession(chatId);
+        const f = getSearchFilters(chatId);
+        f.age_min = parseInt(rangeMatch[1]); f.age_max = parseInt(rangeMatch[2]);
+        return showSearchResults(chatId, f, 0);
+      } else if (singleMatch) {
+        await clearSession(chatId);
+        const a = parseInt(singleMatch[1]);
+        const f = getSearchFilters(chatId);
+        f.age_min = a; f.age_max = a + 5;
+        return showSearchResults(chatId, f, 0);
+      } else {
+        return safeSend(chatId,
+          '❌ Неверный формат\\. Введите диапазон, например: *22\\-28* или одно значение *25*',
           { parse_mode: 'MarkdownV2' }
         );
       }
