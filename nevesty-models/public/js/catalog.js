@@ -104,9 +104,17 @@
       if (filters.search) p.set('q', filters.search);
       const qs = p.toString();
       const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-      window.history.replaceState({}, '', newUrl);
+      window.history.pushState({ filters: { ...filters } }, '', newUrl);
     }, 300);
   }
+
+  // ── popstate: navigate back/forward through filter history ───────────────────
+  window.addEventListener('popstate', () => {
+    const p = getUrlParams();
+    Object.assign(filters, p);
+    applyUrlParamsToUI();
+    render();
+  });
 
   const urlParams = getUrlParams();
   let filters = { ...urlParams };
@@ -579,7 +587,7 @@
             <div class="model-card-bottom">
               ${experienceBadge(m)}
               <span class="model-status-badge ${statusClass}">${statusText}</span>
-              ${m.order_count > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.7" title="Завершённых заказов">📋 ${m.order_count} заказов</span>` : ''}
+              ${m.order_count > 0 ? `<span class="order-badge">📋 ${m.order_count} заказ${m.order_count === 1 ? '' : m.order_count < 5 ? 'а' : 'ов'}</span>` : ''}
               ${(m.view_count || 0) > 0 ? `<span class="mc-chip" style="font-size:0.7rem;opacity:0.6" title="Просмотров">👁 ${(m.view_count || 0).toLocaleString('ru')}</span>` : ''}
             </div>
             <a href="/model.html?id=${m.id}"
