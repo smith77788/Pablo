@@ -2664,6 +2664,26 @@ function initBot(app) {
     if (welcomePhoto) {
       await safePhoto(chatId, welcomePhoto, { caption: 'Nevesty Models' }).catch(() => {});
     }
+
+    // Welcome follow-up for new clients (no orders yet)
+    const hasOrders = await get('SELECT id FROM orders WHERE client_chat_id=? LIMIT 1', [String(chatId)]).catch(() => null);
+    if (!hasOrders && !isAdmin(chatId)) {
+      // Schedule welcome follow-up hint in 1 hour
+      setTimeout(async () => {
+        try {
+          const stillNew = await get('SELECT id FROM orders WHERE client_chat_id=? LIMIT 1', [String(chatId)]).catch(() => null);
+          if (!stillNew) {
+            await bot.sendMessage(chatId,
+              `💡 *Подсказка*: Нажмите *Каталог* чтобы посмотреть наших моделей, или воспользуйтесь *Калькулятором* чтобы оценить стоимость вашего события\\.`, {
+              parse_mode: 'MarkdownV2',
+              reply_markup: { inline_keyboard: [
+                [{ text: '💃 Каталог', callback_data: 'cat_cat__0' }, { text: '🧮 Калькулятор', callback_data: 'calculator' }]
+              ]}
+            });
+          }
+        } catch {}
+      }, 60 * 60 * 1000); // 1 hour
+    }
   });
 
   // ── /admin ─────────────────────────────────────────────────────────────────
@@ -3724,6 +3744,13 @@ function initBot(app) {
     }
 
     // ── Оставить отзыв
+    if (data === 'review_skip') {
+      // Client dismissed the review follow-up
+      return safeSend(chatId, '✅ Спасибо, что воспользовались нашими услугами\\!', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '🏠 Главное меню', callback_data: 'main_menu' }]] }
+      });
+    }
     if (data.startsWith('leave_review_')) {
       const orderId = parseInt(data.replace('leave_review_', ''));
       return startLeaveReview(chatId, orderId);
@@ -4352,6 +4379,13 @@ async function notifyNewOrder(order) {
 
 async function notifyStatusChange(clientChatId, orderNumber, newStatus) {
   if (!bot || !clientChatId) return;
+
+  // Check client notification preferences
+  const clientPrefs = await get('SELECT notify_status FROM client_prefs WHERE chat_id=?', [clientChatId]).catch(() => null);
+  if (clientPrefs && clientPrefs.notify_status === 0) {
+    // Client opted out of status notifications
+    return;
+  }
   const msgs = {
     confirmed:   `✅ *Заявка ${esc(orderNumber)} подтверждена\\!*\n\nМенеджер свяжется с вами для уточнения деталей\\.`,
     reviewing:   `🔍 *Заявка ${esc(orderNumber)} принята в работу\\.*\n\nМы изучаем ваш запрос\\.`,

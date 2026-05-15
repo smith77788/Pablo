@@ -165,6 +165,11 @@ const NOTIFY_PATH  = '/home/user/Pablo/nevesty-models/tools/notify.js';
 const NOTIFY_CWD   = '/home/user/Pablo/nevesty-models';
 const FACTORY_DB   = '/home/user/Pablo/factory/factory.db';
 
+// ─── escapeMarkdown helper ────────────────────────────────────────────────────
+function escapeMarkdown(text) {
+  return String(text || '').replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
+}
+
 function notify(msg) {
   try {
     const safe = msg.replace(/"/g, '\\"').replace(/\n/g, '\\n');
@@ -212,21 +217,101 @@ function taskFactoryHealthCheck() {
   });
 }
 
+// ─── Lazy bot instance for client messaging ───────────────────────────────────
+function getBot() {
+  const TelegramBot = require('node-telegram-bot-api');
+  const token = process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN;
+  if (!token || token === 'your_bot_token_here') return null;
+  return new TelegramBot(token, { polling: false });
+}
+
+// ─── Задача: отправка запроса отзыва через 24ч после завершения заявки ────────
+const reviewFollowup = async () => {
+  try {
+    const completed = await dbAll(`
+      SELECT o.id, o.client_chat_id, o.order_number, o.client_name
+      FROM orders o
+      LEFT JOIN reviews r ON r.order_id = o.id
+      WHERE o.status = 'completed'
+        AND o.client_chat_id IS NOT NULL
+        AND CAST(o.client_chat_id AS INTEGER) > 0
+        AND r.id IS NULL
+        AND datetime(o.updated_at) < datetime('now', '-24 hours')
+        AND datetime(o.updated_at) > datetime('now', '-48 hours')
+        AND o.review_requested IS NULL
+    `).catch(() => []);
+
+    if (!completed.length) return;
+    const bot = getBot();
+    if (!bot) return;
+
+    for (const order of completed) {
+      try {
+        // Check client notification prefs
+        const prefs = await dbGet('SELECT notify_review FROM client_prefs WHERE chat_id=?', [order.client_chat_id]).catch(() => null);
+        if (prefs && prefs.notify_review === 0) continue;
+
+        await bot.sendMessage(order.client_chat_id,
+          `⭐ *${escapeMarkdown(order.client_name || 'Здравствуйте')}*, ваша заявка завершена\\!\n\nКак всё прошло? Оставьте отзыв — это займёт минуту и поможет другим клиентам выбрать модель\\.`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '⭐ Оставить отзыв', callback_data: `leave_review_${order.id}` }],
+            [{ text: '✅ Всё хорошо, спасибо', callback_data: 'review_skip' }]
+          ]}
+        });
+
+        // Mark as requested
+        await dbRun('UPDATE orders SET review_requested=CURRENT_TIMESTAMP WHERE id=?', [order.id]).catch(() => {});
+      } catch {} // User may have blocked bot
+    }
+
+    console.log(`[Scheduler] Review follow-up sent: ${completed.length} orders`);
+  } catch (e) {
+    console.error('[scheduler] review followup error:', e.message);
+  }
+};
+
+// Запускать каждые 6 часов
+setInterval(reviewFollowup, 6 * 60 * 60 * 1000);
+setTimeout(reviewFollowup, 30000); // Один раз после старта
+
+// ─── Задача: еженедельный re-engagement неактивных клиентов ──────────────────
+
 // Таск 3: Понедельник 10:00 — re-engagement клиентов
 async function taskReEngagement() {
   try {
-    const clients = await dbAll(`
-      SELECT DISTINCT client_chat_id, client_name,
-        MAX(created_at) as last_order
-      FROM orders
-      WHERE status='completed'
-        AND client_chat_id IS NOT NULL
-        AND client_chat_id != ''
-      GROUP BY client_chat_id
-      HAVING datetime(last_order) < datetime('now', '-60 days')
-      LIMIT 20
-    `);
-    console.log(`[Scheduler] Re-engagement: ${clients.length} clients eligible`);
+    const inactive = await dbAll(`
+      SELECT DISTINCT o.client_chat_id, MAX(o.client_name) as name
+      FROM orders o
+      WHERE o.client_chat_id IS NOT NULL AND CAST(o.client_chat_id AS INTEGER) > 0
+        AND o.status = 'completed'
+      GROUP BY o.client_chat_id
+      HAVING MAX(o.created_at) < datetime('now', '-60 days')
+        AND MAX(o.created_at) > datetime('now', '-90 days')
+    `).catch(() => []);
+
+    console.log(`[Scheduler] Re-engagement: ${inactive.length} clients eligible`);
+    if (!inactive.length) return;
+
+    const bot = getBot();
+    if (!bot) return;
+
+    for (const client of inactive.slice(0, 20)) { // Max 20 per run
+      try {
+        const prefs = await dbGet('SELECT notify_promo FROM client_prefs WHERE chat_id=?', [client.client_chat_id]).catch(() => null);
+        if (prefs && prefs.notify_promo === 0) continue;
+
+        await bot.sendMessage(client.client_chat_id,
+          `👋 *${escapeMarkdown(client.name || 'Здравствуйте')}\\!*\n\nДавно не видели вас в нашем агентстве\\. У нас появились новые модели\\!\n\n💃 Посмотрите каталог — возможно найдёте подходящую для вашего следующего события\\.`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [
+            [{ text: '💃 Открыть каталог', callback_data: 'cat_cat__0' }],
+            [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }]
+          ]}
+        });
+        await new Promise(resolve => setTimeout(resolve, 500)); // Throttle
+      } catch {}
+    }
   } catch (e) {
     console.error('[Scheduler] re-engagement error:', e.message);
   }

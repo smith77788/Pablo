@@ -259,6 +259,12 @@ async function initDatabase() {
   // Migrations — add status column to reviews if missing
   await run(`ALTER TABLE reviews ADD COLUMN status TEXT DEFAULT 'pending'`).catch(() => {});
 
+  // Migration — add order_id to reviews for follow-up tracking
+  await run(`ALTER TABLE reviews ADD COLUMN order_id INTEGER DEFAULT NULL`).catch(() => {});
+
+  // Migration — add review_requested timestamp to orders
+  await run(`ALTER TABLE orders ADD COLUMN review_requested DATETIME DEFAULT NULL`).catch(() => {});
+
   // Default settings
   const defaults = [
     ['greeting',       'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],
