@@ -286,5 +286,19 @@
       .replace(/'/g, '&#39;');
   }
 
+  // Analytics: model_view on card click
+  grid.addEventListener('click', function(e) {
+    const card = e.target.closest('.model-card[onclick]');
+    if (!card) return;
+    const match = card.getAttribute('onclick').match(/openModelModal\((\d+)\)/);
+    if (!match) return;
+    const modelId = match[1];
+    const nameEl = card.querySelector('.model-card-name');
+    const modelName = nameEl ? nameEl.textContent : '';
+    if (window.NM && NM.analytics) {
+      NM.analytics.event('model_view', { model_id: modelId, model_name: modelName });
+    }
+  });
+
   render();
 })();

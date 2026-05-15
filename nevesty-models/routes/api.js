@@ -468,7 +468,8 @@ router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
 router.post('/orders', async (req, res, next) => {
   try {
     const { client_name, client_phone, client_email, client_telegram, client_chat_id,
-            model_id, event_type, event_date, event_duration, location, budget, comments } = req.body;
+            model_id, event_type, event_date, event_duration, location, budget, comments,
+            utm_source, utm_medium, utm_campaign } = req.body;
 
     if (!sanitize(client_name, 100)) return res.status(400).json({ error: 'Укажите ваше имя' });
     if (!client_phone || !validatePhone(client_phone)) return res.status(400).json({ error: 'Укажите корректный номер телефона' });
@@ -492,12 +493,15 @@ router.post('/orders', async (req, res, next) => {
       location: sanitize(location, 200),
       budget: sanitize(budget, 100),
       comments: sanitize(comments, 2000),
+      utm_source: sanitize(utm_source, 100) || '',
+      utm_medium: sanitize(utm_medium, 100) || '',
+      utm_campaign: sanitize(utm_campaign, 100) || '',
     };
 
     const result = await run(
-      `INSERT INTO orders (order_number,client_name,client_phone,client_email,client_telegram,client_chat_id,model_id,event_type,event_date,event_duration,location,budget,comments)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [order_number, s.client_name, s.client_phone, s.client_email, s.client_telegram, s.client_chat_id, s.model_id, s.event_type, s.event_date, s.event_duration, s.location, s.budget, s.comments]
+      `INSERT INTO orders (order_number,client_name,client_phone,client_email,client_telegram,client_chat_id,model_id,event_type,event_date,event_duration,location,budget,comments,utm_source,utm_medium,utm_campaign)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [order_number, s.client_name, s.client_phone, s.client_email, s.client_telegram, s.client_chat_id, s.model_id, s.event_type, s.event_date, s.event_duration, s.location, s.budget, s.comments, s.utm_source, s.utm_medium, s.utm_campaign]
     );
 
     if (botInstance) {
@@ -792,6 +796,27 @@ router.delete('/admin/managers/:id', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/settings/public — public read-only settings (no auth required)
+router.get('/settings/public', async (req, res) => {
+  try {
+    const SAFE_KEYS = [
+      'contacts_phone', 'contacts_email', 'contacts_insta', 'contacts_addr',
+      'contacts_whatsapp', 'about', 'greeting', 'agency_name', 'tagline',
+      'catalog_per_page', 'site_url', 'manager_hours'
+    ];
+    const placeholders = SAFE_KEYS.map(() => '?').join(',');
+    const rows = await query(
+      `SELECT key, value FROM bot_settings WHERE key IN (${placeholders})`,
+      SAFE_KEYS
+    );
+    const settings = {};
+    rows.forEach(r => { settings[r.key] = r.value; });
+    res.json(settings);
+  } catch (e) {
+    res.status(500).json({ error: 'Settings unavailable' });
+  }
+});
+
 // GET /api/settings — возвращает все настройки бота
 router.get('/settings', auth, async (req, res, next) => {
   try {
@@ -815,11 +840,12 @@ router.delete('/admin/sessions', auth, async (req, res, next) => {
 router.put('/settings', auth, async (req, res, next) => {
   const ALLOWED_KEYS = [
     'greeting', 'about',
-    'contacts_phone', 'contacts_email', 'contacts_insta', 'contacts_addr',
+    'contacts_phone', 'contacts_email', 'contacts_insta', 'contacts_addr', 'contacts_whatsapp',
     'pricing',
     'notif_new_order', 'notif_status', 'notif_message',
     'agency_name', 'tagline', 'hero_image',
     'webhook_url', 'tg_notif_enabled',
+    'catalog_per_page', 'site_url', 'manager_hours',
   ];
   try {
     const body = req.body;

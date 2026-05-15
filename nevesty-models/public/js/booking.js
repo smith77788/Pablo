@@ -444,22 +444,43 @@
     btn.disabled = true;
     btn.textContent = 'Отправка...';
     try {
+      const body = {
+        client_name: state.client_name,
+        client_phone: state.client_phone,
+        client_email: state.client_email || null,
+        client_telegram: state.client_telegram || null,
+        model_id: state.model_id || null,
+        event_type: state.event_type,
+        event_date: state.event_date || null,
+        event_duration: +state.event_duration || 4,
+        location: state.location || null,
+        budget: state.budget || null,
+        comments: state.comments || null,
+      };
+
+      // Attach UTM parameters if available
+      if (window.NM && NM.analytics) {
+        const utm = NM.analytics.getSavedUTM();
+        if (utm.source) {
+          body.utm_source = utm.source;
+          body.utm_medium = utm.medium;
+          body.utm_campaign = utm.campaign;
+        }
+      }
+
       const result = await apiFetch('/orders', {
         method: 'POST',
-        body: JSON.stringify({
-          client_name: state.client_name,
-          client_phone: state.client_phone,
-          client_email: state.client_email || null,
-          client_telegram: state.client_telegram || null,
-          model_id: state.model_id || null,
-          event_type: state.event_type,
-          event_date: state.event_date || null,
-          event_duration: +state.event_duration || 4,
-          location: state.location || null,
-          budget: state.budget || null,
-          comments: state.comments || null,
-        })
+        body: JSON.stringify(body)
       });
+
+      // Analytics: track booking conversion
+      if (window.NM && NM.analytics) {
+        NM.analytics.event('booking_submitted', {
+          event_type: state.event_type,
+          model_id: state.model_id,
+          ...NM.analytics.getSavedUTM()
+        });
+      }
 
       const orderNum = result.order_number;
       document.getElementById('orderNumDisplay').textContent = orderNum;

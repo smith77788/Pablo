@@ -20,19 +20,44 @@
   <link rel="dns-prefetch" href="https://telegram.org">
   <link rel="stylesheet" href="/css/main.css" />
   <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+  <!-- Google Analytics 4 -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=GA_MEASUREMENT_ID"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'GA_MEASUREMENT_ID', { anonymize_ip: true });
+  </script>
+  <!-- Yandex.Metrica -->
+  <script>
+    window.YM_ID = 00000000; // Replace with real ID
+    (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+    m[i].l=1*new Date();k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+    (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+    ym(window.YM_ID, "init", { clickmap:true, trackLinks:true, accurateTrackBounce:true, webvisor:true });
+  </script>
+  <!-- Analytics wrapper -->
+  <script src="/js/analytics.js"></script>
 </head>
 <body>
   <a href="#main-content" class="skip-link">Перейти к содержимому</a>
   <!-- NAVBAR -->
-  <nav class="navbar" id="navbar">
+  <nav class="navbar" id="navbar" role="navigation" aria-label="Главное меню">
     <div class="nav-inner">
       <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
-      <div class="nav-links">
+      <div class="nav-links" role="list">
         <a href="/catalog.html">Модели</a>
         <a href="#services">Услуги</a>
         <a href="#about">О нас</a>
         <a href="/faq.html">FAQ</a>
         <a href="#contact">Контакты</a>
+        <a href="/favorites.html" title="Избранное" style="font-size:1.1rem">❤️</a>
+        <a id="whatsapp-btn" href="#" target="_blank" rel="noopener"
+           style="display:none;align-items:center;gap:6px;background:#25D366;color:#fff;padding:6px 14px;border-radius:8px;font-size:0.8rem;font-weight:600;transition:background 0.2s;text-decoration:none"
+           onmouseover="this.style.background='#1da851'" onmouseout="this.style.background='#25D366'">
+          <svg style="width:16px;height:16px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+          <span>WhatsApp</span>
+        </a>
         <a href="/booking.html" class="btn-nav">Заказать</a>
       </div>
       <div class="nav-burger" id="burgerBtn">
@@ -42,18 +67,19 @@
   </nav>
 
   <!-- MOBILE MENU -->
-  <nav class="nav-mobile" id="mobileMenu">
+  <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
     <span class="nav-mobile-close" id="mobileClose">✕</span>
     <a href="/catalog.html">Модели</a>
     <a href="#services">Услуги</a>
     <a href="#about">О нас</a>
     <a href="/faq.html">FAQ</a>
     <a href="#contact">Контакты</a>
+    <a href="/favorites.html">❤️ Избранное</a>
     <a href="/booking.html" style="color:var(--gold)">Заказать</a>
   </nav>
 
   <!-- HERO -->
-  <section class="hero" id="main-content" tabindex="-1">
+  <section class="hero" id="main-content" tabindex="-1" role="main" aria-label="Главная страница агентства">
     <div class="hero-bg"></div>
     <div class="hero-lines">
       <div class="hero-line"></div>
@@ -98,7 +124,7 @@
   </section>
 
   <!-- FEATURED MODELS -->
-  <section class="featured" id="models" data-animate>
+  <section class="featured" id="models" data-animate aria-label="Каталог моделей">
     <div class="container">
       <div class="section-header">
         <div class="section-tag">Наши модели</div>
@@ -106,11 +132,11 @@
         <div class="gold-line"></div>
         <p>Каждая модель — это уникальная личность с безупречным профессионализмом и яркой индивидуальностью</p>
       </div>
-      <div class="models-grid-3" id="featuredGrid">
+      <div class="models-grid-3" id="featuredGrid" role="list" aria-label="Избранные модели" aria-live="polite">
         <!-- injected by JS -->
-        <div class="model-card-skeleton"></div>
-        <div class="model-card-skeleton"></div>
-        <div class="model-card-skeleton"></div>
+        <div class="model-card-skeleton" aria-hidden="true"></div>
+        <div class="model-card-skeleton" aria-hidden="true"></div>
+        <div class="model-card-skeleton" aria-hidden="true"></div>
       </div>
       <div style="text-align:center;margin-top:48px">
         <a href="/catalog.html" class="btn-outline">Смотреть все модели</a>
@@ -119,31 +145,31 @@
   </section>
 
   <!-- SERVICES -->
-  <section class="services" id="services" data-animate>
+  <section class="services" id="services" data-animate aria-labelledby="services-heading">
     <div class="container">
       <div class="section-header">
         <div class="section-tag">Что мы предлагаем</div>
-        <h2>Наши услуги</h2>
+        <h2 id="services-heading">Наши услуги</h2>
         <div class="gold-line"></div>
       </div>
-      <div class="services-grid">
-        <div class="service-card">
-          <span class="service-icon">👗</span>
+      <div class="services-grid" role="list">
+        <div class="service-card" role="listitem">
+          <span class="service-icon" aria-hidden="true">👗</span>
           <h3>Показы мод</h3>
           <p>Профессиональные модели для подиумных показов и fashion-презентаций любого масштаба.</p>
         </div>
-        <div class="service-card">
-          <span class="service-icon">📸</span>
+        <div class="service-card" role="listitem">
+          <span class="service-icon" aria-hidden="true">📸</span>
           <h3>Фотосессии</h3>
           <p>Опытные модели для рекламных кампаний, каталогов, editorial и lifestyle съёмок.</p>
         </div>
-        <div class="service-card">
-          <span class="service-icon">🥂</span>
+        <div class="service-card" role="listitem">
+          <span class="service-icon" aria-hidden="true">🥂</span>
           <h3>Мероприятия</h3>
           <p>Элегантные хостес и промо-модели для корпоративных, светских и частных мероприятий.</p>
         </div>
-        <div class="service-card">
-          <span class="service-icon">🎬</span>
+        <div class="service-card" role="listitem">
+          <span class="service-icon" aria-hidden="true">🎬</span>
           <h3>Коммерческая съёмка</h3>
           <p>Модели для телевизионной рекламы, видеороликов и digital-контента.</p>
         </div>
@@ -201,29 +227,29 @@
       <p>Свяжитесь с нами сегодня и получите персональную консультацию от нашего менеджера</p>
       <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
         <a href="/booking.html" class="btn-primary" style="font-size:0.85rem;padding:18px 48px;">Оформить заявку</a>
-        <button class="btn-outline" onclick="openQuickBooking()" style="font-size:0.85rem;padding:18px 48px;background:none;cursor:pointer;">⚡ Заказать звонок</button>
+        <button class="btn-outline" onclick="openQuickBooking()" style="font-size:0.85rem;padding:18px 48px;background:none;cursor:pointer;" aria-label="Заказать звонок"><span aria-hidden="true">⚡</span> Заказать звонок</button>
       </div>
     </div>
   </section>
 
   <!-- QUICK BOOKING MODAL -->
-  <div id="quickBookingModal" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,0.8);backdrop-filter:blur(6px);align-items:center;justify-content:center">
+  <div id="quickBookingModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,0.8);backdrop-filter:blur(6px);align-items:center;justify-content:center">
     <div style="background:var(--bg2);border:1px solid var(--border);padding:40px 32px;max-width:420px;width:90%;position:relative">
-      <button onclick="closeQuickBooking()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-muted);font-size:1.3rem;cursor:pointer">✕</button>
+      <button onclick="closeQuickBooking()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-muted);font-size:1.3rem;cursor:pointer" aria-label="Закрыть диалог">✕</button>
       <div style="font-size:0.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px">Быстрая заявка</div>
-      <h3 style="font-size:1.5rem;color:var(--white);margin-bottom:8px">Заказать звонок</h3>
+      <h3 id="qbModalTitle" style="font-size:1.5rem;color:var(--white);margin-bottom:8px">Заказать звонок</h3>
       <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:24px">Оставьте имя и телефон — менеджер свяжется в течение часа</p>
-      <div id="qbForm">
+      <div id="qbForm" role="form" aria-label="Форма быстрой заявки">
         <div style="margin-bottom:16px">
-          <label style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);display:block;margin-bottom:6px">Ваше имя *</label>
-          <input type="text" id="qbName" placeholder="Иван Иванов" class="form-control" autocomplete="name" />
+          <label for="qbName" style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);display:block;margin-bottom:6px">Ваше имя *</label>
+          <input type="text" id="qbName" placeholder="Иван Иванов" class="form-control" autocomplete="name" aria-required="true" />
         </div>
         <div style="margin-bottom:24px">
-          <label style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);display:block;margin-bottom:6px">Телефон *</label>
-          <input type="tel" id="qbPhone" placeholder="+7 (999) 000-00-00" class="form-control" autocomplete="tel" inputmode="tel" />
+          <label for="qbPhone" style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);display:block;margin-bottom:6px">Телефон *</label>
+          <input type="tel" id="qbPhone" placeholder="+7 (999) 000-00-00" class="form-control" autocomplete="tel" inputmode="tel" aria-required="true" />
         </div>
-        <div id="qbError" style="color:#f44336;font-size:0.8rem;margin-bottom:12px;display:none"></div>
-        <button onclick="submitQuickBooking()" class="btn-primary" style="width:100%;font-size:0.85rem;padding:16px;">Отправить заявку</button>
+        <div id="qbError" role="alert" style="color:#f44336;font-size:0.8rem;margin-bottom:12px;display:none"></div>
+        <button onclick="submitQuickBooking()" class="btn-primary" style="width:100%;font-size:0.85rem;padding:16px;" aria-label="Отправить заявку на звонок">Отправить заявку</button>
       </div>
       <div id="qbSuccess" style="display:none;text-align:center;padding:20px 0">
         <div style="font-size:3rem;margin-bottom:16px">✦</div>
@@ -487,6 +513,7 @@
           <a href="/booking.html">Оформить заявку</a>
           <a href="/order-status.html">Статус заявки</a>
           <a href="/catalog.html">Выбрать модель</a>
+          <a href="/privacy.html">Конфиденциальность</a>
         </div>
         <div class="footer-col">
           <h4>Связаться</h4>
@@ -529,7 +556,31 @@ fetch('/api/settings').then(r=>r.json()).then(s=>{
     document.querySelectorAll('a[href^="mailto:"]').forEach(el=>{el.href='mailto:'+s.contacts_email;el.textContent=s.contacts_email;});
   }
 }).catch(()=>{});
+// WhatsApp button init from public settings
+fetch('/api/settings/public').then(r=>r.json()).then(d=>{
+  const wa = d.contacts_whatsapp;
+  if (wa) {
+    const waNum = wa.replace(/\D/g,'');
+    const waUrl = `https://wa.me/${waNum}`;
+    const btn = document.getElementById('whatsapp-btn');
+    if (btn) { btn.href = waUrl; btn.style.display = 'flex'; }
+    const floatEl = document.getElementById('float-whatsapp');
+    const floatLink = document.getElementById('float-wa-link');
+    if (floatEl && floatLink) { floatLink.href = waUrl; floatEl.style.display = 'block'; }
+  }
+}).catch(()=>{});
 </script>
+
+  <!-- Floating WhatsApp Button -->
+  <div id="float-whatsapp" style="display:none;position:fixed;bottom:24px;right:24px;z-index:400">
+    <a id="float-wa-link" href="#" target="_blank" rel="noopener"
+       style="display:flex;align-items:center;gap:8px;background:#25D366;color:#fff;padding:14px 20px;border-radius:50px;box-shadow:0 4px 16px rgba(37,211,102,0.4);text-decoration:none;font-size:0.85rem;font-weight:600;transition:all 0.2s"
+       onmouseover="this.style.background='#1da851';this.style.boxShadow='0 6px 20px rgba(37,211,102,0.5)'"
+       onmouseout="this.style.background='#25D366';this.style.boxShadow='0 4px 16px rgba(37,211,102,0.4)'">
+      <svg style="width:22px;height:22px;flex-shrink:0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Написать в WhatsApp
+    </a>
+  </div>
   <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -557,5 +608,37 @@ fetch('/api/settings').then(r=>r.json()).then(s=>{
   }
 }
 </script>
+
+  <!-- Cookie Banner -->
+  <div id="cookie-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:16px;z-index:5000;border-top:1px solid #333">
+    <div style="max-width:1200px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
+      <p style="margin:0;font-size:0.85rem;color:#ccc">
+        🍪 Мы используем cookies для улучшения сервиса и аналитики.
+        <a href="/privacy" style="color:#e879a0;text-decoration:underline">Политика конфиденциальности</a>
+      </p>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button onclick="NM.cookies.reject()" style="padding:8px 18px;font-size:0.8rem;border:1px solid #555;background:none;color:#ccc;cursor:pointer;border-radius:4px">Отказаться</button>
+        <button onclick="NM.cookies.accept()" style="padding:8px 18px;font-size:0.8rem;background:#c9396f;border:none;color:#fff;cursor:pointer;border-radius:4px">Принять</button>
+      </div>
+    </div>
+  </div>
+  <script>
+  window.NM = window.NM || {};
+  NM.cookies = {
+    accept() {
+      localStorage.setItem("cookie_consent", "accepted");
+      document.getElementById("cookie-banner").style.display = "none";
+    },
+    reject() {
+      localStorage.setItem("cookie_consent", "rejected");
+      document.getElementById("cookie-banner").style.display = "none";
+    }
+  };
+  document.addEventListener("DOMContentLoaded", () => {
+    if (!localStorage.getItem("cookie_consent")) {
+      setTimeout(() => { document.getElementById("cookie-banner").style.display = "block"; }, 1000);
+    }
+  });
+  </script>
 </body>
 </html>

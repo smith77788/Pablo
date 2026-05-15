@@ -532,5 +532,16 @@ if (reviewsContainer) {
   });
 })();
 
+/* ─── Analytics: CTA click tracking (homepage) ─────── */
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('a[href*="booking"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (window.NM && NM.analytics) {
+        NM.analytics.event('cta_click', { location: 'homepage' });
+      }
+    });
+  });
+});
+
 /* ─── Init lazy images for any pre-rendered cards ─── */
 initLazyImages();
