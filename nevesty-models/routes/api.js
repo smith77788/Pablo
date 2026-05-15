@@ -1390,6 +1390,18 @@ router.put('/admin/reviews/:id/approve', auth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// PATCH /admin/reviews/:id/reply — save admin reply to review
+router.patch('/admin/reviews/:id/reply', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
+    const { reply } = req.body;
+    if (typeof reply !== 'string') return res.status(400).json({ error: 'reply must be string' });
+    await run('UPDATE reviews SET admin_reply = ? WHERE id = ?', [reply.slice(0, 1000) || null, id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 router.delete('/admin/reviews/:id', auth, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);

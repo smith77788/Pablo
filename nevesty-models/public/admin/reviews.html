@@ -96,6 +96,22 @@
     }
     .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
 
+    .review-reply {
+      margin: 8px 0;
+      padding: 10px 14px;
+      background: rgba(201,169,110,0.06);
+      border-left: 3px solid var(--gold);
+      border-radius: 0 4px 4px 0;
+    }
+    .reply-label { font-size: 0.72rem; color: var(--gold); margin-bottom: 4px; font-weight: 600; }
+    .reply-text { font-size: 0.82rem; color: var(--text-muted); }
+    .reply-textarea {
+      width: 100%; padding: 8px 10px;
+      border: 1px solid var(--border);
+      background: var(--bg2); color: var(--text);
+      border-radius: 4px; font-size: 0.82rem; resize: vertical;
+    }
+
     @media (max-width: 640px) {
       .stats-row { grid-template-columns: repeat(2, 1fr); }
       .review-actions { flex-wrap: wrap; }
@@ -291,6 +307,17 @@
         hour: '2-digit', minute: '2-digit'
       });
 
+      const safeReply = r.admin_reply ? r.admin_reply.replace(/\\/g, '\\\\').replace(/'/g, "\\'") : '';
+      const replyHtml = r.admin_reply
+        ? `<div class="review-reply">
+             <div class="reply-label">💬 Ответ администратора:</div>
+             <div class="reply-text">${_admin.escapeHtml(r.admin_reply)}</div>
+             <button class="btn btn-sm btn-ghost" onclick="showReplyInput(${r.id}, '${safeReply}')">✏️ Изменить</button>
+           </div>`
+        : `<div id="reply-prompt-${r.id}">
+             <button class="btn btn-sm btn-ghost" onclick="showReplyInput(${r.id}, '')">💬 Ответить</button>
+           </div>`;
+
       return `
       <div class="review-card ${statusClass}" id="review-${r.id}">
         <div class="review-header">
@@ -306,6 +333,7 @@
           </div>
         </div>
         ${r.text ? `<div class="review-text">${_admin.escapeHtml(r.text)}</div>` : '<div class="review-text" style="color:var(--text-dim);font-style:italic">Без текста</div>'}
+        ${replyHtml}
         <div class="review-actions">
           <button class="btn btn-sm ${approved ? 'btn-ghost' : 'btn-primary'}"
             onclick="toggleApprove(${r.id}, ${approved})">
@@ -362,6 +390,32 @@
       currentPage = p;
       loadReviews();
       window.scrollTo({top:0, behavior:'smooth'});
+    }
+
+    function showReplyInput(id, currentReply) {
+      const el = document.getElementById(`reply-prompt-${id}`) || document.querySelector(`#review-${id} .review-reply`);
+      if (!el) return;
+      el.innerHTML = `
+        <textarea id="reply-input-${id}" class="reply-textarea" placeholder="Ответ для клиентов..." rows="2" maxlength="500">${_admin.escapeHtml(currentReply || '')}</textarea>
+        <div style="margin-top:6px;display:flex;gap:6px">
+          <button class="btn btn-sm btn-primary" onclick="submitReply(${id})">💾 Сохранить</button>
+          <button class="btn btn-sm btn-ghost" onclick="loadReviews()">✕ Отмена</button>
+        </div>`;
+    }
+
+    async function submitReply(id) {
+      const input = document.getElementById(`reply-input-${id}`);
+      if (!input) return;
+      const reply = input.value.trim();
+      try {
+        await _admin.api(`/admin/reviews/${id}/reply`, {
+          method: 'PATCH',
+          body: JSON.stringify({ reply })
+        });
+        await loadReviews();
+      } catch(e) {
+        alert('Ошибка сохранения: ' + e.message);
+      }
     }
 
     // Init
