@@ -2157,6 +2157,52 @@ def run_cycle() -> dict:
         logger.error("Phase 23 Research Department error: %s", e)
 
     # ════════════════════════════════════════════════════════════════
+    # Phase 24: Channel Content Generation
+    # ════════════════════════════════════════════════════════════════
+    try:
+        from factory.agents.channel_content import ChannelContentGenerator
+        _channel24 = ChannelContentGenerator()
+
+        # Pick monthly stats from earlier phases if available
+        _phase_stats24 = results.get("phases", {})
+        _orders_count24 = 0
+        _models_count24 = 0
+        try:
+            if db_conn:
+                _ord_row = db_conn.execute(
+                    "SELECT COUNT(*) as cnt FROM orders WHERE created_at >= date('now', '-30 days')"
+                ).fetchone()
+                _mod_row = db_conn.execute(
+                    "SELECT COUNT(*) as cnt FROM models WHERE available=1 AND archived=0"
+                ).fetchone()
+                _orders_count24 = _ord_row["cnt"] if _ord_row else 0
+                _models_count24 = _mod_row["cnt"] if _mod_row else 0
+        except Exception:
+            pass
+
+        _stats_post24 = _channel24.generate_stats_post({
+            "total_orders": _orders_count24,
+            "active_models": _models_count24,
+            "cities_served": 1,
+            "avg_rating": 5.0,
+        })
+        _tips_post24 = _channel24.generate_tips_post("choosing_model")
+        _calendar24 = _channel24.get_content_calendar(weeks=2)
+
+        results["phases"]["channel_content"] = {
+            "stats_post_chars": _stats_post24["char_count"],
+            "tips_post_chars": _tips_post24["char_count"],
+            "calendar_posts_scheduled": len(_calendar24),
+            "next_post_format": _calendar24[0]["format"] if _calendar24 else "model_spotlight",
+        }
+        summary_lines.append(
+            f"📢 Channel Content (Phase 24): {len(_calendar24)} posts scheduled, "
+            f"next={_calendar24[0]['format'] if _calendar24 else 'n/a'}"
+        )
+    except Exception as e:
+        logger.error("Phase 24 Channel Content error: %s", e)
+
+    # ════════════════════════════════════════════════════════════════
     # CYCLE COMPLETE
     # ════════════════════════════════════════════════════════════════
     elapsed = round(time.time() - cycle_start, 1)
