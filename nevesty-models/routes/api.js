@@ -2306,8 +2306,11 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
     }
 
     // ─── CRM webhooks (non-blocking) ─────────────────────────────────────────
-    const { notifyCRM } = require('../services/crm');
+    const { notifyCRM, exportOrderToCrm } = require('../services/crm');
     notifyCRM('order.created', { ...s, order_number, id: result.id }, getSetting).catch(() => {});
+    exportOrderToCrm({ ...s, order_number, id: result.id }).catch(err =>
+      console.warn('[CRM] Export failed:', err.message)
+    );
 
     // ─── SMS booking confirmation (non-blocking) ──────────────────────────────
     if (s.client_phone) {
@@ -7454,6 +7457,10 @@ router.get('/admin/analytics/conversion', auth, async (req, res, next) => {
     next(e);
   }
 });
+
+// ─── CRM incoming webhooks (БЛОК 10.3) ───────────────────────────────────────
+const { registerWebhooks: _registerCrmWebhooks } = require('../services/crm');
+_registerCrmWebhooks(router);
 
 module.exports = router;
 module.exports.setBot = setBot;
