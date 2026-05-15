@@ -43,29 +43,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="/css/main.css" />
-    <script>
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            colors: {
-              pink: {
-                50: '#fdf2f8',
-                100: '#fce7f3',
-                200: '#fbcfe8',
-                300: '#f9a8d4',
-                400: '#f472b6',
-                500: '#ec4899',
-                600: '#db2777',
-                700: '#be185d',
-                800: '#9d174d',
-                900: '#831843',
-              },
-            },
-          },
-        },
-      };
-    </script>
     <style>
       /* ── Cabinet layout ── */
       .cabinet-page {
@@ -1526,7 +1503,7 @@
           if (body) {
             const progressEl = body.querySelector('.status-progress, [role="progressbar"]');
             if (progressEl) {
-              progressEl.outerHTML = buildProgressBar(newStatus);
+              progressEl.outerHTML = buildProgressBar(safeStatus);
             }
           }
 
@@ -1538,7 +1515,7 @@
           }, 1200);
 
           // Show toast
-          toast(`Статус заявки обновлён: ${STATUS_LABELS_WS[newStatus] || newStatus}`, 'info');
+          toast(`Статус заявки обновлён: ${STATUS_LABELS_WS[safeStatus] || safeStatus}`, 'info');
         }
 
         // ── Phone normalization ───────────────────────────────────────
