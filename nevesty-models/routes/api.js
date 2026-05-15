@@ -1322,5 +1322,42 @@ router.post('/admin/factory/run', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// ─── DB stats endpoint ────────────────────────────────────────────────────────
+router.get('/admin/db-stats', auth, async (req, res, next) => {
+  try {
+    const tables = await query(`
+      SELECT name, (SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name=sm.name) as index_count
+      FROM sqlite_master sm WHERE type='table' AND name NOT LIKE 'sqlite_%'
+      ORDER BY name`);
+
+    const tableCounts = await Promise.all(tables.map(async t => ({
+      name: t.name,
+      count: (await get(`SELECT COUNT(*) as cnt FROM "${t.name}"`))?.cnt || 0,
+      indexes: t.index_count
+    })));
+
+    const walInfo = await get('PRAGMA wal_checkpoint(PASSIVE)');
+    const dbSize = await get(`SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()`);
+    const schemaVers = await query('SELECT * FROM schema_versions ORDER BY version DESC LIMIT 5').catch(()=>[]);
+
+    res.json({
+      tables: tableCounts,
+      wal: walInfo,
+      size_bytes: dbSize?.size || 0,
+      size_mb: Math.round((dbSize?.size || 0) / 1024 / 1024 * 100) / 100,
+      schema_versions: schemaVers
+    });
+  } catch (e) { next(e); }
+});
+
+// ─── Manual VACUUM endpoint ───────────────────────────────────────────────────
+router.post('/admin/db-vacuum', auth, async (req, res, next) => {
+  try {
+    await run('VACUUM');
+    await run('ANALYZE');
+    res.json({ success: true, message: 'Database vacuumed and analyzed' });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;
 module.exports.setBot = setBot;

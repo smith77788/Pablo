@@ -37,11 +37,36 @@ async function initDatabase() {
   db = new sqlite3.Database(DB_PATH);
 
   // Performance pragmas — set before any table operations
-  await run('PRAGMA journal_mode = WAL');
-  await run('PRAGMA synchronous = NORMAL');
-  await run('PRAGMA cache_size = 2000');
-  await run('PRAGMA temp_store = MEMORY');
-  await run('PRAGMA mmap_size = 67108864'); // 64 MB memory-mapped I/O
+  await run('PRAGMA journal_mode=WAL');
+  await run('PRAGMA synchronous=NORMAL'); // Faster than FULL, still safe with WAL
+  await run('PRAGMA cache_size=-32000'); // 32MB page cache
+  await run('PRAGMA temp_store=MEMORY');
+  await run('PRAGMA mmap_size=268435456'); // 256MB mmap
+  await run('PRAGMA optimize'); // Optimize query planner
+
+  // Schema version tracking
+  await run(`CREATE TABLE IF NOT EXISTS schema_versions (
+    version INTEGER PRIMARY KEY,
+    description TEXT NOT NULL,
+    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`).catch(()=>{});
+
+  // Record current schema version if not exists
+  const schemaVer = await get('SELECT MAX(version) as v FROM schema_versions').catch(()=>null);
+  if (!schemaVer?.v) {
+    const migrations = [
+      [1, 'Initial schema — models, orders, admins, settings'],
+      [2, 'Add reviews table'],
+      [3, 'Add favorites, order_notes, factory_tasks'],
+      [4, 'Add wishlists, model fields (city, phone, featured, view_count, archived)'],
+      [5, 'Add loyalty_points, loyalty_transactions, client_prefs'],
+      [6, 'Add referrals, blocked_clients, ab_experiments, audit_log'],
+      [7, 'Add UTM columns to orders, quick_bookings'],
+    ];
+    for (const [v, desc] of migrations) {
+      await run('INSERT OR IGNORE INTO schema_versions (version, description) VALUES (?,?)', [v, desc]).catch(()=>{});
+    }
+  }
 
   await run(`CREATE TABLE IF NOT EXISTS admins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -351,6 +376,24 @@ async function initDatabase() {
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_logs_created ON agent_logs(created_at DESC)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_order_status_history_order ON order_status_history(order_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_order_status_history_created ON order_status_history(created_at DESC)`);
+
+  // Additional performance indexes
+  const perfIndexes = [
+    ['idx_orders_chat_id',          'CREATE INDEX IF NOT EXISTS idx_orders_chat_id ON orders(chat_id)'],
+    ['idx_orders_created_at',       'CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC)'],
+    ['idx_orders_status_created',   'CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at DESC)'],
+    ['idx_models_category_active',  'CREATE INDEX IF NOT EXISTS idx_models_category_active ON models(category) WHERE archived=0'],
+    ['idx_models_city_active',      'CREATE INDEX IF NOT EXISTS idx_models_city_active ON models(city) WHERE archived=0'],
+    ['idx_models_available_active', 'CREATE INDEX IF NOT EXISTS idx_models_available_active ON models(available) WHERE archived=0'],
+    ['idx_sessions_state',          'CREATE INDEX IF NOT EXISTS idx_sessions_state ON telegram_sessions(state)'],
+    ['idx_sessions_updated_at',     'CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON telegram_sessions(updated_at)'],
+    ['idx_reviews_status',          'CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status)'],
+    ['idx_factory_tasks_status_pri','CREATE INDEX IF NOT EXISTS idx_factory_tasks_status_pri ON factory_tasks(status, priority)'],
+    ['idx_audit_created',           'CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)'],
+  ];
+  for (const [name, sql] of perfIndexes) {
+    await run(sql).catch(e => console.log(`Index ${name}: ${e.message}`));
+  }
 
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);

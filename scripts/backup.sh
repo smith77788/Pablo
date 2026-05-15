@@ -1,13 +1,41 @@
 #!/bin/bash
+set -euo pipefail
+
 BACKUP_DIR="/home/user/Pablo/backups"
-DATE=$(date +%Y%m%d_%H%M%S)
+DATA_DIR="/home/user/Pablo/nevesty-models"
+DB_FILE="$DATA_DIR/data.db"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="$BACKUP_DIR/nevesty_models_${TIMESTAMP}.db"
+LOG_FILE="$BACKUP_DIR/backup.log"
+KEEP_DAYS=7
+
 mkdir -p "$BACKUP_DIR"
 
-# Backup SQLite databases
-cp /home/user/Pablo/nevesty-models/data.db "$BACKUP_DIR/data_$DATE.db"
-[ -f /home/user/Pablo/factory/factory.db ] && cp /home/user/Pablo/factory/factory.db "$BACKUP_DIR/factory_$DATE.db"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting backup..." >> "$LOG_FILE"
 
-# Keep only last 7 days of backups
-find "$BACKUP_DIR" -name "*.db" -mtime +7 -delete
+# Check if DB exists
+if [ ! -f "$DB_FILE" ]; then
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: DB not found at $DB_FILE" >> "$LOG_FILE"
+  exit 1
+fi
 
-echo "Backup completed: $DATE"
+# SQLite online backup (safe while DB is in use)
+sqlite3 "$DB_FILE" ".backup '$BACKUP_FILE'"
+BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Backup created: $BACKUP_FILE ($BACKUP_SIZE)" >> "$LOG_FILE"
+
+# Compress backup
+gzip -f "$BACKUP_FILE"
+COMPRESSED="${BACKUP_FILE}.gz"
+COMPRESSED_SIZE=$(du -h "$COMPRESSED" | cut -f1)
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Compressed: $COMPRESSED ($COMPRESSED_SIZE)" >> "$LOG_FILE"
+
+# Remove old backups (older than KEEP_DAYS days)
+OLD_COUNT=$(find "$BACKUP_DIR" -name "*.db.gz" -mtime +$KEEP_DAYS | wc -l)
+find "$BACKUP_DIR" -name "*.db.gz" -mtime +$KEEP_DAYS -delete
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Removed $OLD_COUNT old backups" >> "$LOG_FILE"
+
+# Show stats
+TOTAL=$(find "$BACKUP_DIR" -name "*.db.gz" | wc -l)
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Done. Total backups: $TOTAL" >> "$LOG_FILE"
