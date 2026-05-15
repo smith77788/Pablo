@@ -1,740 +1,1233 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Заявки — Nevesty Models Admin</title>
-  <meta name="robots" content="noindex, nofollow">
-  <link rel="stylesheet" href="/css/admin.css" />
-  <style>
-    /* ─── Bulk action bar ──────────────────────────── */
-    .bulk-bar {
-      display: none; align-items: center; gap: 12px;
-      padding: 12px 24px; background: rgba(201,169,110,0.08);
-      border-bottom: 1px solid rgba(201,169,110,0.25);
-      flex-wrap: wrap;
-    }
-    .bulk-bar.visible { display: flex; }
-    .bulk-count {
-      font-size: 0.8rem; color: var(--gold); font-weight: 600;
-      letter-spacing: 0.5px; flex: 1;
-    }
-    /* Checkbox column */
-    .cb-cell { width: 44px; padding: 14px 12px 14px 20px !important; }
-    .cb-th { width: 44px; padding: 12px 12px 12px 20px !important; }
-    .row-check {
-      width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer;
-    }
-    /* Unread dot */
-    .unread-dot {
-      display: inline-block; width: 8px; height: 8px;
-      background: var(--error); border-radius: 50%;
-      margin-left: 6px; vertical-align: middle; flex-shrink: 0;
-    }
-    /* Pagination info */
-    .pagination-info {
-      font-size: 0.75rem; color: var(--text-muted);
-      padding: 0 16px; white-space: nowrap;
-    }
-    .pagination { border-top: 1px solid var(--border); justify-content: flex-end; }
-    /* Manager dropdown in sidebar */
-    .manager-select {
-      width: 100%; background: var(--bg2); border: 1px solid var(--border);
-      color: var(--text); padding: 8px 12px; font-size: 0.85rem;
-      outline: none; margin-bottom: 12px;
-    }
-    .manager-select:focus { border-color: var(--gold); }
-    /* Export btn in filters */
-    .btn-export {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: none; border: 1px solid var(--border); color: var(--text-muted);
-      padding: 7px 14px; font-size: 0.7rem; letter-spacing: 1px;
-      text-transform: uppercase; cursor: pointer; transition: all 0.2s;
-    }
-    .btn-export:hover { border-color: var(--gold); color: var(--gold); }
-    /* Auto-refresh indicator */
-    .chat-live-indicator {
-      display: inline-flex; align-items: center; gap: 5px;
-      font-size: 0.7rem; color: var(--success);
-    }
-    .chat-live-dot {
-      width: 6px; height: 6px; background: var(--success);
-      border-radius: 50%; animation: livePulse 1.5s infinite;
-    }
-    @keyframes livePulse {
-      0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
-    }
-    /* Select-all checkbox header */
-    #checkAll { width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer; }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Заявки — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      /* ─── Bulk action bar ──────────────────────────── */
+      .bulk-bar {
+        display: none;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 24px;
+        background: rgba(201, 169, 110, 0.08);
+        border-bottom: 1px solid rgba(201, 169, 110, 0.25);
+        flex-wrap: wrap;
+      }
+      .bulk-bar.visible {
+        display: flex;
+      }
+      .bulk-count {
+        font-size: 0.8rem;
+        color: var(--gold);
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        flex: 1;
+      }
+      /* Checkbox column */
+      .cb-cell {
+        width: 44px;
+        padding: 14px 12px 14px 20px !important;
+      }
+      .cb-th {
+        width: 44px;
+        padding: 12px 12px 12px 20px !important;
+      }
+      .row-check {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--gold);
+        cursor: pointer;
+      }
+      /* Unread dot */
+      .unread-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background: var(--error);
+        border-radius: 50%;
+        margin-left: 6px;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }
+      /* Pagination info */
+      .pagination-info {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        padding: 0 16px;
+        white-space: nowrap;
+      }
+      .pagination {
+        border-top: 1px solid var(--border);
+        justify-content: flex-end;
+      }
+      /* Manager dropdown in sidebar */
+      .manager-select {
+        width: 100%;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 8px 12px;
+        font-size: 0.85rem;
+        outline: none;
+        margin-bottom: 12px;
+      }
+      .manager-select:focus {
+        border-color: var(--gold);
+      }
+      /* Export btn in filters */
+      .btn-export {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 7px 14px;
+        font-size: 0.7rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .btn-export:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      /* Auto-refresh indicator */
+      .chat-live-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.7rem;
+        color: var(--success);
+      }
+      .chat-live-dot {
+        width: 6px;
+        height: 6px;
+        background: var(--success);
+        border-radius: 50%;
+        animation: livePulse 1.5s infinite;
+      }
+      @keyframes livePulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+      /* Select-all checkbox header */
+      #checkAll {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--gold);
+        cursor: pointer;
+      }
 
-    /* ─── Quick filter chips ─────────────────────────── */
-    .quick-filters {
-      display: flex; flex-wrap: wrap; gap: 6px;
-      padding: 10px 24px 0;
-    }
-    .qf-chip {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 4px 12px; border-radius: 20px; font-size: 0.75rem;
-      font-weight: 600; cursor: pointer; border: 1px solid var(--border);
-      background: var(--bg2); color: var(--text-muted);
-      transition: all 0.15s; white-space: nowrap; letter-spacing: 0.3px;
-    }
-    .qf-chip:hover { color: var(--text); border-color: var(--gold); }
-    .qf-chip.qf-active {
-      background: rgba(201,169,110,0.15); color: var(--gold);
-      border-color: rgba(201,169,110,0.5);
-    }
-    .qf-chip.qf-starred {
-      background: rgba(255,215,0,0.12); color: #ffd700;
-      border-color: rgba(255,215,0,0.4);
-    }
+      /* ─── Quick filter chips ─────────────────────────── */
+      .quick-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 10px 24px 0;
+      }
+      .qf-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        transition: all 0.15s;
+        white-space: nowrap;
+        letter-spacing: 0.3px;
+      }
+      .qf-chip:hover {
+        color: var(--text);
+        border-color: var(--gold);
+      }
+      .qf-chip.qf-active {
+        background: rgba(201, 169, 110, 0.15);
+        color: var(--gold);
+        border-color: rgba(201, 169, 110, 0.5);
+      }
+      .qf-chip.qf-starred {
+        background: rgba(255, 215, 0, 0.12);
+        color: #ffd700;
+        border-color: rgba(255, 215, 0, 0.4);
+      }
 
-    /* ─── Urgency badges ─────────────────────────────── */
-    .urgency-badge {
-      display: inline-block; font-size: 0.72rem; padding: 2px 6px;
-      border-radius: 4px; margin-left: 4px; vertical-align: middle;
-    }
-    .urgency-urgent {
-      background: rgba(220,50,50,0.15); color: #ff6b6b;
-      border: 1px solid rgba(220,50,50,0.3);
-    }
-    .urgency-soon {
-      background: rgba(255,165,0,0.15); color: #ffb347;
-      border: 1px solid rgba(255,165,0,0.3);
-    }
+      /* ─── Urgency badges ─────────────────────────────── */
+      .urgency-badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-left: 4px;
+        vertical-align: middle;
+      }
+      .urgency-urgent {
+        background: rgba(220, 50, 50, 0.15);
+        color: #ff6b6b;
+        border: 1px solid rgba(220, 50, 50, 0.3);
+      }
+      .urgency-soon {
+        background: rgba(255, 165, 0, 0.15);
+        color: #ffb347;
+        border: 1px solid rgba(255, 165, 0, 0.3);
+      }
 
-    /* ─── Star button ────────────────────────────────── */
-    .star-btn {
-      background: none; border: none; cursor: pointer;
-      font-size: 1rem; padding: 2px 4px; opacity: 0.35;
-      transition: opacity 0.15s, transform 0.15s; line-height: 1;
-    }
-    .star-btn:hover { opacity: 0.8; transform: scale(1.2); }
-    .star-btn.starred { opacity: 1; }
+      /* ─── Star button ────────────────────────────────── */
+      .star-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+        padding: 2px 4px;
+        opacity: 0.35;
+        transition:
+          opacity 0.15s,
+          transform 0.15s;
+        line-height: 1;
+      }
+      .star-btn:hover {
+        opacity: 0.8;
+        transform: scale(1.2);
+      }
+      .star-btn.starred {
+        opacity: 1;
+      }
 
-    /* ─── Keyboard shortcuts tooltip ─────────────────── */
-    .kb-hint {
-      position: fixed; bottom: 16px; right: 16px;
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 8px; padding: 8px 14px; font-size: 0.72rem;
-      color: var(--text-muted); display: flex; align-items: center; gap: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 10;
-    }
-    .kb-hint kbd {
-      display: inline-block; background: var(--bg); border: 1px solid var(--border);
-      border-radius: 3px; padding: 1px 5px; font-size: 0.7rem;
-      color: var(--gold); font-family: monospace;
-    }
+      /* ─── Keyboard shortcuts tooltip ─────────────────── */
+      .kb-hint {
+        position: fixed;
+        bottom: 16px;
+        right: 16px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        z-index: 10;
+      }
+      .kb-hint kbd {
+        display: inline-block;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 1px 5px;
+        font-size: 0.7rem;
+        color: var(--gold);
+        font-family: monospace;
+      }
 
-    /* ─── Shortcuts modal ────────────────────────────── */
-    .kb-modal {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
-      z-index: 200; display: flex; align-items: center; justify-content: center;
-    }
-    .kb-modal-box {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 12px; padding: 24px 32px; min-width: 300px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    }
-    .kb-modal-box h3 {
-      font-size: 0.85rem; letter-spacing: 1px; text-transform: uppercase;
-      color: var(--gold); margin: 0 0 16px;
-    }
-    .kb-row {
-      display: flex; align-items: center; gap: 12px;
-      padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
-      font-size: 0.82rem; color: var(--text);
-    }
-    .kb-row:last-child { border-bottom: none; }
-    .kb-row kbd {
-      min-width: 28px; text-align: center; background: var(--bg);
-      border: 1px solid var(--border); border-radius: 4px;
-      padding: 2px 7px; font-size: 0.75rem; color: var(--gold);
-      font-family: monospace; flex-shrink: 0;
-    }
+      /* ─── Shortcuts modal ────────────────────────────── */
+      .kb-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 200;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .kb-modal-box {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 24px 32px;
+        min-width: 300px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      }
+      .kb-modal-box h3 {
+        font-size: 0.85rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin: 0 0 16px;
+      }
+      .kb-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        font-size: 0.82rem;
+        color: var(--text);
+      }
+      .kb-row:last-child {
+        border-bottom: none;
+      }
+      .kb-row kbd {
+        min-width: 28px;
+        text-align: center;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px 7px;
+        font-size: 0.75rem;
+        color: var(--gold);
+        font-family: monospace;
+        flex-shrink: 0;
+      }
 
-    /* ─── Status filter buttons ─────────────────────── */
-    .status-filter-bar {
-      display: flex; flex-wrap: wrap; gap: 6px;
-      padding: 10px 24px; border-bottom: 1px solid var(--border);
-    }
-    .sfilter-btn {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 5px 12px; border-radius: 3px; font-size: 0.75rem;
-      font-weight: 600; cursor: pointer; border: 1px solid transparent;
-      background: var(--bg2); color: var(--text-muted);
-      transition: all 0.15s; white-space: nowrap;
-    }
-    .sfilter-btn:hover { color: var(--text); border-color: var(--border); }
-    .sfilter-btn.active-all  { background:rgba(255,255,255,0.08); color:var(--text); border-color:var(--border); }
-    .sfilter-btn.active-new  { background:rgba(59,130,246,0.15); color:#3b82f6; border-color:rgba(59,130,246,0.4); }
-    .sfilter-btn.active-reviewing { background:rgba(245,158,11,0.15); color:#f59e0b; border-color:rgba(245,158,11,0.4); }
-    .sfilter-btn.active-confirmed { background:rgba(16,185,129,0.15); color:#10b981; border-color:rgba(16,185,129,0.4); }
-    .sfilter-btn.active-in_progress { background:rgba(139,92,246,0.15); color:#8b5cf6; border-color:rgba(139,92,246,0.4); }
-    .sfilter-btn.active-completed { background:rgba(107,114,128,0.15); color:#6b7280; border-color:rgba(107,114,128,0.4); }
-    .sfilter-btn.active-cancelled { background:rgba(239,68,68,0.15); color:#ef4444; border-color:rgba(239,68,68,0.4); }
+      /* ─── Status filter buttons ─────────────────────── */
+      .status-filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 10px 24px;
+        border-bottom: 1px solid var(--border);
+      }
+      .sfilter-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 12px;
+        border-radius: 3px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid transparent;
+        background: var(--bg2);
+        color: var(--text-muted);
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .sfilter-btn:hover {
+        color: var(--text);
+        border-color: var(--border);
+      }
+      .sfilter-btn.active-all {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        border-color: var(--border);
+      }
+      .sfilter-btn.active-new {
+        background: rgba(59, 130, 246, 0.15);
+        color: #3b82f6;
+        border-color: rgba(59, 130, 246, 0.4);
+      }
+      .sfilter-btn.active-reviewing {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border-color: rgba(245, 158, 11, 0.4);
+      }
+      .sfilter-btn.active-confirmed {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border-color: rgba(16, 185, 129, 0.4);
+      }
+      .sfilter-btn.active-in_progress {
+        background: rgba(139, 92, 246, 0.15);
+        color: #8b5cf6;
+        border-color: rgba(139, 92, 246, 0.4);
+      }
+      .sfilter-btn.active-completed {
+        background: rgba(107, 114, 128, 0.15);
+        color: #6b7280;
+        border-color: rgba(107, 114, 128, 0.4);
+      }
+      .sfilter-btn.active-cancelled {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border-color: rgba(239, 68, 68, 0.4);
+      }
 
-    /* ─── Inline status select ──────────────────────── */
-    .inline-status-select {
-      background: var(--bg2); border: 1px solid var(--border);
-      color: var(--text); font-size: 0.72rem; padding: 3px 6px;
-      border-radius: 3px; cursor: pointer; outline: none;
-      transition: border-color 0.2s;
-    }
-    .inline-status-select:focus { border-color: var(--gold); }
+      /* ─── Inline status select ──────────────────────── */
+      .inline-status-select {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 0.72rem;
+        padding: 3px 6px;
+        border-radius: 3px;
+        cursor: pointer;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      .inline-status-select:focus {
+        border-color: var(--gold);
+      }
 
-    /* ─── Colored status badges ─────────────────────── */
-    .sbadge {
-      display: inline-block; padding: 2px 8px; border-radius: 3px;
-      font-size: 0.72rem; font-weight: 600; white-space: nowrap;
-    }
-    .sbadge-new        { background:rgba(59,130,246,0.15);  color:#3b82f6;  border:1px solid rgba(59,130,246,0.3); }
-    .sbadge-reviewing  { background:rgba(245,158,11,0.15);  color:#f59e0b;  border:1px solid rgba(245,158,11,0.3); }
-    .sbadge-confirmed  { background:rgba(16,185,129,0.15);  color:#10b981;  border:1px solid rgba(16,185,129,0.3); }
-    .sbadge-in_progress{ background:rgba(139,92,246,0.15);  color:#8b5cf6;  border:1px solid rgba(139,92,246,0.3); }
-    .sbadge-completed  { background:rgba(107,114,128,0.15); color:#6b7280;  border:1px solid rgba(107,114,128,0.3); }
-    .sbadge-cancelled  { background:rgba(239,68,68,0.15);   color:#ef4444;  border:1px solid rgba(239,68,68,0.3); }
+      /* ─── Colored status badges ─────────────────────── */
+      .sbadge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .sbadge-new {
+        background: rgba(59, 130, 246, 0.15);
+        color: #3b82f6;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+      }
+      .sbadge-reviewing {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+      }
+      .sbadge-confirmed {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+      .sbadge-in_progress {
+        background: rgba(139, 92, 246, 0.15);
+        color: #8b5cf6;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+      }
+      .sbadge-completed {
+        background: rgba(107, 114, 128, 0.15);
+        color: #6b7280;
+        border: 1px solid rgba(107, 114, 128, 0.3);
+      }
+      .sbadge-cancelled {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+      }
 
-    /* ─── Status timeline ─────────────────────────── */
-    .status-timeline { position: relative; padding-left: 28px; }
-    .status-timeline::before {
-      content: ''; position: absolute; left: 9px; top: 8px; bottom: 8px;
-      width: 2px; background: var(--border);
-    }
-    .timeline-item {
-      position: relative; padding: 8px 0 8px 12px; margin-bottom: 2px;
-    }
-    .timeline-dot {
-      position: absolute; left: -22px; top: 13px;
-      width: 12px; height: 12px; border-radius: 50%;
-      border: 2px solid var(--bg); box-sizing: border-box;
-    }
-    .timeline-dot-new        { background: #3b82f6; }
-    .timeline-dot-reviewing  { background: #f59e0b; }
-    .timeline-dot-confirmed  { background: #10b981; }
-    .timeline-dot-in_progress{ background: #8b5cf6; }
-    .timeline-dot-completed  { background: #6b7280; }
-    .timeline-dot-cancelled  { background: #ef4444; }
-    .timeline-dot-default    { background: var(--gold); }
-    .timeline-ts { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 2px; }
-    .timeline-change {
-      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-    }
-    .timeline-arrow { color: var(--text-dim); font-size: 0.85rem; }
-    .timeline-admin { font-size: 0.72rem; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
-  </style>
-</head>
-<body>
-<div class="admin-layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-text">Nevesty Models</div>
-      <div class="sidebar-logo-sub">Панель управления</div>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Главная</div>
-      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
-      <div class="nav-section-label">Бизнес</div>
-      <a href="/admin/orders.html" class="active"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
-      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
-      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
-      <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
-      <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
-      <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
-      <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
-      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
-      <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
-      <div class="nav-section-label">AI</div>
-      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
-      <div class="nav-section-label">Настройки</div>
-      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
-      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
-      <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
-      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-user">
-        <div class="sidebar-avatar sidebar-user-letter">A</div>
-        <div class="sidebar-user-info">
-          <strong class="sidebar-user-name">—</strong>
-          <span class="sidebar-user-role">—</span>
+      /* ─── Status timeline ─────────────────────────── */
+      .status-timeline {
+        position: relative;
+        padding-left: 28px;
+      }
+      .status-timeline::before {
+        content: '';
+        position: absolute;
+        left: 9px;
+        top: 8px;
+        bottom: 8px;
+        width: 2px;
+        background: var(--border);
+      }
+      .timeline-item {
+        position: relative;
+        padding: 8px 0 8px 12px;
+        margin-bottom: 2px;
+      }
+      .timeline-dot {
+        position: absolute;
+        left: -22px;
+        top: 13px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 2px solid var(--bg);
+        box-sizing: border-box;
+      }
+      .timeline-dot-new {
+        background: #3b82f6;
+      }
+      .timeline-dot-reviewing {
+        background: #f59e0b;
+      }
+      .timeline-dot-confirmed {
+        background: #10b981;
+      }
+      .timeline-dot-in_progress {
+        background: #8b5cf6;
+      }
+      .timeline-dot-completed {
+        background: #6b7280;
+      }
+      .timeline-dot-cancelled {
+        background: #ef4444;
+      }
+      .timeline-dot-default {
+        background: var(--gold);
+      }
+      .timeline-ts {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+        margin-bottom: 2px;
+      }
+      .timeline-change {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .timeline-arrow {
+        color: var(--text-dim);
+        font-size: 0.85rem;
+      }
+      .timeline-admin {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-left: auto;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-text">Nevesty Models</div>
+          <div class="sidebar-logo-sub">Панель управления</div>
         </div>
-      </div>
-      <button class="btn-logout" data-action="logout">Выйти</button>
-    </div>
-  </aside>
-
-  <div class="main-content">
-    <header class="topbar">
-      <div class="topbar-title" id="pageTitle">Заявки</div>
-      <div class="topbar-right">
-        <button class="topbar-btn" id="backToListBtn" style="display:none" onclick="closeDetail()">← Все заявки</button>
-      </div>
-    </header>
-
-    <!-- ══════════════════ LIST VIEW ══════════════════ -->
-    <div id="listView" class="page-content">
-      <div class="section-card">
-
-        <!-- Quick filter chips -->
-        <div class="quick-filters" id="quickFiltersBar">
-          <button class="qf-chip qf-active" onclick="quickFilter('all')" data-qf="all">Все</button>
-          <button class="qf-chip" onclick="quickFilter('today')" data-qf="today">Сегодня 📅</button>
-          <button class="qf-chip" onclick="quickFilter('unassigned')" data-qf="unassigned">Без менеджера 🔴</button>
-          <button class="qf-chip" onclick="quickFilter('paid')" data-qf="paid">Оплачено 💰</button>
-          <button class="qf-chip" onclick="quickFilter('high_budget')" data-qf="high_budget">Крупные 💎</button>
-          <button class="qf-chip" onclick="quickFilter('starred')" data-qf="starred">⭐ Отмеченные</button>
+        <nav class="sidebar-nav">
+          <div class="nav-section-label">Главная</div>
+          <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+          <div class="nav-section-label">Бизнес</div>
+          <a href="/admin/orders.html" class="active"
+            ><span class="nav-icon">📋</span> Заявки
+            <span class="nav-badge" id="newOrdersBadge" style="display: none">0</span></a
+          >
+          <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+          <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+          <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+          <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+          <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+          <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
+          <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+          <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+          <div class="nav-section-label">AI</div>
+          <a href="/admin/social.html"><span class="nav-icon">📱</span> Соцсети</a>
+          <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+          <div class="nav-section-label">Настройки</div>
+          <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+          <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+          <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
+          <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <div class="sidebar-avatar sidebar-user-letter">A</div>
+            <div class="sidebar-user-info">
+              <strong class="sidebar-user-name">—</strong>
+              <span class="sidebar-user-role">—</span>
+            </div>
+          </div>
+          <button class="btn-logout" data-action="logout">Выйти</button>
         </div>
+      </aside>
 
-        <!-- Status filter buttons row -->
-        <div class="status-filter-bar" id="statusFilterBar">
-          <button class="sfilter-btn active-all" data-status="" onclick="setStatusFilter('')">Все</button>
-          <button class="sfilter-btn" data-status="new" onclick="setStatusFilter('new')">🆕 Новые</button>
-          <button class="sfilter-btn" data-status="reviewing" onclick="setStatusFilter('reviewing')">🔍 На рассмотрении</button>
-          <button class="sfilter-btn" data-status="confirmed" onclick="setStatusFilter('confirmed')">✅ Подтверждённые</button>
-          <button class="sfilter-btn" data-status="in_progress" onclick="setStatusFilter('in_progress')">▶️ В работе</button>
-          <button class="sfilter-btn" data-status="completed" onclick="setStatusFilter('completed')">🏁 Завершённые</button>
-          <button class="sfilter-btn" data-status="cancelled" onclick="setStatusFilter('cancelled')">❌ Отменённые</button>
-        </div>
+      <div class="main-content">
+        <header class="topbar">
+          <div class="topbar-title" id="pageTitle">Заявки</div>
+          <div class="topbar-right">
+            <button class="topbar-btn" id="backToListBtn" style="display: none" onclick="closeDetail()">
+              ← Все заявки
+            </button>
+          </div>
+        </header>
 
-        <!-- Search + export row -->
-        <div class="filters-bar">
-          <input class="filter-input" type="text" id="searchInput" placeholder="🔍 Поиск: ім'я, телефон, №заявки..." />
-          <select class="filter-select" id="statusFilter" style="display:none">
-            <option value="">Все статусы</option>
-            <option value="new">Новые</option>
-            <option value="reviewing">На рассмотрении</option>
-            <option value="confirmed">Подтверждённые</option>
-            <option value="in_progress">В процессе</option>
-            <option value="completed">Завершённые</option>
-            <option value="cancelled">Отменённые</option>
-          </select>
-          <select class="filter-select" id="eventTypeFilter" onchange="loadOrders(1)" style="min-width:150px">
-            <option value="">Все типы</option>
-            <option value="fashion_show">Показ мод</option>
-            <option value="photo_shoot">Фотосессия</option>
-            <option value="event">Корпоратив</option>
-            <option value="commercial">Коммерческая съёмка</option>
-            <option value="runway">Подиум</option>
-            <option value="other">Другое</option>
-          </select>
-          <select class="filter-select" id="modelFilter" onchange="loadOrders(1)" style="min-width:160px">
-            <option value="">Все модели</option>
-          </select>
-          <button onclick="setDatePreset('today')" class="btn btn-sm btn-ghost">Сьогодні</button>
-          <button onclick="setDatePreset('week')" class="btn btn-sm btn-ghost">Тиждень</button>
-          <button onclick="setDatePreset('month')" class="btn btn-sm btn-ghost">Місяць</button>
-          <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">с</label>
-          <input class="filter-input" type="date" id="filterFrom" style="width:130px" onchange="loadOrders(1)" />
-          <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">по</label>
-          <input class="filter-input" type="date" id="filterTo" style="width:130px" onchange="loadOrders(1)" />
-          <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
-          <button class="btn btn-sm btn-ghost" onclick="clearFilters()" title="Сбросить фильтры">✕ Сброс</button>
-          <span id="refresh-indicator" class="hidden text-xs text-green-500 animate-pulse" style="display:none;font-size:0.7rem;color:var(--success)">↻ Обновление...</span>
-          <button class="btn btn-sm btn-ghost" onclick="exportCSVCurrentFilters()" title="Экспорт с текущими фильтрами в CSV" style="border-color:var(--gold);color:var(--gold)">📊 Экспорт CSV</button>
-          <button class="btn-export" onclick="toggleExportPanel()" title="Расширенный экспорт">📥 CSV ▾</button>
-        </div>
+        <!-- ══════════════════ LIST VIEW ══════════════════ -->
+        <div id="listView" class="page-content">
+          <div class="section-card">
+            <!-- Quick filter chips -->
+            <div class="quick-filters" id="quickFiltersBar">
+              <button class="qf-chip qf-active" onclick="quickFilter('all')" data-qf="all">Все</button>
+              <button class="qf-chip" onclick="quickFilter('today')" data-qf="today">Сегодня 📅</button>
+              <button class="qf-chip" onclick="quickFilter('unassigned')" data-qf="unassigned">Без менеджера 🔴</button>
+              <button class="qf-chip" onclick="quickFilter('paid')" data-qf="paid">Оплачено 💰</button>
+              <button class="qf-chip" onclick="quickFilter('high_budget')" data-qf="high_budget">Крупные 💎</button>
+              <button class="qf-chip" onclick="quickFilter('starred')" data-qf="starred">⭐ Отмеченные</button>
+            </div>
 
-        <!-- Export panel (hidden by default) -->
-        <div id="exportPanel" style="display:none;padding:12px 24px;background:rgba(201,169,110,0.06);border-bottom:1px solid rgba(201,169,110,0.2);">
-          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-            <span style="font-size:0.75rem;color:var(--gold);font-weight:600;letter-spacing:1px;text-transform:uppercase">📥 Экспорт CSV</span>
-            <div style="display:flex;align-items:center;gap:6px">
-              <label style="font-size:0.72rem;color:var(--text-muted)">Статус:</label>
-              <select id="exportStatus" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:4px 8px;outline:none">
+            <!-- Status filter buttons row -->
+            <div class="status-filter-bar" id="statusFilterBar">
+              <button class="sfilter-btn active-all" data-status="" onclick="setStatusFilter('')">Все</button>
+              <button class="sfilter-btn" data-status="new" onclick="setStatusFilter('new')">🆕 Новые</button>
+              <button class="sfilter-btn" data-status="reviewing" onclick="setStatusFilter('reviewing')">
+                🔍 На рассмотрении
+              </button>
+              <button class="sfilter-btn" data-status="confirmed" onclick="setStatusFilter('confirmed')">
+                ✅ Подтверждённые
+              </button>
+              <button class="sfilter-btn" data-status="in_progress" onclick="setStatusFilter('in_progress')">
+                ▶️ В работе
+              </button>
+              <button class="sfilter-btn" data-status="completed" onclick="setStatusFilter('completed')">
+                🏁 Завершённые
+              </button>
+              <button class="sfilter-btn" data-status="cancelled" onclick="setStatusFilter('cancelled')">
+                ❌ Отменённые
+              </button>
+            </div>
+
+            <!-- Search + export row -->
+            <div class="filters-bar">
+              <input
+                class="filter-input"
+                type="text"
+                id="searchInput"
+                placeholder="🔍 Поиск: ім'я, телефон, №заявки..."
+              />
+              <select class="filter-select" id="statusFilter" style="display: none">
                 <option value="">Все статусы</option>
                 <option value="new">Новые</option>
                 <option value="reviewing">На рассмотрении</option>
                 <option value="confirmed">Подтверждённые</option>
                 <option value="in_progress">В процессе</option>
-                <option value="completed">Только завершённые</option>
+                <option value="completed">Завершённые</option>
                 <option value="cancelled">Отменённые</option>
               </select>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px">
-              <label style="font-size:0.72rem;color:var(--text-muted)">С:</label>
-              <input type="date" id="exportFrom" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:3px 6px;outline:none" />
-            </div>
-            <div style="display:flex;align-items:center;gap:6px">
-              <label style="font-size:0.72rem;color:var(--text-muted)">По:</label>
-              <input type="date" id="exportTo" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:3px 6px;outline:none" />
-            </div>
-            <button class="btn btn-sm btn-ghost" onclick="exportCSVWithFilters()" style="border-color:var(--gold);color:var(--gold)">⬇ Скачать CSV</button>
-            <button class="btn btn-sm btn-ghost" onclick="exportCSVCurrentFilters()" title="Экспорт с текущими фильтрами" style="border-color:var(--border);color:var(--text-muted)">⬇ Текущие фильтры</button>
-            <button class="btn btn-sm btn-ghost" onclick="toggleExportPanel()" style="margin-left:auto">✕</button>
-          </div>
-        </div>
-
-        <!-- Bulk action bar (hidden until rows are checked) -->
-        <div class="bulk-bar" id="bulkBar">
-          <span class="bulk-count" id="bulkCount">0 выбрано</span>
-          <button class="btn btn-sm btn-ghost" onclick="bulkAction('confirmed')">✅ Подтвердить</button>
-          <button class="btn btn-sm btn-ghost" onclick="bulkAction('in_progress')">▶️ В процессе</button>
-          <button class="btn btn-sm btn-ghost" onclick="bulkAction('completed')">🏁 Завершить</button>
-          <button class="btn btn-sm btn-ghost" onclick="bulkAction('cancelled')">❌ Отменить</button>
-          <button class="btn btn-sm btn-danger" onclick="bulkAction('delete')">🗑 Удалить</button>
-          <span style="display:flex;align-items:center;gap:6px;margin-left:8px">
-            <select id="bulkStatusSelect" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:4px 8px;outline:none;border-radius:3px">
-              <option value="">— статус —</option>
-              <option value="new">Новая</option>
-              <option value="reviewing">На рассмотрении</option>
-              <option value="confirmed">Подтверждена</option>
-              <option value="in_progress">В процессе</option>
-              <option value="completed">Завершена</option>
-              <option value="cancelled">Отменена</option>
-            </select>
-            <button class="btn btn-sm btn-ghost" onclick="bulkStatusFromSelect()" style="border-color:var(--gold);color:var(--gold)">Применить к выбранным</button>
-          </span>
-          <button class="btn btn-sm btn-ghost" onclick="clearSelection()" style="margin-left:auto">✕ Снять выбор</button>
-        </div>
-
-        <!-- Orders count summary -->
-        <div id="orderCountSummary" style="padding:6px 24px;font-size:0.75rem;color:var(--text-muted);border-bottom:1px solid var(--border);display:none"></div>
-
-        <div class="section-card-body">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th class="cb-th"><input type="checkbox" id="checkAll" title="Выбрать все" /></th>
-                <th>№ заявки</th>
-                <th>Клиент</th>
-                <th>Мероприятие</th>
-                <th>Модель</th>
-                <th>Дата</th>
-                <th>Статус</th>
-                <th>Оплата</th>
-                <th>Изменить статус</th>
-                <th>Создана</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="ordersBody">
-              <tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка...</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Pagination -->
-        <div style="display:flex;align-items:center;border-top:1px solid var(--border)">
-          <span class="pagination-info" id="paginationInfo"></span>
-          <div class="pagination" id="pagination" style="flex:1"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══════════════════ DETAIL VIEW ══════════════════ -->
-    <div id="detailView" class="page-content" style="display:none">
-      <div class="order-detail-grid">
-
-        <!-- Left: order info + chat -->
-        <div>
-          <div class="section-card" style="margin-bottom:24px">
-            <div class="section-card-header">
-              <div class="section-card-title" id="detailTitle">Заявка</div>
-              <div style="display:flex;gap:8px">
-                <button class="btn btn-sm btn-ghost" onclick="closeDetail()">← Назад</button>
-              </div>
-            </div>
-            <div class="section-card-body padded" id="detailInfo"></div>
-          </div>
-
-          <!-- Chat -->
-          <div class="section-card">
-            <div class="section-card-header">
-              <div class="section-card-title">💬 Переписка с клиентом</div>
-              <div style="display:flex;align-items:center;gap:16px">
-                <span class="chat-live-indicator" id="chatLiveIndicator" style="display:none">
-                  <span class="chat-live-dot"></span> Live
-                </span>
-                <span style="font-size:0.75rem;color:var(--text-dim)" id="chatTgInfo"></span>
-              </div>
-            </div>
-            <div class="chat-messages" id="chatMessages"></div>
-            <div class="chat-input-row">
-              <input class="chat-input" id="chatInput" placeholder="Напишите сообщение клиенту..." />
-              <button class="btn btn-md btn-gold" onclick="sendMessage()">Отправить</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: status management -->
-        <div>
-          <div class="section-card" style="margin-bottom:24px">
-            <div class="section-card-header"><div class="section-card-title">🔧 Управление</div></div>
-            <div class="section-card-body padded">
-
-              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Статус заявки</div>
-              <select class="status-select" id="statusSelect"></select>
-
-              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:16px">Ответственный менеджер</div>
-              <select class="manager-select" id="managerSelect">
-                <option value="">— не назначен —</option>
+              <select class="filter-select" id="eventTypeFilter" onchange="loadOrders(1)" style="min-width: 150px">
+                <option value="">Все типы</option>
+                <option value="fashion_show">Показ мод</option>
+                <option value="photo_shoot">Фотосессия</option>
+                <option value="event">Корпоратив</option>
+                <option value="commercial">Коммерческая съёмка</option>
+                <option value="runway">Подиум</option>
+                <option value="other">Другое</option>
               </select>
+              <select class="filter-select" id="modelFilter" onchange="loadOrders(1)" style="min-width: 160px">
+                <option value="">Все модели</option>
+              </select>
+              <button onclick="setDatePreset('today')" class="btn btn-sm btn-ghost">Сьогодні</button>
+              <button onclick="setDatePreset('week')" class="btn btn-sm btn-ghost">Тиждень</button>
+              <button onclick="setDatePreset('month')" class="btn btn-sm btn-ghost">Місяць</button>
+              <label style="font-size: 0.72rem; color: var(--text-muted); white-space: nowrap">с</label>
+              <input class="filter-input" type="date" id="filterFrom" style="width: 130px" onchange="loadOrders(1)" />
+              <label style="font-size: 0.72rem; color: var(--text-muted); white-space: nowrap">по</label>
+              <input class="filter-input" type="date" id="filterTo" style="width: 130px" onchange="loadOrders(1)" />
+              <button class="btn btn-sm btn-ghost" onclick="loadOrders()">↺ Обновить</button>
+              <button class="btn btn-sm btn-ghost" onclick="clearFilters()" title="Сбросить фильтры">✕ Сброс</button>
+              <span
+                id="refresh-indicator"
+                class="hidden text-xs text-green-500 animate-pulse"
+                style="display: none; font-size: 0.7rem; color: var(--success)"
+                >↻ Обновление...</span
+              >
+              <button
+                class="btn btn-sm btn-ghost"
+                onclick="exportCSVCurrentFilters()"
+                title="Экспорт с текущими фильтрами в CSV"
+                style="border-color: var(--gold); color: var(--gold)"
+              >
+                📊 Экспорт CSV
+              </button>
+              <button class="btn-export" onclick="toggleExportPanel()" title="Расширенный экспорт">📥 CSV ▾</button>
+            </div>
 
-              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:8px">Заметки менеджера</div>
-              <textarea class="notes-area" id="adminNotes" placeholder="Внутренние заметки (клиент не видит)"></textarea>
+            <!-- Export panel (hidden by default) -->
+            <div
+              id="exportPanel"
+              style="
+                display: none;
+                padding: 12px 24px;
+                background: rgba(201, 169, 110, 0.06);
+                border-bottom: 1px solid rgba(201, 169, 110, 0.2);
+              "
+            >
+              <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
+                <span
+                  style="
+                    font-size: 0.75rem;
+                    color: var(--gold);
+                    font-weight: 600;
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                  "
+                  >📥 Экспорт CSV</span
+                >
+                <div style="display: flex; align-items: center; gap: 6px">
+                  <label style="font-size: 0.72rem; color: var(--text-muted)">Статус:</label>
+                  <select
+                    id="exportStatus"
+                    style="
+                      background: var(--bg2);
+                      border: 1px solid var(--border);
+                      color: var(--text);
+                      font-size: 0.72rem;
+                      padding: 4px 8px;
+                      outline: none;
+                    "
+                  >
+                    <option value="">Все статусы</option>
+                    <option value="new">Новые</option>
+                    <option value="reviewing">На рассмотрении</option>
+                    <option value="confirmed">Подтверждённые</option>
+                    <option value="in_progress">В процессе</option>
+                    <option value="completed">Только завершённые</option>
+                    <option value="cancelled">Отменённые</option>
+                  </select>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px">
+                  <label style="font-size: 0.72rem; color: var(--text-muted)">С:</label>
+                  <input
+                    type="date"
+                    id="exportFrom"
+                    style="
+                      background: var(--bg2);
+                      border: 1px solid var(--border);
+                      color: var(--text);
+                      font-size: 0.72rem;
+                      padding: 3px 6px;
+                      outline: none;
+                    "
+                  />
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px">
+                  <label style="font-size: 0.72rem; color: var(--text-muted)">По:</label>
+                  <input
+                    type="date"
+                    id="exportTo"
+                    style="
+                      background: var(--bg2);
+                      border: 1px solid var(--border);
+                      color: var(--text);
+                      font-size: 0.72rem;
+                      padding: 3px 6px;
+                      outline: none;
+                    "
+                  />
+                </div>
+                <button
+                  class="btn btn-sm btn-ghost"
+                  onclick="exportCSVWithFilters()"
+                  style="border-color: var(--gold); color: var(--gold)"
+                >
+                  ⬇ Скачать CSV
+                </button>
+                <button
+                  class="btn btn-sm btn-ghost"
+                  onclick="exportCSVCurrentFilters()"
+                  title="Экспорт с текущими фильтрами"
+                  style="border-color: var(--border); color: var(--text-muted)"
+                >
+                  ⬇ Текущие фильтры
+                </button>
+                <button class="btn btn-sm btn-ghost" onclick="toggleExportPanel()" style="margin-left: auto">✕</button>
+              </div>
+            </div>
 
-              <button class="btn btn-md btn-gold" style="width:100%" onclick="saveOrder()">💾 Сохранить</button>
+            <!-- Bulk action bar (hidden until rows are checked) -->
+            <div class="bulk-bar" id="bulkBar">
+              <span class="bulk-count" id="bulkCount">0 выбрано</span>
+              <button class="btn btn-sm btn-ghost" onclick="bulkAction('confirmed')">✅ Подтвердить</button>
+              <button class="btn btn-sm btn-ghost" onclick="bulkAction('in_progress')">▶️ В процессе</button>
+              <button class="btn btn-sm btn-ghost" onclick="bulkAction('completed')">🏁 Завершить</button>
+              <button class="btn btn-sm btn-ghost" onclick="bulkAction('cancelled')">❌ Отменить</button>
+              <button class="btn btn-sm btn-danger" onclick="bulkAction('delete')">🗑 Удалить</button>
+              <span style="display: flex; align-items: center; gap: 6px; margin-left: 8px">
+                <select
+                  id="bulkStatusSelect"
+                  style="
+                    background: var(--bg2);
+                    border: 1px solid var(--border);
+                    color: var(--text);
+                    font-size: 0.72rem;
+                    padding: 4px 8px;
+                    outline: none;
+                    border-radius: 3px;
+                  "
+                >
+                  <option value="">— статус —</option>
+                  <option value="new">Новая</option>
+                  <option value="reviewing">На рассмотрении</option>
+                  <option value="confirmed">Подтверждена</option>
+                  <option value="in_progress">В процессе</option>
+                  <option value="completed">Завершена</option>
+                  <option value="cancelled">Отменена</option>
+                </select>
+                <button
+                  class="btn btn-sm btn-ghost"
+                  onclick="bulkStatusFromSelect()"
+                  style="border-color: var(--gold); color: var(--gold)"
+                >
+                  Применить к выбранным
+                </button>
+              </span>
+              <button class="btn btn-sm btn-ghost" onclick="clearSelection()" style="margin-left: auto">
+                ✕ Снять выбор
+              </button>
+            </div>
 
-              <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:16px">Внутренняя заметка</div>
-              <textarea class="notes-area" id="internalNote" rows="3" placeholder="Быстрая заметка по заявке (не видна клиенту)..."></textarea>
-              <button class="btn btn-sm btn-ghost" style="width:100%;margin-top:6px" onclick="saveInternalNote()">Сохранить заметку</button>
+            <!-- Orders count summary -->
+            <div
+              id="orderCountSummary"
+              style="
+                padding: 6px 24px;
+                font-size: 0.75rem;
+                color: var(--text-muted);
+                border-bottom: 1px solid var(--border);
+                display: none;
+              "
+            ></div>
 
-              <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn btn-sm btn-ghost" onclick="quickStatus('confirmed')">✅ Подтвердить</button>
-                <button class="btn btn-sm btn-ghost" onclick="quickStatus('in_progress')">▶️ В процессе</button>
-                <button class="btn btn-sm btn-ghost" onclick="quickStatus('completed')">🏁 Завершить</button>
-                <button class="btn btn-sm btn-danger" onclick="quickStatus('cancelled')">❌ Отменить</button>
+            <div class="section-card-body">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th class="cb-th"><input type="checkbox" id="checkAll" title="Выбрать все" /></th>
+                    <th>№ заявки</th>
+                    <th>Клиент</th>
+                    <th>Мероприятие</th>
+                    <th>Модель</th>
+                    <th>Дата</th>
+                    <th>Статус</th>
+                    <th>Оплата</th>
+                    <th>Изменить статус</th>
+                    <th>Создана</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="ordersBody">
+                  <tr>
+                    <td colspan="11" style="text-align: center; padding: 40px; color: var(--text-dim)">Загрузка...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Pagination -->
+            <div style="display: flex; align-items: center; border-top: 1px solid var(--border)">
+              <span class="pagination-info" id="paginationInfo"></span>
+              <div class="pagination" id="pagination" style="flex: 1"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════════════════ DETAIL VIEW ══════════════════ -->
+        <div id="detailView" class="page-content" style="display: none">
+          <div class="order-detail-grid">
+            <!-- Left: order info + chat -->
+            <div>
+              <div class="section-card" style="margin-bottom: 24px">
+                <div class="section-card-header">
+                  <div class="section-card-title" id="detailTitle">Заявка</div>
+                  <div style="display: flex; gap: 8px">
+                    <button class="btn btn-sm btn-ghost" onclick="closeDetail()">← Назад</button>
+                  </div>
+                </div>
+                <div class="section-card-body padded" id="detailInfo"></div>
               </div>
 
-              <!-- Payment section -->
-              <div id="paymentSection" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-                <div style="font-size:0.7rem;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Оплата</div>
-                <div id="paidAtBadge" style="display:none;margin-bottom:8px"></div>
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  <input type="number" id="paymentAmount" placeholder="Сумма (руб)" min="1" style="width:140px" class="admin-input" />
-                  <button class="btn btn-sm btn-gold" onclick="createPaymentLink()">💳 Создать ссылку</button>
-                  <span id="paymentLinkResult" style="font-size:0.8rem;color:var(--success)"></span>
+              <!-- Chat -->
+              <div class="section-card">
+                <div class="section-card-header">
+                  <div class="section-card-title">💬 Переписка с клиентом</div>
+                  <div style="display: flex; align-items: center; gap: 16px">
+                    <span class="chat-live-indicator" id="chatLiveIndicator" style="display: none">
+                      <span class="chat-live-dot"></span> Live
+                    </span>
+                    <span style="font-size: 0.75rem; color: var(--text-dim)" id="chatTgInfo"></span>
+                  </div>
                 </div>
-                <div id="existingPaymentLink" style="margin-top:8px;font-size:0.82rem;display:none">
-                  💳 Ссылка: <a id="paymentLinkAnchor" href="#" target="_blank" style="color:var(--gold)">открыть</a>
-                  <span id="paymentStatus" style="margin-left:8px;color:var(--text-muted)"></span>
-                </div>
-                <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
-                  <button class="btn btn-sm btn-ghost" onclick="sendInvoice()" id="sendInvoiceBtn" style="border-color:var(--gold);color:var(--gold)">📄 Создать счёт</button>
-                  <span id="invoiceSentInfo" style="font-size:0.78rem;color:var(--text-muted);align-self:center"></span>
+                <div class="chat-messages" id="chatMessages"></div>
+                <div class="chat-input-row">
+                  <input class="chat-input" id="chatInput" placeholder="Напишите сообщение клиенту..." />
+                  <button class="btn btn-md btn-gold" onclick="sendMessage()">Отправить</button>
                 </div>
               </div>
             </div>
-          </div>
 
-          <!-- Quick contact actions -->
-          <div class="section-card" id="contactActionsCard" style="display:none;margin-bottom:24px">
-            <div class="section-card-header"><div class="section-card-title">📞 Быстрые действия</div></div>
-            <div class="section-card-body padded">
-              <div style="display:flex;gap:8px;flex-wrap:wrap" id="contactActionBtns"></div>
-            </div>
-          </div>
+            <!-- Right: status management -->
+            <div>
+              <div class="section-card" style="margin-bottom: 24px">
+                <div class="section-card-header"><div class="section-card-title">🔧 Управление</div></div>
+                <div class="section-card-body padded">
+                  <div
+                    style="
+                      font-size: 0.7rem;
+                      letter-spacing: 1px;
+                      text-transform: uppercase;
+                      color: var(--text-muted);
+                      margin-bottom: 8px;
+                    "
+                  >
+                    Статус заявки
+                  </div>
+                  <select class="status-select" id="statusSelect"></select>
 
-          <div class="section-card" id="modelCard" style="display:none">
-            <div class="section-card-header"><div class="section-card-title">💃 Модель</div></div>
-            <div class="section-card-body padded" id="modelInfo"></div>
-          </div>
+                  <div
+                    style="
+                      font-size: 0.7rem;
+                      letter-spacing: 1px;
+                      text-transform: uppercase;
+                      color: var(--text-muted);
+                      margin-bottom: 8px;
+                      margin-top: 16px;
+                    "
+                  >
+                    Ответственный менеджер
+                  </div>
+                  <select class="manager-select" id="managerSelect">
+                    <option value="">— не назначен —</option>
+                  </select>
 
-          <!-- Notes history -->
-          <div class="section-card" id="notesHistoryCard" style="display:none;margin-top:24px">
-            <div class="section-card-header"><div class="section-card-title">📝 История заметок</div></div>
-            <div class="section-card-body padded" id="notesHistoryBody" style="font-size:0.82rem"></div>
-          </div>
+                  <div
+                    style="
+                      font-size: 0.7rem;
+                      letter-spacing: 1px;
+                      text-transform: uppercase;
+                      color: var(--text-muted);
+                      margin-bottom: 8px;
+                      margin-top: 8px;
+                    "
+                  >
+                    Заметки менеджера
+                  </div>
+                  <textarea
+                    class="notes-area"
+                    id="adminNotes"
+                    placeholder="Внутренние заметки (клиент не видит)"
+                  ></textarea>
 
-          <!-- Audit log for this order -->
-          <div class="section-card" id="auditCard" style="display:none;margin-top:24px">
-            <div class="section-card-header"><div class="section-card-title">📋 История изменений</div></div>
-            <div class="section-card-body padded" id="auditLog" style="font-size:0.8rem;color:var(--text-muted)"></div>
-          </div>
+                  <button class="btn btn-md btn-gold" style="width: 100%" onclick="saveOrder()">💾 Сохранить</button>
 
-          <!-- Status history timeline -->
-          <div class="section-card" id="statusHistoryCard" style="display:none;margin-top:24px">
-            <div class="section-card-header">
-              <div class="section-card-title">🕐 Хронология статусов</div>
-            </div>
-            <div class="section-card-body padded" id="statusHistoryBody" style="font-size:0.82rem">
-              <div class="status-timeline" id="statusTimeline"></div>
+                  <div
+                    style="
+                      font-size: 0.7rem;
+                      letter-spacing: 1px;
+                      text-transform: uppercase;
+                      color: var(--text-muted);
+                      margin-bottom: 8px;
+                      margin-top: 16px;
+                    "
+                  >
+                    Внутренняя заметка
+                  </div>
+                  <textarea
+                    class="notes-area"
+                    id="internalNote"
+                    rows="3"
+                    placeholder="Быстрая заметка по заявке (не видна клиенту)..."
+                  ></textarea>
+                  <button
+                    class="btn btn-sm btn-ghost"
+                    style="width: 100%; margin-top: 6px"
+                    onclick="saveInternalNote()"
+                  >
+                    Сохранить заметку
+                  </button>
+
+                  <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap">
+                    <button class="btn btn-sm btn-ghost" onclick="quickStatus('confirmed')">✅ Подтвердить</button>
+                    <button class="btn btn-sm btn-ghost" onclick="quickStatus('in_progress')">▶️ В процессе</button>
+                    <button class="btn btn-sm btn-ghost" onclick="quickStatus('completed')">🏁 Завершить</button>
+                    <button class="btn btn-sm btn-danger" onclick="quickStatus('cancelled')">❌ Отменить</button>
+                  </div>
+
+                  <!-- Payment section -->
+                  <div
+                    id="paymentSection"
+                    style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border)"
+                  >
+                    <div
+                      style="
+                        font-size: 0.7rem;
+                        letter-spacing: 1px;
+                        text-transform: uppercase;
+                        color: var(--text-muted);
+                        margin-bottom: 8px;
+                      "
+                    >
+                      Оплата
+                    </div>
+                    <div id="paidAtBadge" style="display: none; margin-bottom: 8px"></div>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+                      <input
+                        type="number"
+                        id="paymentAmount"
+                        placeholder="Сумма (руб)"
+                        min="1"
+                        style="width: 140px"
+                        class="admin-input"
+                      />
+                      <button class="btn btn-sm btn-gold" onclick="createPaymentLink()">💳 Создать ссылку</button>
+                      <span id="paymentLinkResult" style="font-size: 0.8rem; color: var(--success)"></span>
+                    </div>
+                    <div id="existingPaymentLink" style="margin-top: 8px; font-size: 0.82rem; display: none">
+                      💳 Ссылка:
+                      <a id="paymentLinkAnchor" href="#" target="_blank" style="color: var(--gold)">открыть</a>
+                      <span id="paymentStatus" style="margin-left: 8px; color: var(--text-muted)"></span>
+                    </div>
+                    <div style="margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap">
+                      <button
+                        class="btn btn-sm btn-ghost"
+                        onclick="sendInvoice()"
+                        id="sendInvoiceBtn"
+                        style="border-color: var(--gold); color: var(--gold)"
+                      >
+                        📄 Создать счёт
+                      </button>
+                      <span
+                        id="invoiceSentInfo"
+                        style="font-size: 0.78rem; color: var(--text-muted); align-self: center"
+                      ></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Quick contact actions -->
+              <div class="section-card" id="contactActionsCard" style="display: none; margin-bottom: 24px">
+                <div class="section-card-header"><div class="section-card-title">📞 Быстрые действия</div></div>
+                <div class="section-card-body padded">
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap" id="contactActionBtns"></div>
+                </div>
+              </div>
+
+              <div class="section-card" id="modelCard" style="display: none">
+                <div class="section-card-header"><div class="section-card-title">💃 Модель</div></div>
+                <div class="section-card-body padded" id="modelInfo"></div>
+              </div>
+
+              <!-- Notes history -->
+              <div class="section-card" id="notesHistoryCard" style="display: none; margin-top: 24px">
+                <div class="section-card-header"><div class="section-card-title">📝 История заметок</div></div>
+                <div class="section-card-body padded" id="notesHistoryBody" style="font-size: 0.82rem"></div>
+              </div>
+
+              <!-- Audit log for this order -->
+              <div class="section-card" id="auditCard" style="display: none; margin-top: 24px">
+                <div class="section-card-header"><div class="section-card-title">📋 История изменений</div></div>
+                <div
+                  class="section-card-body padded"
+                  id="auditLog"
+                  style="font-size: 0.8rem; color: var(--text-muted)"
+                ></div>
+              </div>
+
+              <!-- Status history timeline -->
+              <div class="section-card" id="statusHistoryCard" style="display: none; margin-top: 24px">
+                <div class="section-card-header">
+                  <div class="section-card-title">🕐 Хронология статусов</div>
+                </div>
+                <div class="section-card-body padded" id="statusHistoryBody" style="font-size: 0.82rem">
+                  <div class="status-timeline" id="statusTimeline"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
-  </div>
-</div>
 
-<!-- ══════════════════ ORDER DETAIL MODAL ══════════════════ -->
-<div id="order-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
-  <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-    <div class="p-6 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-      <div>
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white" id="modal-order-num">Заявка</h2>
-        <p class="text-sm text-gray-500" id="modal-order-date"></p>
+    <!-- ══════════════════ ORDER DETAIL MODAL ══════════════════ -->
+    <div id="order-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div class="p-6 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white" id="modal-order-num">Заявка</h2>
+            <p class="text-sm text-gray-500" id="modal-order-date"></p>
+          </div>
+          <button onclick="closeOrderModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+        </div>
+        <div class="p-6 space-y-6">
+          <!-- Status section -->
+          <div>
+            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Статус</label>
+            <div class="mt-2 flex gap-2 flex-wrap" id="modal-status-btns"></div>
+          </div>
+          <!-- Client info -->
+          <div>
+            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Клиент</label>
+            <div class="mt-2 grid grid-cols-2 gap-3 text-sm" id="modal-client-info"></div>
+          </div>
+          <!-- Order details -->
+          <div>
+            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Детали заявки</label>
+            <div class="mt-2 grid grid-cols-2 gap-3 text-sm" id="modal-order-details"></div>
+          </div>
+          <!-- Manager note -->
+          <div>
+            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Внутренняя заметка</label>
+            <textarea
+              id="modal-note"
+              rows="3"
+              placeholder="Заметка для команды (не видна клиенту)..."
+              class="mt-2 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white resize-none"
+            ></textarea>
+            <button
+              onclick="saveNote()"
+              class="mt-2 px-4 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-sm"
+            >
+              Сохранить заметку
+            </button>
+          </div>
+          <!-- Notes history -->
+          <div id="modal-notes-history" class="space-y-2"></div>
+          <!-- Messages thread -->
+          <div>
+            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Переписка с клиентом</label>
+            <div id="order-messages" style="max-height: 220px; overflow-y: auto; margin-top: 8px"></div>
+          </div>
+        </div>
+        <div class="p-6 border-t border-gray-100 dark:border-gray-700 flex gap-3">
+          <button
+            id="modal-tg-btn"
+            class="flex-1 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium hidden"
+          >
+            📬 Написать в Telegram
+          </button>
+          <button
+            onclick="closeOrderModal()"
+            class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700"
+          >
+            Закрыть
+          </button>
+        </div>
       </div>
-      <button onclick="closeOrderModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
     </div>
-    <div class="p-6 space-y-6">
-      <!-- Status section -->
-      <div>
-        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Статус</label>
-        <div class="mt-2 flex gap-2 flex-wrap" id="modal-status-btns"></div>
-      </div>
-      <!-- Client info -->
-      <div>
-        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Клиент</label>
-        <div class="mt-2 grid grid-cols-2 gap-3 text-sm" id="modal-client-info"></div>
-      </div>
-      <!-- Order details -->
-      <div>
-        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Детали заявки</label>
-        <div class="mt-2 grid grid-cols-2 gap-3 text-sm" id="modal-order-details"></div>
-      </div>
-      <!-- Manager note -->
-      <div>
-        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Внутренняя заметка</label>
-        <textarea id="modal-note" rows="3" placeholder="Заметка для команды (не видна клиенту)..."
-          class="mt-2 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white resize-none"></textarea>
-        <button onclick="saveNote()" class="mt-2 px-4 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-sm">Сохранить заметку</button>
-      </div>
-      <!-- Notes history -->
-      <div id="modal-notes-history" class="space-y-2"></div>
-      <!-- Messages thread -->
-      <div>
-        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Переписка с клиентом</label>
-        <div id="order-messages" style="max-height:220px;overflow-y:auto;margin-top:8px"></div>
-      </div>
-    </div>
-    <div class="p-6 border-t border-gray-100 dark:border-gray-700 flex gap-3">
-      <button id="modal-tg-btn" class="flex-1 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium hidden">
-        📬 Написать в Telegram
-      </button>
-      <button onclick="closeOrderModal()" class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Закрыть</button>
-    </div>
-  </div>
-</div>
 
-<!-- Keyboard shortcuts hint -->
-<div class="kb-hint" id="kbHint">
-  <kbd>N</kbd> поиск &nbsp; <kbd>R</kbd> обновить &nbsp; <kbd>?</kbd> справка
-</div>
+    <!-- Keyboard shortcuts hint -->
+    <div class="kb-hint" id="kbHint"><kbd>N</kbd> поиск &nbsp; <kbd>R</kbd> обновить &nbsp; <kbd>?</kbd> справка</div>
 
-<!-- Keyboard shortcuts modal -->
-<div class="kb-modal" id="kbModal" style="display:none" onclick="if(event.target===this)closeKbModal()">
-  <div class="kb-modal-box">
-    <h3>⌨️ Горячие клавиши</h3>
-    <div class="kb-row"><kbd>N</kbd> Фокус на поиск</div>
-    <div class="kb-row"><kbd>R</kbd> Обновить список заявок</div>
-    <div class="kb-row"><kbd>?</kbd> Показать эту справку</div>
-    <div class="kb-row"><kbd>Esc</kbd> Закрыть справку / модал</div>
-    <div style="margin-top:16px;text-align:right">
-      <button class="btn btn-sm btn-ghost" onclick="closeKbModal()">Закрыть</button>
+    <!-- Keyboard shortcuts modal -->
+    <div class="kb-modal" id="kbModal" style="display: none" onclick="if (event.target === this) closeKbModal();">
+      <div class="kb-modal-box">
+        <h3>⌨️ Горячие клавиши</h3>
+        <div class="kb-row"><kbd>N</kbd> Фокус на поиск</div>
+        <div class="kb-row"><kbd>R</kbd> Обновить список заявок</div>
+        <div class="kb-row"><kbd>?</kbd> Показать эту справку</div>
+        <div class="kb-row"><kbd>Esc</kbd> Закрыть справку / модал</div>
+        <div style="margin-top: 16px; text-align: right">
+          <button class="btn btn-sm btn-ghost" onclick="closeKbModal()">Закрыть</button>
+        </div>
+      </div>
     </div>
-  </div>
-</div>
 
-<div class="toast-container" id="toastContainer"></div>
-<script src="/js/admin.js"></script>
-<script>
-/* ═══════════════════════════════════════════════════════
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/admin.js"></script>
+    <script>
+      /* ═══════════════════════════════════════════════════════
    State
 ═══════════════════════════════════════════════════════ */
-let currentOrderId   = null;
-let currentPage      = 1;
-let totalPages       = 1;
-let totalOrders      = 0;
-const PAGE_LIMIT     = 25;
+      let currentOrderId = null;
+      let currentPage = 1;
+      let totalPages = 1;
+      let totalOrders = 0;
+      const PAGE_LIMIT = 25;
 
-let selectedIds      = new Set();
-let chatPollTimer    = null;
-let chatLastCount    = 0;
-let managersCache    = null;   // loaded once
+      let selectedIds = new Set();
+      let chatPollTimer = null;
+      let chatLastCount = 0;
+      let managersCache = null; // loaded once
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    LIST — load / render
 ═══════════════════════════════════════════════════════ */
-async function loadOrders(page) {
-  if (page !== undefined) currentPage = page;
-  const search     = document.getElementById('searchInput').value.trim();
-  const status     = document.getElementById('statusFilter').value;
-  const from       = document.getElementById('filterFrom').value;
-  const to         = document.getElementById('filterTo').value;
-  const model_id   = document.getElementById('modelFilter').value;
-  const event_type = document.getElementById('eventTypeFilter').value;
+      async function loadOrders(page) {
+        if (page !== undefined) currentPage = page;
+        const search = document.getElementById('searchInput').value.trim();
+        const status = document.getElementById('statusFilter').value;
+        const from = document.getElementById('filterFrom').value;
+        const to = document.getElementById('filterTo').value;
+        const model_id = document.getElementById('modelFilter').value;
+        const event_type = document.getElementById('eventTypeFilter').value;
 
-  const params = new URLSearchParams({ page: currentPage, limit: PAGE_LIMIT });
-  if (status)         params.set('status', status);
-  if (search)         params.set('search', search);
-  if (from)           params.set('date_from', from);
-  if (to)             params.set('date_to', to);
-  if (model_id)       params.set('model_id', model_id);
-  if (event_type)     params.set('event_type', event_type);
-  if (_qfUnassigned)  params.set('unassigned', '1');
-  if (_qfPaid)        params.set('paid', '1');
-  if (_qfHighBudget)  params.set('sort_budget', 'desc');
+        const params = new URLSearchParams({ page: currentPage, limit: PAGE_LIMIT });
+        if (status) params.set('status', status);
+        if (search) params.set('search', search);
+        if (from) params.set('date_from', from);
+        if (to) params.set('date_to', to);
+        if (model_id) params.set('model_id', model_id);
+        if (event_type) params.set('event_type', event_type);
+        if (_qfUnassigned) params.set('unassigned', '1');
+        if (_qfPaid) params.set('paid', '1');
+        if (_qfHighBudget) params.set('sort_budget', 'desc');
 
-  try {
-    const data = await _admin.apiFetch('/admin/orders?' + params);
-    const orders = data.orders || [];
-    totalPages   = data.pages  || 1;
-    totalOrders  = data.total  || 0;
+        try {
+          const data = await _admin.apiFetch('/admin/orders?' + params);
+          const orders = data.orders || [];
+          totalPages = data.pages || 1;
+          totalOrders = data.total || 0;
 
-    renderTable(orders);
-    renderPagination();
-    updateCountSummary(orders.length, totalOrders);
-    syncBulkBar();
-  } catch (e) {
-    _admin.toast('Ошибка загрузки: ' + e.message, 'error');
-  }
-}
+          renderTable(orders);
+          renderPagination();
+          updateCountSummary(orders.length, totalOrders);
+          syncBulkBar();
+        } catch (e) {
+          _admin.toast('Ошибка загрузки: ' + e.message, 'error');
+        }
+      }
 
-function updateCountSummary(shown, total) {
-  const el = document.getElementById('orderCountSummary');
-  if (!el) return;
-  const hasFilters = document.getElementById('searchInput').value.trim() ||
-    document.getElementById('statusFilter').value ||
-    document.getElementById('filterFrom').value ||
-    document.getElementById('filterTo').value ||
-    document.getElementById('modelFilter').value ||
-    document.getElementById('eventTypeFilter').value;
-  if (total === 0) {
-    el.textContent = 'Заявок не найдено';
-    el.style.display = 'block';
-  } else if (hasFilters) {
-    el.textContent = `Показано: ${shown} из ${total} заявок`;
-    el.style.display = 'block';
-  } else {
-    el.textContent = `Всего заявок: ${total}`;
-    el.style.display = 'block';
-  }
-}
+      function updateCountSummary(shown, total) {
+        const el = document.getElementById('orderCountSummary');
+        if (!el) return;
+        const hasFilters =
+          document.getElementById('searchInput').value.trim() ||
+          document.getElementById('statusFilter').value ||
+          document.getElementById('filterFrom').value ||
+          document.getElementById('filterTo').value ||
+          document.getElementById('modelFilter').value ||
+          document.getElementById('eventTypeFilter').value;
+        if (total === 0) {
+          el.textContent = 'Заявок не найдено';
+          el.style.display = 'block';
+        } else if (hasFilters) {
+          el.textContent = `Показано: ${shown} из ${total} заявок`;
+          el.style.display = 'block';
+        } else {
+          el.textContent = `Всего заявок: ${total}`;
+          el.style.display = 'block';
+        }
+      }
 
-/* ─── Inline status color map ────────────────────────── */
-const STATUS_COLORS_ORDERS = {
-  new:'#3b82f6', reviewing:'#f59e0b', confirmed:'#10b981',
-  in_progress:'#8b5cf6', completed:'#6b7280', cancelled:'#ef4444'
-};
+      /* ─── Inline status color map ────────────────────────── */
+      const STATUS_COLORS_ORDERS = {
+        new: '#3b82f6',
+        reviewing: '#f59e0b',
+        confirmed: '#10b981',
+        in_progress: '#8b5cf6',
+        completed: '#6b7280',
+        cancelled: '#ef4444',
+      };
 
-function colorBadge(status) {
-  const label = _admin.STATUS_LABELS[status] || status;
-  return `<span class="sbadge sbadge-${status}">${label}</span>`;
-}
+      function colorBadge(status) {
+        const label = _admin.STATUS_LABELS[status] || status;
+        return `<span class="sbadge sbadge-${status}">${label}</span>`;
+      }
 
-function paymentBadge(o) {
-  if (o.payment_status === 'paid') return '<span title="Оплачено" style="color:#10b981;font-size:1.1rem">💳✅</span>';
-  if (o.payment_status === 'pending') return '<span title="Ожидает оплаты" style="color:#f59e0b;font-size:1.1rem">💳⏳</span>';
-  return '<span style="color:var(--text-dim);font-size:0.75rem">—</span>';
-}
+      function paymentBadge(o) {
+        if (o.payment_status === 'paid')
+          return '<span title="Оплачено" style="color:#10b981;font-size:1.1rem">💳✅</span>';
+        if (o.payment_status === 'pending')
+          return '<span title="Ожидает оплаты" style="color:#f59e0b;font-size:1.1rem">💳⏳</span>';
+        return '<span style="color:var(--text-dim);font-size:0.75rem">—</span>';
+      }
 
-function renderTable(ordersIn) {
-  let orders = ordersIn;
-  const tbody = document.getElementById('ordersBody');
-  if (!orders.length) {
-    tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
-    return;
-  }
+      function renderTable(ordersIn) {
+        let orders = ordersIn;
+        const tbody = document.getElementById('ordersBody');
+        if (!orders.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="11"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
+          return;
+        }
 
-  // Sort starred to top
-  const starredIds = getStarredIds();
-  orders = [...orders].sort((a, b) => {
-    const aS = starredIds.has(a.id) ? 1 : 0;
-    const bS = starredIds.has(b.id) ? 1 : 0;
-    return bS - aS;
-  });
+        // Sort starred to top
+        const starredIds = getStarredIds();
+        orders = [...orders].sort((a, b) => {
+          const aS = starredIds.has(a.id) ? 1 : 0;
+          const bS = starredIds.has(b.id) ? 1 : 0;
+          return bS - aS;
+        });
 
-  tbody.innerHTML = orders.map(o => {
-    const checked = selectedIds.has(o.id) ? 'checked' : '';
-    const unread  = o.has_unread ? '<span class="unread-dot" title="Непрочитанные сообщения"></span>' : '';
-    const starred = starredIds.has(o.id);
-    const urgency = getUrgencyBadge(o);
-    const statusOpts = Object.entries(_admin.STATUS_LABELS).map(([v, l]) =>
-      `<option value="${v}"${v === o.status ? ' selected' : ''}>${l}</option>`
-    ).join('');
-    return `
+        tbody.innerHTML = orders
+          .map(o => {
+            const checked = selectedIds.has(o.id) ? 'checked' : '';
+            const unread = o.has_unread ? '<span class="unread-dot" title="Непрочитанные сообщения"></span>' : '';
+            const starred = starredIds.has(o.id);
+            const urgency = getUrgencyBadge(o);
+            const statusOpts = Object.entries(_admin.STATUS_LABELS)
+              .map(([v, l]) => `<option value="${v}"${v === o.status ? ' selected' : ''}>${l}</option>`)
+              .join('');
+            return `
     <tr data-id="${o.id}" style="cursor:pointer${starred ? ';background:rgba(255,215,0,0.04)' : ''}" onclick="openOrderModal(${o.id})">
       <td class="cb-cell" onclick="event.stopPropagation()">
         <input type="checkbox" class="row-check" data-id="${o.id}" ${checked}
@@ -760,347 +1253,406 @@ function renderTable(ordersIn) {
       <td>${_admin.formatDateTime(o.created_at)}</td>
       <td><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openDetail(${o.id})">Открыть →</button></td>
     </tr>`;
-  }).join('');
-}
+          })
+          .join('');
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    PAGINATION
 ═══════════════════════════════════════════════════════ */
-function renderPagination() {
-  const from  = totalOrders === 0 ? 0 : (currentPage - 1) * PAGE_LIMIT + 1;
-  const to    = Math.min(currentPage * PAGE_LIMIT, totalOrders);
-  document.getElementById('paginationInfo').textContent =
-    totalOrders ? `Заявки ${from}–${to} из ${totalOrders}` : '';
+      function renderPagination() {
+        const from = totalOrders === 0 ? 0 : (currentPage - 1) * PAGE_LIMIT + 1;
+        const to = Math.min(currentPage * PAGE_LIMIT, totalOrders);
+        document.getElementById('paginationInfo').textContent = totalOrders
+          ? `Заявки ${from}–${to} из ${totalOrders}`
+          : '';
 
-  const nav = document.getElementById('pagination');
-  if (totalPages <= 1) { nav.innerHTML = ''; return; }
+        const nav = document.getElementById('pagination');
+        if (totalPages <= 1) {
+          nav.innerHTML = '';
+          return;
+        }
 
-  const pages = buildPageRange(currentPage, totalPages);
-  nav.innerHTML = `
+        const pages = buildPageRange(currentPage, totalPages);
+        nav.innerHTML = `
     <button class="page-btn" ${currentPage <= 1 ? 'disabled style="opacity:.4;cursor:default"' : ''}
       onclick="loadOrders(${currentPage - 1})">‹</button>
-    ${pages.map(p => p === '…'
-      ? `<span style="padding:0 6px;color:var(--text-dim);line-height:32px">…</span>`
-      : `<button class="page-btn ${p === currentPage ? 'active' : ''}" onclick="loadOrders(${p})">${p}</button>`
-    ).join('')}
+    ${pages
+      .map(p =>
+        p === '…'
+          ? `<span style="padding:0 6px;color:var(--text-dim);line-height:32px">…</span>`
+          : `<button class="page-btn ${p === currentPage ? 'active' : ''}" onclick="loadOrders(${p})">${p}</button>`
+      )
+      .join('')}
     <button class="page-btn" ${currentPage >= totalPages ? 'disabled style="opacity:.4;cursor:default"' : ''}
       onclick="loadOrders(${currentPage + 1})">›</button>`;
-}
+      }
 
-function buildPageRange(cur, total) {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-  const pages = [];
-  if (cur <= 4) {
-    pages.push(1, 2, 3, 4, 5, '…', total);
-  } else if (cur >= total - 3) {
-    pages.push(1, '…', total - 4, total - 3, total - 2, total - 1, total);
-  } else {
-    pages.push(1, '…', cur - 1, cur, cur + 1, '…', total);
-  }
-  return pages;
-}
+      function buildPageRange(cur, total) {
+        if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+        const pages = [];
+        if (cur <= 4) {
+          pages.push(1, 2, 3, 4, 5, '…', total);
+        } else if (cur >= total - 3) {
+          pages.push(1, '…', total - 4, total - 3, total - 2, total - 1, total);
+        } else {
+          pages.push(1, '…', cur - 1, cur, cur + 1, '…', total);
+        }
+        return pages;
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    BULK ACTIONS
 ═══════════════════════════════════════════════════════ */
-function toggleRow(id, checked) {
-  if (checked) selectedIds.add(id); else selectedIds.delete(id);
-  syncBulkBar();
-  syncCheckAll();
-}
+      function toggleRow(id, checked) {
+        if (checked) selectedIds.add(id);
+        else selectedIds.delete(id);
+        syncBulkBar();
+        syncCheckAll();
+      }
 
-function syncBulkBar() {
-  const n    = selectedIds.size;
-  const bar  = document.getElementById('bulkBar');
-  bar.classList.toggle('visible', n > 0);
-  document.getElementById('bulkCount').textContent = `${n} выбрано`;
-}
+      function syncBulkBar() {
+        const n = selectedIds.size;
+        const bar = document.getElementById('bulkBar');
+        bar.classList.toggle('visible', n > 0);
+        document.getElementById('bulkCount').textContent = `${n} выбрано`;
+      }
 
-function syncCheckAll() {
-  const boxes    = document.querySelectorAll('.row-check');
-  const allCheck = document.getElementById('checkAll');
-  if (!boxes.length) { allCheck.checked = false; allCheck.indeterminate = false; return; }
-  const visibleIds = [...boxes].map(b => +b.dataset.id);
-  const checkedCnt = visibleIds.filter(id => selectedIds.has(id)).length;
-  allCheck.indeterminate = checkedCnt > 0 && checkedCnt < visibleIds.length;
-  allCheck.checked       = checkedCnt === visibleIds.length;
-}
+      function syncCheckAll() {
+        const boxes = document.querySelectorAll('.row-check');
+        const allCheck = document.getElementById('checkAll');
+        if (!boxes.length) {
+          allCheck.checked = false;
+          allCheck.indeterminate = false;
+          return;
+        }
+        const visibleIds = [...boxes].map(b => +b.dataset.id);
+        const checkedCnt = visibleIds.filter(id => selectedIds.has(id)).length;
+        allCheck.indeterminate = checkedCnt > 0 && checkedCnt < visibleIds.length;
+        allCheck.checked = checkedCnt === visibleIds.length;
+      }
 
-document.getElementById('checkAll').addEventListener('change', function () {
-  const boxes = document.querySelectorAll('.row-check');
-  boxes.forEach(b => {
-    const id = +b.dataset.id;
-    if (this.checked) selectedIds.add(id); else selectedIds.delete(id);
-    b.checked = this.checked;
-  });
-  syncBulkBar();
-});
-
-function clearSelection() {
-  selectedIds.clear();
-  document.querySelectorAll('.row-check').forEach(b => b.checked = false);
-  document.getElementById('checkAll').checked = false;
-  document.getElementById('checkAll').indeterminate = false;
-  syncBulkBar();
-}
-
-async function bulkAction(action) {
-  if (!selectedIds.size) return;
-  const ids = [...selectedIds];
-
-  const labels = {
-    confirmed: 'подтвердить', in_progress: 'перевести в процесс',
-    completed: 'завершить', cancelled: 'отменить', delete: 'УДАЛИТЬ'
-  };
-  const confirmMsg = action === 'delete'
-    ? `Удалить ${ids.length} заявок(и)? Это действие необратимо.`
-    : `${labels[action]} ${ids.length} заявок(и)?`;
-
-  _admin.adminConfirm('Массовое действие', confirmMsg, async () => {
-    try {
-      await _admin.apiFetch('/admin/orders/bulk', {
-        method: 'POST',
-        body: JSON.stringify({ ids, action })
+      document.getElementById('checkAll').addEventListener('change', function () {
+        const boxes = document.querySelectorAll('.row-check');
+        boxes.forEach(b => {
+          const id = +b.dataset.id;
+          if (this.checked) selectedIds.add(id);
+          else selectedIds.delete(id);
+          b.checked = this.checked;
+        });
+        syncBulkBar();
       });
-      _admin.toast('Готово', 'success');
-      clearSelection();
-      loadOrders();
-    } catch (e) {
-      _admin.toast('Ошибка: ' + e.message, 'error');
-    }
-  });
-}
 
-/* ═══════════════════════════════════════════════════════
+      function clearSelection() {
+        selectedIds.clear();
+        document.querySelectorAll('.row-check').forEach(b => (b.checked = false));
+        document.getElementById('checkAll').checked = false;
+        document.getElementById('checkAll').indeterminate = false;
+        syncBulkBar();
+      }
+
+      async function bulkAction(action) {
+        if (!selectedIds.size) return;
+        const ids = [...selectedIds];
+
+        const labels = {
+          confirmed: 'подтвердить',
+          in_progress: 'перевести в процесс',
+          completed: 'завершить',
+          cancelled: 'отменить',
+          delete: 'УДАЛИТЬ',
+        };
+        const confirmMsg =
+          action === 'delete'
+            ? `Удалить ${ids.length} заявок(и)? Это действие необратимо.`
+            : `${labels[action]} ${ids.length} заявок(и)?`;
+
+        _admin.adminConfirm('Массовое действие', confirmMsg, async () => {
+          try {
+            await _admin.apiFetch('/admin/orders/bulk', {
+              method: 'POST',
+              body: JSON.stringify({ ids, action }),
+            });
+            _admin.toast('Готово', 'success');
+            clearSelection();
+            loadOrders();
+          } catch (e) {
+            _admin.toast('Ошибка: ' + e.message, 'error');
+          }
+        });
+      }
+
+      /* ═══════════════════════════════════════════════════════
    BULK STATUS from dropdown
 ═══════════════════════════════════════════════════════ */
-function bulkStatusFromSelect() {
-  const status = document.getElementById('bulkStatusSelect').value;
-  if (!status) { _admin.toast('Выберите статус', 'warning'); return; }
-  const ids = [...selectedIds];
-  if (!ids.length) return;
-  const labels = {
-    new:'Новая', reviewing:'На рассмотрении', confirmed:'Подтверждена',
-    in_progress:'В процессе', completed:'Завершена', cancelled:'Отменена'
-  };
-  _admin.adminConfirm('Массовое изменение статуса',
-    `Изменить статус ${ids.length} заявок(и) на «${labels[status] || status}»?`, async () => {
-      try {
-        await _admin.apiFetch('/admin/orders/bulk-status', {
-          method: 'POST',
-          body: JSON.stringify({ order_ids: ids, status })
-        });
-        _admin.toast('Статус обновлён', 'success');
-        clearSelection();
-        document.getElementById('bulkStatusSelect').value = '';
-        loadOrders();
-      } catch (e) {
-        _admin.toast('Ошибка: ' + e.message, 'error');
+      function bulkStatusFromSelect() {
+        const status = document.getElementById('bulkStatusSelect').value;
+        if (!status) {
+          _admin.toast('Выберите статус', 'warning');
+          return;
+        }
+        const ids = [...selectedIds];
+        if (!ids.length) return;
+        const labels = {
+          new: 'Новая',
+          reviewing: 'На рассмотрении',
+          confirmed: 'Подтверждена',
+          in_progress: 'В процессе',
+          completed: 'Завершена',
+          cancelled: 'Отменена',
+        };
+        _admin.adminConfirm(
+          'Массовое изменение статуса',
+          `Изменить статус ${ids.length} заявок(и) на «${labels[status] || status}»?`,
+          async () => {
+            try {
+              await _admin.apiFetch('/admin/orders/bulk-status', {
+                method: 'POST',
+                body: JSON.stringify({ order_ids: ids, status }),
+              });
+              _admin.toast('Статус обновлён', 'success');
+              clearSelection();
+              document.getElementById('bulkStatusSelect').value = '';
+              loadOrders();
+            } catch (e) {
+              _admin.toast('Ошибка: ' + e.message, 'error');
+            }
+          }
+        );
       }
-    });
-}
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    EXPORT CSV — with filters
 ═══════════════════════════════════════════════════════ */
-function toggleExportPanel() {
-  const panel = document.getElementById('exportPanel');
-  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-  // Pre-fill export fields with current filter values
-  if (panel.style.display !== 'none') {
-    const status = document.getElementById('statusFilter').value;
-    if (status) document.getElementById('exportStatus').value = status;
-    const from = document.getElementById('filterFrom').value;
-    const to   = document.getElementById('filterTo').value;
-    if (from) document.getElementById('exportFrom').value = from;
-    if (to)   document.getElementById('exportTo').value   = to;
-  }
-}
+      function toggleExportPanel() {
+        const panel = document.getElementById('exportPanel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        // Pre-fill export fields with current filter values
+        if (panel.style.display !== 'none') {
+          const status = document.getElementById('statusFilter').value;
+          if (status) document.getElementById('exportStatus').value = status;
+          const from = document.getElementById('filterFrom').value;
+          const to = document.getElementById('filterTo').value;
+          if (from) document.getElementById('exportFrom').value = from;
+          if (to) document.getElementById('exportTo').value = to;
+        }
+      }
 
-function exportCSV() {
-  // Quick export using current list filters
-  exportCSVCurrentFilters();
-}
+      function exportCSV() {
+        // Quick export using current list filters
+        exportCSVCurrentFilters();
+      }
 
-function exportCSVWithFilters() {
-  const status     = document.getElementById('exportStatus').value;
-  const from       = document.getElementById('exportFrom').value;
-  const to         = document.getElementById('exportTo').value;
-  const model_id   = document.getElementById('modelFilter').value;
-  const event_type = document.getElementById('eventTypeFilter').value;
-  const search     = document.getElementById('searchInput').value.trim();
-  const params = new URLSearchParams();
-  if (status)     params.set('status', status);
-  if (from)       params.set('date_from', from);
-  if (to)         params.set('date_to', to);
-  if (model_id)   params.set('model_id', model_id);
-  if (event_type) params.set('event_type', event_type);
-  if (search)     params.set('search', search);
-  _admin.downloadCSV('/admin/orders/export?' + params);
-  document.getElementById('exportPanel').style.display = 'none';
-  _admin.toast('Экспорт начат...', 'info');
-}
+      function exportCSVWithFilters() {
+        const status = document.getElementById('exportStatus').value;
+        const from = document.getElementById('exportFrom').value;
+        const to = document.getElementById('exportTo').value;
+        const model_id = document.getElementById('modelFilter').value;
+        const event_type = document.getElementById('eventTypeFilter').value;
+        const search = document.getElementById('searchInput').value.trim();
+        const params = new URLSearchParams();
+        if (status) params.set('status', status);
+        if (from) params.set('date_from', from);
+        if (to) params.set('date_to', to);
+        if (model_id) params.set('model_id', model_id);
+        if (event_type) params.set('event_type', event_type);
+        if (search) params.set('search', search);
+        _admin.downloadCSV('/admin/orders/export?' + params);
+        document.getElementById('exportPanel').style.display = 'none';
+        _admin.toast('Экспорт начат...', 'info');
+      }
 
-function exportCSVCurrentFilters() {
-  const status     = document.getElementById('statusFilter').value;
-  const from       = document.getElementById('filterFrom').value;
-  const to         = document.getElementById('filterTo').value;
-  const model_id   = document.getElementById('modelFilter').value;
-  const event_type = document.getElementById('eventTypeFilter').value;
-  const search     = document.getElementById('searchInput').value.trim();
-  const params = new URLSearchParams();
-  if (status)     params.set('status', status);
-  if (from)       params.set('date_from', from);
-  if (to)         params.set('date_to', to);
-  if (model_id)   params.set('model_id', model_id);
-  if (event_type) params.set('event_type', event_type);
-  if (search)     params.set('search', search);
-  _admin.downloadCSV('/admin/orders/export?' + params);
-  if (document.getElementById('exportPanel').style.display !== 'none') {
-    document.getElementById('exportPanel').style.display = 'none';
-  }
-  _admin.toast('Экспорт начат...', 'info');
-}
+      function exportCSVCurrentFilters() {
+        const status = document.getElementById('statusFilter').value;
+        const from = document.getElementById('filterFrom').value;
+        const to = document.getElementById('filterTo').value;
+        const model_id = document.getElementById('modelFilter').value;
+        const event_type = document.getElementById('eventTypeFilter').value;
+        const search = document.getElementById('searchInput').value.trim();
+        const params = new URLSearchParams();
+        if (status) params.set('status', status);
+        if (from) params.set('date_from', from);
+        if (to) params.set('date_to', to);
+        if (model_id) params.set('model_id', model_id);
+        if (event_type) params.set('event_type', event_type);
+        if (search) params.set('search', search);
+        _admin.downloadCSV('/admin/orders/export?' + params);
+        if (document.getElementById('exportPanel').style.display !== 'none') {
+          document.getElementById('exportPanel').style.display = 'none';
+        }
+        _admin.toast('Экспорт начат...', 'info');
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    MANAGERS — load once for dropdown
 ═══════════════════════════════════════════════════════ */
-async function loadManagers() {
-  if (managersCache) return managersCache;
-  try {
-    managersCache = await _admin.apiFetch('/admin/managers');
-  } catch { managersCache = []; }
-  return managersCache;
-}
+      async function loadManagers() {
+        if (managersCache) return managersCache;
+        try {
+          managersCache = await _admin.apiFetch('/admin/managers');
+        } catch {
+          managersCache = [];
+        }
+        return managersCache;
+      }
 
-function populateManagerSelect(currentManagerId) {
-  const sel = document.getElementById('managerSelect');
-  const managers = managersCache || [];
-  sel.innerHTML = '<option value="">— не назначен —</option>' +
-    managers.map(m => `<option value="${m.id}" ${m.id === currentManagerId ? 'selected' : ''}>${m.username}${m.role === 'superadmin' ? ' ★' : ''}</option>`).join('');
-}
+      function populateManagerSelect(currentManagerId) {
+        const sel = document.getElementById('managerSelect');
+        const managers = managersCache || [];
+        sel.innerHTML =
+          '<option value="">— не назначен —</option>' +
+          managers
+            .map(
+              m =>
+                `<option value="${m.id}" ${m.id === currentManagerId ? 'selected' : ''}>${m.username}${m.role === 'superadmin' ? ' ★' : ''}</option>`
+            )
+            .join('');
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    DETAIL VIEW — open / render
 ═══════════════════════════════════════════════════════ */
-async function openDetail(id) {
-  currentOrderId = id;
-  stopChatPoll();
+      async function openDetail(id) {
+        currentOrderId = id;
+        stopChatPoll();
 
-  document.getElementById('listView').style.display    = 'none';
-  document.getElementById('detailView').style.display  = 'block';
-  document.getElementById('backToListBtn').style.display = 'inline-flex';
+        document.getElementById('listView').style.display = 'none';
+        document.getElementById('detailView').style.display = 'block';
+        document.getElementById('backToListBtn').style.display = 'inline-flex';
 
-  try {
-    const [o] = await Promise.all([
-      _admin.apiFetch(`/admin/orders/${id}`),
-      loadManagers()
-    ]);
+        try {
+          const [o] = await Promise.all([_admin.apiFetch(`/admin/orders/${id}`), loadManagers()]);
 
-    document.getElementById('detailTitle').innerHTML =
-      `Заявка ${_admin.escapeHtml(o.order_number)}` +
-      ` <button onclick="_admin.copyToClipboard && _admin.copyToClipboard('${_admin.escapeHtml(o.order_number)}')" ` +
-      `title="Копировать номер заявки" style="background:none;border:none;cursor:pointer;color:var(--gold);font-size:0.85rem;vertical-align:middle;padding:0 4px">📋</button>` +
-      ` <a href="${window.location.pathname}?id=${o.id}" style="color:var(--text-dim);font-size:0.8rem;vertical-align:middle" title="Прямая ссылка">🔗</a>`;
-    document.getElementById('pageTitle').textContent   = `Заявка ${o.order_number}`;
+          document.getElementById('detailTitle').innerHTML =
+            `Заявка ${_admin.escapeHtml(o.order_number)}` +
+            ` <button onclick="_admin.copyToClipboard && _admin.copyToClipboard('${_admin.escapeHtml(o.order_number)}')" ` +
+            `title="Копировать номер заявки" style="background:none;border:none;cursor:pointer;color:var(--gold);font-size:0.85rem;vertical-align:middle;padding:0 4px">📋</button>` +
+            ` <a href="${window.location.pathname}?id=${o.id}" style="color:var(--text-dim);font-size:0.8rem;vertical-align:middle" title="Прямая ссылка">🔗</a>`;
+          document.getElementById('pageTitle').textContent = `Заявка ${o.order_number}`;
 
-    document.getElementById('statusSelect').innerHTML = _admin.STATUS_OPTIONS;
-    document.getElementById('statusSelect').value     = o.status;
-    document.getElementById('adminNotes').value       = o.admin_notes || '';
-    document.getElementById('internalNote').value     = o.internal_note || '';
+          document.getElementById('statusSelect').innerHTML = _admin.STATUS_OPTIONS;
+          document.getElementById('statusSelect').value = o.status;
+          document.getElementById('adminNotes').value = o.admin_notes || '';
+          document.getElementById('internalNote').value = o.internal_note || '';
 
-    populateManagerSelect(o.manager_id || null);
+          populateManagerSelect(o.manager_id || null);
 
-    document.getElementById('detailInfo').innerHTML = buildDetailHTML(o);
+          document.getElementById('detailInfo').innerHTML = buildDetailHTML(o);
 
-    document.getElementById('chatTgInfo').textContent =
-      o.client_chat_id    ? '✅ Telegram подключён'
-      : o.client_telegram ? '⚠️ Telegram не привязан'
-      : '—';
+          document.getElementById('chatTgInfo').textContent = o.client_chat_id
+            ? '✅ Telegram подключён'
+            : o.client_telegram
+              ? '⚠️ Telegram не привязан'
+              : '—';
 
-    chatLastCount = (o.messages || []).length;
-    renderChat(o.messages || []);
+          chatLastCount = (o.messages || []).length;
+          renderChat(o.messages || []);
 
-    if (o.model_name) {
-      document.getElementById('modelCard').style.display = 'block';
-      document.getElementById('modelInfo').innerHTML = buildModelHTML(o);
-    } else {
-      document.getElementById('modelCard').style.display = 'none';
-    }
+          if (o.model_name) {
+            document.getElementById('modelCard').style.display = 'block';
+            document.getElementById('modelInfo').innerHTML = buildModelHTML(o);
+          } else {
+            document.getElementById('modelCard').style.display = 'none';
+          }
 
-    // Show existing payment link if present
-    document.getElementById('paymentLinkResult').innerHTML = '';
-    document.getElementById('paymentAmount').value = o.payment_amount || '';
-    if (o.payment_url) {
-      document.getElementById('existingPaymentLink').style.display = '';
-      document.getElementById('paymentLinkAnchor').href = o.payment_url;
-      document.getElementById('paymentStatus').textContent = o.payment_status ? `(${o.payment_status})` : '';
-    } else {
-      document.getElementById('existingPaymentLink').style.display = 'none';
-    }
+          // Show existing payment link if present
+          document.getElementById('paymentLinkResult').innerHTML = '';
+          document.getElementById('paymentAmount').value = o.payment_amount || '';
+          if (o.payment_url) {
+            document.getElementById('existingPaymentLink').style.display = '';
+            document.getElementById('paymentLinkAnchor').href = o.payment_url;
+            document.getElementById('paymentStatus').textContent = o.payment_status ? `(${o.payment_status})` : '';
+          } else {
+            document.getElementById('existingPaymentLink').style.display = 'none';
+          }
 
-    // Payment status — paid_at badge
-    const paidBadge = document.getElementById('paidAtBadge');
-    if (paidBadge) {
-      if (o.paid_at) {
-        paidBadge.style.display = '';
-        paidBadge.innerHTML = `<span style="color:#10b981;font-weight:600;font-size:0.82rem">✅ Оплачено</span> <span style="color:var(--text-muted);font-size:0.78rem">${_admin.formatDateTime(o.paid_at)}</span>`;
-      } else if (o.payment_status === 'pending') {
-        paidBadge.style.display = '';
-        paidBadge.innerHTML = `<span style="color:#f59e0b;font-weight:600;font-size:0.82rem">⏳ Ожидает оплаты</span>`;
-      } else {
-        paidBadge.style.display = 'none';
-        paidBadge.innerHTML = '';
+          // Payment status — paid_at badge
+          const paidBadge = document.getElementById('paidAtBadge');
+          if (paidBadge) {
+            if (o.paid_at) {
+              paidBadge.style.display = '';
+              paidBadge.innerHTML = `<span style="color:#10b981;font-weight:600;font-size:0.82rem">✅ Оплачено</span> <span style="color:var(--text-muted);font-size:0.78rem">${_admin.formatDateTime(o.paid_at)}</span>`;
+            } else if (o.payment_status === 'pending') {
+              paidBadge.style.display = '';
+              paidBadge.innerHTML = `<span style="color:#f59e0b;font-weight:600;font-size:0.82rem">⏳ Ожидает оплаты</span>`;
+            } else {
+              paidBadge.style.display = 'none';
+              paidBadge.innerHTML = '';
+            }
+          }
+
+          // Invoice sent info
+          const invoiceInfo = document.getElementById('invoiceSentInfo');
+          if (invoiceInfo) {
+            if (o.invoice_sent_at) {
+              invoiceInfo.textContent = `Счёт выставлен: ${_admin.formatDateTime(o.invoice_sent_at)}`;
+            } else {
+              invoiceInfo.textContent = '';
+            }
+          }
+
+          // Quick contact action buttons
+          buildContactActions(o);
+
+          startChatPoll();
+          loadOrderAudit(id);
+          loadStatusHistory(id);
+          loadNotesHistory(id);
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
       }
-    }
 
-    // Invoice sent info
-    const invoiceInfo = document.getElementById('invoiceSentInfo');
-    if (invoiceInfo) {
-      if (o.invoice_sent_at) {
-        invoiceInfo.textContent = `Счёт выставлен: ${_admin.formatDateTime(o.invoice_sent_at)}`;
-      } else {
-        invoiceInfo.textContent = '';
+      function buildDetailHTML(o) {
+        const row = (label, val) =>
+          val
+            ? `<div class="detail-row"><div class="detail-label">${label}</div><div class="detail-value">${val}</div></div>`
+            : '';
+        return [
+          row('Клиент', `<strong>${_admin.escapeHtml(o.client_name)}</strong>`),
+          row(
+            'Телефон',
+            `<a href="tel:${_admin.escapeHtml(o.client_phone)}" style="color:var(--gold)">${_admin.escapeHtml(o.client_phone)}</a>`
+          ),
+          o.client_email
+            ? row(
+                'Email',
+                `<a href="mailto:${_admin.escapeHtml(o.client_email)}" style="color:var(--gold)">${_admin.escapeHtml(o.client_email)}</a>`
+              )
+            : '',
+          o.client_telegram
+            ? row(
+                'Telegram',
+                `<a href="https://t.me/${_admin.escapeHtml(o.client_telegram)}" target="_blank" style="color:var(--gold)">@${_admin.escapeHtml(o.client_telegram)}</a>`
+              )
+            : '',
+          row('Мероприятие', _admin.EVENT_LABELS[o.event_type] || _admin.escapeHtml(o.event_type)),
+          o.event_date ? row('Дата', _admin.formatDate(o.event_date)) : '',
+          o.event_duration ? row('Продолжительность', `${_admin.escapeHtml(String(o.event_duration))} ч`) : '',
+          o.location ? row('Место', _admin.escapeHtml(o.location)) : '',
+          o.budget ? row('Бюджет', _admin.escapeHtml(o.budget)) : '',
+          o.comments
+            ? row('Комментарий', `<span style="white-space:pre-wrap">${_admin.escapeHtml(o.comments)}</span>`)
+            : '',
+          row('Создана', _admin.formatDateTime(o.created_at)),
+          // Payment info
+          o.payment_id
+            ? row('ID платежа', `<code style="font-size:0.78rem">${_admin.escapeHtml(o.payment_id)}</code>`)
+            : '',
+          o.payment_status
+            ? row(
+                'Статус оплаты',
+                o.payment_status === 'paid'
+                  ? '<span style="color:#10b981;font-weight:600">✅ Оплачено</span>'
+                  : `<span style="color:#f59e0b">⏳ ${_admin.escapeHtml(o.payment_status)}</span>`
+              )
+            : '',
+          o.paid_at ? row('Дата оплаты', _admin.formatDateTime(o.paid_at)) : '',
+        ].join('');
       }
-    }
 
-    // Quick contact action buttons
-    buildContactActions(o);
-
-    startChatPoll();
-    loadOrderAudit(id);
-    loadStatusHistory(id);
-    loadNotesHistory(id);
-  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
-}
-
-function buildDetailHTML(o) {
-  const row = (label, val) => val
-    ? `<div class="detail-row"><div class="detail-label">${label}</div><div class="detail-value">${val}</div></div>`
-    : '';
-  return [
-    row('Клиент',           `<strong>${_admin.escapeHtml(o.client_name)}</strong>`),
-    row('Телефон',          `<a href="tel:${_admin.escapeHtml(o.client_phone)}" style="color:var(--gold)">${_admin.escapeHtml(o.client_phone)}</a>`),
-    o.client_email    ? row('Email',    `<a href="mailto:${_admin.escapeHtml(o.client_email)}" style="color:var(--gold)">${_admin.escapeHtml(o.client_email)}</a>`) : '',
-    o.client_telegram ? row('Telegram', `<a href="https://t.me/${_admin.escapeHtml(o.client_telegram)}" target="_blank" style="color:var(--gold)">@${_admin.escapeHtml(o.client_telegram)}</a>`) : '',
-    row('Мероприятие',      _admin.EVENT_LABELS[o.event_type] || _admin.escapeHtml(o.event_type)),
-    o.event_date      ? row('Дата',     _admin.formatDate(o.event_date))           : '',
-    o.event_duration  ? row('Продолжительность', `${_admin.escapeHtml(String(o.event_duration))} ч`) : '',
-    o.location        ? row('Место',    _admin.escapeHtml(o.location))             : '',
-    o.budget          ? row('Бюджет',   _admin.escapeHtml(o.budget))               : '',
-    o.comments        ? row('Комментарий', `<span style="white-space:pre-wrap">${_admin.escapeHtml(o.comments)}</span>`) : '',
-    row('Создана',          _admin.formatDateTime(o.created_at)),
-    // Payment info
-    o.payment_id      ? row('ID платежа', `<code style="font-size:0.78rem">${_admin.escapeHtml(o.payment_id)}</code>`) : '',
-    o.payment_status  ? row('Статус оплаты', o.payment_status === 'paid'
-      ? '<span style="color:#10b981;font-weight:600">✅ Оплачено</span>'
-      : `<span style="color:#f59e0b">⏳ ${_admin.escapeHtml(o.payment_status)}</span>`) : '',
-    o.paid_at         ? row('Дата оплаты', _admin.formatDateTime(o.paid_at)) : '',
-  ].join('');
-}
-
-function buildModelHTML(o) {
-  return `<div style="display:flex;gap:12px;align-items:center">
+      function buildModelHTML(o) {
+        return `<div style="display:flex;gap:12px;align-items:center">
     ${o.model_photo ? `<img src="${o.model_photo}" style="width:60px;height:80px;object-fit:cover;flex-shrink:0;border-radius:4px" />` : '<div style="width:60px;height:80px;background:var(--bg2);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.8rem;flex-shrink:0">💃</div>'}
     <div>
       <strong style="color:var(--text);font-size:0.95rem">${_admin.escapeHtml(o.model_name)}</strong>
@@ -1108,135 +1660,185 @@ function buildModelHTML(o) {
       <a href="/?id=${o.model_id}" target="_blank" class="btn btn-sm btn-ghost" style="margin-top:8px;margin-left:4px">Сайт ↗</a>
     </div>
   </div>`;
-}
+      }
 
-function buildContactActions(o) {
-  const card = document.getElementById('contactActionsCard');
-  const btns = document.getElementById('contactActionBtns');
-  if (!card || !btns) return;
+      function buildContactActions(o) {
+        const card = document.getElementById('contactActionsCard');
+        const btns = document.getElementById('contactActionBtns');
+        if (!card || !btns) return;
 
-  const actions = [];
-  if (o.client_phone) {
-    const phone = _admin.escapeHtml(o.client_phone);
-    const phoneClean = o.client_phone.replace(/\D/g, '');
-    actions.push(`<a href="tel:${phone}" class="btn btn-sm btn-ghost" style="text-decoration:none">📞 Позвонить</a>`);
-    actions.push(`<a href="https://wa.me/${phoneClean}" target="_blank" class="btn btn-sm btn-ghost" style="text-decoration:none;color:#25d366;border-color:#25d366">💬 WhatsApp</a>`);
-  }
-  if (o.client_email) {
-    const email = _admin.escapeHtml(o.client_email);
-    const subject = encodeURIComponent(`Заявка ${o.order_number}`);
-    actions.push(`<a href="mailto:${email}?subject=${subject}" class="btn btn-sm btn-ghost" style="text-decoration:none">📧 Email</a>`);
-  }
-  if (o.client_telegram) {
-    actions.push(`<a href="https://t.me/${_admin.escapeHtml(o.client_telegram)}" target="_blank" class="btn btn-sm btn-ghost" style="text-decoration:none;color:#2fa3e7;border-color:#2fa3e7">✈️ Telegram</a>`);
-  }
-  if (o.client_chat_id) {
-    actions.push(`<a href="tg://user?id=${o.client_chat_id}" class="btn btn-sm btn-ghost" style="text-decoration:none;color:#2fa3e7;border-color:#2fa3e7">✈️ TG Открыть</a>`);
-  }
+        const actions = [];
+        if (o.client_phone) {
+          const phone = _admin.escapeHtml(o.client_phone);
+          const phoneClean = o.client_phone.replace(/\D/g, '');
+          actions.push(
+            `<a href="tel:${phone}" class="btn btn-sm btn-ghost" style="text-decoration:none">📞 Позвонить</a>`
+          );
+          actions.push(
+            `<a href="https://wa.me/${phoneClean}" target="_blank" class="btn btn-sm btn-ghost" style="text-decoration:none;color:#25d366;border-color:#25d366">💬 WhatsApp</a>`
+          );
+        }
+        if (o.client_email) {
+          const email = _admin.escapeHtml(o.client_email);
+          const subject = encodeURIComponent(`Заявка ${o.order_number}`);
+          actions.push(
+            `<a href="mailto:${email}?subject=${subject}" class="btn btn-sm btn-ghost" style="text-decoration:none">📧 Email</a>`
+          );
+        }
+        if (o.client_telegram) {
+          actions.push(
+            `<a href="https://t.me/${_admin.escapeHtml(o.client_telegram)}" target="_blank" class="btn btn-sm btn-ghost" style="text-decoration:none;color:#2fa3e7;border-color:#2fa3e7">✈️ Telegram</a>`
+          );
+        }
+        if (o.client_chat_id) {
+          actions.push(
+            `<a href="tg://user?id=${o.client_chat_id}" class="btn btn-sm btn-ghost" style="text-decoration:none;color:#2fa3e7;border-color:#2fa3e7">✈️ TG Открыть</a>`
+          );
+        }
 
-  if (actions.length) {
-    card.style.display = 'block';
-    btns.innerHTML = actions.join('');
-  } else {
-    card.style.display = 'none';
-  }
-}
+        if (actions.length) {
+          card.style.display = 'block';
+          btns.innerHTML = actions.join('');
+        } else {
+          card.style.display = 'none';
+        }
+      }
 
-async function loadNotesHistory(orderId) {
-  try {
-    const data = await _admin.apiFetch(`/admin/orders/${orderId}/notes`);
-    const notes = data.notes || [];
-    const card = document.getElementById('notesHistoryCard');
-    const body = document.getElementById('notesHistoryBody');
-    if (!card || !body) return;
-    if (!notes.length) { card.style.display = 'none'; return; }
-    card.style.display = '';
-    body.innerHTML = notes.map(n => `
+      async function loadNotesHistory(orderId) {
+        try {
+          const data = await _admin.apiFetch(`/admin/orders/${orderId}/notes`);
+          const notes = data.notes || [];
+          const card = document.getElementById('notesHistoryCard');
+          const body = document.getElementById('notesHistoryBody');
+          if (!card || !body) return;
+          if (!notes.length) {
+            card.style.display = 'none';
+            return;
+          }
+          card.style.display = '';
+          body.innerHTML = notes
+            .map(
+              n => `
       <div style="padding:8px 0;border-bottom:1px solid var(--border)">
         <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:4px">${_admin.formatDateTime(n.created_at)}</div>
         <div style="color:var(--text)">${_admin.escapeHtml(n.admin_note)}</div>
-      </div>`).join('');
-  } catch { /* optional */ }
-}
+      </div>`
+            )
+            .join('');
+        } catch {
+          /* optional */
+        }
+      }
 
-async function sendInvoice() {
-  if (!currentOrderId) return;
-  const btn = document.getElementById('sendInvoiceBtn');
-  if (btn) btn.disabled = true;
-  try {
-    const result = await _admin.apiFetch(`/admin/orders/${currentOrderId}/send-invoice`, { method: 'POST' });
-    _admin.toast('Счёт выставлен', 'success');
-    const invoiceInfo = document.getElementById('invoiceSentInfo');
-    if (invoiceInfo && result.invoice_sent_at) {
-      invoiceInfo.textContent = `Счёт выставлен: ${_admin.formatDateTime(result.invoice_sent_at)}`;
-    }
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
+      async function sendInvoice() {
+        if (!currentOrderId) return;
+        const btn = document.getElementById('sendInvoiceBtn');
+        if (btn) btn.disabled = true;
+        try {
+          const result = await _admin.apiFetch(`/admin/orders/${currentOrderId}/send-invoice`, { method: 'POST' });
+          _admin.toast('Счёт выставлен', 'success');
+          const invoiceInfo = document.getElementById('invoiceSentInfo');
+          if (invoiceInfo && result.invoice_sent_at) {
+            invoiceInfo.textContent = `Счёт выставлен: ${_admin.formatDateTime(result.invoice_sent_at)}`;
+          }
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    ORDER AUDIT LOG
 ═══════════════════════════════════════════════════════ */
-async function loadOrderAudit(orderId) {
-  try {
-    const rows = await _admin.apiFetch(`/admin/audit-log?limit=50`);
-    const orderRows = (rows || []).filter(r => r.entity_type === 'order' && r.entity_id === orderId);
-    const card = document.getElementById('auditCard');
-    const cont = document.getElementById('auditLog');
-    if (!card || !cont) return;
-    if (!orderRows.length) { card.style.display = 'none'; return; }
-    card.style.display = 'block';
-    cont.innerHTML = orderRows.map(r => {
-      const det = r.details ? (() => { try { return JSON.parse(r.details); } catch { return {}; } })() : {};
-      const desc = det.from && det.to
-        ? `${_admin.STATUS_LABELS[det.from] || det.from} → ${_admin.STATUS_LABELS[det.to] || det.to}`
-        : (r.action || '');
-      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:baseline">
+      async function loadOrderAudit(orderId) {
+        try {
+          const rows = await _admin.apiFetch(`/admin/audit-log?limit=50`);
+          const orderRows = (rows || []).filter(r => r.entity_type === 'order' && r.entity_id === orderId);
+          const card = document.getElementById('auditCard');
+          const cont = document.getElementById('auditLog');
+          if (!card || !cont) return;
+          if (!orderRows.length) {
+            card.style.display = 'none';
+            return;
+          }
+          card.style.display = 'block';
+          cont.innerHTML = orderRows
+            .map(r => {
+              const det = r.details
+                ? (() => {
+                    try {
+                      return JSON.parse(r.details);
+                    } catch {
+                      return {};
+                    }
+                  })()
+                : {};
+              const desc =
+                det.from && det.to
+                  ? `${_admin.STATUS_LABELS[det.from] || det.from} → ${_admin.STATUS_LABELS[det.to] || det.to}`
+                  : r.action || '';
+              return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:baseline">
         <span style="color:var(--text-dim);flex-shrink:0;font-size:0.72rem">${_admin.formatDateTime(r.created_at)}</span>
         <span>${_admin.escapeHtml(desc)}</span>
       </div>`;
-    }).join('');
-  } catch { /* audit log optional */ }
-}
+            })
+            .join('');
+        } catch {
+          /* audit log optional */
+        }
+      }
 
-async function loadStatusHistory(orderId) {
-  try {
-    const history = await _admin.apiFetch(`/admin/orders/${orderId}/history`);
-    const card = document.getElementById('statusHistoryCard');
-    const timeline = document.getElementById('statusTimeline');
-    if (!card || !timeline) return;
-    if (!history || !history.length) { card.style.display = 'none'; return; }
-    card.style.display = '';
+      async function loadStatusHistory(orderId) {
+        try {
+          const history = await _admin.apiFetch(`/admin/orders/${orderId}/history`);
+          const card = document.getElementById('statusHistoryCard');
+          const timeline = document.getElementById('statusTimeline');
+          if (!card || !timeline) return;
+          if (!history || !history.length) {
+            card.style.display = 'none';
+            return;
+          }
+          card.style.display = '';
 
-    const STATUS_LABELS = {
-      new: '🆕 Нова', reviewing: '🔍 Розгляд', confirmed: '✅ Підтверджена',
-      in_progress: '▶️ В роботі', completed: '🏁 Завершена', cancelled: '❌ Відмінена'
-    };
-    const STATUS_BADGE = {
-      new: 'sbadge-new', reviewing: 'sbadge-reviewing', confirmed: 'sbadge-confirmed',
-      in_progress: 'sbadge-in_progress', completed: 'sbadge-completed', cancelled: 'sbadge-cancelled'
-    };
+          const STATUS_LABELS = {
+            new: '🆕 Нова',
+            reviewing: '🔍 Розгляд',
+            confirmed: '✅ Підтверджена',
+            in_progress: '▶️ В роботі',
+            completed: '🏁 Завершена',
+            cancelled: '❌ Відмінена',
+          };
+          const STATUS_BADGE = {
+            new: 'sbadge-new',
+            reviewing: 'sbadge-reviewing',
+            confirmed: 'sbadge-confirmed',
+            in_progress: 'sbadge-in_progress',
+            completed: 'sbadge-completed',
+            cancelled: 'sbadge-cancelled',
+          };
 
-    timeline.innerHTML = history.map(h => {
-      // Support both `created_at` and legacy `changed_at` column names
-      const ts = h.created_at || h.changed_at;
-      let d = '—';
-      try {
-        d = new Date(ts).toLocaleString('ru-RU', {
-          day: '2-digit', month: '2-digit', year: 'numeric',
-          hour: '2-digit', minute: '2-digit'
-        });
-      } catch {}
+          timeline.innerHTML = history
+            .map(h => {
+              // Support both `created_at` and legacy `changed_at` column names
+              const ts = h.created_at || h.changed_at;
+              let d = '—';
+              try {
+                d = new Date(ts).toLocaleString('ru-RU', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+              } catch {}
 
-      const newDotClass = STATUS_BADGE[h.new_status] ? h.new_status : 'default';
-      const oldLabel = h.old_status ? (STATUS_LABELS[h.old_status] || _admin.escapeHtml(h.old_status)) : '—';
-      const newLabel = STATUS_LABELS[h.new_status] || _admin.escapeHtml(h.new_status || '—');
-      const adminName = h.admin_username || h.changed_by || '';
+              const newDotClass = STATUS_BADGE[h.new_status] ? h.new_status : 'default';
+              const oldLabel = h.old_status ? STATUS_LABELS[h.old_status] || _admin.escapeHtml(h.old_status) : '—';
+              const newLabel = STATUS_LABELS[h.new_status] || _admin.escapeHtml(h.new_status || '—');
+              const adminName = h.admin_username || h.changed_by || '';
 
-      return `<div class="timeline-item">
+              return `<div class="timeline-item">
         <div class="timeline-dot timeline-dot-${newDotClass}"></div>
         <div class="timeline-ts">${d}</div>
         <div class="timeline-change">
@@ -1246,277 +1848,314 @@ async function loadStatusHistory(orderId) {
           ${adminName ? `<span class="timeline-admin">👤 ${_admin.escapeHtml(adminName)}</span>` : ''}
         </div>
       </div>`;
-    }).join('');
-  } catch { /* status history optional */ }
-}
+            })
+            .join('');
+        } catch {
+          /* status history optional */
+        }
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    CHAT — render + auto-poll
 ═══════════════════════════════════════════════════════ */
-function renderChat(messages) {
-  const box = document.getElementById('chatMessages');
-  if (!messages.length) {
-    box.innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:0.85rem;padding:32px">Сообщений пока нет</div>';
-    return;
-  }
-  box.innerHTML = messages.map(m => `
+      function renderChat(messages) {
+        const box = document.getElementById('chatMessages');
+        if (!messages.length) {
+          box.innerHTML =
+            '<div style="text-align:center;color:var(--text-dim);font-size:0.85rem;padding:32px">Сообщений пока нет</div>';
+          return;
+        }
+        box.innerHTML = messages
+          .map(
+            m => `
     <div class="chat-msg ${m.sender_type}">
       <div class="chat-bubble">${_admin.escapeHtml(m.content)}</div>
       <div class="chat-meta">${_admin.escapeHtml(m.sender_name || m.sender_type)} · ${_admin.formatDateTime(m.created_at)}</div>
-    </div>`).join('');
-  box.scrollTop = box.scrollHeight;
-}
+    </div>`
+          )
+          .join('');
+        box.scrollTop = box.scrollHeight;
+      }
 
-function startChatPoll() {
-  document.getElementById('chatLiveIndicator').style.display = 'inline-flex';
-  chatPollTimer = setInterval(pollChat, 5000);
-}
+      function startChatPoll() {
+        document.getElementById('chatLiveIndicator').style.display = 'inline-flex';
+        chatPollTimer = setInterval(pollChat, 5000);
+      }
 
-function stopChatPoll() {
-  document.getElementById('chatLiveIndicator').style.display = 'none';
-  clearInterval(chatPollTimer);
-  chatPollTimer = null;
-}
+      function stopChatPoll() {
+        document.getElementById('chatLiveIndicator').style.display = 'none';
+        clearInterval(chatPollTimer);
+        chatPollTimer = null;
+      }
 
-async function pollChat() {
-  if (!currentOrderId) { stopChatPoll(); return; }
-  try {
-    const o = await _admin.apiFetch(`/admin/orders/${currentOrderId}`);
-    const msgs = o.messages || [];
-    if (msgs.length !== chatLastCount) {
-      chatLastCount = msgs.length;
-      renderChat(msgs);
-    }
-  } catch { /* network blip — keep polling */ }
-}
+      async function pollChat() {
+        if (!currentOrderId) {
+          stopChatPoll();
+          return;
+        }
+        try {
+          const o = await _admin.apiFetch(`/admin/orders/${currentOrderId}`);
+          const msgs = o.messages || [];
+          if (msgs.length !== chatLastCount) {
+            chatLastCount = msgs.length;
+            renderChat(msgs);
+          }
+        } catch {
+          /* network blip — keep polling */
+        }
+      }
 
-async function sendMessage() {
-  const input   = document.getElementById('chatInput');
-  const content = input.value.trim();
-  if (!content) return;
-  try {
-    await _admin.apiFetch(`/admin/orders/${currentOrderId}/message`, {
-      method: 'POST',
-      body: JSON.stringify({ content })
-    });
-    input.value = '';
-    const o = await _admin.apiFetch(`/admin/orders/${currentOrderId}`);
-    chatLastCount = (o.messages || []).length;
-    renderChat(o.messages || []);
-    _admin.toast('Сообщение отправлено', 'success');
-  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
-}
+      async function sendMessage() {
+        const input = document.getElementById('chatInput');
+        const content = input.value.trim();
+        if (!content) return;
+        try {
+          await _admin.apiFetch(`/admin/orders/${currentOrderId}/message`, {
+            method: 'POST',
+            body: JSON.stringify({ content }),
+          });
+          input.value = '';
+          const o = await _admin.apiFetch(`/admin/orders/${currentOrderId}`);
+          chatLastCount = (o.messages || []).length;
+          renderChat(o.messages || []);
+          _admin.toast('Сообщение отправлено', 'success');
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
 
-document.getElementById('chatInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-});
+      document.getElementById('chatInput').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    SAVE / QUICK STATUS
 ═══════════════════════════════════════════════════════ */
-async function createPaymentLink() {
-  const orderId = currentOrderId;
-  const amount = parseInt(document.getElementById('paymentAmount').value);
-  if (!orderId || !amount || amount < 1) {
-    _admin.toast('Введите сумму оплаты', 'error');
-    return;
-  }
-  try {
-    const result = await _admin.apiFetch(`/admin/orders/${orderId}/pay`, {
-      method: 'POST',
-      body: JSON.stringify({ amount })
-    });
-    if (result.payment_url) {
-      document.getElementById('paymentLinkResult').innerHTML =
-        `✅ <a href="${result.payment_url}" target="_blank" style="color:var(--gold)">Открыть ссылку</a>`;
-      document.getElementById('existingPaymentLink').style.display = '';
-      document.getElementById('paymentLinkAnchor').href = result.payment_url;
-      document.getElementById('paymentStatus').textContent = '(pending)';
-    }
-  } catch (e) {
-    document.getElementById('paymentLinkResult').textContent = '⚠️ ' + (e.message || 'ЮKassa не настроена');
-  }
-}
+      async function createPaymentLink() {
+        const orderId = currentOrderId;
+        const amount = parseInt(document.getElementById('paymentAmount').value);
+        if (!orderId || !amount || amount < 1) {
+          _admin.toast('Введите сумму оплаты', 'error');
+          return;
+        }
+        try {
+          const result = await _admin.apiFetch(`/admin/orders/${orderId}/pay`, {
+            method: 'POST',
+            body: JSON.stringify({ amount }),
+          });
+          if (result.payment_url) {
+            document.getElementById('paymentLinkResult').innerHTML =
+              `✅ <a href="${result.payment_url}" target="_blank" style="color:var(--gold)">Открыть ссылку</a>`;
+            document.getElementById('existingPaymentLink').style.display = '';
+            document.getElementById('paymentLinkAnchor').href = result.payment_url;
+            document.getElementById('paymentStatus').textContent = '(pending)';
+          }
+        } catch (e) {
+          document.getElementById('paymentLinkResult').textContent = '⚠️ ' + (e.message || 'ЮKassa не настроена');
+        }
+      }
 
-async function saveOrder() {
-  const managerId = document.getElementById('managerSelect').value;
-  try {
-    await _admin.apiFetch(`/admin/orders/${currentOrderId}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        status:      document.getElementById('statusSelect').value,
-        admin_notes: document.getElementById('adminNotes').value,
-        manager_id:  managerId ? +managerId : null,
-      })
-    });
-    _admin.toast('Сохранено', 'success');
-  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
-}
+      async function saveOrder() {
+        const managerId = document.getElementById('managerSelect').value;
+        try {
+          await _admin.apiFetch(`/admin/orders/${currentOrderId}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              status: document.getElementById('statusSelect').value,
+              admin_notes: document.getElementById('adminNotes').value,
+              manager_id: managerId ? +managerId : null,
+            }),
+          });
+          _admin.toast('Сохранено', 'success');
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
 
-async function quickStatus(status) {
-  document.getElementById('statusSelect').value = status;
-  await saveOrder();
-}
+      async function quickStatus(status) {
+        document.getElementById('statusSelect').value = status;
+        await saveOrder();
+      }
 
-async function saveInternalNote() {
-  const noteEl = document.getElementById('internalNote');
-  const note = noteEl.value;
-  try {
-    await _admin.apiFetch(`/admin/orders/${currentOrderId}/note`, {
-      method: 'PATCH',
-      body: JSON.stringify({ note })
-    });
-    // Also save as a note in order_notes history
-    if (note.trim()) {
-      await _admin.apiFetch(`/admin/orders/${currentOrderId}/notes`, {
-        method: 'POST',
-        body: JSON.stringify({ note: note.trim() })
-      }).catch(() => {});
-      loadNotesHistory(currentOrderId);
-    }
-    _admin.toast('Заметка сохранена', 'success');
-  } catch (e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
-}
+      async function saveInternalNote() {
+        const noteEl = document.getElementById('internalNote');
+        const note = noteEl.value;
+        try {
+          await _admin.apiFetch(`/admin/orders/${currentOrderId}/note`, {
+            method: 'PATCH',
+            body: JSON.stringify({ note }),
+          });
+          // Also save as a note in order_notes history
+          if (note.trim()) {
+            await _admin
+              .apiFetch(`/admin/orders/${currentOrderId}/notes`, {
+                method: 'POST',
+                body: JSON.stringify({ note: note.trim() }),
+              })
+              .catch(() => {});
+            loadNotesHistory(currentOrderId);
+          }
+          _admin.toast('Заметка сохранена', 'success');
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    CLOSE DETAIL
 ═══════════════════════════════════════════════════════ */
-function closeDetail() {
-  stopChatPoll();
-  currentOrderId = null;
-  document.getElementById('detailView').style.display  = 'none';
-  document.getElementById('listView').style.display    = 'block';
-  document.getElementById('backToListBtn').style.display = 'none';
-  document.getElementById('pageTitle').textContent     = 'Заявки';
-  loadOrders(); // refresh list (unread dots may have changed)
-}
+      function closeDetail() {
+        stopChatPoll();
+        currentOrderId = null;
+        document.getElementById('detailView').style.display = 'none';
+        document.getElementById('listView').style.display = 'block';
+        document.getElementById('backToListBtn').style.display = 'none';
+        document.getElementById('pageTitle').textContent = 'Заявки';
+        loadOrders(); // refresh list (unread dots may have changed)
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    STATUS FILTER BUTTONS
 ═══════════════════════════════════════════════════════ */
-function setStatusFilter(status) {
-  // Sync hidden select (used by loadOrders)
-  document.getElementById('statusFilter').value = status;
+      function setStatusFilter(status) {
+        // Sync hidden select (used by loadOrders)
+        document.getElementById('statusFilter').value = status;
 
-  // Update button active classes
-  document.querySelectorAll('#statusFilterBar .sfilter-btn').forEach(btn => {
-    const btnStatus = btn.getAttribute('data-status');
-    btn.className = 'sfilter-btn';
-    if (btnStatus === status) {
-      btn.classList.add(status === '' ? 'active-all' : `active-${status}`);
-    }
-  });
+        // Update button active classes
+        document.querySelectorAll('#statusFilterBar .sfilter-btn').forEach(btn => {
+          const btnStatus = btn.getAttribute('data-status');
+          btn.className = 'sfilter-btn';
+          if (btnStatus === status) {
+            btn.classList.add(status === '' ? 'active-all' : `active-${status}`);
+          }
+        });
 
-  loadOrders(1);
-}
+        loadOrders(1);
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    QUICK INLINE STATUS CHANGE
 ═══════════════════════════════════════════════════════ */
-async function quickStatusChange(orderId, newStatus, selectEl) {
-  const prevStatus = selectEl.getAttribute('data-prev') || selectEl.dataset.prev;
-  const newLabel   = _admin.STATUS_LABELS[newStatus] || newStatus;
-  // Store previous value for rollback
-  if (!selectEl.dataset.prev) selectEl.dataset.prev = prevStatus || newStatus;
+      async function quickStatusChange(orderId, newStatus, selectEl) {
+        const prevStatus = selectEl.getAttribute('data-prev') || selectEl.dataset.prev;
+        const newLabel = _admin.STATUS_LABELS[newStatus] || newStatus;
+        // Store previous value for rollback
+        if (!selectEl.dataset.prev) selectEl.dataset.prev = prevStatus || newStatus;
 
-  const ok = confirm(`Изменить статус заявки на «${newLabel}»?`);
-  if (!ok) {
-    // Revert select to previous value
-    selectEl.value = prevStatus || newStatus;
-    return;
-  }
-  // Update stored previous
-  selectEl.dataset.prev = newStatus;
+        const ok = confirm(`Изменить статус заявки на «${newLabel}»?`);
+        if (!ok) {
+          // Revert select to previous value
+          selectEl.value = prevStatus || newStatus;
+          return;
+        }
+        // Update stored previous
+        selectEl.dataset.prev = newStatus;
 
-  try {
-    await _admin.apiFetch(`/admin/orders/${orderId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ status: newStatus })
-    });
-    _admin.toast(`Статус изменён: ${newLabel}`, 'success');
-    // Update the color badge in the same row
-    const row = selectEl.closest('tr');
-    if (row) {
-      const badgeCell = row.querySelector('.sbadge');
-      if (badgeCell) {
-        badgeCell.className = `sbadge sbadge-${newStatus}`;
-        badgeCell.textContent = newLabel;
+        try {
+          await _admin.apiFetch(`/admin/orders/${orderId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus }),
+          });
+          _admin.toast(`Статус изменён: ${newLabel}`, 'success');
+          // Update the color badge in the same row
+          const row = selectEl.closest('tr');
+          if (row) {
+            const badgeCell = row.querySelector('.sbadge');
+            if (badgeCell) {
+              badgeCell.className = `sbadge sbadge-${newStatus}`;
+              badgeCell.textContent = newLabel;
+            }
+          }
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+          // Revert select to previous value
+          selectEl.value = prevStatus || newStatus;
+          selectEl.dataset.prev = prevStatus || newStatus;
+        }
       }
-    }
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-    // Revert select to previous value
-    selectEl.value = prevStatus || newStatus;
-    selectEl.dataset.prev = prevStatus || newStatus;
-  }
-}
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    SEARCH / FILTER
 ═══════════════════════════════════════════════════════ */
-let searchTimer;
-document.getElementById('searchInput').addEventListener('input', () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => loadOrders(1), 400);
-});
-document.getElementById('statusFilter').addEventListener('change', () => loadOrders(1));
+      let searchTimer;
+      document.getElementById('searchInput').addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => loadOrders(1), 400);
+      });
+      document.getElementById('statusFilter').addEventListener('change', () => loadOrders(1));
 
-function setDatePreset(preset) {
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const today = fmt(now);
-  const fromEl = document.getElementById('filterFrom');
-  const toEl = document.getElementById('filterTo');
-  if (preset === 'today') {
-    fromEl.value = today; toEl.value = today;
-  } else if (preset === 'week') {
-    const week = new Date(now); week.setDate(now.getDate() - 7);
-    fromEl.value = fmt(week); toEl.value = today;
-  } else if (preset === 'month') {
-    const month = new Date(now); month.setDate(now.getDate() - 30);
-    fromEl.value = fmt(month); toEl.value = today;
-  }
-  loadOrders(1);
-}
+      function setDatePreset(preset) {
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        const today = fmt(now);
+        const fromEl = document.getElementById('filterFrom');
+        const toEl = document.getElementById('filterTo');
+        if (preset === 'today') {
+          fromEl.value = today;
+          toEl.value = today;
+        } else if (preset === 'week') {
+          const week = new Date(now);
+          week.setDate(now.getDate() - 7);
+          fromEl.value = fmt(week);
+          toEl.value = today;
+        } else if (preset === 'month') {
+          const month = new Date(now);
+          month.setDate(now.getDate() - 30);
+          fromEl.value = fmt(month);
+          toEl.value = today;
+        }
+        loadOrders(1);
+      }
 
-function clearFilters() {
-  document.getElementById('searchInput').value = '';
-  document.getElementById('statusFilter').value = '';
-  document.getElementById('modelFilter').value = '';
-  document.getElementById('filterFrom').value = '';
-  document.getElementById('filterTo').value = '';
-  document.getElementById('eventTypeFilter').value = '';
-  // Reset quick filters state
-  _qfUnassigned = false; _qfPaid = false; _qfHighBudget = false; _qfStarredOnly = false;
-  setQfChipActive('all');
-  // Reset status filter buttons to "Все"
-  setStatusFilter('');
-}
+      function clearFilters() {
+        document.getElementById('searchInput').value = '';
+        document.getElementById('statusFilter').value = '';
+        document.getElementById('modelFilter').value = '';
+        document.getElementById('filterFrom').value = '';
+        document.getElementById('filterTo').value = '';
+        document.getElementById('eventTypeFilter').value = '';
+        // Reset quick filters state
+        _qfUnassigned = false;
+        _qfPaid = false;
+        _qfHighBudget = false;
+        _qfStarredOnly = false;
+        setQfChipActive('all');
+        // Reset status filter buttons to "Все"
+        setStatusFilter('');
+      }
 
-async function loadModelFilterOptions() {
-  try {
-    const data = await _admin.apiFetch('/admin/models?limit=200&available=');
-    const models = data.models || data || [];
-    const sel = document.getElementById('modelFilter');
-    sel.innerHTML = '<option value="">Все модели</option>' +
-      models.map(m => `<option value="${m.id}">${_admin.escapeHtml(m.name)}</option>`).join('');
-  } catch { /* ignore, models dropdown stays empty */ }
-}
+      async function loadModelFilterOptions() {
+        try {
+          const data = await _admin.apiFetch('/admin/models?limit=200&available=');
+          const models = data.models || data || [];
+          const sel = document.getElementById('modelFilter');
+          sel.innerHTML =
+            '<option value="">Все модели</option>' +
+            models.map(m => `<option value="${m.id}">${_admin.escapeHtml(m.name)}</option>`).join('');
+        } catch {
+          /* ignore, models dropdown stays empty */
+        }
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    ORDER MESSAGES THREAD (for modal)
 ═══════════════════════════════════════════════════════ */
-async function loadOrderMessages(orderId) {
-  try {
-    const messages = await _admin.apiFetch(`/admin/orders/${orderId}/messages`);
-    const cont = document.getElementById('order-messages');
-    if (!cont) return;
-    if (!messages || !messages.length) {
-      cont.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:8px 0">Нет сообщений</div>';
-      return;
-    }
-    cont.innerHTML = messages.map(m => `
+      async function loadOrderMessages(orderId) {
+        try {
+          const messages = await _admin.apiFetch(`/admin/orders/${orderId}/messages`);
+          const cont = document.getElementById('order-messages');
+          if (!cont) return;
+          if (!messages || !messages.length) {
+            cont.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:8px 0">Нет сообщений</div>';
+            return;
+          }
+          cont.innerHTML = messages
+            .map(
+              m => `
       <div class="msg-bubble" style="margin:6px 0;padding:8px 12px;border-radius:10px;font-size:0.82rem;
         background:${m.sender_type === 'admin' ? 'rgba(201,169,110,0.1)' : 'var(--bg2, #1a1a1a)'};
         text-align:${m.sender_type === 'admin' ? 'right' : 'left'}">
@@ -1524,381 +2163,434 @@ async function loadOrderMessages(orderId) {
           ${m.sender_type === 'admin' ? '👤 Менеджер' : '👤 Клиент'} · ${_admin.formatDateTime(m.created_at)}
         </div>
         <div>${_admin.escapeHtml(m.content || '')}</div>
-      </div>`).join('');
-  } catch { /* messages section optional */ }
-}
+      </div>`
+            )
+            .join('');
+        } catch {
+          /* messages section optional */
+        }
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    ORDER DETAIL MODAL
 ═══════════════════════════════════════════════════════ */
-let _modalOrderId = null;
+      let _modalOrderId = null;
 
-async function openOrderModal(orderId) {
-  _modalOrderId = orderId;
-  try {
-    const order = await _admin.apiFetch(`/admin/orders/${orderId}`);
+      async function openOrderModal(orderId) {
+        _modalOrderId = orderId;
+        try {
+          const order = await _admin.apiFetch(`/admin/orders/${orderId}`);
 
-    const orderNum = order.order_number || '#' + orderId;
-    document.getElementById('modal-order-num').innerHTML =
-      `Заявка ${_admin.escapeHtml(orderNum)} ` +
-      `<button onclick="_admin.copyToClipboard && _admin.copyToClipboard('${_admin.escapeHtml(orderNum)}')" ` +
-      `title="Копировать номер заявки" style="background:none;border:none;cursor:pointer;color:#c9a96e;font-size:0.85rem;vertical-align:middle;padding:0 4px">📋</button>` +
-      `<a href="/admin/orders.html?id=${orderId}" title="Прямая ссылка на заявку" style="color:#888;font-size:0.8rem;vertical-align:middle;text-decoration:none">🔗</a>`;
-    document.getElementById('modal-order-date').textContent =
-      new Date(order.created_at).toLocaleString('ru-RU');
+          const orderNum = order.order_number || '#' + orderId;
+          document.getElementById('modal-order-num').innerHTML =
+            `Заявка ${_admin.escapeHtml(orderNum)} ` +
+            `<button onclick="_admin.copyToClipboard && _admin.copyToClipboard('${_admin.escapeHtml(orderNum)}')" ` +
+            `title="Копировать номер заявки" style="background:none;border:none;cursor:pointer;color:#c9a96e;font-size:0.85rem;vertical-align:middle;padding:0 4px">📋</button>` +
+            `<a href="/admin/orders.html?id=${orderId}" title="Прямая ссылка на заявку" style="color:#888;font-size:0.8rem;vertical-align:middle;text-decoration:none">🔗</a>`;
+          document.getElementById('modal-order-date').textContent = new Date(order.created_at).toLocaleString('ru-RU');
 
-    // Status buttons
-    const statuses = {
-      new: '🆕 Новая', reviewing: '🔍 На рассмотрении', confirmed: '✅ Подтверждена',
-      in_progress: '🔄 В работе', completed: '🏁 Завершена', cancelled: '❌ Отменена'
-    };
-    document.getElementById('modal-status-btns').innerHTML =
-      Object.entries(statuses).map(([k, v]) => `
+          // Status buttons
+          const statuses = {
+            new: '🆕 Новая',
+            reviewing: '🔍 На рассмотрении',
+            confirmed: '✅ Подтверждена',
+            in_progress: '🔄 В работе',
+            completed: '🏁 Завершена',
+            cancelled: '❌ Отменена',
+          };
+          document.getElementById('modal-status-btns').innerHTML = Object.entries(statuses)
+            .map(
+              ([k, v]) => `
         <button onclick="changeOrderStatus(${orderId}, '${k}')"
-          class="px-3 py-1.5 text-sm rounded-lg border-2 ${order.status === k
-            ? 'border-pink-500 bg-pink-50 dark:bg-pink-900/20 font-medium'
-            : 'border-gray-200 dark:border-gray-700 hover:border-pink-300'}">
+          class="px-3 py-1.5 text-sm rounded-lg border-2 ${
+            order.status === k
+              ? 'border-pink-500 bg-pink-50 dark:bg-pink-900/20 font-medium'
+              : 'border-gray-200 dark:border-gray-700 hover:border-pink-300'
+          }">
           ${v}
-        </button>`).join('');
+        </button>`
+            )
+            .join('');
 
-    // Client info
-    const clientRows = [
-      ['Имя',      order.client_name],
-      ['Телефон',  order.client_phone],
-      ['Email',    order.client_email],
-      ['Telegram', order.client_chat_id ? `ID: ${order.client_chat_id}` : null],
-    ].filter(([, v]) => v);
-    document.getElementById('modal-client-info').innerHTML = clientRows.map(([k, v]) => `
+          // Client info
+          const clientRows = [
+            ['Имя', order.client_name],
+            ['Телефон', order.client_phone],
+            ['Email', order.client_email],
+            ['Telegram', order.client_chat_id ? `ID: ${order.client_chat_id}` : null],
+          ].filter(([, v]) => v);
+          document.getElementById('modal-client-info').innerHTML = clientRows
+            .map(
+              ([k, v]) => `
       <div>
         <span style="color:var(--text-muted);font-size:0.8rem">${_admin.escapeHtml(k)}:</span><br>
         <span style="font-weight:600">${_admin.escapeHtml(String(v))}</span>
-      </div>`).join('');
+      </div>`
+            )
+            .join('');
 
-    // Order details
-    const eventNames = {
-      wedding: 'Свадьба', corporate: 'Корпоратив', fashion: 'Показ мод',
-      commercial: 'Съёмка', fashion_show: 'Показ мод', photo_shoot: 'Фотосессия',
-      event: 'Мероприятие', runway: 'Подиум', other: 'Другое'
-    };
-    const orderRows = [
-      ['Тип события', eventNames[order.event_type] || order.event_type],
-      ['Дата события', order.event_date || null],
-      ['Бюджет',       order.budget     || null],
-      ['Модель',       order.model_name || null],
-      ['Место',        order.location   || null],
-    ].filter(([, v]) => v);
-    document.getElementById('modal-order-details').innerHTML = orderRows.map(([k, v]) => `
+          // Order details
+          const eventNames = {
+            wedding: 'Свадьба',
+            corporate: 'Корпоратив',
+            fashion: 'Показ мод',
+            commercial: 'Съёмка',
+            fashion_show: 'Показ мод',
+            photo_shoot: 'Фотосессия',
+            event: 'Мероприятие',
+            runway: 'Подиум',
+            other: 'Другое',
+          };
+          const orderRows = [
+            ['Тип события', eventNames[order.event_type] || order.event_type],
+            ['Дата события', order.event_date || null],
+            ['Бюджет', order.budget || null],
+            ['Модель', order.model_name || null],
+            ['Место', order.location || null],
+          ].filter(([, v]) => v);
+          document.getElementById('modal-order-details').innerHTML = orderRows
+            .map(
+              ([k, v]) => `
       <div>
         <span style="color:var(--text-muted);font-size:0.8rem">${_admin.escapeHtml(k)}:</span><br>
         <span style="font-weight:600">${_admin.escapeHtml(String(v))}</span>
-      </div>`).join('');
+      </div>`
+            )
+            .join('');
 
-    // Telegram button
-    const tgBtn = document.getElementById('modal-tg-btn');
-    if (order.client_chat_id) {
-      tgBtn.classList.remove('hidden');
-      tgBtn.style.display = '';
-      tgBtn.onclick = () => window.open(`tg://user?id=${order.client_chat_id}`);
-    } else {
-      tgBtn.classList.add('hidden');
-      tgBtn.style.display = 'none';
-    }
+          // Telegram button
+          const tgBtn = document.getElementById('modal-tg-btn');
+          if (order.client_chat_id) {
+            tgBtn.classList.remove('hidden');
+            tgBtn.style.display = '';
+            tgBtn.onclick = () => window.open(`tg://user?id=${order.client_chat_id}`);
+          } else {
+            tgBtn.classList.add('hidden');
+            tgBtn.style.display = 'none';
+          }
 
-    // Load notes
-    try {
-      const notesData = await _admin.apiFetch(`/admin/orders/${orderId}/notes`);
-      const notes = notesData.notes || [];
-      document.getElementById('modal-notes-history').innerHTML = notes.length
-        ? notes.map(n => `
+          // Load notes
+          try {
+            const notesData = await _admin.apiFetch(`/admin/orders/${orderId}/notes`);
+            const notes = notesData.notes || [];
+            document.getElementById('modal-notes-history').innerHTML = notes.length
+              ? notes
+                  .map(
+                    n => `
             <div style="background:var(--bg2);border-radius:8px;padding:12px;font-size:0.85rem;color:var(--text)">
               <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">${new Date(n.created_at).toLocaleString('ru-RU')}</div>
               ${_admin.escapeHtml(n.admin_note)}
-            </div>`).join('')
-        : '';
-    } catch { /* notes table may not exist yet */ }
+            </div>`
+                  )
+                  .join('')
+              : '';
+          } catch {
+            /* notes table may not exist yet */
+          }
 
-    // Load messages thread
-    loadOrderMessages(orderId);
+          // Load messages thread
+          loadOrderMessages(orderId);
 
-    document.getElementById('order-modal').classList.remove('hidden');
-    document.getElementById('order-modal').style.display = 'flex';
-  } catch (e) {
-    _admin.toast('Ошибка загрузки заявки: ' + e.message, 'error');
-  }
-}
+          document.getElementById('order-modal').classList.remove('hidden');
+          document.getElementById('order-modal').style.display = 'flex';
+        } catch (e) {
+          _admin.toast('Ошибка загрузки заявки: ' + e.message, 'error');
+        }
+      }
 
-function closeOrderModal() {
-  document.getElementById('order-modal').classList.add('hidden');
-  document.getElementById('order-modal').style.display = 'none';
-}
+      function closeOrderModal() {
+        document.getElementById('order-modal').classList.add('hidden');
+        document.getElementById('order-modal').style.display = 'none';
+      }
 
-async function changeOrderStatus(orderId, newStatus) {
-  try {
-    await _admin.apiFetch(`/admin/orders/${orderId}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: newStatus })
-    });
-    _admin.toast('Статус обновлён', 'success');
-    closeOrderModal();
-    loadOrders();
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-  }
-}
+      async function changeOrderStatus(orderId, newStatus) {
+        try {
+          await _admin.apiFetch(`/admin/orders/${orderId}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: newStatus }),
+          });
+          _admin.toast('Статус обновлён', 'success');
+          closeOrderModal();
+          loadOrders();
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
 
-async function saveNote() {
-  const note = document.getElementById('modal-note').value.trim();
-  if (!note) return;
-  try {
-    await _admin.apiFetch(`/admin/orders/${_modalOrderId}/notes`, {
-      method: 'POST',
-      body: JSON.stringify({ note })
-    });
-    document.getElementById('modal-note').value = '';
-    _admin.toast('Заметка сохранена', 'success');
-    openOrderModal(_modalOrderId); // reload to show new note
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-  }
-}
+      async function saveNote() {
+        const note = document.getElementById('modal-note').value.trim();
+        if (!note) return;
+        try {
+          await _admin.apiFetch(`/admin/orders/${_modalOrderId}/notes`, {
+            method: 'POST',
+            body: JSON.stringify({ note }),
+          });
+          document.getElementById('modal-note').value = '';
+          _admin.toast('Заметка сохранена', 'success');
+          openOrderModal(_modalOrderId); // reload to show new note
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
 
-// Close modal on backdrop click
-document.getElementById('order-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeOrderModal();
-});
+      // Close modal on backdrop click
+      document.getElementById('order-modal').addEventListener('click', function (e) {
+        if (e.target === this) closeOrderModal();
+      });
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    AUTO-REFRESH every 30 seconds
 ═══════════════════════════════════════════════════════ */
-function showRefreshIndicator() {
-  const el = document.getElementById('refresh-indicator');
-  if (el) { el.style.display = 'inline'; setTimeout(() => { el.style.display = 'none'; }, 1000); }
-}
+      function showRefreshIndicator() {
+        const el = document.getElementById('refresh-indicator');
+        if (el) {
+          el.style.display = 'inline';
+          setTimeout(() => {
+            el.style.display = 'none';
+          }, 1000);
+        }
+      }
 
-setInterval(() => {
-  const modal = document.getElementById('order-modal');
-  const modalOpen = modal && !modal.classList.contains('hidden') && modal.style.display !== 'none';
-  if (!modalOpen) {
-    showRefreshIndicator();
-    loadOrders();
-  }
-}, 30000);
+      setInterval(() => {
+        const modal = document.getElementById('order-modal');
+        const modalOpen = modal && !modal.classList.contains('hidden') && modal.style.display !== 'none';
+        if (!modalOpen) {
+          showRefreshIndicator();
+          loadOrders();
+        }
+      }, 30000);
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    QUICK FILTERS
 ═══════════════════════════════════════════════════════ */
-let _activeQuickFilter = 'all';
-let _qfUnassigned = false;
-let _qfPaid = false;
-let _qfHighBudget = false;
-let _qfStarredOnly = false;
+      let _activeQuickFilter = 'all';
+      let _qfUnassigned = false;
+      let _qfPaid = false;
+      let _qfHighBudget = false;
+      let _qfStarredOnly = false;
 
-function setQfChipActive(filterKey) {
-  document.querySelectorAll('#quickFiltersBar .qf-chip').forEach(btn => {
-    btn.classList.remove('qf-active', 'qf-starred');
-    if (btn.dataset.qf === filterKey) {
-      btn.classList.add(filterKey === 'starred' ? 'qf-starred' : 'qf-active');
-    }
-  });
-}
+      function setQfChipActive(filterKey) {
+        document.querySelectorAll('#quickFiltersBar .qf-chip').forEach(btn => {
+          btn.classList.remove('qf-active', 'qf-starred');
+          if (btn.dataset.qf === filterKey) {
+            btn.classList.add(filterKey === 'starred' ? 'qf-starred' : 'qf-active');
+          }
+        });
+      }
 
-function quickFilter(type) {
-  _activeQuickFilter = type;
-  _qfUnassigned = false;
-  _qfPaid = false;
-  _qfHighBudget = false;
-  _qfStarredOnly = false;
+      function quickFilter(type) {
+        _activeQuickFilter = type;
+        _qfUnassigned = false;
+        _qfPaid = false;
+        _qfHighBudget = false;
+        _qfStarredOnly = false;
 
-  setQfChipActive(type);
+        setQfChipActive(type);
 
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-  // Reset date fields and status filter
-  document.getElementById('filterFrom').value = '';
-  document.getElementById('filterTo').value   = '';
-  document.getElementById('statusFilter').value = '';
-  document.getElementById('searchInput').value  = '';
+        // Reset date fields and status filter
+        document.getElementById('filterFrom').value = '';
+        document.getElementById('filterTo').value = '';
+        document.getElementById('statusFilter').value = '';
+        document.getElementById('searchInput').value = '';
 
-  if (type === 'all') {
-    // nothing extra — load with cleared filters
-    loadOrders(1);
-    return;
-  }
-  if (type === 'today') {
-    const today = fmt(now);
-    document.getElementById('filterFrom').value = today;
-    document.getElementById('filterTo').value   = today;
-    loadOrders(1);
-    return;
-  }
-  if (type === 'unassigned') {
-    _qfUnassigned = true;
-    loadOrders(1);
-    return;
-  }
-  if (type === 'paid') {
-    _qfPaid = true;
-    loadOrders(1);
-    return;
-  }
-  if (type === 'high_budget') {
-    _qfHighBudget = true;
-    loadOrders(1);
-    return;
-  }
-  if (type === 'starred') {
-    _qfStarredOnly = true;
-    loadOrdersStarred();
-    return;
-  }
-}
+        if (type === 'all') {
+          // nothing extra — load with cleared filters
+          loadOrders(1);
+          return;
+        }
+        if (type === 'today') {
+          const today = fmt(now);
+          document.getElementById('filterFrom').value = today;
+          document.getElementById('filterTo').value = today;
+          loadOrders(1);
+          return;
+        }
+        if (type === 'unassigned') {
+          _qfUnassigned = true;
+          loadOrders(1);
+          return;
+        }
+        if (type === 'paid') {
+          _qfPaid = true;
+          loadOrders(1);
+          return;
+        }
+        if (type === 'high_budget') {
+          _qfHighBudget = true;
+          loadOrders(1);
+          return;
+        }
+        if (type === 'starred') {
+          _qfStarredOnly = true;
+          loadOrdersStarred();
+          return;
+        }
+      }
 
-async function loadOrdersStarred() {
-  const ids = [...getStarredIds()];
-  const tbody = document.getElementById('ordersBody');
-  if (!ids.length) {
-    tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state"><div class="empty-state-icon">⭐</div><p>Нет отмеченных заявок</p></div></td></tr>';
-    document.getElementById('paginationInfo').textContent = '';
-    document.getElementById('pagination').innerHTML = '';
-    document.getElementById('orderCountSummary').textContent = 'Нет отмеченных заявок';
-    document.getElementById('orderCountSummary').style.display = 'block';
-    return;
-  }
-  // Load all starred orders one by one (they're cached anyway via modal)
-  try {
-    const promises = ids.map(id => _admin.apiFetch(`/admin/orders/${id}`).catch(() => null));
-    const results  = (await Promise.all(promises)).filter(Boolean);
-    renderTable(results);
-    document.getElementById('paginationInfo').textContent = '';
-    document.getElementById('pagination').innerHTML = '';
-    updateCountSummary(results.length, results.length);
-  } catch (e) {
-    _admin.toast('Ошибка загрузки: ' + e.message, 'error');
-  }
-}
+      async function loadOrdersStarred() {
+        const ids = [...getStarredIds()];
+        const tbody = document.getElementById('ordersBody');
+        if (!ids.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="11"><div class="empty-state"><div class="empty-state-icon">⭐</div><p>Нет отмеченных заявок</p></div></td></tr>';
+          document.getElementById('paginationInfo').textContent = '';
+          document.getElementById('pagination').innerHTML = '';
+          document.getElementById('orderCountSummary').textContent = 'Нет отмеченных заявок';
+          document.getElementById('orderCountSummary').style.display = 'block';
+          return;
+        }
+        // Load all starred orders one by one (they're cached anyway via modal)
+        try {
+          const promises = ids.map(id => _admin.apiFetch(`/admin/orders/${id}`).catch(() => null));
+          const results = (await Promise.all(promises)).filter(Boolean);
+          renderTable(results);
+          document.getElementById('paginationInfo').textContent = '';
+          document.getElementById('pagination').innerHTML = '';
+          updateCountSummary(results.length, results.length);
+        } catch (e) {
+          _admin.toast('Ошибка загрузки: ' + e.message, 'error');
+        }
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    STAR / PIN
 ═══════════════════════════════════════════════════════ */
-const STARRED_KEY = 'orders_starred_v1';
+      const STARRED_KEY = 'orders_starred_v1';
 
-function getStarredIds() {
-  try {
-    const raw = localStorage.getItem(STARRED_KEY);
-    return new Set(raw ? JSON.parse(raw) : []);
-  } catch { return new Set(); }
-}
+      function getStarredIds() {
+        try {
+          const raw = localStorage.getItem(STARRED_KEY);
+          return new Set(raw ? JSON.parse(raw) : []);
+        } catch {
+          return new Set();
+        }
+      }
 
-function saveStarredIds(set) {
-  try { localStorage.setItem(STARRED_KEY, JSON.stringify([...set])); } catch {}
-}
+      function saveStarredIds(set) {
+        try {
+          localStorage.setItem(STARRED_KEY, JSON.stringify([...set]));
+        } catch {}
+      }
 
-function toggleStar(orderId, btn) {
-  const ids = getStarredIds();
-  if (ids.has(orderId)) {
-    ids.delete(orderId);
-    btn.classList.remove('starred');
-    _admin.toast && _admin.toast('Убрано из отмеченных', 'info');
-  } else {
-    ids.add(orderId);
-    btn.classList.add('starred');
-    _admin.toast && _admin.toast('Заявка отмечена ⭐', 'success');
-  }
-  saveStarredIds(ids);
+      function toggleStar(orderId, btn) {
+        const ids = getStarredIds();
+        if (ids.has(orderId)) {
+          ids.delete(orderId);
+          btn.classList.remove('starred');
+          _admin.toast && _admin.toast('Убрано из отмеченных', 'info');
+        } else {
+          ids.add(orderId);
+          btn.classList.add('starred');
+          _admin.toast && _admin.toast('Заявка отмечена ⭐', 'success');
+        }
+        saveStarredIds(ids);
 
-  // If in starred-only mode, re-render immediately
-  if (_qfStarredOnly) loadOrdersStarred();
-}
+        // If in starred-only mode, re-render immediately
+        if (_qfStarredOnly) loadOrdersStarred();
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    URGENCY BADGE
 ═══════════════════════════════════════════════════════ */
-function getUrgencyBadge(o) {
-  if (!o.event_date) return '';
-  const now = Date.now();
-  const eventMs = new Date(o.event_date).getTime();
-  const diffDays = Math.floor((eventMs - now) / 86400000);
-  if (diffDays < 0) return ''; // past event
-  if (diffDays <= 7 && o.status === 'confirmed') {
-    return '<span class="urgency-badge urgency-urgent" title="Срочно: мероприятие через ' + diffDays + ' дн.">🔴 Срочно</span>';
-  }
-  if (diffDays <= 14) {
-    return '<span class="urgency-badge urgency-soon" title="Скоро: мероприятие через ' + diffDays + ' дн.">🟡 Скоро</span>';
-  }
-  return '';
-}
+      function getUrgencyBadge(o) {
+        if (!o.event_date) return '';
+        const now = Date.now();
+        const eventMs = new Date(o.event_date).getTime();
+        const diffDays = Math.floor((eventMs - now) / 86400000);
+        if (diffDays < 0) return ''; // past event
+        if (diffDays <= 7 && o.status === 'confirmed') {
+          return (
+            '<span class="urgency-badge urgency-urgent" title="Срочно: мероприятие через ' +
+            diffDays +
+            ' дн.">🔴 Срочно</span>'
+          );
+        }
+        if (diffDays <= 14) {
+          return (
+            '<span class="urgency-badge urgency-soon" title="Скоро: мероприятие через ' +
+            diffDays +
+            ' дн.">🟡 Скоро</span>'
+          );
+        }
+        return '';
+      }
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    KEYBOARD SHORTCUTS
 ═══════════════════════════════════════════════════════ */
-function closeKbModal() {
-  document.getElementById('kbModal').style.display = 'none';
-}
+      function closeKbModal() {
+        document.getElementById('kbModal').style.display = 'none';
+      }
 
-document.addEventListener('keydown', function(e) {
-  // Ignore if focus is on input / textarea / select
-  const tag = (e.target.tagName || '').toLowerCase();
-  const isEditable = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+      document.addEventListener('keydown', function (e) {
+        // Ignore if focus is on input / textarea / select
+        const tag = (e.target.tagName || '').toLowerCase();
+        const isEditable = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
 
-  // Esc — close modals
-  if (e.key === 'Escape') {
-    closeKbModal();
-    const modal = document.getElementById('order-modal');
-    if (modal && !modal.classList.contains('hidden')) closeOrderModal();
-    return;
-  }
+        // Esc — close modals
+        if (e.key === 'Escape') {
+          closeKbModal();
+          const modal = document.getElementById('order-modal');
+          if (modal && !modal.classList.contains('hidden')) closeOrderModal();
+          return;
+        }
 
-  if (isEditable) return;
+        if (isEditable) return;
 
-  if (e.key === 'n' || e.key === 'N') {
-    e.preventDefault();
-    const si = document.getElementById('searchInput');
-    if (si) { si.focus(); si.select(); }
-    return;
-  }
-  if (e.key === 'r' || e.key === 'R') {
-    e.preventDefault();
-    loadOrders();
-    _admin.toast && _admin.toast('Обновлено', 'info');
-    return;
-  }
-  if (e.key === '?') {
-    e.preventDefault();
-    document.getElementById('kbModal').style.display = 'flex';
-    return;
-  }
-});
+        if (e.key === 'n' || e.key === 'N') {
+          e.preventDefault();
+          const si = document.getElementById('searchInput');
+          if (si) {
+            si.focus();
+            si.select();
+          }
+          return;
+        }
+        if (e.key === 'r' || e.key === 'R') {
+          e.preventDefault();
+          loadOrders();
+          _admin.toast && _admin.toast('Обновлено', 'info');
+          return;
+        }
+        if (e.key === '?') {
+          e.preventDefault();
+          document.getElementById('kbModal').style.display = 'flex';
+          return;
+        }
+      });
 
-/* ═══════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════════════ */
-(async function init() {
-  const params     = new URLSearchParams(window.location.search);
-  const urlStatus  = params.get('status');
-  const urlId      = params.get('id');
-  const urlModelId = params.get('model_id');
-  const urlFrom    = params.get('date_from') || params.get('from');
-  const urlTo      = params.get('date_to')   || params.get('to');
-  const urlSearch  = params.get('search');
+      (async function init() {
+        const params = new URLSearchParams(window.location.search);
+        const urlStatus = params.get('status');
+        const urlId = params.get('id');
+        const urlModelId = params.get('model_id');
+        const urlFrom = params.get('date_from') || params.get('from');
+        const urlTo = params.get('date_to') || params.get('to');
+        const urlSearch = params.get('search');
 
-  // Load model filter options early
-  await loadModelFilterOptions();
+        // Load model filter options early
+        await loadModelFilterOptions();
 
-  // Restore filter state from URL
-  if (urlModelId) document.getElementById('modelFilter').value = urlModelId;
-  if (urlFrom)    document.getElementById('filterFrom').value  = urlFrom;
-  if (urlTo)      document.getElementById('filterTo').value    = urlTo;
-  if (urlSearch)  document.getElementById('searchInput').value = urlSearch;
+        // Restore filter state from URL
+        if (urlModelId) document.getElementById('modelFilter').value = urlModelId;
+        if (urlFrom) document.getElementById('filterFrom').value = urlFrom;
+        if (urlTo) document.getElementById('filterTo').value = urlTo;
+        if (urlSearch) document.getElementById('searchInput').value = urlSearch;
 
-  if (urlStatus) {
-    setStatusFilter(urlStatus);
-  } else {
-    loadOrders(1);
-  }
-  if (urlId) setTimeout(() => openDetail(+urlId), 400);
-})();
-</script>
-</body>
+        if (urlStatus) {
+          setStatusFilter(urlStatus);
+        } else {
+          loadOrders(1);
+        }
+        if (urlId) setTimeout(() => openDetail(+urlId), 400);
+      })();
+    </script>
+  </body>
 </html>

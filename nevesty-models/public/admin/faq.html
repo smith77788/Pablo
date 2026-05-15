@@ -1,292 +1,412 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FAQ — Nevesty Models Admin</title>
-  <meta name="robots" content="noindex, nofollow">
-  <link rel="stylesheet" href="/css/admin.css" />
-  <style>
-    .faq-item {
-      background: var(--bg1);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 20px;
-      margin-bottom: 12px;
-      transition: border-color 0.2s;
-    }
-    .faq-item:hover { border-color: rgba(201,169,110,0.4); }
-    .faq-item.inactive { opacity: 0.5; }
-    .faq-question {
-      font-weight: 600; color: var(--text); font-size: 0.95rem;
-      margin-bottom: 8px;
-    }
-    .faq-answer {
-      font-size: 0.85rem; color: var(--text-muted);
-      line-height: 1.6; padding: 12px; background: var(--bg2);
-      border-radius: 4px;
-    }
-    .faq-meta {
-      display: flex; align-items: center; gap: 12px; margin-top: 12px;
-    }
-    .faq-order {
-      font-size: 0.75rem; color: var(--text-dim);
-    }
-    .modal-overlay {
-      display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.7); z-index: 1000;
-      align-items: center; justify-content: center;
-    }
-    .modal-overlay.open { display: flex; }
-    .modal-box {
-      background: var(--bg1); border: 1px solid var(--border);
-      border-radius: 8px; padding: 32px; width: 100%;
-      max-width: 560px; max-height: 90vh; overflow-y: auto;
-    }
-    .modal-title { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-bottom: 24px; }
-    .form-group { margin-bottom: 16px; }
-    .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; }
-    .form-group input, .form-group textarea, .form-group select {
-      width: 100%; background: var(--bg2); border: 1px solid var(--border);
-      color: var(--text); border-radius: 4px; padding: 10px 12px;
-      font-size: 0.85rem; font-family: inherit; box-sizing: border-box;
-    }
-    .form-group textarea { min-height: 120px; resize: vertical; }
-    .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
-      border-color: var(--gold); outline: none;
-    }
-    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px; }
-    .drag-handle { cursor: grab; color: var(--text-dim); margin-right: 8px; font-size: 1.1rem; }
-    .empty-state {
-      text-align: center; padding: 60px 20px;
-      color: var(--text-dim); font-size: 0.9rem;
-    }
-    .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
-    .category-badge {
-      display: inline-block; padding: 2px 8px; border-radius: 3px;
-      font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-    }
-    .cat-general   { background: rgba(108,117,125,0.18); color: #adb5bd; }
-    .cat-booking   { background: rgba(201,169,110,0.18); color: var(--gold); }
-    .cat-pricing   { background: rgba(39,174,96,0.18);  color: #27ae60; }
-    .cat-catalog   { background: rgba(52,152,219,0.18); color: #3498db; }
-    .filter-bar {
-      display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;
-    }
-    .filter-chip {
-      padding: 5px 14px; border-radius: 20px; font-size: 0.8rem; cursor: pointer;
-      border: 1px solid var(--border); background: var(--bg2); color: var(--text-muted);
-      transition: all 0.15s;
-    }
-    .filter-chip:hover, .filter-chip.active {
-      border-color: var(--gold); color: var(--gold); background: rgba(201,169,110,0.1);
-    }
-  </style>
-</head>
-<body>
-<div class="admin-layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-text">Nevesty Models</div>
-      <div class="sidebar-logo-sub">Панель управления</div>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Главная</div>
-      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
-      <div class="nav-section-label">Бизнес</div>
-      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки</a>
-      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
-      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
-      <a href="/admin/faq.html" class="active"><span class="nav-icon">❓</span> FAQ</a>
-      <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
-      <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
-      <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
-      <div class="nav-section-label">AI</div>
-      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
-      <div class="nav-section-label">Настройки</div>
-      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
-      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
-      <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
-      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
-      <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
-      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-user">
-        <div class="sidebar-avatar sidebar-user-letter">A</div>
-        <div class="sidebar-user-info">
-          <strong class="sidebar-user-name">—</strong>
-          <span class="sidebar-user-role">—</span>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FAQ — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      .faq-item {
+        background: var(--bg1);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 20px;
+        margin-bottom: 12px;
+        transition: border-color 0.2s;
+      }
+      .faq-item:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+      }
+      .faq-item.inactive {
+        opacity: 0.5;
+      }
+      .faq-question {
+        font-weight: 600;
+        color: var(--text);
+        font-size: 0.95rem;
+        margin-bottom: 8px;
+      }
+      .faq-answer {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        padding: 12px;
+        background: var(--bg2);
+        border-radius: 4px;
+      }
+      .faq-meta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .faq-order {
+        font-size: 0.75rem;
+        color: var(--text-dim);
+      }
+      .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal-overlay.open {
+        display: flex;
+      }
+      .modal-box {
+        background: var(--bg1);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 32px;
+        width: 100%;
+        max-width: 560px;
+        max-height: 90vh;
+        overflow-y: auto;
+      }
+      .modal-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 24px;
+      }
+      .form-group {
+        margin-bottom: 16px;
+      }
+      .form-group label {
+        display: block;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+      }
+      .form-group input,
+      .form-group textarea,
+      .form-group select {
+        width: 100%;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 4px;
+        padding: 10px 12px;
+        font-size: 0.85rem;
+        font-family: inherit;
+        box-sizing: border-box;
+      }
+      .form-group textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+      .form-group input:focus,
+      .form-group textarea:focus,
+      .form-group select:focus {
+        border-color: var(--gold);
+        outline: none;
+      }
+      .modal-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 24px;
+      }
+      .drag-handle {
+        cursor: grab;
+        color: var(--text-dim);
+        margin-right: 8px;
+        font-size: 1.1rem;
+      }
+      .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-dim);
+        font-size: 0.9rem;
+      }
+      .empty-state .icon {
+        font-size: 2.5rem;
+        margin-bottom: 12px;
+      }
+      .category-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .cat-general {
+        background: rgba(108, 117, 125, 0.18);
+        color: #adb5bd;
+      }
+      .cat-booking {
+        background: rgba(201, 169, 110, 0.18);
+        color: var(--gold);
+      }
+      .cat-pricing {
+        background: rgba(39, 174, 96, 0.18);
+        color: #27ae60;
+      }
+      .cat-catalog {
+        background: rgba(52, 152, 219, 0.18);
+        color: #3498db;
+      }
+      .filter-bar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+      .filter-chip {
+        padding: 5px 14px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        transition: all 0.15s;
+      }
+      .filter-chip:hover,
+      .filter-chip.active {
+        border-color: var(--gold);
+        color: var(--gold);
+        background: rgba(201, 169, 110, 0.1);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-text">Nevesty Models</div>
+          <div class="sidebar-logo-sub">Панель управления</div>
         </div>
-      </div>
-      <button class="btn-logout" data-action="logout">Выйти</button>
-    </div>
-  </aside>
-
-  <div class="main-content">
-    <header class="topbar">
-      <div class="topbar-title">❓ FAQ — Часто задаваемые вопросы</div>
-      <div class="topbar-right">
-        <button onclick="openCreateModal()" class="btn btn-md btn-primary">+ Добавить вопрос</button>
-      </div>
-    </header>
-
-    <div class="page-content">
-
-      <!-- AI FAQ Generation -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header">
-          <div class="section-card-title">🤖 AI Генерация FAQ</div>
-        </div>
-        <div class="section-card-body">
-          <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:14px">Введите тему — AI создаст 3 вопроса и ответа, которые можно сразу добавить в FAQ.</p>
-          <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
-            <input type="text" id="aiTopic" placeholder="Например: цены, бронирование, работа моделей..." maxlength="200"
-              style="flex:1;min-width:200px;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:10px 12px;font-size:0.85rem;font-family:inherit"
-              onkeydown="if(event.key==='Enter')generateFaqAi()">
-            <button onclick="generateFaqAi()" id="aiFaqBtn" class="btn btn-md btn-primary">🤖 AI Генерация</button>
+        <nav class="sidebar-nav">
+          <div class="nav-section-label">Главная</div>
+          <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+          <div class="nav-section-label">Бизнес</div>
+          <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки</a>
+          <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+          <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+          <a href="/admin/faq.html" class="active"><span class="nav-icon">❓</span> FAQ</a>
+          <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+          <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+          <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
+          <div class="nav-section-label">AI</div>
+          <a href="/admin/social.html"><span class="nav-icon">📱</span> Соцсети</a>
+          <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+          <div class="nav-section-label">Настройки</div>
+          <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+          <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+          <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
+          <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+          <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+          <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <div class="sidebar-avatar sidebar-user-letter">A</div>
+            <div class="sidebar-user-info">
+              <strong class="sidebar-user-name">—</strong>
+              <span class="sidebar-user-role">—</span>
+            </div>
           </div>
-          <div id="aiGeneratedItems" style="margin-top:16px"></div>
+          <button class="btn-logout" data-action="logout">Выйти</button>
         </div>
-      </div>
+      </aside>
 
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header">
-          <div class="section-card-title">Список вопросов и ответов</div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-size:0.8rem;color:var(--text-muted)" id="faq-count">Загрузка...</span>
-            <button onclick="seedFaq()" class="btn btn-sm btn-ghost" title="Заполнить базовыми вопросами (только если FAQ пуст)">🌱 Seed</button>
+      <div class="main-content">
+        <header class="topbar">
+          <div class="topbar-title">❓ FAQ — Часто задаваемые вопросы</div>
+          <div class="topbar-right">
+            <button onclick="openCreateModal()" class="btn btn-md btn-primary">+ Добавить вопрос</button>
+          </div>
+        </header>
+
+        <div class="page-content">
+          <!-- AI FAQ Generation -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header">
+              <div class="section-card-title">🤖 AI Генерация FAQ</div>
+            </div>
+            <div class="section-card-body">
+              <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 14px">
+                Введите тему — AI создаст 3 вопроса и ответа, которые можно сразу добавить в FAQ.
+              </p>
+              <div style="display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap">
+                <input
+                  type="text"
+                  id="aiTopic"
+                  placeholder="Например: цены, бронирование, работа моделей..."
+                  maxlength="200"
+                  style="
+                    flex: 1;
+                    min-width: 200px;
+                    background: var(--bg2);
+                    border: 1px solid var(--border);
+                    color: var(--text);
+                    border-radius: 4px;
+                    padding: 10px 12px;
+                    font-size: 0.85rem;
+                    font-family: inherit;
+                  "
+                  onkeydown="if (event.key === 'Enter') generateFaqAi();"
+                />
+                <button onclick="generateFaqAi()" id="aiFaqBtn" class="btn btn-md btn-primary">🤖 AI Генерация</button>
+              </div>
+              <div id="aiGeneratedItems" style="margin-top: 16px"></div>
+            </div>
+          </div>
+
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header">
+              <div class="section-card-title">Список вопросов и ответов</div>
+              <div style="display: flex; align-items: center; gap: 10px">
+                <span style="font-size: 0.8rem; color: var(--text-muted)" id="faq-count">Загрузка...</span>
+                <button
+                  onclick="seedFaq()"
+                  class="btn btn-sm btn-ghost"
+                  title="Заполнить базовыми вопросами (только если FAQ пуст)"
+                >
+                  🌱 Seed
+                </button>
+              </div>
+            </div>
+            <div class="section-card-body">
+              <div class="filter-bar" id="category-filter">
+                <button class="filter-chip active" data-cat="" onclick="setFilter('')">Все</button>
+              </div>
+              <div id="faq-list">
+                <div style="padding: 24px; color: var(--text-dim)">Загрузка...</div>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="section-card-body">
-          <div class="filter-bar" id="category-filter">
-            <button class="filter-chip active" data-cat="" onclick="setFilter('')">Все</button>
+      </div>
+    </div>
+
+    <!-- Create/Edit modal -->
+    <div class="modal-overlay" id="faqModal">
+      <div class="modal-box">
+        <div class="modal-title" id="modalTitle">Добавить вопрос</div>
+        <input type="hidden" id="editId" value="" />
+
+        <div class="form-group">
+          <label>Вопрос *</label>
+          <input type="text" id="faqQuestion" placeholder="Введите вопрос..." maxlength="500" />
+        </div>
+
+        <div class="form-group">
+          <label>Ответ *</label>
+          <textarea id="faqAnswer" placeholder="Введите развёрнутый ответ..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Категория</label>
+          <select id="faqCategory">
+            <option value="general">Общее</option>
+            <option value="booking">Бронирование</option>
+            <option value="pricing">Цены</option>
+            <option value="catalog">Каталог</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+          <div>
+            <label>Порядок (меньше = выше)</label>
+            <input type="number" id="faqOrder" value="0" min="0" max="999" />
           </div>
-          <div id="faq-list">
-            <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
+          <div>
+            <label>Статус</label>
+            <select id="faqActive">
+              <option value="1">Активен</option>
+              <option value="0">Скрыт</option>
+            </select>
           </div>
         </div>
-      </div>
 
-    </div>
-  </div>
-</div>
-
-<!-- Create/Edit modal -->
-<div class="modal-overlay" id="faqModal">
-  <div class="modal-box">
-    <div class="modal-title" id="modalTitle">Добавить вопрос</div>
-    <input type="hidden" id="editId" value="">
-
-    <div class="form-group">
-      <label>Вопрос *</label>
-      <input type="text" id="faqQuestion" placeholder="Введите вопрос..." maxlength="500">
-    </div>
-
-    <div class="form-group">
-      <label>Ответ *</label>
-      <textarea id="faqAnswer" placeholder="Введите развёрнутый ответ..."></textarea>
-    </div>
-
-    <div class="form-group">
-      <label>Категория</label>
-      <select id="faqCategory">
-        <option value="general">Общее</option>
-        <option value="booking">Бронирование</option>
-        <option value="pricing">Цены</option>
-        <option value="catalog">Каталог</option>
-      </select>
-    </div>
-
-    <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div>
-        <label>Порядок (меньше = выше)</label>
-        <input type="number" id="faqOrder" value="0" min="0" max="999">
-      </div>
-      <div>
-        <label>Статус</label>
-        <select id="faqActive">
-          <option value="1">Активен</option>
-          <option value="0">Скрыт</option>
-        </select>
+        <div class="modal-actions">
+          <button class="btn btn-md btn-ghost" onclick="closeModal()">Отмена</button>
+          <button class="btn btn-md btn-primary" onclick="saveFaq()">Сохранить</button>
+        </div>
       </div>
     </div>
 
-    <div class="modal-actions">
-      <button class="btn btn-md btn-ghost" onclick="closeModal()">Отмена</button>
-      <button class="btn btn-md btn-primary" onclick="saveFaq()">Сохранить</button>
-    </div>
-  </div>
-</div>
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/admin.js"></script>
+    <script>
+      let faqItems = [];
+      let activeFilter = '';
 
-<div class="toast-container" id="toastContainer"></div>
-<script src="/js/admin.js"></script>
-<script>
-let faqItems = [];
-let activeFilter = '';
+      const CAT_LABELS = {
+        general: 'Общее',
+        booking: 'Бронирование',
+        pricing: 'Цены',
+        catalog: 'Каталог',
+      };
 
-const CAT_LABELS = {
-  general: 'Общее',
-  booking: 'Бронирование',
-  pricing: 'Цены',
-  catalog: 'Каталог',
-};
+      function catClass(cat) {
+        const map = { general: 'cat-general', booking: 'cat-booking', pricing: 'cat-pricing', catalog: 'cat-catalog' };
+        return map[cat] || 'cat-general';
+      }
 
-function catClass(cat) {
-  const map = { general: 'cat-general', booking: 'cat-booking', pricing: 'cat-pricing', catalog: 'cat-catalog' };
-  return map[cat] || 'cat-general';
-}
+      function catLabel(cat) {
+        return CAT_LABELS[cat] || cat || 'Общее';
+      }
 
-function catLabel(cat) {
-  return CAT_LABELS[cat] || cat || 'Общее';
-}
+      async function loadFaq() {
+        try {
+          faqItems = (await _admin.apiFetch('/admin/faq')) || [];
+          renderCategories();
+          renderFaq();
+        } catch (e) {
+          _admin.toast('Ошибка загрузки: ' + e.message, 'error');
+          document.getElementById('faq-list').innerHTML =
+            '<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки</div>';
+        }
+      }
 
-async function loadFaq() {
-  try {
-    faqItems = await _admin.apiFetch('/admin/faq') || [];
-    renderCategories();
-    renderFaq();
-  } catch (e) {
-    _admin.toast('Ошибка загрузки: ' + e.message, 'error');
-    document.getElementById('faq-list').innerHTML = '<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки</div>';
-  }
-}
+      function renderCategories() {
+        const bar = document.getElementById('category-filter');
+        const cats = [...new Set(faqItems.map(f => f.category || 'general'))].sort();
+        bar.innerHTML =
+          `<button class="filter-chip ${activeFilter === '' ? 'active' : ''}" data-cat="" onclick="setFilter('')">Все (${faqItems.length})</button>` +
+          cats
+            .map(c => {
+              const cnt = faqItems.filter(f => (f.category || 'general') === c).length;
+              return `<button class="filter-chip ${activeFilter === c ? 'active' : ''}" data-cat="${c}" onclick="setFilter('${c}')">${catLabel(c)} (${cnt})</button>`;
+            })
+            .join('');
+      }
 
-function renderCategories() {
-  const bar = document.getElementById('category-filter');
-  const cats = [...new Set(faqItems.map(f => f.category || 'general'))].sort();
-  bar.innerHTML = `<button class="filter-chip ${activeFilter === '' ? 'active' : ''}" data-cat="" onclick="setFilter('')">Все (${faqItems.length})</button>` +
-    cats.map(c => {
-      const cnt = faqItems.filter(f => (f.category || 'general') === c).length;
-      return `<button class="filter-chip ${activeFilter === c ? 'active' : ''}" data-cat="${c}" onclick="setFilter('${c}')">${catLabel(c)} (${cnt})</button>`;
-    }).join('');
-}
+      function setFilter(cat) {
+        activeFilter = cat;
+        renderCategories();
+        renderFaq();
+      }
 
-function setFilter(cat) {
-  activeFilter = cat;
-  renderCategories();
-  renderFaq();
-}
+      function renderFaq() {
+        const container = document.getElementById('faq-list');
+        const filtered = activeFilter ? faqItems.filter(f => (f.category || 'general') === activeFilter) : faqItems;
+        document.getElementById('faq-count').textContent = `${faqItems.length} вопросов`;
 
-function renderFaq() {
-  const container = document.getElementById('faq-list');
-  const filtered = activeFilter ? faqItems.filter(f => (f.category || 'general') === activeFilter) : faqItems;
-  document.getElementById('faq-count').textContent = `${faqItems.length} вопросов`;
-
-  if (!filtered.length) {
-    container.innerHTML = `<div class="empty-state">
+        if (!filtered.length) {
+          container.innerHTML = `<div class="empty-state">
       <div class="icon">❓</div>
       <div>${faqItems.length ? 'Нет вопросов в этой категории' : 'Вопросов пока нет'}</div>
       <div style="margin-top:16px">
         <button onclick="openCreateModal()" class="btn btn-md btn-primary">Добавить первый вопрос</button>
       </div>
     </div>`;
-    return;
-  }
+          return;
+        }
 
-  container.innerHTML = filtered.map(item => {
-    const cat = item.category || 'general';
-    return `
+        container.innerHTML = filtered
+          .map(item => {
+            const cat = item.category || 'general';
+            return `
     <div class="faq-item ${item.active ? '' : 'inactive'}" data-id="${item.id}">
       <div class="faq-question">${_admin.escapeHtml(item.question)}</div>
       <div class="faq-answer">${_admin.escapeHtml(item.answer || '').replace(/\n/g, '<br>')}</div>
@@ -305,198 +425,216 @@ function renderFaq() {
         </div>
       </div>
     </div>`;
-  }).join('');
-}
-
-function openCreateModal() {
-  document.getElementById('modalTitle').textContent = 'Добавить вопрос';
-  document.getElementById('editId').value = '';
-  document.getElementById('faqQuestion').value = '';
-  document.getElementById('faqAnswer').value = '';
-  document.getElementById('faqCategory').value = activeFilter || 'general';
-  document.getElementById('faqOrder').value = '0';
-  document.getElementById('faqActive').value = '1';
-  document.getElementById('faqModal').classList.add('open');
-  setTimeout(() => document.getElementById('faqQuestion').focus(), 100);
-}
-
-function openEditModal(id) {
-  const item = faqItems.find(f => f.id === id);
-  if (!item) return;
-  document.getElementById('modalTitle').textContent = 'Редактировать вопрос';
-  document.getElementById('editId').value = id;
-  document.getElementById('faqQuestion').value = item.question || '';
-  document.getElementById('faqAnswer').value = item.answer || '';
-  document.getElementById('faqCategory').value = item.category || 'general';
-  document.getElementById('faqOrder').value = item.sort_order ?? 0;
-  document.getElementById('faqActive').value = item.active ? '1' : '0';
-  document.getElementById('faqModal').classList.add('open');
-  setTimeout(() => document.getElementById('faqQuestion').focus(), 100);
-}
-
-function closeModal() {
-  document.getElementById('faqModal').classList.remove('open');
-}
-
-async function saveFaq() {
-  const id = document.getElementById('editId').value;
-  const question = document.getElementById('faqQuestion').value.trim();
-  const answer = document.getElementById('faqAnswer').value.trim();
-  const category = document.getElementById('faqCategory').value || 'general';
-  const sort_order = parseInt(document.getElementById('faqOrder').value) || 0;
-  const active = parseInt(document.getElementById('faqActive').value);
-
-  if (!question || !answer) {
-    _admin.toast('Заполните вопрос и ответ', 'warning');
-    return;
-  }
-
-  try {
-    if (id) {
-      await _admin.apiFetch(`/admin/faq/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ question, answer, category, sort_order, active })
-      });
-      _admin.toast('Вопрос обновлён', 'success');
-    } else {
-      await _admin.apiFetch('/admin/faq', {
-        method: 'POST',
-        body: JSON.stringify({ question, answer, category, sort_order })
-      });
-      _admin.toast('Вопрос добавлен', 'success');
-    }
-    closeModal();
-    loadFaq();
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-  }
-}
-
-async function toggleActive(id, active) {
-  try {
-    await _admin.apiFetch(`/admin/faq/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ active })
-    });
-    _admin.toast(active ? 'Вопрос опубликован' : 'Вопрос скрыт', 'success');
-    loadFaq();
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-  }
-}
-
-async function deleteFaq(id) {
-  _admin.adminConfirm(
-    'Удалить вопрос',
-    'Это действие необратимо. Вопрос будет удалён.',
-    async () => {
-      try {
-        await _admin.apiFetch(`/admin/faq/${id}`, { method: 'DELETE' });
-        _admin.toast('Вопрос удалён', 'success');
-        loadFaq();
-      } catch (e) {
-        _admin.toast('Ошибка: ' + e.message, 'error');
+          })
+          .join('');
       }
-    }
-  );
-}
 
-async function seedFaq() {
-  try {
-    const data = await _admin.apiFetch('/admin/faq/seed', { method: 'POST' });
-    if (data.seeded > 0) {
-      _admin.toast(`Добавлено ${data.seeded} базовых вопросов`, 'success');
+      function openCreateModal() {
+        document.getElementById('modalTitle').textContent = 'Добавить вопрос';
+        document.getElementById('editId').value = '';
+        document.getElementById('faqQuestion').value = '';
+        document.getElementById('faqAnswer').value = '';
+        document.getElementById('faqCategory').value = activeFilter || 'general';
+        document.getElementById('faqOrder').value = '0';
+        document.getElementById('faqActive').value = '1';
+        document.getElementById('faqModal').classList.add('open');
+        setTimeout(() => document.getElementById('faqQuestion').focus(), 100);
+      }
+
+      function openEditModal(id) {
+        const item = faqItems.find(f => f.id === id);
+        if (!item) return;
+        document.getElementById('modalTitle').textContent = 'Редактировать вопрос';
+        document.getElementById('editId').value = id;
+        document.getElementById('faqQuestion').value = item.question || '';
+        document.getElementById('faqAnswer').value = item.answer || '';
+        document.getElementById('faqCategory').value = item.category || 'general';
+        document.getElementById('faqOrder').value = item.sort_order ?? 0;
+        document.getElementById('faqActive').value = item.active ? '1' : '0';
+        document.getElementById('faqModal').classList.add('open');
+        setTimeout(() => document.getElementById('faqQuestion').focus(), 100);
+      }
+
+      function closeModal() {
+        document.getElementById('faqModal').classList.remove('open');
+      }
+
+      async function saveFaq() {
+        const id = document.getElementById('editId').value;
+        const question = document.getElementById('faqQuestion').value.trim();
+        const answer = document.getElementById('faqAnswer').value.trim();
+        const category = document.getElementById('faqCategory').value || 'general';
+        const sort_order = parseInt(document.getElementById('faqOrder').value) || 0;
+        const active = parseInt(document.getElementById('faqActive').value);
+
+        if (!question || !answer) {
+          _admin.toast('Заполните вопрос и ответ', 'warning');
+          return;
+        }
+
+        try {
+          if (id) {
+            await _admin.apiFetch(`/admin/faq/${id}`, {
+              method: 'PUT',
+              body: JSON.stringify({ question, answer, category, sort_order, active }),
+            });
+            _admin.toast('Вопрос обновлён', 'success');
+          } else {
+            await _admin.apiFetch('/admin/faq', {
+              method: 'POST',
+              body: JSON.stringify({ question, answer, category, sort_order }),
+            });
+            _admin.toast('Вопрос добавлен', 'success');
+          }
+          closeModal();
+          loadFaq();
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
+
+      async function toggleActive(id, active) {
+        try {
+          await _admin.apiFetch(`/admin/faq/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ active }),
+          });
+          _admin.toast(active ? 'Вопрос опубликован' : 'Вопрос скрыт', 'success');
+          loadFaq();
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
+
+      async function deleteFaq(id) {
+        _admin.adminConfirm('Удалить вопрос', 'Это действие необратимо. Вопрос будет удалён.', async () => {
+          try {
+            await _admin.apiFetch(`/admin/faq/${id}`, { method: 'DELETE' });
+            _admin.toast('Вопрос удалён', 'success');
+            loadFaq();
+          } catch (e) {
+            _admin.toast('Ошибка: ' + e.message, 'error');
+          }
+        });
+      }
+
+      async function seedFaq() {
+        try {
+          const data = await _admin.apiFetch('/admin/faq/seed', { method: 'POST' });
+          if (data.seeded > 0) {
+            _admin.toast(`Добавлено ${data.seeded} базовых вопросов`, 'success');
+            loadFaq();
+          } else {
+            _admin.toast(data.message || 'FAQ уже заполнен', 'info');
+          }
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
+
+      // Close modal on overlay click
+      document.getElementById('faqModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('faqModal')) closeModal();
+      });
+
+      // Keyboard: Enter in question field → focus answer
+      document.getElementById('faqQuestion').addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          document.getElementById('faqAnswer').focus();
+        }
+      });
+
+      // Keyboard: Escape to close modal
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeModal();
+      });
+
       loadFaq();
-    } else {
-      _admin.toast(data.message || 'FAQ уже заполнен', 'info');
-    }
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-  }
-}
 
-// Close modal on overlay click
-document.getElementById('faqModal').addEventListener('click', e => {
-  if (e.target === document.getElementById('faqModal')) closeModal();
-});
+      // ─── AI FAQ Generation ────────────────────────────────────────────────────────
+      async function generateFaqAi() {
+        const topic = document.getElementById('aiTopic').value.trim();
+        if (!topic) {
+          _admin.toast('Введите тему для генерации', 'warning');
+          return;
+        }
 
-// Keyboard: Enter in question field → focus answer
-document.getElementById('faqQuestion').addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('faqAnswer').focus(); }
-});
+        const btn = document.getElementById('aiFaqBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Генерирую...';
+        document.getElementById('aiGeneratedItems').innerHTML =
+          '<p style="color:var(--text-muted);font-size:0.85rem">AI создаёт вопросы и ответы...</p>';
 
-// Keyboard: Escape to close modal
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeModal();
-});
+        try {
+          const data = await _admin.apiFetch('/admin/faq/generate', {
+            method: 'POST',
+            body: JSON.stringify({ topic }),
+          });
 
-loadFaq();
+          if (!data.ok) throw new Error(data.error || 'Ошибка AI');
 
-// ─── AI FAQ Generation ────────────────────────────────────────────────────────
-async function generateFaqAi() {
-  const topic = document.getElementById('aiTopic').value.trim();
-  if (!topic) { _admin.toast('Введите тему для генерации', 'warning'); return; }
+          const items = data.items || [];
+          const container = document.getElementById('aiGeneratedItems');
 
-  const btn = document.getElementById('aiFaqBtn');
-  btn.disabled = true;
-  btn.textContent = '⏳ Генерирую...';
-  document.getElementById('aiGeneratedItems').innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem">AI создаёт вопросы и ответы...</p>';
+          if (!items.length) {
+            container.innerHTML =
+              '<p style="color:var(--text-muted);font-size:0.85rem">AI не вернул результатов. Попробуйте другую тему.</p>';
+            return;
+          }
 
-  try {
-    const data = await _admin.apiFetch('/admin/faq/generate', {
-      method: 'POST',
-      body: JSON.stringify({ topic })
-    });
-
-    if (!data.ok) throw new Error(data.error || 'Ошибка AI');
-
-    const items = data.items || [];
-    const container = document.getElementById('aiGeneratedItems');
-
-    if (!items.length) {
-      container.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem">AI не вернул результатов. Попробуйте другую тему.</p>';
-      return;
-    }
-
-    container.innerHTML = items.map((item, i) => `
+          container.innerHTML = items
+            .map(
+              (item, i) => `
       <div id="ai-item-${i}" style="background:var(--bg2);border:1px solid rgba(201,169,110,0.2);border-radius:6px;padding:16px;margin-bottom:10px">
         <div style="font-weight:600;color:var(--text);font-size:0.9rem;margin-bottom:8px">${_admin.escapeHtml(item.question)}</div>
         <div style="font-size:0.82rem;color:var(--text-muted);line-height:1.6;margin-bottom:12px">${_admin.escapeHtml(item.answer || '').replace(/\n/g, '<br>')}</div>
         <button class="btn btn-sm btn-primary" onclick="addAiFaqItem(${i})" id="ai-add-btn-${i}">+ Добавить в FAQ</button>
-      </div>`).join('');
+      </div>`
+            )
+            .join('');
 
-    // Store items for adding
-    window._aiFaqItems = items;
+          // Store items for adding
+          window._aiFaqItems = items;
+        } catch (e) {
+          document.getElementById('aiGeneratedItems').innerHTML =
+            `<p style="color:#e74c3c;font-size:0.85rem">Ошибка: ${e.message}</p>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '🤖 AI Генерация';
+        }
+      }
 
-  } catch (e) {
-    document.getElementById('aiGeneratedItems').innerHTML = `<p style="color:#e74c3c;font-size:0.85rem">Ошибка: ${e.message}</p>`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🤖 AI Генерация';
-  }
-}
+      async function addAiFaqItem(index) {
+        const items = window._aiFaqItems || [];
+        const item = items[index];
+        if (!item) return;
 
-async function addAiFaqItem(index) {
-  const items = window._aiFaqItems || [];
-  const item = items[index];
-  if (!item) return;
+        const addBtn = document.getElementById(`ai-add-btn-${index}`);
+        if (addBtn) {
+          addBtn.disabled = true;
+          addBtn.textContent = 'Добавляю...';
+        }
 
-  const addBtn = document.getElementById(`ai-add-btn-${index}`);
-  if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Добавляю...'; }
-
-  try {
-    await _admin.apiFetch('/admin/faq', {
-      method: 'POST',
-      body: JSON.stringify({ question: item.question, answer: item.answer, sort_order: 0 })
-    });
-    _admin.toast('Вопрос добавлен в FAQ', 'success');
-    if (addBtn) { addBtn.textContent = '✅ Добавлено'; addBtn.style.background = 'var(--success,#27ae60)'; }
-    loadFaq();
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-    if (addBtn) { addBtn.disabled = false; addBtn.textContent = '+ Добавить в FAQ'; }
-  }
-}
-</script>
-</body>
+        try {
+          await _admin.apiFetch('/admin/faq', {
+            method: 'POST',
+            body: JSON.stringify({ question: item.question, answer: item.answer, sort_order: 0 }),
+          });
+          _admin.toast('Вопрос добавлен в FAQ', 'success');
+          if (addBtn) {
+            addBtn.textContent = '✅ Добавлено';
+            addBtn.style.background = 'var(--success,#27ae60)';
+          }
+          loadFaq();
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+          if (addBtn) {
+            addBtn.disabled = false;
+            addBtn.textContent = '+ Добавить в FAQ';
+          }
+        }
+      }
+    </script>
+  </body>
 </html>

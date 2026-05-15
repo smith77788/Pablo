@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Соцсети — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      .post-card {
+        background: var(--bg1);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 18px;
+        margin-bottom: 12px;
+        transition: border-color 0.2s;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+      }
+      .post-card:hover {
+        border-color: rgba(201, 169, 110, 0.3);
+      }
+
+      .post-thumb {
+        width: 72px;
+        height: 72px;
+        border-radius: 6px;
+        object-fit: cover;
+        flex-shrink: 0;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.6rem;
+        color: var(--text-dim);
+      }
+      .post-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 6px;
+      }
+
+      .post-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .post-caption {
+        font-size: 0.85rem;
+        color: var(--text);
+        line-height: 1.5;
+        margin-bottom: 8px;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .post-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        font-size: 0.75rem;
+        color: var(--text-muted);
+      }
+      .post-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+      }
+      .badge-draft {
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--text-dim);
+      }
+      .badge-scheduled {
+        background: rgba(201, 169, 110, 0.15);
+        color: var(--gold);
+      }
+      .badge-published {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--success);
+      }
+      .badge-failed {
+        background: rgba(200, 50, 50, 0.15);
+        color: #e05555;
+      }
+      .badge-platform {
+        background: rgba(201, 169, 110, 0.1);
+        color: var(--gold);
+        border: 1px solid rgba(201, 169, 110, 0.2);
+        padding: 2px 8px;
+        border-radius: 20px;
+        font-size: 0.7rem;
+      }
+
+      .post-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .post-actions button {
+        padding: 5px 14px;
+        font-size: 0.75rem;
+        border-radius: 4px;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .post-actions button:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .post-actions button.btn-publish {
+        background: rgba(201, 169, 110, 0.15);
+        border-color: rgba(201, 169, 110, 0.4);
+        color: var(--gold);
+      }
+      .post-actions button.btn-publish:hover {
+        background: rgba(201, 169, 110, 0.25);
+      }
+      .post-actions button.btn-danger:hover {
+        border-color: #e05555;
+        color: #e05555;
+      }
+
+      .filter-tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 20px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0;
+      }
+      .filter-tab {
+        padding: 8px 18px;
+        font-size: 0.8rem;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+        cursor: pointer;
+        border: none;
+        background: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        transition: all 0.2s;
+      }
+      .filter-tab:hover {
+        color: var(--text);
+      }
+      .filter-tab.active {
+        color: var(--gold);
+        border-bottom-color: var(--gold);
+      }
+
+      .stats-row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 24px;
+      }
+      .stat-chip {
+        background: var(--bg1);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 20px;
+        min-width: 130px;
+        flex: 1;
+      }
+      .stat-chip .stat-val {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--gold);
+      }
+      .stat-chip .stat-lbl {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+
+      .create-form {
+        background: var(--bg1);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 22px;
+        margin-bottom: 28px;
+      }
+      .create-form h3 {
+        margin: 0 0 16px;
+        font-size: 1rem;
+        color: var(--text);
+      }
+      .form-row {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .form-row > * {
+        flex: 1;
+        min-width: 180px;
+      }
+      .form-row label {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-bottom: 5px;
+      }
+      .form-row input,
+      .form-row select,
+      .form-row textarea {
+        width: 100%;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 5px;
+        padding: 8px 12px;
+        font-size: 0.87rem;
+        font-family: inherit;
+        box-sizing: border-box;
+      }
+      .form-row textarea {
+        min-height: 80px;
+        resize: vertical;
+      }
+      .form-row input:focus,
+      .form-row select:focus,
+      .form-row textarea:focus {
+        outline: none;
+        border-color: var(--gold);
+      }
+      .hashtags-input {
+        font-size: 0.82rem;
+      }
+
+      .metrics-grid {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+      }
+      .metric-chip {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 2px 10px;
+        font-size: 0.72rem;
+        color: var(--text-muted);
+      }
+      .metric-chip span {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-muted);
+      }
+      .empty-state-icon {
+        font-size: 3rem;
+        margin-bottom: 12px;
+      }
+      .empty-state p {
+        font-size: 0.9rem;
+        line-height: 1.6;
+        max-width: 360px;
+        margin: 0 auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="admin-nav"></div>
+
+    <main class="admin-content" id="main-content">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">📱 Соцсети</h1>
+          <p class="page-subtitle">Управление контентом и публикациями в Instagram</p>
+        </div>
+        <button class="btn btn-primary" onclick="toggleCreateForm()" id="createBtn">+ Создать пост</button>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row" id="statsRow">
+        <div class="stat-chip">
+          <div class="stat-val" id="statTotal">—</div>
+          <div class="stat-lbl">Всего постов</div>
+        </div>
+        <div class="stat-chip">
+          <div class="stat-val" id="statPublished">—</div>
+          <div class="stat-lbl">Опубликовано</div>
+        </div>
+        <div class="stat-chip">
+          <div class="stat-val" id="statScheduled">—</div>
+          <div class="stat-lbl">Запланировано</div>
+        </div>
+        <div class="stat-chip">
+          <div class="stat-val" id="statDraft">—</div>
+          <div class="stat-lbl">Черновики</div>
+        </div>
+      </div>
+
+      <!-- Create form -->
+      <div class="create-form" id="createForm" style="display: none">
+        <h3>Создать пост / запланировать публикацию</h3>
+        <div class="form-row">
+          <div>
+            <label>Платформа</label>
+            <select id="cfPlatform">
+              <option value="instagram">Instagram</option>
+              <option value="telegram">Telegram-канал</option>
+              <option value="vk">VK</option>
+            </select>
+          </div>
+          <div>
+            <label>Тип контента</label>
+            <select id="cfType">
+              <option value="post">Пост</option>
+              <option value="story">История</option>
+              <option value="reel">Reels</option>
+              <option value="carousel">Карусель</option>
+            </select>
+          </div>
+          <div>
+            <label>Модель (опционально)</label>
+            <select id="cfModel">
+              <option value="">— без модели —</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div style="flex: 2">
+            <label>Текст публикации</label>
+            <textarea id="cfCaption" placeholder="Текст поста..."></textarea>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>URL медиа (фото/видео)</label>
+            <input type="url" id="cfMediaUrl" placeholder="https://..." />
+          </div>
+          <div>
+            <label>Хэштеги</label>
+            <input type="text" id="cfHashtags" class="hashtags-input" placeholder="#невеста #модель #agency" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Дата публикации (оставьте пустым = черновик)</label>
+            <input type="datetime-local" id="cfScheduledAt" />
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 4px">
+          <button class="btn btn-primary" onclick="createPost()">💾 Сохранить</button>
+          <button class="btn btn-secondary" onclick="toggleCreateForm()">Отмена</button>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-status="" onclick="setFilter(this, '')">Все</button>
+        <button class="filter-tab" data-status="draft" onclick="setFilter(this, 'draft')">Черновики</button>
+        <button class="filter-tab" data-status="scheduled" onclick="setFilter(this, 'scheduled')">
+          Запланированные
+        </button>
+        <button class="filter-tab" data-status="published" onclick="setFilter(this, 'published')">
+          Опубликованные
+        </button>
+        <button class="filter-tab" data-status="failed" onclick="setFilter(this, 'failed')">Ошибки</button>
+      </div>
+
+      <!-- Posts list -->
+      <div id="postsList">
+        <div class="empty-state">
+          <div class="empty-state-icon">📱</div>
+          <p>Загрузка...</p>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin-top: 16px" id="loadMoreWrap" hidden>
+        <button class="btn btn-secondary" onclick="loadMore()">Загрузить ещё</button>
+      </div>
+    </main>
+
+    <script src="/js/admin.js"></script>
+    <script>
+      let currentFilter = '';
+      let offset = 0;
+      const limit = 20;
+      let allPosts = [];
+
+      const statusLabel = { draft: 'Черновик', scheduled: 'Запланирован', published: 'Опубликован', failed: 'Ошибка' };
+      const statusClass = {
+        draft: 'badge-draft',
+        scheduled: 'badge-scheduled',
+        published: 'badge-published',
+        failed: 'badge-failed',
+      };
+
+      function setFilter(el, status) {
+        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        currentFilter = status;
+        offset = 0;
+        loadPosts(true);
+      }
+
+      async function loadPosts(reset = false) {
+        if (reset) {
+          allPosts = [];
+          offset = 0;
+        }
+        const token = localStorage.getItem('admin_token');
+        let url = `/api/admin/social/posts?limit=${limit}&offset=${offset}`;
+        if (currentFilter) url += `&status=${currentFilter}`;
+        try {
+          const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+          if (!r.ok) {
+            document.getElementById('postsList').innerHTML =
+              '<p style="color:var(--text-muted);text-align:center">Ошибка загрузки</p>';
+            return;
+          }
+          const data = await r.json();
+          const posts = data.posts || data || [];
+          if (reset) allPosts = posts;
+          else allPosts = allPosts.concat(posts);
+          offset += posts.length;
+          renderPosts();
+          document.getElementById('loadMoreWrap').hidden = posts.length < limit;
+        } catch (e) {
+          document.getElementById('postsList').innerHTML =
+            '<p style="color:var(--text-muted);text-align:center">Ошибка: ' + e.message + '</p>';
+        }
+      }
+
+      function renderPosts() {
+        const el = document.getElementById('postsList');
+        if (!allPosts.length) {
+          el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📭</div><p>Постов нет${currentFilter ? ' по выбранному фильтру' : ''}</p></div>`;
+          return;
+        }
+        el.innerHTML = allPosts
+          .map(p => {
+            let metricsHtml = '';
+            try {
+              const m = typeof p.metrics === 'string' ? JSON.parse(p.metrics || '{}') : p.metrics || {};
+              const chips = [];
+              if (m.likes) chips.push(`❤️ <span>${m.likes}</span>`);
+              if (m.comments) chips.push(`💬 <span>${m.comments}</span>`);
+              if (m.reach) chips.push(`👁 <span>${m.reach}</span>`);
+              if (m.impressions) chips.push(`📊 <span>${m.impressions}</span>`);
+              if (chips.length)
+                metricsHtml = `<div class="metrics-grid">${chips.map(c => `<div class="metric-chip">${c}</div>`).join('')}</div>`;
+            } catch {}
+
+            const hashtags = p.hashtags
+              ? `<span style="color:var(--gold);font-size:0.72rem">${p.hashtags.split(/\s+/).slice(0, 5).join(' ')}</span>`
+              : '';
+            const scheduled = p.scheduled_at ? `📅 ${new Date(p.scheduled_at).toLocaleString('ru')}` : '';
+            const published = p.published_at ? `✅ ${new Date(p.published_at).toLocaleString('ru')}` : '';
+            const modelName = p.model_name ? `💃 ${p.model_name}` : '';
+
+            const canPublish = p.status === 'draft' || p.status === 'scheduled';
+            const actionBtns = `
+        ${canPublish ? `<button class="btn-publish" onclick="publishPost(${p.id})">📤 Опубликовать</button>` : ''}
+        <button onclick="copyCaption(${p.id})">📋 Копировать</button>
+        <button class="btn-danger" onclick="deletePost(${p.id})">🗑 Удалить</button>
+      `;
+
+            const thumbHtml = p.media_url
+              ? `<div class="post-thumb"><img src="${p.media_url}" onerror="this.parentElement.innerHTML='📸'" alt="" /></div>`
+              : `<div class="post-thumb">📸</div>`;
+
+            return `<div class="post-card" id="post-${p.id}">
+        ${thumbHtml}
+        <div class="post-body">
+          <div class="post-caption">${escapeHtml(p.caption || '')}</div>
+          ${hashtags ? `<div style="margin-bottom:6px">${hashtags}</div>` : ''}
+          <div class="post-meta">
+            <span class="badge-platform">${p.platform || 'instagram'}</span>
+            <span class="post-badge ${statusClass[p.status] || 'badge-draft'}">${statusLabel[p.status] || p.status}</span>
+            ${scheduled ? `<span>${scheduled}</span>` : ''}
+            ${published ? `<span>${published}</span>` : ''}
+            ${modelName ? `<span>${modelName}</span>` : ''}
+            <span style="color:var(--text-dim)">${new Date(p.created_at).toLocaleDateString('ru')}</span>
+          </div>
+          ${metricsHtml}
+        </div>
+        <div class="post-actions">${actionBtns}</div>
+      </div>`;
+          })
+          .join('');
+      }
+
+      function loadMore() {
+        loadPosts(false);
+      }
+
+      async function loadStats() {
+        const token = localStorage.getItem('admin_token');
+        try {
+          const r = await fetch('/api/admin/social/posts?limit=1000', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await r.json();
+          const posts = data.posts || data || [];
+          document.getElementById('statTotal').textContent = posts.length;
+          document.getElementById('statPublished').textContent = posts.filter(p => p.status === 'published').length;
+          document.getElementById('statScheduled').textContent = posts.filter(p => p.status === 'scheduled').length;
+          document.getElementById('statDraft').textContent = posts.filter(p => p.status === 'draft').length;
+        } catch {}
+      }
+
+      async function loadModels() {
+        const token = localStorage.getItem('admin_token');
+        try {
+          const r = await fetch('/api/admin/models?limit=100', { headers: { Authorization: `Bearer ${token}` } });
+          const data = await r.json();
+          const models = data.models || data || [];
+          const sel = document.getElementById('cfModel');
+          models.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.id;
+            opt.textContent = m.name;
+            sel.appendChild(opt);
+          });
+        } catch {}
+      }
+
+      function toggleCreateForm() {
+        const f = document.getElementById('createForm');
+        const btn = document.getElementById('createBtn');
+        const visible = f.style.display !== 'none';
+        f.style.display = visible ? 'none' : 'block';
+        btn.textContent = visible ? '+ Создать пост' : '✕ Закрыть';
+      }
+
+      async function createPost() {
+        const token = localStorage.getItem('admin_token');
+        const body = {
+          platform: document.getElementById('cfPlatform').value,
+          content_type: document.getElementById('cfType').value,
+          caption: document.getElementById('cfCaption').value,
+          media_url: document.getElementById('cfMediaUrl').value || null,
+          hashtags: document.getElementById('cfHashtags').value || null,
+          scheduled_at: document.getElementById('cfScheduledAt').value || null,
+          model_id: document.getElementById('cfModel').value || null,
+          status: document.getElementById('cfScheduledAt').value ? 'scheduled' : 'draft',
+        };
+        if (!body.caption) {
+          alert('Введите текст поста');
+          return;
+        }
+        try {
+          const r = await fetch('/api/admin/social/posts', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!r.ok) throw new Error('Ошибка сервера');
+          toggleCreateForm();
+          document.getElementById('cfCaption').value = '';
+          document.getElementById('cfMediaUrl').value = '';
+          document.getElementById('cfHashtags').value = '';
+          document.getElementById('cfScheduledAt').value = '';
+          loadPosts(true);
+          loadStats();
+        } catch (e) {
+          alert('Ошибка: ' + e.message);
+        }
+      }
+
+      async function publishPost(id) {
+        if (!confirm('Опубликовать пост сейчас?')) return;
+        const token = localStorage.getItem('admin_token');
+        try {
+          const r = await fetch(`/api/admin/social/posts/${id}/status`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'published', published_at: new Date().toISOString() }),
+          });
+          if (!r.ok) throw new Error('Ошибка');
+          loadPosts(true);
+          loadStats();
+        } catch (e) {
+          alert('Ошибка: ' + e.message);
+        }
+      }
+
+      function copyCaption(id) {
+        const post = allPosts.find(p => p.id === id);
+        if (!post) return;
+        const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n');
+        navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            const btn = document.querySelector(`#post-${id} .post-actions button:nth-child(2)`);
+            if (btn) {
+              const prev = btn.textContent;
+              btn.textContent = '✅ Скопировано';
+              setTimeout(() => (btn.textContent = prev), 2000);
+            }
+          })
+          .catch(() => alert(text));
+      }
+
+      async function deletePost(id) {
+        if (!confirm('Удалить пост?')) return;
+        const token = localStorage.getItem('admin_token');
+        try {
+          const r = await fetch(`/api/admin/social/posts/${id}/status`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'deleted' }),
+          });
+          if (r.ok) {
+            allPosts = allPosts.filter(p => p.id !== id);
+            renderPosts();
+            loadStats();
+          } else throw new Error('Ошибка');
+        } catch (e) {
+          alert('Ошибка: ' + e.message);
+        }
+      }
+
+      function escapeHtml(t) {
+        return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        loadPosts(true);
+        loadStats();
+        loadModels();
+      });
+    </script>
+  </body>
+</html>

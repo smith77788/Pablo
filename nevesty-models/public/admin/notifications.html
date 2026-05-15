@@ -1,282 +1,324 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Уведомления — Nevesty Models Admin</title>
-  <meta name="robots" content="noindex, nofollow">
-  <link rel="stylesheet" href="/css/admin.css" />
-  <style>
-    .notif-card {
-      background: var(--bg1);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 16px 20px;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: flex-start;
-      gap: 14px;
-      cursor: pointer;
-      transition: border-color 0.2s, background 0.15s;
-      text-decoration: none;
-      color: inherit;
-    }
-    .notif-card:hover { border-color: rgba(201,169,110,0.4); background: var(--bg2); }
-    .notif-card.unread { border-left: 3px solid var(--gold); }
-    .notif-card.read { opacity: 0.72; }
-
-    .notif-icon {
-      font-size: 1.4rem;
-      flex-shrink: 0;
-      width: 36px;
-      height: 36px;
-      background: rgba(201,169,110,0.1);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .notif-body { flex: 1; min-width: 0; }
-    .notif-title {
-      font-weight: 600;
-      font-size: 0.88rem;
-      color: var(--text);
-      margin-bottom: 3px;
-    }
-    .notif-text {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .notif-meta {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
-      flex-direction: column;
-      align-items: flex-end;
-    }
-    .notif-time {
-      font-size: 0.72rem;
-      color: var(--text-dim);
-      white-space: nowrap;
-    }
-    .badge-new {
-      display: inline-block;
-      background: var(--gold);
-      color: #000;
-      font-size: 0.62rem;
-      font-weight: 800;
-      padding: 2px 7px;
-      border-radius: 10px;
-      letter-spacing: 0.5px;
-    }
-
-    .filter-tabs {
-      display: flex;
-      gap: 4px;
-      margin-bottom: 16px;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0;
-    }
-    .filter-tab {
-      padding: 8px 18px;
-      font-size: 0.8rem;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
-      cursor: pointer;
-      border: none;
-      background: none;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
-      transition: all 0.2s;
-    }
-    .filter-tab.active { color: var(--gold); border-bottom-color: var(--gold); }
-    .filter-tab:hover:not(.active) { color: var(--text); }
-    .tab-count {
-      display: inline-block;
-      background: rgba(201,169,110,0.15);
-      color: var(--gold);
-      border-radius: 10px;
-      padding: 0 6px;
-      font-size: 0.68rem;
-      font-weight: 700;
-      margin-left: 4px;
-      min-width: 18px;
-      text-align: center;
-    }
-    .tab-count.count-zero { background: rgba(255,255,255,0.06); color: var(--text-dim); }
-
-    .page-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 20px;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-    .page-header h2 {
-      font-size: 1.1rem;
-      font-weight: 700;
-      color: var(--text);
-      margin: 0;
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 60px 20px;
-      color: var(--text-dim);
-      font-size: 0.9rem;
-    }
-    .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
-
-    @media (max-width: 640px) {
-      .filter-tab { padding: 8px 10px; font-size: 0.75rem; }
-      .notif-card { padding: 12px 14px; gap: 10px; }
-      .notif-icon { width: 30px; height: 30px; font-size: 1.1rem; }
-    }
-  </style>
-</head>
-<body>
-
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-text">Nevesty Models</div>
-      <div class="sidebar-logo-sub">Панель управления</div>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Главная</div>
-      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
-      <div class="nav-section-label">Бизнес</div>
-      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
-      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
-      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
-      <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
-      <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
-      <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
-      <a href="/admin/notifications.html" class="active"><span class="nav-icon">🔔</span> Уведомления <span class="nav-badge" id="notifNavBadge" style="display:none">0</span></a>
-      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
-      <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
-      <div class="nav-section-label">AI</div>
-      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
-      <div class="nav-section-label">Настройки</div>
-      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
-      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
-      <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
-      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-user">
-        <div class="sidebar-avatar sidebar-user-letter">A</div>
-        <div class="sidebar-user-info">
-          <strong class="sidebar-user-name">—</strong>
-          <span class="sidebar-user-role">—</span>
-        </div>
-      </div>
-      <button class="btn btn-sm btn-ghost" onclick="_admin.logout()" style="width:100%;margin-top:8px">Выйти</button>
-    </div>
-  </aside>
-
-  <div class="main-wrap">
-    <header class="topbar">
-      <button class="topbar-burger" id="burgerBtn" aria-label="Меню">☰</button>
-      <div class="topbar-title">🔔 Уведомления</div>
-      <div class="topbar-actions">
-        <button class="btn btn-sm btn-ghost" onclick="loadNotifications()" title="Обновить">↻</button>
-      </div>
-    </header>
-
-    <div class="content-area">
-
-      <div class="page-header">
-        <h2>🔔 Уведомления</h2>
-        <button class="btn btn-sm btn-primary" onclick="markAllRead()" id="markAllBtn">
-          ✓ Отметить все прочитанными
-        </button>
-      </div>
-
-      <!-- Filter tabs -->
-      <div class="filter-tabs">
-        <button class="filter-tab active" data-filter="all" onclick="setFilter('all', this)">
-          📋 Все <span class="tab-count" id="tab-count-all">—</span>
-        </button>
-        <button class="filter-tab" data-filter="unread" onclick="setFilter('unread', this)">
-          🔔 Непрочитанные <span class="tab-count" id="tab-count-unread">—</span>
-        </button>
-        <button class="filter-tab" data-filter="read" onclick="setFilter('read', this)">
-          ✓ Прочитанные <span class="tab-count" id="tab-count-read">—</span>
-        </button>
-      </div>
-
-      <!-- Notifications list -->
-      <div id="notifList">
-        <div class="empty-state">
-          <div class="icon">⏳</div>
-          Загрузка уведомлений...
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <script src="/js/admin.js"></script>
-  <script>
-    let currentFilter = 'all';
-    let _allNotifications = [];
-
-    const TYPE_ICONS = {
-      new_order: '🔔',
-      pending_review: '⭐',
-      unread_message: '💬',
-      system: '📢',
-    };
-
-    function setFilter(f, el) {
-      currentFilter = f;
-      document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
-      el.classList.add('active');
-      renderList();
-    }
-
-    function timeAgo(dateStr) {
-      if (!dateStr) return '—';
-      try {
-        const diff = Date.now() - new Date(dateStr).getTime();
-        const mins = Math.floor(diff / 60000);
-        const hours = Math.floor(diff / 3600000);
-        const days = Math.floor(diff / 86400000);
-        if (mins < 1) return 'только что';
-        if (mins < 60) return `${mins} мин. назад`;
-        if (hours < 24) return `${hours} ч. назад`;
-        if (days === 1) return 'вчера';
-        if (days < 7) return `${days} дн. назад`;
-        return _admin.formatDate(dateStr);
-      } catch { return '—'; }
-    }
-
-    function renderList() {
-      const list = document.getElementById('notifList');
-      let items = _allNotifications;
-
-      if (currentFilter === 'unread') items = _allNotifications.filter(n => !n.read);
-      else if (currentFilter === 'read') items = _allNotifications.filter(n => n.read);
-
-      if (items.length === 0) {
-        const msgs = {
-          all: 'Уведомлений нет',
-          unread: 'Нет непрочитанных уведомлений',
-          read: 'Нет прочитанных уведомлений',
-        };
-        list.innerHTML = `<div class="empty-state"><div class="icon">🔔</div>${msgs[currentFilter] || 'Нет уведомлений'}</div>`;
-        return;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Уведомления — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      .notif-card {
+        background: var(--bg1);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 16px 20px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        cursor: pointer;
+        transition:
+          border-color 0.2s,
+          background 0.15s;
+        text-decoration: none;
+        color: inherit;
+      }
+      .notif-card:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+        background: var(--bg2);
+      }
+      .notif-card.unread {
+        border-left: 3px solid var(--gold);
+      }
+      .notif-card.read {
+        opacity: 0.72;
       }
 
-      list.innerHTML = items.map(n => {
-        const icon = TYPE_ICONS[n.type] || '🔔';
-        const isUnread = !n.read;
-        return `
+      .notif-icon {
+        font-size: 1.4rem;
+        flex-shrink: 0;
+        width: 36px;
+        height: 36px;
+        background: rgba(201, 169, 110, 0.1);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .notif-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .notif-title {
+        font-weight: 600;
+        font-size: 0.88rem;
+        color: var(--text);
+        margin-bottom: 3px;
+      }
+      .notif-text {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .notif-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+        flex-direction: column;
+        align-items: flex-end;
+      }
+      .notif-time {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+        white-space: nowrap;
+      }
+      .badge-new {
+        display: inline-block;
+        background: var(--gold);
+        color: #000;
+        font-size: 0.62rem;
+        font-weight: 800;
+        padding: 2px 7px;
+        border-radius: 10px;
+        letter-spacing: 0.5px;
+      }
+
+      .filter-tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 16px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0;
+      }
+      .filter-tab {
+        padding: 8px 18px;
+        font-size: 0.8rem;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+        cursor: pointer;
+        border: none;
+        background: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        transition: all 0.2s;
+      }
+      .filter-tab.active {
+        color: var(--gold);
+        border-bottom-color: var(--gold);
+      }
+      .filter-tab:hover:not(.active) {
+        color: var(--text);
+      }
+      .tab-count {
+        display: inline-block;
+        background: rgba(201, 169, 110, 0.15);
+        color: var(--gold);
+        border-radius: 10px;
+        padding: 0 6px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        margin-left: 4px;
+        min-width: 18px;
+        text-align: center;
+      }
+      .tab-count.count-zero {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-dim);
+      }
+
+      .page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .page-header h2 {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text);
+        margin: 0;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-dim);
+        font-size: 0.9rem;
+      }
+      .empty-state .icon {
+        font-size: 2.5rem;
+        margin-bottom: 12px;
+      }
+
+      @media (max-width: 640px) {
+        .filter-tab {
+          padding: 8px 10px;
+          font-size: 0.75rem;
+        }
+        .notif-card {
+          padding: 12px 14px;
+          gap: 10px;
+        }
+        .notif-icon {
+          width: 30px;
+          height: 30px;
+          font-size: 1.1rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <div class="sidebar-logo-text">Nevesty Models</div>
+        <div class="sidebar-logo-sub">Панель управления</div>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="nav-section-label">Главная</div>
+        <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+        <div class="nav-section-label">Бизнес</div>
+        <a href="/admin/orders.html"
+          ><span class="nav-icon">📋</span> Заявки
+          <span class="nav-badge" id="newOrdersBadge" style="display: none">0</span></a
+        >
+        <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+        <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+        <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+        <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+        <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+        <a href="/admin/notifications.html" class="active"
+          ><span class="nav-icon">🔔</span> Уведомления
+          <span class="nav-badge" id="notifNavBadge" style="display: none">0</span></a
+        >
+        <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+        <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+        <div class="nav-section-label">AI</div>
+        <a href="/admin/social.html"><span class="nav-icon">📱</span> Соцсети</a>
+        <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+        <div class="nav-section-label">Настройки</div>
+        <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+        <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+        <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
+        <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-user">
+          <div class="sidebar-avatar sidebar-user-letter">A</div>
+          <div class="sidebar-user-info">
+            <strong class="sidebar-user-name">—</strong>
+            <span class="sidebar-user-role">—</span>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="_admin.logout()" style="width: 100%; margin-top: 8px">
+          Выйти
+        </button>
+      </div>
+    </aside>
+
+    <div class="main-wrap">
+      <header class="topbar">
+        <button class="topbar-burger" id="burgerBtn" aria-label="Меню">☰</button>
+        <div class="topbar-title">🔔 Уведомления</div>
+        <div class="topbar-actions">
+          <button class="btn btn-sm btn-ghost" onclick="loadNotifications()" title="Обновить">↻</button>
+        </div>
+      </header>
+
+      <div class="content-area">
+        <div class="page-header">
+          <h2>🔔 Уведомления</h2>
+          <button class="btn btn-sm btn-primary" onclick="markAllRead()" id="markAllBtn">
+            ✓ Отметить все прочитанными
+          </button>
+        </div>
+
+        <!-- Filter tabs -->
+        <div class="filter-tabs">
+          <button class="filter-tab active" data-filter="all" onclick="setFilter('all', this)">
+            📋 Все <span class="tab-count" id="tab-count-all">—</span>
+          </button>
+          <button class="filter-tab" data-filter="unread" onclick="setFilter('unread', this)">
+            🔔 Непрочитанные <span class="tab-count" id="tab-count-unread">—</span>
+          </button>
+          <button class="filter-tab" data-filter="read" onclick="setFilter('read', this)">
+            ✓ Прочитанные <span class="tab-count" id="tab-count-read">—</span>
+          </button>
+        </div>
+
+        <!-- Notifications list -->
+        <div id="notifList">
+          <div class="empty-state">
+            <div class="icon">⏳</div>
+            Загрузка уведомлений...
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/admin.js"></script>
+    <script>
+      let currentFilter = 'all';
+      let _allNotifications = [];
+
+      const TYPE_ICONS = {
+        new_order: '🔔',
+        pending_review: '⭐',
+        unread_message: '💬',
+        system: '📢',
+      };
+
+      function setFilter(f, el) {
+        currentFilter = f;
+        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        renderList();
+      }
+
+      function timeAgo(dateStr) {
+        if (!dateStr) return '—';
+        try {
+          const diff = Date.now() - new Date(dateStr).getTime();
+          const mins = Math.floor(diff / 60000);
+          const hours = Math.floor(diff / 3600000);
+          const days = Math.floor(diff / 86400000);
+          if (mins < 1) return 'только что';
+          if (mins < 60) return `${mins} мин. назад`;
+          if (hours < 24) return `${hours} ч. назад`;
+          if (days === 1) return 'вчера';
+          if (days < 7) return `${days} дн. назад`;
+          return _admin.formatDate(dateStr);
+        } catch {
+          return '—';
+        }
+      }
+
+      function renderList() {
+        const list = document.getElementById('notifList');
+        let items = _allNotifications;
+
+        if (currentFilter === 'unread') items = _allNotifications.filter(n => !n.read);
+        else if (currentFilter === 'read') items = _allNotifications.filter(n => n.read);
+
+        if (items.length === 0) {
+          const msgs = {
+            all: 'Уведомлений нет',
+            unread: 'Нет непрочитанных уведомлений',
+            read: 'Нет прочитанных уведомлений',
+          };
+          list.innerHTML = `<div class="empty-state"><div class="icon">🔔</div>${msgs[currentFilter] || 'Нет уведомлений'}</div>`;
+          return;
+        }
+
+        list.innerHTML = items
+          .map(n => {
+            const icon = TYPE_ICONS[n.type] || '🔔';
+            const isUnread = !n.read;
+            return `
           <a class="notif-card ${isUnread ? 'unread' : 'read'}"
              href="${_admin.escapeHtml(n.link || '#')}"
              onclick="markRead(event, '${_admin.escapeHtml(n.id)}', this)">
@@ -290,84 +332,89 @@
               ${isUnread ? '<span class="badge-new">NEW</span>' : ''}
             </div>
           </a>`;
-      }).join('');
-    }
-
-    function updateCounts() {
-      const total = _allNotifications.length;
-      const unread = _allNotifications.filter(n => !n.read).length;
-      const read = _allNotifications.filter(n => n.read).length;
-
-      setTabCount('tab-count-all', total);
-      setTabCount('tab-count-unread', unread);
-      setTabCount('tab-count-read', read);
-
-      // Update sidebar badge
-      const badge = document.getElementById('notifNavBadge');
-      if (badge) {
-        badge.textContent = unread > 9 ? '9+' : unread;
-        badge.style.display = unread > 0 ? '' : 'none';
+          })
+          .join('');
       }
 
-      // Toggle mark-all button
-      const btn = document.getElementById('markAllBtn');
-      if (btn) btn.disabled = unread === 0;
-    }
+      function updateCounts() {
+        const total = _allNotifications.length;
+        const unread = _allNotifications.filter(n => !n.read).length;
+        const read = _allNotifications.filter(n => n.read).length;
 
-    function setTabCount(id, n) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.textContent = n;
-      el.className = 'tab-count' + (n === 0 ? ' count-zero' : '');
-    }
+        setTabCount('tab-count-all', total);
+        setTabCount('tab-count-unread', unread);
+        setTabCount('tab-count-read', read);
 
-    async function loadNotifications() {
-      const list = document.getElementById('notifList');
-      list.innerHTML = '<div class="empty-state"><div class="icon">⏳</div>Загрузка...</div>';
-      try {
-        const data = await _admin.apiFetch('/admin/notifications?limit=50');
-        _allNotifications = data.notifications || [];
-        updateCounts();
-        renderList();
-      } catch (e) {
-        list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
-      }
-    }
-
-    async function markRead(event, id, cardEl) {
-      if (!id) return;
-      // Don't prevent default — let the link navigate
-      try {
-        await _admin.apiFetch(`/admin/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' });
-        const n = _allNotifications.find(x => x.id === id);
-        if (n) n.read = true;
-        updateCounts();
-        // Visually update card without full re-render
-        if (cardEl) {
-          cardEl.classList.remove('unread');
-          cardEl.classList.add('read');
-          const badge = cardEl.querySelector('.badge-new');
-          if (badge) badge.remove();
+        // Update sidebar badge
+        const badge = document.getElementById('notifNavBadge');
+        if (badge) {
+          badge.textContent = unread > 9 ? '9+' : unread;
+          badge.style.display = unread > 0 ? '' : 'none';
         }
-      } catch { /* ignore — navigation proceeds anyway */ }
-    }
 
-    async function markAllRead() {
-      try {
-        await _admin.apiFetch('/admin/notifications/read-all', { method: 'PATCH' });
-        _allNotifications.forEach(n => { n.read = true; });
-        updateCounts();
-        renderList();
-        _admin.toast('Все уведомления отмечены прочитанными', 'success');
-      } catch (e) {
-        _admin.toast('Ошибка: ' + e.message, 'error');
+        // Toggle mark-all button
+        const btn = document.getElementById('markAllBtn');
+        if (btn) btn.disabled = unread === 0;
       }
-    }
 
-    // Init
-    loadNotifications();
-    // Auto-refresh every 60 seconds
-    setInterval(loadNotifications, 60000);
-  </script>
-</body>
+      function setTabCount(id, n) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = n;
+        el.className = 'tab-count' + (n === 0 ? ' count-zero' : '');
+      }
+
+      async function loadNotifications() {
+        const list = document.getElementById('notifList');
+        list.innerHTML = '<div class="empty-state"><div class="icon">⏳</div>Загрузка...</div>';
+        try {
+          const data = await _admin.apiFetch('/admin/notifications?limit=50');
+          _allNotifications = data.notifications || [];
+          updateCounts();
+          renderList();
+        } catch (e) {
+          list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
+        }
+      }
+
+      async function markRead(event, id, cardEl) {
+        if (!id) return;
+        // Don't prevent default — let the link navigate
+        try {
+          await _admin.apiFetch(`/admin/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' });
+          const n = _allNotifications.find(x => x.id === id);
+          if (n) n.read = true;
+          updateCounts();
+          // Visually update card without full re-render
+          if (cardEl) {
+            cardEl.classList.remove('unread');
+            cardEl.classList.add('read');
+            const badge = cardEl.querySelector('.badge-new');
+            if (badge) badge.remove();
+          }
+        } catch {
+          /* ignore — navigation proceeds anyway */
+        }
+      }
+
+      async function markAllRead() {
+        try {
+          await _admin.apiFetch('/admin/notifications/read-all', { method: 'PATCH' });
+          _allNotifications.forEach(n => {
+            n.read = true;
+          });
+          updateCounts();
+          renderList();
+          _admin.toast('Все уведомления отмечены прочитанными', 'success');
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
+
+      // Init
+      loadNotifications();
+      // Auto-refresh every 60 seconds
+      setInterval(loadNotifications, 60000);
+    </script>
+  </body>
 </html>

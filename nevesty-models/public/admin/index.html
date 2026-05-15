@@ -1,811 +1,1440 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dashboard — Nevesty Models</title>
-  <meta name="robots" content="noindex, nofollow">
-  <link rel="stylesheet" href="/css/admin.css" />
-  <!-- Chart.js for stats visualization -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
-  <style>
-    /* ─── Status bar charts ─────────────────────────── */
-    .chart-bar-wrap { display:flex; flex-direction:column; gap:8px; }
-    .chart-bar-row { display:flex; align-items:center; gap:12px; font-size:0.8rem; }
-    .chart-bar-label { width:130px; color:var(--text-muted); flex-shrink:0; }
-    .chart-bar-track { flex:1; height:20px; background:var(--bg2); border-radius:2px; overflow:hidden; position:relative; }
-    .chart-bar-fill { height:100%; border-radius:2px; transition:width 0.6s ease; }
-    .chart-bar-count { width:36px; text-align:right; color:var(--text); font-weight:600; }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard — Nevesty Models</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <!-- Chart.js for stats visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
+    <style>
+      /* ─── Status bar charts ─────────────────────────── */
+      .chart-bar-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .chart-bar-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 0.8rem;
+      }
+      .chart-bar-label {
+        width: 130px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      .chart-bar-track {
+        flex: 1;
+        height: 20px;
+        background: var(--bg2);
+        border-radius: 2px;
+        overflow: hidden;
+        position: relative;
+      }
+      .chart-bar-fill {
+        height: 100%;
+        border-radius: 2px;
+        transition: width 0.6s ease;
+      }
+      .chart-bar-count {
+        width: 36px;
+        text-align: right;
+        color: var(--text);
+        font-weight: 600;
+      }
 
-    /* ─── Activity items ────────────────────────────── */
-    .activity-item { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--border); }
-    .activity-item:last-child { border-bottom:none; }
-    .activity-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-    .activity-text { font-size:0.82rem; color:var(--text-muted); flex:1; }
-    .activity-text strong { color:var(--text); }
-    .activity-time { font-size:0.72rem; color:var(--text-dim); }
+      /* ─── Activity items ────────────────────────────── */
+      .activity-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .activity-item:last-child {
+        border-bottom: none;
+      }
+      .activity-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .activity-text {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        flex: 1;
+      }
+      .activity-text strong {
+        color: var(--text);
+      }
+      .activity-time {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+      }
 
-    /* ─── KPI deltas ────────────────────────────────── */
-    .kpi-delta { font-size:0.7rem; color:var(--success); margin-top:4px; }
-    .kpi-delta.down { color:var(--error); }
+      /* ─── KPI deltas ────────────────────────────────── */
+      .kpi-delta {
+        font-size: 0.7rem;
+        color: var(--success);
+        margin-top: 4px;
+      }
+      .kpi-delta.down {
+        color: var(--error);
+      }
 
-    /* ─── New-orders badge pill ─────────────────────── */
-    .new-badge-pill {
-      display:inline-flex; align-items:center; gap:6px;
-      background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.35);
-      color:#60a5fa; border-radius:20px; padding:3px 10px 3px 8px;
-      font-size:0.75rem; font-weight:600; cursor:pointer;
-      transition:background 0.2s;
-    }
-    .new-badge-pill:hover { background:rgba(59,130,246,0.25); }
-    .new-badge-pill .badge-dot {
-      width:8px; height:8px; border-radius:50%;
-      background:#3b82f6; animation:pulseBadge 1.5s infinite;
-    }
-    @keyframes pulseBadge { 0%,100%{opacity:1} 50%{opacity:0.3} }
+      /* ─── New-orders badge pill ─────────────────────── */
+      .new-badge-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(59, 130, 246, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.35);
+        color: #60a5fa;
+        border-radius: 20px;
+        padding: 3px 10px 3px 8px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .new-badge-pill:hover {
+        background: rgba(59, 130, 246, 0.25);
+      }
+      .new-badge-pill .badge-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #3b82f6;
+        animation: pulseBadge 1.5s infinite;
+      }
+      @keyframes pulseBadge {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
 
-    /* ─── Mini 7-day bar chart ──────────────────────── */
-    .mini-chart {
-      display:flex; align-items:flex-end; gap:5px;
-      height:64px; padding:4px 0 0;
-    }
-    .mini-chart-col {
-      display:flex; flex-direction:column; align-items:center; flex:1; gap:3px;
-    }
-    .mini-chart-bar-wrap {
-      flex:1; display:flex; align-items:flex-end; width:100%;
-    }
-    .mini-chart-bar {
-      width:100%; border-radius:2px 2px 0 0;
-      background:var(--gold); opacity:0.7;
-      min-height:2px; transition:height 0.5s ease;
-    }
-    .mini-chart-bar.today { opacity:1; background:#c9a96e; }
-    .mini-chart-label {
-      font-size:0.6rem; color:var(--text-dim); white-space:nowrap;
-      text-align:center;
-    }
-    .mini-chart-count {
-      font-size:0.62rem; color:var(--text-muted); font-weight:600;
-    }
+      /* ─── Mini 7-day bar chart ──────────────────────── */
+      .mini-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 5px;
+        height: 64px;
+        padding: 4px 0 0;
+      }
+      .mini-chart-col {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: 1;
+        gap: 3px;
+      }
+      .mini-chart-bar-wrap {
+        flex: 1;
+        display: flex;
+        align-items: flex-end;
+        width: 100%;
+      }
+      .mini-chart-bar {
+        width: 100%;
+        border-radius: 2px 2px 0 0;
+        background: var(--gold);
+        opacity: 0.7;
+        min-height: 2px;
+        transition: height 0.5s ease;
+      }
+      .mini-chart-bar.today {
+        opacity: 1;
+        background: #c9a96e;
+      }
+      .mini-chart-label {
+        font-size: 0.6rem;
+        color: var(--text-dim);
+        white-space: nowrap;
+        text-align: center;
+      }
+      .mini-chart-count {
+        font-size: 0.62rem;
+        color: var(--text-muted);
+        font-weight: 600;
+      }
 
-    /* ─── Highlight animation on auto-refresh ───────── */
-    @keyframes highlightFade {
-      0%   { background:rgba(201,169,110,0.22); }
-      100% { background:transparent; }
-    }
-    .updated { animation:highlightFade 1.2s ease-out forwards; }
+      /* ─── Highlight animation on auto-refresh ───────── */
+      @keyframes highlightFade {
+        0% {
+          background: rgba(201, 169, 110, 0.22);
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .updated {
+        animation: highlightFade 1.2s ease-out forwards;
+      }
 
-    /* ─── Status color badges (inline style variants) ── */
-    .sbadge {
-      display:inline-block; padding:2px 8px; border-radius:3px;
-      font-size:0.72rem; font-weight:600; white-space:nowrap;
-    }
-    .sbadge-new       { background:rgba(59,130,246,0.15);  color:#3b82f6;  border:1px solid rgba(59,130,246,0.3);  }
-    .sbadge-reviewing { background:rgba(245,158,11,0.15);  color:#f59e0b;  border:1px solid rgba(245,158,11,0.3);  }
-    .sbadge-confirmed { background:rgba(16,185,129,0.15);  color:#10b981;  border:1px solid rgba(16,185,129,0.3);  }
-    .sbadge-in_progress{ background:rgba(139,92,246,0.15); color:#8b5cf6;  border:1px solid rgba(139,92,246,0.3);  }
-    .sbadge-completed  { background:rgba(107,114,128,0.15);color:#6b7280;  border:1px solid rgba(107,114,128,0.3); }
-    .sbadge-cancelled  { background:rgba(239,68,68,0.15);  color:#ef4444;  border:1px solid rgba(239,68,68,0.3);   }
+      /* ─── Status color badges (inline style variants) ── */
+      .sbadge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .sbadge-new {
+        background: rgba(59, 130, 246, 0.15);
+        color: #3b82f6;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+      }
+      .sbadge-reviewing {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+      }
+      .sbadge-confirmed {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+      .sbadge-in_progress {
+        background: rgba(139, 92, 246, 0.15);
+        color: #8b5cf6;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+      }
+      .sbadge-completed {
+        background: rgba(107, 114, 128, 0.15);
+        color: #6b7280;
+        border: 1px solid rgba(107, 114, 128, 0.3);
+      }
+      .sbadge-cancelled {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+      }
 
-    /* ─── Agent feed ────────────────────────────────── */
-    .agent-feed-item {
-      display:flex; gap:10px; padding:9px 0;
-      border-bottom:1px solid var(--border); font-size:0.8rem;
-    }
-    .agent-feed-item:last-child { border-bottom:none; }
-    .agent-feed-from {
-      font-weight:600; color:var(--gold); flex-shrink:0;
-      min-width:120px; font-size:0.75rem;
-    }
-    .agent-feed-msg { color:var(--text-muted); flex:1; }
-    .agent-feed-time { color:var(--text-dim); font-size:0.68rem; white-space:nowrap; }
+      /* ─── Agent feed ────────────────────────────────── */
+      .agent-feed-item {
+        display: flex;
+        gap: 10px;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.8rem;
+      }
+      .agent-feed-item:last-child {
+        border-bottom: none;
+      }
+      .agent-feed-from {
+        font-weight: 600;
+        color: var(--gold);
+        flex-shrink: 0;
+        min-width: 120px;
+        font-size: 0.75rem;
+      }
+      .agent-feed-msg {
+        color: var(--text-muted);
+        flex: 1;
+      }
+      .agent-feed-time {
+        color: var(--text-dim);
+        font-size: 0.68rem;
+        white-space: nowrap;
+      }
 
-    /* ─── Recent orders compact table ──────────────── */
-    .recent-compact td { padding:9px 12px; font-size:0.82rem; }
-    .recent-compact tr:hover { background:rgba(255,255,255,0.03); cursor:pointer; }
+      /* ─── Recent orders compact table ──────────────── */
+      .recent-compact td {
+        padding: 9px 12px;
+        font-size: 0.82rem;
+      }
+      .recent-compact tr:hover {
+        background: rgba(255, 255, 255, 0.03);
+        cursor: pointer;
+      }
 
-    /* ─── Extra KPI cards row ───────────────────────── */
-    .kpi-row2 {
-      display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px;
-    }
-    .kpi-card {
-      background:var(--bg2); border:1px solid var(--border); border-radius:4px;
-      padding:18px 20px; display:flex; flex-direction:column; gap:6px;
-      position:relative; overflow:hidden;
-    }
-    .kpi-card-label { font-size:0.72rem; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-muted); }
-    .kpi-card-value { font-size:2rem; font-weight:600; color:var(--text); line-height:1; }
-    .kpi-card-value.gold { color:var(--gold); }
-    .kpi-card-icon { position:absolute; right:16px; top:50%; transform:translateY(-50%); font-size:2rem; opacity:0.13; }
-    @keyframes kpiHighlight { 0%{background:rgba(201,169,110,0.18)} 100%{background:transparent} }
-    .kpi-card.updated { animation:kpiHighlight 1s ease-out forwards; }
+      /* ─── Extra KPI cards row ───────────────────────── */
+      .kpi-row2 {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .kpi-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 18px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        position: relative;
+        overflow: hidden;
+      }
+      .kpi-card-label {
+        font-size: 0.72rem;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+      }
+      .kpi-card-value {
+        font-size: 2rem;
+        font-weight: 600;
+        color: var(--text);
+        line-height: 1;
+      }
+      .kpi-card-value.gold {
+        color: var(--gold);
+      }
+      .kpi-card-icon {
+        position: absolute;
+        right: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 2rem;
+        opacity: 0.13;
+      }
+      @keyframes kpiHighlight {
+        0% {
+          background: rgba(201, 169, 110, 0.18);
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .kpi-card.updated {
+        animation: kpiHighlight 1s ease-out forwards;
+      }
 
-    /* ─── 30-day SVG chart ──────────────────────────── */
-    .chart30-wrap { position:relative; width:100%; }
-    .chart30-svg { width:100%; height:160px; display:block; overflow:visible; }
-    .chart30-tooltip {
-      position:absolute; background:var(--bg3); border:1px solid var(--border2);
-      padding:6px 10px; font-size:0.75rem; color:var(--text); border-radius:3px;
-      pointer-events:none; display:none; white-space:nowrap; z-index:10;
-    }
-    .chart30-x-labels {
-      display:flex; justify-content:space-between; padding:0 4px;
-      font-size:0.6rem; color:var(--text-dim); margin-top:4px;
-    }
+      /* ─── 30-day SVG chart ──────────────────────────── */
+      .chart30-wrap {
+        position: relative;
+        width: 100%;
+      }
+      .chart30-svg {
+        width: 100%;
+        height: 160px;
+        display: block;
+        overflow: visible;
+      }
+      .chart30-tooltip {
+        position: absolute;
+        background: var(--bg3);
+        border: 1px solid var(--border2);
+        padding: 6px 10px;
+        font-size: 0.75rem;
+        color: var(--text);
+        border-radius: 3px;
+        pointer-events: none;
+        display: none;
+        white-space: nowrap;
+        z-index: 10;
+      }
+      .chart30-x-labels {
+        display: flex;
+        justify-content: space-between;
+        padding: 0 4px;
+        font-size: 0.6rem;
+        color: var(--text-dim);
+        margin-top: 4px;
+      }
 
-    /* ─── Quick Actions Grid ────────────────────────── */
-    .quick-actions {
-      display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px;
-    }
-    .qa-btn {
-      display:flex; flex-direction:column; align-items:center; justify-content:center;
-      gap:6px; padding:18px 12px; background:var(--bg2); border:1px solid var(--border);
-      border-radius:4px; text-decoration:none; color:var(--text);
-      transition:all 0.2s; cursor:pointer; position:relative; overflow:hidden;
-      min-height:90px;
-    }
-    .qa-btn:hover { border-color:var(--gold); background:rgba(201,169,110,0.07); transform:translateY(-1px); }
-    .qa-btn-new { border-color:rgba(59,130,246,0.4); background:rgba(59,130,246,0.06); }
-    .qa-btn-new:hover { border-color:#3b82f6; background:rgba(59,130,246,0.12); }
-    .qa-icon { font-size:1.6rem; line-height:1; }
-    .qa-count {
-      position:absolute; top:10px; right:12px;
-      background:#3b82f6; color:#fff; font-size:0.72rem; font-weight:700;
-      min-width:20px; height:20px; border-radius:10px; padding:0 5px;
-      display:flex; align-items:center; justify-content:center;
-      display:none;
-    }
-    .qa-count.visible { display:flex; }
-    .qa-label { font-size:0.78rem; color:var(--text-muted); text-align:center; font-weight:500; }
+      /* ─── Quick Actions Grid ────────────────────────── */
+      .quick-actions {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+        margin-bottom: 24px;
+      }
+      .qa-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 18px 12px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        text-decoration: none;
+        color: var(--text);
+        transition: all 0.2s;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+        min-height: 90px;
+      }
+      .qa-btn:hover {
+        border-color: var(--gold);
+        background: rgba(201, 169, 110, 0.07);
+        transform: translateY(-1px);
+      }
+      .qa-btn-new {
+        border-color: rgba(59, 130, 246, 0.4);
+        background: rgba(59, 130, 246, 0.06);
+      }
+      .qa-btn-new:hover {
+        border-color: #3b82f6;
+        background: rgba(59, 130, 246, 0.12);
+      }
+      .qa-icon {
+        font-size: 1.6rem;
+        line-height: 1;
+      }
+      .qa-count {
+        position: absolute;
+        top: 10px;
+        right: 12px;
+        background: #3b82f6;
+        color: #fff;
+        font-size: 0.72rem;
+        font-weight: 700;
+        min-width: 20px;
+        height: 20px;
+        border-radius: 10px;
+        padding: 0 5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        display: none;
+      }
+      .qa-count.visible {
+        display: flex;
+      }
+      .qa-label {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        text-align: center;
+        font-weight: 500;
+      }
 
-    /* ─── Today activity card ───────────────────────── */
-    .today-card {
-      background:var(--bg2); border:1px solid var(--border); border-radius:4px;
-      padding:0; overflow:hidden; margin-bottom:24px;
-    }
-    .today-card-header {
-      display:flex; align-items:center; justify-content:space-between;
-      padding:14px 20px; border-bottom:1px solid var(--border);
-      font-size:0.78rem; font-weight:600; color:var(--text);
-    }
-    .today-stats {
-      display:grid; grid-template-columns:repeat(4,1fr);
-    }
-    .today-stat {
-      padding:16px 20px; border-right:1px solid var(--border);
-      display:flex; flex-direction:column; gap:4px;
-    }
-    .today-stat:last-child { border-right:none; }
-    .today-stat-label { font-size:0.68rem; letter-spacing:1.2px; text-transform:uppercase; color:var(--text-dim); }
-    .today-stat-value { font-size:1.6rem; font-weight:600; color:var(--gold); line-height:1; }
-    .today-orders-list { padding:0 0 0 0; }
-    .today-order-item {
-      display:flex; align-items:center; gap:12px; padding:10px 20px;
-      border-top:1px solid var(--border); text-decoration:none; color:var(--text);
-      transition:background 0.15s; font-size:0.82rem;
-    }
-    .today-order-item:hover { background:rgba(255,255,255,0.03); }
-    .today-order-num { color:var(--gold); font-weight:600; min-width:100px; }
-    .today-order-client { flex:1; color:var(--text); }
-    .today-order-time { color:var(--text-dim); font-size:0.72rem; white-space:nowrap; }
+      /* ─── Today activity card ───────────────────────── */
+      .today-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0;
+        overflow: hidden;
+        margin-bottom: 24px;
+      }
+      .today-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .today-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+      }
+      .today-stat {
+        padding: 16px 20px;
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .today-stat:last-child {
+        border-right: none;
+      }
+      .today-stat-label {
+        font-size: 0.68rem;
+        letter-spacing: 1.2px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      .today-stat-value {
+        font-size: 1.6rem;
+        font-weight: 600;
+        color: var(--gold);
+        line-height: 1;
+      }
+      .today-orders-list {
+        padding: 0 0 0 0;
+      }
+      .today-order-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 20px;
+        border-top: 1px solid var(--border);
+        text-decoration: none;
+        color: var(--text);
+        transition: background 0.15s;
+        font-size: 0.82rem;
+      }
+      .today-order-item:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .today-order-num {
+        color: var(--gold);
+        font-weight: 600;
+        min-width: 100px;
+      }
+      .today-order-client {
+        flex: 1;
+        color: var(--text);
+      }
+      .today-order-time {
+        color: var(--text-dim);
+        font-size: 0.72rem;
+        white-space: nowrap;
+      }
 
-    /* ─── Bot status indicator ──────────────────────── */
-    .bot-status-bar {
-      display:flex; align-items:center; gap:10px; padding:10px 16px;
-      background:var(--bg2); border:1px solid var(--border); border-radius:4px;
-      font-size:0.82rem; margin-bottom:24px;
-    }
-    .bot-status-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
-    .bot-status-dot.online { background:#10b981; box-shadow:0 0 6px rgba(16,185,129,0.6); animation:botPulse 2s infinite; }
-    .bot-status-dot.warn   { background:#f59e0b; box-shadow:0 0 6px rgba(245,158,11,0.5); }
-    .bot-status-dot.offline { background:#ef4444; }
-    @keyframes botPulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-    .bot-status-label { font-weight:600; }
-    .bot-status-label.online { color:#10b981; }
-    .bot-status-label.warn   { color:#f59e0b; }
-    .bot-status-label.offline { color:#ef4444; }
-    .bot-status-uptime { color:var(--text-dim); font-size:0.75rem; margin-left:4px; }
-    .bot-status-spacer { flex:1; }
+      /* ─── Bot status indicator ──────────────────────── */
+      .bot-status-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 16px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-size: 0.82rem;
+        margin-bottom: 24px;
+      }
+      .bot-status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .bot-status-dot.online {
+        background: #10b981;
+        box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+        animation: botPulse 2s infinite;
+      }
+      .bot-status-dot.warn {
+        background: #f59e0b;
+        box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+      }
+      .bot-status-dot.offline {
+        background: #ef4444;
+      }
+      @keyframes botPulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      .bot-status-label {
+        font-weight: 600;
+      }
+      .bot-status-label.online {
+        color: #10b981;
+      }
+      .bot-status-label.warn {
+        color: #f59e0b;
+      }
+      .bot-status-label.offline {
+        color: #ef4444;
+      }
+      .bot-status-uptime {
+        color: var(--text-dim);
+        font-size: 0.75rem;
+        margin-left: 4px;
+      }
+      .bot-status-spacer {
+        flex: 1;
+      }
 
-    /* ─── Revenue sparkline (7-day) ─────────────────── */
-    .revenue-sparkline {
-      display:flex; align-items:flex-end; gap:4px; height:56px;
-    }
-    .rev-bar-wrap { display:flex; flex-direction:column; align-items:center; flex:1; gap:2px; }
-    .rev-bar-fill { width:100%; border-radius:2px 2px 0 0; background:#c9a96e; opacity:0.6; min-height:2px; transition:height 0.5s ease; }
-    .rev-bar-fill.today { opacity:1; background:#e8c980; }
-    .rev-bar-label { font-size:0.58rem; color:var(--text-dim); white-space:nowrap; }
+      /* ─── Revenue sparkline (7-day) ─────────────────── */
+      .revenue-sparkline {
+        display: flex;
+        align-items: flex-end;
+        gap: 4px;
+        height: 56px;
+      }
+      .rev-bar-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: 1;
+        gap: 2px;
+      }
+      .rev-bar-fill {
+        width: 100%;
+        border-radius: 2px 2px 0 0;
+        background: #c9a96e;
+        opacity: 0.6;
+        min-height: 2px;
+        transition: height 0.5s ease;
+      }
+      .rev-bar-fill.today {
+        opacity: 1;
+        background: #e8c980;
+      }
+      .rev-bar-label {
+        font-size: 0.58rem;
+        color: var(--text-dim);
+        white-space: nowrap;
+      }
 
-    /* ─── Recent client messages ─────────────────────── */
-    .msg-item {
-      display:flex; align-items:flex-start; gap:12px;
-      padding:12px 16px; border-bottom:1px solid var(--border);
-      font-size:0.82rem;
-    }
-    .msg-item:last-child { border-bottom:none; }
-    .msg-avatar {
-      width:32px; height:32px; border-radius:50%; background:var(--gold);
-      color:#1a1a1a; font-weight:700; font-size:0.78rem;
-      display:flex; align-items:center; justify-content:center; flex-shrink:0;
-    }
-    .msg-body { flex:1; min-width:0; }
-    .msg-client { font-weight:600; color:var(--text); }
-    .msg-order { font-size:0.7rem; color:var(--text-dim); margin-bottom:2px; }
-    .msg-text { color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .msg-meta { display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex-shrink:0; }
-    .msg-time { font-size:0.68rem; color:var(--text-dim); white-space:nowrap; }
-    .msg-reply-btn {
-      font-size:0.7rem; padding:3px 10px; background:none;
-      border:1px solid var(--border); color:var(--text-muted);
-      border-radius:3px; cursor:pointer; text-decoration:none;
-      transition:all 0.15s; white-space:nowrap;
-    }
-    .msg-reply-btn:hover { border-color:var(--gold); color:var(--gold); }
+      /* ─── Recent client messages ─────────────────────── */
+      .msg-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.82rem;
+      }
+      .msg-item:last-child {
+        border-bottom: none;
+      }
+      .msg-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: var(--gold);
+        color: #1a1a1a;
+        font-weight: 700;
+        font-size: 0.78rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .msg-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .msg-client {
+        font-weight: 600;
+        color: var(--text);
+      }
+      .msg-order {
+        font-size: 0.7rem;
+        color: var(--text-dim);
+        margin-bottom: 2px;
+      }
+      .msg-text {
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .msg-meta {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .msg-time {
+        font-size: 0.68rem;
+        color: var(--text-dim);
+        white-space: nowrap;
+      }
+      .msg-reply-btn {
+        font-size: 0.7rem;
+        padding: 3px 10px;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        border-radius: 3px;
+        cursor: pointer;
+        text-decoration: none;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .msg-reply-btn:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
 
-    /* ─── Notification bell ─────────────────────────── */
-    .notif-bell-wrap { position:relative; display:inline-flex; }
-    .notif-bell-btn {
-      background:none; border:1px solid var(--border); color:var(--text-muted);
-      width:36px; height:36px; border-radius:3px; font-size:1rem;
-      display:flex; align-items:center; justify-content:center;
-      cursor:pointer; transition:all 0.2s; position:relative;
-    }
-    .notif-bell-btn:hover { border-color:var(--gold); color:var(--gold); }
-    .notif-bell-badge {
-      position:absolute; top:-6px; right:-6px;
-      background:var(--error); color:#fff; font-size:0.6rem; font-weight:700;
-      width:18px; height:18px; border-radius:50%; display:flex;
-      align-items:center; justify-content:center; display:none;
-      border:2px solid var(--bg);
-    }
-    .notif-popup {
-      position:absolute; top:calc(100% + 8px); right:0; width:340px;
-      background:var(--bg2); border:1px solid var(--border2); border-radius:4px;
-      box-shadow:0 8px 32px rgba(0,0,0,0.5); z-index:200; display:none;
-    }
-    .notif-popup.open { display:block; }
-    .notif-popup-header {
-      display:flex; align-items:center; justify-content:space-between;
-      padding:12px 16px; border-bottom:1px solid var(--border);
-      font-size:0.8rem; font-weight:600; color:var(--text);
-    }
-    .notif-popup-header a {
-      font-size:0.7rem; color:var(--text-dim); font-weight:400;
-      cursor:pointer; text-decoration:underline;
-    }
-    .notif-popup-header a:hover { color:var(--gold); }
-    .notif-item {
-      display:flex; align-items:flex-start; gap:10px;
-      padding:10px 16px; border-bottom:1px solid var(--border);
-      text-decoration:none; transition:background 0.15s;
-    }
-    .notif-item:last-child { border-bottom:none; }
-    .notif-item:hover { background:rgba(255,255,255,0.03); }
-    .notif-item.unread { background:rgba(201,169,110,0.05); }
-    .notif-item-icon { font-size:1rem; flex-shrink:0; margin-top:1px; }
-    .notif-item-body { flex:1; min-width:0; }
-    .notif-item-title { font-size:0.78rem; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .notif-item-text { font-size:0.72rem; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .notif-item-time { font-size:0.65rem; color:var(--text-dim); white-space:nowrap; }
-    .notif-empty { padding:24px 16px; text-align:center; color:var(--text-dim); font-size:0.85rem; }
+      /* ─── Notification bell ─────────────────────────── */
+      .notif-bell-wrap {
+        position: relative;
+        display: inline-flex;
+      }
+      .notif-bell-btn {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        width: 36px;
+        height: 36px;
+        border-radius: 3px;
+        font-size: 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        position: relative;
+      }
+      .notif-bell-btn:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .notif-bell-badge {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        background: var(--error);
+        color: #fff;
+        font-size: 0.6rem;
+        font-weight: 700;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        display: none;
+        border: 2px solid var(--bg);
+      }
+      .notif-popup {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        width: 340px;
+        background: var(--bg2);
+        border: 1px solid var(--border2);
+        border-radius: 4px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        z-index: 200;
+        display: none;
+      }
+      .notif-popup.open {
+        display: block;
+      }
+      .notif-popup-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .notif-popup-header a {
+        font-size: 0.7rem;
+        color: var(--text-dim);
+        font-weight: 400;
+        cursor: pointer;
+        text-decoration: underline;
+      }
+      .notif-popup-header a:hover {
+        color: var(--gold);
+      }
+      .notif-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+        text-decoration: none;
+        transition: background 0.15s;
+      }
+      .notif-item:last-child {
+        border-bottom: none;
+      }
+      .notif-item:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .notif-item.unread {
+        background: rgba(201, 169, 110, 0.05);
+      }
+      .notif-item-icon {
+        font-size: 1rem;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .notif-item-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .notif-item-title {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .notif-item-text {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .notif-item-time {
+        font-size: 0.65rem;
+        color: var(--text-dim);
+        white-space: nowrap;
+      }
+      .notif-empty {
+        padding: 24px 16px;
+        text-align: center;
+        color: var(--text-dim);
+        font-size: 0.85rem;
+      }
 
-    /* ─── Chart.js stats charts ─────────────────────────── */
-    .chartjs-row {
-      display:grid; grid-template-columns:1fr 1fr;
-      gap:20px; margin-top:0; margin-bottom:24px;
-    }
-    .chartjs-card {
-      background:var(--bg2); border:1px solid var(--border);
-      border-radius:4px; padding:20px;
-    }
-    .chartjs-title {
-      font-size:0.72rem; font-weight:600; color:var(--text-muted);
-      margin-bottom:16px; text-transform:uppercase; letter-spacing:0.05em;
-    }
-    @media (max-width:768px) {
-      .chartjs-row { grid-template-columns:1fr; }
-    }
-  </style>
-</head>
-<body>
-<div class="admin-layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-text">Nevesty Models</div>
-      <div class="sidebar-logo-sub">Панель управления</div>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Главная</div>
-      <a href="/admin/" class="active"><span class="nav-icon">📊</span> Dashboard</a>
-      <div class="nav-section-label">Бизнес</div>
-      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
-      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
-      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы <span class="nav-badge" id="pendingBadge" style="display:none">0</span></a>
-      <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
-      <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
-      <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
-      <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления <span class="nav-badge" id="notifNavBadge" style="display:none">0</span></a>
-      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
-      <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
-      <div class="nav-section-label">AI</div>
-      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
-      <div class="nav-section-label">Настройки</div>
-      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
-      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
-      <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
-      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-user">
-        <div class="sidebar-avatar sidebar-user-letter">A</div>
-        <div class="sidebar-user-info">
-          <strong class="sidebar-user-name">—</strong>
-          <span class="sidebar-user-role">—</span>
+      /* ─── Chart.js stats charts ─────────────────────────── */
+      .chartjs-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-top: 0;
+        margin-bottom: 24px;
+      }
+      .chartjs-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 20px;
+      }
+      .chartjs-title {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        margin-bottom: 16px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      @media (max-width: 768px) {
+        .chartjs-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-text">Nevesty Models</div>
+          <div class="sidebar-logo-sub">Панель управления</div>
         </div>
-      </div>
-      <button class="btn-logout" data-action="logout">Выйти</button>
-    </div>
-  </aside>
-
-  <div class="main-content">
-    <header class="topbar">
-      <div class="topbar-title">Dashboard</div>
-      <div class="topbar-right">
-        <!-- 🔔 New orders badge -->
-        <a href="/admin/orders.html?status=new" id="newOrdersPill" class="new-badge-pill" style="display:none">
-          <span class="badge-dot"></span>
-          <span id="newOrdersPillText">Новых заявок: 0</span>
-        </a>
-        <!-- 🔔 Notification bell -->
-        <div class="notif-bell-wrap" id="notifBellWrap">
-          <button class="notif-bell-btn" id="notifBellBtn" onclick="toggleNotifPopup()" title="Уведомления">
-            🔔
-            <span class="notif-bell-badge" id="notifBadge">0</span>
-          </button>
-          <div class="notif-popup" id="notifPopup">
-            <div class="notif-popup-header">
-              <span>Уведомления</span>
-              <a onclick="markAllNotifRead()">Отметить все прочитанными</a>
+        <nav class="sidebar-nav">
+          <div class="nav-section-label">Главная</div>
+          <a href="/admin/" class="active"><span class="nav-icon">📊</span> Dashboard</a>
+          <div class="nav-section-label">Бизнес</div>
+          <a href="/admin/orders.html"
+            ><span class="nav-icon">📋</span> Заявки
+            <span class="nav-badge" id="newOrdersBadge" style="display: none">0</span></a
+          >
+          <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+          <a href="/admin/reviews.html"
+            ><span class="nav-icon">⭐</span> Отзывы
+            <span class="nav-badge" id="pendingBadge" style="display: none">0</span></a
+          >
+          <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+          <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+          <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+          <a href="/admin/notifications.html"
+            ><span class="nav-icon">🔔</span> Уведомления
+            <span class="nav-badge" id="notifNavBadge" style="display: none">0</span></a
+          >
+          <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+          <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+          <a href="/admin/social.html"><span class="nav-icon">📱</span> Соцсети</a>
+          <div class="nav-section-label">AI</div>
+          <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+          <div class="nav-section-label">Настройки</div>
+          <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+          <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+          <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
+          <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <div class="sidebar-avatar sidebar-user-letter">A</div>
+            <div class="sidebar-user-info">
+              <strong class="sidebar-user-name">—</strong>
+              <span class="sidebar-user-role">—</span>
             </div>
-            <div id="notifList"><div class="notif-empty">Загрузка...</div></div>
           </div>
+          <button class="btn-logout" data-action="logout">Выйти</button>
         </div>
-        <button class="topbar-btn" id="refreshBtn" onclick="loadDashboard()">↺ Обновить</button>
-        <a href="/admin/orders.html#new" class="topbar-btn primary">+ Заявка</a>
-      </div>
-    </header>
+      </aside>
 
-    <div class="page-content">
-
-      <!-- ══════════════════ BOT STATUS BAR ══════════════════ -->
-      <div class="bot-status-bar" id="botStatusBar">
-        <div class="bot-status-dot" id="botStatusDot"></div>
-        <span class="bot-status-label" id="botStatusLabel">Проверка...</span>
-        <span class="bot-status-uptime" id="botStatusUptime"></span>
-        <div class="bot-status-spacer"></div>
-        <a href="/admin/settings.html" class="btn btn-sm btn-ghost" style="font-size:0.72rem">Настройки бота →</a>
-      </div>
-
-      <!-- ══════════════════ QUICK ACTIONS ══════════════════ -->
-      <div class="quick-actions">
-        <a href="/admin/orders.html?status=new" class="qa-btn qa-btn-new">
-          <span class="qa-icon">🆕</span>
-          <span class="qa-count" id="qa-new-count">0</span>
-          <span class="qa-label">Новые заявки</span>
-        </a>
-        <a href="/admin/models.html#add" class="qa-btn">
-          <span class="qa-icon">💃</span>
-          <span class="qa-label">Добавить модель</span>
-        </a>
-        <a href="/admin/broadcasts.html" class="qa-btn">
-          <span class="qa-icon">📢</span>
-          <span class="qa-label">Рассылка</span>
-        </a>
-        <a href="/admin/factory.html" class="qa-btn">
-          <span class="qa-icon">🤖</span>
-          <span class="qa-label">AI Factory</span>
-        </a>
-      </div>
-
-      <!-- ══════════════════ TODAY ACTIVITY CARD ══════════════════ -->
-      <div class="today-card" id="todayCard">
-        <div class="today-card-header">
-          <span>📅 Сегодня</span>
-          <span id="todayDateLabel" style="color:var(--text-dim);font-weight:400;font-size:0.72rem"></span>
-        </div>
-        <div class="today-stats">
-          <div class="today-stat">
-            <div class="today-stat-label">Заявок</div>
-            <div class="today-stat-value" id="today-orders-count">—</div>
-          </div>
-          <div class="today-stat">
-            <div class="today-stat-label">Новых клиентов</div>
-            <div class="today-stat-value" style="color:var(--text)" id="today-clients-count">—</div>
-          </div>
-          <div class="today-stat">
-            <div class="today-stat-label">Сообщений</div>
-            <div class="today-stat-value" style="color:var(--text)" id="today-messages-count">—</div>
-          </div>
-          <div class="today-stat">
-            <div class="today-stat-label">Выручка</div>
-            <div class="today-stat-value" style="color:#10b981;font-size:1.2rem" id="today-revenue">—</div>
-          </div>
-        </div>
-        <div class="today-orders-list" id="todayOrdersList"></div>
-      </div>
-
-      <!-- ══════════════════ STAT CARDS ROW 2 (Today / Active / Completed / New Clients) ══════════════════ -->
-      <div class="kpi-row2" id="kpiRow2">
-        <div class="kpi-card">
-          <div class="kpi-card-label">Заявок сегодня</div>
-          <div class="kpi-card-value gold" id="k_today">—</div>
-          <div class="kpi-card-icon">📅</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-card-label">Активных</div>
-          <div class="kpi-card-value" id="k_active">—</div>
-          <div class="kpi-card-icon">▶️</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-card-label">Завершённых</div>
-          <div class="kpi-card-value" id="k_completed">—</div>
-          <div class="kpi-card-icon">🏁</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-card-label">Новых клиентов (30д)</div>
-          <div class="kpi-card-value" id="k_new_clients">—</div>
-          <div class="kpi-card-icon">👤</div>
-        </div>
-        <a href="/admin/reviews.html?approved=0" class="kpi-card" style="text-decoration:none;display:block;cursor:pointer" title="Перейти к отзывам">
-          <div class="kpi-card-label">Отзывов на проверке</div>
-          <div class="kpi-card-value" id="k_pending_reviews" style="color:var(--gold)">—</div>
-          <div class="kpi-card-icon">⭐</div>
-        </a>
-      </div>
-
-      <!-- ══════════════════ KPI CARDS ══════════════════ -->
-      <div class="stat-cards" id="kpiCards">
-        <div class="stat-card">
-          <div class="stat-card-label">Всего заявок</div>
-          <div class="stat-card-value" id="s_total">—</div>
-          <div class="stat-card-icon">📋</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Новых</div>
-          <div class="stat-card-value gold" id="s_new">—</div>
-          <div class="stat-card-icon">🆕</div>
-          <div class="kpi-delta" id="d_new"></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Активных</div>
-          <div class="stat-card-value" id="s_active">—</div>
-          <div class="stat-card-icon">▶️</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Моделей (своб.)</div>
-          <div class="stat-card-value" id="s_models">—</div>
-          <div class="stat-card-icon">💃</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Непрочит. сообщ.</div>
-          <div class="stat-card-value gold" id="s_unread">—</div>
-          <div class="stat-card-icon">💬</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Выручка (30 дней)</div>
-          <div class="stat-card-value gold" id="s_revenue30">—</div>
-          <div class="stat-card-icon">💰</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Постоянных клиентов</div>
-          <div class="stat-card-value" id="s_repeat">—</div>
-          <div class="stat-card-icon">🔁</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Среднее время сделки</div>
-          <div class="stat-card-value" id="s_deal_days">—</div>
-          <div class="stat-card-icon">📅</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Конверсія</div>
-          <div class="stat-card-value gold" id="s_conversion">—</div>
-          <div class="stat-card-icon">📈</div>
-          <div class="kpi-delta" id="d_trend"></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Середній бюджет</div>
-          <div class="stat-card-value" id="s_avg_budget">—</div>
-          <div class="stat-card-icon">💳</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Цикл угоди (дн.)</div>
-          <div class="stat-card-value" id="s_avg_cycle">—</div>
-          <div class="stat-card-icon">⏱️</div>
-        </div>
-      </div>
-
-      <!-- ══════════════════ CHART.JS CHARTS ROW ══════════════════ -->
-      <div class="chartjs-row" id="chartjsRow">
-
-        <!-- Orders by status — doughnut chart -->
-        <div class="chartjs-card">
-          <div class="chartjs-title">Заявки по статусу</div>
-          <canvas id="statusChartJs" height="200"></canvas>
-        </div>
-
-        <!-- Orders trend bar chart (prev 7d vs last 7d) -->
-        <div class="chartjs-card">
-          <div class="chartjs-title">Тренд заявок (7 дн)</div>
-          <canvas id="trendChartJs" height="200"></canvas>
-        </div>
-
-      </div>
-
-      <!-- ══════════════════ TOP MODELS ══════════════════ -->
-      <div class="section-card" style="margin-bottom:24px" id="topModelsCard">
-        <div class="section-card-header">
-          <div class="section-card-title">🏆 Топ моделей по заявкам</div>
-        </div>
-        <div class="section-card-body padded" id="topModelsList">
-          <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
-        </div>
-      </div>
-
-      <!-- ══════════════════ AI FACTORY INTELLIGENCE ══════════════════ -->
-      <div class="section-card" style="margin-bottom:24px" id="factory-panel">
-        <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between">
-          <div class="section-card-title">🤖 AI Factory <span id="factory-status-badge" style="display:inline-block;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:20px;margin-left:8px;white-space:nowrap"></span></div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <button class="btn btn-sm btn-ghost" onclick="loadFactoryStatus()">↺</button>
-            <a href="/admin/factory.html" class="btn btn-sm btn-ghost">Открыть →</a>
-          </div>
-        </div>
-        <div class="section-card-body padded" id="factory-body">
-          <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
-        </div>
-      </div>
-
-      <!-- ══════════════════ RECENT ACTIVITY FEED ══════════════════ -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header">
-          <div class="section-card-title">🕐 Нещодавня активність</div>
-          <a href="/admin/orders.html" class="btn btn-sm btn-ghost">Всі заявки →</a>
-        </div>
-        <div class="section-card-body" id="activity-feed" style="min-height:80px">
-          <div style="padding:20px;text-align:center;color:var(--text-dim)">Завантаження...</div>
-        </div>
-      </div>
-
-      <!-- ══════════════════ ROW 2: STATUS CHART + 7-DAY CHART ══════════════════ -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
-
-        <!-- Status chart -->
-        <div class="section-card">
-          <div class="section-card-header">
-            <div class="section-card-title">📊 Заявки по статусам</div>
-          </div>
-          <div class="section-card-body padded">
-            <div class="chart-bar-wrap" id="statusChart">
-              <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 7-day mini bar chart + revenue sparkline -->
-        <div style="display:flex;flex-direction:column;gap:16px">
-          <div class="section-card">
-            <div class="section-card-header">
-              <div class="section-card-title">📅 Заявки за 7 дней</div>
-              <div style="font-size:0.72rem;color:var(--text-dim)" id="chart7dTotal"></div>
-            </div>
-            <div class="section-card-body padded">
-              <div class="mini-chart" id="miniChart">
-                <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+      <div class="main-content">
+        <header class="topbar">
+          <div class="topbar-title">Dashboard</div>
+          <div class="topbar-right">
+            <!-- 🔔 New orders badge -->
+            <a href="/admin/orders.html?status=new" id="newOrdersPill" class="new-badge-pill" style="display: none">
+              <span class="badge-dot"></span>
+              <span id="newOrdersPillText">Новых заявок: 0</span>
+            </a>
+            <!-- 🔔 Notification bell -->
+            <div class="notif-bell-wrap" id="notifBellWrap">
+              <button class="notif-bell-btn" id="notifBellBtn" onclick="toggleNotifPopup()" title="Уведомления">
+                🔔
+                <span class="notif-bell-badge" id="notifBadge">0</span>
+              </button>
+              <div class="notif-popup" id="notifPopup">
+                <div class="notif-popup-header">
+                  <span>Уведомления</span>
+                  <a onclick="markAllNotifRead()">Отметить все прочитанными</a>
+                </div>
+                <div id="notifList"><div class="notif-empty">Загрузка...</div></div>
               </div>
             </div>
+            <button class="topbar-btn" id="refreshBtn" onclick="loadDashboard()">↺ Обновить</button>
+            <a href="/admin/orders.html#new" class="topbar-btn primary">+ Заявка</a>
           </div>
-          <div class="section-card">
-            <div class="section-card-header">
-              <div class="section-card-title">💰 Выручка за 7 дней</div>
-              <div style="font-size:0.72rem;color:var(--gold);font-weight:600" id="rev7dTotal">—</div>
+        </header>
+
+        <div class="page-content">
+          <!-- ══════════════════ BOT STATUS BAR ══════════════════ -->
+          <div class="bot-status-bar" id="botStatusBar">
+            <div class="bot-status-dot" id="botStatusDot"></div>
+            <span class="bot-status-label" id="botStatusLabel">Проверка...</span>
+            <span class="bot-status-uptime" id="botStatusUptime"></span>
+            <div class="bot-status-spacer"></div>
+            <a href="/admin/settings.html" class="btn btn-sm btn-ghost" style="font-size: 0.72rem">Настройки бота →</a>
+          </div>
+
+          <!-- ══════════════════ QUICK ACTIONS ══════════════════ -->
+          <div class="quick-actions">
+            <a href="/admin/orders.html?status=new" class="qa-btn qa-btn-new">
+              <span class="qa-icon">🆕</span>
+              <span class="qa-count" id="qa-new-count">0</span>
+              <span class="qa-label">Новые заявки</span>
+            </a>
+            <a href="/admin/models.html#add" class="qa-btn">
+              <span class="qa-icon">💃</span>
+              <span class="qa-label">Добавить модель</span>
+            </a>
+            <a href="/admin/broadcasts.html" class="qa-btn">
+              <span class="qa-icon">📢</span>
+              <span class="qa-label">Рассылка</span>
+            </a>
+            <a href="/admin/factory.html" class="qa-btn">
+              <span class="qa-icon">🤖</span>
+              <span class="qa-label">AI Factory</span>
+            </a>
+          </div>
+
+          <!-- ══════════════════ TODAY ACTIVITY CARD ══════════════════ -->
+          <div class="today-card" id="todayCard">
+            <div class="today-card-header">
+              <span>📅 Сегодня</span>
+              <span id="todayDateLabel" style="color: var(--text-dim); font-weight: 400; font-size: 0.72rem"></span>
             </div>
-            <div class="section-card-body padded">
-              <div class="revenue-sparkline" id="revenueSparkline">
-                <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
+            <div class="today-stats">
+              <div class="today-stat">
+                <div class="today-stat-label">Заявок</div>
+                <div class="today-stat-value" id="today-orders-count">—</div>
+              </div>
+              <div class="today-stat">
+                <div class="today-stat-label">Новых клиентов</div>
+                <div class="today-stat-value" style="color: var(--text)" id="today-clients-count">—</div>
+              </div>
+              <div class="today-stat">
+                <div class="today-stat-label">Сообщений</div>
+                <div class="today-stat-value" style="color: var(--text)" id="today-messages-count">—</div>
+              </div>
+              <div class="today-stat">
+                <div class="today-stat-label">Выручка</div>
+                <div class="today-stat-value" style="color: #10b981; font-size: 1.2rem" id="today-revenue">—</div>
               </div>
             </div>
+            <div class="today-orders-list" id="todayOrdersList"></div>
           </div>
-        </div>
-      </div>
 
-      <!-- ══════════════════ ROW 2b: 30-DAY CHART ══════════════════ -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header">
-          <div class="section-card-title">📈 Заявки за 30 дней</div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:0.72rem;color:var(--text-dim)" id="chart30Total"></span>
-            <select id="chart30Period" onchange="loadChart30()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:0.72rem;padding:3px 8px;outline:none">
-              <option value="7">7 дней</option>
-              <option value="30" selected>30 дней</option>
-              <option value="90">90 дней</option>
-            </select>
+          <!-- ══════════════════ STAT CARDS ROW 2 (Today / Active / Completed / New Clients) ══════════════════ -->
+          <div class="kpi-row2" id="kpiRow2">
+            <div class="kpi-card">
+              <div class="kpi-card-label">Заявок сегодня</div>
+              <div class="kpi-card-value gold" id="k_today">—</div>
+              <div class="kpi-card-icon">📅</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-card-label">Активных</div>
+              <div class="kpi-card-value" id="k_active">—</div>
+              <div class="kpi-card-icon">▶️</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-card-label">Завершённых</div>
+              <div class="kpi-card-value" id="k_completed">—</div>
+              <div class="kpi-card-icon">🏁</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-card-label">Новых клиентов (30д)</div>
+              <div class="kpi-card-value" id="k_new_clients">—</div>
+              <div class="kpi-card-icon">👤</div>
+            </div>
+            <a
+              href="/admin/reviews.html?approved=0"
+              class="kpi-card"
+              style="text-decoration: none; display: block; cursor: pointer"
+              title="Перейти к отзывам"
+            >
+              <div class="kpi-card-label">Отзывов на проверке</div>
+              <div class="kpi-card-value" id="k_pending_reviews" style="color: var(--gold)">—</div>
+              <div class="kpi-card-icon">⭐</div>
+            </a>
           </div>
-        </div>
-        <div class="section-card-body padded">
-          <div class="chart30-wrap">
-            <svg class="chart30-svg" id="chart30Svg" viewBox="0 0 800 160" preserveAspectRatio="none">
-              <text x="400" y="80" text-anchor="middle" fill="#555" font-size="14">Загрузка...</text>
-            </svg>
-            <div class="chart30-tooltip" id="chart30Tooltip"></div>
-          </div>
-          <div class="chart30-x-labels" id="chart30XLabels"></div>
-        </div>
-      </div>
 
-      <!-- ══════════════════ ROW 3: RECENT ORDERS + QUICK ACTIONS ══════════════════ -->
-      <div style="display:grid;grid-template-columns:1fr auto;gap:24px;margin-bottom:24px">
-
-        <!-- Последние заявки (compact 5 rows) -->
-        <div class="section-card">
-          <div class="section-card-header">
-            <div class="section-card-title">📋 Последние заявки</div>
-            <a href="/admin/orders.html" class="btn btn-sm btn-ghost">Все заявки →</a>
-          </div>
-          <div class="section-card-body">
-            <table class="data-table recent-compact">
-              <thead>
-                <tr>
-                  <th>№</th>
-                  <th>Клиент</th>
-                  <th>Мероприятие</th>
-                  <th>Дата</th>
-                  <th>Статус</th>
-                </tr>
-              </thead>
-              <tbody id="recentOrders">
-                <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-dim)">Загрузка...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Quick actions -->
-        <div class="section-card" style="min-width:220px">
-          <div class="section-card-header"><div class="section-card-title">⚡ Быстрые действия</div></div>
-          <div class="section-card-body padded">
-            <div style="display:flex;flex-direction:column;gap:10px">
-              <a href="/admin/orders.html?status=new" class="btn btn-md btn-ghost" style="justify-content:flex-start">🆕 Новые заявки</a>
-              <a href="/admin/orders.html?status=confirmed" class="btn btn-md btn-ghost" style="justify-content:flex-start">✅ Подтверждённые</a>
-              <a href="/admin/orders.html" class="btn btn-md btn-ghost" style="justify-content:flex-start" id="unreadLink" style="display:none">💬 Непрочитанные <span id="unreadBadge" class="nav-badge" style="display:none"></span></a>
-              <a href="/admin/models.html#add" class="btn btn-md btn-ghost" style="justify-content:flex-start">➕ Нова модель</a>
-              <a href="/admin/broadcasts.html" class="btn btn-md btn-ghost" style="justify-content:flex-start">📢 Рассылки</a>
-              <a href="/admin/analytics.html" class="btn btn-md btn-ghost" style="justify-content:flex-start">📈 Аналітика</a>
-              <a href="/admin/reviews.html" class="btn btn-md btn-ghost" style="justify-content:flex-start">⭐ Відзиви</a>
-              <a href="/admin/orders.html" onclick="setTimeout(()=>_admin.downloadCSV('/admin/orders/export?'),100);return false;" class="btn btn-md btn-ghost" style="justify-content:flex-start">📥 Экспорт CSV</a>
+          <!-- ══════════════════ KPI CARDS ══════════════════ -->
+          <div class="stat-cards" id="kpiCards">
+            <div class="stat-card">
+              <div class="stat-card-label">Всего заявок</div>
+              <div class="stat-card-value" id="s_total">—</div>
+              <div class="stat-card-icon">📋</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Новых</div>
+              <div class="stat-card-value gold" id="s_new">—</div>
+              <div class="stat-card-icon">🆕</div>
+              <div class="kpi-delta" id="d_new"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Активных</div>
+              <div class="stat-card-value" id="s_active">—</div>
+              <div class="stat-card-icon">▶️</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Моделей (своб.)</div>
+              <div class="stat-card-value" id="s_models">—</div>
+              <div class="stat-card-icon">💃</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Непрочит. сообщ.</div>
+              <div class="stat-card-value gold" id="s_unread">—</div>
+              <div class="stat-card-icon">💬</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Выручка (30 дней)</div>
+              <div class="stat-card-value gold" id="s_revenue30">—</div>
+              <div class="stat-card-icon">💰</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Постоянных клиентов</div>
+              <div class="stat-card-value" id="s_repeat">—</div>
+              <div class="stat-card-icon">🔁</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Среднее время сделки</div>
+              <div class="stat-card-value" id="s_deal_days">—</div>
+              <div class="stat-card-icon">📅</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Конверсія</div>
+              <div class="stat-card-value gold" id="s_conversion">—</div>
+              <div class="stat-card-icon">📈</div>
+              <div class="kpi-delta" id="d_trend"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Середній бюджет</div>
+              <div class="stat-card-value" id="s_avg_budget">—</div>
+              <div class="stat-card-icon">💳</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Цикл угоди (дн.)</div>
+              <div class="stat-card-value" id="s_avg_cycle">—</div>
+              <div class="stat-card-icon">⏱️</div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- ══════════════════ RECENT CLIENT MESSAGES ══════════════════ -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header">
-          <div class="section-card-title">💬 Последние сообщения клиентов</div>
-          <button class="btn btn-sm btn-ghost" onclick="loadRecentMessages()">↺</button>
-        </div>
-        <div class="section-card-body" id="recentMessagesList">
-          <div style="padding:20px;text-align:center;color:var(--text-dim)">Загрузка...</div>
-        </div>
-      </div>
+          <!-- ══════════════════ CHART.JS CHARTS ROW ══════════════════ -->
+          <div class="chartjs-row" id="chartjsRow">
+            <!-- Orders by status — doughnut chart -->
+            <div class="chartjs-card">
+              <div class="chartjs-title">Заявки по статусу</div>
+              <canvas id="statusChartJs" height="200"></canvas>
+            </div>
 
-      <!-- ══════════════════ ROW 4: AGENT FEED + BOT INFO ══════════════════ -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
-
-        <!-- Agent logs feed -->
-        <div class="section-card">
-          <div class="section-card-header">
-            <div class="section-card-title">🤖 Лог агентов</div>
-            <button class="btn btn-sm btn-ghost" onclick="loadAgentFeed()">↺</button>
+            <!-- Orders trend bar chart (prev 7d vs last 7d) -->
+            <div class="chartjs-card">
+              <div class="chartjs-title">Тренд заявок (7 дн)</div>
+              <canvas id="trendChartJs" height="200"></canvas>
+            </div>
           </div>
-          <div class="section-card-body padded" id="agentFeed">
-            <div style="color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
-          </div>
-        </div>
 
-        <!-- Quick booking leads -->
-        <div class="section-card">
-          <div class="section-card-header">
-            <div class="section-card-title">⚡ Быстрые заявки (лиды)</div>
-            <button class="btn btn-sm btn-ghost" onclick="loadQuickBookings()">↺</button>
+          <!-- ══════════════════ TOP MODELS ══════════════════ -->
+          <div class="section-card" style="margin-bottom: 24px" id="topModelsCard">
+            <div class="section-card-header">
+              <div class="section-card-title">🏆 Топ моделей по заявкам</div>
+            </div>
+            <div class="section-card-body padded" id="topModelsList">
+              <div style="color: var(--text-dim); font-size: 0.85rem">Загрузка...</div>
+            </div>
           </div>
-          <div class="section-card-body" id="quickBookingsList">
-            <div style="padding:16px;color:var(--text-dim);font-size:0.85rem">Загрузка...</div>
-          </div>
-        </div>
 
-        <!-- Bot commands -->
-        <div class="section-card">
-          <div class="section-card-header"><div class="section-card-title">📱 Telegram бот — команды</div></div>
-          <div class="section-card-body padded">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
-              <div>
-                <div style="font-size:0.7rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:10px">Менеджер</div>
-                <div style="font-size:0.82rem;color:var(--text-muted);line-height:2.1">
-                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/orders</code> — последние 10</div>
-                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/new_orders</code> — только новые</div>
-                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/models</code> — список</div>
-                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/stats</code> — статистика</div>
+          <!-- ══════════════════ AI FACTORY INTELLIGENCE ══════════════════ -->
+          <div class="section-card" style="margin-bottom: 24px" id="factory-panel">
+            <div class="section-card-header" style="display: flex; align-items: center; justify-content: space-between">
+              <div class="section-card-title">
+                🤖 AI Factory
+                <span
+                  id="factory-status-badge"
+                  style="
+                    display: inline-block;
+                    font-size: 0.7rem;
+                    font-weight: 600;
+                    padding: 2px 8px;
+                    border-radius: 20px;
+                    margin-left: 8px;
+                    white-space: nowrap;
+                  "
+                ></span>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center">
+                <button class="btn btn-sm btn-ghost" onclick="loadFactoryStatus()">↺</button>
+                <a href="/admin/factory.html" class="btn btn-sm btn-ghost">Открыть →</a>
+              </div>
+            </div>
+            <div class="section-card-body padded" id="factory-body">
+              <div style="color: var(--text-dim); font-size: 0.85rem">Загрузка...</div>
+            </div>
+          </div>
+
+          <!-- ══════════════════ RECENT ACTIVITY FEED ══════════════════ -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header">
+              <div class="section-card-title">🕐 Нещодавня активність</div>
+              <a href="/admin/orders.html" class="btn btn-sm btn-ghost">Всі заявки →</a>
+            </div>
+            <div class="section-card-body" id="activity-feed" style="min-height: 80px">
+              <div style="padding: 20px; text-align: center; color: var(--text-dim)">Завантаження...</div>
+            </div>
+          </div>
+
+          <!-- ══════════════════ ROW 2: STATUS CHART + 7-DAY CHART ══════════════════ -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px">
+            <!-- Status chart -->
+            <div class="section-card">
+              <div class="section-card-header">
+                <div class="section-card-title">📊 Заявки по статусам</div>
+              </div>
+              <div class="section-card-body padded">
+                <div class="chart-bar-wrap" id="statusChart">
+                  <div style="color: var(--text-dim); font-size: 0.85rem">Загрузка...</div>
                 </div>
               </div>
-              <div>
-                <div style="font-size:0.7rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:10px">Клиент</div>
-                <div style="font-size:0.82rem;color:var(--text-muted);line-height:2.1">
-                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/start</code> — приветствие</div>
-                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/status NM-XXXX</code></div>
-                  <div><code style="color:var(--gold);background:rgba(201,169,110,0.08);padding:1px 6px">/cancel</code> — сброс</div>
-                  <div>Текст → переслать менеджеру</div>
+            </div>
+
+            <!-- 7-day mini bar chart + revenue sparkline -->
+            <div style="display: flex; flex-direction: column; gap: 16px">
+              <div class="section-card">
+                <div class="section-card-header">
+                  <div class="section-card-title">📅 Заявки за 7 дней</div>
+                  <div style="font-size: 0.72rem; color: var(--text-dim)" id="chart7dTotal"></div>
+                </div>
+                <div class="section-card-body padded">
+                  <div class="mini-chart" id="miniChart">
+                    <div style="color: var(--text-dim); font-size: 0.85rem">Загрузка...</div>
+                  </div>
+                </div>
+              </div>
+              <div class="section-card">
+                <div class="section-card-header">
+                  <div class="section-card-title">💰 Выручка за 7 дней</div>
+                  <div style="font-size: 0.72rem; color: var(--gold); font-weight: 600" id="rev7dTotal">—</div>
+                </div>
+                <div class="section-card-body padded">
+                  <div class="revenue-sparkline" id="revenueSparkline">
+                    <div style="color: var(--text-dim); font-size: 0.85rem">Загрузка...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ══════════════════ ROW 2b: 30-DAY CHART ══════════════════ -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header">
+              <div class="section-card-title">📈 Заявки за 30 дней</div>
+              <div style="display: flex; align-items: center; gap: 8px">
+                <span style="font-size: 0.72rem; color: var(--text-dim)" id="chart30Total"></span>
+                <select
+                  id="chart30Period"
+                  onchange="loadChart30()"
+                  style="
+                    background: var(--bg2);
+                    border: 1px solid var(--border);
+                    color: var(--text);
+                    font-size: 0.72rem;
+                    padding: 3px 8px;
+                    outline: none;
+                  "
+                >
+                  <option value="7">7 дней</option>
+                  <option value="30" selected>30 дней</option>
+                  <option value="90">90 дней</option>
+                </select>
+              </div>
+            </div>
+            <div class="section-card-body padded">
+              <div class="chart30-wrap">
+                <svg class="chart30-svg" id="chart30Svg" viewBox="0 0 800 160" preserveAspectRatio="none">
+                  <text x="400" y="80" text-anchor="middle" fill="#555" font-size="14">Загрузка...</text>
+                </svg>
+                <div class="chart30-tooltip" id="chart30Tooltip"></div>
+              </div>
+              <div class="chart30-x-labels" id="chart30XLabels"></div>
+            </div>
+          </div>
+
+          <!-- ══════════════════ ROW 3: RECENT ORDERS + QUICK ACTIONS ══════════════════ -->
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 24px; margin-bottom: 24px">
+            <!-- Последние заявки (compact 5 rows) -->
+            <div class="section-card">
+              <div class="section-card-header">
+                <div class="section-card-title">📋 Последние заявки</div>
+                <a href="/admin/orders.html" class="btn btn-sm btn-ghost">Все заявки →</a>
+              </div>
+              <div class="section-card-body">
+                <table class="data-table recent-compact">
+                  <thead>
+                    <tr>
+                      <th>№</th>
+                      <th>Клиент</th>
+                      <th>Мероприятие</th>
+                      <th>Дата</th>
+                      <th>Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody id="recentOrders">
+                    <tr>
+                      <td colspan="5" style="text-align: center; padding: 24px; color: var(--text-dim)">Загрузка...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Quick actions -->
+            <div class="section-card" style="min-width: 220px">
+              <div class="section-card-header"><div class="section-card-title">⚡ Быстрые действия</div></div>
+              <div class="section-card-body padded">
+                <div style="display: flex; flex-direction: column; gap: 10px">
+                  <a
+                    href="/admin/orders.html?status=new"
+                    class="btn btn-md btn-ghost"
+                    style="justify-content: flex-start"
+                    >🆕 Новые заявки</a
+                  >
+                  <a
+                    href="/admin/orders.html?status=confirmed"
+                    class="btn btn-md btn-ghost"
+                    style="justify-content: flex-start"
+                    >✅ Подтверждённые</a
+                  >
+                  <a
+                    href="/admin/orders.html"
+                    class="btn btn-md btn-ghost"
+                    style="justify-content: flex-start"
+                    id="unreadLink"
+                    style="display: none"
+                    >💬 Непрочитанные <span id="unreadBadge" class="nav-badge" style="display: none"></span
+                  ></a>
+                  <a href="/admin/models.html#add" class="btn btn-md btn-ghost" style="justify-content: flex-start"
+                    >➕ Нова модель</a
+                  >
+                  <a href="/admin/broadcasts.html" class="btn btn-md btn-ghost" style="justify-content: flex-start"
+                    >📢 Рассылки</a
+                  >
+                  <a href="/admin/analytics.html" class="btn btn-md btn-ghost" style="justify-content: flex-start"
+                    >📈 Аналітика</a
+                  >
+                  <a href="/admin/reviews.html" class="btn btn-md btn-ghost" style="justify-content: flex-start"
+                    >⭐ Відзиви</a
+                  >
+                  <a
+                    href="/admin/orders.html"
+                    onclick="
+                      setTimeout(() => _admin.downloadCSV('/admin/orders/export?'), 100);
+                      return false;
+                    "
+                    class="btn btn-md btn-ghost"
+                    style="justify-content: flex-start"
+                    >📥 Экспорт CSV</a
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ══════════════════ RECENT CLIENT MESSAGES ══════════════════ -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header">
+              <div class="section-card-title">💬 Последние сообщения клиентов</div>
+              <button class="btn btn-sm btn-ghost" onclick="loadRecentMessages()">↺</button>
+            </div>
+            <div class="section-card-body" id="recentMessagesList">
+              <div style="padding: 20px; text-align: center; color: var(--text-dim)">Загрузка...</div>
+            </div>
+          </div>
+
+          <!-- ══════════════════ ROW 4: AGENT FEED + BOT INFO ══════════════════ -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px">
+            <!-- Agent logs feed -->
+            <div class="section-card">
+              <div class="section-card-header">
+                <div class="section-card-title">🤖 Лог агентов</div>
+                <button class="btn btn-sm btn-ghost" onclick="loadAgentFeed()">↺</button>
+              </div>
+              <div class="section-card-body padded" id="agentFeed">
+                <div style="color: var(--text-dim); font-size: 0.85rem">Загрузка...</div>
+              </div>
+            </div>
+
+            <!-- Quick booking leads -->
+            <div class="section-card">
+              <div class="section-card-header">
+                <div class="section-card-title">⚡ Быстрые заявки (лиды)</div>
+                <button class="btn btn-sm btn-ghost" onclick="loadQuickBookings()">↺</button>
+              </div>
+              <div class="section-card-body" id="quickBookingsList">
+                <div style="padding: 16px; color: var(--text-dim); font-size: 0.85rem">Загрузка...</div>
+              </div>
+            </div>
+
+            <!-- Bot commands -->
+            <div class="section-card">
+              <div class="section-card-header"><div class="section-card-title">📱 Telegram бот — команды</div></div>
+              <div class="section-card-body padded">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px">
+                  <div>
+                    <div
+                      style="
+                        font-size: 0.7rem;
+                        letter-spacing: 1.5px;
+                        text-transform: uppercase;
+                        color: var(--gold);
+                        margin-bottom: 10px;
+                      "
+                    >
+                      Менеджер
+                    </div>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); line-height: 2.1">
+                      <div>
+                        <code style="color: var(--gold); background: rgba(201, 169, 110, 0.08); padding: 1px 6px"
+                          >/orders</code
+                        >
+                        — последние 10
+                      </div>
+                      <div>
+                        <code style="color: var(--gold); background: rgba(201, 169, 110, 0.08); padding: 1px 6px"
+                          >/new_orders</code
+                        >
+                        — только новые
+                      </div>
+                      <div>
+                        <code style="color: var(--gold); background: rgba(201, 169, 110, 0.08); padding: 1px 6px"
+                          >/models</code
+                        >
+                        — список
+                      </div>
+                      <div>
+                        <code style="color: var(--gold); background: rgba(201, 169, 110, 0.08); padding: 1px 6px"
+                          >/stats</code
+                        >
+                        — статистика
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div
+                      style="
+                        font-size: 0.7rem;
+                        letter-spacing: 1.5px;
+                        text-transform: uppercase;
+                        color: var(--gold);
+                        margin-bottom: 10px;
+                      "
+                    >
+                      Клиент
+                    </div>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); line-height: 2.1">
+                      <div>
+                        <code style="color: var(--gold); background: rgba(201, 169, 110, 0.08); padding: 1px 6px"
+                          >/start</code
+                        >
+                        — приветствие
+                      </div>
+                      <div>
+                        <code style="color: var(--gold); background: rgba(201, 169, 110, 0.08); padding: 1px 6px"
+                          >/status NM-XXXX</code
+                        >
+                      </div>
+                      <div>
+                        <code style="color: var(--gold); background: rgba(201, 169, 110, 0.08); padding: 1px 6px"
+                          >/cancel</code
+                        >
+                        — сброс
+                      </div>
+                      <div>Текст → переслать менеджеру</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-
     </div>
-  </div>
-</div>
 
-<div class="toast-container" id="toastContainer"></div>
-<script src="/js/admin.js"></script>
-<script>
-/* ─── Status color map ───────────────────────────────── */
-const STATUS_COLORS = {
-  new:        '#3b82f6',
-  reviewing:  '#f59e0b',
-  confirmed:  '#10b981',
-  in_progress:'#8b5cf6',
-  completed:  '#6b7280',
-  cancelled:  '#ef4444'
-};
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/admin.js"></script>
+    <script>
+      /* ─── Status color map ───────────────────────────────── */
+      const STATUS_COLORS = {
+        new: '#3b82f6',
+        reviewing: '#f59e0b',
+        confirmed: '#10b981',
+        in_progress: '#8b5cf6',
+        completed: '#6b7280',
+        cancelled: '#ef4444',
+      };
 
-/* ─── Inline status badge (colored variant) ─────────── */
-function colorBadge(status) {
-  const label = _admin.STATUS_LABELS[status] || status;
-  return `<span class="sbadge sbadge-${status}">${label}</span>`;
-}
+      /* ─── Inline status badge (colored variant) ─────────── */
+      function colorBadge(status) {
+        const label = _admin.STATUS_LABELS[status] || status;
+        return `<span class="sbadge sbadge-${status}">${label}</span>`;
+      }
 
-/* ─── Highlight helper ───────────────────────────────── */
-function highlight(el) {
-  if (!el) return;
-  el.classList.remove('updated');
-  void el.offsetWidth; // reflow to restart animation
-  el.classList.add('updated');
-}
+      /* ─── Highlight helper ───────────────────────────────── */
+      function highlight(el) {
+        if (!el) return;
+        el.classList.remove('updated');
+        void el.offsetWidth; // reflow to restart animation
+        el.classList.add('updated');
+      }
 
-/* ─── Smooth number update ───────────────────────────── */
-function setVal(id, val) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  if (el.textContent !== String(val)) {
-    el.textContent = val;
-    highlight(el);
-  }
-}
+      /* ─── Smooth number update ───────────────────────────── */
+      function setVal(id, val) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.textContent !== String(val)) {
+          el.textContent = val;
+          highlight(el);
+        }
+      }
 
-/* ─── 7-day mini bar chart ───────────────────────────── */
-function renderMiniChart(daily7d) {
-  const wrap = document.getElementById('miniChart');
-  const total7 = daily7d.reduce((s, d) => s + d.count, 0);
-  document.getElementById('chart7dTotal').textContent = `${total7} заявок за неделю`;
+      /* ─── 7-day mini bar chart ───────────────────────────── */
+      function renderMiniChart(daily7d) {
+        const wrap = document.getElementById('miniChart');
+        const total7 = daily7d.reduce((s, d) => s + d.count, 0);
+        document.getElementById('chart7dTotal').textContent = `${total7} заявок за неделю`;
 
-  const max = Math.max(...daily7d.map(d => d.count), 1);
-  const today = new Date().toISOString().slice(0, 10);
+        const max = Math.max(...daily7d.map(d => d.count), 1);
+        const today = new Date().toISOString().slice(0, 10);
 
-  wrap.innerHTML = daily7d.map(d => {
-    const pct = Math.round((d.count / max) * 100);
-    const isToday = d.day === today;
-    return `
+        wrap.innerHTML = daily7d
+          .map(d => {
+            const pct = Math.round((d.count / max) * 100);
+            const isToday = d.day === today;
+            return `
       <div class="mini-chart-col">
         <div class="mini-chart-count">${d.count || ''}</div>
         <div class="mini-chart-bar-wrap">
@@ -813,45 +1442,71 @@ function renderMiniChart(daily7d) {
         </div>
         <div class="mini-chart-label">${d.label}</div>
       </div>`;
-  }).join('');
-}
+          })
+          .join('');
+      }
 
-/* ─── Agent feed ─────────────────────────────────────── */
-async function loadAgentFeed() {
-  const el = document.getElementById('agentFeed');
-  try {
-    const logs = await _admin.apiFetch('/admin/agent-logs?limit=3').catch(() =>
-      fetch('/api/agent-logs?limit=3').then(r => r.json())
-    );
-    if (!Array.isArray(logs) || !logs.length) {
-      el.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Активности агентов ещё нет</div>';
-      return;
-    }
-    el.innerHTML = logs.slice(0, 3).map(l => `
+      /* ─── Agent feed ─────────────────────────────────────── */
+      async function loadAgentFeed() {
+        const el = document.getElementById('agentFeed');
+        try {
+          const logs = await _admin
+            .apiFetch('/admin/agent-logs?limit=3')
+            .catch(() => fetch('/api/agent-logs?limit=3').then(r => r.json()));
+          if (!Array.isArray(logs) || !logs.length) {
+            el.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Активности агентов ещё нет</div>';
+            return;
+          }
+          el.innerHTML = logs
+            .slice(0, 3)
+            .map(
+              l => `
       <div class="agent-feed-item">
         <div class="agent-feed-from">${_admin.escapeHtml(l.from || 'Agent')}</div>
         <div class="agent-feed-msg">${_admin.escapeHtml(l.message || l.text || l.msg || JSON.stringify(l))}</div>
         <div class="agent-feed-time">${_admin.formatDateTime(l.created_at)}</div>
-      </div>`).join('');
-  } catch {
-    el.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Лог недоступен</div>';
-  }
-}
+      </div>`
+            )
+            .join('');
+        } catch {
+          el.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Лог недоступен</div>';
+        }
+      }
 
-/* ─── Recent activity feed ───────────────────────────── */
-async function loadActivityFeed() {
-  try {
-    const data = await _admin.apiFetch('/admin/orders?limit=8&page=1');
-    const feed = document.getElementById('activity-feed');
-    if (!data || !data.orders || !data.orders.length) {
-      feed.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Заявок ще немає</div>';
-      return;
-    }
-    const STATUS = { new:'🆕', reviewing:'🔍', confirmed:'✅', in_progress:'▶️', completed:'🏁', cancelled:'❌' };
-    const STATUS_COLOR = { new:'var(--gold)', reviewing:'#8899aa', confirmed:'var(--success)', in_progress:'#4fc3f7', completed:'#80cbc4', cancelled:'var(--error)' };
-    feed.innerHTML = data.orders.map(o => {
-      const d = new Date(o.created_at || o.updated_at).toLocaleDateString('ru-RU', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
-      return `<div style="display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer" onclick="location.href='/admin/orders.html?id=${o.id}'">
+      /* ─── Recent activity feed ───────────────────────────── */
+      async function loadActivityFeed() {
+        try {
+          const data = await _admin.apiFetch('/admin/orders?limit=8&page=1');
+          const feed = document.getElementById('activity-feed');
+          if (!data || !data.orders || !data.orders.length) {
+            feed.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Заявок ще немає</div>';
+            return;
+          }
+          const STATUS = {
+            new: '🆕',
+            reviewing: '🔍',
+            confirmed: '✅',
+            in_progress: '▶️',
+            completed: '🏁',
+            cancelled: '❌',
+          };
+          const STATUS_COLOR = {
+            new: 'var(--gold)',
+            reviewing: '#8899aa',
+            confirmed: 'var(--success)',
+            in_progress: '#4fc3f7',
+            completed: '#80cbc4',
+            cancelled: 'var(--error)',
+          };
+          feed.innerHTML = data.orders
+            .map(o => {
+              const d = new Date(o.created_at || o.updated_at).toLocaleDateString('ru-RU', {
+                day: 'numeric',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+              });
+              return `<div style="display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer" onclick="location.href='/admin/orders.html?id=${o.id}'">
         <span style="font-size:1.2rem">${STATUS[o.status] || '📋'}</span>
         <div style="flex:1;min-width:0">
           <div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_admin.escapeHtml(o.client_name || '—')}</div>
@@ -862,54 +1517,58 @@ async function loadActivityFeed() {
           <div style="font-size:0.72rem;color:var(--text-dim)">${d}</div>
         </div>
       </div>`;
-    }).join('');
-  } catch {
-    const feed = document.getElementById('activity-feed');
-    if (feed) feed.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Помилка завантаження</div>';
-  }
-}
+            })
+            .join('');
+        } catch {
+          const feed = document.getElementById('activity-feed');
+          if (feed)
+            feed.innerHTML =
+              '<div style="padding:20px;text-align:center;color:var(--text-dim)">Помилка завантаження</div>';
+        }
+      }
 
-/* ─── Main dashboard loader ──────────────────────────── */
-async function loadDashboard() {
-  try {
-    const stats = await _admin.apiFetch('/admin/stats');
+      /* ─── Main dashboard loader ──────────────────────────── */
+      async function loadDashboard() {
+        try {
+          const stats = await _admin.apiFetch('/admin/stats');
 
-    // KPI cards — smooth update
-    setVal('s_total',  stats.total_orders);
-    setVal('s_new',    stats.new_orders);
-    setVal('s_active', stats.active_orders);
-    setVal('s_models', `${stats.available_models}/${stats.total_models}`);
-    setVal('s_unread', stats.unread_messages || 0);
+          // KPI cards — smooth update
+          setVal('s_total', stats.total_orders);
+          setVal('s_new', stats.new_orders);
+          setVal('s_active', stats.active_orders);
+          setVal('s_models', `${stats.available_models}/${stats.total_models}`);
+          setVal('s_unread', stats.unread_messages || 0);
 
-    // Enhanced metrics
-    if (stats.conversion_rate !== undefined) {
-      setVal('s_conversion', stats.conversion_rate.toFixed(1) + '%');
-    }
-    if (stats.avg_order_budget) {
-      setVal('s_avg_budget', Math.round(stats.avg_order_budget).toLocaleString('ru-RU') + ' ₽');
-    }
-    if (stats.avg_cycle_days) {
-      setVal('s_avg_cycle', stats.avg_cycle_days + ' дн');
-    }
+          // Enhanced metrics
+          if (stats.conversion_rate !== undefined) {
+            setVal('s_conversion', stats.conversion_rate.toFixed(1) + '%');
+          }
+          if (stats.avg_order_budget) {
+            setVal('s_avg_budget', Math.round(stats.avg_order_budget).toLocaleString('ru-RU') + ' ₽');
+          }
+          if (stats.avg_cycle_days) {
+            setVal('s_avg_cycle', stats.avg_cycle_days + ' дн');
+          }
 
-    // Orders trend indicator
-    const trend = stats.orders_trend;
-    const dTrend = document.getElementById('d_trend');
-    if (trend && dTrend) {
-      const arrow = trend.direction === 'up' ? '↑' : trend.direction === 'down' ? '↓' : '→';
-      const sign  = trend.delta >= 0 ? '+' : '';
-      dTrend.textContent = `${arrow} ${sign}${trend.delta} за 7 дн (вс пред.)`;
-      dTrend.className = 'kpi-delta' + (trend.direction === 'down' ? ' down' : '');
-    }
+          // Orders trend indicator
+          const trend = stats.orders_trend;
+          const dTrend = document.getElementById('d_trend');
+          if (trend && dTrend) {
+            const arrow = trend.direction === 'up' ? '↑' : trend.direction === 'down' ? '↓' : '→';
+            const sign = trend.delta >= 0 ? '+' : '';
+            dTrend.textContent = `${arrow} ${sign}${trend.delta} за 7 дн (вс пред.)`;
+            dTrend.className = 'kpi-delta' + (trend.direction === 'down' ? ' down' : '');
+          }
 
-    // Top models list
-    const topModelsEl = document.getElementById('topModelsList');
-    if (topModelsEl && stats.top_models && stats.top_models.length) {
-      const maxCount = stats.top_models[0].order_count || 1;
-      topModelsEl.innerHTML = stats.top_models.map((m, i) => {
-        const pct = maxCount > 0 ? Math.round((m.order_count / maxCount) * 100) : 0;
-        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-        return `<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          // Top models list
+          const topModelsEl = document.getElementById('topModelsList');
+          if (topModelsEl && stats.top_models && stats.top_models.length) {
+            const maxCount = stats.top_models[0].order_count || 1;
+            topModelsEl.innerHTML = stats.top_models
+              .map((m, i) => {
+                const pct = maxCount > 0 ? Math.round((m.order_count / maxCount) * 100) : 0;
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+                return `<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
           <span style="width:24px;text-align:center;font-size:1rem">${medal}</span>
           <div style="flex:1;min-width:0">
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
@@ -919,240 +1578,282 @@ async function loadDashboard() {
             <div style="background:var(--border);border-radius:2px;height:4px"><div style="background:var(--gold);width:${pct}%;height:4px;border-radius:2px;transition:width 0.5s"></div></div>
           </div>
         </div>`;
-      }).join('');
-    } else if (topModelsEl) {
-      topModelsEl.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Нет данных</div>';
-    }
+              })
+              .join('');
+          } else if (topModelsEl) {
+            topModelsEl.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Нет данных</div>';
+          }
 
-    // 🔔 New orders badge pill + quick-action badge
-    const pill     = document.getElementById('newOrdersPill');
-    const pillText = document.getElementById('newOrdersPillText');
-    if (stats.new_orders > 0) {
-      pillText.textContent = `Новых заявок: ${stats.new_orders}`;
-      pill.style.display = 'inline-flex';
-    } else {
-      pill.style.display = 'none';
-    }
-    updateQaBadge(stats.new_orders || 0);
+          // 🔔 New orders badge pill + quick-action badge
+          const pill = document.getElementById('newOrdersPill');
+          const pillText = document.getElementById('newOrdersPillText');
+          if (stats.new_orders > 0) {
+            pillText.textContent = `Новых заявок: ${stats.new_orders}`;
+            pill.style.display = 'inline-flex';
+          } else {
+            pill.style.display = 'none';
+          }
+          updateQaBadge(stats.new_orders || 0);
 
-    // Unread link
-    if (stats.unread_messages > 0) {
-      const ul = document.getElementById('unreadLink');
-      if (ul) ul.style.display = '';
-    }
+          // Unread link
+          if (stats.unread_messages > 0) {
+            const ul = document.getElementById('unreadLink');
+            if (ul) ul.style.display = '';
+          }
 
-    // Status chart
-    const chartEl   = document.getElementById('statusChart');
-    const byStatus  = stats.by_status || [];
-    const total     = byStatus.reduce((s, r) => s + r.count, 0) || 1;
-    const STATUS_RU = _admin.STATUS_LABELS;
-    if (byStatus.length) {
-      chartEl.innerHTML = byStatus
-        .sort((a, b) => b.count - a.count)
-        .map(r => `
+          // Status chart
+          const chartEl = document.getElementById('statusChart');
+          const byStatus = stats.by_status || [];
+          const total = byStatus.reduce((s, r) => s + r.count, 0) || 1;
+          const STATUS_RU = _admin.STATUS_LABELS;
+          if (byStatus.length) {
+            chartEl.innerHTML = byStatus
+              .sort((a, b) => b.count - a.count)
+              .map(
+                r => `
           <div class="chart-bar-row">
             <div class="chart-bar-label">
               <span class="sbadge sbadge-${r.status}">${STATUS_RU[r.status] || r.status}</span>
             </div>
             <div class="chart-bar-track">
-              <div class="chart-bar-fill" style="width:${Math.round(r.count/total*100)}%;background:${STATUS_COLORS[r.status] || '#888'}"></div>
+              <div class="chart-bar-fill" style="width:${Math.round((r.count / total) * 100)}%;background:${STATUS_COLORS[r.status] || '#888'}"></div>
             </div>
             <div class="chart-bar-count">${r.count}</div>
-          </div>`).join('');
-    } else {
-      chartEl.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Нет данных</div>';
-    }
+          </div>`
+              )
+              .join('');
+          } else {
+            chartEl.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Нет данных</div>';
+          }
 
-    // 7-day mini chart
-    if (stats.daily_7d) renderMiniChart(stats.daily_7d);
+          // 7-day mini chart
+          if (stats.daily_7d) renderMiniChart(stats.daily_7d);
 
-    // Chart.js charts (status doughnut + trend bar)
-    renderStatsCharts(stats);
+          // Chart.js charts (status doughnut + trend bar)
+          renderStatsCharts(stats);
 
-    // Recent orders — 5 rows compact
-    const tbody = document.getElementById('recentOrders');
-    const recent5 = (stats.recent || []).slice(0, 5);
-    if (!recent5.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-dim)">Заявок ещё нет</td></tr>';
-    } else {
-      tbody.innerHTML = recent5.map(o => `
+          // Recent orders — 5 rows compact
+          const tbody = document.getElementById('recentOrders');
+          const recent5 = (stats.recent || []).slice(0, 5);
+          if (!recent5.length) {
+            tbody.innerHTML =
+              '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-dim)">Заявок ещё нет</td></tr>';
+          } else {
+            tbody.innerHTML = recent5
+              .map(
+                o => `
         <tr onclick="window.location='/admin/orders.html?id=${o.id}'" style="cursor:pointer">
           <td><strong>${_admin.escapeHtml(o.order_number)}</strong></td>
           <td>${_admin.escapeHtml(o.client_name)}<br><span style="font-size:0.7rem;color:var(--text-dim)">${_admin.escapeHtml(o.client_phone)}</span></td>
           <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type}</td>
           <td>${_admin.formatDate(o.event_date || o.created_at)}</td>
           <td>${colorBadge(o.status)}</td>
-        </tr>`).join('');
-    }
-
-  } catch (e) {
-    _admin.toast('Ошибка загрузки: ' + e.message, 'error');
-  }
-}
-
-/* ─── Chart.js stats charts ──────────────────────────── */
-function renderStatsCharts(stats) {
-  if (typeof Chart === 'undefined') return;
-
-  const statusData = {};
-  (stats.by_status || []).forEach(r => { statusData[r.status] = r.count; });
-
-  const statusLabels = {
-    new: 'Новые', confirmed: 'Подтверждённые', in_progress: 'В работе',
-    completed: 'Завершённые', cancelled: 'Отменённые', reviewing: 'На рассмотрении'
-  };
-  const colors = {
-    new: '#3b82f6', confirmed: '#10b981', in_progress: '#8b5cf6',
-    completed: '#6b7280', cancelled: '#ef4444', reviewing: '#f59e0b'
-  };
-
-  // Doughnut: orders by status
-  const statusCtx = document.getElementById('statusChartJs');
-  if (statusCtx && Object.keys(statusData).length) {
-    if (window._statusChartJs) window._statusChartJs.destroy();
-    const keys   = Object.keys(statusData);
-    const labels = keys.map(k => statusLabels[k] || k);
-    const data   = keys.map(k => statusData[k]);
-    const bgColors = keys.map(k => colors[k] || '#888');
-    window._statusChartJs = new Chart(statusCtx, {
-      type: 'doughnut',
-      data: { labels, datasets: [{ data, backgroundColor: bgColors, borderWidth: 1, borderColor: 'rgba(0,0,0,0.2)' }] },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { position: 'bottom', labels: { font: { size: 11 }, color: '#999', boxWidth: 12, padding: 10 } }
+        </tr>`
+              )
+              .join('');
+          }
+        } catch (e) {
+          _admin.toast('Ошибка загрузки: ' + e.message, 'error');
         }
       }
-    });
-  }
 
-  // Bar chart: trend (previous 7d vs current 7d)
-  const trendCtx = document.getElementById('trendChartJs');
-  if (trendCtx && stats.orders_trend) {
-    if (window._trendChartJs) window._trendChartJs.destroy();
-    const t = stats.orders_trend;
-    window._trendChartJs = new Chart(trendCtx, {
-      type: 'bar',
-      data: {
-        labels: ['Предыдущие 7 дней', 'Последние 7 дней'],
-        datasets: [{
-          label: 'Заявки',
-          data: [t.previous_7d || 0, t.current_7d || 0],
-          backgroundColor: ['rgba(201,169,110,0.4)', 'rgba(201,169,110,0.9)'],
-          borderColor: ['#c9a96e', '#c9a96e'],
-          borderWidth: 1,
-          borderRadius: 3
-        }]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          y: {
-            beginAtZero: true,
-            ticks: { stepSize: 1, color: '#888', font: { size: 11 } },
-            grid: { color: 'rgba(255,255,255,0.05)' }
-          },
-          x: { ticks: { color: '#888', font: { size: 11 } }, grid: { display: false } }
-        },
-        plugins: { legend: { display: false } }
+      /* ─── Chart.js stats charts ──────────────────────────── */
+      function renderStatsCharts(stats) {
+        if (typeof Chart === 'undefined') return;
+
+        const statusData = {};
+        (stats.by_status || []).forEach(r => {
+          statusData[r.status] = r.count;
+        });
+
+        const statusLabels = {
+          new: 'Новые',
+          confirmed: 'Подтверждённые',
+          in_progress: 'В работе',
+          completed: 'Завершённые',
+          cancelled: 'Отменённые',
+          reviewing: 'На рассмотрении',
+        };
+        const colors = {
+          new: '#3b82f6',
+          confirmed: '#10b981',
+          in_progress: '#8b5cf6',
+          completed: '#6b7280',
+          cancelled: '#ef4444',
+          reviewing: '#f59e0b',
+        };
+
+        // Doughnut: orders by status
+        const statusCtx = document.getElementById('statusChartJs');
+        if (statusCtx && Object.keys(statusData).length) {
+          if (window._statusChartJs) window._statusChartJs.destroy();
+          const keys = Object.keys(statusData);
+          const labels = keys.map(k => statusLabels[k] || k);
+          const data = keys.map(k => statusData[k]);
+          const bgColors = keys.map(k => colors[k] || '#888');
+          window._statusChartJs = new Chart(statusCtx, {
+            type: 'doughnut',
+            data: {
+              labels,
+              datasets: [{ data, backgroundColor: bgColors, borderWidth: 1, borderColor: 'rgba(0,0,0,0.2)' }],
+            },
+            options: {
+              responsive: true,
+              plugins: {
+                legend: {
+                  position: 'bottom',
+                  labels: { font: { size: 11 }, color: '#999', boxWidth: 12, padding: 10 },
+                },
+              },
+            },
+          });
+        }
+
+        // Bar chart: trend (previous 7d vs current 7d)
+        const trendCtx = document.getElementById('trendChartJs');
+        if (trendCtx && stats.orders_trend) {
+          if (window._trendChartJs) window._trendChartJs.destroy();
+          const t = stats.orders_trend;
+          window._trendChartJs = new Chart(trendCtx, {
+            type: 'bar',
+            data: {
+              labels: ['Предыдущие 7 дней', 'Последние 7 дней'],
+              datasets: [
+                {
+                  label: 'Заявки',
+                  data: [t.previous_7d || 0, t.current_7d || 0],
+                  backgroundColor: ['rgba(201,169,110,0.4)', 'rgba(201,169,110,0.9)'],
+                  borderColor: ['#c9a96e', '#c9a96e'],
+                  borderWidth: 1,
+                  borderRadius: 3,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  ticks: { stepSize: 1, color: '#888', font: { size: 11 } },
+                  grid: { color: 'rgba(255,255,255,0.05)' },
+                },
+                x: { ticks: { color: '#888', font: { size: 11 } }, grid: { display: false } },
+              },
+              plugins: { legend: { display: false } },
+            },
+          });
+        }
       }
-    });
-  }
-}
 
-/* ─── Extended KPI cards (Task 1) ────────────────────── */
-async function loadKpiCards() {
-  try {
-    const d = await _admin.apiFetch('/admin/stats/extended2');
-    function setKpi(id, val) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      if (el.textContent !== String(val)) {
-        el.textContent = val;
-        el.closest('.kpi-card')?.classList.remove('updated');
-        void el.closest('.kpi-card')?.offsetWidth;
-        el.closest('.kpi-card')?.classList.add('updated');
+      /* ─── Extended KPI cards (Task 1) ────────────────────── */
+      async function loadKpiCards() {
+        try {
+          const d = await _admin.apiFetch('/admin/stats/extended2');
+          function setKpi(id, val) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (el.textContent !== String(val)) {
+              el.textContent = val;
+              el.closest('.kpi-card')?.classList.remove('updated');
+              void el.closest('.kpi-card')?.offsetWidth;
+              el.closest('.kpi-card')?.classList.add('updated');
+            }
+          }
+          setKpi('k_today', d.today_orders);
+          setKpi('k_active', d.active_orders);
+          setKpi('k_completed', d.completed_orders);
+          setKpi('k_new_clients', d.new_clients_30d);
+          if (d.pending_reviews !== undefined) setKpi('k_pending_reviews', d.pending_reviews);
+          if (d.revenue_30d) setVal('s_revenue30', (d.revenue_30d / 1000).toFixed(0) + ' тыс ₽');
+          setVal('s_repeat', d.repeat_clients || 0);
+          setVal('s_deal_days', d.avg_deal_days ? d.avg_deal_days + ' дн' : '—');
+        } catch {
+          /* silently skip */
+        }
+        // Load pending reviews separately if not in extended stats
+        try {
+          const rv = await _admin.apiFetch('/admin/reviews?approved=0&limit=1');
+          const cnt = rv.total ?? 0;
+          const el = document.getElementById('k_pending_reviews');
+          if (el && el.textContent === '—') el.textContent = cnt;
+          if (cnt > 0) {
+            document.getElementById('pendingBadge')?.style &&
+              (document.getElementById('pendingBadge').style.display = '');
+            const pb = document.getElementById('pendingBadge');
+            if (pb) pb.textContent = cnt;
+          }
+        } catch {
+          /* silently skip */
+        }
       }
-    }
-    setKpi('k_today',       d.today_orders);
-    setKpi('k_active',      d.active_orders);
-    setKpi('k_completed',   d.completed_orders);
-    setKpi('k_new_clients', d.new_clients_30d);
-    if (d.pending_reviews !== undefined) setKpi('k_pending_reviews', d.pending_reviews);
-    if (d.revenue_30d) setVal('s_revenue30', (d.revenue_30d / 1000).toFixed(0) + ' тыс ₽');
-    setVal('s_repeat', d.repeat_clients || 0);
-    setVal('s_deal_days', d.avg_deal_days ? d.avg_deal_days + ' дн' : '—');
-  } catch { /* silently skip */ }
-  // Load pending reviews separately if not in extended stats
-  try {
-    const rv = await _admin.apiFetch('/admin/reviews?approved=0&limit=1');
-    const cnt = rv.total ?? 0;
-    const el = document.getElementById('k_pending_reviews');
-    if (el && el.textContent === '—') el.textContent = cnt;
-    if (cnt > 0) {
-      document.getElementById('pendingBadge')?.style && (document.getElementById('pendingBadge').style.display = '');
-      const pb = document.getElementById('pendingBadge');
-      if (pb) pb.textContent = cnt;
-    }
-  } catch { /* silently skip */ }
-}
 
-/* ─── 30-day SVG chart (Task 3) ──────────────────────── */
-async function loadChart30() {
-  const days = parseInt(document.getElementById('chart30Period').value) || 30;
-  try {
-    const data = await _admin.apiFetch(`/admin/orders-chart?days=${days}`);
-    renderChart30(data.days, data.total);
-    document.getElementById('chart30Total').textContent = `${data.total} заявок`;
-  } catch {
-    document.getElementById('chart30Total').textContent = '';
-  }
-}
+      /* ─── 30-day SVG chart (Task 3) ──────────────────────── */
+      async function loadChart30() {
+        const days = parseInt(document.getElementById('chart30Period').value) || 30;
+        try {
+          const data = await _admin.apiFetch(`/admin/orders-chart?days=${days}`);
+          renderChart30(data.days, data.total);
+          document.getElementById('chart30Total').textContent = `${data.total} заявок`;
+        } catch {
+          document.getElementById('chart30Total').textContent = '';
+        }
+      }
 
-function renderChart30(days, total) {
-  const svg   = document.getElementById('chart30Svg');
-  const xLabels = document.getElementById('chart30XLabels');
-  const tooltip = document.getElementById('chart30Tooltip');
-  if (!svg || !days.length) return;
+      function renderChart30(days, total) {
+        const svg = document.getElementById('chart30Svg');
+        const xLabels = document.getElementById('chart30XLabels');
+        const tooltip = document.getElementById('chart30Tooltip');
+        if (!svg || !days.length) return;
 
-  const W = 800, H = 140, PAD_L = 0, PAD_R = 0, PAD_T = 10, PAD_B = 20;
-  const maxVal = Math.max(...days.map(d => d.count), 1);
-  const n = days.length;
-  const stepX = (W - PAD_L - PAD_R) / Math.max(n - 1, 1);
-  const scaleY = v => PAD_T + (H - PAD_T - PAD_B) * (1 - v / maxVal);
+        const W = 800,
+          H = 140,
+          PAD_L = 0,
+          PAD_R = 0,
+          PAD_T = 10,
+          PAD_B = 20;
+        const maxVal = Math.max(...days.map(d => d.count), 1);
+        const n = days.length;
+        const stepX = (W - PAD_L - PAD_R) / Math.max(n - 1, 1);
+        const scaleY = v => PAD_T + (H - PAD_T - PAD_B) * (1 - v / maxVal);
 
-  // Build points
-  const pts = days.map((d, i) => ({
-    x: PAD_L + i * stepX,
-    y: scaleY(d.count),
-    count: d.count,
-    label: d.label,
-    day: d.day,
-  }));
+        // Build points
+        const pts = days.map((d, i) => ({
+          x: PAD_L + i * stepX,
+          y: scaleY(d.count),
+          count: d.count,
+          label: d.label,
+          day: d.day,
+        }));
 
-  // Area fill path
-  const ptsStr = pts.map(p => `${p.x},${p.y}`).join(' ');
-  const areaPath = `M${pts[0].x},${H - PAD_B} L${ptsStr} L${pts[pts.length-1].x},${H - PAD_B} Z`;
+        // Area fill path
+        const ptsStr = pts.map(p => `${p.x},${p.y}`).join(' ');
+        const areaPath = `M${pts[0].x},${H - PAD_B} L${ptsStr} L${pts[pts.length - 1].x},${H - PAD_B} Z`;
 
-  // Line path
-  const linePath = `M${pts.map(p => `${p.x},${p.y}`).join(' L')}`;
+        // Line path
+        const linePath = `M${pts.map(p => `${p.x},${p.y}`).join(' L')}`;
 
-  // Y grid lines
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(f => {
-    const y = scaleY(maxVal * f);
-    const v = Math.round(maxVal * f);
-    return `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="#1e1e1e" stroke-width="1"/>
+        // Y grid lines
+        const gridLines = [0, 0.25, 0.5, 0.75, 1]
+          .map(f => {
+            const y = scaleY(maxVal * f);
+            const v = Math.round(maxVal * f);
+            return `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="#1e1e1e" stroke-width="1"/>
             <text x="4" y="${y - 3}" fill="#444" font-size="9">${v}</text>`;
-  }).join('');
+          })
+          .join('');
 
-  // Circles + invisible hit targets
-  const circles = pts.map((p, i) => `
+        // Circles + invisible hit targets
+        const circles = pts
+          .map(
+            (p, i) => `
     <circle cx="${p.x}" cy="${p.y}" r="3" fill="${p.count > 0 ? '#c9a96e' : '#1e1e1e'}" stroke="#c9a96e" stroke-width="1.5" class="chart30-dot" data-i="${i}"/>
-    <rect x="${p.x - stepX/2}" y="${PAD_T}" width="${stepX}" height="${H - PAD_T - PAD_B}" fill="transparent"
+    <rect x="${p.x - stepX / 2}" y="${PAD_T}" width="${stepX}" height="${H - PAD_T - PAD_B}" fill="transparent"
       onmouseenter="showChart30Tip(${i},${p.x},${p.y},event)" onmouseleave="hideChart30Tip()" style="cursor:crosshair"/>
-  `).join('');
+  `
+          )
+          .join('');
 
-  svg.innerHTML = `
+        svg.innerHTML = `
     <defs>
       <linearGradient id="chart30Grad" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#c9a96e" stop-opacity="0.25"/>
@@ -1165,68 +1866,72 @@ function renderChart30(days, total) {
     ${circles}
   `;
 
-  // Store pts globally for tooltip
-  svg._pts = pts;
+        // Store pts globally for tooltip
+        svg._pts = pts;
 
-  // X labels — show ~6 evenly spread
-  const step = Math.max(1, Math.floor(n / 6));
-  const labelItems = days.filter((_, i) => i === 0 || i === n - 1 || i % step === 0).map(d => d.label);
-  xLabels.innerHTML = labelItems.map(l => `<span>${l}</span>`).join('');
-}
+        // X labels — show ~6 evenly spread
+        const step = Math.max(1, Math.floor(n / 6));
+        const labelItems = days.filter((_, i) => i === 0 || i === n - 1 || i % step === 0).map(d => d.label);
+        xLabels.innerHTML = labelItems.map(l => `<span>${l}</span>`).join('');
+      }
 
-let _chart30TipTimer;
-function showChart30Tip(i, x, y, e) {
-  const svg = document.getElementById('chart30Svg');
-  const tip = document.getElementById('chart30Tooltip');
-  const pt  = (svg._pts || [])[i];
-  if (!pt) return;
-  tip.textContent = `${pt.label}: ${pt.count} заявок`;
-  const rect = svg.getBoundingClientRect();
-  const svgW = rect.width;
-  // map svg x (0..800) to actual pixel
-  const px = (pt.x / 800) * svgW;
-  const pyRatio = (pt.y / 140);
-  const tipLeft = Math.min(px + 8, svgW - 120);
-  tip.style.left = tipLeft + 'px';
-  tip.style.top  = (pyRatio * rect.height - 32) + 'px';
-  tip.style.display = 'block';
-}
-function hideChart30Tip() {
-  const tip = document.getElementById('chart30Tooltip');
-  if (tip) tip.style.display = 'none';
-}
+      let _chart30TipTimer;
+      function showChart30Tip(i, x, y, e) {
+        const svg = document.getElementById('chart30Svg');
+        const tip = document.getElementById('chart30Tooltip');
+        const pt = (svg._pts || [])[i];
+        if (!pt) return;
+        tip.textContent = `${pt.label}: ${pt.count} заявок`;
+        const rect = svg.getBoundingClientRect();
+        const svgW = rect.width;
+        // map svg x (0..800) to actual pixel
+        const px = (pt.x / 800) * svgW;
+        const pyRatio = pt.y / 140;
+        const tipLeft = Math.min(px + 8, svgW - 120);
+        tip.style.left = tipLeft + 'px';
+        tip.style.top = pyRatio * rect.height - 32 + 'px';
+        tip.style.display = 'block';
+      }
+      function hideChart30Tip() {
+        const tip = document.getElementById('chart30Tooltip');
+        if (tip) tip.style.display = 'none';
+      }
 
-/* ─── Notifications center (Task 2) ─────────────────── */
-let _notifData = [];
+      /* ─── Notifications center (Task 2) ─────────────────── */
+      let _notifData = [];
 
-async function loadNotifications() {
-  try {
-    const data = await _admin.apiFetch('/admin/notifications');
-    _notifData = data.notifications || [];
-    const count = data.unread_count || 0;
-    const badge = document.getElementById('notifBadge');
-    if (badge) {
-      badge.textContent = count > 9 ? '9+' : count;
-      badge.style.display = count > 0 ? 'flex' : 'none';
-    }
-    const navBadge = document.getElementById('notifNavBadge');
-    if (navBadge) {
-      navBadge.textContent = count > 9 ? '9+' : count;
-      navBadge.style.display = count > 0 ? '' : 'none';
-    }
-    renderNotifList();
-  } catch { /* silently skip */ }
-}
+      async function loadNotifications() {
+        try {
+          const data = await _admin.apiFetch('/admin/notifications');
+          _notifData = data.notifications || [];
+          const count = data.unread_count || 0;
+          const badge = document.getElementById('notifBadge');
+          if (badge) {
+            badge.textContent = count > 9 ? '9+' : count;
+            badge.style.display = count > 0 ? 'flex' : 'none';
+          }
+          const navBadge = document.getElementById('notifNavBadge');
+          if (navBadge) {
+            navBadge.textContent = count > 9 ? '9+' : count;
+            navBadge.style.display = count > 0 ? '' : 'none';
+          }
+          renderNotifList();
+        } catch {
+          /* silently skip */
+        }
+      }
 
-function renderNotifList() {
-  const list = document.getElementById('notifList');
-  if (!list) return;
-  if (!_notifData.length) {
-    list.innerHTML = '<div class="notif-empty">Уведомлений нет</div>';
-    return;
-  }
-  const ICONS = { new_order: '📋', pending_review: '⭐', unread_message: '💬' };
-  list.innerHTML = _notifData.map(n => `
+      function renderNotifList() {
+        const list = document.getElementById('notifList');
+        if (!list) return;
+        if (!_notifData.length) {
+          list.innerHTML = '<div class="notif-empty">Уведомлений нет</div>';
+          return;
+        }
+        const ICONS = { new_order: '📋', pending_review: '⭐', unread_message: '💬' };
+        list.innerHTML = _notifData
+          .map(
+            n => `
     <a class="notif-item${n.read ? '' : ' unread'}" href="${n.link}" onclick="markNotifRead('${n.id}')">
       <div class="notif-item-icon">${ICONS[n.type] || '🔔'}</div>
       <div class="notif-item-body">
@@ -1234,56 +1939,68 @@ function renderNotifList() {
         <div class="notif-item-text">${_admin.escapeHtml(n.text)}</div>
       </div>
       <div class="notif-item-time">${_admin.formatDateTime(n.created_at)}</div>
-    </a>`).join('');
-}
+    </a>`
+          )
+          .join('');
+      }
 
-function toggleNotifPopup() {
-  const popup = document.getElementById('notifPopup');
-  if (!popup) return;
-  const isOpen = popup.classList.toggle('open');
-  if (isOpen) loadNotifications();
-}
+      function toggleNotifPopup() {
+        const popup = document.getElementById('notifPopup');
+        if (!popup) return;
+        const isOpen = popup.classList.toggle('open');
+        if (isOpen) loadNotifications();
+      }
 
-async function markNotifRead(id) {
-  try {
-    await _admin.apiFetch('/admin/notifications/read', {
-      method: 'POST', body: JSON.stringify({ ids: [id] })
-    });
-    const n = _notifData.find(x => x.id === id);
-    if (n) n.read = true;
-    loadNotifications();
-  } catch { /* ignore */ }
-}
+      async function markNotifRead(id) {
+        try {
+          await _admin.apiFetch('/admin/notifications/read', {
+            method: 'POST',
+            body: JSON.stringify({ ids: [id] }),
+          });
+          const n = _notifData.find(x => x.id === id);
+          if (n) n.read = true;
+          loadNotifications();
+        } catch {
+          /* ignore */
+        }
+      }
 
-async function markAllNotifRead() {
-  try {
-    await _admin.apiFetch('/admin/notifications/read', {
-      method: 'POST', body: JSON.stringify({ ids: _notifData.map(n => n.id) })
-    });
-    _notifData.forEach(n => n.read = true);
-    loadNotifications();
-  } catch { /* ignore */ }
-}
+      async function markAllNotifRead() {
+        try {
+          await _admin.apiFetch('/admin/notifications/read', {
+            method: 'POST',
+            body: JSON.stringify({ ids: _notifData.map(n => n.id) }),
+          });
+          _notifData.forEach(n => (n.read = true));
+          loadNotifications();
+        } catch {
+          /* ignore */
+        }
+      }
 
-// Close popup on outside click
-document.addEventListener('click', e => {
-  const wrap = document.getElementById('notifBellWrap');
-  const popup = document.getElementById('notifPopup');
-  if (wrap && popup && !wrap.contains(e.target)) popup.classList.remove('open');
-});
+      // Close popup on outside click
+      document.addEventListener('click', e => {
+        const wrap = document.getElementById('notifBellWrap');
+        const popup = document.getElementById('notifPopup');
+        if (wrap && popup && !wrap.contains(e.target)) popup.classList.remove('open');
+      });
 
-/* ─── Quick booking leads ────────────────────────────── */
-async function loadQuickBookings() {
-  const cont = document.getElementById('quickBookingsList');
-  try {
-    const rows = await _admin.apiFetch('/admin/quick-bookings');
-    if (!rows || !rows.length) {
-      cont.innerHTML = '<div style="padding:16px;color:var(--text-dim);font-size:0.85rem">Быстрых заявок нет</div>';
-      return;
-    }
-    cont.innerHTML = `<table class="data-table">
+      /* ─── Quick booking leads ────────────────────────────── */
+      async function loadQuickBookings() {
+        const cont = document.getElementById('quickBookingsList');
+        try {
+          const rows = await _admin.apiFetch('/admin/quick-bookings');
+          if (!rows || !rows.length) {
+            cont.innerHTML =
+              '<div style="padding:16px;color:var(--text-dim);font-size:0.85rem">Быстрых заявок нет</div>';
+            return;
+          }
+          cont.innerHTML = `<table class="data-table">
       <thead><tr><th>Имя</th><th>Телефон</th><th>Дата</th></tr></thead>
-      <tbody>${rows.slice(0, 10).map(r => `
+      <tbody>${rows
+        .slice(0, 10)
+        .map(
+          r => `
         <tr>
           <td>${_admin.escapeHtml(r.client_name || '—')}</td>
           <td>
@@ -1292,182 +2009,210 @@ async function loadQuickBookings() {
             </a>
           </td>
           <td style="font-size:0.78rem;color:var(--text-dim)">${_admin.formatDateTime(r.created_at)}</td>
-        </tr>`).join('')}
+        </tr>`
+        )
+        .join('')}
       </tbody>
     </table>`;
-  } catch {
-    cont.innerHTML = '<div style="padding:16px;color:var(--text-dim);font-size:0.85rem">Нет данных</div>';
-  }
-}
-
-/* ─── Bot status indicator ───────────────────────────── */
-async function loadBotStatus() {
-  const dot   = document.getElementById('botStatusDot');
-  const label = document.getElementById('botStatusLabel');
-  const uptime = document.getElementById('botStatusUptime');
-  try {
-    const data = await fetch('/api/health').then(r => r.json());
-    const status = data.status;
-    const bot    = data.components?.bot || data.bot || '';
-    const uptimeSec = data.uptime_seconds || data.uptime || 0;
-    const hours  = Math.floor(uptimeSec / 3600);
-    const mins   = Math.floor((uptimeSec % 3600) / 60);
-    const uptimeStr = uptimeSec ? `Работает ${hours} ч ${String(mins).padStart(2,'0')} мин` : '';
-
-    if (status === 'ok' && (bot === 'ok' || bot === 'connected')) {
-      dot.className   = 'bot-status-dot online';
-      label.className = 'bot-status-label online';
-      label.textContent = '✅ Бот онлайн';
-    } else if (status === 'degraded') {
-      dot.className   = 'bot-status-dot warn';
-      label.className = 'bot-status-label warn';
-      label.textContent = '⚠️ Проблемы';
-    } else {
-      dot.className   = 'bot-status-dot offline';
-      label.className = 'bot-status-label offline';
-      label.textContent = '❌ Офлайн';
-    }
-    if (uptime) uptime.textContent = uptimeStr;
-  } catch {
-    if (dot)   dot.className   = 'bot-status-dot offline';
-    if (label) { label.className = 'bot-status-label offline'; label.textContent = '❌ Офлайн'; }
-  }
-}
-
-/* ─── Today's activity card ──────────────────────────── */
-async function loadTodayActivity() {
-  try {
-    // Today's orders
-    const today = new Date().toISOString().slice(0, 10);
-    document.getElementById('todayDateLabel').textContent = new Date().toLocaleDateString('ru-RU', { weekday:'long', day:'numeric', month:'long' });
-
-    const data = await _admin.apiFetch(`/admin/orders?period=today&limit=3&page=1`)
-      .catch(() => _admin.apiFetch('/admin/orders?limit=3&page=1'));
-
-    // Try period filter via date params
-    const todayData = await _admin.apiFetch(`/admin/orders?date_from=${today}&date_to=${today}&limit=3&page=1`).catch(() => null);
-    const orders = todayData?.orders || [];
-    const totalToday = todayData?.total ?? 0;
-
-    document.getElementById('today-orders-count').textContent = totalToday;
-
-    // Revenue from today's confirmed/completed orders
-    let todayRevenue = 0;
-    try {
-      const revData = await _admin.apiFetch(`/admin/analytics/revenue?months=1`);
-      const currentMonth = new Date().toISOString().slice(0, 7);
-      // We show monthly total as approximation since daily isn't available
-      const monthRow = (revData.months || revData.data || []).find(r => r.month === currentMonth);
-      if (monthRow && monthRow.revenue) {
-        // Show monthly revenue as context
-        document.getElementById('today-revenue').textContent =
-          monthRow.revenue >= 1000
-            ? (monthRow.revenue / 1000).toFixed(0) + 'к ₽/мес'
-            : Math.round(monthRow.revenue) + ' ₽/мес';
-      } else {
-        document.getElementById('today-revenue').textContent = '—';
+        } catch {
+          cont.innerHTML = '<div style="padding:16px;color:var(--text-dim);font-size:0.85rem">Нет данных</div>';
+        }
       }
-    } catch { document.getElementById('today-revenue').textContent = '—'; }
 
-    // Messages today
-    try {
-      const msgData = await _admin.apiFetch('/admin/messages/recent?limit=20');
-      const todayMsgs = (msgData.messages || []).filter(m => m.created_at && m.created_at.slice(0,10) === today);
-      document.getElementById('today-messages-count').textContent = todayMsgs.length;
-    } catch { document.getElementById('today-messages-count').textContent = '—'; }
+      /* ─── Bot status indicator ───────────────────────────── */
+      async function loadBotStatus() {
+        const dot = document.getElementById('botStatusDot');
+        const label = document.getElementById('botStatusLabel');
+        const uptime = document.getElementById('botStatusUptime');
+        try {
+          const data = await fetch('/api/health').then(r => r.json());
+          const status = data.status;
+          const bot = data.components?.bot || data.bot || '';
+          const uptimeSec = data.uptime_seconds || data.uptime || 0;
+          const hours = Math.floor(uptimeSec / 3600);
+          const mins = Math.floor((uptimeSec % 3600) / 60);
+          const uptimeStr = uptimeSec ? `Работает ${hours} ч ${String(mins).padStart(2, '0')} мин` : '';
 
-    // New clients today (from today's orders with unique clients)
-    const uniqueClients = new Set(orders.map(o => o.client_phone || o.client_chat_id)).size;
-    document.getElementById('today-clients-count').textContent = uniqueClients;
+          if (status === 'ok' && (bot === 'ok' || bot === 'connected')) {
+            dot.className = 'bot-status-dot online';
+            label.className = 'bot-status-label online';
+            label.textContent = '✅ Бот онлайн';
+          } else if (status === 'degraded') {
+            dot.className = 'bot-status-dot warn';
+            label.className = 'bot-status-label warn';
+            label.textContent = '⚠️ Проблемы';
+          } else {
+            dot.className = 'bot-status-dot offline';
+            label.className = 'bot-status-label offline';
+            label.textContent = '❌ Офлайн';
+          }
+          if (uptime) uptime.textContent = uptimeStr;
+        } catch {
+          if (dot) dot.className = 'bot-status-dot offline';
+          if (label) {
+            label.className = 'bot-status-label offline';
+            label.textContent = '❌ Офлайн';
+          }
+        }
+      }
 
-    // Recent 3 orders
-    const listEl = document.getElementById('todayOrdersList');
-    if (!orders.length) {
-      listEl.innerHTML = '<div style="padding:14px 20px;color:var(--text-dim);font-size:0.82rem">Заявок сегодня пока нет</div>';
-    } else {
-      const STATUS = { new:'🆕', reviewing:'🔍', confirmed:'✅', in_progress:'▶️', completed:'🏁', cancelled:'❌' };
-      listEl.innerHTML = orders.map(o => {
-        const t = new Date(o.created_at).toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' });
-        return `<a href="/admin/orders.html?id=${o.id}" class="today-order-item">
+      /* ─── Today's activity card ──────────────────────────── */
+      async function loadTodayActivity() {
+        try {
+          // Today's orders
+          const today = new Date().toISOString().slice(0, 10);
+          document.getElementById('todayDateLabel').textContent = new Date().toLocaleDateString('ru-RU', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+          });
+
+          const data = await _admin
+            .apiFetch(`/admin/orders?period=today&limit=3&page=1`)
+            .catch(() => _admin.apiFetch('/admin/orders?limit=3&page=1'));
+
+          // Try period filter via date params
+          const todayData = await _admin
+            .apiFetch(`/admin/orders?date_from=${today}&date_to=${today}&limit=3&page=1`)
+            .catch(() => null);
+          const orders = todayData?.orders || [];
+          const totalToday = todayData?.total ?? 0;
+
+          document.getElementById('today-orders-count').textContent = totalToday;
+
+          // Revenue from today's confirmed/completed orders
+          let todayRevenue = 0;
+          try {
+            const revData = await _admin.apiFetch(`/admin/analytics/revenue?months=1`);
+            const currentMonth = new Date().toISOString().slice(0, 7);
+            // We show monthly total as approximation since daily isn't available
+            const monthRow = (revData.months || revData.data || []).find(r => r.month === currentMonth);
+            if (monthRow && monthRow.revenue) {
+              // Show monthly revenue as context
+              document.getElementById('today-revenue').textContent =
+                monthRow.revenue >= 1000
+                  ? (monthRow.revenue / 1000).toFixed(0) + 'к ₽/мес'
+                  : Math.round(monthRow.revenue) + ' ₽/мес';
+            } else {
+              document.getElementById('today-revenue').textContent = '—';
+            }
+          } catch {
+            document.getElementById('today-revenue').textContent = '—';
+          }
+
+          // Messages today
+          try {
+            const msgData = await _admin.apiFetch('/admin/messages/recent?limit=20');
+            const todayMsgs = (msgData.messages || []).filter(m => m.created_at && m.created_at.slice(0, 10) === today);
+            document.getElementById('today-messages-count').textContent = todayMsgs.length;
+          } catch {
+            document.getElementById('today-messages-count').textContent = '—';
+          }
+
+          // New clients today (from today's orders with unique clients)
+          const uniqueClients = new Set(orders.map(o => o.client_phone || o.client_chat_id)).size;
+          document.getElementById('today-clients-count').textContent = uniqueClients;
+
+          // Recent 3 orders
+          const listEl = document.getElementById('todayOrdersList');
+          if (!orders.length) {
+            listEl.innerHTML =
+              '<div style="padding:14px 20px;color:var(--text-dim);font-size:0.82rem">Заявок сегодня пока нет</div>';
+          } else {
+            const STATUS = {
+              new: '🆕',
+              reviewing: '🔍',
+              confirmed: '✅',
+              in_progress: '▶️',
+              completed: '🏁',
+              cancelled: '❌',
+            };
+            listEl.innerHTML = orders
+              .map(o => {
+                const t = new Date(o.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                return `<a href="/admin/orders.html?id=${o.id}" class="today-order-item">
           <span style="font-size:1rem">${STATUS[o.status] || '📋'}</span>
           <span class="today-order-num">${_admin.escapeHtml(o.order_number || '')}</span>
           <span class="today-order-client">${_admin.escapeHtml(o.client_name || '—')}</span>
           <span class="today-order-time">${t}</span>
         </a>`;
-      }).join('');
-    }
-  } catch (e) {
-    console.warn('loadTodayActivity error:', e.message);
-  }
-}
+              })
+              .join('');
+          }
+        } catch (e) {
+          console.warn('loadTodayActivity error:', e.message);
+        }
+      }
 
-/* ─── Revenue 7-day sparkline ────────────────────────── */
-async function loadRevenueSparkline() {
-  const el = document.getElementById('revenueSparkline');
-  const totEl = document.getElementById('rev7dTotal');
-  try {
-    const data = await _admin.apiFetch('/admin/analytics/revenue?months=1');
-    const months = data.months || data.data || [];
+      /* ─── Revenue 7-day sparkline ────────────────────────── */
+      async function loadRevenueSparkline() {
+        const el = document.getElementById('revenueSparkline');
+        const totEl = document.getElementById('rev7dTotal');
+        try {
+          const data = await _admin.apiFetch('/admin/analytics/revenue?months=1');
+          const months = data.months || data.data || [];
 
-    // Build last 7 days from order data (use daily stats from main stats)
-    const mainStats = await _admin.apiFetch('/admin/stats').catch(() => null);
-    const daily7d = mainStats?.daily_7d || [];
+          // Build last 7 days from order data (use daily stats from main stats)
+          const mainStats = await _admin.apiFetch('/admin/stats').catch(() => null);
+          const daily7d = mainStats?.daily_7d || [];
 
-    if (!daily7d.length) {
-      // Fallback: show monthly revenue if no daily data
-      const totalRev = months.reduce((s, m) => s + (m.revenue || 0), 0);
-      if (totEl) totEl.textContent = totalRev ? (totalRev / 1000).toFixed(0) + 'к ₽' : '—';
-      if (el) el.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">Нет данных</div>';
-      return;
-    }
+          if (!daily7d.length) {
+            // Fallback: show monthly revenue if no daily data
+            const totalRev = months.reduce((s, m) => s + (m.revenue || 0), 0);
+            if (totEl) totEl.textContent = totalRev ? (totalRev / 1000).toFixed(0) + 'к ₽' : '—';
+            if (el) el.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">Нет данных</div>';
+            return;
+          }
 
-    // Since we only have order counts per day (not revenue per day),
-    // estimate daily revenue = daily orders × avg revenue per completed order
-    const monthRevenue = months.reduce((s, m) => s + (m.revenue || 0), 0);
-    const monthOrders  = months.reduce((s, m) => s + (m.order_count || 0), 0);
-    const avgPerOrder  = monthOrders > 0 ? monthRevenue / monthOrders : 0;
+          // Since we only have order counts per day (not revenue per day),
+          // estimate daily revenue = daily orders × avg revenue per completed order
+          const monthRevenue = months.reduce((s, m) => s + (m.revenue || 0), 0);
+          const monthOrders = months.reduce((s, m) => s + (m.order_count || 0), 0);
+          const avgPerOrder = monthOrders > 0 ? monthRevenue / monthOrders : 0;
 
-    const bars = daily7d.map(d => ({ ...d, rev: d.count * avgPerOrder }));
-    const maxRev = Math.max(...bars.map(b => b.rev), 1);
-    const totalRev = bars.reduce((s, b) => s + b.rev, 0);
-    const today = new Date().toISOString().slice(0, 10);
+          const bars = daily7d.map(d => ({ ...d, rev: d.count * avgPerOrder }));
+          const maxRev = Math.max(...bars.map(b => b.rev), 1);
+          const totalRev = bars.reduce((s, b) => s + b.rev, 0);
+          const today = new Date().toISOString().slice(0, 10);
 
-    if (totEl) {
-      totEl.textContent = totalRev >= 1000
-        ? (totalRev / 1000).toFixed(0) + 'к ₽ (оценка)'
-        : Math.round(totalRev) + ' ₽ (оценка)';
-    }
+          if (totEl) {
+            totEl.textContent =
+              totalRev >= 1000 ? (totalRev / 1000).toFixed(0) + 'к ₽ (оценка)' : Math.round(totalRev) + ' ₽ (оценка)';
+          }
 
-    if (el) {
-      el.innerHTML = bars.map(b => {
-        const pct = Math.round((b.rev / maxRev) * 100);
-        const isToday = b.day === today;
-        return `<div class="rev-bar-wrap">
+          if (el) {
+            el.innerHTML = bars
+              .map(b => {
+                const pct = Math.round((b.rev / maxRev) * 100);
+                const isToday = b.day === today;
+                return `<div class="rev-bar-wrap">
           <div class="rev-bar-fill${isToday ? ' today' : ''}" style="height:${Math.max(pct, 2)}%"></div>
           <div class="rev-bar-label">${b.label}</div>
         </div>`;
-      }).join('');
-    }
-  } catch (e) {
-    if (el) el.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">Нет данных</div>';
-  }
-}
+              })
+              .join('');
+          }
+        } catch (e) {
+          if (el) el.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">Нет данных</div>';
+        }
+      }
 
-/* ─── Recent client messages ─────────────────────────── */
-async function loadRecentMessages() {
-  const el = document.getElementById('recentMessagesList');
-  try {
-    const data = await _admin.apiFetch('/admin/messages/recent?limit=5');
-    const msgs = data.messages || [];
-    if (!msgs.length) {
-      el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Сообщений нет</div>';
-      return;
-    }
-    el.innerHTML = msgs.map(m => {
-      const initial = (m.client_name || 'C').charAt(0).toUpperCase();
-      const time = _admin.formatDateTime(m.created_at);
-      const text = (m.content || '').slice(0, 80) + (m.content?.length > 80 ? '…' : '');
-      return `<div class="msg-item">
+      /* ─── Recent client messages ─────────────────────────── */
+      async function loadRecentMessages() {
+        const el = document.getElementById('recentMessagesList');
+        try {
+          const data = await _admin.apiFetch('/admin/messages/recent?limit=5');
+          const msgs = data.messages || [];
+          if (!msgs.length) {
+            el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Сообщений нет</div>';
+            return;
+          }
+          el.innerHTML = msgs
+            .map(m => {
+              const initial = (m.client_name || 'C').charAt(0).toUpperCase();
+              const time = _admin.formatDateTime(m.created_at);
+              const text = (m.content || '').slice(0, 80) + (m.content?.length > 80 ? '…' : '');
+              return `<div class="msg-item">
         <div class="msg-avatar">${_admin.escapeHtml(initial)}</div>
         <div class="msg-body">
           <div class="msg-client">${_admin.escapeHtml(m.client_name || '—')}</div>
@@ -1479,133 +2224,151 @@ async function loadRecentMessages() {
           <a href="/admin/orders.html?id=${m.order_id}" class="msg-reply-btn">Ответить →</a>
         </div>
       </div>`;
-    }).join('');
-  } catch {
-    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Ошибка загрузки</div>';
-  }
-}
-
-/* ─── Sync new-orders count to quick-actions badge ───── */
-function updateQaBadge(count) {
-  const el = document.getElementById('qa-new-count');
-  if (!el) return;
-  if (count > 0) {
-    el.textContent = count > 99 ? '99+' : count;
-    el.classList.add('visible');
-  } else {
-    el.classList.remove('visible');
-  }
-}
-
-/* ─── Factory AI Intelligence widget (БЛОК 5.6) ─────── */
-async function loadFactoryStatus() {
-  const body = document.getElementById('factory-body');
-  const badge = document.getElementById('factory-status-badge');
-  try {
-    const data = await _admin.apiFetch('/admin/factory/status');
-
-    if (!data.available) {
-      if (body) body.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem">${_admin.escapeHtml(data.message || 'Factory недоступна')}</p>`;
-      if (badge) { badge.style.background = 'rgba(120,120,120,0.15)'; badge.style.color = 'var(--text-muted)'; badge.textContent = 'офлайн'; }
-      return;
-    }
-
-    // Update badge
-    const score = data.healthScore != null ? parseInt(data.healthScore) : null;
-    if (badge) {
-      if (score == null) {
-        badge.style.background = 'rgba(120,120,120,0.15)'; badge.style.color = 'var(--text-muted)'; badge.textContent = '—';
-      } else if (score >= 70) {
-        badge.style.background = 'rgba(16,185,129,0.15)'; badge.style.color = '#10b981'; badge.textContent = score + '%';
-      } else if (score >= 50) {
-        badge.style.background = 'rgba(245,158,11,0.15)'; badge.style.color = '#f59e0b'; badge.textContent = score + '%';
-      } else {
-        badge.style.background = 'rgba(239,68,68,0.15)'; badge.style.color = '#ef4444'; badge.textContent = score + '%';
+            })
+            .join('');
+        } catch {
+          el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Ошибка загрузки</div>';
+        }
       }
-    }
 
-    const lastRun = data.lastRun ? new Date(data.lastRun).toLocaleString('ru-RU') : 'никогда';
-    let html = `<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px">
+      /* ─── Sync new-orders count to quick-actions badge ───── */
+      function updateQaBadge(count) {
+        const el = document.getElementById('qa-new-count');
+        if (!el) return;
+        if (count > 0) {
+          el.textContent = count > 99 ? '99+' : count;
+          el.classList.add('visible');
+        } else {
+          el.classList.remove('visible');
+        }
+      }
+
+      /* ─── Factory AI Intelligence widget (БЛОК 5.6) ─────── */
+      async function loadFactoryStatus() {
+        const body = document.getElementById('factory-body');
+        const badge = document.getElementById('factory-status-badge');
+        try {
+          const data = await _admin.apiFetch('/admin/factory/status');
+
+          if (!data.available) {
+            if (body)
+              body.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem">${_admin.escapeHtml(data.message || 'Factory недоступна')}</p>`;
+            if (badge) {
+              badge.style.background = 'rgba(120,120,120,0.15)';
+              badge.style.color = 'var(--text-muted)';
+              badge.textContent = 'офлайн';
+            }
+            return;
+          }
+
+          // Update badge
+          const score = data.healthScore != null ? parseInt(data.healthScore) : null;
+          if (badge) {
+            if (score == null) {
+              badge.style.background = 'rgba(120,120,120,0.15)';
+              badge.style.color = 'var(--text-muted)';
+              badge.textContent = '—';
+            } else if (score >= 70) {
+              badge.style.background = 'rgba(16,185,129,0.15)';
+              badge.style.color = '#10b981';
+              badge.textContent = score + '%';
+            } else if (score >= 50) {
+              badge.style.background = 'rgba(245,158,11,0.15)';
+              badge.style.color = '#f59e0b';
+              badge.textContent = score + '%';
+            } else {
+              badge.style.background = 'rgba(239,68,68,0.15)';
+              badge.style.color = '#ef4444';
+              badge.textContent = score + '%';
+            }
+          }
+
+          const lastRun = data.lastRun ? new Date(data.lastRun).toLocaleString('ru-RU') : 'никогда';
+          let html = `<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px">
       <div><span style="color:var(--text-muted);font-size:0.8rem">Последний запуск:</span> <strong style="color:var(--text);font-size:0.85rem">${_admin.escapeHtml(lastRun)}</strong></div>
       <div><span style="color:var(--text-muted);font-size:0.8rem">Health Score:</span> <strong style="color:var(--text);font-size:0.85rem">${score != null ? score + '%' : '—'}</strong></div>
     </div>`;
 
-    if (data.pendingActions && data.pendingActions.length > 0) {
-      html += '<div style="font-size:0.8rem;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">📋 Growth Tasks (pending)</div>';
-      html += '<ul style="margin:0 0 14px;padding-left:18px;list-style:disc">';
-      data.pendingActions.slice(0, 5).forEach(a => {
-        const pri = (a.priority || 'medium').toLowerCase();
-        const priColor = pri === 'high' ? 'var(--error)' : pri === 'low' ? 'var(--success)' : '#f59e0b';
-        html += `<li style="margin-bottom:5px;font-size:0.83rem;color:var(--text-muted)">
+          if (data.pendingActions && data.pendingActions.length > 0) {
+            html +=
+              '<div style="font-size:0.8rem;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">📋 Growth Tasks (pending)</div>';
+            html += '<ul style="margin:0 0 14px;padding-left:18px;list-style:disc">';
+            data.pendingActions.slice(0, 5).forEach(a => {
+              const pri = (a.priority || 'medium').toLowerCase();
+              const priColor = pri === 'high' ? 'var(--error)' : pri === 'low' ? 'var(--success)' : '#f59e0b';
+              html += `<li style="margin-bottom:5px;font-size:0.83rem;color:var(--text-muted)">
           <span style="color:${priColor};font-weight:700;font-size:0.72rem;text-transform:uppercase">[${_admin.escapeHtml(pri)}]</span>
           ${_admin.escapeHtml(a.action || a.title || '')}
         </li>`;
-      });
-      if (data.pendingActions.length > 5) {
-        html += `<li style="font-size:0.78rem;color:var(--text-dim)">…ещё ${data.pendingActions.length - 5} задач — <a href="/admin/factory.html" style="color:var(--gold)">смотреть все</a></li>`;
+            });
+            if (data.pendingActions.length > 5) {
+              html += `<li style="font-size:0.78rem;color:var(--text-dim)">…ещё ${data.pendingActions.length - 5} задач — <a href="/admin/factory.html" style="color:var(--gold)">смотреть все</a></li>`;
+            }
+            html += '</ul>';
+          }
+
+          if (data.recentDecisions && data.recentDecisions.length > 0) {
+            html +=
+              '<div style="font-size:0.8rem;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">🧠 CEO Decisions</div>';
+            html += '<ul style="margin:0 0 14px;padding-left:18px;list-style:disc">';
+            data.recentDecisions.slice(0, 3).forEach(d => {
+              const text = (d.decision || d.content || d.rationale || '').slice(0, 180);
+              html += `<li style="margin-bottom:5px;font-size:0.83rem;color:var(--text-muted)">${_admin.escapeHtml(text)}${text.length === 180 ? '…' : ''}</li>`;
+            });
+            html += '</ul>';
+          }
+
+          if (data.activeExperiments && data.activeExperiments.length > 0) {
+            html +=
+              '<div style="font-size:0.8rem;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">🧪 Active Experiments</div>';
+            html += '<ul style="margin:0 0 4px;padding-left:18px;list-style:disc">';
+            data.activeExperiments.slice(0, 3).forEach(e => {
+              html += `<li style="margin-bottom:5px;font-size:0.83rem;color:var(--text-muted)">${_admin.escapeHtml(e.name || e.title || '')}</li>`;
+            });
+            html += '</ul>';
+          }
+
+          if (!data.pendingActions?.length && !data.recentDecisions?.length && !data.activeExperiments?.length) {
+            html +=
+              '<p style="color:var(--text-dim);font-size:0.82rem">Данных пока нет. <a href="/admin/factory.html" style="color:var(--gold)">Запустить цикл Factory →</a></p>';
+          }
+
+          if (body) body.innerHTML = html;
+        } catch (e) {
+          if (body) body.innerHTML = '<p style="color:var(--text-dim);font-size:0.85rem">Ошибка загрузки Factory</p>';
+        }
       }
-      html += '</ul>';
-    }
 
-    if (data.recentDecisions && data.recentDecisions.length > 0) {
-      html += '<div style="font-size:0.8rem;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">🧠 CEO Decisions</div>';
-      html += '<ul style="margin:0 0 14px;padding-left:18px;list-style:disc">';
-      data.recentDecisions.slice(0, 3).forEach(d => {
-        const text = (d.decision || d.content || d.rationale || '').slice(0, 180);
-        html += `<li style="margin-bottom:5px;font-size:0.83rem;color:var(--text-muted)">${_admin.escapeHtml(text)}${text.length === 180 ? '…' : ''}</li>`;
-      });
-      html += '</ul>';
-    }
+      /* ─── Init ───────────────────────────────────────────── */
+      loadDashboard();
+      loadActivityFeed();
+      loadAgentFeed();
+      loadKpiCards();
+      loadChart30();
+      loadNotifications();
+      loadQuickBookings();
+      loadBotStatus();
+      loadTodayActivity();
+      loadRevenueSparkline();
+      loadRecentMessages();
+      loadFactoryStatus();
 
-    if (data.activeExperiments && data.activeExperiments.length > 0) {
-      html += '<div style="font-size:0.8rem;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">🧪 Active Experiments</div>';
-      html += '<ul style="margin:0 0 4px;padding-left:18px;list-style:disc">';
-      data.activeExperiments.slice(0, 3).forEach(e => {
-        html += `<li style="margin-bottom:5px;font-size:0.83rem;color:var(--text-muted)">${_admin.escapeHtml(e.name || e.title || '')}</li>`;
-      });
-      html += '</ul>';
-    }
-
-    if (!data.pendingActions?.length && !data.recentDecisions?.length && !data.activeExperiments?.length) {
-      html += '<p style="color:var(--text-dim);font-size:0.82rem">Данных пока нет. <a href="/admin/factory.html" style="color:var(--gold)">Запустить цикл Factory →</a></p>';
-    }
-
-    if (body) body.innerHTML = html;
-  } catch (e) {
-    if (body) body.innerHTML = '<p style="color:var(--text-dim);font-size:0.85rem">Ошибка загрузки Factory</p>';
-  }
-}
-
-/* ─── Init ───────────────────────────────────────────── */
-loadDashboard();
-loadActivityFeed();
-loadAgentFeed();
-loadKpiCards();
-loadChart30();
-loadNotifications();
-loadQuickBookings();
-loadBotStatus();
-loadTodayActivity();
-loadRevenueSparkline();
-loadRecentMessages();
-loadFactoryStatus();
-
-// Auto-refresh every 30 seconds
-setInterval(loadDashboard, 30000);
-// Refresh activity feed every 60 seconds
-setInterval(loadActivityFeed, 60000);
-// Refresh agent feed every 60 seconds
-setInterval(loadAgentFeed, 60000);
-// Refresh KPI cards every 60 seconds
-setInterval(loadKpiCards, 60000);
-// Refresh notifications every 60 seconds
-setInterval(loadNotifications, 60000);
-// Refresh new widgets every 2 minutes
-setInterval(loadBotStatus, 60000);
-setInterval(loadTodayActivity, 120000);
-setInterval(loadRecentMessages, 120000);
-// Refresh Factory status every 5 minutes
-setInterval(loadFactoryStatus, 300000);
-</script>
-</body>
+      // Auto-refresh every 30 seconds
+      setInterval(loadDashboard, 30000);
+      // Refresh activity feed every 60 seconds
+      setInterval(loadActivityFeed, 60000);
+      // Refresh agent feed every 60 seconds
+      setInterval(loadAgentFeed, 60000);
+      // Refresh KPI cards every 60 seconds
+      setInterval(loadKpiCards, 60000);
+      // Refresh notifications every 60 seconds
+      setInterval(loadNotifications, 60000);
+      // Refresh new widgets every 2 minutes
+      setInterval(loadBotStatus, 60000);
+      setInterval(loadTodayActivity, 120000);
+      setInterval(loadRecentMessages, 120000);
+      // Refresh Factory status every 5 minutes
+      setInterval(loadFactoryStatus, 300000);
+    </script>
+  </body>
 </html>

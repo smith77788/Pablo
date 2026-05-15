@@ -1,343 +1,509 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Аудит — Nevesty Models Admin</title>
-  <meta name="robots" content="noindex, nofollow">
-  <link rel="stylesheet" href="/css/admin.css" />
-  <style>
-    /* ── Action badges ── */
-    .audit-badge {
-      display: inline-block; padding: 2px 8px; border-radius: 3px;
-      font-size: 0.72rem; font-weight: 600; white-space: nowrap;
-      text-transform: uppercase; letter-spacing: 0.4px;
-    }
-    .audit-create  { background: rgba(16,185,129,0.15);  color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
-    .audit-delete  { background: rgba(239,68,68,0.15);   color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
-    .audit-update  { background: rgba(245,158,11,0.15);  color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
-    .audit-archive { background: rgba(249,115,22,0.15);  color: #f97316; border: 1px solid rgba(249,115,22,0.3); }
-    .audit-login   { background: rgba(99,102,241,0.15);  color: #818cf8; border: 1px solid rgba(99,102,241,0.3); }
-    .audit-other   { background: rgba(107,114,128,0.15); color: #6b7280; border: 1px solid rgba(107,114,128,0.3); }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Аудит — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      /* ── Action badges ── */
+      .audit-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        white-space: nowrap;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .audit-create {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+      .audit-delete {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+      }
+      .audit-update {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+      }
+      .audit-archive {
+        background: rgba(249, 115, 22, 0.15);
+        color: #f97316;
+        border: 1px solid rgba(249, 115, 22, 0.3);
+      }
+      .audit-login {
+        background: rgba(99, 102, 241, 0.15);
+        color: #818cf8;
+        border: 1px solid rgba(99, 102, 241, 0.3);
+      }
+      .audit-other {
+        background: rgba(107, 114, 128, 0.15);
+        color: #6b7280;
+        border: 1px solid rgba(107, 114, 128, 0.3);
+      }
 
-    /* ── Row color coding ── */
-    .audit-row-auth     td { background: rgba(99,102,241,0.04); }
-    .audit-row-danger   td { background: rgba(239,68,68,0.05); }
-    .audit-row-routine  td { background: transparent; }
+      /* ── Row color coding ── */
+      .audit-row-auth td {
+        background: rgba(99, 102, 241, 0.04);
+      }
+      .audit-row-danger td {
+        background: rgba(239, 68, 68, 0.05);
+      }
+      .audit-row-routine td {
+        background: transparent;
+      }
 
-    /* ── Pagination ── */
-    .pagination-row {
-      display: flex; align-items: center; justify-content: flex-end;
-      gap: 6px; padding: 12px 16px; border-top: 1px solid var(--border);
-    }
-    .pagination-row .page-btn {
-      min-width: 32px; height: 32px; border: 1px solid var(--border);
-      background: var(--bg2); color: var(--text-muted); font-size: 0.8rem;
-      cursor: pointer; border-radius: 3px; padding: 0 6px; transition: all 0.15s;
-    }
-    .pagination-row .page-btn:hover,
-    .pagination-row .page-btn.active { border-color: var(--gold); color: var(--gold); }
-    .pagination-row .page-btn:disabled { opacity: 0.3; cursor: default; }
-    .pagination-info { font-size: 0.75rem; color: var(--text-muted); margin-right: auto; }
+      /* ── Pagination ── */
+      .pagination-row {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        padding: 12px 16px;
+        border-top: 1px solid var(--border);
+      }
+      .pagination-row .page-btn {
+        min-width: 32px;
+        height: 32px;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        cursor: pointer;
+        border-radius: 3px;
+        padding: 0 6px;
+        transition: all 0.15s;
+      }
+      .pagination-row .page-btn:hover,
+      .pagination-row .page-btn.active {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .pagination-row .page-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+      .pagination-info {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-right: auto;
+      }
 
-    /* ── Filters bar ── */
-    .filters-bar {
-      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-      padding: 10px 16px; border-bottom: 1px solid var(--border);
-    }
-    .filters-row2 {
-      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-      padding: 8px 16px 10px; border-bottom: 1px solid var(--border);
-      background: rgba(0,0,0,0.02);
-    }
+      /* ── Filters bar ── */
+      .filters-bar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .filters-row2 {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        padding: 8px 16px 10px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.02);
+      }
 
-    /* ── Filter chips ── */
-    .chip-group { display: flex; gap: 4px; flex-wrap: wrap; }
-    .chip {
-      padding: 3px 10px; border-radius: 14px; font-size: 0.75rem; font-weight: 500;
-      border: 1px solid var(--border); background: var(--bg2); color: var(--text-muted);
-      cursor: pointer; transition: all 0.15s; white-space: nowrap;
-    }
-    .chip:hover { border-color: var(--gold); color: var(--gold); }
-    .chip.active { background: var(--gold); color: #000; border-color: var(--gold); }
+      /* ── Filter chips ── */
+      .chip-group {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .chip {
+        padding: 3px 10px;
+        border-radius: 14px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .chip:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .chip.active {
+        background: var(--gold);
+        color: #000;
+        border-color: var(--gold);
+      }
 
-    /* ── Date quick buttons ── */
-    .date-btn {
-      padding: 3px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 500;
-      border: 1px solid var(--border); background: var(--bg2); color: var(--text-muted);
-      cursor: pointer; transition: all 0.15s;
-    }
-    .date-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .date-btn.active { background: rgba(99,102,241,0.15); color: #818cf8; border-color: rgba(99,102,241,0.4); }
+      /* ── Date quick buttons ── */
+      .date-btn {
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .date-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .date-btn.active {
+        background: rgba(99, 102, 241, 0.15);
+        color: #818cf8;
+        border-color: rgba(99, 102, 241, 0.4);
+      }
 
-    /* ── Refresh indicator ── */
-    .refresh-indicator { font-size: 0.7rem; color: var(--success); display: none; }
-    .live-dot {
-      display: inline-block; width: 6px; height: 6px;
-      background: var(--success); border-radius: 50%; animation: pulse 2s infinite;
-    }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+      /* ── Refresh indicator ── */
+      .refresh-indicator {
+        font-size: 0.7rem;
+        color: var(--success);
+        display: none;
+      }
+      .live-dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        background: var(--success);
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
 
-    /* ── Export button ── */
-    .export-btn {
-      padding: 4px 12px; border-radius: 4px; font-size: 0.78rem; font-weight: 500;
-      border: 1px solid var(--border); background: var(--bg2); color: var(--text-muted);
-      cursor: pointer; transition: all 0.15s; white-space: nowrap;
-    }
-    .export-btn:hover { border-color: var(--gold); color: var(--gold); }
+      /* ── Export button ── */
+      .export-btn {
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 0.78rem;
+        font-weight: 500;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .export-btn:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
 
-    /* ── User+IP cell ── */
-    .user-cell .username { font-weight: 600; font-size: 0.82rem; }
-    .user-cell .ip-tag {
-      display: inline-block; margin-top: 2px;
-      font-size: 0.66rem; color: var(--text-dim);
-      background: rgba(107,114,128,0.1); border-radius: 3px; padding: 0 4px;
-    }
+      /* ── User+IP cell ── */
+      .user-cell .username {
+        font-weight: 600;
+        font-size: 0.82rem;
+      }
+      .user-cell .ip-tag {
+        display: inline-block;
+        margin-top: 2px;
+        font-size: 0.66rem;
+        color: var(--text-dim);
+        background: rgba(107, 114, 128, 0.1);
+        border-radius: 3px;
+        padding: 0 4px;
+      }
 
-    /* ── Auto-refresh countdown ── */
-    .refresh-countdown { font-size: 0.7rem; color: var(--text-dim); }
-  </style>
-</head>
-<body>
-<div class="admin-layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo"><div class="sidebar-logo-text">Nevesty Models</div><div class="sidebar-logo-sub">Панель управления</div></div>
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Главная</div>
-      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
-      <div class="nav-section-label">Бизнес</div>
-      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
-      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
-      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
-      <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
-      <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
-      <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
-      <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
-      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
-      <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
-      <div class="nav-section-label">AI</div>
-      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
-      <div class="nav-section-label">Настройки</div>
-      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
-      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
-      <a href="/admin/audit.html" class="active"><span class="nav-icon">📜</span> Аудит</a>
-      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-user"><div class="sidebar-avatar sidebar-user-letter">A</div><div class="sidebar-user-info"><strong class="sidebar-user-name">—</strong><span class="sidebar-user-role">—</span></div></div>
-      <button class="btn-logout" data-action="logout">Выйти</button>
-    </div>
-  </aside>
-
-  <div class="main-content">
-    <header class="topbar">
-      <div class="topbar-title">📜 Аудит действий</div>
-      <div class="topbar-right" style="display:flex;align-items:center;gap:12px">
-        <span class="refresh-indicator" id="refreshIndicator"><span class="live-dot"></span> Обновление…</span>
-        <span class="refresh-countdown" id="refreshCountdown"></span>
-        <span style="font-size:0.75rem;color:var(--text-muted)" id="totalCount"></span>
-        <button class="export-btn" onclick="exportCSV()">📥 Экспорт CSV</button>
-        <button class="topbar-btn" onclick="loadAudit(1)">↺ Обновить</button>
-      </div>
-    </header>
-
-    <div class="page-content">
-      <div class="section-card">
-
-        <!-- Row 1: text filter + action dropdown -->
-        <div class="filters-bar">
-          <input class="filter-input" type="text" id="adminFilter" placeholder="🔍 Поиск по админу..." style="min-width:180px" oninput="debounceLoad()" />
-          <select class="filter-select" id="actionFilter" onchange="loadAudit(1)" style="min-width:160px">
-            <option value="">Все действия</option>
-          </select>
-          <span style="margin-left:auto;font-size:0.72rem;color:var(--text-dim)">
-            <span class="live-dot" style="margin-right:4px"></span>Авто-обновление 30 сек
-          </span>
+      /* ── Auto-refresh countdown ── */
+      .refresh-countdown {
+        font-size: 0.7rem;
+        color: var(--text-dim);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-text">Nevesty Models</div>
+          <div class="sidebar-logo-sub">Панель управления</div>
         </div>
-
-        <!-- Row 2: event-type chips + date range -->
-        <div class="filters-row2">
-          <!-- Event type chips -->
-          <div class="chip-group" id="eventChips">
-            <button class="chip active" data-et="">Все</button>
-            <button class="chip" data-et="auth">Auth</button>
-            <button class="chip" data-et="orders">Заявки</button>
-            <button class="chip" data-et="models">Модели</button>
-            <button class="chip" data-et="settings">Настройки</button>
-            <button class="chip" data-et="broadcasts">Рассылки</button>
-            <button class="chip" data-et="factory">AI Factory</button>
+        <nav class="sidebar-nav">
+          <div class="nav-section-label">Главная</div>
+          <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+          <div class="nav-section-label">Бизнес</div>
+          <a href="/admin/orders.html"
+            ><span class="nav-icon">📋</span> Заявки
+            <span class="nav-badge" id="newOrdersBadge" style="display: none">0</span></a
+          >
+          <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+          <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+          <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+          <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+          <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+          <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
+          <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+          <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+          <div class="nav-section-label">AI</div>
+          <a href="/admin/social.html"><span class="nav-icon">📱</span> Соцсети</a>
+          <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+          <div class="nav-section-label">Настройки</div>
+          <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+          <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+          <a href="/admin/audit.html" class="active"><span class="nav-icon">📜</span> Аудит</a>
+          <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <div class="sidebar-avatar sidebar-user-letter">A</div>
+            <div class="sidebar-user-info">
+              <strong class="sidebar-user-name">—</strong><span class="sidebar-user-role">—</span>
+            </div>
           </div>
+          <button class="btn-logout" data-action="logout">Выйти</button>
+        </div>
+      </aside>
 
-          <!-- Date range quick buttons -->
-          <div style="display:flex;gap:4px;margin-left:auto" id="dateGroup">
-            <button class="date-btn active" data-since="">Всё время</button>
-            <button class="date-btn" data-since="today">Сегодня</button>
-            <button class="date-btn" data-since="7d">Эта неделя</button>
-            <button class="date-btn" data-since="30d">Этот месяц</button>
+      <div class="main-content">
+        <header class="topbar">
+          <div class="topbar-title">📜 Аудит действий</div>
+          <div class="topbar-right" style="display: flex; align-items: center; gap: 12px">
+            <span class="refresh-indicator" id="refreshIndicator"><span class="live-dot"></span> Обновление…</span>
+            <span class="refresh-countdown" id="refreshCountdown"></span>
+            <span style="font-size: 0.75rem; color: var(--text-muted)" id="totalCount"></span>
+            <button class="export-btn" onclick="exportCSV()">📥 Экспорт CSV</button>
+            <button class="topbar-btn" onclick="loadAudit(1)">↺ Обновить</button>
           </div>
-        </div>
+        </header>
 
-        <!-- Table -->
-        <div class="section-card-body">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th style="width:150px">Дата/Время</th>
-                <th style="width:150px">Админ / IP</th>
-                <th style="width:110px">Действие</th>
-                <th style="width:120px">Сущность</th>
-                <th>Детали</th>
-              </tr>
-            </thead>
-            <tbody id="auditBody">
-              <tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim)">Загрузка…</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <div class="page-content">
+          <div class="section-card">
+            <!-- Row 1: text filter + action dropdown -->
+            <div class="filters-bar">
+              <input
+                class="filter-input"
+                type="text"
+                id="adminFilter"
+                placeholder="🔍 Поиск по админу..."
+                style="min-width: 180px"
+                oninput="debounceLoad()"
+              />
+              <select class="filter-select" id="actionFilter" onchange="loadAudit(1)" style="min-width: 160px">
+                <option value="">Все действия</option>
+              </select>
+              <span style="margin-left: auto; font-size: 0.72rem; color: var(--text-dim)">
+                <span class="live-dot" style="margin-right: 4px"></span>Авто-обновление 30 сек
+              </span>
+            </div>
 
-        <!-- Pagination -->
-        <div class="pagination-row">
-          <span class="pagination-info" id="paginationInfo"></span>
-          <button class="page-btn" id="prevBtn" onclick="changePage(-1)" disabled>‹</button>
-          <span id="pageIndicator" style="font-size:0.8rem;color:var(--text-muted);padding:0 8px"></span>
-          <button class="page-btn" id="nextBtn" onclick="changePage(1)" disabled>›</button>
+            <!-- Row 2: event-type chips + date range -->
+            <div class="filters-row2">
+              <!-- Event type chips -->
+              <div class="chip-group" id="eventChips">
+                <button class="chip active" data-et="">Все</button>
+                <button class="chip" data-et="auth">Auth</button>
+                <button class="chip" data-et="orders">Заявки</button>
+                <button class="chip" data-et="models">Модели</button>
+                <button class="chip" data-et="settings">Настройки</button>
+                <button class="chip" data-et="broadcasts">Рассылки</button>
+                <button class="chip" data-et="factory">AI Factory</button>
+              </div>
+
+              <!-- Date range quick buttons -->
+              <div style="display: flex; gap: 4px; margin-left: auto" id="dateGroup">
+                <button class="date-btn active" data-since="">Всё время</button>
+                <button class="date-btn" data-since="today">Сегодня</button>
+                <button class="date-btn" data-since="7d">Эта неделя</button>
+                <button class="date-btn" data-since="30d">Этот месяц</button>
+              </div>
+            </div>
+
+            <!-- Table -->
+            <div class="section-card-body">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width: 150px">Дата/Время</th>
+                    <th style="width: 150px">Админ / IP</th>
+                    <th style="width: 110px">Действие</th>
+                    <th style="width: 120px">Сущность</th>
+                    <th>Детали</th>
+                  </tr>
+                </thead>
+                <tbody id="auditBody">
+                  <tr>
+                    <td colspan="5" style="text-align: center; padding: 40px; color: var(--text-dim)">Загрузка…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination-row">
+              <span class="pagination-info" id="paginationInfo"></span>
+              <button class="page-btn" id="prevBtn" onclick="changePage(-1)" disabled>‹</button>
+              <span id="pageIndicator" style="font-size: 0.8rem; color: var(--text-muted); padding: 0 8px"></span>
+              <button class="page-btn" id="nextBtn" onclick="changePage(1)" disabled>›</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-</div>
 
-<div class="toast-container" id="toastContainer"></div>
-<script src="/js/admin.js"></script>
-<script>
-const PAGE_SIZE = 50;
-let currentPage = 1;
-let totalRows = 0;
-let debounceTimer = null;
-let autoRefreshTimer = null;
-let countdownTimer = null;
-let secondsLeft = 30;
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/admin.js"></script>
+    <script>
+      const PAGE_SIZE = 50;
+      let currentPage = 1;
+      let totalRows = 0;
+      let debounceTimer = null;
+      let autoRefreshTimer = null;
+      let countdownTimer = null;
+      let secondsLeft = 30;
 
-// ── State ──────────────────────────────────────────────────────────────────
-let activeEventType = '';
-let activeSince     = '';
+      // ── State ──────────────────────────────────────────────────────────────────
+      let activeEventType = '';
+      let activeSince = '';
 
-// ── Event type chips ───────────────────────────────────────────────────────
-document.getElementById('eventChips').addEventListener('click', e => {
-  const btn = e.target.closest('.chip');
-  if (!btn) return;
-  document.querySelectorAll('#eventChips .chip').forEach(c => c.classList.remove('active'));
-  btn.classList.add('active');
-  activeEventType = btn.dataset.et;
-  loadAudit(1);
-});
-
-// ── Date range buttons ─────────────────────────────────────────────────────
-document.getElementById('dateGroup').addEventListener('click', e => {
-  const btn = e.target.closest('.date-btn');
-  if (!btn) return;
-  document.querySelectorAll('#dateGroup .date-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  activeSince = btn.dataset.since;
-  loadAudit(1);
-});
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-function debounceLoad() {
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => loadAudit(1), 400);
-}
-
-function actionBadge(action) {
-  if (!action) return '<span class="audit-badge audit-other">—</span>';
-  const a = action.toLowerCase();
-  let cls = 'audit-other';
-  if (a.includes('create') || a.includes('add') || a.includes('insert')) cls = 'audit-create';
-  else if (a.includes('delete') || a.includes('remove'))                  cls = 'audit-delete';
-  else if (a.includes('update') || a.includes('edit') || a.includes('change') || a.includes('patch')) cls = 'audit-update';
-  else if (a.includes('archive'))                                          cls = 'audit-archive';
-  else if (a.includes('login') || a.includes('auth') || a.includes('logout')) cls = 'audit-login';
-  return `<span class="audit-badge ${cls}">${_admin.escapeHtml(action)}</span>`;
-}
-
-// Row-level color class: auth=blue, dangerous=red, routine=gray
-function rowClass(action) {
-  if (!action) return 'audit-row-routine';
-  const a = action.toLowerCase();
-  if (a.includes('login') || a.includes('logout') || a.includes('auth') || a.includes('totp') || a.includes('2fa')) return 'audit-row-auth';
-  if (a.includes('delete') || a.includes('remove') || a.includes('block') || a.includes('ban')) return 'audit-row-danger';
-  return 'audit-row-routine';
-}
-
-function entityLabel(row) {
-  const parts = [];
-  if (row.entity || row.entity_type) parts.push(_admin.escapeHtml(row.entity || row.entity_type || ''));
-  if (row.entity_id) parts.push(`#${row.entity_id}`);
-  return parts.join(' ') || '—';
-}
-
-function detailsText(row) {
-  const src = row.details;
-  if (!src) return '<span style="color:var(--text-dim)">—</span>';
-  try {
-    const obj = JSON.parse(src);
-    const parts = Object.entries(obj).map(([k, v]) =>
-      `<span style="color:var(--text-muted)">${_admin.escapeHtml(k)}:</span> ${_admin.escapeHtml(String(v ?? ''))}`);
-    return parts.join(' &nbsp;·&nbsp; ');
-  } catch {
-    return _admin.escapeHtml(String(src).slice(0, 200));
-  }
-}
-
-// ── Load audit ─────────────────────────────────────────────────────────────
-async function loadAudit(page) {
-  if (page) currentPage = page;
-  const adminVal  = document.getElementById('adminFilter').value.trim();
-  const actionVal = document.getElementById('actionFilter').value;
-  const offset    = (currentPage - 1) * PAGE_SIZE;
-
-  const params = new URLSearchParams({ limit: PAGE_SIZE, offset });
-  if (adminVal)       params.set('admin',      adminVal);
-  if (actionVal)      params.set('action',     actionVal);
-  if (activeEventType) params.set('event_type', activeEventType);
-  if (activeSince)    params.set('since',      activeSince);
-
-  document.getElementById('refreshIndicator').style.display = 'inline-flex';
-
-  // reset countdown
-  resetCountdown();
-
-  try {
-    const data = await _admin.apiFetch(`/admin/audit-log?${params}`);
-    totalRows = data.total || 0;
-    const rows = data.rows || [];
-
-    // Populate action filter dropdown (only once)
-    const actionSel = document.getElementById('actionFilter');
-    if (actionSel.options.length <= 1 && data.actions && data.actions.length) {
-      data.actions.forEach(a => {
-        const opt = document.createElement('option');
-        opt.value = a; opt.textContent = a;
-        if (a === actionVal) opt.selected = true;
-        actionSel.appendChild(opt);
+      // ── Event type chips ───────────────────────────────────────────────────────
+      document.getElementById('eventChips').addEventListener('click', e => {
+        const btn = e.target.closest('.chip');
+        if (!btn) return;
+        document.querySelectorAll('#eventChips .chip').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        activeEventType = btn.dataset.et;
+        loadAudit(1);
       });
-    }
 
-    const totalPages = Math.ceil(totalRows / PAGE_SIZE) || 1;
-    document.getElementById('totalCount').textContent = `Всего: ${totalRows}`;
-    document.getElementById('paginationInfo').textContent =
-      `Записей ${offset + 1}–${Math.min(offset + rows.length, totalRows)} из ${totalRows}`;
-    document.getElementById('pageIndicator').textContent = `${currentPage} / ${totalPages}`;
-    document.getElementById('prevBtn').disabled = currentPage <= 1;
-    document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+      // ── Date range buttons ─────────────────────────────────────────────────────
+      document.getElementById('dateGroup').addEventListener('click', e => {
+        const btn = e.target.closest('.date-btn');
+        if (!btn) return;
+        document.querySelectorAll('#dateGroup .date-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeSince = btn.dataset.since;
+        loadAudit(1);
+      });
 
-    const tbody = document.getElementById('auditBody');
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim)">Записей не найдено</td></tr>';
-      return;
-    }
+      // ── Helpers ────────────────────────────────────────────────────────────────
+      function debounceLoad() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => loadAudit(1), 400);
+      }
 
-    tbody.innerHTML = rows.map(r => `
+      function actionBadge(action) {
+        if (!action) return '<span class="audit-badge audit-other">—</span>';
+        const a = action.toLowerCase();
+        let cls = 'audit-other';
+        if (a.includes('create') || a.includes('add') || a.includes('insert')) cls = 'audit-create';
+        else if (a.includes('delete') || a.includes('remove')) cls = 'audit-delete';
+        else if (a.includes('update') || a.includes('edit') || a.includes('change') || a.includes('patch'))
+          cls = 'audit-update';
+        else if (a.includes('archive')) cls = 'audit-archive';
+        else if (a.includes('login') || a.includes('auth') || a.includes('logout')) cls = 'audit-login';
+        return `<span class="audit-badge ${cls}">${_admin.escapeHtml(action)}</span>`;
+      }
+
+      // Row-level color class: auth=blue, dangerous=red, routine=gray
+      function rowClass(action) {
+        if (!action) return 'audit-row-routine';
+        const a = action.toLowerCase();
+        if (
+          a.includes('login') ||
+          a.includes('logout') ||
+          a.includes('auth') ||
+          a.includes('totp') ||
+          a.includes('2fa')
+        )
+          return 'audit-row-auth';
+        if (a.includes('delete') || a.includes('remove') || a.includes('block') || a.includes('ban'))
+          return 'audit-row-danger';
+        return 'audit-row-routine';
+      }
+
+      function entityLabel(row) {
+        const parts = [];
+        if (row.entity || row.entity_type) parts.push(_admin.escapeHtml(row.entity || row.entity_type || ''));
+        if (row.entity_id) parts.push(`#${row.entity_id}`);
+        return parts.join(' ') || '—';
+      }
+
+      function detailsText(row) {
+        const src = row.details;
+        if (!src) return '<span style="color:var(--text-dim)">—</span>';
+        try {
+          const obj = JSON.parse(src);
+          const parts = Object.entries(obj).map(
+            ([k, v]) =>
+              `<span style="color:var(--text-muted)">${_admin.escapeHtml(k)}:</span> ${_admin.escapeHtml(String(v ?? ''))}`
+          );
+          return parts.join(' &nbsp;·&nbsp; ');
+        } catch {
+          return _admin.escapeHtml(String(src).slice(0, 200));
+        }
+      }
+
+      // ── Load audit ─────────────────────────────────────────────────────────────
+      async function loadAudit(page) {
+        if (page) currentPage = page;
+        const adminVal = document.getElementById('adminFilter').value.trim();
+        const actionVal = document.getElementById('actionFilter').value;
+        const offset = (currentPage - 1) * PAGE_SIZE;
+
+        const params = new URLSearchParams({ limit: PAGE_SIZE, offset });
+        if (adminVal) params.set('admin', adminVal);
+        if (actionVal) params.set('action', actionVal);
+        if (activeEventType) params.set('event_type', activeEventType);
+        if (activeSince) params.set('since', activeSince);
+
+        document.getElementById('refreshIndicator').style.display = 'inline-flex';
+
+        // reset countdown
+        resetCountdown();
+
+        try {
+          const data = await _admin.apiFetch(`/admin/audit-log?${params}`);
+          totalRows = data.total || 0;
+          const rows = data.rows || [];
+
+          // Populate action filter dropdown (only once)
+          const actionSel = document.getElementById('actionFilter');
+          if (actionSel.options.length <= 1 && data.actions && data.actions.length) {
+            data.actions.forEach(a => {
+              const opt = document.createElement('option');
+              opt.value = a;
+              opt.textContent = a;
+              if (a === actionVal) opt.selected = true;
+              actionSel.appendChild(opt);
+            });
+          }
+
+          const totalPages = Math.ceil(totalRows / PAGE_SIZE) || 1;
+          document.getElementById('totalCount').textContent = `Всего: ${totalRows}`;
+          document.getElementById('paginationInfo').textContent =
+            `Записей ${offset + 1}–${Math.min(offset + rows.length, totalRows)} из ${totalRows}`;
+          document.getElementById('pageIndicator').textContent = `${currentPage} / ${totalPages}`;
+          document.getElementById('prevBtn').disabled = currentPage <= 1;
+          document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+
+          const tbody = document.getElementById('auditBody');
+          if (!rows.length) {
+            tbody.innerHTML =
+              '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim)">Записей не найдено</td></tr>';
+            return;
+          }
+
+          tbody.innerHTML = rows
+            .map(
+              r => `
       <tr class="${rowClass(r.action)}">
         <td style="font-size:0.78rem;color:var(--text-muted);white-space:nowrap">${_admin.formatDateTime(r.created_at)}</td>
         <td class="user-cell">
@@ -347,58 +513,60 @@ async function loadAudit(page) {
         <td>${actionBadge(r.action)}</td>
         <td style="font-size:0.82rem">${entityLabel(r)}</td>
         <td style="font-size:0.78rem;max-width:320px;overflow:hidden;text-overflow:ellipsis">${detailsText(r)}</td>
-      </tr>`).join('');
-  } catch (e) {
-    document.getElementById('auditBody').innerHTML =
-      `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--danger)">Ошибка: ${_admin.escapeHtml(e.message)}</td></tr>`;
-    _admin.toast('Ошибка загрузки: ' + e.message, 'error');
-  } finally {
-    document.getElementById('refreshIndicator').style.display = 'none';
-  }
-}
+      </tr>`
+            )
+            .join('');
+        } catch (e) {
+          document.getElementById('auditBody').innerHTML =
+            `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--danger)">Ошибка: ${_admin.escapeHtml(e.message)}</td></tr>`;
+          _admin.toast('Ошибка загрузки: ' + e.message, 'error');
+        } finally {
+          document.getElementById('refreshIndicator').style.display = 'none';
+        }
+      }
 
-function changePage(dir) {
-  const totalPages = Math.ceil(totalRows / PAGE_SIZE) || 1;
-  const np = currentPage + dir;
-  if (np < 1 || np > totalPages) return;
-  currentPage = np;
-  loadAudit();
-}
+      function changePage(dir) {
+        const totalPages = Math.ceil(totalRows / PAGE_SIZE) || 1;
+        const np = currentPage + dir;
+        if (np < 1 || np > totalPages) return;
+        currentPage = np;
+        loadAudit();
+      }
 
-// ── Auto-refresh with countdown ────────────────────────────────────────────
-function resetCountdown() {
-  clearInterval(countdownTimer);
-  secondsLeft = 30;
-  updateCountdownText();
-  countdownTimer = setInterval(() => {
-    secondsLeft--;
-    if (secondsLeft <= 0) secondsLeft = 30;
-    updateCountdownText();
-  }, 1000);
-}
+      // ── Auto-refresh with countdown ────────────────────────────────────────────
+      function resetCountdown() {
+        clearInterval(countdownTimer);
+        secondsLeft = 30;
+        updateCountdownText();
+        countdownTimer = setInterval(() => {
+          secondsLeft--;
+          if (secondsLeft <= 0) secondsLeft = 30;
+          updateCountdownText();
+        }, 1000);
+      }
 
-function updateCountdownText() {
-  const el = document.getElementById('refreshCountdown');
-  if (el) el.textContent = `↻ ${secondsLeft}с`;
-}
+      function updateCountdownText() {
+        const el = document.getElementById('refreshCountdown');
+        if (el) el.textContent = `↻ ${secondsLeft}с`;
+      }
 
-function startAutoRefresh() {
-  clearInterval(autoRefreshTimer);
-  autoRefreshTimer = setInterval(() => loadAudit(), 30000);
-  resetCountdown();
-}
+      function startAutoRefresh() {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = setInterval(() => loadAudit(), 30000);
+        resetCountdown();
+      }
 
-// ── CSV Export ─────────────────────────────────────────────────────────────
-function exportCSV() {
-  const params = new URLSearchParams();
-  if (activeEventType) params.set('event_type', activeEventType);
-  if (activeSince)    params.set('since',       activeSince);
-  window.location.href = `/api/admin/audit/export?${params}`;
-}
+      // ── CSV Export ─────────────────────────────────────────────────────────────
+      function exportCSV() {
+        const params = new URLSearchParams();
+        if (activeEventType) params.set('event_type', activeEventType);
+        if (activeSince) params.set('since', activeSince);
+        window.location.href = `/api/admin/audit/export?${params}`;
+      }
 
-// ── Init ───────────────────────────────────────────────────────────────────
-loadAudit(1);
-startAutoRefresh();
-</script>
-</body>
+      // ── Init ───────────────────────────────────────────────────────────────────
+      loadAudit(1);
+      startAutoRefresh();
+    </script>
+  </body>
 </html>

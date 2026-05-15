@@ -1,183 +1,191 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>База данных — Nevesty Models Admin</title>
-  <meta name="robots" content="noindex, nofollow">
-  <link rel="stylesheet" href="/css/admin.css" />
-</head>
-<body>
-<div class="admin-layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-text">Nevesty Models</div>
-      <div class="sidebar-logo-sub">Панель управления</div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>База данных — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+  </head>
+  <body>
+    <div class="admin-layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-text">Nevesty Models</div>
+          <div class="sidebar-logo-sub">Панель управления</div>
+        </div>
+        <nav class="sidebar-nav">
+          <div class="nav-section-label">Главная</div>
+          <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+          <div class="nav-section-label">Бизнес</div>
+          <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки</a>
+          <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+          <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+          <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+          <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+          <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+          <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
+          <div class="nav-section-label">AI</div>
+          <a href="/admin/social.html"><span class="nav-icon">📱</span> Соцсети</a>
+          <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+          <div class="nav-section-label">Настройки</div>
+          <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+          <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+          <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+          <a href="/admin/db.html" class="active"><span class="nav-icon">🗄️</span> База данных</a>
+          <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <div class="sidebar-avatar sidebar-user-letter">A</div>
+            <div class="sidebar-user-info">
+              <strong class="sidebar-user-name">—</strong>
+              <span class="sidebar-user-role">—</span>
+            </div>
+          </div>
+          <button class="btn-logout" data-action="logout">Выйти</button>
+        </div>
+      </aside>
+
+      <div class="main-content">
+        <header class="topbar">
+          <div class="topbar-title">🗄️ База данных</div>
+          <div class="topbar-right">
+            <button onclick="runVacuum()" class="topbar-btn" id="vacuumBtn">🧹 VACUUM</button>
+            <button onclick="runBackup()" class="topbar-btn" id="backupBtn">💾 Резервная копия</button>
+            <button onclick="loadData()" class="topbar-btn">↺ Обновить</button>
+          </div>
+        </header>
+
+        <div class="page-content">
+          <!-- KPI cards -->
+          <div class="stat-cards" style="margin-bottom: 24px">
+            <div class="stat-card">
+              <div class="stat-card-label">Размер БД</div>
+              <div class="stat-card-value" id="db-size">—</div>
+              <div class="stat-card-icon">💾</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Таблиц</div>
+              <div class="stat-card-value" id="tables-count">—</div>
+              <div class="stat-card-icon">🗃️</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Версия схемы</div>
+              <div class="stat-card-value" id="schema-ver">—</div>
+              <div class="stat-card-icon">🔢</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">WAL страниц</div>
+              <div class="stat-card-value" id="wal-pages">—</div>
+              <div class="stat-card-icon">📝</div>
+            </div>
+          </div>
+
+          <!-- Tables list -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header"><div class="section-card-title">📋 Таблицы</div></div>
+            <div id="tables-list" class="section-card-body">
+              <div style="padding: 24px; color: var(--text-dim)">Загрузка...</div>
+            </div>
+          </div>
+
+          <!-- Schema versions -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header"><div class="section-card-title">🔢 История миграций</div></div>
+            <div id="schema-history" class="section-card-body">
+              <div style="padding: 24px; color: var(--text-dim)">Загрузка...</div>
+            </div>
+          </div>
+
+          <!-- Audit log -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header"><div class="section-card-title">🔍 Аудит лог</div></div>
+            <div id="audit-log" class="section-card-body">
+              <div style="padding: 24px; color: var(--text-dim)">Загрузка...</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Главная</div>
-      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
-      <div class="nav-section-label">Бизнес</div>
-      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки</a>
-      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
-      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
-      <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
-      <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
-      <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
-      <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
-      <div class="nav-section-label">AI</div>
-      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
-      <div class="nav-section-label">Настройки</div>
-      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
-      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
-      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
-      <a href="/admin/db.html" class="active"><span class="nav-icon">🗄️</span> База данных</a>
-      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-user">
-        <div class="sidebar-avatar sidebar-user-letter">A</div>
-        <div class="sidebar-user-info">
-          <strong class="sidebar-user-name">—</strong>
-          <span class="sidebar-user-role">—</span>
-        </div>
-      </div>
-      <button class="btn-logout" data-action="logout">Выйти</button>
-    </div>
-  </aside>
 
-  <div class="main-content">
-    <header class="topbar">
-      <div class="topbar-title">🗄️ База данных</div>
-      <div class="topbar-right">
-        <button onclick="runVacuum()" class="topbar-btn" id="vacuumBtn">🧹 VACUUM</button>
-        <button onclick="runBackup()" class="topbar-btn" id="backupBtn">💾 Резервная копия</button>
-        <button onclick="loadData()" class="topbar-btn">↺ Обновить</button>
-      </div>
-    </header>
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/admin.js"></script>
+    <script>
+      async function loadData() {
+        try {
+          const data = await _admin.apiFetch('/admin/db-stats');
 
-    <div class="page-content">
+          document.getElementById('db-size').textContent = data.size_mb != null ? data.size_mb + ' MB' : '—';
+          document.getElementById('tables-count').textContent = (data.tables || []).length;
+          document.getElementById('wal-pages').textContent = data.wal?.wal_size ?? '—';
 
-      <!-- KPI cards -->
-      <div class="stat-cards" style="margin-bottom:24px">
-        <div class="stat-card">
-          <div class="stat-card-label">Размер БД</div>
-          <div class="stat-card-value" id="db-size">—</div>
-          <div class="stat-card-icon">💾</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Таблиц</div>
-          <div class="stat-card-value" id="tables-count">—</div>
-          <div class="stat-card-icon">🗃️</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Версия схемы</div>
-          <div class="stat-card-value" id="schema-ver">—</div>
-          <div class="stat-card-icon">🔢</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">WAL страниц</div>
-          <div class="stat-card-value" id="wal-pages">—</div>
-          <div class="stat-card-icon">📝</div>
-        </div>
-      </div>
+          const versions = data.schema_versions || [];
+          if (versions.length) {
+            document.getElementById('schema-ver').textContent = 'v' + versions[0].version;
+          }
 
-      <!-- Tables list -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header"><div class="section-card-title">📋 Таблицы</div></div>
-        <div id="tables-list" class="section-card-body">
-          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
-        </div>
-      </div>
-
-      <!-- Schema versions -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header"><div class="section-card-title">🔢 История миграций</div></div>
-        <div id="schema-history" class="section-card-body">
-          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
-        </div>
-      </div>
-
-      <!-- Audit log -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header"><div class="section-card-title">🔍 Аудит лог</div></div>
-        <div id="audit-log" class="section-card-body">
-          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-</div>
-
-<div class="toast-container" id="toastContainer"></div>
-<script src="/js/admin.js"></script>
-<script>
-async function loadData() {
-  try {
-    const data = await _admin.apiFetch('/admin/db-stats');
-
-    document.getElementById('db-size').textContent = data.size_mb != null ? data.size_mb + ' MB' : '—';
-    document.getElementById('tables-count').textContent = (data.tables || []).length;
-    document.getElementById('wal-pages').textContent = data.wal?.wal_size ?? '—';
-
-    const versions = data.schema_versions || [];
-    if (versions.length) {
-      document.getElementById('schema-ver').textContent = 'v' + versions[0].version;
-    }
-
-    // Render tables
-    const tablesCont = document.getElementById('tables-list');
-    if (!data.tables || !data.tables.length) {
-      tablesCont.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет таблиц</div>';
-    } else {
-      const sorted = [...data.tables].sort((a, b) => (b.count || 0) - (a.count || 0));
-      tablesCont.innerHTML = `<table class="data-table">
+          // Render tables
+          const tablesCont = document.getElementById('tables-list');
+          if (!data.tables || !data.tables.length) {
+            tablesCont.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет таблиц</div>';
+          } else {
+            const sorted = [...data.tables].sort((a, b) => (b.count || 0) - (a.count || 0));
+            tablesCont.innerHTML = `<table class="data-table">
         <thead><tr><th>Таблица</th><th>Строк</th><th>Индексов</th></tr></thead>
         <tbody>
-          ${sorted.map(t => `
+          ${sorted
+            .map(
+              t => `
             <tr>
               <td style="font-weight:500;font-family:monospace">${_admin.escapeHtml(t.name)}</td>
               <td style="color:var(--gold)">${(t.count || 0).toLocaleString('ru-RU')}</td>
               <td style="color:var(--text-muted)">${t.indexes || 0}</td>
-            </tr>`).join('')}
+            </tr>`
+            )
+            .join('')}
         </tbody>
       </table>`;
-    }
+          }
 
-    // Render schema versions
-    const schemaCont = document.getElementById('schema-history');
-    if (!versions.length) {
-      schemaCont.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет данных о миграциях</div>';
-    } else {
-      schemaCont.innerHTML = `<table class="data-table">
+          // Render schema versions
+          const schemaCont = document.getElementById('schema-history');
+          if (!versions.length) {
+            schemaCont.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет данных о миграциях</div>';
+          } else {
+            schemaCont.innerHTML = `<table class="data-table">
         <thead><tr><th>Версия</th><th>Описание</th><th>Дата</th></tr></thead>
         <tbody>
-          ${versions.map(v => `
+          ${versions
+            .map(
+              v => `
             <tr>
               <td><span style="background:var(--gold);color:#000;padding:2px 8px;border-radius:10px;font-size:0.75rem;font-weight:700">v${v.version}</span></td>
               <td style="color:var(--text-muted)">${_admin.escapeHtml(v.description || '—')}</td>
               <td style="font-size:0.8rem;color:var(--text-dim)">${(v.applied_at || '').slice(0, 10)}</td>
-            </tr>`).join('')}
+            </tr>`
+            )
+            .join('')}
         </tbody>
       </table>`;
-    }
+          }
+        } catch (e) {
+          _admin.toast('Ошибка загрузки: ' + e.message, 'error');
+        }
 
-  } catch (e) {
-    _admin.toast('Ошибка загрузки: ' + e.message, 'error');
-  }
-
-  // Audit log (separate fetch — non-blocking)
-  try {
-    const auditRows = await _admin.apiFetch('/admin/audit-log?limit=50');
-    const auditCont = document.getElementById('audit-log');
-    if (!auditRows || !auditRows.length) {
-      auditCont.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет записей аудита</div>';
-    } else {
-      auditCont.innerHTML = `<table class="data-table">
+        // Audit log (separate fetch — non-blocking)
+        try {
+          const auditRows = await _admin.apiFetch('/admin/audit-log?limit=50');
+          const auditCont = document.getElementById('audit-log');
+          if (!auditRows || !auditRows.length) {
+            auditCont.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет записей аудита</div>';
+          } else {
+            auditCont.innerHTML = `<table class="data-table">
         <thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>ID</th><th>Детали</th></tr></thead>
         <tbody>
-          ${auditRows.map(r => `
+          ${auditRows
+            .map(
+              r => `
             <tr>
               <td style="font-size:0.78rem;color:var(--text-dim);white-space:nowrap">${(r.created_at || '').slice(0, 19).replace('T', ' ')}</td>
               <td style="color:var(--gold)">${_admin.escapeHtml(r.admin_username || r.admin_chat_id || '—')}</td>
@@ -185,47 +193,49 @@ async function loadData() {
               <td style="color:var(--text-muted)">${_admin.escapeHtml(r.entity || r.entity_type || '—')}</td>
               <td style="color:var(--text-dim)">${r.entity_id != null ? r.entity_id : '—'}</td>
               <td style="font-size:0.78rem;color:var(--text-dim);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_admin.escapeHtml(r.details || '')}">${_admin.escapeHtml(r.details || '—')}</td>
-            </tr>`).join('')}
+            </tr>`
+            )
+            .join('')}
         </tbody>
       </table>`;
-    }
-  } catch (_) {}
-}
+          }
+        } catch (_) {}
+      }
 
-loadData();
+      loadData();
 
-async function runVacuum() {
-  const btn = document.getElementById('vacuumBtn');
-  btn.disabled = true;
-  btn.textContent = '🧹 Выполняется...';
-  try {
-    const result = await _admin.apiFetch('/admin/db-vacuum', { method: 'POST' });
-    _admin.toast(result.message || 'VACUUM выполнен', 'success');
-    loadData();
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🧹 VACUUM';
-  }
-}
+      async function runVacuum() {
+        const btn = document.getElementById('vacuumBtn');
+        btn.disabled = true;
+        btn.textContent = '🧹 Выполняется...';
+        try {
+          const result = await _admin.apiFetch('/admin/db-vacuum', { method: 'POST' });
+          _admin.toast(result.message || 'VACUUM выполнен', 'success');
+          loadData();
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '🧹 VACUUM';
+        }
+      }
 
-async function runBackup() {
-  const btn = document.getElementById('backupBtn');
-  btn.disabled = true;
-  btn.textContent = '💾 Создаётся...';
-  try {
-    const result = await _admin.apiFetch('/admin/db-backup', { method: 'POST' });
-    if (result.success) {
-      _admin.toast(`Резервная копия создана: ${result.filename} (${result.size_mb} MB)`, 'success');
-    }
-  } catch (e) {
-    _admin.toast('Ошибка резервного копирования: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '💾 Резервная копия';
-  }
-}
-</script>
-</body>
+      async function runBackup() {
+        const btn = document.getElementById('backupBtn');
+        btn.disabled = true;
+        btn.textContent = '💾 Создаётся...';
+        try {
+          const result = await _admin.apiFetch('/admin/db-backup', { method: 'POST' });
+          if (result.success) {
+            _admin.toast(`Резервная копия создана: ${result.filename} (${result.size_mb} MB)`, 'success');
+          }
+        } catch (e) {
+          _admin.toast('Ошибка резервного копирования: ' + e.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '💾 Резервная копия';
+        }
+      }
+    </script>
+  </body>
 </html>

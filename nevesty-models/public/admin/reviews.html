@@ -1,422 +1,572 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Отзывы — Nevesty Models Admin</title>
-  <meta name="robots" content="noindex, nofollow">
-  <link rel="stylesheet" href="/css/admin.css" />
-  <style>
-    .review-card {
-      background: var(--bg1);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 20px;
-      margin-bottom: 12px;
-      transition: border-color 0.2s, opacity 0.2s;
-      position: relative;
-    }
-    .review-card:hover { border-color: rgba(201,169,110,0.4); }
-    .review-card.pending { border-left: 3px solid var(--gold); }
-    .review-card.approved { border-left: 3px solid var(--success); }
-    .review-card.rejected { border-left: 3px solid var(--text-dim); }
-    .review-card.selected { outline: 2px solid var(--gold); outline-offset: -2px; }
-
-    .review-header {
-      display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px;
-    }
-    .review-checkbox {
-      display: flex; align-items: center; padding-top: 10px; flex-shrink: 0;
-    }
-    .review-checkbox input[type="checkbox"] {
-      width: 16px; height: 16px; cursor: pointer; accent-color: var(--gold);
-    }
-    .review-avatar {
-      width: 40px; height: 40px; border-radius: 50%;
-      background: rgba(201,169,110,0.15);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.1rem; flex-shrink: 0;
-      border: 1px solid rgba(201,169,110,0.3);
-    }
-    .review-meta { flex: 1; }
-    .review-author {
-      font-weight: 600; color: var(--text); font-size: 0.9rem;
-    }
-    .review-model {
-      font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;
-    }
-    .review-date {
-      font-size: 0.72rem; color: var(--text-dim);
-    }
-    .review-stars {
-      font-size: 1rem; letter-spacing: 1px;
-    }
-    .review-text {
-      font-size: 0.85rem; color: var(--text-muted);
-      line-height: 1.6; margin: 12px 0;
-      padding: 12px; background: var(--bg2);
-      border-radius: 4px;
-    }
-    .review-actions {
-      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-    }
-    .status-badge {
-      display: inline-block; padding: 2px 10px;
-      border-radius: 20px; font-size: 0.72rem; font-weight: 600;
-    }
-    .status-pending { background: rgba(201,169,110,0.15); color: var(--gold); }
-    .status-approved { background: rgba(34,197,94,0.15); color: var(--success); }
-    .status-rejected { background: rgba(255,255,255,0.06); color: var(--text-dim); }
-
-    .filter-tabs {
-      display: flex; gap: 4px; margin-bottom: 16px;
-      border-bottom: 1px solid var(--border); padding-bottom: 0;
-    }
-    .filter-tab {
-      padding: 8px 18px; font-size: 0.8rem; letter-spacing: 0.5px;
-      color: var(--text-muted); cursor: pointer; border: none;
-      background: none; border-bottom: 2px solid transparent;
-      margin-bottom: -1px; transition: all 0.2s;
-    }
-    .filter-tab.active {
-      color: var(--gold); border-bottom-color: var(--gold);
-    }
-    .filter-tab:hover:not(.active) { color: var(--text); }
-    .tab-count {
-      display: inline-block; background: rgba(201,169,110,0.15);
-      color: var(--gold); border-radius: 10px; padding: 0 6px;
-      font-size: 0.68rem; font-weight: 700; margin-left: 4px; min-width: 18px;
-      text-align: center;
-    }
-    .tab-count.count-zero { background: rgba(255,255,255,0.06); color: var(--text-dim); }
-
-    .stats-row {
-      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
-      margin-bottom: 24px;
-    }
-    .stat-mini {
-      background: var(--bg1); border: 1px solid var(--border);
-      border-radius: 6px; padding: 16px; text-align: center;
-    }
-    .stat-mini-val { font-size: 1.6rem; font-weight: 700; color: var(--gold); }
-    .stat-mini-lbl { font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
-
-    .stars-avg {
-      display: flex; align-items: center; gap: 6px;
-      justify-content: center; margin-top: 6px;
-    }
-    .empty-state {
-      text-align: center; padding: 60px 20px;
-      color: var(--text-dim); font-size: 0.9rem;
-    }
-    .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
-
-    .review-reply {
-      margin: 8px 0;
-      padding: 10px 14px;
-      background: rgba(201,169,110,0.06);
-      border-left: 3px solid var(--gold);
-      border-radius: 0 4px 4px 0;
-    }
-    .reply-label { font-size: 0.72rem; color: var(--gold); margin-bottom: 4px; font-weight: 600; }
-    .reply-text { font-size: 0.82rem; color: var(--text-muted); }
-    .reply-textarea {
-      width: 100%; padding: 8px 10px;
-      border: 1px solid var(--border);
-      background: var(--bg2); color: var(--text);
-      border-radius: 4px; font-size: 0.82rem; resize: vertical;
-      box-sizing: border-box;
-    }
-
-    /* Bulk actions toolbar */
-    .bulk-toolbar {
-      display: none; align-items: center; gap: 10px;
-      background: rgba(201,169,110,0.08); border: 1px solid rgba(201,169,110,0.3);
-      border-radius: 6px; padding: 10px 14px; margin-bottom: 14px;
-    }
-    .bulk-toolbar.visible { display: flex; }
-    .bulk-toolbar-label { font-size: 0.82rem; color: var(--gold); font-weight: 600; }
-    .bulk-spacer { flex: 1; }
-    .select-all-row {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
-    }
-    .select-all-row label { font-size: 0.8rem; color: var(--text-muted); cursor: pointer; }
-    .select-all-row input[type="checkbox"] { accent-color: var(--gold); cursor: pointer; }
-
-    @media (max-width: 640px) {
-      .stats-row { grid-template-columns: repeat(2, 1fr); }
-      .review-actions { flex-wrap: wrap; }
-      .filter-tab { padding: 8px 10px; font-size: 0.75rem; }
-    }
-  </style>
-</head>
-<body>
-
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-text">Nevesty Models</div>
-      <div class="sidebar-logo-sub">Панель управления</div>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Главная</div>
-      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
-      <div class="nav-section-label">Бизнес</div>
-      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки <span class="nav-badge" id="newOrdersBadge" style="display:none">0</span></a>
-      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
-      <a href="/admin/reviews.html" class="active"><span class="nav-icon">⭐</span> Отзывы <span class="nav-badge" id="pendingBadge" style="display:none">0</span></a>
-      <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
-      <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
-      <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
-      <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
-      <div class="nav-section-label">Аналитика</div>
-      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
-      <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
-      <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
-      <div class="nav-section-label">Настройки</div>
-      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
-      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
-      <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
-      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-user">
-        <div class="sidebar-avatar sidebar-user-letter">A</div>
-        <div class="sidebar-user-info">
-          <strong class="sidebar-user-name">—</strong>
-          <span class="sidebar-user-role">—</span>
-        </div>
-      </div>
-      <button class="btn btn-sm btn-ghost" onclick="_admin.logout()" style="width:100%;margin-top:8px">Выйти</button>
-    </div>
-  </aside>
-
-  <div class="main-wrap">
-    <header class="topbar">
-      <button class="topbar-burger" id="burgerBtn" aria-label="Меню">☰</button>
-      <div class="topbar-title">⭐ Управление отзывами</div>
-      <div class="topbar-actions">
-        <button class="btn btn-sm btn-ghost" onclick="loadReviews()" title="Обновить">↻</button>
-      </div>
-    </header>
-
-    <div class="content-area">
-
-      <!-- Stats -->
-      <div class="stats-row" id="statsRow">
-        <div class="stat-mini">
-          <div class="stat-mini-val" id="totalCount">—</div>
-          <div class="stat-mini-lbl">Всего отзывов</div>
-        </div>
-        <div class="stat-mini">
-          <div class="stat-mini-val" id="approvedCount">—</div>
-          <div class="stat-mini-lbl">Опубликовано</div>
-        </div>
-        <div class="stat-mini">
-          <div class="stat-mini-val" id="pendingCount" style="color:var(--gold)">—</div>
-          <div class="stat-mini-lbl">Ожидают проверки</div>
-        </div>
-        <div class="stat-mini">
-          <div class="stat-mini-val" id="avgRating">—</div>
-          <div class="stars-avg" id="avgStars"></div>
-          <div class="stat-mini-lbl">Средний рейтинг</div>
-        </div>
-      </div>
-
-      <!-- Filter tabs -->
-      <div class="filter-tabs">
-        <button class="filter-tab active" data-filter="all" onclick="setFilter('all', this)">
-          📋 Все <span class="tab-count" id="tab-count-all">—</span>
-        </button>
-        <button class="filter-tab" data-filter="0" onclick="setFilter('0', this)">
-          ⏳ На проверке <span class="tab-count" id="tab-count-pending">—</span>
-        </button>
-        <button class="filter-tab" data-filter="1" onclick="setFilter('1', this)">
-          ✅ Одобренные <span class="tab-count" id="tab-count-approved">—</span>
-        </button>
-      </div>
-
-      <!-- Bulk actions toolbar (shown when checkboxes selected) -->
-      <div class="bulk-toolbar" id="bulkToolbar">
-        <span class="bulk-toolbar-label" id="bulkLabel">0 выбрано</span>
-        <div class="bulk-spacer"></div>
-        <button class="btn btn-sm btn-primary" onclick="bulkApprove()">✅ Одобрить выбранные</button>
-        <button class="btn btn-sm btn-ghost" onclick="clearSelection()">✕ Снять выделение</button>
-      </div>
-
-      <!-- Reviews list -->
-      <div id="reviewsList">
-        <div class="empty-state">
-          <div class="icon">⏳</div>
-          Загрузка отзывов...
-        </div>
-      </div>
-
-      <!-- Pagination -->
-      <div class="pagination" id="pagination" style="margin-top:20px"></div>
-
-    </div>
-  </div>
-
-  <script src="/js/admin.js"></script>
-  <script>
-    let currentFilter = 'all';
-    let currentPage = 1;
-    const PAGE_SIZE = 20;
-    let selectedIds = new Set();
-
-    const STAR = '⭐';
-    const STAR_EMPTY = '☆';
-
-    function stars(n) {
-      n = Math.round(n || 0);
-      return STAR.repeat(Math.min(n,5)) + STAR_EMPTY.repeat(Math.max(0,5-n));
-    }
-
-    function starsLabel(rating) {
-      if (!rating) return '';
-      return '⭐'.repeat(rating) + ` (${rating}/5)`;
-    }
-
-    function setFilter(f, el) {
-      currentFilter = f;
-      currentPage = 1;
-      selectedIds.clear();
-      updateBulkToolbar();
-      document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
-      el.classList.add('active');
-      loadReviews();
-    }
-
-    function filterToApiParam(f) {
-      if (f === '0') return '?approved=0';
-      if (f === '1') return '?approved=1';
-      return '';
-    }
-
-    async function loadStats() {
-      try {
-        const [allData, approvedData, pendingData] = await Promise.all([
-          _admin.api('/admin/reviews?limit=1'),
-          _admin.api('/admin/reviews?approved=1&limit=1'),
-          _admin.api('/admin/reviews?approved=0&limit=1'),
-        ]);
-
-        const totalReviews = allData.total != null ? allData.total : 0;
-        const approvedCount = approvedData.total != null ? approvedData.total : 0;
-        const pendingCount = pendingData.total != null ? pendingData.total : 0;
-
-        document.getElementById('totalCount').textContent = totalReviews;
-        document.getElementById('approvedCount').textContent = approvedCount;
-        document.getElementById('pendingCount').textContent = pendingCount;
-
-        // Update tab count badges
-        setTabCount('tab-count-all', totalReviews);
-        setTabCount('tab-count-pending', pendingCount);
-        setTabCount('tab-count-approved', approvedCount);
-
-        // Update nav badge
-        const badge = document.getElementById('pendingBadge');
-        if (badge) {
-          badge.textContent = pendingCount;
-          badge.style.display = pendingCount > 0 ? '' : 'none';
-        }
-
-        // Avg rating — re-fetch small batch for calculation if needed
-        const ratedData = await _admin.api('/admin/reviews?limit=500');
-        const allReviews = ratedData.reviews || [];
-        const rated = allReviews.filter(r => r.rating > 0);
-        if (rated.length > 0) {
-          const avg = rated.reduce((s, r) => s + r.rating, 0) / rated.length;
-          document.getElementById('avgRating').textContent = avg.toFixed(1);
-          document.getElementById('avgStars').textContent = stars(Math.round(avg));
-        } else {
-          document.getElementById('avgRating').textContent = '—';
-          document.getElementById('avgStars').textContent = '';
-        }
-      } catch (e) {
-        console.error('Stats error:', e);
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Отзывы — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      .review-card {
+        background: var(--bg1);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 20px;
+        margin-bottom: 12px;
+        transition:
+          border-color 0.2s,
+          opacity 0.2s;
+        position: relative;
       }
-    }
+      .review-card:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+      }
+      .review-card.pending {
+        border-left: 3px solid var(--gold);
+      }
+      .review-card.approved {
+        border-left: 3px solid var(--success);
+      }
+      .review-card.rejected {
+        border-left: 3px solid var(--text-dim);
+      }
+      .review-card.selected {
+        outline: 2px solid var(--gold);
+        outline-offset: -2px;
+      }
 
-    function setTabCount(id, n) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.textContent = n;
-      el.className = 'tab-count' + (n === 0 ? ' count-zero' : '');
-    }
+      .review-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .review-checkbox {
+        display: flex;
+        align-items: center;
+        padding-top: 10px;
+        flex-shrink: 0;
+      }
+      .review-checkbox input[type='checkbox'] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+        accent-color: var(--gold);
+      }
+      .review-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: rgba(201, 169, 110, 0.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.1rem;
+        flex-shrink: 0;
+        border: 1px solid rgba(201, 169, 110, 0.3);
+      }
+      .review-meta {
+        flex: 1;
+      }
+      .review-author {
+        font-weight: 600;
+        color: var(--text);
+        font-size: 0.9rem;
+      }
+      .review-model {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+      .review-date {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+      }
+      .review-stars {
+        font-size: 1rem;
+        letter-spacing: 1px;
+      }
+      .review-text {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        margin: 12px 0;
+        padding: 12px;
+        background: var(--bg2);
+        border-radius: 4px;
+      }
+      .review-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .status-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 20px;
+        font-size: 0.72rem;
+        font-weight: 600;
+      }
+      .status-pending {
+        background: rgba(201, 169, 110, 0.15);
+        color: var(--gold);
+      }
+      .status-approved {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--success);
+      }
+      .status-rejected {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-dim);
+      }
 
-    async function loadReviews() {
-      const list = document.getElementById('reviewsList');
-      list.innerHTML = '<div class="empty-state"><div class="icon">⏳</div>Загрузка...</div>';
-      selectedIds.clear();
-      updateBulkToolbar();
+      .filter-tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 16px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0;
+      }
+      .filter-tab {
+        padding: 8px 18px;
+        font-size: 0.8rem;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+        cursor: pointer;
+        border: none;
+        background: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        transition: all 0.2s;
+      }
+      .filter-tab.active {
+        color: var(--gold);
+        border-bottom-color: var(--gold);
+      }
+      .filter-tab:hover:not(.active) {
+        color: var(--text);
+      }
+      .tab-count {
+        display: inline-block;
+        background: rgba(201, 169, 110, 0.15);
+        color: var(--gold);
+        border-radius: 10px;
+        padding: 0 6px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        margin-left: 4px;
+        min-width: 18px;
+        text-align: center;
+      }
+      .tab-count.count-zero {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-dim);
+      }
 
-      try {
-        const filterParam = filterToApiParam(currentFilter);
-        const sep = filterParam ? '&' : '?';
-        const url = `/admin/reviews${filterParam}${sep}page=${currentPage}&limit=${PAGE_SIZE}`;
+      .stats-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      .stat-mini {
+        background: var(--bg1);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 16px;
+        text-align: center;
+      }
+      .stat-mini-val {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--gold);
+      }
+      .stat-mini-lbl {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
 
-        const data = await _admin.api(url);
-        const reviews = data.reviews || [];
+      .stars-avg {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: center;
+        margin-top: 6px;
+      }
+      .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-dim);
+        font-size: 0.9rem;
+      }
+      .empty-state .icon {
+        font-size: 2.5rem;
+        margin-bottom: 12px;
+      }
 
-        if (reviews.length === 0) {
-          list.innerHTML = `<div class="empty-state"><div class="icon">💬</div>${
-            currentFilter === '0' ? 'Нет отзывов, ожидающих проверки' :
-            currentFilter === '1' ? 'Нет опубликованных отзывов' : 'Отзывов пока нет'
-          }</div>`;
-          renderPagination(0, 0);
-          return;
+      .review-reply {
+        margin: 8px 0;
+        padding: 10px 14px;
+        background: rgba(201, 169, 110, 0.06);
+        border-left: 3px solid var(--gold);
+        border-radius: 0 4px 4px 0;
+      }
+      .reply-label {
+        font-size: 0.72rem;
+        color: var(--gold);
+        margin-bottom: 4px;
+        font-weight: 600;
+      }
+      .reply-text {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+      }
+      .reply-textarea {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text);
+        border-radius: 4px;
+        font-size: 0.82rem;
+        resize: vertical;
+        box-sizing: border-box;
+      }
+
+      /* Bulk actions toolbar */
+      .bulk-toolbar {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        background: rgba(201, 169, 110, 0.08);
+        border: 1px solid rgba(201, 169, 110, 0.3);
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin-bottom: 14px;
+      }
+      .bulk-toolbar.visible {
+        display: flex;
+      }
+      .bulk-toolbar-label {
+        font-size: 0.82rem;
+        color: var(--gold);
+        font-weight: 600;
+      }
+      .bulk-spacer {
+        flex: 1;
+      }
+      .select-all-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .select-all-row label {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        cursor: pointer;
+      }
+      .select-all-row input[type='checkbox'] {
+        accent-color: var(--gold);
+        cursor: pointer;
+      }
+
+      @media (max-width: 640px) {
+        .stats-row {
+          grid-template-columns: repeat(2, 1fr);
         }
+        .review-actions {
+          flex-wrap: wrap;
+        }
+        .filter-tab {
+          padding: 8px 10px;
+          font-size: 0.75rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <div class="sidebar-logo-text">Nevesty Models</div>
+        <div class="sidebar-logo-sub">Панель управления</div>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="nav-section-label">Главная</div>
+        <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+        <div class="nav-section-label">Бизнес</div>
+        <a href="/admin/orders.html"
+          ><span class="nav-icon">📋</span> Заявки
+          <span class="nav-badge" id="newOrdersBadge" style="display: none">0</span></a
+        >
+        <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+        <a href="/admin/reviews.html" class="active"
+          ><span class="nav-icon">⭐</span> Отзывы
+          <span class="nav-badge" id="pendingBadge" style="display: none">0</span></a
+        >
+        <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+        <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+        <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+        <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
+        <div class="nav-section-label">Аналитика</div>
+        <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+        <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+        <a href="/admin/social.html"><span class="nav-icon">📱</span> Соцсети</a>
+        <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+        <div class="nav-section-label">Настройки</div>
+        <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+        <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+        <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
+        <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-user">
+          <div class="sidebar-avatar sidebar-user-letter">A</div>
+          <div class="sidebar-user-info">
+            <strong class="sidebar-user-name">—</strong>
+            <span class="sidebar-user-role">—</span>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="_admin.logout()" style="width: 100%; margin-top: 8px">
+          Выйти
+        </button>
+      </div>
+    </aside>
 
-        // Show select-all row only when there are reviews
-        const pendingReviews = reviews.filter(r => r.approved !== 1);
-        const selectAllHtml = pendingReviews.length > 0
-          ? `<div class="select-all-row">
+    <div class="main-wrap">
+      <header class="topbar">
+        <button class="topbar-burger" id="burgerBtn" aria-label="Меню">☰</button>
+        <div class="topbar-title">⭐ Управление отзывами</div>
+        <div class="topbar-actions">
+          <button class="btn btn-sm btn-ghost" onclick="loadReviews()" title="Обновить">↻</button>
+        </div>
+      </header>
+
+      <div class="content-area">
+        <!-- Stats -->
+        <div class="stats-row" id="statsRow">
+          <div class="stat-mini">
+            <div class="stat-mini-val" id="totalCount">—</div>
+            <div class="stat-mini-lbl">Всего отзывов</div>
+          </div>
+          <div class="stat-mini">
+            <div class="stat-mini-val" id="approvedCount">—</div>
+            <div class="stat-mini-lbl">Опубликовано</div>
+          </div>
+          <div class="stat-mini">
+            <div class="stat-mini-val" id="pendingCount" style="color: var(--gold)">—</div>
+            <div class="stat-mini-lbl">Ожидают проверки</div>
+          </div>
+          <div class="stat-mini">
+            <div class="stat-mini-val" id="avgRating">—</div>
+            <div class="stars-avg" id="avgStars"></div>
+            <div class="stat-mini-lbl">Средний рейтинг</div>
+          </div>
+        </div>
+
+        <!-- Filter tabs -->
+        <div class="filter-tabs">
+          <button class="filter-tab active" data-filter="all" onclick="setFilter('all', this)">
+            📋 Все <span class="tab-count" id="tab-count-all">—</span>
+          </button>
+          <button class="filter-tab" data-filter="0" onclick="setFilter('0', this)">
+            ⏳ На проверке <span class="tab-count" id="tab-count-pending">—</span>
+          </button>
+          <button class="filter-tab" data-filter="1" onclick="setFilter('1', this)">
+            ✅ Одобренные <span class="tab-count" id="tab-count-approved">—</span>
+          </button>
+        </div>
+
+        <!-- Bulk actions toolbar (shown when checkboxes selected) -->
+        <div class="bulk-toolbar" id="bulkToolbar">
+          <span class="bulk-toolbar-label" id="bulkLabel">0 выбрано</span>
+          <div class="bulk-spacer"></div>
+          <button class="btn btn-sm btn-primary" onclick="bulkApprove()">✅ Одобрить выбранные</button>
+          <button class="btn btn-sm btn-ghost" onclick="clearSelection()">✕ Снять выделение</button>
+        </div>
+
+        <!-- Reviews list -->
+        <div id="reviewsList">
+          <div class="empty-state">
+            <div class="icon">⏳</div>
+            Загрузка отзывов...
+          </div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination" id="pagination" style="margin-top: 20px"></div>
+      </div>
+    </div>
+
+    <script src="/js/admin.js"></script>
+    <script>
+      let currentFilter = 'all';
+      let currentPage = 1;
+      const PAGE_SIZE = 20;
+      let selectedIds = new Set();
+
+      const STAR = '⭐';
+      const STAR_EMPTY = '☆';
+
+      function stars(n) {
+        n = Math.round(n || 0);
+        return STAR.repeat(Math.min(n, 5)) + STAR_EMPTY.repeat(Math.max(0, 5 - n));
+      }
+
+      function starsLabel(rating) {
+        if (!rating) return '';
+        return '⭐'.repeat(rating) + ` (${rating}/5)`;
+      }
+
+      function setFilter(f, el) {
+        currentFilter = f;
+        currentPage = 1;
+        selectedIds.clear();
+        updateBulkToolbar();
+        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        loadReviews();
+      }
+
+      function filterToApiParam(f) {
+        if (f === '0') return '?approved=0';
+        if (f === '1') return '?approved=1';
+        return '';
+      }
+
+      async function loadStats() {
+        try {
+          const [allData, approvedData, pendingData] = await Promise.all([
+            _admin.api('/admin/reviews?limit=1'),
+            _admin.api('/admin/reviews?approved=1&limit=1'),
+            _admin.api('/admin/reviews?approved=0&limit=1'),
+          ]);
+
+          const totalReviews = allData.total != null ? allData.total : 0;
+          const approvedCount = approvedData.total != null ? approvedData.total : 0;
+          const pendingCount = pendingData.total != null ? pendingData.total : 0;
+
+          document.getElementById('totalCount').textContent = totalReviews;
+          document.getElementById('approvedCount').textContent = approvedCount;
+          document.getElementById('pendingCount').textContent = pendingCount;
+
+          // Update tab count badges
+          setTabCount('tab-count-all', totalReviews);
+          setTabCount('tab-count-pending', pendingCount);
+          setTabCount('tab-count-approved', approvedCount);
+
+          // Update nav badge
+          const badge = document.getElementById('pendingBadge');
+          if (badge) {
+            badge.textContent = pendingCount;
+            badge.style.display = pendingCount > 0 ? '' : 'none';
+          }
+
+          // Avg rating — re-fetch small batch for calculation if needed
+          const ratedData = await _admin.api('/admin/reviews?limit=500');
+          const allReviews = ratedData.reviews || [];
+          const rated = allReviews.filter(r => r.rating > 0);
+          if (rated.length > 0) {
+            const avg = rated.reduce((s, r) => s + r.rating, 0) / rated.length;
+            document.getElementById('avgRating').textContent = avg.toFixed(1);
+            document.getElementById('avgStars').textContent = stars(Math.round(avg));
+          } else {
+            document.getElementById('avgRating').textContent = '—';
+            document.getElementById('avgStars').textContent = '';
+          }
+        } catch (e) {
+          console.error('Stats error:', e);
+        }
+      }
+
+      function setTabCount(id, n) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = n;
+        el.className = 'tab-count' + (n === 0 ? ' count-zero' : '');
+      }
+
+      async function loadReviews() {
+        const list = document.getElementById('reviewsList');
+        list.innerHTML = '<div class="empty-state"><div class="icon">⏳</div>Загрузка...</div>';
+        selectedIds.clear();
+        updateBulkToolbar();
+
+        try {
+          const filterParam = filterToApiParam(currentFilter);
+          const sep = filterParam ? '&' : '?';
+          const url = `/admin/reviews${filterParam}${sep}page=${currentPage}&limit=${PAGE_SIZE}`;
+
+          const data = await _admin.api(url);
+          const reviews = data.reviews || [];
+
+          if (reviews.length === 0) {
+            list.innerHTML = `<div class="empty-state"><div class="icon">💬</div>${
+              currentFilter === '0'
+                ? 'Нет отзывов, ожидающих проверки'
+                : currentFilter === '1'
+                  ? 'Нет опубликованных отзывов'
+                  : 'Отзывов пока нет'
+            }</div>`;
+            renderPagination(0, 0);
+            return;
+          }
+
+          // Show select-all row only when there are reviews
+          const pendingReviews = reviews.filter(r => r.approved !== 1);
+          const selectAllHtml =
+            pendingReviews.length > 0
+              ? `<div class="select-all-row">
                <input type="checkbox" id="selectAllCb" onchange="toggleSelectAll(this)">
                <label for="selectAllCb">Выбрать все неодобренные (${pendingReviews.length})</label>
              </div>`
-          : '';
+              : '';
 
-        list.innerHTML = selectAllHtml + reviews.map(r => renderReview(r)).join('');
-        renderPagination(data.page, data.pages);
-      } catch (e) {
-        list.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div>Ошибка загрузки отзывов</div>';
+          list.innerHTML = selectAllHtml + reviews.map(r => renderReview(r)).join('');
+          renderPagination(data.page, data.pages);
+        } catch (e) {
+          list.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div>Ошибка загрузки отзывов</div>';
+        }
       }
-    }
 
-    function renderReview(r) {
-      const approved = r.approved === 1;
-      const statusClass = approved ? 'approved' : 'pending';
-      const statusLabel = approved ? 'Опубликован' : 'На проверке';
-      const statusBadgeClass = approved ? 'status-approved' : 'status-pending';
-      const initial = (r.client_name || '?')[0].toUpperCase();
-      const date = new Date(r.created_at).toLocaleString('ru-RU', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      });
+      function renderReview(r) {
+        const approved = r.approved === 1;
+        const statusClass = approved ? 'approved' : 'pending';
+        const statusLabel = approved ? 'Опубликован' : 'На проверке';
+        const statusBadgeClass = approved ? 'status-approved' : 'status-pending';
+        const initial = (r.client_name || '?')[0].toUpperCase();
+        const date = new Date(r.created_at).toLocaleString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
 
-      const ratingDisplay = r.rating ? starsLabel(r.rating) : '';
+        const ratingDisplay = r.rating ? starsLabel(r.rating) : '';
 
-      const safeReply = r.admin_reply ? r.admin_reply.replace(/\\/g, '\\\\').replace(/'/g, "\\'") : '';
-      const replyHtml = r.admin_reply
-        ? `<div class="review-reply" id="reply-area-${r.id}">
+        const safeReply = r.admin_reply ? r.admin_reply.replace(/\\/g, '\\\\').replace(/'/g, "\\'") : '';
+        const replyHtml = r.admin_reply
+          ? `<div class="review-reply" id="reply-area-${r.id}">
              <div class="reply-label">💬 Ответ агентства:</div>
              <div class="reply-text">${_admin.escapeHtml(r.admin_reply)}</div>
              <button class="btn btn-sm btn-ghost" style="margin-top:6px" onclick="showReplyInput(${r.id}, '${safeReply}')">✏️ Изменить ответ</button>
            </div>`
-        : `<div id="reply-area-${r.id}">
+          : `<div id="reply-area-${r.id}">
              <button class="btn btn-sm btn-ghost" onclick="showReplyInput(${r.id}, '')">💬 Ответить</button>
            </div>`;
 
-      // Checkbox only for non-approved reviews (pending ones eligible for bulk approve)
-      const checkboxHtml = !approved
-        ? `<div class="review-checkbox">
+        // Checkbox only for non-approved reviews (pending ones eligible for bulk approve)
+        const checkboxHtml = !approved
+          ? `<div class="review-checkbox">
              <input type="checkbox" id="cb-${r.id}" value="${r.id}"
                onchange="toggleSelect(${r.id}, this.checked)">
            </div>`
-        : '<div class="review-checkbox" style="width:20px"></div>';
+          : '<div class="review-checkbox" style="width:20px"></div>';
 
-      return `
+        return `
       <div class="review-card ${statusClass}" id="review-${r.id}">
         <div class="review-header">
           ${checkboxHtml}
@@ -434,10 +584,11 @@
         ${r.text ? `<div class="review-text">${_admin.escapeHtml(r.text)}</div>` : '<div class="review-text" style="color:var(--text-dim);font-style:italic">Без текста</div>'}
         ${replyHtml}
         <div class="review-actions">
-          ${!approved
-            ? `<button class="btn btn-sm btn-primary" onclick="approveReview(${r.id})">✅ Одобрить</button>
+          ${
+            !approved
+              ? `<button class="btn btn-sm btn-primary" onclick="approveReview(${r.id})">✅ Одобрить</button>
                <button class="btn btn-sm btn-ghost" onclick="rejectReview(${r.id})">❌ Отклонить</button>`
-            : `<button class="btn btn-sm btn-ghost" onclick="rejectReview(${r.id})">🚫 Снять публикацию</button>`
+              : `<button class="btn btn-sm btn-ghost" onclick="rejectReview(${r.id})">🚫 Снять публикацию</button>`
           }
           <button class="btn btn-sm btn-danger" onclick="deleteReview(${r.id}, '${_admin.escapeHtml(r.client_name || 'Аноним').replace(/'/g, '')}')">
             🗑 Удалить
@@ -445,226 +596,246 @@
           ${r.model_id ? `<a href="/model.html?id=${r.model_id}" target="_blank" class="btn btn-sm btn-ghost">👁 Модель</a>` : ''}
         </div>
       </div>`;
-    }
-
-    // ── Bulk selection ────────────────────────────────────────────────────────
-
-    function toggleSelect(id, checked) {
-      if (checked) {
-        selectedIds.add(id);
-        document.getElementById(`review-${id}`)?.classList.add('selected');
-      } else {
-        selectedIds.delete(id);
-        document.getElementById(`review-${id}`)?.classList.remove('selected');
       }
-      updateBulkToolbar();
-      syncSelectAllCheckbox();
-    }
 
-    function toggleSelectAll(cb) {
-      const checkboxes = document.querySelectorAll('#reviewsList input[type="checkbox"][id^="cb-"]');
-      checkboxes.forEach(chk => {
-        const id = parseInt(chk.value);
-        chk.checked = cb.checked;
-        if (cb.checked) {
+      // ── Bulk selection ────────────────────────────────────────────────────────
+
+      function toggleSelect(id, checked) {
+        if (checked) {
           selectedIds.add(id);
           document.getElementById(`review-${id}`)?.classList.add('selected');
         } else {
           selectedIds.delete(id);
           document.getElementById(`review-${id}`)?.classList.remove('selected');
         }
-      });
-      updateBulkToolbar();
-    }
-
-    function syncSelectAllCheckbox() {
-      const cb = document.getElementById('selectAllCb');
-      if (!cb) return;
-      const checkboxes = document.querySelectorAll('#reviewsList input[type="checkbox"][id^="cb-"]');
-      const allChecked = checkboxes.length > 0 && [...checkboxes].every(c => c.checked);
-      cb.checked = allChecked;
-      cb.indeterminate = !allChecked && selectedIds.size > 0;
-    }
-
-    function updateBulkToolbar() {
-      const toolbar = document.getElementById('bulkToolbar');
-      const label = document.getElementById('bulkLabel');
-      if (selectedIds.size > 0) {
-        toolbar.classList.add('visible');
-        label.textContent = `${selectedIds.size} выбрано`;
-      } else {
-        toolbar.classList.remove('visible');
-      }
-    }
-
-    function clearSelection() {
-      selectedIds.clear();
-      document.querySelectorAll('#reviewsList input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-      document.querySelectorAll('.review-card.selected').forEach(el => el.classList.remove('selected'));
-      updateBulkToolbar();
-    }
-
-    async function bulkApprove() {
-      if (!selectedIds.size) return;
-      const ids = [...selectedIds];
-      const btn = document.querySelector('#bulkToolbar .btn-primary');
-      if (btn) { btn.disabled = true; btn.textContent = 'Сохранение...'; }
-      try {
-        const result = await _admin.api('/admin/reviews/bulk-approve', {
-          method: 'POST',
-          body: JSON.stringify({ ids })
-        });
-        const updated = result.updated || ids.length;
-        await Promise.all([loadReviews(), loadStats()]);
-        // Brief toast
-        showToast(`✅ Одобрено: ${updated} отзывов`);
-      } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = '✅ Одобрить выбранные'; }
-        alert('Ошибка: ' + (e.message || 'Попробуйте ещё раз'));
-      }
-    }
-
-    // ── Individual review actions ─────────────────────────────────────────────
-
-    async function approveReview(id) {
-      const card = document.getElementById(`review-${id}`);
-      if (card) card.style.opacity = '0.5';
-      try {
-        await _admin.api(`/admin/reviews/${id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ approved: 1 })
-        });
-        await Promise.all([loadReviews(), loadStats()]);
-      } catch (e) {
-        // Fallback to legacy PUT endpoint
-        try {
-          await _admin.api(`/admin/reviews/${id}/approve`, { method: 'PUT' });
-          await Promise.all([loadReviews(), loadStats()]);
-        } catch (e2) {
-          if (card) card.style.opacity = '1';
-          alert('Ошибка: ' + (e2.message || 'Попробуйте ещё раз'));
-        }
-      }
-    }
-
-    async function rejectReview(id) {
-      const card = document.getElementById(`review-${id}`);
-      if (card) card.style.opacity = '0.5';
-      try {
-        await _admin.api(`/admin/reviews/${id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ approved: 0 })
-        });
-        await Promise.all([loadReviews(), loadStats()]);
-      } catch (e) {
-        if (card) card.style.opacity = '1';
-        alert('Ошибка: ' + (e.message || 'Попробуйте ещё раз'));
-      }
-    }
-
-    async function deleteReview(id, name) {
-      if (!confirm(`Удалить отзыв от "${name}"? Это действие нельзя отменить.`)) return;
-      try {
-        await _admin.api(`/admin/reviews/${id}`, { method: 'DELETE' });
-        const card = document.getElementById(`review-${id}`);
-        if (card) {
-          card.style.opacity = '0';
-          card.style.transform = 'translateX(-10px)';
-          card.style.transition = 'all 0.3s';
-          setTimeout(() => card.remove(), 300);
-        }
-        selectedIds.delete(id);
         updateBulkToolbar();
-        loadStats();
-      } catch (e) {
-        alert('Ошибка удаления: ' + (e.message || 'Попробуйте ещё раз'));
+        syncSelectAllCheckbox();
       }
-    }
 
-    // ── Reply ─────────────────────────────────────────────────────────────────
+      function toggleSelectAll(cb) {
+        const checkboxes = document.querySelectorAll('#reviewsList input[type="checkbox"][id^="cb-"]');
+        checkboxes.forEach(chk => {
+          const id = parseInt(chk.value);
+          chk.checked = cb.checked;
+          if (cb.checked) {
+            selectedIds.add(id);
+            document.getElementById(`review-${id}`)?.classList.add('selected');
+          } else {
+            selectedIds.delete(id);
+            document.getElementById(`review-${id}`)?.classList.remove('selected');
+          }
+        });
+        updateBulkToolbar();
+      }
 
-    function showReplyInput(id, currentReply) {
-      const el = document.getElementById(`reply-area-${id}`);
-      if (!el) return;
-      el.innerHTML = `
+      function syncSelectAllCheckbox() {
+        const cb = document.getElementById('selectAllCb');
+        if (!cb) return;
+        const checkboxes = document.querySelectorAll('#reviewsList input[type="checkbox"][id^="cb-"]');
+        const allChecked = checkboxes.length > 0 && [...checkboxes].every(c => c.checked);
+        cb.checked = allChecked;
+        cb.indeterminate = !allChecked && selectedIds.size > 0;
+      }
+
+      function updateBulkToolbar() {
+        const toolbar = document.getElementById('bulkToolbar');
+        const label = document.getElementById('bulkLabel');
+        if (selectedIds.size > 0) {
+          toolbar.classList.add('visible');
+          label.textContent = `${selectedIds.size} выбрано`;
+        } else {
+          toolbar.classList.remove('visible');
+        }
+      }
+
+      function clearSelection() {
+        selectedIds.clear();
+        document.querySelectorAll('#reviewsList input[type="checkbox"]').forEach(cb => {
+          cb.checked = false;
+        });
+        document.querySelectorAll('.review-card.selected').forEach(el => el.classList.remove('selected'));
+        updateBulkToolbar();
+      }
+
+      async function bulkApprove() {
+        if (!selectedIds.size) return;
+        const ids = [...selectedIds];
+        const btn = document.querySelector('#bulkToolbar .btn-primary');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Сохранение...';
+        }
+        try {
+          const result = await _admin.api('/admin/reviews/bulk-approve', {
+            method: 'POST',
+            body: JSON.stringify({ ids }),
+          });
+          const updated = result.updated || ids.length;
+          await Promise.all([loadReviews(), loadStats()]);
+          // Brief toast
+          showToast(`✅ Одобрено: ${updated} отзывов`);
+        } catch (e) {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = '✅ Одобрить выбранные';
+          }
+          alert('Ошибка: ' + (e.message || 'Попробуйте ещё раз'));
+        }
+      }
+
+      // ── Individual review actions ─────────────────────────────────────────────
+
+      async function approveReview(id) {
+        const card = document.getElementById(`review-${id}`);
+        if (card) card.style.opacity = '0.5';
+        try {
+          await _admin.api(`/admin/reviews/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ approved: 1 }),
+          });
+          await Promise.all([loadReviews(), loadStats()]);
+        } catch (e) {
+          // Fallback to legacy PUT endpoint
+          try {
+            await _admin.api(`/admin/reviews/${id}/approve`, { method: 'PUT' });
+            await Promise.all([loadReviews(), loadStats()]);
+          } catch (e2) {
+            if (card) card.style.opacity = '1';
+            alert('Ошибка: ' + (e2.message || 'Попробуйте ещё раз'));
+          }
+        }
+      }
+
+      async function rejectReview(id) {
+        const card = document.getElementById(`review-${id}`);
+        if (card) card.style.opacity = '0.5';
+        try {
+          await _admin.api(`/admin/reviews/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ approved: 0 }),
+          });
+          await Promise.all([loadReviews(), loadStats()]);
+        } catch (e) {
+          if (card) card.style.opacity = '1';
+          alert('Ошибка: ' + (e.message || 'Попробуйте ещё раз'));
+        }
+      }
+
+      async function deleteReview(id, name) {
+        if (!confirm(`Удалить отзыв от "${name}"? Это действие нельзя отменить.`)) return;
+        try {
+          await _admin.api(`/admin/reviews/${id}`, { method: 'DELETE' });
+          const card = document.getElementById(`review-${id}`);
+          if (card) {
+            card.style.opacity = '0';
+            card.style.transform = 'translateX(-10px)';
+            card.style.transition = 'all 0.3s';
+            setTimeout(() => card.remove(), 300);
+          }
+          selectedIds.delete(id);
+          updateBulkToolbar();
+          loadStats();
+        } catch (e) {
+          alert('Ошибка удаления: ' + (e.message || 'Попробуйте ещё раз'));
+        }
+      }
+
+      // ── Reply ─────────────────────────────────────────────────────────────────
+
+      function showReplyInput(id, currentReply) {
+        const el = document.getElementById(`reply-area-${id}`);
+        if (!el) return;
+        el.innerHTML = `
         <textarea id="reply-input-${id}" class="reply-textarea" placeholder="Ответ для клиентов (виден публично)..." rows="3" maxlength="1000">${_admin.escapeHtml(currentReply || '')}</textarea>
         <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
           <button class="btn btn-sm btn-primary" onclick="submitReply(${id})">💾 Сохранить</button>
           <button class="btn btn-sm btn-ghost" onclick="loadReviews()">✕ Отмена</button>
           <span style="font-size:0.72rem;color:var(--text-dim)">макс. 1000 символов</span>
         </div>`;
-      document.getElementById(`reply-input-${id}`)?.focus();
-    }
-
-    async function submitReply(id) {
-      const input = document.getElementById(`reply-input-${id}`);
-      if (!input) return;
-      const reply = input.value.trim();
-      const btn = input.nextElementSibling?.querySelector('.btn-primary');
-      if (btn) { btn.disabled = true; btn.textContent = 'Сохранение...'; }
-      try {
-        await _admin.api(`/admin/reviews/${id}/reply`, {
-          method: 'PATCH',
-          body: JSON.stringify({ reply })
-        });
-        await loadReviews();
-        showToast('💬 Ответ сохранён');
-      } catch(e) {
-        if (btn) { btn.disabled = false; btn.textContent = '💾 Сохранить'; }
-        alert('Ошибка сохранения: ' + e.message);
+        document.getElementById(`reply-input-${id}`)?.focus();
       }
-    }
 
-    // ── Pagination ────────────────────────────────────────────────────────────
-
-    function renderPagination(page, pages) {
-      const nav = document.getElementById('pagination');
-      if (!pages || pages <= 1) { nav.innerHTML = ''; return; }
-      let html = '';
-      if (page > 1) html += `<button class="btn btn-sm btn-ghost" onclick="goPage(${page-1})">← Пред.</button>`;
-      html += `<span class="pagination-info">Стр. ${page} из ${pages}</span>`;
-      if (page < pages) html += `<button class="btn btn-sm btn-ghost" onclick="goPage(${page+1})">След. →</button>`;
-      nav.innerHTML = html;
-    }
-
-    function goPage(p) {
-      currentPage = p;
-      loadReviews();
-      window.scrollTo({top:0, behavior:'smooth'});
-    }
-
-    // ── Toast ─────────────────────────────────────────────────────────────────
-
-    function showToast(msg) {
-      let toast = document.getElementById('adminToast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'adminToast';
-        toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg1);border:1px solid var(--gold);color:var(--text);padding:10px 18px;border-radius:6px;font-size:0.85rem;z-index:9999;transition:opacity 0.3s';
-        document.body.appendChild(toast);
-      }
-      toast.textContent = msg;
-      toast.style.opacity = '1';
-      clearTimeout(toast._t);
-      toast._t = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
-    }
-
-    // ── Init ──────────────────────────────────────────────────────────────────
-
-    document.addEventListener('DOMContentLoaded', async () => {
-      await _admin.init();
-      document.getElementById('burgerBtn').addEventListener('click', () => {
-        document.getElementById('sidebar').classList.toggle('open');
-      });
-      await Promise.all([loadStats(), loadReviews()]);
-      // Auto-refresh every 30s when on pending tab
-      setInterval(() => {
-        if (currentFilter === '0') {
-          loadReviews();
-          loadStats();
+      async function submitReply(id) {
+        const input = document.getElementById(`reply-input-${id}`);
+        if (!input) return;
+        const reply = input.value.trim();
+        const btn = input.nextElementSibling?.querySelector('.btn-primary');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Сохранение...';
         }
-      }, 30000);
-    });
-  </script>
-</body>
+        try {
+          await _admin.api(`/admin/reviews/${id}/reply`, {
+            method: 'PATCH',
+            body: JSON.stringify({ reply }),
+          });
+          await loadReviews();
+          showToast('💬 Ответ сохранён');
+        } catch (e) {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = '💾 Сохранить';
+          }
+          alert('Ошибка сохранения: ' + e.message);
+        }
+      }
+
+      // ── Pagination ────────────────────────────────────────────────────────────
+
+      function renderPagination(page, pages) {
+        const nav = document.getElementById('pagination');
+        if (!pages || pages <= 1) {
+          nav.innerHTML = '';
+          return;
+        }
+        let html = '';
+        if (page > 1) html += `<button class="btn btn-sm btn-ghost" onclick="goPage(${page - 1})">← Пред.</button>`;
+        html += `<span class="pagination-info">Стр. ${page} из ${pages}</span>`;
+        if (page < pages) html += `<button class="btn btn-sm btn-ghost" onclick="goPage(${page + 1})">След. →</button>`;
+        nav.innerHTML = html;
+      }
+
+      function goPage(p) {
+        currentPage = p;
+        loadReviews();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      // ── Toast ─────────────────────────────────────────────────────────────────
+
+      function showToast(msg) {
+        let toast = document.getElementById('adminToast');
+        if (!toast) {
+          toast = document.createElement('div');
+          toast.id = 'adminToast';
+          toast.style.cssText =
+            'position:fixed;bottom:24px;right:24px;background:var(--bg1);border:1px solid var(--gold);color:var(--text);padding:10px 18px;border-radius:6px;font-size:0.85rem;z-index:9999;transition:opacity 0.3s';
+          document.body.appendChild(toast);
+        }
+        toast.textContent = msg;
+        toast.style.opacity = '1';
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => {
+          toast.style.opacity = '0';
+        }, 3000);
+      }
+
+      // ── Init ──────────────────────────────────────────────────────────────────
+
+      document.addEventListener('DOMContentLoaded', async () => {
+        await _admin.init();
+        document.getElementById('burgerBtn').addEventListener('click', () => {
+          document.getElementById('sidebar').classList.toggle('open');
+        });
+        await Promise.all([loadStats(), loadReviews()]);
+        // Auto-refresh every 30s when on pending tab
+        setInterval(() => {
+          if (currentFilter === '0') {
+            loadReviews();
+            loadStats();
+          }
+        }, 30000);
+      });
+    </script>
+  </body>
 </html>
