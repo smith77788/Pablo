@@ -42,6 +42,7 @@
         if (!res.ok) { err.textContent = data.error || 'Ошибка входа'; btn.disabled = false; btn.textContent = 'Войти'; return; }
         localStorage.setItem('admin_token', data.token);
         localStorage.setItem('admin_user', JSON.stringify(data.admin));
+        if (data.refresh_token) localStorage.setItem('admin_refresh_token', data.refresh_token);
         window.location.href = '/admin/';
       } catch { err.textContent = 'Ошибка соединения'; btn.disabled = false; btn.textContent = 'Войти'; }
     });

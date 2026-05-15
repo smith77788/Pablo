@@ -1,34 +1,66 @@
 /* ─── Admin panel shared utilities ─────────────────── */
 const API = '/api';
 
-const token = localStorage.getItem('admin_token');
-if (!token && !window.location.pathname.includes('login')) {
+let _adminToken = localStorage.getItem('admin_token');
+if (!_adminToken && !window.location.pathname.includes('login')) {
   window.location.href = '/admin/login.html';
 }
 
 const adminUser = JSON.parse(localStorage.getItem('admin_user') || '{}');
 
-async function apiFetch(path, opts = {}) {
+// ─── Token refresh ────────────────────────────────────
+let _refreshing = null;
+async function _tryRefresh() {
+  if (_refreshing) return _refreshing;
+  const rt = localStorage.getItem('admin_refresh_token');
+  if (!rt) { localStorage.clear(); window.location.href = '/admin/login.html'; return null; }
+  _refreshing = fetch(API + '/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: rt })
+  }).then(async r => {
+    if (!r.ok) { localStorage.clear(); window.location.href = '/admin/login.html'; return null; }
+    const d = await r.json();
+    _adminToken = d.token;
+    localStorage.setItem('admin_token', d.token);
+    if (d.refresh_token) localStorage.setItem('admin_refresh_token', d.refresh_token);
+    return d.token;
+  }).catch(() => { localStorage.clear(); window.location.href = '/admin/login.html'; return null; })
+    .finally(() => { _refreshing = null; });
+  return _refreshing;
+}
+
+async function apiFetch(path, opts = {}, _retry = true) {
   const res = await fetch(API + path, {
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${_adminToken}`,
       ...opts.headers
     },
     ...opts
   });
+  if (res.status === 401 && _retry) {
+    const newToken = await _tryRefresh();
+    if (newToken) return apiFetch(path, opts, false);
+    return;
+  }
   if (res.status === 401) { localStorage.clear(); window.location.href = '/admin/login.html'; return; }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
-async function apiFetchForm(path, formData, method = 'POST') {
+async function apiFetchForm(path, formData, method = 'POST', _retry = true) {
   const res = await fetch(API + path, {
     method,
-    headers: { 'Authorization': `Bearer ${token}` },
+    headers: { 'Authorization': `Bearer ${_adminToken}` },
     body: formData
   });
+  if (res.status === 401 && _retry) {
+    const newToken = await _tryRefresh();
+    if (newToken) return apiFetchForm(path, formData, method, false);
+    return;
+  }
   if (res.status === 401) { localStorage.clear(); window.location.href = '/admin/login.html'; return; }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -84,7 +116,18 @@ function adminConfirm(title, msg, onOk) {
   newBtn.addEventListener('click', () => { overlay.classList.remove('open'); onOk(); });
 }
 
-function logout() { localStorage.clear(); window.location.href = '/admin/login.html'; }
+function logout() {
+  const rt = localStorage.getItem('admin_refresh_token');
+  if (rt) {
+    fetch(API + '/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: rt })
+    }).catch(() => {});
+  }
+  localStorage.clear();
+  window.location.href = '/admin/login.html';
+}
 
 // ─── HTML escape helper (XSS protection) ──────────────
 function escapeHtml(s) {
@@ -196,9 +239,9 @@ setInterval(pollNewOrders, 20000);
 // ─── Export helper ────────────────────────────────────
 function downloadCSV(url) {
   const a = document.createElement('a');
-  a.href = API + url + `&_auth=${encodeURIComponent(token)}`;
+  a.href = API + url + `&_auth=${encodeURIComponent(_adminToken)}`;
   // Use fetch with auth header and create blob URL
-  fetch(API + url, { headers: { Authorization: `Bearer ${token}` } })
+  fetch(API + url, { headers: { Authorization: `Bearer ${_adminToken}` } })
     .then(r => r.blob())
     .then(blob => {
       const link = document.createElement('a');
