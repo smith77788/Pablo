@@ -734,15 +734,46 @@
       }
     }
     if (n === 2) {
-      // Restore multi-model highlight
-      document.querySelectorAll('.model-select-card').forEach(c => {
-        const cid = parseInt(c.id.replace('mc_', ''), 10);
-        const isSel = state.selected_models.some(m => m.id === cid);
-        c.classList.toggle('selected', isSel);
-        c.setAttribute('aria-pressed', isSel ? 'true' : 'false');
-      });
-      document.getElementById('noModelOption')?.classList.toggle('selected', state.selected_models.length === 0);
-      renderModelChips();
+      // Load recommended models based on selected event type, then restore selection
+      const loadAndRestore = (models) => {
+        const grid = document.getElementById('modelSelectGrid');
+        if (grid) {
+          const subset = models.slice(0, 8);
+          grid.innerHTML = subset.map(m => `
+            <div class="model-select-card" id="mc_${m.id}" role="button" tabindex="0"
+                 aria-label="${escHtml(m.name)}"
+                 onclick="_booking.toggleModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')"
+                 onkeydown="if(event.key==='Enter'||event.key===' ')_booking.toggleModel(${m.id}, '${escHtml(m.name)}', '${m.photo_main || ''}')">
+              <div class="model-select-thumb">
+                ${m.photo_main
+                  ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" loading="lazy" />`
+                  : `<div class="model-select-thumb-placeholder">${escHtml(m.name[0])}</div>`
+                }
+              </div>
+              <div class="model-select-info">
+                <strong>${escHtml(m.name)}</strong>
+                <span>${m.height ? m.height + 'см' : ''}${m.hair_color ? ' · ' + escHtml(m.hair_color) : ''}</span>
+              </div>
+              <div class="model-select-check" aria-hidden="true">✓</div>
+            </div>`).join('');
+        }
+        document.querySelectorAll('.model-select-card').forEach(c => {
+          const cid = parseInt(c.id.replace('mc_', ''), 10);
+          const isSel = state.selected_models.some(m => m.id === cid);
+          c.classList.toggle('selected', isSel);
+          c.setAttribute('aria-pressed', isSel ? 'true' : 'false');
+        });
+        document.getElementById('noModelOption')?.classList.toggle('selected', state.selected_models.length === 0);
+        renderModelChips();
+      };
+
+      if (state.event_type) {
+        apiFetch(`/recommend?event_type=${encodeURIComponent(state.event_type)}&limit=8`)
+          .then(d => loadAndRestore(d.models || d))
+          .catch(() => apiFetch('/models?available=1').then(m => loadAndRestore(m)).catch(() => {}));
+      } else {
+        apiFetch('/models?available=1').then(loadAndRestore).catch(() => {});
+      }
     }
     if (n === 3) {
       const dateEl = document.getElementById('event_date');
