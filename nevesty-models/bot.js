@@ -6898,6 +6898,114 @@ function factoryDbAll(sql, params = []) {
   });
 }
 
+// ─── Factory Content: view & send AI-generated posts to Telegram channel ────────
+
+async function getFactoryTelegramPosts(limit) {
+  const fs = require('fs');
+  if (!fs.existsSync(FACTORY_DB_PATH)) return null;
+  return factoryDbAll(
+    'SELECT id, action_type, channel, action as content, status, created_at FROM growth_actions WHERE channel = \'telegram\' AND action IS NOT NULL ORDER BY created_at DESC LIMIT ?',
+    [limit || 5]
+  );
+}
+
+function formatFactoryPostForChannel(content) {
+  const phone = process.env.CONTACT_PHONE || '+7 (800) 123-45-67';
+  const domain = (process.env.SITE_URL || 'nevesty-models.ru').replace(/^https?:\/\//, '');
+  return '💎 Nevesty Models\n\n' + content + '\n\n📞 ' + phone + '\n🌐 ' + domain + '\n#невесты #модели #агентство';
+}
+
+async function showFactoryContent(chatId) {
+  if (!isAdmin(chatId)) return;
+  const posts = await getFactoryTelegramPosts(5);
+  if (posts === null) {
+    return safeSend(chatId, '🏭 Factory не запущен.\n\nЗапустите: pm2 start nevesty-factory', {
+      reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
+    });
+  }
+  if (!posts.length) {
+    return safeSend(chatId, '📢 Нет Telegram-постов от Factory.\n\nЗапустите цикл — Factory сгенерирует контент.', {
+      reply_markup: { inline_keyboard: [
+        [{ text: '🔄 Запустить цикл', callback_data: 'adm_factory_run' }],
+        [{ text: '← Factory', callback_data: 'adm_factory' }],
+      ]}
+    });
+  }
+  const tgChannel = await getSetting('tg_channel').catch(() => null);
+  const channelLabel = tgChannel || '(канал не задан)';
+  for (const p of posts) {
+    const preview = (p.content || '').slice(0, 300);
+    const dt = p.created_at ? new Date(p.created_at).toLocaleString('ru-RU', {
+      timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+    }) : '';
+    const label = '📝 [' + (p.action_type || 'post') + '] ' + dt + '\n\n' + preview + (preview.length < (p.content || '').length ? '…' : '');
+    await safeSend(chatId, label, {
+      reply_markup: { inline_keyboard: [[
+        { text: '📢 Отправить в канал', callback_data: 'adm_fc_pub_' + p.id },
+        { text: '👁 Превью',           callback_data: 'adm_fc_preview_' + p.id },
+      ]]}
+    });
+  }
+  return safeSend(chatId, '📣 Канал: ' + channelLabel + '\n\nНастройте в: Настройки → Бот → Telegram канал', {
+    reply_markup: { inline_keyboard: [
+      [{ text: '⚙️ Задать канал', callback_data: 'adm_set_tg_channel' }],
+      [{ text: '← Factory', callback_data: 'adm_factory' }],
+    ]}
+  });
+}
+
+async function previewFactoryPost(chatId, postId) {
+  if (!isAdmin(chatId)) return;
+  const post = await factoryDbGet('SELECT action as content FROM growth_actions WHERE id=?', [postId]);
+  if (!post || !post.content) {
+    return safeSend(chatId, '❌ Пост не найден.', {
+      reply_markup: { inline_keyboard: [[{ text: '← Контент', callback_data: 'adm_factory_content' }]] }
+    });
+  }
+  const formatted = formatFactoryPostForChannel(post.content);
+  return safeSend(chatId, '👁 Предпросмотр поста:\n\n' + formatted, {
+    reply_markup: { inline_keyboard: [
+      [{ text: '📢 Отправить в канал', callback_data: 'adm_fc_pub_' + postId }],
+      [{ text: '← Контент', callback_data: 'adm_factory_content' }],
+    ]}
+  });
+}
+
+async function publishFactoryPost(chatId, postId) {
+  if (!isAdmin(chatId)) return;
+  const post = await factoryDbGet('SELECT action as content FROM growth_actions WHERE id=?', [postId]);
+  if (!post || !post.content) {
+    return safeSend(chatId, '❌ Пост не найден.', {
+      reply_markup: { inline_keyboard: [[{ text: '← Контент', callback_data: 'adm_factory_content' }]] }
+    });
+  }
+  let channelId = await getSetting('tg_channel').catch(() => null);
+  const formatted = formatFactoryPostForChannel(post.content);
+  if (!channelId) {
+    await safeSend(chatId, '⚠️ Telegram-канал не задан. Отправляю превью вам как тест:\n\n' + formatted);
+    return safeSend(chatId, 'Чтобы отправлять в канал, задайте его в настройках:', {
+      reply_markup: { inline_keyboard: [
+        [{ text: '⚙️ Задать канал', callback_data: 'adm_set_tg_channel' }],
+        [{ text: '← Контент', callback_data: 'adm_factory_content' }],
+      ]}
+    });
+  }
+  if (!channelId.startsWith('@') && !channelId.startsWith('-')) {
+    channelId = '@' + channelId;
+  }
+  try {
+    await bot.sendMessage(channelId, formatted);
+    return safeSend(chatId, '✅ Пост отправлен в канал ' + channelId + '!', {
+      reply_markup: { inline_keyboard: [[{ text: '← Контент', callback_data: 'adm_factory_content' }]] }
+    });
+  } catch (e) {
+    console.error('[Bot] publishFactoryPost:', e.message);
+    return safeSend(chatId, '❌ Ошибка отправки: ' + e.message + '\n\nПроверьте, что бот является администратором канала ' + channelId + '.', {
+      reply_markup: { inline_keyboard: [[{ text: '← Контент', callback_data: 'adm_factory_content' }]] }
+    });
+  }
+}
+
 async function showFactoryPanel(chatId) {
   if (!isAdmin(chatId)) return;
   try {
@@ -8195,64 +8303,6 @@ async function showAdminDashboard(chatId) {
       ]}
     });
   } catch (e) { console.error('[Bot] showAdminDashboard:', e.message); }
-}
-
-// ─── Factory Content: AI-generated posts for channel ─────────────────────────
-
-async function showFactoryContent(chatId) {
-  if (!isAdmin(chatId)) return;
-  try {
-    const posts = await query(
-      "SELECT id, title, body, status, created_at FROM factory_posts ORDER BY created_at DESC LIMIT 10"
-    ).catch(() => []);
-    if (!posts.length) {
-      return safeSend(chatId, '📢 *Контент для канала*\n\nНет сгенерированных постов\\.', {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] }
-      });
-    }
-    const lines = posts.map((p, i) =>
-      `${i + 1}\\. ${esc(p.title || 'Без заголовка')} — ${esc(p.status || 'draft')}`
-    ).join('\n');
-    const keyboard = posts.map(p => ([
-      { text: `👁 ${(p.title || 'Пост').slice(0, 20)}`, callback_data: `adm_fc_preview_${p.id}` },
-      { text: '📢 Опубл.', callback_data: `adm_fc_pub_${p.id}` },
-    ]));
-    keyboard.push([{ text: '← Factory', callback_data: 'adm_factory' }]);
-    return safeSend(chatId, `📢 *Контент для канала*\n\n${lines}`, {
-      parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  } catch (e) { console.error('[Bot] showFactoryContent:', e.message); }
-}
-
-async function previewFactoryPost(chatId, postId) {
-  if (!isAdmin(chatId)) return;
-  try {
-    const post = await get('SELECT * FROM factory_posts WHERE id=?', [postId]).catch(() => null);
-    if (!post) return safeSend(chatId, '❌ Пост не найден');
-    const text = `📝 *Предпросмотр поста*\n\n*${esc(post.title || '')}*\n\n${esc(post.body || '')}`;
-    return safeSend(chatId, text.slice(0, 4000), {
-      parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [
-        [{ text: '📢 Опубликовать', callback_data: `adm_fc_pub_${postId}` }],
-        [{ text: '← Назад', callback_data: 'adm_factory_content' }],
-      ]}
-    });
-  } catch (e) { console.error('[Bot] previewFactoryPost:', e.message); }
-}
-
-async function publishFactoryPost(chatId, postId) {
-  if (!isAdmin(chatId)) return;
-  try {
-    const post = await get('SELECT * FROM factory_posts WHERE id=?', [postId]).catch(() => null);
-    if (!post) return safeSend(chatId, '❌ Пост не найден');
-    await run("UPDATE factory_posts SET status='published', published_at=CURRENT_TIMESTAMP WHERE id=?", [postId]).catch(() => {});
-    return safeSend(chatId, `✅ Пост опубликован\\.`, {
-      parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '← Контент', callback_data: 'adm_factory_content' }]] }
-    });
-  } catch (e) { console.error('[Bot] publishFactoryPost:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

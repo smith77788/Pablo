@@ -1393,6 +1393,14 @@ router.get('/admin/orders', auth, async (req, res, next) => {
     if (period === 'today')  { where += " AND date(o.created_at) = date('now')"; }
     else if (period === 'week')  { where += " AND o.created_at >= date('now', '-7 days')"; }
     else if (period === 'month') { where += " AND o.created_at >= date('now', '-30 days')"; }
+    // Quick filter: unassigned (no manager)
+    if (req.query.unassigned === '1') { where += ' AND o.manager_id IS NULL'; }
+    // Quick filter: paid orders
+    if (req.query.paid === '1') { where += ' AND o.paid_at IS NOT NULL'; }
+    // Quick filter: high budget — sort by budget DESC (CAST to handle text budgets)
+    const orderBy = req.query.sort_budget === 'desc'
+      ? 'CAST(o.budget AS REAL) DESC'
+      : 'o.created_at DESC';
     const [totalRow, orders] = await Promise.all([
       get(`SELECT COUNT(*) as n FROM orders o WHERE ${where}`, params),
       query(`SELECT o.*, m.name as model_name, a.username as manager_name
@@ -1400,7 +1408,7 @@ router.get('/admin/orders', auth, async (req, res, next) => {
              LEFT JOIN models m ON o.model_id = m.id
              LEFT JOIN admins a ON o.manager_id = a.id
              WHERE ${where}
-             ORDER BY o.created_at DESC
+             ORDER BY ${orderBy}
              LIMIT ? OFFSET ?`, [...params, limit, offset])
     ]);
     res.json({

@@ -167,8 +167,20 @@
   <div class="main-content">
     <header class="topbar">
       <div class="topbar-title">Настройки</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <button class="btn btn-sm btn-ghost" onclick="exportSettings()" title="Скачать все настройки в JSON">📥 Экспорт</button>
+        <label class="btn btn-sm btn-ghost" style="cursor:pointer;margin:0" title="Импортировать настройки из JSON">
+          📤 Импорт
+          <input type="file" id="importFileInput" accept=".json,application/json" style="display:none" onchange="importSettings(this)" />
+        </label>
+      </div>
     </header>
     <div class="page-content">
+
+      <!-- Settings search -->
+      <div style="margin-bottom:16px">
+        <input class="admin-input" type="search" id="settingsSearch" placeholder="🔍 Поиск настроек..." oninput="filterSettings(this.value)" style="max-width:360px" />
+      </div>
 
       <!-- Tab navigation -->
       <div class="settings-tabs" role="tablist">
@@ -435,6 +447,7 @@
                 <div class="toggle-row-title">Быстрая заявка</div>
                 <div class="toggle-row-desc">Кнопка быстрой заявки (имя + телефон) отображается на сайте и в боте</div>
               </div>
+              <span class="restore-link" style="margin-left:8px" onclick="resetSetting('quick_booking_enabled')" title="Сбросить к умолчанию">🔄</span>
               <label class="toggle-switch">
                 <input type="checkbox" id="quick_booking_enabled" />
                 <span class="toggle-slider"></span>
@@ -508,7 +521,10 @@
             </div>
 
             <div class="admin-form-group" style="margin-top:16px">
-              <label>Количество моделей на странице</label>
+              <div class="form-label-row">
+                <label>Количество моделей на странице</label>
+                <span class="restore-link" onclick="resetSetting('catalog_per_page','catalog_per_page')">🔄 По умолчанию</span>
+              </div>
               <input class="admin-input" type="number" id="catalog_per_page" placeholder="12" min="1" max="100" />
             </div>
 
@@ -522,7 +538,10 @@
             </div>
 
             <div class="admin-form-group" style="margin-top:16px">
-              <label>Сортировка каталога</label>
+              <div class="form-label-row">
+                <label>Сортировка каталога</label>
+                <span class="restore-link" onclick="resetSetting('catalog_sort','catalog_sort')">🔄 По умолчанию</span>
+              </div>
               <select class="admin-input" id="catalog_sort">
                 <option value="featured">По топу (featured першими)</option>
                 <option value="name">По алфавіту</option>
@@ -578,6 +597,7 @@
                 <div class="toggle-row-title">Wishlist (Избранное)</div>
                 <div class="toggle-row-desc">Клиенты могут добавлять моделей в список избранного</div>
               </div>
+              <span class="restore-link" style="margin-left:8px" onclick="resetSetting('wishlist_enabled')" title="Сбросить к умолчанию">🔄</span>
               <label class="toggle-switch">
                 <input type="checkbox" id="wishlist_enabled" />
                 <span class="toggle-slider"></span>
@@ -600,6 +620,7 @@
                 <div class="toggle-row-title">Отзывы</div>
                 <div class="toggle-row-desc">Клиенты могут оставлять отзывы о работе с агентством</div>
               </div>
+              <span class="restore-link" style="margin-left:8px" onclick="resetSetting('reviews_enabled')" title="Сбросить к умолчанию">🔄</span>
               <label class="toggle-switch">
                 <input type="checkbox" id="reviews_enabled" />
                 <span class="toggle-slider"></span>
@@ -1302,6 +1323,98 @@ function restoreDefault(field) {
   el.value = DEFAULTS[field];
   if (field === 'greeting')  updateCharCount(el, 'cnt_greeting', 500);
   if (field === 'about_text') updateCharCount(el, 'cnt_about', 1000);
+}
+
+/* ─── Reset setting to server default via API ─────────────── */
+async function resetSetting(key, elId, charCounterId, charMax) {
+  if (!confirm('Сбросить "' + key + '" к значению по умолчанию?')) return;
+  try {
+    const resp = await fetch('/api/admin/settings/reset', {
+      method: 'POST',
+      headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { _admin.toast(data.error || 'Ошибка сброса', 'error'); return; }
+    const el = elId ? document.getElementById(elId) : null;
+    if (el) {
+      el.value = data.value;
+      if (charCounterId && charMax) updateCharCount(el, charCounterId, charMax);
+    }
+    _admin.toast('Настройка сброшена', 'success');
+  } catch(e) { _admin.toast('Ошибка: ' + e.message, 'error'); }
+}
+
+/* ─── Export settings to JSON ─────────────────────────────── */
+async function exportSettings() {
+  try {
+    const resp = await fetch('/api/admin/settings/export', { headers: h });
+    if (!resp.ok) { _admin.toast('Ошибка экспорта', 'error'); return; }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'settings.json';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    _admin.toast('Настройки экспортированы', 'success');
+  } catch(e) { _admin.toast('Ошибка экспорта: ' + e.message, 'error'); }
+}
+
+/* ─── Import settings from JSON file ─────────────────────── */
+async function importSettings(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const reader = new FileReader();
+  reader.onload = async function(ev) {
+    let parsed;
+    try { parsed = JSON.parse(ev.target.result); }
+    catch(e) { _admin.toast('Невалидный JSON: ' + e.message, 'error'); return; }
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      _admin.toast('Ожидается JSON-объект', 'error'); return;
+    }
+    try {
+      const resp = await fetch('/api/admin/settings/import', {
+        method: 'POST',
+        headers: { ...h, 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed),
+      });
+      const data = await resp.json();
+      if (!resp.ok) { _admin.toast(data.error || 'Ошибка импорта', 'error'); return; }
+      _admin.toast('Импортировано ' + data.imported + ' настроек', 'success');
+      loadSettings();
+    } catch(e) { _admin.toast('Ошибка импорта: ' + e.message, 'error'); }
+  };
+  reader.readAsText(file);
+}
+
+/* ─── Settings search / filter ────────────────────────────── */
+function filterSettings(q) {
+  const term = q.trim().toLowerCase();
+  document.querySelectorAll('.tab-pane').forEach(function(pane) {
+    pane.querySelectorAll('.section-card').forEach(function(card) {
+      card.style.display = (!term || card.textContent.toLowerCase().includes(term)) ? '' : 'none';
+    });
+    if (!term) {
+      pane.querySelectorAll('.admin-form-group label').forEach(function(lbl) { lbl.style.color = ''; });
+    } else {
+      pane.querySelectorAll('.admin-form-group').forEach(function(group) {
+        const visible = group.textContent.toLowerCase().includes(term);
+        group.querySelectorAll('label').forEach(function(lbl) {
+          lbl.style.color = visible ? 'var(--gold)' : '';
+        });
+      });
+    }
+  });
+
+  if (term) {
+    let firstTabWithResults = null;
+    document.querySelectorAll('.tab-pane').forEach(function(pane) {
+      const hasVisible = Array.from(pane.querySelectorAll('.section-card')).some(c => c.style.display !== 'none');
+      if (hasVisible && !firstTabWithResults) firstTabWithResults = pane.id.replace('pane-', '');
+    });
+    if (firstTabWithResults) switchTab(firstTabWithResults);
+  }
 }
 
 /* ─── Greeting preview ────────────────────────────────────── */
