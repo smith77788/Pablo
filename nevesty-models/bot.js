@@ -7820,7 +7820,7 @@ async function showSearchMenu(chatId) {
         ...(hasFilters ? [{ text: '✖️ Сбросить фильтры', callback_data: 'search_reset' }] : []),
         { text: findLabel, callback_data: 'search_go' },
       ],
-      [{ text: '← Назад', callback_data: 'cat_catalog' }],
+      [{ text: '← Назад', callback_data: 'cat_cat__0' }],
     ];
 
     return safeSend(chatId,
