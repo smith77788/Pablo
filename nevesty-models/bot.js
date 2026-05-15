@@ -106,6 +106,8 @@ function isActiveInputState(state) {
       'adm_search_model_input',
       'adm_note_order_id',
       'adm_add_admin_id',
+      'adm_add_manager_username',
+      'adm_add_manager_tgid',
       'replying',
       'direct_reply',
       'msg_to_manager',
@@ -4402,6 +4404,7 @@ async function showManagersList(chatId) {
     kb.push([{ text: `📊 Статистика: ${a.username}`, callback_data: `adm_mgr_stat_${a.id}` }]);
   }
 
+  kb.push([{ text: '➕ Добавить менеджера', callback_data: 'adm_mgr_add' }]);
   kb.push([{ text: '← Назад', callback_data: 'admin_menu' }]);
 
   return safeSend(chatId, text.trim(), { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: kb } });
@@ -4441,8 +4444,62 @@ async function showManagerStats(chatId, managerId) {
     text += `• Средний чек: ${esc(String(Math.round(stats.avg_check)))} руб\\.\n`;
   }
 
-  const kb = [[{ text: '← К списку', callback_data: 'adm_managers' }]];
+  const kb = [];
+  // Allow removing managers that are not superadmins and have no active orders
+  if (manager.role !== 'superadmin') {
+    kb.push([{ text: '🗑 Удалить менеджера', callback_data: `adm_mgr_del_${managerId}` }]);
+  }
+  kb.push([{ text: '← К списку', callback_data: 'adm_managers' }]);
   return safeSend(chatId, text, { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: kb } });
+}
+
+async function addManagerFlow(chatId) {
+  if (!isAdmin(chatId)) return;
+  await setSession(chatId, 'adm_add_manager_username', {});
+  return safeSend(chatId, '👤 *Добавить менеджера*\n\nВведите *username* нового менеджера \\(без @\\):', {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_managers' }]] },
+  });
+}
+
+async function deleteManager(chatId, managerId) {
+  if (!isAdmin(chatId)) return;
+  const manager = await get('SELECT id, username, role FROM admins WHERE id=?', [managerId]);
+  if (!manager) return safeSend(chatId, '❌ Менеджер не найден\\.', { parse_mode: 'MarkdownV2' });
+  if (manager.role === 'superadmin')
+    return safeSend(chatId, '❌ Нельзя удалить суперадмина\\.', { parse_mode: 'MarkdownV2' });
+
+  // Show confirmation before deleting
+  return safeSend(
+    chatId,
+    `⚠️ *Удалить менеджера «${esc(manager.username)}»?*\n\nЭто действие нельзя отменить\\. Заявки менеджера останутся в системе\\.`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ Да, удалить', callback_data: `adm_mgr_del_confirm_${managerId}` },
+            { text: '❌ Отмена', callback_data: `adm_mgr_stat_${managerId}` },
+          ],
+        ],
+      },
+    }
+  );
+}
+
+async function confirmDeleteManager(chatId, managerId) {
+  if (!isAdmin(chatId)) return;
+  const manager = await get('SELECT id, username, role FROM admins WHERE id=?', [managerId]);
+  if (!manager) return safeSend(chatId, '❌ Менеджер не найден\\.', { parse_mode: 'MarkdownV2' });
+  if (manager.role === 'superadmin')
+    return safeSend(chatId, '❌ Нельзя удалить суперадмина\\.', { parse_mode: 'MarkdownV2' });
+
+  await run('DELETE FROM admins WHERE id=?', [managerId]);
+  await logAdminAction(chatId, 'delete_manager', null, null, { username: manager.username });
+  return safeSend(chatId, `✅ Менеджер *${esc(manager.username)}* удалён из системы\\.`, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [[{ text: '← К списку', callback_data: 'adm_managers' }]] },
+  });
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
@@ -7466,10 +7523,24 @@ function initBot(app) {
       if (!isAdmin(chatId)) return;
       return showManagersList(chatId);
     }
+    if (data === 'adm_mgr_add') {
+      if (!isAdmin(chatId)) return;
+      return addManagerFlow(chatId);
+    }
     if (data.startsWith('adm_mgr_stat_')) {
       if (!isAdmin(chatId)) return;
       const managerId = parseInt(data.replace('adm_mgr_stat_', ''));
       if (!isNaN(managerId)) return showManagerStats(chatId, managerId);
+    }
+    if (data.startsWith('adm_mgr_del_confirm_')) {
+      if (!isAdmin(chatId)) return;
+      const managerId = parseInt(data.replace('adm_mgr_del_confirm_', ''));
+      if (!isNaN(managerId)) return confirmDeleteManager(chatId, managerId);
+    }
+    if (data.startsWith('adm_mgr_del_')) {
+      if (!isAdmin(chatId)) return;
+      const managerId = parseInt(data.replace('adm_mgr_del_', ''));
+      if (!isNaN(managerId)) return deleteManager(chatId, managerId);
     }
 
     // ── Admin: client management
@@ -9028,6 +9099,61 @@ function initBot(app) {
           `✅ Telegram ID \`${newId}\` добавлен!\n\n⚠️ Для постоянного добавления — также добавьте его в ADMIN_TELEGRAM_IDS в .env файле.`,
           {
             reply_markup: { inline_keyboard: [[{ text: '← Администраторы', callback_data: 'adm_admins' }]] },
+          }
+        );
+      }
+
+      // ── Add manager: step 1 — username
+      if (state === 'adm_add_manager_username') {
+        const username = text.trim().replace(/^@/, '');
+        if (!username || username.length < 3)
+          return safeSend(chatId, '❌ Некорректный username. Введите username без @:', {
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_managers' }]] },
+          });
+        // Check duplicate
+        const existing = await get('SELECT id FROM admins WHERE username=?', [username]);
+        if (existing)
+          return safeSend(chatId, `❌ Менеджер с username *${esc(username)}* уже существует\\.`, {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_managers' }]] },
+          });
+        await setSession(chatId, 'adm_add_manager_tgid', { new_mgr_username: username });
+        return safeSend(
+          chatId,
+          `👤 Username: *${esc(username)}*\n\nВведите *Telegram ID* менеджера \\(числовой\\):\n_Получить ID можно через @userinfobot_`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_managers' }]] },
+          }
+        );
+      }
+
+      // ── Add manager: step 2 — telegram ID
+      if (state === 'adm_add_manager_tgid') {
+        const tgId = text.replace(/[^0-9]/g, '');
+        if (!tgId) return safeSend(chatId, '❌ Некорректный ID. Введите числовой Telegram ID:');
+        const username = d.new_mgr_username || '';
+        if (!username) {
+          await clearSession(chatId);
+          return safeSend(chatId, '❌ Ошибка сессии. Начните сначала.', {
+            reply_markup: { inline_keyboard: [[{ text: '← Менеджеры', callback_data: 'adm_managers' }]] },
+          });
+        }
+        // Generate a placeholder password hash (manager will use web login)
+        const crypto = require('crypto');
+        const pwHash = crypto.randomBytes(32).toString('hex');
+        await run(
+          `INSERT OR IGNORE INTO admins (username, password_hash, telegram_id, role) VALUES (?, ?, ?, 'manager')`,
+          [username, pwHash, tgId]
+        );
+        await logAdminAction(chatId, 'add_manager', null, null, { username, telegram_id: tgId });
+        await clearSession(chatId);
+        return safeSend(
+          chatId,
+          `✅ Менеджер *${esc(username)}* добавлен\\!\n\nTelegram ID: \`${esc(tgId)}\`\nРоль: 👤 Менеджер\n\n_Для входа в веб\\-панель — установите пароль через сброс или напрямую в БД\\._`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '← К списку', callback_data: 'adm_managers' }]] },
           }
         );
       }

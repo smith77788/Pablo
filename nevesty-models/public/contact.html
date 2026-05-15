@@ -649,17 +649,77 @@
                 ></span>
               </div>
               <div class="form-field">
+                <label for="cf-email"
+                  >Email <span style="color: var(--text-dim); font-size: 0.75em">(необязательно)</span></label
+                >
+                <input
+                  type="email"
+                  id="cf-email"
+                  autocomplete="email"
+                  inputmode="email"
+                  placeholder="your@email.com"
+                  aria-describedby="cf-email-err"
+                />
+                <span
+                  id="cf-email-err"
+                  role="alert"
+                  style="display: none; color: #f44336; font-size: 0.78rem; margin-top: 4px"
+                ></span>
+              </div>
+              <div class="form-field">
                 <label for="cf-message">Сообщение *</label>
                 <textarea
                   id="cf-message"
                   required
                   aria-required="true"
                   rows="5"
+                  maxlength="2000"
                   placeholder="Опишите ваш вопрос или запрос..."
-                  aria-describedby="cf-message-err"
+                  aria-describedby="cf-message-err cf-msg-counter"
+                  oninput="document.getElementById('cf-msg-counter').textContent = this.value.length + '/2000'"
                 ></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px">
+                  <span
+                    id="cf-message-err"
+                    role="alert"
+                    style="display: none; color: #f44336; font-size: 0.78rem"
+                  ></span>
+                  <span id="cf-msg-counter" style="font-size: 0.72rem; color: var(--text-dim); margin-left: auto"
+                    >0/2000</span
+                  >
+                </div>
+              </div>
+              <div class="form-field" style="margin-bottom: 16px">
+                <label
+                  style="
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 10px;
+                    cursor: pointer;
+                    font-size: 0.82rem;
+                    text-transform: none;
+                    letter-spacing: 0;
+                    color: var(--text-muted);
+                    line-height: 1.5;
+                  "
+                >
+                  <input
+                    type="checkbox"
+                    id="cf-consent"
+                    required
+                    aria-required="true"
+                    style="width: auto; margin-top: 2px; flex-shrink: 0; accent-color: var(--gold)"
+                  />
+                  <span
+                    >Я согласен(а) с
+                    <a href="/privacy.html" target="_blank" style="color: var(--gold); text-decoration: underline"
+                      >политикой конфиденциальности</a
+                    >
+                    и на обработку персональных данных *</span
+                  >
+                </label>
                 <span
-                  id="cf-message-err"
+                  id="cf-consent-err"
                   role="alert"
                   style="display: none; color: #f44336; font-size: 0.78rem; margin-top: 4px"
                 ></span>
@@ -667,6 +727,7 @@
               <div
                 id="cf-error"
                 role="alert"
+                aria-live="assertive"
                 style="display: none; color: #f44336; font-size: 0.8rem; margin-bottom: 12px"
               ></div>
               <button
@@ -726,14 +787,14 @@
           </div>
           <div class="footer-col">
             <h4>Связаться</h4>
-            <a href="tel:+78005550000">+7 (800) 555-00-00</a>
-            <a href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
-            <a href="https://t.me/nevesty_models" target="_blank">Telegram</a>
-            <a href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
+            <a id="footer-phone-link" href="tel:+78005550000">+7 (800) 555-00-00</a>
+            <a id="footer-email-link" href="mailto:info@nevesty-models.ru">info@nevesty-models.ru</a>
+            <a id="footer-tg-link" href="https://t.me/nevesty_models" target="_blank">Telegram</a>
+            <a id="footer-insta-link" href="https://instagram.com/nevesty_models" target="_blank">Instagram</a>
           </div>
         </div>
         <div class="footer-bottom">
-          <p>© 2024 Nevesty Models. Все права защищены.</p>
+          <p>© 2026 Nevesty Models. Все права защищены.</p>
           <div class="footer-socials" aria-label="Социальные сети">
             <a href="https://instagram.com/nevesty_models" target="_blank" aria-label="Instagram"
               ><span aria-hidden="true">📸</span></a
@@ -840,6 +901,40 @@
             }
           }
 
+          // Footer: update phone, email, instagram links from settings
+          if (d.contacts_phone) {
+            const fp = document.getElementById('footer-phone-link');
+            if (fp) {
+              fp.href = `tel:${d.contacts_phone.replace(/[^+\d]/g, '')}`;
+              fp.textContent = d.contacts_phone;
+            }
+          }
+          if (d.contacts_email) {
+            const fe = document.getElementById('footer-email-link');
+            if (fe) {
+              fe.href = `mailto:${d.contacts_email}`;
+              fe.textContent = d.contacts_email;
+            }
+          }
+          const footerInsta = d.contacts_instagram || d.contacts_insta;
+          if (footerInsta) {
+            const handle = footerInsta.replace(/^@/, '');
+            const fi = document.getElementById('footer-insta-link');
+            if (fi) fi.href = `https://instagram.com/${handle}`;
+            const fis = document.querySelector('.footer-socials a[aria-label="Instagram"]');
+            if (fis) fis.href = `https://instagram.com/${handle}`;
+          }
+          // Footer Telegram link
+          const tgChannel = d.tg_channel || d.telegram_channel_id;
+          const botUsername = cfg.bot_username;
+          if (tgChannel || botUsername) {
+            const tgHandle = (tgChannel || botUsername).replace(/^@/, '');
+            const ftg = document.getElementById('footer-tg-link');
+            if (ftg) ftg.href = `https://t.me/${tgHandle}`;
+            const ftgs = document.querySelector('.footer-socials a[aria-label="Telegram"]');
+            if (ftgs) ftgs.href = `https://t.me/${tgHandle}`;
+          }
+
           // Hours
           if (d.manager_hours) {
             const hoursEl = document.getElementById('manager-hours');
@@ -918,13 +1013,15 @@
         err.style.display = 'none';
 
         // Clear previous per-field errors
-        ['cf-name', 'cf-phone', 'cf-message'].forEach((id, i) => {
+        ['cf-name', 'cf-phone', 'cf-email', 'cf-message', 'cf-consent'].forEach(id => {
           clearFieldError(id, id + '-err');
         });
 
         const name = document.getElementById('cf-name').value.trim();
         const phone = document.getElementById('cf-phone').value.trim();
+        const email = document.getElementById('cf-email').value.trim();
         const message = document.getElementById('cf-message').value.trim();
+        const consent = document.getElementById('cf-consent').checked;
 
         let valid = true;
         if (!name || name.length < 2) {
@@ -935,8 +1032,16 @@
           showFieldError('cf-phone', 'cf-phone-err', 'Введите корректный номер телефона');
           valid = false;
         }
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          showFieldError('cf-email', 'cf-email-err', 'Введите корректный email или оставьте поле пустым');
+          valid = false;
+        }
         if (!message || message.length < 10) {
           showFieldError('cf-message', 'cf-message-err', 'Сообщение должно содержать не менее 10 символов');
+          valid = false;
+        }
+        if (!consent) {
+          showFieldError('cf-consent', 'cf-consent-err', 'Необходимо согласие на обработку персональных данных');
           valid = false;
         }
         if (!valid) return;
@@ -946,10 +1051,12 @@
         btn.style.opacity = '0.7';
 
         try {
+          const body = { name, phone, message };
+          if (email) body.email = email;
           const resp = await fetch('/api/contact', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, phone, message }),
+            body: JSON.stringify(body),
           });
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok) {
