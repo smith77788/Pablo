@@ -3700,12 +3700,21 @@ async function _sendOneBroadcastMsg(cid, photoId, text) {
       }
       return 'ok';
     } catch (err) {
+      // User blocked the bot or deactivated account — count as skipped, don't retry
+      const errCode = err?.response?.statusCode || err?.code;
+      const errMsg = String(err?.message || '');
+      const isBlocked =
+        errCode === 403 ||
+        errMsg.includes('bot was blocked') ||
+        errMsg.includes('user is deactivated') ||
+        errMsg.includes('chat not found') ||
+        errMsg.includes('user not found');
+      if (isBlocked) return 'skip';
+
       // Handle Telegram 429 Too Many Requests — wait retry_after seconds then retry
       const retryAfter =
         err?.response?.parameters?.retry_after ||
-        (err?.message && /retry after (\d+)/i.test(err.message)
-          ? parseInt(err.message.match(/retry after (\d+)/i)[1])
-          : null);
+        (/retry after (\d+)/i.test(errMsg) ? parseInt(errMsg.match(/retry after (\d+)/i)[1]) : null);
       if (retryAfter && attempt < MAX_RETRIES - 1) {
         await new Promise(r => setTimeout(r, (retryAfter + 1) * 1000));
         continue;
@@ -3744,31 +3753,43 @@ async function doSendBroadcast(chatId) {
 
   const startTime = Date.now();
   let sent = 0,
-    failed = 0;
-  for (const cid of recipients) {
-    const result = await _sendOneBroadcastMsg(cid, photoId, text);
+    failed = 0,
+    skipped = 0;
+  const PROGRESS_INTERVAL = 50; // send progress update every N messages
+  for (let i = 0; i < recipients.length; i++) {
+    const result = await _sendOneBroadcastMsg(recipients[i], photoId, text);
     if (result === 'ok') sent++;
+    else if (result === 'skip') skipped++;
     else failed++;
+    // Progress update for large broadcasts
+    if (recipients.length >= 20 && (i + 1) % PROGRESS_INTERVAL === 0 && i + 1 < recipients.length) {
+      const pct = Math.round(((i + 1) / recipients.length) * 100);
+      safeSend(
+        chatId,
+        `⏳ Рассылка: ${i + 1}/${recipients.length} \\(${pct}%\\) — ✅ ${sent} ❌ ${failed} ⏭ ${skipped}`,
+        { parse_mode: 'MarkdownV2' }
+      ).catch(() => {});
+    }
     await new Promise(r => setTimeout(r, 50)); // 50ms delay between sends (rate limit)
   }
   const durationSec = Math.round((Date.now() - startTime) / 1000);
 
   // Update broadcast record with final stats
   if (broadcastId) {
-    run(`UPDATE bot_broadcasts SET delivered=?, failed=?, status='done', finished_at=datetime('now') WHERE id=?`, [
-      sent,
-      failed,
-      broadcastId,
-    ]).catch(e => console.error('[Broadcast] Failed to update broadcast stats:', e.message));
+    run(
+      `UPDATE bot_broadcasts SET delivered=?, failed=?, skipped=?, status='done', finished_at=datetime('now') WHERE id=?`,
+      [sent, failed, skipped, broadcastId]
+    ).catch(e => console.error('[Broadcast] Failed to update broadcast stats:', e.message));
   }
 
-  await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, segment, duration: durationSec });
+  await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, skipped, segment, duration: durationSec });
   await clearSession(chatId);
   const total = recipients.length;
   const segLabel = _bcSegmentLabel(segment);
+  const skippedLine = skipped > 0 ? `\n⏭ Пропущено: *${skipped}*` : '';
   return safeSend(
     chatId,
-    `📊 *Рассылка завершена\\!*\n\n✅ Доставлено: *${sent}*\n❌ Ошибок: *${failed}*\n📬 Всего: *${total}*\n🎯 Аудитория: *${esc(segLabel)}*\n⏱ Время: *${durationSec}с*`,
+    `📊 *Итог рассылки:*\n\n✅ Доставлено: *${sent}*\n❌ Ошибки: *${failed}*${skippedLine}\n📬 Всего: *${total}*\n🎯 Аудитория: *${esc(segLabel)}*\n⏱ Время: *${durationSec}с*`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: {
@@ -3784,7 +3805,7 @@ async function doSendBroadcast(chatId) {
 async function showBroadcastHistory(chatId) {
   if (!isAdmin(chatId)) return;
   const rows = await query(
-    `SELECT id, message, photo_id, segment, delivered, failed, total_recipients, status, started_at, finished_at
+    `SELECT id, message, photo_id, segment, delivered, failed, skipped, total_recipients, status, started_at, finished_at
      FROM bot_broadcasts
      ORDER BY started_at DESC
      LIMIT 5`
@@ -3810,11 +3831,12 @@ async function showBroadcastHistory(chatId) {
       const statusEmoji = b.status === 'done' ? '✅' : b.status === 'sending' ? '🔄' : '⏳';
       const delivered = b.delivered ?? 0;
       const failed = b.failed ?? 0;
-      const total = b.total_recipients ?? delivered + failed;
+      const skippedCount = b.skipped ?? 0;
+      const total = b.total_recipients ?? delivered + failed + skippedCount;
       const preview = String(b.message || '').slice(0, 50);
       const previewText = preview ? esc(preview) + ((b.message || '').length > 50 ? '…' : '') : '_без текста_';
       text += `${statusEmoji} ${msgType} *${esc(dt)}* — ${esc(segLabel)}\n`;
-      text += `✅ ${delivered}  ❌ ${failed}  📬 ${total}\n`;
+      text += `✅ ${delivered}  ❌ ${failed}${skippedCount > 0 ? `  ⏭ ${skippedCount}` : ''}  📬 ${total}\n`;
       text += `${previewText}\n\n`;
     }
   }
@@ -7627,12 +7649,13 @@ function initBot(app) {
         reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_broadcast' }]] },
       });
     }
-    if (data === 'adm_bc_send_now') {
+    if (data === 'adm_bc_send_now' || data === 'adm_bc_no_photo') {
       if (!isAdmin(chatId)) return;
       // Send without photo — go straight to preview
       const sess = await getSession(chatId);
       const sd = sessionData(sess);
       if (!sd.broadcastText && !sd.broadcastRecipients) return showBroadcast(chatId);
+      await setSession(chatId, 'adm_broadcast_preview', sd);
       return previewBroadcast(chatId);
     }
     // ── Broadcast: confirm send

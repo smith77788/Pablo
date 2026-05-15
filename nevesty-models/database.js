@@ -771,6 +771,15 @@ async function initDatabase() {
     ).catch(() => {});
   }
 
+  // v25 — skipped column for bot_broadcasts (users who blocked the bot)
+  const v25 = await get(`SELECT version FROM schema_versions WHERE version=25`).catch(() => null);
+  if (!v25) {
+    await run(`ALTER TABLE bot_broadcasts ADD COLUMN skipped INTEGER DEFAULT 0`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(25, 'bot_broadcasts.skipped column for blocked-user tracking (БЛОК 3.5)')`
+    ).catch(() => {});
+  }
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
