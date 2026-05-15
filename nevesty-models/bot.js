@@ -173,28 +173,26 @@ const REPLY_KB_ADMIN = {
 
 function buildClientKeyboard() {
   const rows = [
-    [{ text: '⭐ Топ-модели',           callback_data: 'cat_top_0'          },
-     { text: '💃 Все модели',           callback_data: 'cat_cat__0'         }],
-    [{ text: '👗 Fashion',              callback_data: 'cat_filter_fashion'  },
-     { text: '📷 Commercial',           callback_data: 'cat_filter_commercial'},
-     { text: '🎉 Events',              callback_data: 'cat_filter_events'   }],
-    [{ text: '🔍 Поиск по параметрам', callback_data: 'cat_search'          },
-     { text: '📏 Поиск по росту',      callback_data: 'search_height_input' }],
+    [{ text: '💃 Каталог',              callback_data: 'cat_cat__0'         },
+     { text: '⭐ Топ-модели',           callback_data: 'cat_top_0'          }],
     [{ text: '📝 Оформить заявку',      callback_data: 'bk_start'           },
      { text: '⚡ Быстрая заявка',       callback_data: 'bk_quick'           }],
-    [{ text: '❤️ Избранное',            callback_data: 'fav_list_0'         },
-     { text: '💬 Написать менеджеру',   callback_data: 'contact_mgr'        }],
     [{ text: '📋 Мои заявки',           callback_data: 'my_orders'          },
-     { text: '🔍 Статус заявки',        callback_data: 'check_status'       }],
-    [{ text: '⭐ Отзывы',              callback_data: 'show_reviews'        },
-     { text: '💰 Прайс-лист',          callback_data: 'pricing'            }],
-    [{ text: 'ℹ️ О нас',               callback_data: 'about_us'           },
-     { text: '📞 Контакты',             callback_data: 'contacts'           },
-     { text: '❓ FAQ',                  callback_data: 'faq'                }],
-    [{ text: '👤 Мой профиль',          callback_data: 'profile'            },
-     { text: '💫 Баллы',               callback_data: 'loyalty'            }],
-    [{ text: '🎁 Реферал',             callback_data: 'referral'           },
+     { text: '👤 Мой профиль',          callback_data: 'profile'            }],
+    [{ text: '❤️ Избранное',            callback_data: 'fav_list_0'         },
      { text: '🧮 Калькулятор',         callback_data: 'calculator'         }],
+    [{ text: '⭐ Отзывы',              callback_data: 'show_reviews'        },
+     { text: '❓ FAQ',                  callback_data: 'faq'                }],
+    [{ text: '🎁 Реферальная программа',callback_data: 'referral'           },
+     { text: '💫 Баллы лояльности',    callback_data: 'loyalty'            }],
+    [{ text: '👗 Fashion',              callback_data: 'cat_filter_fashion'  },
+     { text: '📷 Commercial',           callback_data: 'cat_filter_commercial'}],
+    [{ text: '🔍 Поиск по параметрам', callback_data: 'cat_search'          },
+     { text: '📏 Поиск по росту',      callback_data: 'search_height_input' }],
+    [{ text: '💰 Прайс-лист',          callback_data: 'pricing'            },
+     { text: '💬 Написать менеджеру',   callback_data: 'contact_mgr'        }],
+    [{ text: 'ℹ️ О нас',               callback_data: 'about_us'           },
+     { text: '📞 Контакты',             callback_data: 'contacts'           }],
   ];
   if (SITE_URL.startsWith('https://')) {
     const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
@@ -463,7 +461,8 @@ async function showModel(chatId, modelId) {
     // Caption ≤ 1024 chars (Telegram limit for media)
     const bioEsc  = m.bio ? esc(m.bio) : '';
     const bioFits = bioEsc.slice(0, 180) + (bioEsc.length > 180 ? '…' : '');
-    const captionParts = [`💃 ${star}*${esc(m.name)}*`, '', ...lines, '', avail];
+    const breadcrumb = `🏠 Главная › 💃 Каталог › ${esc(m.name)}`;
+    const captionParts = [breadcrumb, `💃 ${star}*${esc(m.name)}*`, '', ...lines, '', avail];
     if (bioFits) captionParts.push('', `_${bioFits}_`);
     const caption = captionParts.join('\n').slice(0, 1020);
 
@@ -1048,7 +1047,8 @@ async function showAdminOrder(chatId, orderId) {
       query('SELECT * FROM order_notes WHERE order_id=? ORDER BY created_at DESC LIMIT 3', [orderId]),
     ]);
 
-    let text = `📋 *${esc(o.order_number)}*\nСтатус: ${esc(STATUS_LABELS[o.status]||o.status)}\n`;
+    const breadcrumb = `🔧 Админ › 📋 Заявки › #${esc(o.order_number || String(o.id))}`;
+    let text = `${breadcrumb}\n\n📋 *${esc(o.order_number)}*\nСтатус: ${esc(STATUS_LABELS[o.status]||o.status)}\n`;
     if (o.manager_name) text += `👤 Менеджер: *${esc(o.manager_name)}*\n`;
     text += `\n`;
     text += `👤 ${esc(o.client_name)}\n📞 ${esc(o.client_phone)}\n`;
@@ -2588,16 +2588,17 @@ function initBot(app) {
 
   // Регистрация команд в меню "/" Telegram
   bot.setMyCommands([
-    { command: 'start',   description: '🏠 Главное меню' },
-    { command: 'catalog', description: '💃 Каталог моделей' },
-    { command: 'booking', description: '📝 Оформить заявку' },
-    { command: 'orders',  description: '📋 Мои заявки' },
-    { command: 'status',  description: '🔍 Статус заявки по номеру' },
-    { command: 'faq',     description: '❓ Часто задаваемые вопросы' },
-    { command: 'profile', description: '👤 Мой профиль' },
-    { command: 'contacts',description: '📞 Контакты агентства' },
-    { command: 'help',    description: '📖 Справка' },
-    { command: 'cancel',  description: '❌ Отменить действие' },
+    { command: 'start',      description: '🏠 Главное меню' },
+    { command: 'catalog',    description: '💃 Каталог моделей' },
+    { command: 'booking',    description: '📋 Оформить заявку' },
+    { command: 'orders',     description: '📂 Мои заявки' },
+    { command: 'profile',    description: '👤 Мой профиль' },
+    { command: 'wishlist',   description: '❤️ Избранные модели' },
+    { command: 'calculator', description: '🧮 Калькулятор стоимости' },
+    { command: 'reviews',    description: '⭐ Отзывы' },
+    { command: 'faq',        description: '❓ Частые вопросы' },
+    { command: 'help',       description: '🆘 Помощь' },
+    { command: 'cancel',     description: '❌ Отменить действие' },
   ]).catch(e => console.warn('[Bot] setMyCommands:', e.message));
 
   // ── /start ─────────────────────────────────────────────────────────────────
@@ -2614,6 +2615,14 @@ function initBot(app) {
         const modelId = parseInt(modelMatch[1]);
         const m = await get('SELECT id FROM models WHERE id=? AND available=1', [modelId]).catch(()=>null);
         if (m) return showModel(chatId, modelId);
+      }
+      // Deep-link: /start booking_NNN — начать бронирование модели NNN
+      const bookingDeepMatch = ref.match(/^booking_(\d+)$/);
+      if (bookingDeepMatch) {
+        const modelId = parseInt(bookingDeepMatch[1]);
+        const bm = await get('SELECT id,name FROM models WHERE id=? AND available=1', [modelId]).catch(()=>null);
+        const initData = bm ? { model_id: bm.id, model_name: bm.name } : {};
+        return bkStep1(chatId, initData);
       }
       // Deep-link: /start ref{code} — referral link
       const refMatch = ref.match(/^ref(\d+)$/);
@@ -2717,6 +2726,21 @@ function initBot(app) {
   // ── /contacts ──────────────────────────────────────────────────────────────
   bot.onText(/\/contacts/, async (msg) => {
     return showContacts(msg.chat.id);
+  });
+
+  // ── /wishlist ──────────────────────────────────────────────────────────────
+  bot.onText(/^\/wishlist/, async (msg) => {
+    return showFavorites(msg.chat.id, 0);
+  });
+
+  // ── /calculator ────────────────────────────────────────────────────────────
+  bot.onText(/^\/calculator/, async (msg) => {
+    return showPriceCalculator(msg.chat.id);
+  });
+
+  // ── /reviews ───────────────────────────────────────────────────────────────
+  bot.onText(/^\/reviews/, async (msg) => {
+    return showPublicReviews(msg.chat.id, 0);
   });
 
   // ── /msg (admin direct reply) ──────────────────────────────────────────────
