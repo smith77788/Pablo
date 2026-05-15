@@ -1,5 +1,5 @@
 """
-Sales Department — Lead qualification, proposal writing, follow-up.
+Sales Department — Lead qualification, proposal writing, follow-up, pricing.
 Reads live orders data from nevesty-models DB.
 """
 from __future__ import annotations
@@ -21,13 +21,13 @@ def _read_db(query: str, params=()) -> list[dict]:
         return []
 
 
-class LeadQualifier(FactoryAgent):
-    name = "LeadQualifier"
-    department = "sales"
-    role = "lead_qualifier_db"
+class LeadQualifierAgent(FactoryAgent):
+    department = 'sales'
+    role = 'LeadQualifier'
+    name = 'Алиса'
     system_prompt = (
-        "Ты — Sales Lead Qualifier агентства моделей Nevesty Models. "
-        "Анализируешь данные заявок из базы и даёшь конкретные рекомендации. "
+        "Ты — Алиса, Lead Qualifier агентства моделей Nevesty Models. "
+        "Анализируешь входящие заявки, присваиваешь скоринг и выявляешь высокоценных клиентов. "
         "Всё на русском языке."
     )
 
@@ -37,36 +37,33 @@ class LeadQualifier(FactoryAgent):
         )
         data_str = "\n".join(
             f"{r['event_type']} | {r['status']} | {r['cnt']}" for r in orders
-        )
+        ) if orders else "No orders yet"
 
         return (
-            "You are a Sales Lead Qualifier for a premium modeling agency in Moscow.\n\n"
+            f"You are {self.name}, Lead Qualifier for a premium modeling agency in Moscow.\n\n"
             "Current orders data by type and status:\n"
-            f"{data_str or 'No orders yet'}\n\n"
-            "Analyze the order pipeline and:\n"
-            "1. Identify which event types have highest conversion rates\n"
-            "2. Identify bottlenecks in the pipeline (where leads get stuck)\n"
-            "3. Suggest 3 specific qualification criteria to prioritize high-value leads\n"
+            f"{data_str}\n\n"
+            "Analyze the new leads/orders and:\n"
+            "1. Score each lead type 1-10 for qualification potential\n"
+            "2. Identify 3 high-value prospects (high priority)\n"
+            "3. Suggest specific follow-up actions for each high-value prospect\n"
             "4. Recommend the optimal follow-up timing for each stage\n\n"
-            "Be specific, data-driven, and practical. Max 250 words."
+            "Respond in Russian. Be specific and actionable. Max 250 words."
         )
 
     def run(self, context: dict | None = None) -> dict:
-        try:
-            prompt = self.build_prompt()
-            result = self.think(prompt, context=context, max_tokens=600)
-            return {"agent": self.name, "output": result}
-        except Exception as e:
-            return {"agent": self.name, "error": str(e)}
+        prompt = self.build_prompt()
+        result = self.think(prompt, context=context, max_tokens=600)
+        return {'role': self.role, 'department': self.department, 'result': result}
 
 
-class ProposalWriter(FactoryAgent):
-    name = "ProposalWriter"
-    department = "sales"
-    role = "proposal_writer_db"
+class ProposalWriterAgent(FactoryAgent):
+    department = 'sales'
+    role = 'ProposalWriter'
+    name = 'Михаил'
     system_prompt = (
-        "Ты — Proposal Writer агентства моделей Nevesty Models. "
-        "Создаёшь убедительные коммерческие предложения на основе реального каталога моделей. "
+        "Ты — Михаил, Proposal Writer агентства моделей Nevesty Models. "
+        "Создаёшь убедительные персонализированные коммерческие предложения. "
         "Всё на русском языке."
     )
 
@@ -77,86 +74,157 @@ class ProposalWriter(FactoryAgent):
         )
         model_list = "\n".join(
             f"- {r['name']} ({r['category']}, {r['city']})" for r in models
+        ) if models else "No models available"
+
+        orders = _read_db(
+            "SELECT event_type, COUNT(*) as cnt FROM orders GROUP BY event_type ORDER BY cnt DESC LIMIT 5"
         )
+        event_types = ", ".join(r['event_type'] for r in orders) if orders else "корпоратив, фотосессия"
 
         return (
-            "You are a Sales Proposal Writer for a premium modeling agency.\n\n"
+            f"You are {self.name}, Proposal Writer for a premium modeling agency.\n\n"
             "Top available models:\n"
-            f"{model_list or 'No models available'}\n\n"
-            "Create a compelling proposal template for a fashion brand seeking models for:\n"
-            "- A 2-day photo shoot in Moscow\n"
-            "- 3-5 models needed\n"
-            "- Budget: 150,000-300,000 rubles\n\n"
-            "Include:\n"
-            "1. A strong opening value proposition\n"
-            "2. How we select the perfect models for their brand\n"
-            "3. Our process and guarantees\n"
-            "4. A clear call-to-action\n\n"
-            "Write in Russian, professional tone. Max 300 words."
+            f"{model_list}\n\n"
+            f"Most popular event types: {event_types}\n\n"
+            "Generate a personalized proposal/pitch template based on client type and event:\n"
+            "1. A strong opening value proposition tailored to the event type\n"
+            "2. How we select the perfect models for their brand/event\n"
+            "3. Our process, timeline, and guarantees\n"
+            "4. Pricing structure with packages\n"
+            "5. A clear call-to-action\n\n"
+            "Write in Russian, professional yet warm tone. Max 300 words."
         )
 
     def run(self, context: dict | None = None) -> dict:
-        try:
-            prompt = self.build_prompt()
-            result = self.think(prompt, context=context, max_tokens=700)
-            return {"agent": self.name, "output": result}
-        except Exception as e:
-            return {"agent": self.name, "error": str(e)}
+        prompt = self.build_prompt()
+        result = self.think(prompt, context=context, max_tokens=700)
+        return {'role': self.role, 'department': self.department, 'result': result}
 
 
-class FollowUpSpecialist(FactoryAgent):
-    name = "FollowUpSpecialist"
-    department = "sales"
-    role = "followup_specialist_db"
+class FollowUpSpecialistAgent(FactoryAgent):
+    department = 'sales'
+    role = 'FollowUpSpecialist'
+    name = 'Екатерина'
     system_prompt = (
-        "Ты — Follow-Up Specialist агентства моделей Nevesty Models. "
-        "Отслеживаешь незакрытые заявки и создаёшь персонализированные шаблоны сообщений. "
+        "Ты — Екатерина, Follow-Up Specialist агентства моделей Nevesty Models. "
+        "Отслеживаешь незакрытые заявки и создаёшь персонализированные сообщения для повторного контакта. "
         "Всё на русском языке."
     )
 
     def build_prompt(self) -> str:
-        stale_orders = _read_db(
+        stale_new = _read_db(
+            """SELECT COUNT(*) as cnt FROM orders
+               WHERE status IN ('new', 'processing')
+               AND datetime(created_at) < datetime('now', '-3 days')"""
+        )
+        cnt_new = stale_new[0]["cnt"] if stale_new else 0
+
+        stale_reviewing = _read_db(
             """SELECT COUNT(*) as cnt FROM orders
                WHERE status = 'reviewing'
-               AND datetime(created_at) < datetime('now', '-2 days')"""
+               AND datetime(created_at) < datetime('now', '-3 days')"""
         )
-        cnt = stale_orders[0]["cnt"] if stale_orders else 0
+        cnt_reviewing = stale_reviewing[0]["cnt"] if stale_reviewing else 0
 
         return (
-            f"You are a Follow-Up Specialist for a modeling agency.\n\n"
-            f"There are currently {cnt} orders in 'reviewing' status for more than 2 days.\n\n"
+            f"You are {self.name}, Follow-Up Specialist for a modeling agency.\n\n"
+            f"Stale orders (new/processing > 3 days old): {cnt_new}\n"
+            f"Stale orders (reviewing > 3 days old): {cnt_reviewing}\n\n"
             "Create 3 follow-up message templates for:\n"
-            "1. A client who submitted a request 2 days ago and hasn't heard back\n"
-            "2. A client who confirmed a booking but hasn't provided final details\n"
+            "1. A client who submitted a new/processing request 3+ days ago and needs follow-up\n"
+            "2. A client whose order is in 'reviewing' status for 3+ days\n"
             "3. A past client (completed order 3+ months ago) for re-engagement\n\n"
             "Each template should:\n"
             "- Be in Russian, warm but professional tone\n"
             "- Be under 100 words\n"
             "- Include a specific call-to-action\n"
-            "- Not feel like a template\n\n"
-            "Format: Template 1: ... / Template 2: ... / Template 3: ..."
+            "- Feel personal, not like a generic template\n\n"
+            "Format: Шаблон 1: ... / Шаблон 2: ... / Шаблон 3: ..."
         )
 
     def run(self, context: dict | None = None) -> dict:
-        try:
-            prompt = self.build_prompt()
-            result = self.think(prompt, context=context, max_tokens=700)
-            return {"agent": self.name, "output": result}
-        except Exception as e:
-            return {"agent": self.name, "error": str(e)}
+        prompt = self.build_prompt()
+        result = self.think(prompt, context=context, max_tokens=700)
+        return {'role': self.role, 'department': self.department, 'result': result}
+
+
+class PricingNegotiatorAgent(FactoryAgent):
+    department = 'sales'
+    role = 'PricingNegotiator'
+    name = 'Дмитрий'
+    system_prompt = (
+        "Ты — Дмитрий, Pricing Negotiator агентства моделей Nevesty Models. "
+        "Анализируешь распределение бюджетов и предлагаешь оптимальную стратегию ценообразования. "
+        "Всё на русском языке."
+    )
+
+    def build_prompt(self) -> str:
+        budget_data = _read_db(
+            """SELECT event_type, status, COUNT(*) as cnt
+               FROM orders
+               GROUP BY event_type, status
+               ORDER BY cnt DESC LIMIT 20"""
+        )
+        budget_str = "\n".join(
+            f"{r['event_type']} | {r['status']} | {r['cnt']} заявок"
+            for r in budget_data
+        ) if budget_data else "No budget data available"
+
+        return (
+            f"You are {self.name}, Pricing Negotiator for a premium modeling agency.\n\n"
+            "Order distribution by event type and status:\n"
+            f"{budget_str}\n\n"
+            "Analyze the budget distribution and suggest pricing strategy:\n"
+            "1. Assess which event types command premium pricing\n"
+            "2. Suggest 3 pricing packages (budget/standard/premium)\n"
+            "3. Recommend discount thresholds and conditions\n"
+            "4. Identify negotiation scripts for common price objections\n"
+            "5. Suggest seasonal pricing adjustments\n\n"
+            "Respond in Russian. Be data-driven and specific. Max 300 words."
+        )
+
+    def run(self, context: dict | None = None) -> dict:
+        prompt = self.build_prompt()
+        result = self.think(prompt, context=context, max_tokens=700)
+        return {'role': self.role, 'department': self.department, 'result': result}
+
+
+class LeadQualifier(LeadQualifierAgent):
+    """Alias with canonical name for test compatibility."""
+    name = 'LeadQualifier'
+
+
+class ProposalWriter(ProposalWriterAgent):
+    """Alias with canonical name for test compatibility."""
+    name = 'ProposalWriter'
+
+
+class FollowUpSpecialist(FollowUpSpecialistAgent):
+    """Alias with canonical name for test compatibility."""
+    name = 'FollowUpSpecialist'
+
+
+class PricingNegotiator(PricingNegotiatorAgent):
+    """Alias with canonical name for test compatibility."""
+    name = 'PricingNegotiator'
 
 
 class SalesDepartment:
-    """DB-aware Sales Department: reads live data from nevesty-models."""
+    """Sales Department: 4 agents for lead qualification, proposals, follow-up, pricing."""
 
     def __init__(self):
-        self.agents = [LeadQualifier(), ProposalWriter(), FollowUpSpecialist()]
+        self.agents = [
+            LeadQualifierAgent(),
+            ProposalWriterAgent(),
+            FollowUpSpecialistAgent(),
+            PricingNegotiatorAgent(),
+        ]
 
     def run_cycle(self) -> dict:
         results = {}
         for agent in self.agents:
             try:
-                results[agent.name] = agent.run()
+                results[agent.role] = agent.run()
             except Exception as e:
-                results[agent.name] = {"error": str(e)}
+                results[agent.role] = {"error": str(e)}
         return results
