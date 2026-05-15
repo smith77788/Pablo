@@ -92,6 +92,7 @@ function isActiveInputState(state) {
   if (state.startsWith('adm_note_input_')) return true;
   if (state.startsWith('adm_personal_msg_')) return true;
   if (state.startsWith('adm_rev_reply_text_')) return true;
+  if (state.startsWith('model_decline_reason_')) return true;
   if (
     [
       'adm_broadcast_msg',
@@ -1266,6 +1267,19 @@ async function _showModelCabinet(chatId, page = 0) {
       );
     }
 
+    // Load availability status (БЛОК 12.3)
+    const avail = await get('SELECT status FROM model_availability WHERE model_id=?', [model.id]).catch(() => null);
+    const isBusy = avail?.status === 'busy';
+    const availRow = isBusy
+      ? [
+          { text: '✅ Доступна', callback_data: 'model_avail_free' },
+          { text: '⛔ Занята на этой неделе ✓', callback_data: 'model_avail_busy' },
+        ]
+      : [
+          { text: '✅ Доступна ✓', callback_data: 'model_avail_free' },
+          { text: '⛔ Занята на этой неделе', callback_data: 'model_avail_busy' },
+        ];
+
     const PER_PAGE = 5;
     const totalRow = await get(
       `SELECT COUNT(*) as n FROM orders
@@ -1276,12 +1290,18 @@ async function _showModelCabinet(chatId, page = 0) {
     const total = totalRow.n;
 
     if (!total) {
-      return safeSend(chatId, `💃 *Кабинет модели: ${esc(model.name)}*\n\n📭 Заявок пока нет\\.`, {
-        parse_mode: 'MarkdownV2',
-        reply_markup: {
-          inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]],
-        },
-      });
+      return safeSend(
+        chatId,
+        `💃 *Кабинет модели: ${esc(model.name)}*\n\n` +
+          `🗓 *Статус занятости:* ${isBusy ? '⛔ Занята на этой неделе' : '✅ Доступна'}\n\n` +
+          `📭 Заявок пока нет\\.`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [availRow, [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]],
+          },
+        }
+      );
     }
 
     const orders = await query(
@@ -1294,14 +1314,23 @@ async function _showModelCabinet(chatId, page = 0) {
     );
 
     let text = `💃 *Кабинет модели: ${esc(model.name)}*\n`;
+    text += `🗓 Статус: ${isBusy ? '⛔ Занята на этой неделе' : '✅ Доступна'}\n`;
     text += `_Всего заявок: ${total}_\n\n`;
 
+    const keyboard = [];
     for (const o of orders) {
       const statusLabel = STATUS_LABELS[o.status] || o.status;
       text += `*${esc(o.order_number)}* — ${esc(EVENT_TYPES[o.event_type] || o.event_type)}\n`;
       if (o.event_date) text += `📅 ${esc(o.event_date)}\n`;
       text += `${statusLabel}\n`;
       if (o.budget) text += `💰 ${esc(String(o.budget))} ₽\n`;
+      // Confirm/decline buttons for new orders (БЛОК 12.3)
+      if (o.status === 'new') {
+        keyboard.push([
+          { text: `✅ Принять ${o.order_number}`, callback_data: `model_confirm_${o.id}` },
+          { text: `❌ Отклонить`, callback_data: `model_decline_${o.id}` },
+        ]);
+      }
       text += '\n';
     }
 
@@ -1312,7 +1341,12 @@ async function _showModelCabinet(chatId, page = 0) {
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: {
-        inline_keyboard: [...(nav.length ? [nav] : []), [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]],
+        inline_keyboard: [
+          availRow,
+          ...keyboard,
+          ...(nav.length ? [nav] : []),
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
+        ],
       },
     });
   } catch (e) {
@@ -7820,6 +7854,95 @@ function initBot(app) {
       const pg = parseInt(data.replace('model_cab_page_', '')) || 0;
       return _showModelCabinet(chatId, pg);
     }
+    // ── Model: confirm order (БЛОК 12.3)
+    if (data.startsWith('model_confirm_')) {
+      const orderId = parseInt(data.replace('model_confirm_', ''));
+      const model = await get('SELECT id, name FROM models WHERE telegram_chat_id=? AND archived=0', [
+        String(chatId),
+      ]).catch(() => null);
+      if (!model) return bot.answerCallbackQuery(q.id, { text: '❌ Профиль не найден' }).catch(() => {});
+      const order = await get(
+        `SELECT * FROM orders WHERE id=? AND (model_id=? OR (model_ids IS NOT NULL AND model_ids LIKE ?))`,
+        [orderId, model.id, `%${model.id}%`]
+      ).catch(() => null);
+      if (!order)
+        return bot.answerCallbackQuery(q.id, { text: '❌ Заявка не найдена или не назначена вам' }).catch(() => {});
+      if (order.status !== 'new') {
+        return bot
+          .answerCallbackQuery(q.id, { text: `Статус уже: ${STATUS_LABELS[order.status] || order.status}` })
+          .catch(() => {});
+      }
+      await run(`UPDATE orders SET status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [orderId]).catch(
+        () => {}
+      );
+      // Notify admins
+      const adminMsg =
+        `✅ *Модель подтвердила заявку*\n\n` +
+        `💃 Модель: ${esc(model.name)}\n` +
+        `📋 Заявка: *${esc(order.order_number)}*\n` +
+        `👤 Клиент: ${esc(order.client_name || '—')}`;
+      notifyAdmin(adminMsg, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: {
+          inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]],
+        },
+      }).catch(() => {});
+      // Notify client
+      if (order.client_chat_id) {
+        notifyStatusChange(order.client_chat_id, order.order_number, 'confirmed').catch(() => {});
+      }
+      bot.answerCallbackQuery(q.id, { text: '✅ Заявка подтверждена!' }).catch(() => {});
+      return _showModelCabinet(chatId, 0);
+    }
+    // ── Model: decline order (БЛОК 12.3)
+    if (data.startsWith('model_decline_')) {
+      const orderId = parseInt(data.replace('model_decline_', ''));
+      const model = await get('SELECT id, name FROM models WHERE telegram_chat_id=? AND archived=0', [
+        String(chatId),
+      ]).catch(() => null);
+      if (!model) return bot.answerCallbackQuery(q.id, { text: '❌ Профиль не найден' }).catch(() => {});
+      const order = await get(
+        `SELECT * FROM orders WHERE id=? AND (model_id=? OR (model_ids IS NOT NULL AND model_ids LIKE ?))`,
+        [orderId, model.id, `%${model.id}%`]
+      ).catch(() => null);
+      if (!order) return bot.answerCallbackQuery(q.id, { text: '❌ Заявка не найдена' }).catch(() => {});
+      // Ask for decline reason
+      await setSession(chatId, `model_decline_reason_${orderId}`, {
+        modelId: model.id,
+        modelName: model.name,
+        orderNumber: order.order_number,
+      });
+      bot.answerCallbackQuery(q.id).catch(() => {});
+      return safeSend(
+        chatId,
+        `❌ *Отклонение заявки ${esc(order.order_number)}*\n\n` +
+          `Укажите причину отказа \\(она будет передана менеджеру\\):\n\n` +
+          `_Или введите «—» если не хотите указывать причину\\._`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [[{ text: '← Отмена', callback_data: 'model_cab_page_0' }]],
+          },
+        }
+      );
+    }
+    // ── Model: availability toggle (БЛОК 12.3)
+    if (data === 'model_avail_free' || data === 'model_avail_busy') {
+      const model = await get('SELECT id, name FROM models WHERE telegram_chat_id=? AND archived=0', [
+        String(chatId),
+      ]).catch(() => null);
+      if (!model) return bot.answerCallbackQuery(q.id, { text: '❌ Профиль не найден' }).catch(() => {});
+      const newStatus = data === 'model_avail_busy' ? 'busy' : 'free';
+      await run(
+        `INSERT INTO model_availability (model_id, status, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(model_id) DO UPDATE SET status=excluded.status, updated_at=CURRENT_TIMESTAMP`,
+        [model.id, newStatus]
+      ).catch(() => {});
+      const label = newStatus === 'busy' ? '⛔ Занята на этой неделе' : '✅ Доступна';
+      bot.answerCallbackQuery(q.id, { text: `Статус обновлён: ${label}` }).catch(() => {});
+      return _showModelCabinet(chatId, 0);
+    }
     // ── Broadcast with photo: skip caption
     if (data === 'adm_broadcast_photo_nosend') {
       if (!isAdmin(chatId)) return;
@@ -9866,6 +9989,48 @@ function initBot(app) {
         }
         return;
       }
+    }
+
+    // ── Model: decline order reason input (БЛОК 12.3)
+    if (state.startsWith('model_decline_reason_')) {
+      const orderId = parseInt(state.replace('model_decline_reason_', ''));
+      const sess2 = await getSession(chatId);
+      const sd2 = sessionData(sess2);
+      await clearSession(chatId);
+      if (!orderId) return;
+      const reason = text.trim() === '—' ? null : text.trim().slice(0, 500);
+      const order = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(() => null);
+      if (!order) return safeSend(chatId, '❌ Заявка не найдена\\.', { parse_mode: 'MarkdownV2' });
+      // Save decline reason as internal note, keep status 'new' for reassignment
+      const noteText = `❌ Модель ${esc(sd2.modelName || '—')} отказалась от заявки${reason ? `: ${reason}` : '.'}`;
+      await run('UPDATE orders SET internal_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [
+        noteText.replace(/[\\*_\[\]()~`>#+\-=|{}.!]/g, ''),
+        orderId,
+      ]).catch(() => {});
+      // Notify admins
+      const adminMsg =
+        `⚠️ *Модель отказалась от заявки*\n\n` +
+        `💃 Модель: ${esc(sd2.modelName || '—')}\n` +
+        `📋 Заявка: *${esc(order.order_number || String(orderId))}*\n` +
+        `👤 Клиент: ${esc(order.client_name || '—')}` +
+        (reason ? `\n💬 Причина: ${esc(reason)}` : '');
+      notifyAdmin(adminMsg, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: {
+          inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]],
+        },
+      }).catch(() => {});
+      await safeSend(
+        chatId,
+        `✅ Менеджер уведомлён об отказе от заявки *${esc(order.order_number || String(orderId))}*\\.`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [[{ text: '← В кабинет', callback_data: 'model_cab_page_0' }]],
+          },
+        }
+      );
+      return;
     }
 
     // ── Admin: add busy period input

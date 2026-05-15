@@ -751,6 +751,26 @@ async function initDatabase() {
     ).catch(() => {});
   }
 
+  // v24 — model_availability weekly status (БЛОК 12.3)
+  const v24 = await get(`SELECT version FROM schema_versions WHERE version=24`).catch(() => null);
+  if (!v24) {
+    await run(`CREATE TABLE IF NOT EXISTS model_availability (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      model_id INTEGER NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'free',
+      date_from TEXT,
+      date_to TEXT,
+      reason TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE
+    )`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_model_avail_model ON model_availability(model_id)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(24, 'model_availability weekly status (БЛОК 12.3)')`
+    ).catch(() => {});
+  }
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
