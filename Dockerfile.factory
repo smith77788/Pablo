@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy factory code
+COPY factory/ ./factory/
+COPY factory_main.py .
+
+CMD ["python3", "factory_main.py"]

@@ -1,39 +1,56 @@
-"""Base AI agent for the Factory — uses Claude with structured JSON output."""
+"""Base AI agent — работает с ANTHROPIC_API_KEY (Lovable/любой хостинг) или claude CLI (локально)."""
 from __future__ import annotations
 import json
 import logging
 import os
 import re
-from typing import Any
-
-import anthropic
+import subprocess
 
 logger = logging.getLogger(__name__)
 
+CLAUDE_BIN = os.getenv("CLAUDE_CODE_EXECPATH", "claude")
 MODEL = os.getenv("FACTORY_MODEL", "claude-sonnet-4-6")
+TIMEOUT = int(os.getenv("FACTORY_TIMEOUT", "120"))
+_USE_SDK = bool(os.getenv("ANTHROPIC_API_KEY"))
+
+
+def _make_sdk_client():
+    """Создаёт Anthropic SDK клиент если есть API ключ."""
+    try:
+        import anthropic
+        return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    except Exception as e:
+        logger.warning("SDK init failed: %s, falling back to CLI", e)
+        return None
+
+
+_sdk_client = _make_sdk_client() if _USE_SDK else None
 
 
 class FactoryAgent:
     name: str = "base"
-    department: str = "general"   # CEO|product|marketing|operations|analytics|hr|tech
-    role: str = "agent"           # конкретная роль внутри департамента
+    department: str = "general"
+    role: str = "agent"
     system_prompt: str = "You are an AI assistant."
 
     def __init__(self) -> None:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY not set")
-        self.client = anthropic.Anthropic(api_key=api_key)
+        pass
 
     def think(self, prompt: str, context: dict | None = None, max_tokens: int = 2048) -> str:
-        """Call Claude and return raw text response."""
+        """Вызывает Claude (SDK или CLI) и возвращает текст ответа."""
         system = self.system_prompt
         if context:
             ctx_str = json.dumps(context, ensure_ascii=False, indent=2, default=str)
             system += f"\n\n<context>\n{ctx_str}\n</context>"
 
+        if _sdk_client:
+            return self._think_sdk(system, prompt, max_tokens)
+        return self._think_cli(system, prompt)
+
+    def _think_sdk(self, system: str, prompt: str, max_tokens: int) -> str:
+        """Через Anthropic SDK (работает на Lovable, Railway, VPS с API ключом)."""
         try:
-            resp = self.client.messages.create(
+            resp = _sdk_client.messages.create(
                 model=MODEL,
                 max_tokens=max_tokens,
                 system=system,
@@ -41,11 +58,34 @@ class FactoryAgent:
             )
             return resp.content[0].text if resp.content else ""
         except Exception as e:
-            logger.error("[%s/%s] Claude API error: %s", self.department, self.role, e)
+            logger.error("[%s/%s] SDK error: %s", self.department, self.role, e)
+            return ""
+
+    def _think_cli(self, system: str, prompt: str) -> str:
+        """Через claude CLI (работает локально без API ключа)."""
+        full_input = f"{system}\n\n---\n\n{prompt}"
+        try:
+            result = subprocess.run(
+                [CLAUDE_BIN, "-p", full_input, "--model", MODEL],
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT,
+                cwd="/tmp",  # избегаем CLAUDE.md из проекта
+                env={**os.environ},
+            )
+            output = result.stdout.strip()
+            if result.returncode != 0 and not output:
+                logger.error("[%s/%s] CLI error: %s", self.department, self.role, result.stderr[:200])
+            return output
+        except subprocess.TimeoutExpired:
+            logger.error("[%s/%s] CLI timeout after %ds", self.department, self.role, TIMEOUT)
+            return ""
+        except Exception as e:
+            logger.error("[%s/%s] CLI error: %s", self.department, self.role, e)
             return ""
 
     def think_json(self, prompt: str, context: dict | None = None, max_tokens: int = 2048) -> dict | list:
-        """Call Claude expecting JSON response. Returns parsed dict/list."""
+        """Вызывает Claude и парсит JSON из ответа."""
         full_prompt = prompt + "\n\nОтветь ТОЛЬКО валидным JSON без пояснений."
         raw = self.think(full_prompt, context, max_tokens)
         return self._parse_json(raw)

@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  # ── Telegram Bot + Web Server ─────────────────────────────────────
+  bot:
+    build:
+      context: ./nevesty-models
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - bot-data:/app/data
+    ports:
+      - "${PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - factory
+
+  # ── AI Office Factory ─────────────────────────────────────────────
+  factory:
+    build:
+      context: .
+      dockerfile: Dockerfile.factory
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - factory-data:/app/factory
+      - bot-data:/app/nevesty-models/data  # общий доступ к данным бота
+    environment:
+      FACTORY_CYCLE_HOURS: ${FACTORY_CYCLE_HOURS:-6}
+      PYTHONPATH: /app
+
+volumes:
+  bot-data:
+  factory-data:
