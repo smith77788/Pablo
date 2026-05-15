@@ -689,6 +689,32 @@ async function initDatabase() {
     `INSERT OR IGNORE INTO schema_versions (version, description) VALUES (20, 'UNIQUE index on reviews(chat_id,order_id) to prevent duplicates')`
   ).catch(() => {});
 
+  // v21 – wishlists table
+  const v21 = await get(`SELECT version FROM schema_versions WHERE version=21`).catch(() => null);
+  if (!v21) {
+    await run(`CREATE TABLE IF NOT EXISTS wishlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    model_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chat_id, model_id)
+  )`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_wishlists_chat ON wishlists(chat_id)`).catch(() => {});
+    await run(`INSERT OR IGNORE INTO schema_versions(version, description) VALUES(21, 'wishlists table')`).catch(
+      () => {}
+    );
+  }
+
+  // v22 – model archive support (ensure NOT NULL constraint & index)
+  const v22 = await get(`SELECT version FROM schema_versions WHERE version=22`).catch(() => null);
+  if (!v22) {
+    await run(`ALTER TABLE models ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_models_archived ON models(archived)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(22, 'models.archived soft-delete column')`
+    ).catch(() => {});
+  }
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
