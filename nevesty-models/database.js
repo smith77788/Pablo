@@ -454,6 +454,18 @@ async function initDatabase() {
   await run(`CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)`).catch(() => {});
   await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (10, 'audit_log extended columns for admin actions')`).catch(() => {});
 
+  // Wishlists table — named alias for favorites (schema v11)
+  await run(`CREATE TABLE IF NOT EXISTS wishlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    model_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chat_id, model_id),
+    FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE
+  )`).catch(() => {});
+  await run(`CREATE INDEX IF NOT EXISTS idx_wishlists_chat_id ON wishlists(chat_id)`).catch(() => {});
+  await run(`INSERT OR IGNORE INTO schema_versions (version, description) VALUES (11, 'wishlists table')`).catch(() => {});
+
   // Seed admin if not exists
   const admin = await get('SELECT id FROM admins WHERE username = ?', [process.env.ADMIN_USERNAME || 'admin']);
   if (!admin) {

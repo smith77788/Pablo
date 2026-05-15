@@ -6715,6 +6715,49 @@ async function removeFavorite(chatId, modelId) {
   } catch (e) { console.error('[Bot] removeFavorite:', e.message); }
 }
 
+// ─── Wishlist (wishlists table — mirrors favorites) ───────────────────────────
+
+async function showWishlist(chatId, page = 0) {
+  try {
+    const PAGE_SIZE = 5;
+    const rows = await query(
+      `SELECT m.id, m.name, m.category, m.city, m.featured FROM wishlists w
+       JOIN models m ON m.id = w.model_id AND (m.archived IS NULL OR m.archived = 0)
+       WHERE w.chat_id = ?
+       ORDER BY w.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [String(chatId), PAGE_SIZE + 1, page * PAGE_SIZE]
+    ).catch(() => []);
+
+    const hasMore = rows.length > PAGE_SIZE;
+    const items = rows.slice(0, PAGE_SIZE);
+
+    if (items.length === 0 && page === 0) {
+      return safeSend(chatId,
+        '❤️ *Список избранного пуст*\n\nДобавляйте понравившихся моделей кнопкой ❤️ в их профиле\\.',
+        { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] } }
+      );
+    }
+
+    const totalRow = await get('SELECT COUNT(*) as c FROM wishlists WHERE chat_id=?', [String(chatId)]).catch(() => ({ c: items.length }));
+    const keyboard = items.map(m => [{
+      text: `${m.featured ? '⭐ ' : ''}${m.name} · ${MODEL_CATEGORIES[m.category] || m.category} · ${m.city || ''}`,
+      callback_data: `fav_view_${m.id}`
+    }]);
+
+    const navRow = [];
+    if (page > 0) navRow.push({ text: '← Назад', callback_data: `fav_list_${page - 1}` });
+    if (hasMore) navRow.push({ text: 'Далее →', callback_data: `fav_list_${page + 1}` });
+    if (navRow.length) keyboard.push(navRow);
+    keyboard.push([{ text: '💃 Каталог', callback_data: 'cat_cat__0' }, { text: '🏠 Главная', callback_data: 'main_menu' }]);
+
+    return safeSend(chatId,
+      `❤️ *Избранные модели* \\(${items.length} из ${totalRow.c}\\)`,
+      { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
+    );
+  } catch (e) { console.error('[Bot] showWishlist:', e.message); }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── FEATURE B: Быстрая заявка (Quick Booking) ────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -6862,10 +6905,19 @@ function _registerNewFeatures() {
     const data   = q.data;
     try { await bot.answerCallbackQuery(q.id); } catch {}
 
-    // Favorites list
+    // Favorites / Wishlist list
+    if (data === 'fav_list') {
+      return showWishlist(chatId, 0);
+    }
     if (data.startsWith('fav_list_')) {
       const page = parseInt(data.replace('fav_list_', '')) || 0;
       return showFavorites(chatId, page);
+    }
+
+    // View model from wishlist
+    if (data.startsWith('fav_view_')) {
+      const modelId = parseInt(data.replace('fav_view_', ''));
+      return showModel(chatId, modelId);
     }
 
     // Favorites add/remove
