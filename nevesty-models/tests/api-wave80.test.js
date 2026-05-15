@@ -10,11 +10,11 @@
  */
 
 const path = require('path');
-const fs   = require('fs');
+const fs = require('fs');
 
 const apiCode = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
 const botCode = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
-const dbCode  = fs.readFileSync(path.join(__dirname, '../database.js'), 'utf8');
+const dbCode = fs.readFileSync(path.join(__dirname, '../database.js'), 'utf8');
 
 // ── БЛОК A: Wishlist API — routes/api.js ──────────────────────────────────────
 
@@ -155,7 +155,7 @@ describe('Wave 80 БЛОК B: Wishlist features in bot.js', () => {
   });
 
   test('Wishlist enabled check uses wishlist_enabled setting', () => {
-    expect(botCode).toContain("wishlist_enabled");
+    expect(botCode).toContain('wishlist_enabled');
   });
 
   test('showWishlist checks wishlist_enabled before showing list', () => {
@@ -165,15 +165,15 @@ describe('Wave 80 БЛОК B: Wishlist features in bot.js', () => {
   });
 
   test('fav_add_ handler uses INSERT OR IGNORE into wishlists', () => {
-    expect(botCode).toContain("INSERT OR IGNORE INTO wishlists (chat_id, model_id)");
+    expect(botCode).toContain('INSERT OR IGNORE INTO wishlists (chat_id, model_id)');
   });
 
   test('fav_remove_ handler uses DELETE FROM wishlists', () => {
-    expect(botCode).toContain("DELETE FROM wishlists WHERE chat_id=? AND model_id=?");
+    expect(botCode).toContain('DELETE FROM wishlists WHERE chat_id=? AND model_id=?');
   });
 
   test('fav_clear_yes deletes all wishlist entries for user', () => {
-    expect(botCode).toContain("DELETE FROM wishlists WHERE chat_id=?");
+    expect(botCode).toContain('DELETE FROM wishlists WHERE chat_id=?');
   });
 
   test('/wishlist command triggers showWishlist', () => {
@@ -333,7 +333,7 @@ describe('Wave 80 БЛОК D: Session timeout in bot.js', () => {
 
   test('Session timeout (resetSessionTimer) clears bookingData via clearSession', () => {
     const fnIdx = botCode.indexOf('function resetSessionTimer(');
-    const segment = botCode.slice(fnIdx, fnIdx + 600);
+    const segment = botCode.slice(fnIdx, fnIdx + 900);
     expect(segment).toContain('clearSession(chatId)');
   });
 

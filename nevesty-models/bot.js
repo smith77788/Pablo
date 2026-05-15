@@ -47,6 +47,10 @@ const sessionTimers = new Map();
 const SESSION_REMINDER_MS = 15 * 60 * 1000; // 15 minutes — fires before hard timeout
 const sessionReminderTimers = {};
 
+// ─── Session warning timers (fires 2 min before hard timeout) ─────────────────
+const SESSION_WARNING_BEFORE_MS = 2 * 60 * 1000; // warn 2 minutes before expiry
+const sessionWarningTimers = new Map();
+
 const ACTIVE_BOOKING_STATES = new Set([
   'bk_s1',
   'bk_s1_add',
@@ -115,11 +119,47 @@ function isActiveInputState(state) {
   return false;
 }
 
+function clearSessionWarning(chatId) {
+  clearTimeout(sessionWarningTimers.get(chatId));
+  sessionWarningTimers.delete(chatId);
+}
+
+function setSessionWarning(chatId) {
+  clearSessionWarning(chatId);
+  const warningDelay = SESSION_TIMEOUT_MS - SESSION_WARNING_BEFORE_MS;
+  if (warningDelay <= 0) return; // timeout too short to warn
+  const t = setTimeout(async () => {
+    sessionWarningTimers.delete(chatId);
+    try {
+      const sess = await getSession(chatId);
+      if (sess?.state && isActiveInputState(sess.state)) {
+        await bot.sendMessage(
+          chatId,
+          '⏰ Бронирование будет отменено через 2 минуты\\. Продолжите ввод или нажмите кнопку ниже\\.',
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [[{ text: '▶️ Продолжить', callback_data: 'session_keepalive' }]],
+            },
+          }
+        );
+      }
+    } catch {
+      /* session may already be gone */
+    }
+  }, warningDelay);
+  if (t?.unref) t.unref();
+  sessionWarningTimers.set(chatId, t);
+}
+
 function resetSessionTimer(chatId) {
   clearTimeout(sessionTimers.get(chatId));
-  setSessionReminder(chatId); // schedule soft nudge at SESSION_REMINDER_MS
+  clearSessionWarning(chatId);
+  setSessionWarning(chatId);
+  setSessionReminder(chatId);
   const timer = setTimeout(async () => {
-    clearSessionReminder(chatId); // cancel soft reminder when hard timeout fires
+    clearSessionReminder(chatId);
+    clearSessionWarning(chatId);
     try {
       const sess = await getSession(chatId);
       const state = sess?.state;
@@ -5238,6 +5278,7 @@ function initBot(app) {
     // Clear session timeout if any active flow was running
     clearTimeout(sessionTimers.get(chatId));
     sessionTimers.delete(chatId);
+    clearSessionWarning(chatId);
     // Clear any active state/flow
     await clearSession(chatId);
 
@@ -5869,10 +5910,25 @@ function initBot(app) {
       return bkSubmit(chatId, d);
     }
 
-    // ── Booking: cancel
+    // ── Booking: cancel (show confirmation first)
     if (data === 'bk_cancel') {
+      await bot.answerCallbackQuery(q.id);
+      return safeSend(chatId, '⚠️ *Отменить бронирование?*\nВесь прогресс будет потерян\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '✅ Да, отменить', callback_data: 'bk_cancel_confirm' }],
+            [{ text: '↩️ Вернуться', callback_data: 'main_menu' }],
+          ],
+        },
+      });
+    }
+
+    // ── Booking: cancel confirmed
+    if (data === 'bk_cancel_confirm') {
       clearTimeout(sessionTimers.get(chatId));
       sessionTimers.delete(chatId);
+      clearSessionWarning(chatId);
       clearSessionReminder(chatId);
       await clearSession(chatId);
       return isAdmin(chatId) ? showAdminMenu(chatId, q.from.first_name) : showMainMenu(chatId, q.from.first_name);
@@ -5895,6 +5951,7 @@ function initBot(app) {
     if (data === 'bk_cancel_session') {
       clearTimeout(sessionTimers.get(chatId));
       sessionTimers.delete(chatId);
+      clearSessionWarning(chatId);
       clearSessionReminder(chatId);
       await clearSession(chatId);
       await safeSend(chatId, '❌ *Бронирование отменено\\.*', { parse_mode: 'MarkdownV2' });
@@ -5909,10 +5966,20 @@ function initBot(app) {
     if (data === 'cancel_session') {
       clearTimeout(sessionTimers.get(chatId));
       sessionTimers.delete(chatId);
+      clearSessionWarning(chatId);
       clearSessionReminder(chatId);
       await clearSession(chatId);
       await safeSend(chatId, '❌ Действие отменено\\.', { parse_mode: 'MarkdownV2' });
       return showMainMenu(chatId, q.from.first_name);
+    }
+
+    // ── Session: keepalive (triggered from warning message before timeout)
+    if (data === 'session_keepalive') {
+      resetSessionTimer(chatId);
+      await bot.answerCallbackQuery(q.id, { text: '✅ Время продлено!' });
+      return safeSend(chatId, '✅ Хорошо\\! Время сессии продлено\\. Продолжайте заполнение\\.', {
+        parse_mode: 'MarkdownV2',
+      });
     }
 
     // ── Session: continue / restart
@@ -5922,6 +5989,7 @@ function initBot(app) {
     if (data === 'session_restart') {
       clearTimeout(sessionTimers.get(chatId));
       sessionTimers.delete(chatId);
+      clearSessionWarning(chatId);
       clearSessionReminder(chatId);
       await clearSession(chatId);
       return safeSend(chatId, '🔄 Начинаем заново\\. Используйте кнопки меню для навигации\\.', {
@@ -8480,6 +8548,7 @@ function initBot(app) {
         // Non-booking session expired — reset and show appropriate menu
         clearTimeout(sessionTimers.get(chatId));
         sessionTimers.delete(chatId);
+        clearSessionWarning(chatId);
         await clearSession(chatId);
         await safeSend(
           chatId,
