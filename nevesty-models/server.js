@@ -1101,12 +1101,13 @@ async function start() {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('uncaughtException', err => {
     console.error('[CRITICAL] Uncaught exception:', err);
-    // Attempt to notify admin via Telegram before crashing
+    // Attempt to notify admin via Telegram before crashing (args as array — no shell injection)
     try {
-      require('child_process').execSync(
-        `node ${require('path').join(__dirname, 'tools/notify.js')} --from "Server" "🚨 КРИТИЧНА ПОМИЛКА: ${(err.message || String(err)).replace(/['"]/g, '').substring(0, 100)}"`,
-        { timeout: 5000 }
-      );
+      const { spawnSync } = require('child_process');
+      const msg = `🚨 КРИТИЧНА ПОМИЛКА: ${String(err.message || err).substring(0, 100)}`;
+      spawnSync(process.execPath, [require('path').join(__dirname, 'tools/notify.js'), '--from', 'Server', msg], {
+        timeout: 5000,
+      });
     } catch (_) {
       /* best-effort, never block the crash */
     }

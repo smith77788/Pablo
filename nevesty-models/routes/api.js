@@ -1919,7 +1919,9 @@ router.delete('/admin/models/:id/availability/:date', auth, async (req, res, nex
 // ─── Model busy dates (calendar) — legacy endpoints kept for backwards compat ──
 router.get('/admin/models/:id/busy-dates', auth, async (req, res, next) => {
   try {
-    const dates = await query('SELECT * FROM model_busy_dates WHERE model_id=? ORDER BY busy_date', [req.params.id]);
+    const dates = await query('SELECT * FROM model_busy_dates WHERE model_id=? ORDER BY busy_date LIMIT 366', [
+      req.params.id,
+    ]);
     res.json(dates);
   } catch (e) {
     next(e);
@@ -2762,7 +2764,7 @@ router.get('/admin/orders/export', auth, async (req, res, next) => {
               o.internal_note, o.paid_at
        FROM orders o
        LEFT JOIN models m ON o.model_id = m.id
-       WHERE ${where} ORDER BY o.created_at DESC`,
+       WHERE ${where} ORDER BY o.created_at DESC LIMIT 10000`,
       params
     );
     const STATUS_RU = {
@@ -3670,11 +3672,18 @@ router.post('/admin/settings/import', auth, async (req, res, next) => {
     const SKIP_KEYS = ['admin_password', 'jwt_secret', 'totp_secret'];
 
     let imported = 0;
-    for (const [key, value] of Object.entries(settings)) {
-      if (SKIP_KEYS.includes(key)) continue;
-      if (typeof value !== 'string' || value.length > 10000) continue;
-      await run('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)', [key, value]);
-      imported++;
+    await run('BEGIN');
+    try {
+      for (const [key, value] of Object.entries(settings)) {
+        if (SKIP_KEYS.includes(key)) continue;
+        if (typeof value !== 'string' || value.length > 10000) continue;
+        await run('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)', [key, value]);
+        imported++;
+      }
+      await run('COMMIT');
+    } catch (txErr) {
+      await run('ROLLBACK').catch(() => {});
+      throw txErr;
     }
 
     await logAudit(req, 'import_settings', 'setting', null, { imported });
@@ -4075,16 +4084,16 @@ function auditEventTypeFilter(eventType) {
 function auditSinceClause(since) {
   const now = new Date();
   if (since === 'today') {
-    const d = now.toISOString().slice(0, 10);
-    return `al.created_at >= '${d} 00:00:00'`;
+    const d = now.toISOString().slice(0, 10) + ' 00:00:00';
+    return { clause: 'al.created_at >= ?', value: d };
   }
   if (since === '7d') {
     const d = new Date(now - 7 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
-    return `al.created_at >= '${d}'`;
+    return { clause: 'al.created_at >= ?', value: d };
   }
   if (since === '30d') {
     const d = new Date(now - 30 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
-    return `al.created_at >= '${d}'`;
+    return { clause: 'al.created_at >= ?', value: d };
   }
   return null;
 }
@@ -4115,8 +4124,11 @@ router.get('/admin/audit-log', auth, async (req, res, next) => {
         params.push(...patterns);
       }
     }
-    const sinceClause = since ? auditSinceClause(since) : null;
-    if (sinceClause) sql += ` AND ${sinceClause}`;
+    const sinceResult = since ? auditSinceClause(since) : null;
+    if (sinceResult) {
+      sql += ` AND ${sinceResult.clause}`;
+      params.push(sinceResult.value);
+    }
     sql += ` ORDER BY al.created_at DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
@@ -4139,7 +4151,10 @@ router.get('/admin/audit-log', auth, async (req, res, next) => {
         countParams.push(...patterns);
       }
     }
-    if (sinceClause) countSql += ` AND ${sinceClause}`;
+    if (sinceResult) {
+      countSql += ` AND ${sinceResult.clause}`;
+      countParams.push(sinceResult.value);
+    }
     const total = await get(countSql, countParams);
 
     // Also return distinct actions for frontend filter dropdowns
@@ -4169,8 +4184,11 @@ router.get('/admin/audit/export', auth, async (req, res, next) => {
         params.push(...patterns);
       }
     }
-    const sinceClause = since ? auditSinceClause(since) : null;
-    if (sinceClause) sql += ` AND ${sinceClause}`;
+    const sinceResult2 = since ? auditSinceClause(since) : null;
+    if (sinceResult2) {
+      sql += ` AND ${sinceResult2.clause}`;
+      params.push(sinceResult2.value);
+    }
     sql += ` ORDER BY al.created_at DESC LIMIT ?`;
     params.push(limit);
 
@@ -4736,8 +4754,10 @@ router.post('/admin/models/import-csv', auth, uploadCsv.single('file'), async (r
 
 router.get('/export/models', auth, async (req, res, next) => {
   try {
+    const limitN = Math.min(Math.max(1, parseInt(req.query.limit) || 5000), 5000);
     const models = await query(
-      'SELECT id, name, age, height, city, category, available, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos FROM models ORDER BY name'
+      'SELECT id, name, age, height, city, category, available, photo_main, bio, instagram, hair_color, eye_color, weight, bust, waist, hips, shoe_size, photos FROM models ORDER BY name LIMIT ?',
+      [limitN]
     );
     res.setHeader('Content-Disposition', `attachment; filename="models-${Date.now()}.json"`);
     res.json(models);
