@@ -95,6 +95,11 @@ const STRINGS = {
   reviewTextPrompt: '📝 Напишите несколько слов о вашем опыте работы с нами:',
   reviewAlreadyLeft: '✅ Вы уже оставили отзыв\\.',
   reviewAlreadyLeftForOrder: '✅ Вы уже оставили отзыв для этой заявки\\.',
+  reviewsHeader: '⭐ *Отзывы клиентов*\n\n',
+  reviewsEmpty: 'Пока нет отзывов\\.',
+  reviewAskRating: '⭐ Оцените работу с нами от 1 до 5:',
+  reviewAskText: 'Напишите ваш отзыв \\(или /skip\\):',
+  reviewSaved: '✅ Спасибо за отзыв\\! Он будет опубликован после проверки\\.',
 
   // ─── Wishlist strings ──────────────────────────────────────────────────────
   wishlistAdded: '❤️ Добавлено в избранное!',
