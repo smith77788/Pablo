@@ -104,6 +104,16 @@
         </div>
       </div>
 
+      <!-- Experiment Results -->
+      <div class="section-card" style="margin-bottom:24px" id="exp-results-card">
+        <div class="section-card-header">
+          <div class="section-card-title">📊 Результаты экспериментов</div>
+        </div>
+        <div class="section-card-body" id="exp-results-body">
+          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
+        </div>
+      </div>
+
       <!-- Factory Tasks -->
       <div class="section-card">
         <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -300,7 +310,37 @@ async function runCycle() {
   btn.textContent = '▶ Запустить цикл';
 }
 
+async function loadExperiments() {
+  const body = document.getElementById('exp-results-body');
+  try {
+    const rows = await _admin.apiFetch('/admin/factory-experiments');
+    if (!rows || !rows.length) {
+      body.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет отслеживаемых экспериментов. Запустите цикл Factory для оценки.</div>';
+      return;
+    }
+    const outcomeIcon = { success: '✅', fail: '❌', pending: '⏳', inconclusive: '🔵' };
+    const outcomeLabel = { success: 'Успех', fail: 'Провал', pending: 'Ожидание', inconclusive: 'Неопределённо' };
+    body.innerHTML = `<table class="data-table">
+      <thead><tr><th>Тип</th><th>Метрика</th><th>Базовое</th><th>Цель</th><th>Текущее</th><th>Результат</th><th>Оценено</th></tr></thead>
+      <tbody>${rows.map(r => `
+        <tr>
+          <td style="font-size:0.8rem;color:var(--text-muted)">${_admin.escapeHtml(r.action_type||'—')}</td>
+          <td style="font-family:monospace;font-size:0.82rem">${_admin.escapeHtml(r.metric_name||'—')}</td>
+          <td style="color:var(--text-dim)">${r.metric_baseline!=null?r.metric_baseline:'—'}</td>
+          <td style="color:var(--gold)">${r.metric_target!=null?r.metric_target:'—'}</td>
+          <td style="font-weight:600">${r.metric_current!=null?r.metric_current:'—'}</td>
+          <td><span style="font-size:0.8rem">${outcomeIcon[r.outcome]||'?'} ${_admin.escapeHtml(outcomeLabel[r.outcome]||r.outcome||'—')}</span></td>
+          <td style="font-size:0.75rem;color:var(--text-dim)">${(r.evaluated_at||'').slice(0,16).replace('T',' ')||'—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  } catch(e) {
+    body.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Экспериментов нет (${_admin.escapeHtml(e.message)})</div>`;
+  }
+}
+
 loadData();
+loadExperiments();
 setInterval(loadData, 30000);
 </script>
 </body>

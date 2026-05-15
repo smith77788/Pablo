@@ -1720,6 +1720,27 @@ router.post('/admin/factory/run', auth, async (req, res, next) => {
   } catch(e) { next(e); }
 });
 
+// ─── Factory experiments (reads factory.db directly) ──────────────────────────
+router.get('/admin/factory-experiments', auth, async (req, res, next) => {
+  try {
+    const Database = require('better-sqlite3');
+    const factoryDbPath = require('path').join(__dirname, '../../factory/factory.db');
+    let rows = [];
+    try {
+      const fdb = new Database(factoryDbPath, { readonly: true });
+      rows = fdb.prepare(`
+        SELECT id, action_type, channel, metric_name, metric_baseline,
+               metric_target, metric_current, outcome, evaluated_at, created_at
+        FROM growth_actions
+        WHERE metric_name IS NOT NULL
+        ORDER BY created_at DESC LIMIT 50
+      `).all();
+      fdb.close();
+    } catch (_) {}
+    res.json(rows);
+  } catch(e) { next(e); }
+});
+
 // ─── DB stats endpoint ────────────────────────────────────────────────────────
 router.get('/admin/db-stats', auth, async (req, res, next) => {
   try {
