@@ -882,6 +882,33 @@ def run_cycle() -> dict:
     summary_lines.append(f"💡 Новых action items: {total_new_actions}")
 
     # ════════════════════════════════════════════════════════════════
+    # PHASE 6b: Sales + Creative + Customer Success (simple/no-API)
+    # ════════════════════════════════════════════════════════════════
+    logger.info("\n🏭 PHASE 6b: Sales + Creative + CustomerSuccess (heuristic)")
+    try:
+        from factory.agents.sales_department import SalesDepartment as _SalesDeptSimple
+        from factory.agents.creative_department import CreativeDepartment as _CreativeDeptSimple
+        from factory.agents.customer_success_department import CustomerSuccessDepartment as _CSDeptSimple
+
+        _sales_simple = _SalesDeptSimple()
+        _creative_simple = _CreativeDeptSimple()
+        _cs_simple = _CSDeptSimple()
+
+        # Run a quick analysis cycle (no external calls)
+        _guidelines = _creative_simple.get_brand_voice_guidelines()
+        _log_phase = lambda label, msg: logger.info("[Phase6b] %s: %s", label, msg)
+        _log_phase('Sales+Creative+CS', f"Brand voice: {_guidelines.get('tone', 'N/A')}")
+        results["phases"]["sales_creative_cs_simple"] = {
+            "brand_voice_tone": _guidelines.get("tone", "N/A"),
+            "status": "ok",
+        }
+        summary_lines.append(
+            f"🏭 Sales+Creative+CS heuristic: brand_tone={_guidelines.get('tone', 'N/A')[:40]}"
+        )
+    except Exception as _e6b:
+        logger.error("Phase 6b error: %s", _e6b)
+
+    # ════════════════════════════════════════════════════════════════
     # PHASE 7 — FINANCE + RESEARCH DEPARTMENTS
     # ════════════════════════════════════════════════════════════════
     logger.info("\n💰 FINANCE + RESEARCH DEPTS")

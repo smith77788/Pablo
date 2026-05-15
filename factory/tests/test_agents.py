@@ -1748,3 +1748,398 @@ class TestCEOWeeklyReport:
     def test_generate_weekly_report_text_exists(self):
         from factory.agents.strategic_core import StrategicCore
         assert hasattr(StrategicCore, 'generate_weekly_report_text')
+
+
+# ======================================================================
+# NEW DEPARTMENTS — Sales, Creative, CustomerSuccess (simple/no-API)
+# ======================================================================
+
+class TestSalesDepartmentNew:
+    """Tests for factory/agents/sales_department.py (no-API-call implementation)."""
+
+    def _dept(self):
+        from factory.agents.sales_department import SalesDepartment
+        return SalesDepartment()
+
+    # --- qualify_lead ---
+
+    def test_qualify_lead_premium_budget(self):
+        dept = self._dept()
+        result = dept.qualify_lead({"budget": 150_000, "event_type": "фотосессия"})
+        assert isinstance(result, dict)
+        assert result["score"] >= 80
+        assert result["tier"] == "premium"
+
+    def test_qualify_lead_standard_budget(self):
+        dept = self._dept()
+        result = dept.qualify_lead({"budget": 50_000, "event_type": "фотосессия"})
+        assert result["tier"] == "standard"
+        assert 50 <= result["score"] < 80
+
+    def test_qualify_lead_economy_budget(self):
+        dept = self._dept()
+        result = dept.qualify_lead({"budget": 10_000, "event_type": "фотосессия"})
+        assert result["tier"] == "economy"
+        assert result["score"] < 50
+
+    def test_qualify_lead_corporate_bonus(self):
+        dept = self._dept()
+        base = dept.qualify_lead({"budget": 50_000, "event_type": "фотосессия"})
+        corp = dept.qualify_lead({"budget": 50_000, "event_type": "корпоратив"})
+        assert corp["score"] > base["score"]
+
+    def test_qualify_lead_urgency_bonus(self):
+        from datetime import date, timedelta
+        dept = self._dept()
+        soon = (date.today() + timedelta(days=10)).isoformat()
+        base = dept.qualify_lead({"budget": 50_000, "event_type": "фотосессия"})
+        urgent = dept.qualify_lead({"budget": 50_000, "event_type": "фотосессия", "date": soon})
+        assert urgent["score"] > base["score"]
+
+    def test_qualify_lead_score_capped_at_100(self):
+        from datetime import date, timedelta
+        dept = self._dept()
+        soon = (date.today() + timedelta(days=5)).isoformat()
+        result = dept.qualify_lead({"budget": 200_000, "event_type": "корпоратив", "date": soon})
+        assert result["score"] <= 100
+
+    def test_qualify_lead_returns_notes_string(self):
+        dept = self._dept()
+        result = dept.qualify_lead({"budget": 50_000})
+        assert isinstance(result["notes"], str)
+        assert len(result["notes"]) > 0
+
+    # --- generate_proposal ---
+
+    def test_generate_proposal_returns_string(self):
+        dept = self._dept()
+        result = dept.generate_proposal({"client_name": "ООО Ромашка", "event_type": "корпоратив"})
+        assert isinstance(result, str)
+        assert len(result) > 50
+
+    def test_generate_proposal_contains_client_name(self):
+        dept = self._dept()
+        result = dept.generate_proposal({"client_name": "Иван Петров", "event_type": "свадьба"})
+        assert "Иван Петров" in result
+
+    def test_generate_proposal_contains_event_type(self):
+        dept = self._dept()
+        result = dept.generate_proposal({"client_name": "Клиент", "event_type": "фотосессия"})
+        assert "фотосессия" in result
+
+    def test_generate_proposal_no_data_does_not_raise(self):
+        dept = self._dept()
+        result = dept.generate_proposal({})
+        assert isinstance(result, str)
+
+    # --- get_followup_schedule ---
+
+    def test_get_followup_schedule_returns_list(self):
+        dept = self._dept()
+        result = dept.get_followup_schedule(42, "new")
+        assert isinstance(result, list)
+        assert len(result) >= 1
+
+    def test_get_followup_schedule_new_status(self):
+        dept = self._dept()
+        result = dept.get_followup_schedule(1, "new")
+        assert len(result) >= 2
+
+    def test_get_followup_schedule_completed_status(self):
+        dept = self._dept()
+        result = dept.get_followup_schedule(1, "completed")
+        assert isinstance(result, list)
+        assert len(result) >= 1
+
+    def test_get_followup_schedule_contains_message(self):
+        dept = self._dept()
+        result = dept.get_followup_schedule(7, "processing")
+        for item in result:
+            assert "message" in item
+            assert isinstance(item["message"], str)
+
+    def test_get_followup_schedule_unknown_status(self):
+        dept = self._dept()
+        result = dept.get_followup_schedule(99, "unknown_status")
+        assert isinstance(result, list)
+
+    # --- suggest_pricing ---
+
+    def test_suggest_pricing_returns_dict(self):
+        dept = self._dept()
+        result = dept.suggest_pricing({"event_type": "корпоратив", "model_count": 2})
+        assert isinstance(result, dict)
+        assert "min_price" in result
+        assert "max_price" in result
+        assert "recommended" in result
+
+    def test_suggest_pricing_min_less_than_max(self):
+        dept = self._dept()
+        result = dept.suggest_pricing({"event_type": "свадьба", "model_count": 1})
+        assert result["min_price"] < result["max_price"]
+
+    def test_suggest_pricing_recommended_in_range(self):
+        dept = self._dept()
+        result = dept.suggest_pricing({"event_type": "фотосессия", "model_count": 1})
+        assert result["min_price"] <= result["recommended"] <= result["max_price"]
+
+    def test_suggest_pricing_scales_with_model_count(self):
+        dept = self._dept()
+        one = dept.suggest_pricing({"event_type": "корпоратив", "model_count": 1})
+        two = dept.suggest_pricing({"event_type": "корпоратив", "model_count": 2})
+        assert two["min_price"] > one["min_price"]
+
+    def test_suggest_pricing_unknown_event_type_defaults(self):
+        dept = self._dept()
+        result = dept.suggest_pricing({"event_type": "неизвестный тип", "model_count": 1})
+        assert result["min_price"] > 0
+        assert result["recommended"] > 0
+
+
+class TestCreativeDepartmentNew:
+    """Tests for factory/agents/creative_department.py (no-API-call implementation)."""
+
+    def _dept(self):
+        from factory.agents.creative_department import CreativeDepartment
+        return CreativeDepartment()
+
+    # --- generate_model_bio ---
+
+    def test_generate_model_bio_returns_string(self):
+        dept = self._dept()
+        result = dept.generate_model_bio({"name": "Анна", "city": "Москва", "categories": "подиум"})
+        assert isinstance(result, str)
+        assert len(result) > 20
+
+    def test_generate_model_bio_contains_name(self):
+        dept = self._dept()
+        result = dept.generate_model_bio({"name": "Светлана"})
+        assert "Светлана" in result
+
+    def test_generate_model_bio_contains_city(self):
+        dept = self._dept()
+        result = dept.generate_model_bio({"name": "Ольга", "city": "Санкт-Петербург"})
+        assert "Санкт-Петербург" in result
+
+    def test_generate_model_bio_with_height(self):
+        dept = self._dept()
+        result = dept.generate_model_bio({"name": "Алина", "height": 178})
+        assert "178" in result
+
+    def test_generate_model_bio_categories_list(self):
+        dept = self._dept()
+        result = dept.generate_model_bio({"name": "Мария", "categories": ["подиум", "реклама"]})
+        assert "подиум" in result or "реклама" in result
+
+    def test_generate_model_bio_no_data_does_not_raise(self):
+        dept = self._dept()
+        result = dept.generate_model_bio({})
+        assert isinstance(result, str)
+
+    # --- generate_social_caption ---
+
+    def test_generate_social_caption_returns_string(self):
+        dept = self._dept()
+        result = dept.generate_social_caption("корпоратив", "Анна")
+        assert isinstance(result, str)
+        assert len(result) > 20
+
+    def test_generate_social_caption_contains_model_name(self):
+        dept = self._dept()
+        result = dept.generate_social_caption("фотосессия", "Наташа")
+        assert "Наташа" in result
+
+    def test_generate_social_caption_wedding(self):
+        dept = self._dept()
+        result = dept.generate_social_caption("свадьба", "Ирина")
+        assert isinstance(result, str)
+        assert len(result) > 20
+
+    def test_generate_social_caption_unknown_event(self):
+        dept = self._dept()
+        result = dept.generate_social_caption("неизвестный тип", "Модель")
+        assert isinstance(result, str)
+
+    # --- generate_promo_text ---
+
+    def test_generate_promo_text_returns_string(self):
+        dept = self._dept()
+        result = dept.generate_promo_text(15, 7)
+        assert isinstance(result, str)
+        assert len(result) > 20
+
+    def test_generate_promo_text_contains_discount(self):
+        dept = self._dept()
+        result = dept.generate_promo_text(20, 3)
+        assert "20" in result
+
+    def test_generate_promo_text_single_day(self):
+        dept = self._dept()
+        result = dept.generate_promo_text(10, 1)
+        assert isinstance(result, str)
+
+    def test_generate_promo_text_zero_discount(self):
+        dept = self._dept()
+        result = dept.generate_promo_text(0, 5)
+        assert isinstance(result, str)
+
+    # --- get_brand_voice_guidelines ---
+
+    def test_get_brand_voice_guidelines_returns_dict(self):
+        dept = self._dept()
+        result = dept.get_brand_voice_guidelines()
+        assert isinstance(result, dict)
+
+    def test_get_brand_voice_guidelines_has_tone(self):
+        dept = self._dept()
+        result = dept.get_brand_voice_guidelines()
+        assert "tone" in result
+        assert isinstance(result["tone"], str)
+
+    def test_get_brand_voice_guidelines_has_keywords(self):
+        dept = self._dept()
+        result = dept.get_brand_voice_guidelines()
+        assert "keywords" in result
+        assert isinstance(result["keywords"], list)
+        assert len(result["keywords"]) > 0
+
+    def test_get_brand_voice_guidelines_has_avoid_words(self):
+        dept = self._dept()
+        result = dept.get_brand_voice_guidelines()
+        assert "avoid_words" in result
+        assert isinstance(result["avoid_words"], list)
+
+    def test_get_brand_voice_guidelines_has_style(self):
+        dept = self._dept()
+        result = dept.get_brand_voice_guidelines()
+        assert "style" in result
+
+
+class TestCustomerSuccessDepartmentNew:
+    """Tests for factory/agents/customer_success_department.py (no-API-call implementation)."""
+
+    def _dept(self):
+        from factory.agents.customer_success_department import CustomerSuccessDepartment
+        return CustomerSuccessDepartment()
+
+    # --- generate_onboarding_message ---
+
+    def test_generate_onboarding_message_returns_string(self):
+        dept = self._dept()
+        result = dept.generate_onboarding_message("Иван", "ORD-001")
+        assert isinstance(result, str)
+        assert len(result) > 50
+
+    def test_generate_onboarding_message_contains_name(self):
+        dept = self._dept()
+        result = dept.generate_onboarding_message("Алексей", "42")
+        assert "Алексей" in result
+
+    def test_generate_onboarding_message_contains_order_number(self):
+        dept = self._dept()
+        result = dept.generate_onboarding_message("Клиент", "ORD-999")
+        assert "ORD-999" in result
+
+    def test_generate_onboarding_message_empty_inputs(self):
+        dept = self._dept()
+        result = dept.generate_onboarding_message("", "")
+        assert isinstance(result, str)
+
+    # --- analyze_retention_risk ---
+
+    def test_analyze_retention_risk_empty_history(self):
+        dept = self._dept()
+        result = dept.analyze_retention_risk([])
+        assert isinstance(result, dict)
+        assert "risk_level" in result
+        assert result["risk_level"] == "unknown"
+
+    def test_analyze_retention_risk_low_risk_recent_order(self):
+        from datetime import datetime, timezone, timedelta
+        dept = self._dept()
+        recent = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        result = dept.analyze_retention_risk([{"date": recent}])
+        assert result["risk_level"] == "low"
+        assert result["days_since_last_order"] <= 30
+
+    def test_analyze_retention_risk_high_risk_old_order(self):
+        from datetime import datetime, timezone, timedelta
+        dept = self._dept()
+        old = (datetime.now(timezone.utc) - timedelta(days=120)).isoformat()
+        result = dept.analyze_retention_risk([{"date": old}])
+        assert result["risk_level"] in ("high", "critical")
+
+    def test_analyze_retention_risk_medium_risk(self):
+        from datetime import datetime, timezone, timedelta
+        dept = self._dept()
+        mid = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        result = dept.analyze_retention_risk([{"date": mid}])
+        assert result["risk_level"] == "medium"
+
+    def test_analyze_retention_risk_returns_recommendation(self):
+        from datetime import datetime, timezone, timedelta
+        dept = self._dept()
+        recent = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        result = dept.analyze_retention_risk([{"date": recent}])
+        assert "recommendation" in result
+        assert isinstance(result["recommendation"], str)
+
+    def test_analyze_retention_risk_uses_most_recent_date(self):
+        from datetime import datetime, timezone, timedelta
+        dept = self._dept()
+        old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat()
+        recent = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        result = dept.analyze_retention_risk([{"date": old}, {"date": recent}])
+        # Should pick the most recent date → low risk
+        assert result["risk_level"] == "low"
+
+    # --- generate_review_request ---
+
+    def test_generate_review_request_returns_string(self):
+        dept = self._dept()
+        result = dept.generate_review_request({"client_name": "Анна", "event_type": "корпоратив"})
+        assert isinstance(result, str)
+        assert len(result) > 50
+
+    def test_generate_review_request_contains_client_name(self):
+        dept = self._dept()
+        result = dept.generate_review_request({"client_name": "Светлана"})
+        assert "Светлана" in result
+
+    def test_generate_review_request_empty_data(self):
+        dept = self._dept()
+        result = dept.generate_review_request({})
+        assert isinstance(result, str)
+
+    # --- suggest_upsell ---
+
+    def test_suggest_upsell_returns_dict(self):
+        dept = self._dept()
+        result = dept.suggest_upsell({"event_type": "корпоратив", "budget": 60_000})
+        assert isinstance(result, dict)
+        assert "suggestions" in result
+        assert "reason" in result
+
+    def test_suggest_upsell_suggestions_is_list(self):
+        dept = self._dept()
+        result = dept.suggest_upsell({"event_type": "свадьба", "budget": 80_000})
+        assert isinstance(result["suggestions"], list)
+        assert len(result["suggestions"]) >= 1
+
+    def test_suggest_upsell_photoshoot(self):
+        dept = self._dept()
+        result = dept.suggest_upsell({"event_type": "фотосессия", "budget": 20_000})
+        assert isinstance(result["suggestions"], list)
+
+    def test_suggest_upsell_high_budget_bonus(self):
+        dept = self._dept()
+        low = dept.suggest_upsell({"event_type": "корпоратив", "budget": 10_000})
+        high = dept.suggest_upsell({"event_type": "корпоратив", "budget": 100_000})
+        # High budget should have at least as many suggestions
+        assert len(high["suggestions"]) >= len(low["suggestions"])
+
+    def test_suggest_upsell_reason_is_string(self):
+        dept = self._dept()
+        result = dept.suggest_upsell({"event_type": "корпоратив"})
+        assert isinstance(result["reason"], str)
+        assert len(result["reason"]) > 5
