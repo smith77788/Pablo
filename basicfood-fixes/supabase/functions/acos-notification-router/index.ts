@@ -119,6 +119,10 @@ Deno.serve(async (req) => {
     let inappSent = 0;
     let routedCount = 0;
 
+    // Determine routing decisions and collect all in-app notification rows in one pass.
+    const routingDecisions: Array<{ ins: typeof insights[number]; routeTg: boolean; routeInapp: boolean }> = [];
+    const allNotifRows: any[] = [];
+
     for (const ins of insights) {
       const risk = ins.risk_level ?? "low";
       let routeTg = false;
@@ -129,44 +133,52 @@ Deno.serve(async (req) => {
 
       // Apply throttle
       if (routeTg && lastTgByType.has(ins.insight_type)) routeTg = false;
+      if (routeTg) lastTgByType.add(ins.insight_type); // prevent same-batch duplicates
 
-      // Dispatch in-app notifications
       if (routeInapp && adminIds.length > 0) {
-        const rows = adminIds.map((uid) => ({
-          user_id: uid,
-          type: "acos_insight",
-          title: `${severityEmoji(risk)} ${ins.title}`,
-          message: ins.description?.slice(0, 280) ?? null,
-          reference_id: ins.id,
-        }));
-        // notifications has RLS requiring admin/moderator auth.uid(); service role bypasses.
-        const { error: nErr } = await supabase.from("notifications").insert(rows as never);
-        if (!nErr) inappSent += rows.length;
+        for (const uid of adminIds) {
+          allNotifRows.push({
+            user_id: uid,
+            type: "acos_insight",
+            title: `${severityEmoji(risk)} ${ins.title}`,
+            message: ins.description?.slice(0, 280) ?? null,
+            reference_id: ins.id,
+          });
+        }
       }
-
-      // Dispatch Telegram
-      if (routeTg && (chats?.length ?? 0) > 0) {
-        const text = `${severityEmoji(risk)} <b>${ins.title}</b>\n\n${ins.description}\n\n<i>Layer: ${ins.affected_layer ?? "—"} · Risk: ${risk}</i>\n\n👉 /admin/insights`;
-        const results = await Promise.all(chats!.map((c) => sendTelegram(Number(c.chat_id), text)));
-        tgSent += results.filter(Boolean).length;
-        lastTgByType.add(ins.insight_type); // prevent same-batch duplicates
-      }
-
-      // Mark insight as routed
-      await supabase
-        .from("ai_insights")
-        .update({
-          status: "routed",
-          metrics: {
-            ...((ins.metrics as Record<string, unknown>) ?? {}),
-            routed_at: new Date().toISOString(),
-            routed_telegram: routeTg,
-            routed_inapp: routeInapp,
-          },
-        })
-        .eq("id", ins.id);
-      routedCount++;
+      routingDecisions.push({ ins, routeTg, routeInapp });
     }
+
+    // Batch insert all in-app notifications.
+    if (allNotifRows.length > 0) {
+      const { error: nErr } = await supabase.from("notifications").insert(allNotifRows as never);
+      if (!nErr) inappSent = allNotifRows.length;
+    }
+
+    // Parallel Telegram sends + parallel ai_insights status updates.
+    const routedAt = new Date().toISOString();
+    await Promise.all(
+      routingDecisions.map(async ({ ins, routeTg, routeInapp }) => {
+        if (routeTg && (chats?.length ?? 0) > 0) {
+          const text = `${severityEmoji(ins.risk_level ?? "low")} <b>${ins.title}</b>\n\n${ins.description}\n\n<i>Layer: ${ins.affected_layer ?? "—"} · Risk: ${ins.risk_level ?? "low"}</i>\n\n👉 /admin/insights`;
+          const results = await Promise.all(chats!.map((c) => sendTelegram(Number(c.chat_id), text)));
+          tgSent += results.filter(Boolean).length;
+        }
+        await supabase
+          .from("ai_insights")
+          .update({
+            status: "routed",
+            metrics: {
+              ...((ins.metrics as Record<string, unknown>) ?? {}),
+              routed_at: routedAt,
+              routed_telegram: routeTg,
+              routed_inapp: routeInapp,
+            },
+          })
+          .eq("id", ins.id);
+        routedCount++;
+      }),
+    );
 
     return new Response(
       JSON.stringify({
