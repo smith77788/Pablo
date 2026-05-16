@@ -137,6 +137,198 @@
     <!-- /Yandex.Metrica -->
     <!-- Analytics wrapper -->
     <script src="/js/analytics.js" defer></script>
+
+    <!-- ═══════════════════════════════════════════════════════
+         UI ENHANCEMENTS — visual animations & effects
+         ═══════════════════════════════════════════════════════ -->
+    <style>
+      /* ── 1. Hero title fade-in word-by-word ─────────────────── */
+      #hero-title .word {
+        display: inline-block;
+        opacity: 0;
+        transform: translateY(20px);
+        animation: heroWordIn 0.7s ease forwards;
+      }
+      #hero-title .word:nth-child(1) {
+        animation-delay: 0.1s;
+      }
+      #hero-title .word:nth-child(2) {
+        animation-delay: 0.35s;
+      }
+      #hero-title .word:nth-child(3) {
+        animation-delay: 0.6s;
+      }
+      #hero-subtitle {
+        opacity: 0;
+        animation: heroWordIn 0.7s ease 0.9s forwards;
+      }
+      @keyframes heroWordIn {
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* ── 2. Service-card hover: gold border + lift ───────────── */
+      .service-card {
+        transition:
+          transform 0.28s ease,
+          border-color 0.28s ease,
+          box-shadow 0.28s ease;
+      }
+      .service-card:hover {
+        transform: translateY(-4px);
+        border-color: var(--gold) !important;
+        box-shadow: 0 8px 32px rgba(201, 169, 110, 0.18);
+      }
+
+      /* Pricing cards same treatment */
+      .pricing-card {
+        transition:
+          transform 0.28s ease,
+          border-color 0.28s ease,
+          box-shadow 0.28s ease;
+      }
+      .pricing-card:not(.pricing-featured):hover {
+        transform: translateY(-4px);
+        border-color: var(--gold) !important;
+        box-shadow: 0 8px 32px rgba(201, 169, 110, 0.18);
+      }
+
+      /* Step cards hover */
+      .step {
+        transition:
+          transform 0.28s ease,
+          box-shadow 0.28s ease;
+      }
+      .step:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 32px rgba(201, 169, 110, 0.12);
+      }
+
+      /* ── 3. Stats counter — animated number (via JS) ─────────── */
+      .stat-num {
+        display: inline-block;
+        transition: color 0.3s;
+      }
+      .stats-bar .stat-item {
+        transition: transform 0.28s ease;
+      }
+      .stats-bar .stat-item:hover {
+        transform: translateY(-3px);
+      }
+
+      /* ── 4. CTA primary button — subtle gold pulse glow ──────── */
+      @keyframes ctaPulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(201, 169, 110, 0.55);
+        }
+        60% {
+          box-shadow: 0 0 0 10px rgba(201, 169, 110, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(201, 169, 110, 0);
+        }
+      }
+      .cta-section .btn-primary {
+        animation: ctaPulse 2.2s ease-out infinite;
+      }
+      /* Also the hero primary CTA */
+      .hero-btns .btn-primary {
+        animation: ctaPulse 2.4s ease-out 1.2s infinite;
+      }
+
+      /* ── 7. Footer gradient divider ──────────────────────────── */
+      .footer {
+        position: relative;
+      }
+      .footer::before {
+        content: '';
+        display: block;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          var(--gold-dark) 20%,
+          var(--gold) 50%,
+          var(--gold-dark) 80%,
+          transparent 100%
+        );
+        margin-bottom: 0;
+      }
+
+      /* Footer link hover gold underline */
+      .footer-col a {
+        position: relative;
+        transition: color 0.2s;
+      }
+      .footer-col a::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        bottom: -2px;
+        width: 0;
+        height: 1px;
+        background: var(--gold);
+        transition: width 0.25s ease;
+      }
+      .footer-col a:hover {
+        color: var(--gold);
+      }
+      .footer-col a:hover::after {
+        width: 100%;
+      }
+
+      /* ── Model card lazy image fade ─────────────────────────── */
+      .model-img,
+      .model-card img {
+        opacity: 0;
+        transition: opacity 0.5s ease;
+      }
+      .model-img.loaded,
+      .model-card img.loaded {
+        opacity: 1;
+      }
+
+      /* ── Testimonial card hover ──────────────────────────────── */
+      .testimonial-card {
+        transition:
+          transform 0.28s ease,
+          border-color 0.28s ease !important;
+      }
+      .testimonial-card:hover {
+        transform: translateY(-4px);
+        border-color: var(--gold) !important;
+      }
+
+      /* ── 6. Parallax: extend hero-bg so no gap shows at bottom ── */
+      .hero-bg {
+        /* extend 40% below so translateY(30%) never clips */
+        bottom: -40% !important;
+        will-change: transform;
+      }
+
+      /* ── Reduced motion: disable all animations ──────────────── */
+      @media (prefers-reduced-motion: reduce) {
+        #hero-title .word,
+        #hero-subtitle {
+          opacity: 1 !important;
+          transform: none !important;
+          animation: none !important;
+        }
+        .cta-section .btn-primary,
+        .hero-btns .btn-primary {
+          animation: none !important;
+        }
+        .service-card:hover,
+        .pricing-card:hover,
+        .step:hover,
+        .stats-bar .stat-item:hover,
+        .testimonial-card:hover {
+          transform: none !important;
+        }
+      }
+    </style>
   </head>
   <body>
     <a href="#main-content" class="skip-link">Перейти к содержимому</a>
@@ -240,7 +432,7 @@
         </div>
         <div class="hero-content">
           <div class="hero-label">Модельное агентство</div>
-          <h1 id="hero-title">NEVESTY<br /><em>Models</em></h1>
+          <h1 id="hero-title"><span class="word">NEVESTY</span><br /><em class="word">Models</em></h1>
           <p class="hero-tagline" id="hero-subtitle">Элегантность. Стиль. Совершенство.</p>
           <p class="hero-desc">
             Мы создаём неповторимые образы для ваших мероприятий. Эксклюзивные модели для fashion-шоу, фотосессий и
@@ -1942,6 +2134,96 @@
         var detail = (e && e.detail) || {};
         if (window.NM && NM.analytics) NM.analytics.submitOrder(detail.event_type || '', detail.budget || 0);
       });
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════
+         UI ENHANCEMENTS — JS: parallax, lazy img
+         (counter-up is handled by existing inline script above)
+         ═══════════════════════════════════════════════════════ -->
+    <script>
+      (function () {
+        'use strict';
+
+        /* ── Skip all motion-heavy JS for reduced-motion users ─── */
+        var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        /* ────────────────────────────────────────────────────────
+         6. PARALLAX on hero background
+         Max 30% of scroll speed — smooth and subtle
+      ──────────────────────────────────────────────────────── */
+        if (!reducedMotion) {
+          var heroBg = document.querySelector('.hero-bg');
+          var heroSection = document.querySelector('.hero');
+
+          if (heroBg && heroSection) {
+            var ticking = false;
+
+            function updateParallax() {
+              var scrollY = window.pageYOffset;
+              var heroH = heroSection.offsetHeight;
+              // Only active while hero is visible
+              if (scrollY < heroH) {
+                // 0.3 = 30% speed
+                var offset = scrollY * 0.3;
+                heroBg.style.transform = 'translateY(' + offset + 'px)';
+              }
+              ticking = false;
+            }
+
+            window.addEventListener(
+              'scroll',
+              function () {
+                if (!ticking) {
+                  requestAnimationFrame(updateParallax);
+                  ticking = true;
+                }
+              },
+              { passive: true }
+            );
+          }
+        }
+
+        /* ────────────────────────────────────────────────────────
+         5. LAZY LOADING for dynamically injected model images
+         We observe the DOM for images added by JS to #featuredGrid
+         and apply the .loaded class after load.
+      ──────────────────────────────────────────────────────── */
+        function applyLazyLoad(img) {
+          if (!img || img.hasAttribute('data-lazy-init')) return;
+          img.setAttribute('data-lazy-init', '1');
+          // Add loading="lazy" if not present
+          if (!img.hasAttribute('loading')) img.setAttribute('loading', 'lazy');
+          // Fade-in on load
+          if (img.complete && img.naturalWidth > 0) {
+            img.classList.add('loaded');
+          } else {
+            img.addEventListener('load', function () {
+              img.classList.add('loaded');
+            });
+            img.addEventListener('error', function () {
+              img.classList.add('loaded');
+            }); // fallback
+          }
+        }
+
+        var featuredGrid = document.getElementById('featuredGrid');
+        if (featuredGrid && 'MutationObserver' in window) {
+          // Process any images already present
+          featuredGrid.querySelectorAll('img').forEach(applyLazyLoad);
+
+          var imgObserver = new MutationObserver(function (mutations) {
+            mutations.forEach(function (m) {
+              m.addedNodes.forEach(function (node) {
+                if (node.nodeType === 1) {
+                  if (node.tagName === 'IMG') applyLazyLoad(node);
+                  node.querySelectorAll && node.querySelectorAll('img').forEach(applyLazyLoad);
+                }
+              });
+            });
+          });
+          imgObserver.observe(featuredGrid, { childList: true, subtree: true });
+        }
+      })();
     </script>
   </body>
 </html>
