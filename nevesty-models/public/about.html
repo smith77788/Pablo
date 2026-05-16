@@ -571,6 +571,151 @@
         }
       }
 
+      /* ─── TEAM CARD HOVER OVERLAY ──────────────────── */
+      .team-card {
+        position: relative;
+        overflow: hidden;
+      }
+      .team-card-overlay {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(160deg, rgba(201, 169, 110, 0.12) 0%, rgba(15, 10, 5, 0.92) 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 24px;
+        opacity: 0;
+        transform: translateY(10px);
+        transition:
+          opacity 0.32s ease,
+          transform 0.32s ease;
+        border-radius: var(--radius);
+        pointer-events: none;
+      }
+      .team-card:hover .team-card-overlay,
+      .team-card:focus-within .team-card-overlay {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
+      }
+      .team-card-overlay p {
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 0.8rem;
+        line-height: 1.65;
+        text-align: center;
+        margin: 0;
+      }
+      .team-card-overlay .team-social {
+        display: flex;
+        gap: 12px;
+        margin-top: 6px;
+      }
+      .team-card-overlay .team-social a {
+        color: var(--gold);
+        font-size: 0.75rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        text-decoration: none;
+        border-bottom: 1px solid rgba(201, 169, 110, 0.4);
+        transition:
+          border-color 0.2s,
+          color 0.2s;
+      }
+      .team-card-overlay .team-social a:hover {
+        color: var(--gold-light, #e0c882);
+        border-color: var(--gold-light, #e0c882);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .team-card-overlay {
+          transition: none;
+        }
+      }
+
+      /* ─── TIMELINE ENHANCED ─────────────────────────── */
+      .timeline-item {
+        opacity: 0;
+        transform: translateX(-20px);
+        transition:
+          opacity 0.5s ease,
+          transform 0.5s ease;
+      }
+      .timeline-item.tl-visible {
+        opacity: 1;
+        transform: translateX(0);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .timeline-item {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+      }
+      .timeline-dot {
+        transition:
+          background 0.3s ease,
+          box-shadow 0.3s ease;
+      }
+      .timeline-item.tl-visible .timeline-dot {
+        background: rgba(201, 169, 110, 0.25);
+        box-shadow: 0 0 0 4px rgba(201, 169, 110, 0.12);
+      }
+
+      /* ─── BLOCKQUOTE ────────────────────────────────── */
+      .about-blockquote {
+        position: relative;
+        max-width: 720px;
+        margin: 56px auto;
+        padding: 40px 56px 40px 72px;
+        background: linear-gradient(135deg, rgba(201, 169, 110, 0.06) 0%, transparent 100%);
+        border-left: 3px solid var(--gold);
+      }
+      .about-blockquote::before {
+        content: '\201C';
+        position: absolute;
+        top: 16px;
+        left: 20px;
+        font-family: 'Playfair Display', serif;
+        font-size: 6rem;
+        line-height: 1;
+        color: var(--gold);
+        opacity: 0.6;
+        pointer-events: none;
+      }
+      .about-blockquote::after {
+        content: '\201D';
+        position: absolute;
+        bottom: -16px;
+        right: 24px;
+        font-family: 'Playfair Display', serif;
+        font-size: 6rem;
+        line-height: 1;
+        color: var(--gold);
+        opacity: 0.25;
+        pointer-events: none;
+      }
+      .about-blockquote p {
+        font-family: 'Playfair Display', serif;
+        font-size: clamp(1rem, 2vw, 1.25rem);
+        font-style: italic;
+        color: var(--white);
+        line-height: 1.8;
+        margin: 0 0 16px;
+      }
+      .about-blockquote cite {
+        font-size: 0.75rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--gold);
+        font-style: normal;
+      }
+
+      /* ─── ANIMATED COUNTERS ─────────────────────────── */
+      .about-stat-num.counting {
+        transition: none;
+      }
+
       /* ─── CTA ────────────────────────────────────────── */
       .about-cta {
         padding: 80px 0 100px;
@@ -922,15 +1067,24 @@
           <p>Профессионалы, которые каждый день работают для вашего успеха</p>
         </div>
         <div class="team-grid">
-          <div class="team-card">
+          <div class="team-card" tabindex="0">
             <div class="team-avatar">👑</div>
             <div class="team-name">Анна Соколова</div>
             <div class="team-role">Директор агентства</div>
             <p class="team-bio">
               10 лет в индустрии моды. Основала агентство в 2014 году. Эксперт по кастингу и стратегическому развитию.
             </p>
+            <div class="team-card-overlay" aria-hidden="true">
+              <p>
+                Основатель и визионер агентства. Выстроила систему отбора и подготовки моделей, признанную лучшей в
+                отрасли.
+              </p>
+              <div class="team-social">
+                <a href="mailto:info@nevesty-models.ru">Написать</a>
+              </div>
+            </div>
           </div>
-          <div class="team-card">
+          <div class="team-card" tabindex="0">
             <div class="team-avatar">🎯</div>
             <div class="team-name">Мария Петрова</div>
             <div class="team-role">Старший менеджер</div>
@@ -938,14 +1092,32 @@
               Более 300 успешно организованных мероприятий. Отвечает за качество обслуживания клиентов и координацию
               моделей.
             </p>
+            <div class="team-card-overlay" aria-hidden="true">
+              <p>
+                Отвечает за весь клиентский путь — от первого контакта до финального результата. Всегда на связи в день
+                мероприятия.
+              </p>
+              <div class="team-social">
+                <a href="/contact.html">Связаться</a>
+              </div>
+            </div>
           </div>
-          <div class="team-card">
+          <div class="team-card" tabindex="0">
             <div class="team-avatar">✨</div>
             <div class="team-name">Екатерина Иванова</div>
             <div class="team-role">Кастинг-директор</div>
             <p class="team-bio">
               Профессиональный фотограф и стилист. Отвечает за отбор, обучение и подготовку моделей к съёмкам.
             </p>
+            <div class="team-card-overlay" aria-hidden="true">
+              <p>
+                Формирует и обновляет базу моделей. Проводит кастинги, фотосессии для портфолио и мастер-классы по
+                позированию.
+              </p>
+              <div class="team-social">
+                <a href="/catalog.html">Каталог</a>
+              </div>
+            </div>
           </div>
         </div>
       </div>

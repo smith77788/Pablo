@@ -330,27 +330,51 @@
 
       /* ─── PARAMETERS TABLE ───────────────────────────── */
       .model-params-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
         margin-bottom: 40px;
       }
       .model-param-item {
-        border-left: 2px solid var(--border);
-        padding: 8px 0 8px 14px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(201, 169, 110, 0.06);
+        border: 1px solid rgba(201, 169, 110, 0.2);
+        border-radius: 40px;
+        padding: 8px 16px 8px 12px;
+        transition:
+          background 0.2s,
+          border-color 0.2s;
+      }
+      .model-param-item:hover {
+        background: rgba(201, 169, 110, 0.12);
+        border-color: rgba(201, 169, 110, 0.4);
+      }
+      .model-param-icon {
+        font-size: 0.95rem;
+        line-height: 1;
+        flex-shrink: 0;
+      }
+      .model-param-inner {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
       }
       .model-param-item label {
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         letter-spacing: 1.5px;
         text-transform: uppercase;
         color: var(--text-dim);
         display: block;
-        margin-bottom: 4px;
+        margin: 0;
+        line-height: 1.2;
       }
       .model-param-item span {
-        font-size: 0.9rem;
-        color: var(--text);
-        font-weight: 500;
+        font-size: 0.88rem;
+        color: var(--gold);
+        font-weight: 600;
+        line-height: 1.2;
       }
 
       /* ─── GALLERY ─────────────────────────────────────── */
@@ -555,15 +579,189 @@
         .model-stats {
           grid-template-columns: repeat(2, 1fr);
         }
-        .model-params-grid {
-          grid-template-columns: 1fr;
-        }
         .model-gallery-grid {
           grid-template-columns: repeat(2, 1fr);
         }
         .model-profile {
           padding: 0 16px 60px;
         }
+      }
+
+      /* ─── HORIZONTAL SCROLL — RELATED MODELS ─────────── */
+      @media (max-width: 640px) {
+        #related-models-section {
+          overflow: hidden;
+        }
+        #related-models {
+          display: flex !important;
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          scroll-snap-type: x mandatory;
+          -webkit-overflow-scrolling: touch;
+          gap: 12px;
+          padding-bottom: 12px;
+          scrollbar-width: none;
+        }
+        #related-models::-webkit-scrollbar {
+          display: none;
+        }
+        #related-models > a {
+          flex: 0 0 62vw;
+          max-width: 62vw;
+          scroll-snap-align: start;
+        }
+      }
+
+      /* ─── STAGGER ANIMATION ───────────────────────────── */
+      .reveal-item {
+        opacity: 0;
+        transform: translateY(20px);
+        transition:
+          opacity 0.5s ease,
+          transform 0.5s ease;
+      }
+      .reveal-item.revealed {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* ─── SHARE BUTTONS ───────────────────────────────── */
+      .share-block {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 14px;
+        flex-wrap: wrap;
+      }
+      .share-label {
+        font-size: 0.75rem;
+        color: var(--text-dim);
+        white-space: nowrap;
+      }
+      .share-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 14px;
+        border-radius: 8px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        transition:
+          opacity 0.2s,
+          transform 0.15s;
+        text-decoration: none;
+        line-height: 1;
+      }
+      .share-btn:hover {
+        opacity: 0.85;
+        transform: translateY(-1px);
+      }
+      .share-btn svg {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+      }
+      .share-btn-vk {
+        background: #4c75a3;
+        color: #fff;
+      }
+      .share-btn-tg {
+        background: #2ca5e0;
+        color: #fff;
+      }
+      .share-btn-copy {
+        background: var(--bg3);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+      }
+
+      /* ─── STICKY MOBILE CTA ───────────────────────────── */
+      .sticky-book-mobile {
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 500;
+        padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+        background: linear-gradient(to top, rgba(8, 8, 8, 0.98) 70%, transparent);
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(8px);
+        transition:
+          opacity 0.35s ease,
+          transform 0.35s ease;
+      }
+      .sticky-book-mobile.visible {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: all;
+      }
+      .sticky-book-mobile .btn-book-mobile {
+        display: block;
+        width: 100%;
+        padding: 16px 24px;
+        background: var(--gold);
+        color: var(--bg);
+        font-size: 0.8rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        font-weight: 600;
+        text-align: center;
+        border: none;
+        cursor: pointer;
+        transition: background 0.2s;
+        text-decoration: none;
+        border-radius: 4px;
+        box-shadow: 0 4px 20px rgba(201, 169, 110, 0.3);
+      }
+      .sticky-book-mobile .btn-book-mobile:hover {
+        background: var(--gold-light);
+      }
+      @media (min-width: 900px) {
+        .sticky-book-mobile {
+          display: none !important;
+        }
+      }
+      @media (max-width: 899px) {
+        .sticky-book-mobile {
+          display: block;
+        }
+        /* Extra bottom padding so content isn't hidden behind the sticky bar */
+        .model-page {
+          padding-bottom: 80px;
+        }
+      }
+
+      /* ─── ENHANCED LIGHTBOX ───────────────────────────── */
+      #lightbox {
+        opacity: 0;
+        transition: opacity 0.25s ease;
+      }
+      #lightbox.lb-open {
+        opacity: 1;
+      }
+      #lightboxImg {
+        border-radius: 4px;
+        box-shadow: 0 0 60px rgba(0, 0, 0, 0.8);
+        transition: opacity 0.2s ease;
+      }
+      #lightboxImg.lb-loading {
+        opacity: 0.4;
+      }
+      /* Keyboard-hint strip */
+      #lightboxHint {
+        position: absolute;
+        bottom: 52px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.7rem;
+        color: rgba(255, 255, 255, 0.35);
+        white-space: nowrap;
+        pointer-events: none;
+        letter-spacing: 1px;
       }
     </style>
   </head>
@@ -930,61 +1128,42 @@
                   ⚖️ Добавить к сравнению
                 </button>
                 <!-- Social sharing -->
-                <div style="display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap">
-                  <span style="font-size: 0.75rem; color: var(--text-dim); white-space: nowrap">Поделиться:</span>
+                <div class="share-block">
+                  <span class="share-label">Поделиться:</span>
                   <button
                     onclick="shareModel('vk')"
                     aria-label="Поделиться профилем модели во ВКонтакте"
-                    style="
-                      padding: 6px 14px;
-                      background: #4c75a3;
-                      color: #fff;
-                      font-size: 0.75rem;
-                      border: none;
-                      border-radius: 6px;
-                      cursor: pointer;
-                      transition: opacity 0.2s;
-                    "
-                    onmouseover="this.style.opacity = '0.85'"
-                    onmouseout="this.style.opacity = '1'"
+                    class="share-btn share-btn-vk"
                   >
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path
+                        d="M15.07 2H8.93C3.33 2 2 3.33 2 8.93v6.14C2 20.67 3.33 22 8.93 22h6.14C20.67 22 22 20.67 22 15.07V8.93C22 3.33 20.67 2 15.07 2zm3.08 13.56h-1.64c-.62 0-.81-.49-1.92-1.61-1-.95-1.44-.95-1.44 0v1.61c0 .44-.14.61-1.25.61-1.86 0-3.91-1.13-5.35-3.22C4.89 10.4 4.5 8.5 4.5 8.1c0-.17.07-.33.44-.33h1.64c.32 0 .44.15.57.5.62 1.81 1.68 3.39 2.11 3.39.16 0 .23-.07.23-.48V9.07c-.05-.88-.5-1-.5-1.33 0-.16.13-.32.33-.32h2.59c.27 0 .37.15.37.47v3.22c0 .27.12.37.19.37.16 0 .3-.1.6-.41 1.02-1.14 1.75-2.9 1.75-2.9.1-.2.26-.38.55-.38h1.64c.5 0 .6.25.5.5-.21.96-2.19 3.75-2.19 3.75-.17.28-.23.41 0 .71.17.23.73.71 1.1 1.14.68.76 1.2 1.4 1.34 1.84.13.43-.09.65-.52.65z"
+                      />
+                    </svg>
                     VK
                   </button>
                   <button
                     onclick="shareModel('tg')"
                     aria-label="Поделиться профилем модели в Telegram"
-                    style="
-                      padding: 6px 14px;
-                      background: #2ca5e0;
-                      color: #fff;
-                      font-size: 0.75rem;
-                      border: none;
-                      border-radius: 6px;
-                      cursor: pointer;
-                      transition: opacity 0.2s;
-                    "
-                    onmouseover="this.style.opacity = '0.85'"
-                    onmouseout="this.style.opacity = '1'"
+                    class="share-btn share-btn-tg"
                   >
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path
+                        d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.19 13.902l-2.966-.924c-.643-.204-.657-.643.136-.953l11.57-4.46c.537-.194 1.006.131.964.656z"
+                      />
+                    </svg>
                     Telegram
                   </button>
                   <button
                     id="copy-btn"
                     onclick="shareModel('copy')"
                     aria-label="Скопировать ссылку на профиль модели"
-                    style="
-                      padding: 6px 14px;
-                      background: var(--bg3);
-                      color: var(--text-muted);
-                      font-size: 0.75rem;
-                      border: 1px solid var(--border);
-                      border-radius: 6px;
-                      cursor: pointer;
-                      transition: opacity 0.2s;
-                    "
-                    onmouseover="this.style.opacity = '0.85'"
-                    onmouseout="this.style.opacity = '1'"
+                    class="share-btn share-btn-copy"
                   >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" />
+                      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                    </svg>
                     Копировать
                   </button>
                 </div>
@@ -1015,6 +1194,11 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Sticky mobile CTA — appears after scrolling past hero -->
+    <div class="sticky-book-mobile" id="stickyBookMobile" aria-hidden="true">
+      <a class="btn-book-mobile" id="stickyBookBtn" href="/booking.html"> 📋 Забронировать </a>
     </div>
 
     <!-- Lightbox overlay for gallery -->
@@ -1124,6 +1308,7 @@
           pointer-events: none;
         "
       ></div>
+      <div id="lightboxHint">← → для навигации · ESC для закрытия</div>
     </div>
 
     <div class="toast-container" id="toastContainer"></div>
@@ -1432,7 +1617,16 @@
             el('bioText').textContent = 'Описание не добавлено.';
           }
 
-          // Parameters
+          // Parameters — badge style with icons
+          const PARAM_ICONS = {
+            Вес: '⚖️',
+            Грудь: '📐',
+            Талия: '〰️',
+            Бёдра: '📏',
+            Обувь: '👠',
+            Волосы: '💇',
+            Глаза: '👁️',
+          };
           const params = [];
           if (m.weight) params.push(['Вес', `${m.weight} кг`]);
           if (m.bust) params.push(['Грудь', m.bust]);
@@ -1444,15 +1638,28 @@
 
           const paramsGrid = el('paramsGrid');
           if (params.length) {
-            params.forEach(([label, val]) => {
+            params.forEach(([label, val], i) => {
               const item = document.createElement('div');
-              item.className = 'model-param-item';
+              item.className = 'model-param-item reveal-item';
+              item.style.transitionDelay = `${i * 60}ms`;
+
+              const icon = document.createElement('span');
+              icon.className = 'model-param-icon';
+              icon.setAttribute('aria-hidden', 'true');
+              icon.textContent = PARAM_ICONS[label] || '✦';
+
+              const inner = document.createElement('div');
+              inner.className = 'model-param-inner';
+
               const lbl = document.createElement('label');
               lbl.textContent = label;
               const spn = document.createElement('span');
               spn.textContent = val;
-              item.appendChild(lbl);
-              item.appendChild(spn);
+
+              inner.appendChild(lbl);
+              inner.appendChild(spn);
+              item.appendChild(icon);
+              item.appendChild(inner);
               paramsGrid.appendChild(item);
             });
           } else {
