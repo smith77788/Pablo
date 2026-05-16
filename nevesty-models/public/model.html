@@ -1616,6 +1616,9 @@
             el('bioText').className = 'model-bio-empty';
             el('bioText').textContent = 'Описание не добавлено.';
           }
+          // Add reveal animation class to bio section
+          const bioSection = el('bioSection');
+          if (bioSection) bioSection.classList.add('reveal-item');
 
           // Parameters — badge style with icons
           const PARAM_ICONS = {
@@ -1709,7 +1712,11 @@
 
           // CTA sidebar
           el('ctaName').textContent = m.name;
-          el('bookBtn').href = `/booking.html?model=${m.id}&model_id=${m.id}&model_name=${encodeURIComponent(m.name)}`;
+          const bookUrl = `/booking.html?model=${m.id}&model_id=${m.id}&model_name=${encodeURIComponent(m.name)}`;
+          el('bookBtn').href = bookUrl;
+          // Sync sticky mobile CTA
+          const stickyBtn = el('stickyBookBtn');
+          if (stickyBtn) stickyBtn.href = bookUrl;
 
           // Upcoming busy dates notice
           if (Array.isArray(m.busy_dates) && m.busy_dates.length) {
@@ -1766,6 +1773,10 @@
           // Re-sync fav/compare buttons now that model is rendered
           updateFavBtn();
           updateCompareBtn();
+          // Trigger staggered reveal for newly injected elements
+          if (typeof window._observeRevealItems === 'function') window._observeRevealItems();
+          // Recalculate sticky CTA trigger point after hero renders
+          if (typeof window._recalcStickyHero === 'function') setTimeout(window._recalcStickyHero, 100);
         }
 
         // ── Availability section ──────────────────────────────────────────────────
@@ -1868,15 +1879,35 @@
           _lbIdx = idx || 0;
           _lbTrigger = document.activeElement;
           updateLightboxImg();
-          el('lightbox').style.display = 'flex';
+          const lb = el('lightbox');
+          lb.style.display = 'flex';
+          // Fade in
+          requestAnimationFrame(() => {
+            lb.classList.add('lb-open');
+          });
           document.body.style.overflow = 'hidden';
+          lb.setAttribute('aria-hidden', 'false');
+          // Show/hide keyboard hint based on input device
+          const hint = el('lightboxHint');
+          if (hint) hint.style.display = window.matchMedia('(pointer:coarse)').matches ? 'none' : '';
           // Move focus to close button for keyboard and screen reader users
-          const closeBtn = el('lightbox').querySelector('[aria-label="Закрыть"]');
+          const closeBtn = lb.querySelector('[aria-label="Закрыть"]');
           if (closeBtn) setTimeout(() => closeBtn.focus(), 50);
         };
         function updateLightboxImg() {
           const img = el('lightboxImg');
-          img.src = _lbPhotos[_lbIdx];
+          img.classList.add('lb-loading');
+          const newSrc = _lbPhotos[_lbIdx];
+          const tmp = new Image();
+          tmp.onload = () => {
+            img.src = newSrc;
+            img.classList.remove('lb-loading');
+          };
+          tmp.onerror = () => {
+            img.src = newSrc;
+            img.classList.remove('lb-loading');
+          };
+          tmp.src = newSrc;
           const counter = el('lightboxCounter');
           const total = _lbPhotos.length;
           if (counter) counter.textContent = total > 1 ? `${_lbIdx + 1} / ${total}` : '';
@@ -1892,18 +1923,103 @@
           updateLightboxImg();
         };
         window.closeLightbox = function () {
-          el('lightbox').style.display = 'none';
+          const lb = el('lightbox');
+          lb.classList.remove('lb-open');
+          // Wait for fade-out transition
+          lb.addEventListener('transitionend', function _done() {
+            lb.style.display = 'none';
+            lb.setAttribute('aria-hidden', 'true');
+            lb.removeEventListener('transitionend', _done);
+          });
           document.body.style.overflow = '';
           // Restore focus to the element that triggered the lightbox
           if (_lbTrigger && typeof _lbTrigger.focus === 'function') {
             _lbTrigger.focus();
           }
         };
+        // Swipe support for lightbox on touch devices
+        (function () {
+          let _tsX = null;
+          const lb = el('lightbox');
+          lb.addEventListener(
+            'touchstart',
+            e => {
+              _tsX = e.touches[0].clientX;
+            },
+            { passive: true }
+          );
+          lb.addEventListener(
+            'touchend',
+            e => {
+              if (_tsX === null) return;
+              const dx = e.changedTouches[0].clientX - _tsX;
+              _tsX = null;
+              if (Math.abs(dx) < 40) return;
+              if (dx < 0) window.nextPhoto();
+              else window.prevPhoto();
+            },
+            { passive: true }
+          );
+        })();
         document.addEventListener('keydown', function (e) {
-          if (e.key === 'Escape') window.closeLightbox();
-          if (e.key === 'ArrowLeft') window.prevPhoto();
-          if (e.key === 'ArrowRight') window.nextPhoto();
+          if (el('lightbox').style.display !== 'none') {
+            if (e.key === 'Escape') window.closeLightbox();
+            if (e.key === 'ArrowLeft') window.prevPhoto();
+            if (e.key === 'ArrowRight') window.nextPhoto();
+          }
         });
+
+        // ── Staggered reveal via IntersectionObserver ──────────────────────────────
+        (function () {
+          if (!window.IntersectionObserver) return;
+          const io = new IntersectionObserver(
+            entries => {
+              entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                  entry.target.classList.add('revealed');
+                  io.unobserve(entry.target);
+                }
+              });
+            },
+            { threshold: 0.15 }
+          );
+
+          // Observe existing and future .reveal-item elements
+          function observeRevealItems() {
+            document.querySelectorAll('.reveal-item:not(.revealed)').forEach(el => io.observe(el));
+          }
+
+          // Run once DOM is ready, then again after model loads
+          document.addEventListener('DOMContentLoaded', observeRevealItems);
+          // Expose for renderModel to call after injecting badges
+          window._observeRevealItems = observeRevealItems;
+        })();
+
+        // ── Sticky mobile CTA — show after scrolling past hero ────────────────────
+        (function () {
+          const sticky = el('stickyBookMobile');
+          if (!sticky) return;
+          let heroBottom = 300;
+          function calcHeroBottom() {
+            const hero = el('modelHero');
+            if (hero) heroBottom = hero.getBoundingClientRect().bottom + window.scrollY;
+          }
+          function onScroll() {
+            if (window.scrollY > heroBottom - 80) {
+              sticky.classList.add('visible');
+              sticky.setAttribute('aria-hidden', 'false');
+            } else {
+              sticky.classList.remove('visible');
+              sticky.setAttribute('aria-hidden', 'true');
+            }
+          }
+          window.addEventListener('scroll', onScroll, { passive: true });
+          // Recalc when model renders
+          window._recalcStickyHero = function () {
+            calcHeroBottom();
+            onScroll();
+          };
+        })();
 
         // ── Reviews ───────────────────────────────────────────────────────────────
         function escHtml(s) {
