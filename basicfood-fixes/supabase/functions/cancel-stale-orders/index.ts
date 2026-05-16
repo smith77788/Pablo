@@ -133,6 +133,27 @@ Deno.serve(async (req) => {
       adminChats = (chatRecords || []).filter((c: any) => adminIds.has(c.user_id));
     }
 
+    // Pre-fetch customer chat IDs in bulk for all order phones/emails
+    const orderPhones = orders.map((o: any) => o.customer_phone).filter(Boolean) as string[];
+    const orderEmails = orders.map((o: any) => o.customer_email).filter(Boolean) as string[];
+    const customerChatMap = new Map<string, number>(); // phone|email → chat_id
+    if (tgConfigured && (orderPhones.length > 0 || orderEmails.length > 0)) {
+      const orFilters = [
+        ...orderPhones.map((p) => `phone.eq.${p}`),
+        ...orderEmails.map((e) => `email.eq.${e}`),
+      ].join(",");
+      const { data: custRows } = await supabase
+        .from("customers")
+        .select("phone, email, telegram_chat_id")
+        .or(orFilters);
+      for (const c of custRows ?? []) {
+        if (c.telegram_chat_id) {
+          if (c.phone) customerChatMap.set(c.phone, Number(c.telegram_chat_id));
+          if (c.email) customerChatMap.set(c.email, Number(c.telegram_chat_id));
+        }
+      }
+    }
+
     let reminded = 0;
     let cancelled = 0;
     const results: any[] = [];
@@ -189,7 +210,8 @@ Deno.serve(async (req) => {
         results.push({ id: order.id, cancelled: true, mono_status: monoStatus });
 
         if (tgConfigured) {
-          const customerChatId = await findCustomerChatId(supabase, order.customer_phone, order.customer_email);
+          const customerChatId = (order.customer_phone && customerChatMap.get(order.customer_phone)) ||
+            (order.customer_email && customerChatMap.get(order.customer_email)) || null;
           if (customerChatId) {
             await tgSend(
               customerChatId,
@@ -212,9 +234,9 @@ Deno.serve(async (req) => {
             `💰 ${order.total} ₴\n` +
             `📊 Статус Monobank: ${monoStatus ?? "невідомо"}\n` +
             (customerChatId ? `\n✉️ Клієнту надіслано сповіщення в Telegram` : `\n⚠️ У клієнта немає привʼязаного Telegram — варто передзвонити`);
-          for (const chat of adminChats) {
-            await tgSend(chat.chat_id, adminText, lovableKey!, tgKey!);
-          }
+          await Promise.all(
+            adminChats.map((chat) => tgSend(chat.chat_id, adminText, lovableKey!, tgKey!)),
+          );
         }
         continue;
       }
@@ -230,7 +252,8 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const customerChatId = await findCustomerChatId(supabase, order.customer_phone, order.customer_email);
+      const customerChatId = (order.customer_phone && customerChatMap.get(order.customer_phone)) ||
+        (order.customer_email && customerChatMap.get(order.customer_email)) || null;
       const pageUrl = extractPageUrl(order.admin_notes);
 
       if (customerChatId && pageUrl) {
