@@ -879,11 +879,11 @@
             <span class="about-stat-label">Успешных заказов</span>
           </div>
           <div class="about-stat">
-            <span class="about-stat-num">10</span>
+            <span class="about-stat-num" data-count="10" data-suffix="">10</span>
             <span class="about-stat-label">Лет на рынке</span>
           </div>
           <div class="about-stat">
-            <span class="about-stat-num">15+</span>
+            <span class="about-stat-num" data-count="15" data-suffix="+">15+</span>
             <span class="about-stat-label">Городов присутствия</span>
           </div>
         </div>
@@ -920,6 +920,16 @@
             </p>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- BLOCKQUOTE -->
+    <section style="background: var(--bg); border-top: 1px solid var(--border); padding: 0 0 20px" aria-label="Цитата">
+      <div class="container">
+        <blockquote class="about-blockquote">
+          <p>Мы не просто предоставляем моделей — мы создаём образы, которые остаются в памяти навсегда.</p>
+          <cite>— Анна Соколова, основатель Nevesty Models</cite>
+        </blockquote>
       </div>
     </section>
 
@@ -1358,5 +1368,85 @@
       </a>
     </div>
     <script src="/js/cookie-consent.js" defer></script>
+    <!-- ── About UI enhancements: animated counters + timeline ── -->
+    <script>
+      (function () {
+        var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        /* ── Animated counter ── */
+        function animateCounter(el, target, suffix, duration) {
+          if (reducedMotion) {
+            el.textContent = target + suffix;
+            return;
+          }
+          var start = 0;
+          var startTime = null;
+          var step = function (ts) {
+            if (!startTime) startTime = ts;
+            var progress = Math.min((ts - startTime) / duration, 1);
+            // easeOutCubic
+            var eased = 1 - Math.pow(1 - progress, 3);
+            var current = Math.round(start + (target - start) * eased);
+            el.textContent = current + suffix;
+            if (progress < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        }
+
+        /* ── Stats IntersectionObserver ── */
+        var statsObserver = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (!entry.isIntersecting) return;
+              statsObserver.unobserve(entry.target);
+
+              var numEls = entry.target.querySelectorAll('.about-stat-num[data-count]');
+              numEls.forEach(function (el) {
+                var target = parseInt(el.dataset.count, 10);
+                var suffix = el.dataset.suffix || (el.textContent.includes('+') ? '+' : '');
+                animateCounter(el, target, suffix, 1800);
+              });
+            });
+          },
+          { threshold: 0.3 }
+        );
+
+        document.addEventListener('DOMContentLoaded', function () {
+          var statsSection = document.querySelector('.about-stats');
+          if (statsSection)
+            statsSection.querySelectorAll('.about-stat-num[data-count]').forEach(function (el) {
+              // Ensure suffix is derived before zeroing the text
+              if (!el.dataset.suffix) {
+                el.dataset.suffix = el.textContent.trim().replace(/^\d+/, '');
+              }
+            });
+          if (statsSection) statsObserver.observe(statsSection);
+
+          /* ── Timeline stagger animation ── */
+          var timelineItems = document.querySelectorAll('.timeline-item');
+          if (reducedMotion) {
+            timelineItems.forEach(function (el) {
+              el.classList.add('tl-visible');
+            });
+          } else {
+            var timelineObserver = new IntersectionObserver(
+              function (entries) {
+                entries.forEach(function (entry) {
+                  if (entry.isIntersecting) {
+                    entry.target.classList.add('tl-visible');
+                    timelineObserver.unobserve(entry.target);
+                  }
+                });
+              },
+              { threshold: 0.15, rootMargin: '0px 0px -40px 0px' }
+            );
+            timelineItems.forEach(function (el, i) {
+              el.style.transitionDelay = i * 0.12 + 's';
+              timelineObserver.observe(el);
+            });
+          }
+        });
+      })();
+    </script>
   </body>
 </html>
