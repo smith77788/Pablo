@@ -150,6 +150,18 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
+    // Pre-fetch all ai_memory records for action pattern keys in one batch.
+    const patternKeys = [
+      ...new Set(((actions ?? []) as ActionRow[]).map((a) => `${a.agent_id}:${a.action_type}`)),
+    ];
+    const { data: memoryRows } = await supabase
+      .from("ai_memory")
+      .select("id, pattern_key, success_count, failure_count, confidence, avg_impact")
+      .in("pattern_key", patternKeys);
+    const memoryMap = new Map(
+      (memoryRows ?? []).map((m: any) => [m.pattern_key, m]),
+    );
+
     const results: Array<Record<string, unknown>> = [];
     let revertedCount = 0;
 
@@ -196,10 +208,12 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // ROLLBACK: mark action reverted, update memory, log insight
-      await supabase
-        .from("ai_actions")
-        .update({
+      // ROLLBACK: mark action reverted, update memory, log insight — all in parallel.
+      const patternKey = `${act.agent_id}:${act.action_type}`;
+      const mem = memoryMap.get(patternKey) ?? null;
+
+      const revertWrites: Promise<unknown>[] = [
+        supabase.from("ai_actions").update({
           status: "reverted",
           reverted_at: new Date().toISOString(),
           reverted_reason: "auto_rollback_metric_drop",
@@ -212,58 +226,49 @@ Deno.serve(async (req) => {
             measured_at: new Date().toISOString(),
           },
           measured_at: new Date().toISOString(),
-        })
-        .eq("id", act.id);
-
-      // Update ai_memory if pattern exists for this action_type
-      const patternKey = `${act.agent_id}:${act.action_type}`;
-      const { data: mem } = await supabase
-        .from("ai_memory")
-        .select("id, success_count, failure_count, confidence, avg_impact")
-        .eq("pattern_key", patternKey)
-        .maybeSingle();
+        }).eq("id", act.id),
+        supabase.from("ai_insights").insert({
+          insight_type: "auto_rollback_executed",
+          affected_layer: "stability",
+          risk_level: "medium",
+          title: `Auto-rollback: ${act.action_type}`,
+          description: `Watchdog відкотив авто-дію ${act.action_type} (агент ${act.agent_id}). Виручка впала з ${baseline.per_day_revenue.toFixed(0)} ₴/день до ${current.per_day_revenue.toFixed(0)} ₴/день (-${(drop * 100).toFixed(1)}%) за ${MIN_AGE_HOURS}+ годин після застосування. Memory pattern оновлено.`,
+          confidence: 0.9,
+          metrics: {
+            action_id: act.id,
+            action_type: act.action_type,
+            agent_id: act.agent_id,
+            target_entity: act.target_entity,
+            target_id: act.target_id,
+            page_path: pagePath,
+            product_id: productId,
+            baseline_per_day_revenue: baseline.per_day_revenue,
+            current_per_day_revenue: current.per_day_revenue,
+            baseline_sessions: baseline.sessions,
+            current_sessions: current.sessions,
+            drop_pct: drop,
+            memory_updated: !!mem,
+          },
+          status: "new",
+        }),
+      ];
 
       if (mem) {
         const newFail = (mem.failure_count as number) + 1;
         const newSucc = mem.success_count as number;
         const totalObs = newFail + newSucc;
         const newConfidence = totalObs > 0 ? Math.max(0.1, newSucc / totalObs) : 0.5;
-        await supabase
-          .from("ai_memory")
-          .update({
+        revertWrites.push(
+          supabase.from("ai_memory").update({
             failure_count: newFail,
             confidence: newConfidence,
             last_observed_at: new Date().toISOString(),
-            is_active: newConfidence >= 0.4, // disable pattern if too unreliable
-          })
-          .eq("id", mem.id);
+            is_active: newConfidence >= 0.4,
+          }).eq("id", mem.id),
+        );
       }
 
-      // Log insight so admins see the rollback
-      await supabase.from("ai_insights").insert({
-        insight_type: "auto_rollback_executed",
-        affected_layer: "stability",
-        risk_level: "medium",
-        title: `Auto-rollback: ${act.action_type}`,
-        description: `Watchdog відкотив авто-дію ${act.action_type} (агент ${act.agent_id}). Виручка впала з ${baseline.per_day_revenue.toFixed(0)} ₴/день до ${current.per_day_revenue.toFixed(0)} ₴/день (-${(drop * 100).toFixed(1)}%) за ${MIN_AGE_HOURS}+ годин після застосування. Memory pattern оновлено.`,
-        confidence: 0.9,
-        metrics: {
-          action_id: act.id,
-          action_type: act.action_type,
-          agent_id: act.agent_id,
-          target_entity: act.target_entity,
-          target_id: act.target_id,
-          page_path: pagePath,
-          product_id: productId,
-          baseline_per_day_revenue: baseline.per_day_revenue,
-          current_per_day_revenue: current.per_day_revenue,
-          baseline_sessions: baseline.sessions,
-          current_sessions: current.sessions,
-          drop_pct: drop,
-          memory_updated: !!mem,
-        },
-        status: "new",
-      });
+      await Promise.all(revertWrites);
 
       revertedCount++;
       results.push({

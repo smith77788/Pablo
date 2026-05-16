@@ -185,31 +185,17 @@ Deno.serve(async (req) => {
             const d7 = new Date(now.getTime() - 7 * 86400000).toISOString();
             const d14 = new Date(now.getTime() - 14 * 86400000).toISOString();
 
-            const { count: views7 } = await supabase
-              .from("events")
-              .select("id", { count: "exact", head: true })
-              .eq("event_type", "product_viewed")
-              .gte("created_at", d7);
-
-            const { count: purch7 } = await supabase
-              .from("events")
-              .select("id", { count: "exact", head: true })
-              .eq("event_type", "purchase_completed")
-              .gte("created_at", d7);
-
-            const { count: viewsPrev } = await supabase
-              .from("events")
-              .select("id", { count: "exact", head: true })
-              .eq("event_type", "product_viewed")
-              .gte("created_at", d14)
-              .lt("created_at", d7);
-
-            const { count: purchPrev } = await supabase
-              .from("events")
-              .select("id", { count: "exact", head: true })
-              .eq("event_type", "purchase_completed")
-              .gte("created_at", d14)
-              .lt("created_at", d7);
+            const [
+              { count: views7 },
+              { count: purch7 },
+              { count: viewsPrev },
+              { count: purchPrev },
+            ] = await Promise.all([
+              supabase.from("events").select("id", { count: "exact", head: true }).eq("event_type", "product_viewed").gte("created_at", d7),
+              supabase.from("events").select("id", { count: "exact", head: true }).eq("event_type", "purchase_completed").gte("created_at", d7),
+              supabase.from("events").select("id", { count: "exact", head: true }).eq("event_type", "product_viewed").gte("created_at", d14).lt("created_at", d7),
+              supabase.from("events").select("id", { count: "exact", head: true }).eq("event_type", "purchase_completed").gte("created_at", d14).lt("created_at", d7),
+            ]);
 
             const cur = (views7 ?? 0) > 0 ? (purch7 ?? 0) / (views7 ?? 1) : 0;
             const prev = (viewsPrev ?? 0) > 0 ? (purchPrev ?? 0) / (viewsPrev ?? 1) : 0;

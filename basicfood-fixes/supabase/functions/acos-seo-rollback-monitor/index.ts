@@ -119,6 +119,21 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Pre-fetch source experiments for all override page_paths in one batch.
+  const ovPaths = (overrides ?? []).map((ov) => (ov as OverrideRow).page_path);
+  const { data: expRows } = await supabase
+    .from("seo_experiments")
+    .select("id, page_path")
+    .in("page_path", ovPaths)
+    .eq("status", "winner_b")
+    .is("rolled_back_at", null)
+    .order("decided_at", { ascending: false });
+  // Keep only the most recent experiment per page (first due to descending order).
+  const expMap = new Map<string, { id: string }>();
+  for (const e of expRows ?? []) {
+    if (!expMap.has((e as any).page_path)) expMap.set((e as any).page_path, e as any);
+  }
+
   const results: Array<Record<string, unknown>> = [];
 
   for (const ov of (overrides ?? []) as OverrideRow[]) {
@@ -165,16 +180,7 @@ Deno.serve(async (req) => {
       applied_from_insight_id: ov.applied_from_insight_id,
     };
 
-    // Find source experiment (most recent winner_b for this page, not yet rolled back).
-    const { data: exp } = await supabase
-      .from("seo_experiments")
-      .select("id")
-      .eq("page_path", ov.page_path)
-      .eq("status", "winner_b")
-      .is("rolled_back_at", null)
-      .order("decided_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const exp = expMap.get(ov.page_path) ?? null;
 
     const { error: delErr } = await supabase
       .from("seo_overrides")
@@ -186,43 +192,44 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    await supabase.from("seo_rollback_log").insert({
-      page_path: ov.page_path,
-      experiment_id: exp?.id ?? null,
-      override_snapshot: snapshot,
-      baseline_conv_rate: baseline.rate,
-      current_conv_rate: current.rate,
-      drop_pct: dropPct,
-      reason: "conversion_drop",
-    });
-
-    if (exp?.id) {
-      await supabase
-        .from("seo_experiments")
-        .update({ rolled_back_at: new Date().toISOString() })
-        .eq("id", exp.id);
-    }
-
-    await supabase.from("ai_insights").insert({
-      insight_type: "seo_auto_rollback",
-      affected_layer: "seo",
-      risk_level: "medium",
-      title: `Auto-rollback: ${ov.page_path}`,
-      description: `Stability agent відкотив SEO winner на ${ov.page_path}. Конверсія впала з ${(baseline.rate * 100).toFixed(2)}% до ${(current.rate * 100).toFixed(2)}% (-${(dropPct * 100).toFixed(1)}%) за останні 24h. Override видалено, сторінка повернулась на baseline.`,
-      confidence: 0.85,
-      metrics: {
+    // Parallelize the remaining rollback writes.
+    const rollbackWrites: Promise<unknown>[] = [
+      supabase.from("seo_rollback_log").insert({
         page_path: ov.page_path,
-        baseline_sessions: baseline.sessions,
-        baseline_purchases: baseline.purchases,
-        baseline_rate: baseline.rate,
-        current_sessions: current.sessions,
-        current_purchases: current.purchases,
-        current_rate: current.rate,
+        experiment_id: exp?.id ?? null,
+        override_snapshot: snapshot,
+        baseline_conv_rate: baseline.rate,
+        current_conv_rate: current.rate,
         drop_pct: dropPct,
-        snapshot,
-      },
-      status: "new",
-    });
+        reason: "conversion_drop",
+      }),
+      supabase.from("ai_insights").insert({
+        insight_type: "seo_auto_rollback",
+        affected_layer: "seo",
+        risk_level: "medium",
+        title: `Auto-rollback: ${ov.page_path}`,
+        description: `Stability agent відкотив SEO winner на ${ov.page_path}. Конверсія впала з ${(baseline.rate * 100).toFixed(2)}% до ${(current.rate * 100).toFixed(2)}% (-${(dropPct * 100).toFixed(1)}%) за останні 24h. Override видалено, сторінка повернулась на baseline.`,
+        confidence: 0.85,
+        metrics: {
+          page_path: ov.page_path,
+          baseline_sessions: baseline.sessions,
+          baseline_purchases: baseline.purchases,
+          baseline_rate: baseline.rate,
+          current_sessions: current.sessions,
+          current_purchases: current.purchases,
+          current_rate: current.rate,
+          drop_pct: dropPct,
+          snapshot,
+        },
+        status: "new",
+      }),
+    ];
+    if (exp?.id) {
+      rollbackWrites.push(
+        supabase.from("seo_experiments").update({ rolled_back_at: new Date().toISOString() }).eq("id", exp.id),
+      );
+    }
+    await Promise.all(rollbackWrites);
 
     results.push({
       page_path: ov.page_path,

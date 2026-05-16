@@ -147,8 +147,19 @@ Deno.serve(async (req) => {
     });
   }
 
-  // 3. Generate AI suggestions + create experiments.
+  // 3. Pre-fetch seo_overrides for all candidate pages in one batch.
+  const candidatePaths = candidates.map((c) => c.page_path);
+  const { data: overrideRows } = await supabase
+    .from("seo_overrides")
+    .select("page_path, h1, meta_title, meta_description, keywords")
+    .in("page_path", candidatePaths);
+  const overrideMap = new Map(
+    (overrideRows ?? []).map((r: any) => [r.page_path, r]),
+  );
+
+  // Generate AI suggestions + create experiments.
   const results: Array<Record<string, unknown>> = [];
+  const insightRows: object[] = [];
   for (const page of candidates) {
     const suggestion = await generateSuggestion(page);
     if (!suggestion) {
@@ -157,11 +168,7 @@ Deno.serve(async (req) => {
     }
 
     // Variant A = current overrides if any, else nulls (PageSeo falls back to hardcoded).
-    const { data: currentOverride } = await supabase
-      .from("seo_overrides")
-      .select("h1, meta_title, meta_description, keywords")
-      .eq("page_path", page.page_path)
-      .maybeSingle();
+    const currentOverride = overrideMap.get(page.page_path) ?? null;
 
     const { data: exp, error: expErr } = await supabase
       .from("seo_experiments")
@@ -185,7 +192,7 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    await supabase.from("ai_insights").insert({
+    insightRows.push({
       insight_type: "autonomous_seo_loop",
       affected_layer: "seo",
       risk_level: "low",
@@ -204,6 +211,10 @@ Deno.serve(async (req) => {
     });
 
     results.push({ page_path: page.page_path, action: "experiment_created", experiment_id: exp.id });
+  }
+
+  if (insightRows.length > 0) {
+    await supabase.from("ai_insights").insert(insightRows);
   }
 
   __agent.success();
