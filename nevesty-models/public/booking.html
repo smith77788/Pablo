@@ -97,15 +97,75 @@
       /* ── Step indicator enhancements ── */
       .booking-step-num {
         font-weight: 600;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg3);
+        border: 2px solid var(--border);
+        color: var(--text-dim);
+        font-size: 0.85rem;
+        transition:
+          background 0.35s ease,
+          border-color 0.35s ease,
+          color 0.35s ease,
+          box-shadow 0.35s ease;
+        position: relative;
+        z-index: 1;
+      }
+      .booking-step.active .booking-step-num {
+        background: var(--gold);
+        border-color: var(--gold);
+        color: var(--bg);
+        box-shadow: 0 0 0 4px rgba(201, 169, 110, 0.2);
+      }
+      .booking-step.done .booking-step-num {
+        background: rgba(201, 169, 110, 0.15);
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .booking-step-label {
+        font-size: 0.68rem;
+        letter-spacing: 0.5px;
+        color: var(--text-dim);
+        margin-top: 6px;
+        transition: color 0.3s ease;
+        text-align: center;
+      }
+      .booking-step.active .booking-step-label {
+        color: var(--gold);
+      }
+      .booking-step.done .booking-step-label {
+        color: var(--gold-dark);
+      }
+      /* Connector line animated fill */
+      .booking-step-line {
+        height: 2px;
+        flex: 1;
+        background: var(--border);
+        position: relative;
+        overflow: hidden;
+        margin-top: -20px;
+      }
+      .booking-step-line::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--gold-dark), var(--gold));
+        transition: width 0.5s ease;
+      }
+      .booking-step-line.done::after {
+        width: 100%;
       }
       /* Done steps show a checkmark instead of the number */
-      .booking-step.done .booking-step-num {
-        font-size: 0; /* hide the number text */
-        position: relative;
-      }
       .booking-step.done .booking-step-num::after {
         content: '✓';
-        font-size: 1rem;
+        font-size: 0.9rem;
         position: absolute;
         top: 50%;
         left: 50%;
@@ -383,7 +443,7 @@
         flex: 1;
       }
 
-      /* ── Booking step done label ── */
+      /* ── Booking step done label (already handled above, keep for specificity) ── */
       .booking-step.done .booking-step-label {
         color: var(--gold-dark);
       }
@@ -488,6 +548,135 @@
       .btn-add-model:hover {
         color: var(--gold-light);
         border-color: var(--gold-light);
+      }
+
+      /* ── Step slide transition animations ── */
+      @media (prefers-reduced-motion: no-preference) {
+        .booking-section {
+          animation: none;
+        }
+        .booking-section.slide-in-left {
+          animation: slideInFromLeft 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+        .booking-section.slide-in-right {
+          animation: slideInFromRight 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+        .booking-section.slide-out-left {
+          animation: slideOutToLeft 0.28s ease-in forwards;
+          pointer-events: none;
+        }
+        .booking-section.slide-out-right {
+          animation: slideOutToRight 0.28s ease-in forwards;
+          pointer-events: none;
+        }
+        @keyframes slideInFromRight {
+          from {
+            opacity: 0;
+            transform: translateX(40px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        @keyframes slideInFromLeft {
+          from {
+            opacity: 0;
+            transform: translateX(-40px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        @keyframes slideOutToLeft {
+          from {
+            opacity: 1;
+            transform: translateX(0);
+          }
+          to {
+            opacity: 0;
+            transform: translateX(-40px);
+          }
+        }
+        @keyframes slideOutToRight {
+          from {
+            opacity: 1;
+            transform: translateX(0);
+          }
+          to {
+            opacity: 0;
+            transform: translateX(40px);
+          }
+        }
+      }
+
+      /* ── Field validation styles ── */
+      .form-control.field-valid {
+        border-color: #4caf82 !important;
+        box-shadow: 0 0 0 2px rgba(76, 175, 130, 0.15);
+        transition:
+          border-color 0.25s ease,
+          box-shadow 0.25s ease;
+      }
+      .form-control.field-invalid {
+        border-color: #e05c5c !important;
+        box-shadow: 0 0 0 2px rgba(224, 92, 92, 0.15);
+        transition:
+          border-color 0.25s ease,
+          box-shadow 0.25s ease;
+      }
+      .field-validation-icon {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.9rem;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+      .field-validation-icon.visible {
+        opacity: 1;
+      }
+      .field-validation-icon.icon-valid {
+        color: #4caf82;
+      }
+      .field-validation-icon.icon-invalid {
+        color: #e05c5c;
+      }
+      .form-group {
+        position: relative;
+      }
+      .form-group.has-icon .form-control {
+        padding-right: 38px;
+      }
+
+      /* ── Date input styling ── */
+      input[type='date'].form-control {
+        cursor: pointer;
+        color-scheme: dark;
+        appearance: none;
+        -webkit-appearance: none;
+      }
+      input[type='date'].form-control::-webkit-calendar-picker-indicator {
+        filter: invert(0.7) sepia(1) saturate(3) hue-rotate(5deg);
+        cursor: pointer;
+        opacity: 0.8;
+        padding: 2px;
+        border-radius: 3px;
+        transition: opacity 0.2s;
+      }
+      input[type='date'].form-control::-webkit-calendar-picker-indicator:hover {
+        opacity: 1;
+        background: rgba(201, 169, 110, 0.15);
+      }
+      .light input[type='date'].form-control {
+        color-scheme: light;
+      }
+      .light input[type='date'].form-control::-webkit-calendar-picker-indicator {
+        filter: none;
+        opacity: 0.6;
       }
 
       /* ── File upload button ── */
@@ -1312,6 +1501,196 @@
     <script src="/js/booking.js" defer></script>
     <script src="/js/telegram-webapp.js" defer></script>
     <script src="/js/darkmode.js"></script>
+    <!-- ── Booking UI enhancements: step transitions, connector lines, field validation ── -->
+    <script>
+      (function () {
+        var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        /* ── Connector line sync ── */
+        function syncConnectorLines(currentStep) {
+          var totalLines = 4;
+          for (var i = 1; i <= totalLines; i++) {
+            var line = document.getElementById('line' + i);
+            if (!line) continue;
+            if (i < currentStep) {
+              line.classList.add('done');
+            } else {
+              line.classList.remove('done');
+            }
+          }
+        }
+
+        /* ── Patch step circle: show checkmark via data-num + class ── */
+        function syncStepCircles(currentStep) {
+          var steps = document.querySelectorAll('.booking-step');
+          steps.forEach(function (el) {
+            var num = parseInt(el.dataset.step, 10);
+            var numEl = el.querySelector('.booking-step-num');
+            if (!numEl) return;
+            if (num < currentStep) {
+              el.classList.add('done');
+              el.classList.remove('active');
+              numEl.textContent = ''; // checkmark via ::after
+            } else if (num === currentStep) {
+              el.classList.add('active');
+              el.classList.remove('done');
+              numEl.textContent = num;
+            } else {
+              el.classList.remove('active', 'done');
+              numEl.textContent = num;
+            }
+          });
+        }
+
+        /* ── Step slide transition ── */
+        function animateStepTransition(outId, inId, direction) {
+          if (reducedMotion) return;
+          var outEl = document.getElementById(outId);
+          var inEl = document.getElementById(inId);
+          if (!outEl || !inEl) return;
+
+          var outClass = direction === 'forward' ? 'slide-out-left' : 'slide-out-right';
+          var inClass = direction === 'forward' ? 'slide-in-right' : 'slide-in-left';
+
+          outEl.classList.add(outClass);
+          setTimeout(function () {
+            outEl.classList.remove(outClass);
+            inEl.classList.add(inClass);
+            setTimeout(function () {
+              inEl.classList.remove(inClass);
+            }, 380);
+          }, 300);
+        }
+
+        /* ── Field validation helpers ── */
+        function validateField(input) {
+          if (!input) return;
+          var type = input.type;
+          var val = input.value.trim();
+          var valid = false;
+
+          if (type === 'email') {
+            valid = val === '' ? null : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+          } else if (type === 'tel') {
+            valid = val === '' ? null : val.replace(/\D/g, '').length >= 10;
+          } else if (type === 'date') {
+            if (val) {
+              var picked = new Date(val);
+              var today = new Date();
+              today.setHours(0, 0, 0, 0);
+              valid = picked >= today;
+            } else {
+              valid = null;
+            }
+          } else if (input.required || input.getAttribute('aria-required') === 'true') {
+            valid = val.length > 0 ? true : null;
+          } else {
+            return; // optional, no validation badge
+          }
+
+          var icon = input.parentElement && input.parentElement.querySelector('.field-validation-icon');
+          if (valid === null) {
+            input.classList.remove('field-valid', 'field-invalid');
+            if (icon) {
+              icon.classList.remove('visible', 'icon-valid', 'icon-invalid');
+            }
+            return;
+          }
+          if (valid) {
+            input.classList.add('field-valid');
+            input.classList.remove('field-invalid');
+            if (icon) {
+              icon.textContent = '✓';
+              icon.classList.add('visible', 'icon-valid');
+              icon.classList.remove('icon-invalid');
+            }
+          } else {
+            input.classList.add('field-invalid');
+            input.classList.remove('field-valid');
+            if (icon) {
+              icon.textContent = '✗';
+              icon.classList.add('visible', 'icon-invalid');
+              icon.classList.remove('icon-valid');
+            }
+          }
+        }
+
+        function attachValidation(inputEl) {
+          if (!inputEl || inputEl.dataset.validationAttached) return;
+          inputEl.dataset.validationAttached = '1';
+
+          /* inject icon span if parent has .form-group */
+          var group = inputEl.closest('.form-group');
+          if (group) {
+            group.classList.add('has-icon');
+            var icon = document.createElement('span');
+            icon.className = 'field-validation-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            group.appendChild(icon);
+          }
+
+          inputEl.addEventListener('blur', function () {
+            validateField(inputEl);
+          });
+          inputEl.addEventListener('input', function () {
+            if (inputEl.classList.contains('field-invalid')) validateField(inputEl);
+          });
+        }
+
+        /* ── Init after booking.js is ready ── */
+        document.addEventListener('DOMContentLoaded', function () {
+          /* Attach validation to contact fields */
+          var validatedIds = ['client_name', 'client_phone', 'client_email', 'event_date'];
+          validatedIds.forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) attachValidation(el);
+          });
+
+          /* Intercept _booking.goToStep if it exists, to add animations */
+          var pollCount = 0;
+          var poll = setInterval(function () {
+            pollCount++;
+            if (pollCount > 100) {
+              clearInterval(poll);
+              return;
+            }
+            if (!window._booking || !window._booking.goToStep) return;
+            clearInterval(poll);
+
+            var origGoTo = window._booking.goToStep.bind(window._booking);
+            var lastStep = 1;
+
+            window._booking.goToStep = function (newStep) {
+              var direction = newStep > lastStep ? 'forward' : 'backward';
+              var outId = 'step' + lastStep;
+              origGoTo(newStep);
+              var inId = 'step' + newStep;
+              animateStepTransition(outId, inId, direction);
+              syncStepCircles(newStep);
+              syncConnectorLines(newStep);
+              lastStep = newStep;
+            };
+
+            /* Also patch nextStep / prevStep as they call goToStep internally,
+               but backup in case architecture differs */
+            ['nextStep', 'prevStep'].forEach(function (method) {
+              if (!window._booking[method]) return;
+              var orig = window._booking[method].bind(window._booking);
+              window._booking[method] = function () {
+                var before = lastStep;
+                orig();
+                /* goToStep might have already updated lastStep,
+                   so only fire sync if it didn't */
+              };
+            });
+
+            /* Initial sync */
+            syncStepCircles(1);
+            syncConnectorLines(1);
+          }, 80);
+        });
+      })();
+    </script>
     <script type="application/ld+json">
       [
         {
