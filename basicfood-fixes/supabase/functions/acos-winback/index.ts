@@ -268,70 +268,98 @@ async function runApprovedBlast(body: {
   }
 
   const ttlHours = change.ttl_hours ?? PROMO_TTL_HOURS;
-  let sent = 0;
-  const tierBreakdown = { vip: 0, loyal: 0, base: 0 };
-  const results: Array<{ customer_id: string; sent: boolean; code: string; tier: Tier }> = [];
+  const now = Date.now();
+  const expiresAt = new Date(now + ttlHours * 60 * 60 * 1000).toISOString();
+  const startsAt = new Date(now).toISOString();
 
-  for (const t of targets) {
-    const code = generateCode(t.pct);
-    const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000).toISOString();
+  // 1. Batch mint all promo codes.
+  const promoRows = targets.map((t) => ({
+    code: generateCode(t.pct),
+    discount_type: "percent",
+    discount_value: t.pct,
+    max_uses: 1,
+    min_order_amount: t.min_order,
+    starts_at: startsAt,
+    ends_at: expiresAt,
+    is_active: true,
+  }));
+  const { data: promos, error: batchPromoErr } = await supabase
+    .from("promo_codes")
+    .insert(promoRows)
+    .select("id, code");
+  if (batchPromoErr || !promos || promos.length !== targets.length) {
+    return new Response(
+      JSON.stringify({ ok: false, error: batchPromoErr?.message ?? "promo batch insert mismatch" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
 
-    const { data: promo, error: pErr } = await supabase
-      .from("promo_codes")
-      .insert({
-        code,
-        discount_type: "percent",
-        discount_value: t.pct,
-        max_uses: 1,
-        min_order_amount: t.min_order,
-        starts_at: new Date().toISOString(),
-        ends_at: expiresAt,
-        is_active: true,
-      })
-      .select("id, code")
-      .single();
-    if (pErr || !promo) continue;
+  // 2. Generate AI hooks in parallel.
+  const hooks = await Promise.all(
+    targets.map((t) => generateHook(t.first_name, t.total_orders, t.days_silent)),
+  );
 
-    const aiHook = await generateHook(t.first_name, t.total_orders, t.days_silent);
-    const intro = aiHook
-      ? `${t.emoji} <b>${t.first_name}</b>\n\n${aiHook}`
-      : `${t.emoji} <b>${t.first_name}, ми за вами скучили!</b>\n\nВи — наш ${t.label} (${t.total_orders} замовлень). Хочемо повернути вас спеціальною пропозицією.`;
+  // 3. Send Telegrams in parallel.
+  type SendResult =
+    | { ok: true; target: PlannedTarget; promo: { id: string; code: string }; aiHook: string | null }
+    | { ok: false; promoId: string; target: PlannedTarget; promo: { id: string; code: string } };
 
-    const msg = `${intro}\n\n` +
-      `🎫 <b>Персональний промокод:</b>\n<code>${code}</code>\n\n` +
-      `💰 Знижка <b>−${t.pct}%</b> на наступне замовлення\n` +
-      `🛒 Мінімальне замовлення: ${t.min_order} ₴\n` +
-      `⏰ Діє <b>${ttlHours} години</b> (одноразовий)\n\n` +
-      `🔗 <a href="https://basic-food.shop/catalog">Обрати ласощі</a>`;
+  const sendResults: SendResult[] = await Promise.all(
+    targets.map(async (t, i) => {
+      const promo = promos[i];
+      const aiHook = hooks[i];
+      const intro = aiHook
+        ? `${t.emoji} <b>${t.first_name}</b>\n\n${aiHook}`
+        : `${t.emoji} <b>${t.first_name}, ми за вами скучили!</b>\n\nВи — наш ${t.label} (${t.total_orders} замовлень). Хочемо повернути вас спеціальною пропозицією.`;
+      const msg =
+        `${intro}\n\n` +
+        `🎫 <b>Персональний промокод:</b>\n<code>${promo.code}</code>\n\n` +
+        `💰 Знижка <b>−${t.pct}%</b> на наступне замовлення\n` +
+        `🛒 Мінімальне замовлення: ${t.min_order} ₴\n` +
+        `⏰ Діє <b>${ttlHours} години</b> (одноразовий)\n\n` +
+        `🔗 <a href="https://basic-food.shop/catalog">Обрати ласощі</a>`;
+      const ok = await sendTelegram(t.chat_id, msg);
+      if (!ok) return { ok: false, promoId: promo.id, target: t, promo };
+      return { ok: true, target: t, promo, aiHook };
+    }),
+  );
 
-    const ok = await sendTelegram(t.chat_id, msg);
-    if (ok) {
-      sent++;
-      tierBreakdown[t.tier]++;
-    } else {
-      // Deactivate orphaned code — promo was never delivered to the customer.
-      await supabase.from("promo_codes").update({ is_active: false }).eq("id", promo.id).catch(() => {});
-    }
+  // 4. Deactivate orphaned promos in batch.
+  const orphanIds = sendResults
+    .filter((r): r is Extract<SendResult, { ok: false }> => !r.ok)
+    .map((r) => r.promoId);
+  if (orphanIds.length > 0) {
+    await supabase.from("promo_codes").update({ is_active: false }).in("id", orphanIds).catch(() => {});
+  }
 
-    await supabase.from("events").insert({
+  // 5. Batch insert events for all results (success and failure).
+  await supabase.from("events").insert(
+    sendResults.map((r) => ({
       event_type: "winback_sent",
       user_id: null,
       metadata: {
-        customer_id: t.customer_id,
-        promo_code: code,
-        promo_id: promo.id,
-        success: ok,
-        days_silent: t.days_silent,
-        tier: t.tier,
-        discount_pct: t.pct,
-        min_order: t.min_order,
-        ai_hook_used: aiHook !== null,
+        customer_id: r.target.customer_id,
+        promo_code: r.promo.code,
+        promo_id: r.promo.id,
+        success: r.ok,
+        days_silent: r.target.days_silent,
+        tier: r.target.tier,
+        discount_pct: r.target.pct,
+        min_order: r.target.min_order,
+        ai_hook_used: r.ok ? r.aiHook !== null : false,
         tribunal_case_id: body.case_id,
       },
       source: "acos",
-    });
+    })),
+  ).catch(() => {});
 
-    results.push({ customer_id: t.customer_id, sent: ok, code, tier: t.tier });
+  const sentItems = sendResults.filter((r): r is Extract<SendResult, { ok: true }> => r.ok);
+  let sent = sentItems.length;
+  const tierBreakdown = { vip: 0, loyal: 0, base: 0 };
+  const results: Array<{ customer_id: string; sent: boolean; code: string; tier: Tier }> = [];
+  for (const r of sendResults) {
+    if (r.ok) tierBreakdown[r.target.tier]++;
+    results.push({ customer_id: r.target.customer_id, sent: r.ok, code: r.promo.code, tier: r.target.tier });
   }
 
   if (sent > 0) {
