@@ -140,6 +140,341 @@
         font-size: 11px;
         margin-top: 4px;
       }
+
+      /* ── Enhanced skeleton shimmer ── */
+      @keyframes catalog-shimmer {
+        0% {
+          background-position: -600px 0;
+        }
+        100% {
+          background-position: 600px 0;
+        }
+      }
+      .catalog-skeleton-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+      }
+      .skel-card {
+        background: var(--bg3, #1a1a1a);
+        border: 1px solid var(--border, #2a2a2a);
+        overflow: hidden;
+        position: relative;
+      }
+      .skel-img {
+        width: 100%;
+        padding-bottom: 133%;
+        background: linear-gradient(
+          90deg,
+          var(--skeleton-base, #2a2a2a) 25%,
+          var(--skeleton-highlight, #3a3a3a) 50%,
+          var(--skeleton-base, #2a2a2a) 75%
+        );
+        background-size: 600px 100%;
+        animation: catalog-shimmer 1.5s infinite linear;
+      }
+      .skel-body {
+        padding: 14px 16px;
+      }
+      .skel-line {
+        border-radius: 3px;
+        background: linear-gradient(
+          90deg,
+          var(--skeleton-base, #2a2a2a) 25%,
+          var(--skeleton-highlight, #3a3a3a) 50%,
+          var(--skeleton-base, #2a2a2a) 75%
+        );
+        background-size: 600px 100%;
+        animation: catalog-shimmer 1.5s infinite linear;
+        margin-bottom: 8px;
+      }
+      .skel-line.w-60 {
+        height: 18px;
+        width: 60%;
+      }
+      .skel-line.w-40 {
+        height: 13px;
+        width: 40%;
+      }
+      .skel-line.w-80 {
+        height: 13px;
+        width: 80%;
+      }
+      .skel-line.w-100 {
+        height: 36px;
+        width: 100%;
+        margin-top: 12px;
+        margin-bottom: 0;
+      }
+
+      /* ── Card hover: image zoom + overlay slide-up ── */
+      .model-card .model-card-img {
+        overflow: hidden;
+      }
+      .model-card .model-card-img img,
+      .model-card .model-card-img picture img {
+        transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1) !important;
+        will-change: transform;
+      }
+      .model-card:hover .model-card-img img,
+      .model-card:hover .model-card-img picture img {
+        transform: scale(1.05) !important;
+      }
+      /* Overlay: name + button slides from bottom */
+      .model-card-hover-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 45%, transparent 75%);
+        opacity: 0;
+        transform: translateY(8px);
+        transition:
+          opacity 0.35s ease,
+          transform 0.35s ease;
+        pointer-events: none;
+        z-index: 3;
+        padding: 20px 16px 16px;
+      }
+      .model-card:hover .model-card-hover-overlay {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
+      }
+      .hover-overlay-name {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.05rem;
+        color: #fff;
+        font-weight: 600;
+        margin-bottom: 10px;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+      }
+      .hover-overlay-btn {
+        display: inline-block;
+        padding: 8px 18px;
+        background: var(--gold, #c9a96e);
+        color: #000;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        text-decoration: none;
+        border: none;
+        cursor: pointer;
+        transition:
+          background 0.2s,
+          transform 0.15s;
+        align-self: flex-start;
+      }
+      .hover-overlay-btn:hover {
+        background: var(--gold-light, #e8d5b0);
+        transform: translateY(-1px);
+      }
+
+      /* ── Filter tag active: gold background ── */
+      .filter-tag.active {
+        background: rgba(201, 169, 110, 0.15) !important;
+        color: var(--gold, #c9a96e) !important;
+        border-color: var(--gold, #c9a96e) !important;
+        font-weight: 600;
+      }
+
+      /* ── Cards fade transition on filter ── */
+      #catalogGrid {
+        transition: opacity 0.2s ease;
+      }
+      #catalogGrid.fading {
+        opacity: 0;
+      }
+
+      /* ── Featured badge: glow animation ── */
+      @keyframes badge-glow {
+        0%,
+        100% {
+          box-shadow:
+            0 0 6px rgba(201, 169, 110, 0.5),
+            0 2px 6px rgba(0, 0, 0, 0.35);
+        }
+        50% {
+          box-shadow:
+            0 0 14px rgba(201, 169, 110, 0.9),
+            0 2px 8px rgba(0, 0, 0, 0.4);
+        }
+      }
+      .badge-top-glow {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 4;
+        pointer-events: none;
+        background: linear-gradient(135deg, #c9a96e, #e8d5b0, #c9a96e);
+        background-size: 200% 100%;
+        color: #000;
+        font-size: 0.65rem;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        padding: 4px 12px;
+        border-radius: 20px;
+        animation: badge-glow 2s ease-in-out infinite;
+        white-space: nowrap;
+      }
+      @keyframes badge-gold-slide {
+        0% {
+          background-position: 0% 50%;
+        }
+        50% {
+          background-position: 100% 50%;
+        }
+        100% {
+          background-position: 0% 50%;
+        }
+      }
+
+      /* ── Load More button ── */
+      #loadMoreContainer {
+        grid-column: 1 / -1;
+        display: flex;
+        justify-content: center;
+        margin-top: 12px;
+        padding-bottom: 8px;
+      }
+      .btn-load-more {
+        padding: 14px 48px;
+        border: 1px solid var(--gold, #c9a96e);
+        background: transparent;
+        color: var(--gold, #c9a96e);
+        font-size: 0.78rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition:
+          background 0.25s,
+          color 0.25s,
+          transform 0.15s;
+        position: relative;
+        overflow: hidden;
+        font-family: 'Inter', sans-serif;
+      }
+      .btn-load-more:hover:not(:disabled) {
+        background: rgba(201, 169, 110, 0.12);
+        transform: translateY(-2px);
+      }
+      .btn-load-more:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-load-more.loading::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: var(--gold, #c9a96e);
+        animation: load-bar 0.9s ease-in-out infinite alternate;
+      }
+      @keyframes load-bar {
+        from {
+          transform: scaleX(0.1);
+          transform-origin: left;
+        }
+        to {
+          transform: scaleX(1);
+          transform-origin: left;
+        }
+      }
+
+      /* ── Result counter smooth update ── */
+      #catalogCount {
+        transition: opacity 0.25s ease;
+      }
+      #catalogCount.updating {
+        opacity: 0.3;
+      }
+
+      /* ── Empty state ── */
+      .empty-state {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 80px 24px;
+        text-align: center;
+        gap: 16px;
+      }
+      .empty-state-icon {
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        background: rgba(201, 169, 110, 0.08);
+        border: 1px solid rgba(201, 169, 110, 0.2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.8rem;
+        animation: empty-pulse 2.5s ease-in-out infinite;
+      }
+      @keyframes empty-pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(201, 169, 110, 0.2);
+        }
+        50% {
+          box-shadow: 0 0 0 10px rgba(201, 169, 110, 0);
+        }
+      }
+      .empty-state-title {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.2rem;
+        color: var(--text, #f0ede8);
+      }
+      .empty-state-sub {
+        font-size: 0.82rem;
+        color: var(--text-dim, #6e6e6e);
+        max-width: 300px;
+        line-height: 1.6;
+      }
+      .empty-state-reset {
+        margin-top: 4px;
+        padding: 10px 28px;
+        border: 1px solid rgba(201, 169, 110, 0.4);
+        background: none;
+        color: var(--gold, #c9a96e);
+        font-size: 0.75rem;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition:
+          background 0.2s,
+          border-color 0.2s;
+        font-family: 'Inter', sans-serif;
+      }
+      .empty-state-reset:hover {
+        background: rgba(201, 169, 110, 0.1);
+        border-color: var(--gold, #c9a96e);
+      }
+
+      /* ── Light mode skeleton ── */
+      html.light .skel-img,
+      html.light .skel-line {
+        background: linear-gradient(90deg, #e0e0e0 25%, #f0f0f0 50%, #e0e0e0 75%) !important;
+        background-size: 600px 100% !important;
+      }
+
+      @media (max-width: 900px) {
+        .catalog-skeleton-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 560px) {
+        .catalog-skeleton-grid {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
     <script>
       if (typeof tailwind !== 'undefined') {
@@ -645,13 +980,67 @@
               </select>
             </div>
             <!-- Skeleton loader -->
-            <div class="catalog-grid" id="catalogSkeleton" aria-busy="true" aria-live="polite">
-              <div class="model-card-skeleton"></div>
-              <div class="model-card-skeleton"></div>
-              <div class="model-card-skeleton"></div>
-              <div class="model-card-skeleton"></div>
-              <div class="model-card-skeleton"></div>
-              <div class="model-card-skeleton"></div>
+            <div
+              class="catalog-skeleton-grid"
+              id="catalogSkeleton"
+              aria-busy="true"
+              aria-live="polite"
+              aria-label="Загрузка моделей..."
+            >
+              <div class="skel-card">
+                <div class="skel-img"></div>
+                <div class="skel-body">
+                  <div class="skel-line w-60"></div>
+                  <div class="skel-line w-40"></div>
+                  <div class="skel-line w-80"></div>
+                  <div class="skel-line w-100"></div>
+                </div>
+              </div>
+              <div class="skel-card">
+                <div class="skel-img"></div>
+                <div class="skel-body">
+                  <div class="skel-line w-60"></div>
+                  <div class="skel-line w-40"></div>
+                  <div class="skel-line w-80"></div>
+                  <div class="skel-line w-100"></div>
+                </div>
+              </div>
+              <div class="skel-card">
+                <div class="skel-img"></div>
+                <div class="skel-body">
+                  <div class="skel-line w-60"></div>
+                  <div class="skel-line w-40"></div>
+                  <div class="skel-line w-80"></div>
+                  <div class="skel-line w-100"></div>
+                </div>
+              </div>
+              <div class="skel-card">
+                <div class="skel-img"></div>
+                <div class="skel-body">
+                  <div class="skel-line w-60"></div>
+                  <div class="skel-line w-40"></div>
+                  <div class="skel-line w-80"></div>
+                  <div class="skel-line w-100"></div>
+                </div>
+              </div>
+              <div class="skel-card">
+                <div class="skel-img"></div>
+                <div class="skel-body">
+                  <div class="skel-line w-60"></div>
+                  <div class="skel-line w-40"></div>
+                  <div class="skel-line w-80"></div>
+                  <div class="skel-line w-100"></div>
+                </div>
+              </div>
+              <div class="skel-card">
+                <div class="skel-img"></div>
+                <div class="skel-body">
+                  <div class="skel-line w-60"></div>
+                  <div class="skel-line w-40"></div>
+                  <div class="skel-line w-80"></div>
+                  <div class="skel-line w-100"></div>
+                </div>
+              </div>
             </div>
             <div
               class="catalog-grid"
@@ -1115,25 +1504,353 @@
     <script src="/js/animations.js" defer></script>
     <script src="/js/darkmode.js"></script>
     <script>
-      // ── Skeleton loading helper (для дополнительных контейнеров) ──────────────
+      // ── Skeleton loading helper ──────────────────────────────────────────────
+      function _buildSkeletonCard() {
+        return (
+          '<div class="skel-card">' +
+          '<div class="skel-img"></div>' +
+          '<div class="skel-body">' +
+          '<div class="skel-line w-60"></div>' +
+          '<div class="skel-line w-40"></div>' +
+          '<div class="skel-line w-80"></div>' +
+          '<div class="skel-line w-100"></div>' +
+          '</div></div>'
+        );
+      }
+
       function showSkeletons(count) {
         count = count || 6;
+        // Primary catalog skeleton
+        var skeleton = document.getElementById('catalogSkeleton');
+        var grid = document.getElementById('catalogGrid');
+        if (skeleton) {
+          skeleton.innerHTML = Array(count).fill(0).map(_buildSkeletonCard).join('');
+          skeleton.style.display = '';
+        }
+        if (grid) grid.style.display = 'none';
+        // Legacy containers
         var container = document.getElementById('models-list') || document.querySelector('.models-grid');
-        if (!container) return;
-        container.innerHTML = Array(count)
-          .fill(0)
-          .map(function () {
-            return (
-              '<div class="model-card skeleton-card">' +
-              '<div class="skeleton skeleton-img"></div>' +
-              '<div class="skeleton skeleton-title"></div>' +
-              '<div class="skeleton skeleton-text"></div>' +
-              '<div class="skeleton skeleton-text short"></div>' +
-              '</div>'
-            );
-          })
-          .join('');
+        if (container) {
+          container.innerHTML = Array(count).fill(0).map(_buildSkeletonCard).join('');
+        }
       }
+
+      // ── Catalog UI enhancements ──────────────────────────────────────────────
+      (function () {
+        var PAGE_SIZE = 12; // cards per page
+        var _allRendered = []; // current filtered list
+        var _visibleCount = 0;
+
+        // Intercept catalog.js render to add Load More + animations
+        // We patch grid.appendChild and grid.innerHTML after DOMContentLoaded
+        document.addEventListener('DOMContentLoaded', function () {
+          var grid = document.getElementById('catalogGrid');
+          if (!grid) return;
+
+          // ── Observe grid mutations to inject overlay on new cards ────────────
+          var observer = new MutationObserver(function (mutations) {
+            mutations.forEach(function (m) {
+              m.addedNodes.forEach(function (node) {
+                if (node.nodeType === 1 && node.classList.contains('model-card')) {
+                  enhanceCard(node);
+                }
+              });
+            });
+          });
+          observer.observe(grid, { childList: true });
+
+          // ── Patch countEl smooth update ──────────────────────────────────────
+          var countEl = document.getElementById('catalogCount');
+          if (countEl) {
+            var origTextSetter = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent').set;
+            // Use a MutationObserver on countEl instead
+            var countObs = new MutationObserver(function () {
+              countEl.classList.remove('updating');
+            });
+            countObs.observe(countEl, { childList: true, characterData: true, subtree: true });
+          }
+        });
+
+        // ── Enhance individual card: add hover overlay with name + button ─────
+        function enhanceCard(card) {
+          var imgContainer = card.querySelector('.model-card-img');
+          if (!imgContainer) return;
+          // Avoid duplicates
+          if (imgContainer.querySelector('.model-card-hover-overlay')) return;
+
+          var modelName = card.dataset.modelName || '';
+          var modelId = card.dataset.modelId || '';
+
+          // Replace old badge-top with glow version if featured
+          var oldBadge = imgContainer.querySelector('.badge-top');
+          if (oldBadge) {
+            oldBadge.remove();
+            var glowBadge = document.createElement('span');
+            glowBadge.className = 'badge-top-glow';
+            glowBadge.textContent = '★ ТОП';
+            glowBadge.setAttribute('aria-label', 'Топ модель');
+            imgContainer.appendChild(glowBadge);
+          }
+
+          var overlay = document.createElement('div');
+          overlay.className = 'model-card-hover-overlay';
+          overlay.setAttribute('aria-hidden', 'true');
+          overlay.innerHTML =
+            '<div class="hover-overlay-name">' +
+            _escHtml(modelName) +
+            '</div>' +
+            '<a href="/model.html?id=' +
+            parseInt(modelId || 0) +
+            '" class="hover-overlay-btn" tabindex="-1" onclick="event.stopPropagation()">Смотреть профиль</a>';
+          imgContainer.appendChild(overlay);
+        }
+
+        function _escHtml(s) {
+          return String(s || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        }
+
+        // ── Patch render to add fade transition + load more ──────────────────
+        // Wait for catalog.js to define window.applyFilters, then wrap it
+        var _patchAttempts = 0;
+        function patchRender() {
+          _patchAttempts++;
+          if (_patchAttempts > 50) return; // give up after ~5s
+          var grid = document.getElementById('catalogGrid');
+          if (!grid || typeof window.applyFilters !== 'function') {
+            setTimeout(patchRender, 100);
+            return;
+          }
+          // Hook into grid innerHTML changes via MutationObserver
+          // Already handled above. Now just add Load More button after grid
+          ensureLoadMoreBtn();
+        }
+        setTimeout(patchRender, 200);
+
+        // ── Load More button ─────────────────────────────────────────────────
+        var loadMoreBtn = null;
+        var loadMoreContainer = null;
+        var _fullList = [];
+        var _pageSize = PAGE_SIZE;
+        var _currentPage = 0;
+
+        function ensureLoadMoreBtn() {
+          var grid = document.getElementById('catalogGrid');
+          if (!grid || loadMoreBtn) return;
+          loadMoreContainer = document.createElement('div');
+          loadMoreContainer.id = 'loadMoreContainer';
+          loadMoreBtn = document.createElement('button');
+          loadMoreBtn.className = 'btn-load-more';
+          loadMoreBtn.textContent = 'Загрузить ещё';
+          loadMoreBtn.setAttribute('aria-label', 'Загрузить следующие модели');
+          loadMoreContainer.appendChild(loadMoreBtn);
+          grid.parentNode.insertBefore(loadMoreContainer, grid.nextSibling);
+          loadMoreContainer.style.display = 'none';
+
+          loadMoreBtn.addEventListener('click', function () {
+            if (!_fullList.length) return;
+            loadMoreBtn.disabled = true;
+            loadMoreBtn.classList.add('loading');
+            loadMoreBtn.textContent = 'Загрузка...';
+            setTimeout(function () {
+              _currentPage++;
+              var start = _currentPage * _pageSize;
+              var slice = _fullList.slice(start, start + _pageSize);
+              slice.forEach(function (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(16px)';
+                document.getElementById('catalogGrid').appendChild(card);
+                // Force reflow then animate in
+                requestAnimationFrame(function () {
+                  requestAnimationFrame(function () {
+                    card.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+                    card.style.opacity = '1';
+                    card.style.transform = '';
+                  });
+                });
+              });
+              _visibleCount = Math.min((_currentPage + 1) * _pageSize, _fullList.length);
+              var remaining = _fullList.length - _visibleCount;
+              if (remaining <= 0) {
+                loadMoreContainer.style.display = 'none';
+              } else {
+                loadMoreBtn.textContent = 'Загрузить ещё (' + remaining + ')';
+              }
+              loadMoreBtn.disabled = false;
+              loadMoreBtn.classList.remove('loading');
+              if (remaining > 0) loadMoreBtn.textContent = 'Загрузить ещё (' + remaining + ')';
+            }, 300);
+          });
+        }
+
+        // ── Patch: intercept grid build for pagination ───────────────────────
+        // We use a MutationObserver on grid to detect full re-renders
+        document.addEventListener('DOMContentLoaded', function () {
+          var grid = document.getElementById('catalogGrid');
+          if (!grid) return;
+          var rendering = false;
+          var gridObs = new MutationObserver(function (mutations) {
+            if (rendering) return;
+            rendering = true;
+            requestAnimationFrame(function () {
+              rendering = false;
+              applyPagination();
+              animateGridCards();
+              updateCountSmooth();
+            });
+          });
+          gridObs.observe(grid, { childList: true });
+        });
+
+        function applyPagination() {
+          var grid = document.getElementById('catalogGrid');
+          if (!grid || !loadMoreBtn) return;
+          var cards = Array.from(grid.querySelectorAll('.model-card'));
+          if (!cards.length) {
+            if (loadMoreContainer) loadMoreContainer.style.display = 'none';
+            return;
+          }
+          _fullList = cards;
+          _currentPage = 0;
+          _visibleCount = Math.min(_pageSize, cards.length);
+
+          // Hide cards beyond first page
+          cards.forEach(function (card, i) {
+            card.style.display = i < _pageSize ? '' : 'none';
+          });
+          var remaining = cards.length - _pageSize;
+          if (remaining > 0) {
+            loadMoreContainer.style.display = 'flex';
+            loadMoreBtn.disabled = false;
+            loadMoreBtn.classList.remove('loading');
+            loadMoreBtn.textContent = 'Загрузить ещё (' + remaining + ')';
+          } else {
+            if (loadMoreContainer) loadMoreContainer.style.display = 'none';
+          }
+
+          // Update Load More to append hidden cards
+          // Re-bind click to work with current _fullList
+          _fullList = cards; // keep reference
+        }
+
+        // ── Override Load More click to show hidden cards (not DOM-appended) ─
+        document.addEventListener('DOMContentLoaded', function () {
+          setTimeout(function () {
+            if (!loadMoreBtn) return;
+            // Replace original listener
+            var newBtn = loadMoreBtn.cloneNode(true);
+            loadMoreBtn.parentNode.replaceChild(newBtn, loadMoreBtn);
+            loadMoreBtn = newBtn;
+            loadMoreBtn.addEventListener('click', function () {
+              loadMoreBtn.disabled = true;
+              loadMoreBtn.classList.add('loading');
+              loadMoreBtn.textContent = 'Загрузка...';
+              setTimeout(function () {
+                _currentPage++;
+                var start = _currentPage * _pageSize;
+                var end = start + _pageSize;
+                _fullList.forEach(function (card, i) {
+                  if (i >= start && i < end) {
+                    card.style.display = '';
+                    card.style.opacity = '0';
+                    card.style.transform = 'translateY(16px)';
+                    requestAnimationFrame(function () {
+                      requestAnimationFrame(function () {
+                        card.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+                        card.style.opacity = '1';
+                        card.style.transform = '';
+                        card.style.transition = '';
+                      });
+                    });
+                  }
+                });
+                var shown = Math.min((_currentPage + 1) * _pageSize, _fullList.length);
+                var remaining = _fullList.length - shown;
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.classList.remove('loading');
+                if (remaining > 0) {
+                  loadMoreBtn.textContent = 'Загрузить ещё (' + remaining + ')';
+                } else {
+                  loadMoreContainer.style.display = 'none';
+                }
+              }, 280);
+            });
+          }, 800);
+        });
+
+        // ── Stagger-animate visible cards ────────────────────────────────────
+        function animateGridCards() {
+          var grid = document.getElementById('catalogGrid');
+          if (!grid) return;
+          var cards = grid.querySelectorAll('.model-card');
+          cards.forEach(function (card, i) {
+            if (card.style.display === 'none') return;
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(18px)';
+            var delay = Math.min(i, 8) * 55;
+            setTimeout(function () {
+              card.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+              card.style.opacity = '1';
+              card.style.transform = '';
+              setTimeout(function () {
+                card.style.transition = '';
+              }, 450);
+            }, delay);
+          });
+        }
+
+        // ── Counter smooth update ─────────────────────────────────────────────
+        function updateCountSmooth() {
+          var countEl = document.getElementById('catalogCount');
+          if (!countEl) return;
+          countEl.classList.add('updating');
+          setTimeout(function () {
+            countEl.classList.remove('updating');
+          }, 50);
+        }
+
+        // ── Replace plain no-results with styled empty state ─────────────────
+        // Observe grid for no-results div
+        document.addEventListener('DOMContentLoaded', function () {
+          var grid = document.getElementById('catalogGrid');
+          if (!grid) return;
+          var noResObs = new MutationObserver(function () {
+            var noRes = grid.querySelector('.no-results');
+            if (noRes && !noRes.classList.contains('empty-enhanced')) {
+              noRes.outerHTML =
+                '<div class="empty-state">' +
+                '<div class="empty-state-icon" aria-hidden="true">🔍</div>' +
+                '<div class="empty-state-title">Модели не найдены</div>' +
+                '<div class="empty-state-sub">По вашим фильтрам нет подходящих кандидатов. Попробуйте изменить параметры поиска.</div>' +
+                '<button class="empty-state-reset" onclick="window.resetFilters && window.resetFilters()">Сбросить фильтры</button>' +
+                '</div>';
+              if (loadMoreContainer) loadMoreContainer.style.display = 'none';
+            }
+          });
+          noResObs.observe(grid, { childList: true, subtree: true });
+        });
+
+        // ── Fade transition when filters change ───────────────────────────────
+        // Intercept filter-tag clicks to add fade
+        document.addEventListener(
+          'click',
+          function (e) {
+            if (e.target.classList.contains('filter-tag')) {
+              var grid = document.getElementById('catalogGrid');
+              if (grid) {
+                grid.classList.add('fading');
+                setTimeout(function () {
+                  grid.classList.remove('fading');
+                }, 220);
+              }
+            }
+          },
+          true
+        );
+      })();
     </script>
 
     <!-- AI Match logic -->
