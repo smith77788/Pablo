@@ -318,6 +318,111 @@
         padding: 48px;
         color: var(--text-dim);
       }
+
+      /* ── Star rating display (CSS ★ with gold color) ── */
+      .review-rating .stars-filled {
+        color: var(--gold, #c9a96e);
+        letter-spacing: 1px;
+      }
+      .review-rating .stars-empty {
+        color: rgba(201, 169, 110, 0.25);
+        letter-spacing: 1px;
+      }
+      .review-rating {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .review-rating .rating-num {
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        font-weight: 500;
+      }
+
+      /* ── Card stagger animation ── */
+      @media (prefers-reduced-motion: no-preference) {
+        .review-card {
+          opacity: 0;
+          transform: translateY(16px);
+          transition:
+            opacity 0.38s ease,
+            transform 0.38s ease,
+            border-color 0.2s,
+            box-shadow 0.2s;
+        }
+        .review-card.card-visible {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .review-card {
+          opacity: 1;
+          transform: none;
+          transition:
+            border-color 0.2s,
+            box-shadow 0.2s;
+        }
+      }
+
+      /* ── Filter buttons: enhanced ── */
+      .filter-tag {
+        padding: 6px 14px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.82rem;
+        cursor: pointer;
+        border-radius: 20px;
+        transition:
+          background 0.2s,
+          border-color 0.2s,
+          color 0.2s,
+          transform 0.15s;
+        letter-spacing: 0.3px;
+      }
+      .filter-tag:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+        color: var(--gold, #c9a96e);
+        transform: translateY(-1px);
+      }
+      .filter-tag.active {
+        background: rgba(201, 169, 110, 0.12);
+        border-color: var(--gold, #c9a96e);
+        color: var(--gold, #c9a96e);
+        font-weight: 600;
+      }
+
+      /* ── Avatar color variations ── */
+      .review-avatar[data-color='0'] {
+        background: rgba(201, 169, 110, 0.18);
+        color: #c9a96e;
+      }
+      .review-avatar[data-color='1'] {
+        background: rgba(110, 155, 201, 0.18);
+        color: #6e9bc9;
+      }
+      .review-avatar[data-color='2'] {
+        background: rgba(110, 201, 155, 0.18);
+        color: #6ec99b;
+      }
+      .review-avatar[data-color='3'] {
+        background: rgba(201, 110, 155, 0.18);
+        color: #c96e9b;
+      }
+      .review-avatar[data-color='4'] {
+        background: rgba(201, 155, 110, 0.18);
+        color: #c99b6e;
+      }
+
+      /* ── Smooth grid transition on filter ── */
+      .reviews-grid {
+        transition: opacity 0.2s ease;
+      }
+      .reviews-grid.filtering {
+        opacity: 0.4;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
@@ -508,9 +613,26 @@
       }
 
       function starStr(r) {
-        var filled = r || 0;
-        var stars = '★'.repeat(filled) + '☆'.repeat(5 - filled);
-        return '<span role="img" aria-label="Рейтинг: ' + filled + ' из 5 звёзд">' + stars + '</span>';
+        var filled = Math.max(0, Math.min(5, r || 0));
+        var empty = 5 - filled;
+        return (
+          '<span class="stars-filled" aria-hidden="true">' +
+          '★'.repeat(filled) +
+          '</span>' +
+          (empty > 0 ? '<span class="stars-empty" aria-hidden="true">' + '★'.repeat(empty) + '</span>' : '') +
+          '<span class="sr-only">Рейтинг: ' +
+          filled +
+          ' из 5</span>' +
+          '<span class="rating-num">' +
+          filled +
+          '/5</span>'
+        );
+      }
+
+      /* Avatar color by name hash */
+      function avatarColor(name) {
+        var n = (name || '?').charCodeAt(0);
+        return n % 5;
       }
 
       function timeSince(dateStr) {
@@ -539,14 +661,16 @@
           return;
         }
 
+        var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
         grid.innerHTML = shown
           .map(
-            r => `
-    <div class="review-card">
-      <div class="review-rating">${starStr(r.rating)} <span style="font-size:0.8rem;color:var(--text-dim);margin-left:4px">${r.rating}/5</span></div>
+            (r, i) => `
+    <div class="review-card" style="${reducedMotion ? '' : 'transition-delay:' + (i % 12) * 0.055 + 's'}">
+      <div class="review-rating">${starStr(r.rating)}</div>
       <p class="review-text">${esc(r.text || '')}</p>
       <div class="review-author">
-        <div class="review-avatar">${esc((r.client_name || r.name || '?')[0].toUpperCase())}</div>
+        <div class="review-avatar" data-color="${avatarColor(r.client_name || r.name)}">${esc((r.client_name || r.name || '?')[0].toUpperCase())}</div>
         <div class="review-author-info">
           <strong>${esc(r.client_name || r.name || 'Клиент')}</strong>
           <span>${timeSince(r.created_at)}</span>
@@ -565,6 +689,17 @@
   `
           )
           .join('');
+
+        /* Trigger stagger animation */
+        if (!reducedMotion) {
+          requestAnimationFrame(function () {
+            grid.querySelectorAll('.review-card').forEach(function (card) {
+              requestAnimationFrame(function () {
+                card.classList.add('card-visible');
+              });
+            });
+          });
+        }
 
         document.getElementById('loadMoreWrap').style.display = filtered.length > displayCount ? 'block' : 'none';
       }
@@ -619,7 +754,13 @@
           btn.setAttribute('aria-pressed', 'true');
           currentRating = btn.dataset.rating;
           displayCount = 12;
-          renderReviews();
+          /* Smooth filter transition */
+          var grid = document.getElementById('reviewsGrid');
+          grid.classList.add('filtering');
+          setTimeout(function () {
+            grid.classList.remove('filtering');
+            renderReviews();
+          }, 180);
         });
       });
 
