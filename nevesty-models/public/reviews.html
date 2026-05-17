@@ -436,28 +436,71 @@
   </head>
   <body>
     <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-    <header class="header" id="header">
-      <div class="header-container">
-        <a href="/" class="logo" aria-label="Nevesty Models — главная">
-          <span class="logo-em">N</span>EVESTY
-          <span class="logo-sub">MODELS</span>
-        </a>
-        <nav class="nav" id="nav" aria-label="Основная навигация">
-          <a href="/" class="nav-link">Главная</a>
-          <a href="/catalog.html" class="nav-link">Каталог</a>
-          <a href="/reviews.html" class="nav-link active">Отзывы</a>
-          <a href="/pricing.html" class="nav-link">Цены</a>
-          <a href="/contact.html" class="nav-link">Контакты</a>
-        </nav>
-        <div class="header-actions">
-          <a href="/cabinet.html" class="btn btn-ghost btn-sm">Личный кабинет</a>
-          <a href="/booking.html" class="btn btn-gold btn-sm">Забронировать</a>
+    <!-- NAVBAR -->
+    <nav class="navbar" id="navbar" role="navigation" aria-label="Главное меню">
+      <div class="nav-inner">
+        <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
+        <div class="nav-links" role="list">
+          <a href="/catalog.html">Каталог</a>
+          <a href="/pricing.html">Цены</a>
+          <a href="/cases.html">Кейсы</a>
+          <a href="/about.html">О нас</a>
+          <a href="/reviews.html" style="color: var(--gold)">Отзывы</a>
+          <a href="/faq.html">FAQ</a>
+          <a href="/contact.html">Контакты</a>
+          <a href="/cabinet.html" style="font-size: 0.9rem" aria-label="Мои заявки"
+            ><span aria-hidden="true">👤</span> Мои заявки</a
+          >
+          <button
+            class="theme-toggle"
+            onclick="DarkMode.toggle()"
+            aria-label="Переключить на светлую тему"
+            title="Светлая/тёмная тема"
+          >
+            ☀️
+          </button>
+          <a href="/booking.html" class="btn-nav">Заказать</a>
         </div>
-        <button class="burger" id="burger" aria-label="Меню" aria-expanded="false" aria-controls="nav">
+        <button
+          class="nav-burger"
+          id="burgerBtn"
+          aria-label="Открыть меню"
+          aria-expanded="false"
+          aria-controls="mobileMenu"
+        >
           <span></span><span></span><span></span>
         </button>
       </div>
-    </header>
+    </nav>
+    <div class="nav-overlay" id="navOverlay"></div>
+    <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
+      <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
+      <a href="/catalog.html">Каталог</a>
+      <a href="/pricing.html">Цены</a>
+      <a href="/cases.html">Кейсы</a>
+      <a href="/about.html">О нас</a>
+      <a href="/reviews.html" style="color: var(--gold)">Отзывы</a>
+      <a href="/faq.html">FAQ</a>
+      <a href="/contact.html">Контакты</a>
+      <a href="/cabinet.html"><span aria-hidden="true">👤</span> Мои заявки</a>
+      <a href="/booking.html" style="color: var(--gold)">Заказать</a>
+      <button
+        onclick="DarkMode.toggle()"
+        aria-label="Переключить тему"
+        style="
+          background: none;
+          border: 1px solid var(--border);
+          color: var(--text-muted);
+          padding: 8px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 1rem;
+          margin-top: 8px;
+        "
+      >
+        <span class="dark-mode-icon">🌙</span> Тема
+      </button>
+    </nav>
 
     <main class="reviews-page" id="main-content" role="main" tabindex="-1">
       <div class="reviews-container">
