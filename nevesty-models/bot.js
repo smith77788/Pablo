@@ -7530,6 +7530,30 @@ function initBot(app) {
         );
       }
 
+      // ── iCal export for single order (БЛОК 31)
+      if (data.startsWith('adm_order_ical_')) {
+        if (!isAdmin(chatId)) return;
+        const orderId = parseInt(data.replace('adm_order_ical_', ''));
+        const order = await get('SELECT id, order_number FROM orders WHERE id=?', [orderId]).catch(() => null);
+        if (!order) return safeSend(chatId, '❌ Заявка не найдена');
+        const icalUrl = `${SITE_URL.replace(/\/$/, '')}/api/admin/orders/${orderId}/calendar.ics`;
+        return safeSend(
+          chatId,
+          `📅 *iCal для заявки \#${esc(order.order_number || String(orderId))}*
+
+Скачайте файл и добавьте в Google Calendar, Apple Calendar или Outlook:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '📅 Скачать .ics', url: icalUrl }],
+                [{ text: '← К заявке', callback_data: `adm_order_${orderId}` }],
+              ],
+            },
+          }
+        );
+      }
+
       // ── Admin order detail
       if (data.startsWith('adm_order_')) {
         if (!isAdmin(chatId)) return;
@@ -12414,6 +12438,10 @@ function initBot(app) {
 
     // ── Сообщение в поддержку (БЛОК 25)
     if (state === 'support_message') {
+      // Enforce max message length to prevent spam / DB bloat
+      if (text && text.length > 1000) {
+        return safeSend(chatId, '⚠️ Сообщение слишком длинное. Пожалуйста, сократите его до 1000 символов.');
+      }
       const clientName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || 'Клиент';
       const username = msg.from.username ? `@${msg.from.username}` : '';
       // Save to support_messages
