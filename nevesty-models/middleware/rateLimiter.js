@@ -17,13 +17,17 @@ let apiLimiter = noop;
 try {
   const rateLimit = require('express-rate-limit');
 
-  // Auth endpoints: 5 attempts per minute per IP (brute-force protection)
+  // Auth endpoints: 5 failed attempts per 15 minutes per IP (brute-force protection).
+  // skipSuccessfulRequests: true — a successful login doesn't consume an attempt,
+  // so a legitimate user is never locked out by their own correct credentials.
+  // Window aligned with server.js authLimiter (15 min) for consistent UX.
   authLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1 minute
+    windowMs: 15 * 60 * 1000, // 15 minutes
     max: 5,
+    skipSuccessfulRequests: true,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Слишком много попыток входа. Попробуйте через минуту.' },
+    message: { error: 'Слишком много попыток входа. Попробуйте через 15 минут.' },
   });
 
   // AI budget estimation: 5 requests per minute per IP (paid API calls)

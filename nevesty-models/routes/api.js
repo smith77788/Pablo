@@ -58,10 +58,13 @@ try {
     legacyHeaders: false,
     message: { error: 'Превышен лимит заявок, попробуйте через час' },
   });
-  // Auth limit: 5 attempts per 15 minutes (brute-force protection)
+  // Auth limit: 5 failed attempts per 15 minutes (brute-force protection).
+  // skipSuccessfulRequests: true ensures successful logins don't count toward
+  // the limit, so a legitimate user is never locked out by their own correct credentials.
   authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 5,
+    skipSuccessfulRequests: true,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Слишком много попыток входа. Попробуйте через 15 минут.' },
