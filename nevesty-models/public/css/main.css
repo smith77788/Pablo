@@ -3980,4 +3980,63 @@ img[data-zoom]:hover {
   }
 }
 
+/* ─── WhatsApp Floating Button ───────────────────────────────────── */
+.whatsapp-float {
+  position: fixed;
+  bottom: 90px;
+  right: 84px; /* sits left of the chat button */
+  z-index: 999;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #25d366;
+  display: none; /* shown via JS once phone number is available */
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(37, 211, 102, 0.4);
+  transition:
+    transform 0.3s,
+    box-shadow 0.3s;
+  animation: whatsappPulse 2s ease-in-out infinite;
+  text-decoration: none;
+}
+
+.whatsapp-float.wa-visible {
+  display: flex;
+}
+
+.whatsapp-float:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 28px rgba(37, 211, 102, 0.6);
+  animation: none;
+}
+
+.whatsapp-float svg {
+  width: 28px;
+  height: 28px;
+  fill: #ffffff;
+  flex-shrink: 0;
+}
+
+@keyframes whatsappPulse {
+  0%,
+  100% {
+    box-shadow: 0 4px 20px rgba(37, 211, 102, 0.4);
+  }
+  50% {
+    box-shadow:
+      0 4px 32px rgba(37, 211, 102, 0.7),
+      0 0 0 8px rgba(37, 211, 102, 0.1);
+  }
+}
+
+@media (max-width: 480px) {
+  .whatsapp-float {
+    width: 46px;
+    height: 46px;
+    right: 76px;
+    bottom: 84px;
+  }
+}
+
 /* ─── END OF NEW UI COMPONENTS ───────────────────────────────────── */
