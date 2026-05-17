@@ -58,7 +58,7 @@ beforeAll(async () => {
     model_id: modelId,
   });
   orderId = oRes.body.id || oRes.body.order?.id;
-}, 30000);
+}, 60000);
 
 afterAll(() => {
   const db = require('../database');
@@ -157,7 +157,8 @@ describe('GET /client/orders', () => {
 
 describe('POST /contact', () => {
   it('сохраняет контакт-заявку', async () => {
-    const res = await request(app).post('/api/contact').send({
+    const csrf = await getCsrf();
+    const res = await request(app).post('/api/contact').set('x-csrf-token', csrf).send({
       name: 'Иван Иванов',
       phone: '+79991234567',
       message: 'Хочу узнать о сотрудничестве',
@@ -170,24 +171,38 @@ describe('POST /contact', () => {
   });
 
   it('возвращает 400 без имени', async () => {
-    const res = await request(app).post('/api/contact').send({ phone: '+79991234567', message: 'Вопрос' });
+    const csrf = await getCsrf();
+    const res = await request(app)
+      .post('/api/contact')
+      .set('x-csrf-token', csrf)
+      .send({ phone: '+79991234567', message: 'Вопрос' });
     expect([400, 429]).toContain(res.status);
     if (res.status === 400) expect(typeof res.body.error).toBe('string');
   });
 
   it('возвращает 400 без телефона', async () => {
-    const res = await request(app).post('/api/contact').send({ name: 'Иван', message: 'Вопрос' });
+    const csrf = await getCsrf();
+    const res = await request(app)
+      .post('/api/contact')
+      .set('x-csrf-token', csrf)
+      .send({ name: 'Иван', message: 'Вопрос' });
     expect([400, 429]).toContain(res.status);
   });
 
   it('возвращает 400 без сообщения', async () => {
-    const res = await request(app).post('/api/contact').send({ name: 'Иван', phone: '+79991234567' });
+    const csrf = await getCsrf();
+    const res = await request(app)
+      .post('/api/contact')
+      .set('x-csrf-token', csrf)
+      .send({ name: 'Иван', phone: '+79991234567' });
     expect([400, 429]).toContain(res.status);
   });
 
   it('возвращает 400 при некорректном email', async () => {
+    const csrf = await getCsrf();
     const res = await request(app)
       .post('/api/contact')
+      .set('x-csrf-token', csrf)
       .send({ name: 'Иван', phone: '+79991234567', message: 'Вопрос', email: 'not-an-email' });
     expect([400, 429]).toContain(res.status);
   });

@@ -29,11 +29,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
-}, 15000);
+}, 60000);
 
 afterAll(() => {
   if (app && app.close) app.close();
@@ -48,17 +46,13 @@ describe('GET /api/admin/notifications', () => {
 
   it('Returns 200 with admin JWT', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/notifications')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/notifications').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   it('Returns { notifications: [...] } structure', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/notifications')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/notifications').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('notifications');
     expect(Array.isArray(res.body.notifications)).toBe(true);

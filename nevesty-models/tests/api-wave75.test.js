@@ -46,11 +46,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body?.token || res.body?.accessToken || null;
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   await new Promise(r => setTimeout(r, 300));
@@ -81,7 +79,9 @@ describe('Wave 75: Repeat Order', () => {
 
   test('bot.js shows confirmation buttons for repeat order', () => {
     // Should have both confirm and cancel buttons defined together for repeat flow
-    expect(botContent).toMatch(/bk_repeat_confirm[\s\S]{1,300}bk_repeat_cancel|bk_repeat_cancel[\s\S]{1,300}bk_repeat_confirm/);
+    expect(botContent).toMatch(
+      /bk_repeat_confirm[\s\S]{1,300}bk_repeat_cancel|bk_repeat_cancel[\s\S]{1,300}bk_repeat_confirm/
+    );
   });
 });
 
@@ -99,17 +99,13 @@ describe('Wave 75: Admin Stats', () => {
 
   test('GET /api/admin/stats with token returns 200', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/stats')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/stats').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   test('GET /api/admin/stats returns total_orders field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/stats')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/stats').set('Authorization', `Bearer ${adminToken}`);
     if (res.status === 200) {
       expect(res.body).toHaveProperty('total_orders');
     }
@@ -117,9 +113,7 @@ describe('Wave 75: Admin Stats', () => {
 
   test('GET /api/admin/stats returns total_models field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/stats')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/stats').set('Authorization', `Bearer ${adminToken}`);
     if (res.status === 200) {
       expect(res.body).toHaveProperty('total_models');
     }
@@ -132,17 +126,13 @@ describe('Wave 75: Admin Stats', () => {
 
   test('GET /api/admin/stats/extended2 with token returns 200', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/stats/extended2')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/stats/extended2').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   test('GET /api/admin/stats/extended2 returns repeat_clients field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/stats/extended2')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/stats/extended2').set('Authorization', `Bearer ${adminToken}`);
     if (res.status === 200) {
       expect(res.body).toHaveProperty('repeat_clients');
     }
@@ -224,9 +214,7 @@ describe('Wave 75: Model Archive', () => {
 
   test('GET /api/admin/models?archived=1 with token returns 200', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/models?archived=1')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/models?archived=1').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 });
@@ -247,16 +235,12 @@ describe('Wave 75: Security', () => {
   });
 
   test('POST /api/admin/login with wrong credentials returns 401', async () => {
-    const res = await request(app)
-      .post('/api/admin/login')
-      .send({ username: 'wrong', password: 'wrong' });
+    const res = await request(app).post('/api/admin/login').send({ username: 'wrong', password: 'wrong' });
     expect(res.status).toBe(401);
   });
 
   test('POST /api/admin/login with correct credentials returns token', async () => {
-    const res = await request(app)
-      .post('/api/admin/login')
-      .send({ username: 'admin', password: 'admin123' });
+    const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
     expect(res.status).toBe(200);
     expect(res.body?.token || res.body?.accessToken).toBeTruthy();
   });

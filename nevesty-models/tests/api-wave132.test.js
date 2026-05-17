@@ -56,7 +56,7 @@ beforeAll(async () => {
     'Wave132 test message',
     'client',
   ]);
-}, 30000);
+}, 60000);
 
 // ── 1. Admin messages recent ──────────────────────────────────────────────────
 

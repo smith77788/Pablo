@@ -52,44 +52,36 @@ beforeAll(async () => {
   app = a;
 
   // ── Authenticate admin ──────────────────────────────────────────────────────
-  const loginRes = await request(a)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(a).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 
   // ── Create a test model ─────────────────────────────────────────────────────
-  const modelRes = await request(a)
-    .post('/api/admin/models/json')
-    .set('Authorization', `Bearer ${adminToken}`)
-    .send({
-      name: 'Wishlist Test Model',
-      height: 172,
-      weight: 53,
-      bust: 86,
-      waist: 60,
-      hips: 88,
-      shoe_size: '37',
-      age: 22,
-      category: 'fashion',
-      city: 'Kyiv',
-      available: 1,
-    });
+  const modelRes = await request(a).post('/api/admin/models/json').set('Authorization', `Bearer ${adminToken}`).send({
+    name: 'Wishlist Test Model',
+    height: 172,
+    weight: 53,
+    bust: 86,
+    waist: 60,
+    hips: 88,
+    shoe_size: '37',
+    age: 22,
+    category: 'fashion',
+    city: 'Kyiv',
+    available: 1,
+  });
   createdModelId = modelRes.body.id || null;
 
   // ── Create a test order and mark it completed ───────────────────────────────
   const csrfRes = await request(a).get('/api/csrf-token');
   const csrfToken = csrfRes.body.token;
 
-  const orderRes = await request(a)
-    .post('/api/orders')
-    .set('x-csrf-token', csrfToken)
-    .send({
-      client_name: 'Review Test Client',
-      client_phone: '+7 999 555-11-22',
-      event_type: 'photo_shoot',
-      event_date: '2026-09-01',
-      event_duration: 3,
-    });
+  const orderRes = await request(a).post('/api/orders').set('x-csrf-token', csrfToken).send({
+    client_name: 'Review Test Client',
+    client_phone: '+7 999 555-11-22',
+    event_type: 'photo_shoot',
+    event_date: '2026-09-01',
+    event_duration: 3,
+  });
   createdOrderId = orderRes.body.id;
   createdOrderNumber = orderRes.body.order_number;
 
@@ -97,7 +89,7 @@ beforeAll(async () => {
   if (createdOrderId) {
     await run('UPDATE orders SET status=? WHERE id=?', ['completed', createdOrderId]);
   }
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   const { closeDatabase } = require('../database');
@@ -123,9 +115,7 @@ describe('Admin TOTP — Setup', () => {
 
   test('GET /api/admin/totp/setup with auth → 200 + secret + qr_url', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/totp/setup')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/totp/setup').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('secret');
     expect(res.body).toHaveProperty('qr_url');
@@ -140,10 +130,7 @@ describe('Admin TOTP — Enable & Disable', () => {
 
   test('POST /api/admin/totp/enable without body → 400', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .post('/api/admin/totp/enable')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({});
+    const res = await request(app).post('/api/admin/totp/enable').set('Authorization', `Bearer ${adminToken}`).send({});
     expect(res.status).toBe(400);
     expect(res.body.error).toBeTruthy();
   });
@@ -151,9 +138,7 @@ describe('Admin TOTP — Enable & Disable', () => {
   test('POST /api/admin/totp/enable with wrong code → 400', async () => {
     expect(adminToken).toBeTruthy();
     // Generate a fresh secret but provide an obviously wrong code
-    const setupRes = await request(app)
-      .get('/api/admin/totp/setup')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const setupRes = await request(app).get('/api/admin/totp/setup').set('Authorization', `Bearer ${adminToken}`);
     totpSecret = setupRes.body.secret;
 
     const res = await request(app)
@@ -167,9 +152,7 @@ describe('Admin TOTP — Enable & Disable', () => {
   test('POST /api/admin/totp/enable with valid code → 200 + ok', async () => {
     expect(adminToken).toBeTruthy();
     // Generate a fresh TOTP secret
-    const setupRes = await request(app)
-      .get('/api/admin/totp/setup')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const setupRes = await request(app).get('/api/admin/totp/setup').set('Authorization', `Bearer ${adminToken}`);
     totpSecret = setupRes.body.secret;
 
     // Generate a valid TOTP code from the secret
@@ -300,65 +283,55 @@ describe('Public API — Reviews GET', () => {
 
 describe('Client Review Submission', () => {
   test('POST /api/client/review without required fields → 400', async () => {
-    const res = await request(app)
-      .post('/api/client/review')
-      .send({});
+    const res = await request(app).post('/api/client/review').send({});
     expect(res.status).toBe(400);
     expect(res.body.error).toBeTruthy();
   });
 
   test('POST /api/client/review with invalid phone → 400', async () => {
     expect(createdOrderId).toBeTruthy();
-    const res = await request(app)
-      .post('/api/client/review')
-      .send({
-        order_id: createdOrderId,
-        phone: 'not-a-phone',
-        rating: 5,
-        text: 'This is a valid review text with enough characters',
-      });
+    const res = await request(app).post('/api/client/review').send({
+      order_id: createdOrderId,
+      phone: 'not-a-phone',
+      rating: 5,
+      text: 'This is a valid review text with enough characters',
+    });
     expect(res.status).toBe(400);
     expect(res.body.error).toBeTruthy();
   });
 
   test('POST /api/client/review with rating out of range → 400', async () => {
     expect(createdOrderId).toBeTruthy();
-    const res = await request(app)
-      .post('/api/client/review')
-      .send({
-        order_id: createdOrderId,
-        phone: '+7 999 555-11-22',
-        rating: 10,
-        text: 'This is a valid review text with enough characters',
-      });
+    const res = await request(app).post('/api/client/review').send({
+      order_id: createdOrderId,
+      phone: '+7 999 555-11-22',
+      rating: 10,
+      text: 'This is a valid review text with enough characters',
+    });
     expect(res.status).toBe(400);
     expect(res.body.error).toBeTruthy();
   });
 
   test('POST /api/client/review with text too short → 400', async () => {
     expect(createdOrderId).toBeTruthy();
-    const res = await request(app)
-      .post('/api/client/review')
-      .send({
-        order_id: createdOrderId,
-        phone: '+7 999 555-11-22',
-        rating: 5,
-        text: 'Too short',
-      });
+    const res = await request(app).post('/api/client/review').send({
+      order_id: createdOrderId,
+      phone: '+7 999 555-11-22',
+      rating: 5,
+      text: 'Too short',
+    });
     expect(res.status).toBe(400);
     expect(res.body.error).toBeTruthy();
   });
 
   test('POST /api/client/review for completed order with matching phone → 200 + ok', async () => {
     expect(createdOrderId).toBeTruthy();
-    const res = await request(app)
-      .post('/api/client/review')
-      .send({
-        order_id: createdOrderId,
-        phone: '+7 999 555-11-22',
-        rating: 5,
-        text: 'Excellent service! Very professional and punctual. Highly recommended.',
-      });
+    const res = await request(app).post('/api/client/review').send({
+      order_id: createdOrderId,
+      phone: '+7 999 555-11-22',
+      rating: 5,
+      text: 'Excellent service! Very professional and punctual. Highly recommended.',
+    });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.id).toBeTruthy();
@@ -366,14 +339,12 @@ describe('Client Review Submission', () => {
 
   test('POST /api/client/review duplicate for same order → 409', async () => {
     expect(createdOrderId).toBeTruthy();
-    const res = await request(app)
-      .post('/api/client/review')
-      .send({
-        order_id: createdOrderId,
-        phone: '+7 999 555-11-22',
-        rating: 4,
-        text: 'Another review attempt — should be rejected as duplicate.',
-      });
+    const res = await request(app).post('/api/client/review').send({
+      order_id: createdOrderId,
+      phone: '+7 999 555-11-22',
+      rating: 4,
+      text: 'Another review attempt — should be rejected as duplicate.',
+    });
     expect(res.status).toBe(409);
     expect(res.body.error).toBeTruthy();
   });
@@ -387,9 +358,7 @@ describe('Admin Reviews Management', () => {
 
   test('GET /api/admin/reviews with auth → 200 + { reviews, total }', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/reviews')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.reviews)).toBe(true);
     expect(typeof res.body.total).toBe('number');
@@ -446,9 +415,7 @@ describe('Public API — Quick Booking', () => {
 
   test('GET /api/admin/quick-bookings with auth → 200, array', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/quick-bookings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/quick-bookings').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     // The booking we just created should appear

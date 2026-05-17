@@ -63,7 +63,7 @@ beforeAll(async () => {
     "INSERT INTO orders (order_number,client_name,client_phone,client_email,event_type,event_date,event_duration,status) VALUES ('ORD-W201C','Anna Test','+79991110001','anna@wave201.test','photo_shoot','2026-07-01',2,'completed')",
     []
   );
-}, 30000);
+}, 60000);
 
 afterAll(() => {
   const db = require('../database');

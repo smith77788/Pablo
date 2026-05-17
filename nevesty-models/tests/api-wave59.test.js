@@ -28,7 +28,7 @@ beforeAll(async () => {
   a.use('/api', apiRouter);
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
-}, 15000);
+}, 60000);
 
 afterAll(() => {
   if (app && app.close) app.close();

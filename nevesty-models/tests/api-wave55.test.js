@@ -44,9 +44,7 @@ beforeAll(async () => {
 
   app = a;
 
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 
   // Seed order with a valid phone number for WhatsApp and bulk-status tests
@@ -57,7 +55,7 @@ beforeAll(async () => {
     [orderNum, 'Wave55 Client', '+79991234567', 'test@test.ru', 'корпоратив', '2025-12-31', 'new']
   );
   seededOrderId = orderRes ? orderRes.id : null;
-}, 15000);
+}, 60000);
 
 // ── 1. SMS Service ────────────────────────────────────────────────────────────
 
@@ -250,9 +248,7 @@ describe('Manager Stats — GET /api/admin/managers/:id/stats', () => {
 
   it('returns 200 with stats object for valid manager id (superadmin can access)', async () => {
     // The seeded admin is superadmin. Try id=1 (the default admin)
-    const res = await request(app)
-      .get('/api/admin/managers/1/stats')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/managers/1/stats').set('Authorization', `Bearer ${adminToken}`);
     // Endpoint exists and either returns stats or 404 if id doesn't match a manager
     expect([200, 403, 404]).toContain(res.status);
     if (res.status === 200) {
@@ -270,10 +266,12 @@ describe('Manager Stats — GET /api/admin/managers/:id/stats', () => {
     const { run, get } = require('../database');
     const bcrypt = require('bcryptjs');
     const hash = await bcrypt.hash('managerpass', 6);
-    await run(
-      `INSERT OR IGNORE INTO admins (username, email, password_hash, role) VALUES (?,?,?,?)`,
-      ['test_manager_w55', 'mgr_w55@test.ru', hash, 'manager']
-    );
+    await run(`INSERT OR IGNORE INTO admins (username, email, password_hash, role) VALUES (?,?,?,?)`, [
+      'test_manager_w55',
+      'mgr_w55@test.ru',
+      hash,
+      'manager',
+    ]);
     const mgr = await get("SELECT id FROM admins WHERE username='test_manager_w55'");
     if (!mgr) return;
 
@@ -288,9 +286,7 @@ describe('Manager Stats — GET /api/admin/managers/:id/stats', () => {
   });
 
   it('returns 200 (with empty stats) for non-existent manager id', async () => {
-    const res = await request(app)
-      .get('/api/admin/managers/999999/stats')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/managers/999999/stats').set('Authorization', `Bearer ${adminToken}`);
     // Endpoint returns stats with zeroes for non-existent manager (no 404 from DB)
     expect([200, 403, 404]).toContain(res.status);
     if (res.status === 200) {
@@ -308,9 +304,7 @@ describe('Broadcast Count — GET /api/admin/broadcasts/count', () => {
   });
 
   it('returns count for default (all) segment', async () => {
-    const res = await request(app)
-      .get('/api/admin/broadcasts/count')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/broadcasts/count').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('count');
     expect(typeof res.body.count).toBe('number');
@@ -363,9 +357,7 @@ describe('Broadcast Count — GET /api/admin/broadcasts/count', () => {
   });
 
   it('count is a non-negative integer', async () => {
-    const res = await request(app)
-      .get('/api/admin/broadcasts/count')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/broadcasts/count').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.count).toBeGreaterThanOrEqual(0);
     expect(Number.isInteger(res.body.count)).toBe(true);

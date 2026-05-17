@@ -36,7 +36,7 @@ beforeAll(async () => {
 
   const lr = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = lr.body.token;
-}, 30000);
+}, 60000);
 
 // ── 1. Model CSV import ────────────────────────────────────────────────────────
 

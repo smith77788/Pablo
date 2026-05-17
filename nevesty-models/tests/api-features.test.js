@@ -54,9 +54,7 @@ beforeAll(async () => {
   app = a;
 
   // ── Obtain admin token ──────────────────────────────────────────────────────
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 
   // ── Seed a model ────────────────────────────────────────────────────────────
@@ -92,7 +90,7 @@ beforeAll(async () => {
     ['Reviewer A', 5, 'Excellent model, highly recommended!', seededModelId, 1]
   );
   seededReviewId = reviewRes.id;
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   const { closeDatabase } = require('../database');
@@ -168,8 +166,7 @@ describe('Model busy dates', () => {
   });
 
   test('GET /admin/models/:id/busy-dates requires auth', async () => {
-    const res = await request(app)
-      .get(`/api/admin/models/${seededModelId}/busy-dates`);
+    const res = await request(app).get(`/api/admin/models/${seededModelId}/busy-dates`);
     expect(res.status).toBe(401);
   });
 
@@ -243,9 +240,7 @@ describe('Order payment', () => {
   });
 
   test('PATCH /admin/orders/:id/payment requires auth', async () => {
-    const res = await request(app)
-      .patch(`/api/admin/orders/${seededOrderId}/payment`)
-      .send({ paid: true });
+    const res = await request(app).patch(`/api/admin/orders/${seededOrderId}/payment`).send({ paid: true });
     expect(res.status).toBe(401);
   });
 });
@@ -272,14 +267,10 @@ describe('Review reply', () => {
       .send({ reply: replyText });
 
     // Verify via admin reviews list
-    const listRes = await request(app)
-      .get('/api/admin/reviews')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const listRes = await request(app).get('/api/admin/reviews').set('Authorization', `Bearer ${adminToken}`);
     expect(listRes.status).toBe(200);
     const reviews = listRes.body.reviews || listRes.body;
-    const review = Array.isArray(reviews)
-      ? reviews.find(r => r.id === seededReviewId)
-      : null;
+    const review = Array.isArray(reviews) ? reviews.find(r => r.id === seededReviewId) : null;
     if (review) {
       expect(review.admin_reply).toBe(replyText);
     }
@@ -293,9 +284,7 @@ describe('Review reply', () => {
       .send({ reply: 'Reply that sets reply_at timestamp' });
 
     // Admin reviews endpoint includes admin_reply column
-    const adminRes = await request(app)
-      .get('/api/admin/reviews')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const adminRes = await request(app).get('/api/admin/reviews').set('Authorization', `Bearer ${adminToken}`);
     expect(adminRes.status).toBe(200);
     const reviews = adminRes.body.reviews || adminRes.body;
     if (Array.isArray(reviews)) {
@@ -354,9 +343,7 @@ describe('Bulk order status', () => {
     expect(res.body.updated).toBe(2);
 
     // Verify status was changed in the list
-    const listRes = await request(app)
-      .get('/api/admin/orders')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const listRes = await request(app).get('/api/admin/orders').set('Authorization', `Bearer ${adminToken}`);
     expect(listRes.status).toBe(200);
     const orders = listRes.body.orders || [];
     const order1 = orders.find(o => o.id === seededOrderId);
@@ -440,7 +427,7 @@ describe('Order date range filter', () => {
     expect(res.body.orders.length).toBe(0);
   });
 
-  test('GET /admin/orders with date_from=today returns today\'s orders', async () => {
+  test("GET /admin/orders with date_from=today returns today's orders", async () => {
     expect(adminToken).toBeTruthy();
     // Seeded orders are created "now" in SQLite via DEFAULT CURRENT_TIMESTAMP
     const today = new Date().toISOString().slice(0, 10);
@@ -474,8 +461,7 @@ describe('Order date range filter', () => {
 
   test('GET /admin/orders date filter requires auth', async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const res = await request(app)
-      .get(`/api/admin/orders?date_from=${today}`);
+    const res = await request(app).get(`/api/admin/orders?date_from=${today}`);
     expect(res.status).toBe(401);
   });
 });

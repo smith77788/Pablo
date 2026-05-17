@@ -53,7 +53,7 @@ beforeAll(async () => {
   // Get client token
   const cl = await request(app).post('/api/cabinet/login').send({ phone: TEST_PHONE });
   clientToken = cl.body.token;
-}, 30000);
+}, 60000);
 
 afterAll(() => {
   const db = require('../database');

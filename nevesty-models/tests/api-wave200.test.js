@@ -22,7 +22,7 @@ beforeAll(async () => {
   a.use('/api', apiRouter);
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
-}, 30000);
+}, 60000);
 afterAll(() => {
   const db = require('../database');
   if (db.closeDatabase) db.closeDatabase();

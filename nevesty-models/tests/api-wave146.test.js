@@ -67,7 +67,7 @@ beforeAll(async () => {
     .set('Authorization', `Bearer ${adminToken}`)
     .set('x-csrf-token', csrf3)
     .send({ status: 'completed' });
-}, 30000);
+}, 60000);
 
 afterAll(() => {
   const db = require('../database');

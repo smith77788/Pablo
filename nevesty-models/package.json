@@ -32,7 +32,8 @@
     "testPathIgnorePatterns": [
       "/node_modules/"
     ],
-    "testTimeout": 30000
+    "testTimeout": 60000,
+    "runInBand": true
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

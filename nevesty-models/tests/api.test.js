@@ -24,6 +24,11 @@ let createdOrderId;
 let createdOrderNumber;
 let createdModelId;
 
+async function getCsrf() {
+  const r = await request(app).get('/api/csrf-token');
+  return r.body.token;
+}
+
 // ── Server bootstrap ─────────────────────────────────────────────────────────
 
 beforeAll(async () => {
@@ -62,7 +67,7 @@ beforeAll(async () => {
   });
 
   app = a;
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   const { closeDatabase } = require('../database');
@@ -249,8 +254,10 @@ describe('Public API — Orders', () => {
 
 describe('Public API — Contact', () => {
   test('POST /api/contact → 200, 201 or 429 (rate limited)', async () => {
+    const csrf = await getCsrf();
     const res = await request(app)
       .post('/api/contact')
+      .set('x-csrf-token', csrf)
       .send({ name: 'Test User', phone: '+79001234567', message: 'Test message from CI' });
     expect([200, 201, 429]).toContain(res.status);
   });

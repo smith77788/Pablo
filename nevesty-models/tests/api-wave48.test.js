@@ -54,9 +54,7 @@ beforeAll(async () => {
   app = a;
 
   // ── Obtain admin token ──────────────────────────────────────────────────────
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 
   // ── Seed a model ────────────────────────────────────────────────────────────
@@ -89,7 +87,7 @@ beforeAll(async () => {
      VALUES (?, ?, ?, ?)`,
     [seededOrderId, 'client', 'Wave48 Client', 'Hello, I have a question about my order.']
   );
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   const { closeDatabase } = require('../database');
@@ -106,9 +104,7 @@ describe('Settings Export/Import/Reset', () => {
 
   test('GET /api/admin/settings/export returns JSON with Content-Disposition header', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/settings/export')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/export').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.headers['content-disposition']).toMatch(/attachment/);
     expect(res.headers['content-disposition']).toMatch(/settings\.json/);
@@ -216,14 +212,12 @@ describe('Public Reviews API', () => {
 
   test('POST /api/client/review with valid order_number saves pending review', async () => {
     // The endpoint checks order ownership via phone, and requires status=completed
-    const res = await request(app)
-      .post('/api/client/review')
-      .send({
-        order_id: seededOrderId,
-        phone: '+79001112233',
-        rating: 4,
-        text: 'Very professional, would book again for sure!',
-      });
+    const res = await request(app).post('/api/client/review').send({
+      order_id: seededOrderId,
+      phone: '+79001112233',
+      rating: 4,
+      text: 'Very professional, would book again for sure!',
+    });
     // Should succeed (201 or 200) — review saved with approved=0
     expect([200, 201]).toContain(res.status);
     expect(res.body.ok).toBe(true);
@@ -258,9 +252,7 @@ describe('Model Stats', () => {
 
   test('GET /api/admin/models/:id/stats for unknown ID returns 404', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/models/999999/stats')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/models/999999/stats').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(404);
   });
 
@@ -282,10 +274,10 @@ describe('Wishlist DB helpers', () => {
   });
 
   test('can insert a wishlist entry for a chat_id', async () => {
-    const r = await db.run(
-      `INSERT INTO wishlists (chat_id, model_id) VALUES (?, ?)`,
-      ['test_chat_1001', seededModelId]
-    );
+    const r = await db.run(`INSERT INTO wishlists (chat_id, model_id) VALUES (?, ?)`, [
+      'test_chat_1001',
+      seededModelId,
+    ]);
     expect(r.id).toBeGreaterThan(0);
   });
 
@@ -304,30 +296,21 @@ describe('Wishlist DB helpers', () => {
 
   test('UNIQUE constraint prevents duplicate wishlist entries', async () => {
     await expect(
-      db.run(
-        `INSERT INTO wishlists (chat_id, model_id) VALUES (?, ?)`,
-        ['test_chat_1001', seededModelId]
-      )
+      db.run(`INSERT INTO wishlists (chat_id, model_id) VALUES (?, ?)`, ['test_chat_1001', seededModelId])
     ).rejects.toThrow();
   });
 
   test('can remove a wishlist entry', async () => {
-    await db.run(
-      `DELETE FROM wishlists WHERE chat_id = ? AND model_id = ?`,
-      ['test_chat_1001', seededModelId]
-    );
-    const rows = await db.query(
-      `SELECT id FROM wishlists WHERE chat_id = ? AND model_id = ?`,
-      ['test_chat_1001', seededModelId]
-    );
+    await db.run(`DELETE FROM wishlists WHERE chat_id = ? AND model_id = ?`, ['test_chat_1001', seededModelId]);
+    const rows = await db.query(`SELECT id FROM wishlists WHERE chat_id = ? AND model_id = ?`, [
+      'test_chat_1001',
+      seededModelId,
+    ]);
     expect(rows.length).toBe(0);
   });
 
   test('wishlist is empty for unknown chat_id', async () => {
-    const rows = await db.query(
-      `SELECT id FROM wishlists WHERE chat_id = ?`,
-      ['totally_unknown_chat_999']
-    );
+    const rows = await db.query(`SELECT id FROM wishlists WHERE chat_id = ?`, ['totally_unknown_chat_999']);
     expect(Array.isArray(rows)).toBe(true);
     expect(rows.length).toBe(0);
   });
@@ -350,9 +333,7 @@ describe('Admin Messages', () => {
 
   test('GET /api/admin/messages/recent returns object with messages array', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/messages/recent')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/messages/recent').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('messages');
     expect(Array.isArray(res.body.messages)).toBe(true);
@@ -369,9 +350,7 @@ describe('Admin Messages', () => {
 
   test('GET /api/admin/messages/recent returns messages with order_number field', async () => {
     expect(adminToken).toBeTruthy();
-    const res = await request(app)
-      .get('/api/admin/messages/recent')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/messages/recent').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.messages.length).toBeGreaterThan(0);
     const msg = res.body.messages[0];

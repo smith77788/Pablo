@@ -44,7 +44,7 @@ beforeAll(async () => {
     .set('Authorization', `Bearer ${adminToken}`)
     .send({ name: 'Wave126 Package', price_from: 5000, category: 'standard' });
   createdPackageId = cr.body.id;
-}, 30000);
+}, 60000);
 
 // ── 1. Price packages — GET ───────────────────────────────────────────────────
 

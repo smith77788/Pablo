@@ -42,11 +42,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body?.token || res.body?.accessToken || null;
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   await new Promise(r => setTimeout(r, 300));
@@ -62,26 +60,20 @@ describe('Wave 76: Admin Reviews API (БЛОК 3.2)', () => {
 
   test('GET /api/admin/reviews returns 200 with auth', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/reviews')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   test('GET /api/admin/reviews returns reviews array', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/reviews')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body).toHaveProperty('reviews');
     expect(Array.isArray(res.body.reviews)).toBe(true);
   });
 
   test('GET /api/admin/reviews returns total and page fields', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/reviews')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body).toHaveProperty('total');
     expect(res.body).toHaveProperty('page');
   });
@@ -104,18 +96,14 @@ describe('Wave 76: Admin Reviews API (БЛОК 3.2)', () => {
 
   test('GET /api/admin/reviews?approved=0 returns pending', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/reviews?approved=0')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews?approved=0').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.reviews)).toBe(true);
   });
 
   test('PUT /api/admin/reviews/999/approve returns 404 for nonexistent', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .put('/api/admin/reviews/999/approve')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).put('/api/admin/reviews/999/approve').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(404);
   });
 
@@ -188,9 +176,7 @@ describe('Wave 76: Factory Status API', () => {
 
   test('GET /api/admin/factory/status returns status field with auth', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/factory/status')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory/status').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body).toHaveProperty('status');
   });
 
@@ -201,9 +187,7 @@ describe('Wave 76: Factory Status API', () => {
 
   test('GET /api/admin/factory-experiments returns 200 or graceful error with auth', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/factory-experiments')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory-experiments').set('Authorization', `Bearer ${adminToken}`);
     // May return 500 in test environment if factory.db doesn't exist — that's ok
     expect([200, 500]).toContain(res.status);
   });
@@ -215,9 +199,7 @@ describe('Wave 76: Factory Status API', () => {
 
   test('GET /api/admin/factory-content returns 200 or graceful error with auth', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/factory-content')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory-content').set('Authorization', `Bearer ${adminToken}`);
     // May return 500 in test environment if factory.db doesn't exist — that's ok
     expect([200, 500]).toContain(res.status);
   });

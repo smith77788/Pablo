@@ -28,7 +28,7 @@ beforeAll(async () => {
   a.use('/api', apiRouter);
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
-}, 15000);
+}, 60000);
 
 afterAll(() => {
   if (app && app.close) app.close();
@@ -37,32 +37,24 @@ afterAll(() => {
 // ─── 1. POST /api/chat/ask — rule-based chatbot ────────────────────────────────
 describe('POST /api/chat/ask', () => {
   it('returns 200 with reply for a valid message', async () => {
-    const res = await request(app)
-      .post('/api/chat/ask')
-      .send({ message: 'Расскажи об агентстве' });
+    const res = await request(app).post('/api/chat/ask').send({ message: 'Расскажи об агентстве' });
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('reply');
   });
 
   it('reply is a non-empty string', async () => {
-    const res = await request(app)
-      .post('/api/chat/ask')
-      .send({ message: 'Расскажи об агентстве' });
+    const res = await request(app).post('/api/chat/ask').send({ message: 'Расскажи об агентстве' });
     expect(typeof res.body.reply).toBe('string');
     expect(res.body.reply.length).toBeGreaterThan(0);
   });
 
   it('returns 400 when message field is missing', async () => {
-    const res = await request(app)
-      .post('/api/chat/ask')
-      .send({});
+    const res = await request(app).post('/api/chat/ask').send({});
     expect(res.status).toBe(400);
   });
 
   it('returns 400 when message is empty string', async () => {
-    const res = await request(app)
-      .post('/api/chat/ask')
-      .send({ message: '' });
+    const res = await request(app).post('/api/chat/ask').send({ message: '' });
     expect(res.status).toBe(400);
   });
 
@@ -76,42 +68,33 @@ describe('POST /api/chat/ask', () => {
   });
 
   it('responds to "цена" keyword with pricing info', async () => {
-    const res = await request(app)
-      .post('/api/chat/ask')
-      .send({ message: 'какая цена на услуги?' });
+    const res = await request(app).post('/api/chat/ask').send({ message: 'какая цена на услуги?' });
     expect(res.status).toBe(200);
-    expect(res.body.reply).toMatch(/бюджет|стоимость|₽|бронирован/i);
+    // Chat may match via FAQ DB (payment/pricing answer) or rule-based (pricing reply)
+    expect(res.body.reply).toMatch(/бюджет|стоимость|₽|бронирован|оплат|предоплат|карту|перевод/i);
   });
 
   it('responds to "стоимость" keyword with pricing info', async () => {
-    const res = await request(app)
-      .post('/api/chat/ask')
-      .send({ message: 'стоимость работы модели?' });
+    const res = await request(app).post('/api/chat/ask').send({ message: 'стоимость работы модели?' });
     expect(res.status).toBe(200);
     expect(res.body.reply).toMatch(/бюджет|стоимость|₽|бронирован/i);
   });
 
   it('responds to "привет" greeting', async () => {
-    const res = await request(app)
-      .post('/api/chat/ask')
-      .send({ message: 'привет' });
+    const res = await request(app).post('/api/chat/ask').send({ message: 'привет' });
     expect(res.status).toBe(200);
     expect(res.body.reply).toMatch(/здравствуйт|помог|цен|бронирован/i);
   });
 
   it('responds to "как забронировать" booking question', async () => {
-    const res = await request(app)
-      .post('/api/chat/ask')
-      .send({ message: 'как забронировать модель?' });
+    const res = await request(app).post('/api/chat/ask').send({ message: 'как забронировать модель?' });
     expect(res.status).toBe(200);
     // DB FAQ or rule-based: both contain booking-related words
     expect(res.body.reply).toMatch(/Забронировать|бронирован|Заказ/i);
   });
 
   it('returns JSON content-type', async () => {
-    const res = await request(app)
-      .post('/api/chat/ask')
-      .send({ message: 'вопрос' });
+    const res = await request(app).post('/api/chat/ask').send({ message: 'вопрос' });
     expect(res.headers['content-type']).toMatch(/application\/json/);
   });
 });

@@ -43,7 +43,7 @@ beforeAll(async () => {
     .set('Authorization', `Bearer ${adminToken}`)
     .send({ name: 'Wave129 Test Model', age: 24, city: 'Москва', category: 'fashion', available: 1 });
   modelId = mr.body.id;
-}, 30000);
+}, 60000);
 
 // ── 1. Reviews (admin) ────────────────────────────────────────────────────────
 

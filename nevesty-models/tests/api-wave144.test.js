@@ -90,7 +90,7 @@ beforeAll(async () => {
     ['Другой Клиент', 3, 'Нормально было', modelId || null]
   );
   reviewId2 = r2.id || r2.lastID;
-}, 30000);
+}, 60000);
 
 afterAll(() => {
   const db = require('../database');

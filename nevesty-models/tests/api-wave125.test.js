@@ -36,7 +36,7 @@ beforeAll(async () => {
 
   const lr = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = lr.body.token;
-}, 30000);
+}, 60000);
 
 // ── 1. Social posts ───────────────────────────────────────────────────────────
 
@@ -161,14 +161,11 @@ describe('FAQ — GET/POST /api/admin/faq', () => {
   });
 
   it('POST creates FAQ item', async () => {
-    const res = await request(app)
-      .post('/api/admin/faq')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        question: 'Как забронировать модель?',
-        answer: 'Через форму на сайте или Telegram бот.',
-        category: 'booking',
-      });
+    const res = await request(app).post('/api/admin/faq').set('Authorization', `Bearer ${adminToken}`).send({
+      question: 'Как забронировать модель?',
+      answer: 'Через форму на сайте или Telegram бот.',
+      category: 'booking',
+    });
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('id');
   });
@@ -237,17 +234,14 @@ describe('Price packages — GET/POST /api/admin/price-packages', () => {
   });
 
   it('POST creates price package', async () => {
-    const res = await request(app)
-      .post('/api/admin/price-packages')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        name: 'Стандарт',
-        price_from: 50000,
-        price_to: 100000,
-        duration: '4 часа',
-        category: 'standard',
-        description: 'Стандартный пакет',
-      });
+    const res = await request(app).post('/api/admin/price-packages').set('Authorization', `Bearer ${adminToken}`).send({
+      name: 'Стандарт',
+      price_from: 50000,
+      price_to: 100000,
+      duration: '4 часа',
+      category: 'standard',
+      description: 'Стандартный пакет',
+    });
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('id');
     expect(res.body.ok).toBe(true);

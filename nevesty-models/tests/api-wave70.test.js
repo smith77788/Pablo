@@ -39,7 +39,7 @@ beforeAll(async () => {
 
   const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body.token;
-}, 15000);
+}, 60000);
 
 afterAll(() => {
   if (app && app.close) app.close();

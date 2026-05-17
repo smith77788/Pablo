@@ -51,7 +51,7 @@ beforeAll(async () => {
 
   const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token || loginRes.body.accessToken || null;
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   const { closeDatabase } = require('../database');

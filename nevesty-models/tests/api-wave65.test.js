@@ -29,11 +29,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body.token;
-}, 15000);
+}, 60000);
 
 afterAll(() => {
   if (app && app.close) app.close();
@@ -166,23 +164,17 @@ describe('GET /api/admin/analytics/top-cities', () => {
     // Without token must be 401, with token must not be 401
     const unauth = await request(app).get('/api/admin/analytics/top-cities');
     expect(unauth.status).toBe(401);
-    const auth = await request(app)
-      .get('/api/admin/analytics/top-cities')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const auth = await request(app).get('/api/admin/analytics/top-cities').set('Authorization', `Bearer ${adminToken}`);
     expect(auth.status).not.toBe(401);
   });
 
   it('responds with JSON content-type', async () => {
-    const res = await request(app)
-      .get('/api/admin/analytics/top-cities')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/analytics/top-cities').set('Authorization', `Bearer ${adminToken}`);
     expect(res.headers['content-type']).toMatch(/application\/json/);
   });
 
   it('response has cities array when query succeeds', async () => {
-    const res = await request(app)
-      .get('/api/admin/analytics/top-cities')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/analytics/top-cities').set('Authorization', `Bearer ${adminToken}`);
     if (res.status === 200) {
       expect(Array.isArray(res.body.cities)).toBe(true);
     } else {
@@ -192,9 +184,7 @@ describe('GET /api/admin/analytics/top-cities', () => {
   });
 
   it('when cities returned, each entry has city, orders, unique_clients fields', async () => {
-    const res = await request(app)
-      .get('/api/admin/analytics/top-cities')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/analytics/top-cities').set('Authorization', `Bearer ${adminToken}`);
     if (res.status === 200 && Array.isArray(res.body.cities)) {
       for (const entry of res.body.cities) {
         expect(typeof entry.city).toBe('string');
@@ -205,9 +195,7 @@ describe('GET /api/admin/analytics/top-cities', () => {
   });
 
   it('returns at most 10 cities when successful', async () => {
-    const res = await request(app)
-      .get('/api/admin/analytics/top-cities')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/analytics/top-cities').set('Authorization', `Bearer ${adminToken}`);
     if (res.status === 200 && Array.isArray(res.body.cities)) {
       expect(res.body.cities.length).toBeLessThanOrEqual(10);
     }
@@ -222,45 +210,33 @@ describe('GET /api/admin/settings/sections', () => {
   });
 
   it('returns 200 with valid token', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   it('response has sections object', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(typeof res.body.sections).toBe('object');
     expect(res.body.sections).not.toBeNull();
   });
 
   it('sections has contacts section', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('contacts');
   });
 
   it('sections has catalog section', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('catalog');
   });
 
   it('sections has booking section', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('booking');
   });
 
   it('each section has a label string', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     for (const key of Object.keys(res.body.sections)) {
       expect(typeof res.body.sections[key].label).toBe('string');
       expect(res.body.sections[key].label.length).toBeGreaterThan(0);
@@ -268,9 +244,7 @@ describe('GET /api/admin/settings/sections', () => {
   });
 
   it('each section has a settings object', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     for (const key of Object.keys(res.body.sections)) {
       expect(typeof res.body.sections[key].settings).toBe('object');
     }

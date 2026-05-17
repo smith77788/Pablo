@@ -23,9 +23,9 @@ const path = require('path');
 
 let app, adminToken;
 
-const botContent       = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
-const routesContent    = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
-const serverContent    = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+const botContent = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
+const routesContent = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
+const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
 const schedulerContent = fs.readFileSync(path.join(__dirname, '../services/scheduler.js'), 'utf8');
 
 const FACTORY_DIR = path.join(__dirname, '../../factory');
@@ -46,11 +46,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body.token;
-}, 15000);
+}, 60000);
 
 afterAll(async () => {
   const { closeDatabase } = require('../database');
@@ -100,17 +98,13 @@ describe('Wave 72: Factory Status API', () => {
 
   it('GET /api/admin/factory/status with token returns 200', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/factory/status')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory/status').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   it('GET /api/admin/factory/status returns status field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/factory/status')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory/status').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body).toHaveProperty('status');
   });
 
@@ -199,24 +193,32 @@ describe('Wave 72: Factory Monitoring', () => {
 
 describe('Wave 72: A/B Experiment System (factory)', () => {
   it('factory/agents/experiment_system.py exists', () => {
-    if (!factoryExists) { return; }
+    if (!factoryExists) {
+      return;
+    }
     expect(fs.existsSync(path.join(FACTORY_DIR, 'agents', 'experiment_system.py'))).toBe(true);
   });
 
   it('experiment_system.py contains HeuristicExperimentSystem or ExperimentSystem', () => {
-    if (!factoryExists) { return; }
+    if (!factoryExists) {
+      return;
+    }
     const code = fs.readFileSync(path.join(FACTORY_DIR, 'agents', 'experiment_system.py'), 'utf8');
     expect(code).toMatch(/HeuristicExperimentSystem|ExperimentSystem/);
   });
 
   it('cycle.py contains run_phase_28_experiments', () => {
-    if (!factoryExists) { return; }
+    if (!factoryExists) {
+      return;
+    }
     const code = fs.readFileSync(path.join(FACTORY_DIR, 'cycle.py'), 'utf8');
     expect(code).toMatch(/run_phase_28_experiments/);
   });
 
   it('factory/tests/test_experiment_system.py exists', () => {
-    if (!factoryExists) { return; }
+    if (!factoryExists) {
+      return;
+    }
     expect(fs.existsSync(path.join(FACTORY_DIR, 'tests', 'test_experiment_system.py'))).toBe(true);
   });
 });

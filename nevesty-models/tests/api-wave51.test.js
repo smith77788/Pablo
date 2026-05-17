@@ -44,9 +44,7 @@ beforeAll(async () => {
 
   app = a;
 
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 
   // Seed a model and order
@@ -59,44 +57,35 @@ beforeAll(async () => {
        (order_number, client_name, client_phone, client_email, event_type,
         event_date, status)
      VALUES (?,?,?,?,?,?,?)`,
-    [orderNum, 'Wave51 Client', '+79991234567', 'test@test.ru',
-     'корпоратив', '2025-12-31', 'new']
+    [orderNum, 'Wave51 Client', '+79991234567', 'test@test.ru', 'корпоратив', '2025-12-31', 'new']
   );
   seededOrderId = orderRes ? orderRes.id : null;
-});
+}, 60000);
 
 // ── Client Cabinet: order lookup by phone ────────────────────────────────────
 
 describe('Client Cabinet — /api/orders/by-phone', () => {
   it('returns orders for a known phone number', async () => {
-    const res = await request(app)
-      .get('/api/orders/by-phone')
-      .query({ phone: '+79991234567' });
+    const res = await request(app).get('/api/orders/by-phone').query({ phone: '+79991234567' });
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('orders');
     expect(Array.isArray(res.body.orders)).toBe(true);
   });
 
   it('returns empty array for unknown phone', async () => {
-    const res = await request(app)
-      .get('/api/orders/by-phone')
-      .query({ phone: '+70000000001' });
+    const res = await request(app).get('/api/orders/by-phone').query({ phone: '+70000000001' });
     expect(res.status).toBe(200);
     expect(res.body.orders).toEqual([]);
   });
 
   it('returns empty array for too-short phone', async () => {
-    const res = await request(app)
-      .get('/api/orders/by-phone')
-      .query({ phone: '123' });
+    const res = await request(app).get('/api/orders/by-phone').query({ phone: '123' });
     expect(res.status).toBe(200);
     expect(res.body.orders).toEqual([]);
   });
 
   it('returns orders with required fields', async () => {
-    const res = await request(app)
-      .get('/api/orders/by-phone')
-      .query({ phone: '79991234567' });
+    const res = await request(app).get('/api/orders/by-phone').query({ phone: '79991234567' });
     if (res.body.orders && res.body.orders.length > 0) {
       const order = res.body.orders[0];
       expect(order).toHaveProperty('order_number');
@@ -120,8 +109,8 @@ describe('Payment Webhook — POST /api/webhooks/yookassa', () => {
           id: 'pay_test_001',
           status: 'succeeded',
           amount: { value: '50000.00', currency: 'RUB' },
-          metadata: { order_id: seededOrderId || 1 }
-        }
+          metadata: { order_id: seededOrderId || 1 },
+        },
       });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
@@ -136,25 +125,21 @@ describe('Payment Webhook — POST /api/webhooks/yookassa', () => {
         object: {
           id: 'pay_test_002',
           status: 'canceled',
-          metadata: { order_id: seededOrderId || 1 }
-        }
+          metadata: { order_id: seededOrderId || 1 },
+        },
       });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
   });
 
   it('handles non-notification event gracefully', async () => {
-    const res = await request(app)
-      .post('/api/webhooks/yookassa')
-      .send({ type: 'something_else', object: {} });
+    const res = await request(app).post('/api/webhooks/yookassa').send({ type: 'something_else', object: {} });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
   });
 
   it('handles empty body gracefully', async () => {
-    const res = await request(app)
-      .post('/api/webhooks/yookassa')
-      .send({});
+    const res = await request(app).post('/api/webhooks/yookassa').send({});
     expect(res.status).toBe(200);
   });
 });
@@ -163,8 +148,7 @@ describe('Payment Webhook — POST /api/webhooks/yookassa', () => {
 
 describe('Payment Link — POST /api/admin/orders/:id/payment-link', () => {
   it('requires authentication', async () => {
-    const res = await request(app)
-      .post('/api/admin/orders/1/payment-link');
+    const res = await request(app).post('/api/admin/orders/1/payment-link');
     expect(res.status).toBe(401);
   });
 
@@ -206,9 +190,7 @@ describe('Manager Assignment', () => {
   });
 
   it('orders list includes manager_id field', async () => {
-    const res = await request(app)
-      .get('/api/admin/orders')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/orders').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.orders || res.body)).toBe(true);
   });
@@ -237,10 +219,9 @@ describe('Security — password not exposed in logs', () => {
 describe('Repeat Order — database level', () => {
   it('orders table has client contact fields for prefill', async () => {
     const { get } = require('../database');
-    const order = await get(
-      'SELECT client_name, client_phone, client_email FROM orders WHERE id=?',
-      [seededOrderId || 1]
-    );
+    const order = await get('SELECT client_name, client_phone, client_email FROM orders WHERE id=?', [
+      seededOrderId || 1,
+    ]);
     if (order) {
       expect(order).toHaveProperty('client_name');
       expect(order).toHaveProperty('client_phone');

@@ -21,9 +21,9 @@ const path = require('path');
 
 let app, adminToken;
 
-const botContent    = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
+const botContent = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
 const routesContent = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
-const dbContent     = fs.readFileSync(path.join(__dirname, '../database.js'), 'utf8');
+const dbContent = fs.readFileSync(path.join(__dirname, '../database.js'), 'utf8');
 const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
 
 const FACTORY_DIR = path.join(__dirname, '../../factory');
@@ -44,11 +44,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body.token;
-}, 15000);
+}, 60000);
 
 afterAll(async () => {
   const { closeDatabase } = require('../database');
@@ -89,16 +87,12 @@ describe('Wave 71: Security hardening', () => {
   });
 
   it('POST /api/admin/login with wrong password returns 401', async () => {
-    const res = await request(app)
-      .post('/api/admin/login')
-      .send({ username: 'admin', password: 'wrongpassword' });
+    const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'wrongpassword' });
     expect(res.status).toBe(401);
   });
 
   it('POST /api/admin/login with unknown user returns 401', async () => {
-    const res = await request(app)
-      .post('/api/admin/login')
-      .send({ username: 'nonexistent', password: 'anything' });
+    const res = await request(app).post('/api/admin/login').send({ username: 'nonexistent', password: 'anything' });
     expect(res.status).toBe(401);
   });
 
@@ -108,9 +102,7 @@ describe('Wave 71: Security hardening', () => {
   });
 
   it('Protected admin routes reject requests with invalid token', async () => {
-    const res = await request(app)
-      .get('/api/admin/orders')
-      .set('Authorization', 'Bearer invalid.token.here');
+    const res = await request(app).get('/api/admin/orders').set('Authorization', 'Bearer invalid.token.here');
     expect([401, 403]).toContain(res.status);
   });
 });

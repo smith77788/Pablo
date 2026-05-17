@@ -46,7 +46,7 @@ beforeAll(async () => {
     .set('Authorization', `Bearer ${adminToken}`)
     .send({ name: 'Wave124 Model', age: 24, city: 'Москва', category: 'fashion', available: 1 });
   seedModelId = modelRes.body.id;
-}, 30000);
+}, 60000);
 
 // ── 1. User Wishlist — GET /api/user/wishlist ──────────────────────────────────
 

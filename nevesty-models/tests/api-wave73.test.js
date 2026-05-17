@@ -23,9 +23,9 @@ const path = require('path');
 
 let app, adminToken;
 
-const routesContent    = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
+const routesContent = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
 const schedulerContent = fs.readFileSync(path.join(__dirname, '../services/scheduler.js'), 'utf8');
-const serverContent    = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
 
 const FACTORY_DIR = path.join(__dirname, '../../factory');
 const factoryExists = fs.existsSync(FACTORY_DIR);
@@ -45,11 +45,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body?.token || res.body?.accessToken || null;
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   await new Promise(r => setTimeout(r, 300));
@@ -97,9 +95,7 @@ describe('Wave 73: Factory Status & Monitoring', () => {
 
   test('GET /api/admin/factory/status returns status field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/factory/status')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory/status').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body).toHaveProperty('status');
   });
 

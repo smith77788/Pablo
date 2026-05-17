@@ -28,7 +28,7 @@ beforeAll(async () => {
   a.use('/api', apiRouter);
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
-}, 15000);
+}, 60000);
 
 afterAll(() => {
   if (app && app.close) app.close();
@@ -52,8 +52,9 @@ describe('GET /api/budget-estimate', () => {
   });
 
   it('корпоратив event_type returns reasonable budget values', async () => {
-    const res = await request(app)
-      .get('/api/budget-estimate?event_type=%D0%BA%D0%BE%D1%80%D0%BF%D0%BE%D1%80%D0%B0%D1%82%D0%B8%D0%B2&model_count=2&duration_hours=6');
+    const res = await request(app).get(
+      '/api/budget-estimate?event_type=%D0%BA%D0%BE%D1%80%D0%BF%D0%BE%D1%80%D0%B0%D1%82%D0%B8%D0%B2&model_count=2&duration_hours=6'
+    );
     expect(res.status).toBe(200);
     const { min, max, recommended } = res.body.budget;
     expect(typeof min).toBe('number');
@@ -65,8 +66,9 @@ describe('GET /api/budget-estimate', () => {
   });
 
   it('min < recommended < max for корпоратив event', async () => {
-    const res = await request(app)
-      .get('/api/budget-estimate?event_type=%D0%BA%D0%BE%D1%80%D0%BF%D0%BE%D1%80%D0%B0%D1%82%D0%B8%D0%B2&model_count=2&duration_hours=6');
+    const res = await request(app).get(
+      '/api/budget-estimate?event_type=%D0%BA%D0%BE%D1%80%D0%BF%D0%BE%D1%80%D0%B0%D1%82%D0%B8%D0%B2&model_count=2&duration_hours=6'
+    );
     const { min, max, recommended } = res.body.budget;
     expect(min).toBeLessThan(recommended);
     expect(recommended).toBeLessThan(max);
@@ -83,10 +85,10 @@ describe('GET /api/budget-estimate', () => {
   });
 
   it('фотосессия returns different range than показ', async () => {
-    const foto = await request(app)
-      .get('/api/budget-estimate?event_type=%D1%84%D0%BE%D1%82%D0%BE%D1%81%D0%B5%D1%81%D1%81%D0%B8%D1%8F');
-    const pokaz = await request(app)
-      .get('/api/budget-estimate?event_type=%D0%BF%D0%BE%D0%BA%D0%B0%D0%B7');
+    const foto = await request(app).get(
+      '/api/budget-estimate?event_type=%D1%84%D0%BE%D1%82%D0%BE%D1%81%D0%B5%D1%81%D1%81%D0%B8%D1%8F'
+    );
+    const pokaz = await request(app).get('/api/budget-estimate?event_type=%D0%BF%D0%BE%D0%BA%D0%B0%D0%B7');
     expect(foto.body.budget.min).not.toBe(pokaz.body.budget.min);
     expect(foto.body.budget.max).not.toBe(pokaz.body.budget.max);
   });

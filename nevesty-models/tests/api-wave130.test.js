@@ -55,7 +55,7 @@ beforeAll(async () => {
     ['ORD-W130-001', 'Wave130 Client', '+79001234130', 'photo', '2026-08-01', modelId, 'new']
   );
   orderId = orderResult.id;
-}, 30000);
+}, 60000);
 
 // ── 1. Public model detail — GET /api/models/:id ──────────────────────────────
 

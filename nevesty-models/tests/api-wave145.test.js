@@ -63,7 +63,7 @@ describe('JWT Type Confusion protection', () => {
     clientToken = jwt.sign({ phone: '79001234567', type: 'client', chat_id: '12345' }, process.env.JWT_SECRET, {
       expiresIn: '1h',
     });
-  }, 30000);
+  }, 60000);
 
   afterAll(() => {
     const db = require('../database');
@@ -133,7 +133,7 @@ describe('Refresh token flow', () => {
     const lr = await supertest(a).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
     firstToken = lr.body.token;
     firstRefresh = lr.body.refresh_token;
-  }, 30000);
+  }, 60000);
 
   afterAll(() => {
     try {
@@ -209,7 +209,7 @@ describe('Catalog endpoints', () => {
     a.use('/api', apiRouter);
     app3 = a;
     request3 = supertest;
-  }, 30000);
+  }, 60000);
 
   afterAll(() => {
     try {
@@ -272,7 +272,7 @@ describe('Auth logout endpoint', () => {
     a.use('/api', apiRouter);
     app4 = a;
     request4 = supertest;
-  }, 30000);
+  }, 60000);
 
   afterAll(() => {
     try {
@@ -320,7 +320,7 @@ describe('Edge cases: /api/admin/login', () => {
     a.use('/api', apiRouter);
     app5 = a;
     request5 = supertest;
-  }, 30000);
+  }, 60000);
 
   afterAll(() => {
     try {

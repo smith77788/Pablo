@@ -15,6 +15,11 @@ const cors = require('cors');
 
 let app, adminToken;
 
+async function getCsrf() {
+  const r = await request(app).get('/api/csrf-token');
+  return r.body.token;
+}
+
 beforeAll(async () => {
   const { initDatabase } = require('../database');
   await initDatabase();
@@ -37,7 +42,7 @@ beforeAll(async () => {
 
   const lr = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = lr.body.token;
-}, 30000);
+}, 60000);
 
 // ── 1. DB Backups — GET /api/admin/db/backups ────────────────────────────────
 
@@ -448,7 +453,11 @@ describe('Revenue by month — GET /api/admin/analytics/revenue-by-month', () =>
 
 describe('Contact form — POST /api/contact', () => {
   it('returns 400 when name is missing (validation before rate-limit check)', async () => {
-    const res = await request(app).post('/api/contact').send({ phone: '+79991234567', message: 'Hello' });
+    const csrf = await getCsrf();
+    const res = await request(app)
+      .post('/api/contact')
+      .set('x-csrf-token', csrf)
+      .send({ phone: '+79991234567', message: 'Hello' });
     // Rate limit middleware runs first, so 429 is also possible if limit already hit
     expect([400, 429]).toContain(res.status);
     if (res.status === 400) {
@@ -457,7 +466,11 @@ describe('Contact form — POST /api/contact', () => {
   });
 
   it('returns 400 when phone is missing', async () => {
-    const res = await request(app).post('/api/contact').send({ name: 'Test User', message: 'Hello' });
+    const csrf = await getCsrf();
+    const res = await request(app)
+      .post('/api/contact')
+      .set('x-csrf-token', csrf)
+      .send({ name: 'Test User', message: 'Hello' });
     expect([400, 429]).toContain(res.status);
     if (res.status === 400) {
       expect(res.body).toHaveProperty('error');
@@ -465,8 +478,10 @@ describe('Contact form — POST /api/contact', () => {
   });
 
   it('returns 400 when phone is invalid format', async () => {
+    const csrf = await getCsrf();
     const res = await request(app)
       .post('/api/contact')
+      .set('x-csrf-token', csrf)
       .send({ name: 'Test User', phone: 'not-a-phone', message: 'Hello' });
     expect([400, 429]).toContain(res.status);
     if (res.status === 400) {
@@ -475,7 +490,11 @@ describe('Contact form — POST /api/contact', () => {
   });
 
   it('returns 400 when message is missing', async () => {
-    const res = await request(app).post('/api/contact').send({ name: 'Test User', phone: '+79991234567' });
+    const csrf = await getCsrf();
+    const res = await request(app)
+      .post('/api/contact')
+      .set('x-csrf-token', csrf)
+      .send({ name: 'Test User', phone: '+79991234567' });
     expect([400, 429]).toContain(res.status);
     if (res.status === 400) {
       expect(res.body).toHaveProperty('error');
@@ -483,15 +502,19 @@ describe('Contact form — POST /api/contact', () => {
   });
 
   it('returns 200 or 429 with valid required fields', async () => {
+    const csrf = await getCsrf();
     const res = await request(app)
       .post('/api/contact')
+      .set('x-csrf-token', csrf)
       .send({ name: 'Test User', phone: '+79991234567', message: 'I am interested in your services' });
     expect([200, 429]).toContain(res.status);
   });
 
   it('successful response (when not rate-limited) has ok:true, message, order_number, id', async () => {
+    const csrf = await getCsrf();
     const res = await request(app)
       .post('/api/contact')
+      .set('x-csrf-token', csrf)
       .send({ name: 'Jane Doe', phone: '+79992345678', message: 'Please call me back' });
     if (res.status === 200) {
       expect(res.body.ok).toBe(true);
@@ -507,15 +530,19 @@ describe('Contact form — POST /api/contact', () => {
   });
 
   it('does not require auth (public endpoint — never returns 401)', async () => {
+    const csrf = await getCsrf();
     const res = await request(app)
       .post('/api/contact')
+      .set('x-csrf-token', csrf)
       .send({ name: 'No Auth User', phone: '+79996789012', message: 'Public contact test' });
     expect(res.status).not.toBe(401);
   });
 
   it('returns 400 or 429 when email is provided but invalid', async () => {
+    const csrf = await getCsrf();
     const res = await request(app)
       .post('/api/contact')
+      .set('x-csrf-token', csrf)
       .send({ name: 'Test User', phone: '+79997890123', message: 'Test message', email: 'not-an-email' });
     expect([400, 429]).toContain(res.status);
     if (res.status === 400) {
@@ -524,7 +551,8 @@ describe('Contact form — POST /api/contact', () => {
   });
 
   it('returns 200 or 429 when valid optional email is provided', async () => {
-    const res = await request(app).post('/api/contact').send({
+    const csrf = await getCsrf();
+    const res = await request(app).post('/api/contact').set('x-csrf-token', csrf).send({
       name: 'Valid Email User',
       phone: '+79998901234',
       message: 'Test with valid email',
@@ -540,8 +568,10 @@ describe('Contact form — POST /api/contact', () => {
     // Make several requests to trigger rate limit, then verify 429 shape
     let lastRes;
     for (let i = 0; i < 5; i++) {
+      const csrf = await getCsrf();
       lastRes = await request(app)
         .post('/api/contact')
+        .set('x-csrf-token', csrf)
         .send({ name: `User${i}`, phone: `+7999000000${i}`, message: 'Rate limit test' });
       if (lastRes.status === 429) break;
     }

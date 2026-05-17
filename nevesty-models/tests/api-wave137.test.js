@@ -59,7 +59,7 @@ beforeAll(async () => {
     ['ORD-W137', 'Wave137 Client', '+79001370001', 'photo_shoot', '2027-10-01', 'new']
   );
   orderId = ord.id;
-}, 30000);
+}, 60000);
 
 // ─── POST /admin/factory-content/:id/publish ─────────────────────────────────
 

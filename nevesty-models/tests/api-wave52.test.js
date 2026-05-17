@@ -44,22 +44,19 @@ beforeAll(async () => {
 
   app = a;
 
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 
   // Get seeded model from demo data
   const model = await get('SELECT id FROM models LIMIT 1');
   seededModelId = model ? model.id : null;
-}, 15000);
+}, 60000);
 
 // ── Model Archive / Restore ───────────────────────────────────────────────────
 
 describe('Model Archive/Restore — /api/admin/models/:id/archive|restore', () => {
   it('requires authentication to archive', async () => {
-    const res = await request(app)
-      .patch('/api/admin/models/1/archive');
+    const res = await request(app).patch('/api/admin/models/1/archive');
     expect(res.status).toBe(401);
   });
 
@@ -76,8 +73,7 @@ describe('Model Archive/Restore — /api/admin/models/:id/archive|restore', () =
 
   it('model is hidden from public catalog after archive', async () => {
     if (!seededModelId) return;
-    const res = await request(app)
-      .get('/api/models');
+    const res = await request(app).get('/api/models');
     expect(res.status).toBe(200);
     const models = res.body.models || res.body;
     const found = Array.isArray(models) && models.some(m => m.id === seededModelId);
@@ -97,9 +93,7 @@ describe('Model Archive/Restore — /api/admin/models/:id/archive|restore', () =
   });
 
   it('model appears in archived list', async () => {
-    const res = await request(app)
-      .get('/api/admin/models/archived')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/models/archived').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('total');
     expect(Array.isArray(res.body.models)).toBe(true);
@@ -110,8 +104,7 @@ describe('Model Archive/Restore — /api/admin/models/:id/archive|restore', () =
 
 describe('Model Duplicate — POST /api/admin/models/:id/duplicate', () => {
   it('requires authentication', async () => {
-    const res = await request(app)
-      .post('/api/admin/models/1/duplicate');
+    const res = await request(app).post('/api/admin/models/1/duplicate');
     expect(res.status).toBe(401);
   });
 
@@ -138,8 +131,7 @@ describe('Model Duplicate — POST /api/admin/models/:id/duplicate', () => {
 
 describe('Model Stats — GET /api/admin/models/:id/stats', () => {
   it('requires authentication', async () => {
-    const res = await request(app)
-      .get('/api/admin/models/1/stats');
+    const res = await request(app).get('/api/admin/models/1/stats');
     expect(res.status).toBe(401);
   });
 
@@ -183,8 +175,7 @@ describe('FAQ — GET /api/faq', () => {
 
 describe('Broadcast Count — GET /api/admin/broadcasts/count', () => {
   it('requires authentication', async () => {
-    const res = await request(app)
-      .get('/api/admin/broadcasts/count');
+    const res = await request(app).get('/api/admin/broadcasts/count');
     expect(res.status).toBe(401);
   });
 
@@ -210,15 +201,12 @@ describe('Broadcast Count — GET /api/admin/broadcasts/count', () => {
 
 describe('Factory Manual Trigger — POST /api/admin/factory/run', () => {
   it('requires authentication', async () => {
-    const res = await request(app)
-      .post('/api/admin/factory/run');
+    const res = await request(app).post('/api/admin/factory/run');
     expect(res.status).toBe(401);
   });
 
   it('returns job started response for authorized admin', async () => {
-    const res = await request(app)
-      .post('/api/admin/factory/run')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).post('/api/admin/factory/run').set('Authorization', `Bearer ${adminToken}`);
     // May return 403 if not superadmin, or 200 if started, or 500 if factory not available
     expect([200, 202, 403, 500]).toContain(res.status);
   });

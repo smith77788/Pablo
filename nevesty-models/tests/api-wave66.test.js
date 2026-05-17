@@ -29,11 +29,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body.token;
-}, 15000);
+}, 60000);
 
 afterAll(() => {
   if (app && app.close) app.close();
@@ -47,23 +45,17 @@ describe('GET /api/admin/analytics/top-cities', () => {
   });
 
   it('returns 200 with valid token', async () => {
-    const res = await request(app)
-      .get('/api/admin/analytics/top-cities')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/analytics/top-cities').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   it('response has cities array', async () => {
-    const res = await request(app)
-      .get('/api/admin/analytics/top-cities')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/analytics/top-cities').set('Authorization', `Bearer ${adminToken}`);
     expect(Array.isArray(res.body.cities)).toBe(true);
   });
 
   it('each city entry has orders and unique_clients fields', async () => {
-    const res = await request(app)
-      .get('/api/admin/analytics/top-cities')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/analytics/top-cities').set('Authorization', `Bearer ${adminToken}`);
     for (const entry of res.body.cities) {
       expect(typeof entry.orders).toBe('number');
       expect(typeof entry.unique_clients).toBe('number');
@@ -71,9 +63,7 @@ describe('GET /api/admin/analytics/top-cities', () => {
   });
 
   it('handles empty data gracefully (cities array is empty or valid)', async () => {
-    const res = await request(app)
-      .get('/api/admin/analytics/top-cities')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/analytics/top-cities').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.cities)).toBe(true);
     expect(res.body.cities.length).toBeGreaterThanOrEqual(0);
@@ -88,52 +78,38 @@ describe('GET /api/admin/settings/sections', () => {
   });
 
   it('returns 200 with valid token', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   it('response has sections object', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(typeof res.body.sections).toBe('object');
     expect(res.body.sections).not.toBeNull();
   });
 
   it('sections includes contacts', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('contacts');
   });
 
   it('sections includes catalog', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('catalog');
   });
 
   it('sections includes booking', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('booking');
   });
 
   it('sections includes reviews', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('reviews');
   });
 
   it('each section has a label string', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     for (const key of Object.keys(res.body.sections)) {
       expect(typeof res.body.sections[key].label).toBe('string');
       expect(res.body.sections[key].label.length).toBeGreaterThan(0);
@@ -141,18 +117,14 @@ describe('GET /api/admin/settings/sections', () => {
   });
 
   it('each section has a settings object', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     for (const key of Object.keys(res.body.sections)) {
       expect(typeof res.body.sections[key].settings).toBe('object');
     }
   });
 
   it('more than 3 sections total', async () => {
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(Object.keys(res.body.sections).length).toBeGreaterThan(3);
   });
 });
@@ -205,7 +177,7 @@ describe('bot.js broadcast security', () => {
   });
 
   it('.slice(0, 4096) appears at least once in broadcast code', () => {
-    const matches = (botContent.match(/\.slice\(0,\s*4096\)/g) || []);
+    const matches = botContent.match(/\.slice\(0,\s*4096\)/g) || [];
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 });

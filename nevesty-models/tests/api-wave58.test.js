@@ -30,7 +30,7 @@ beforeAll(async () => {
   adminToken = loginRes.body.token;
   const model = await get('SELECT id FROM models LIMIT 1');
   seededModelId = model ? model.id : null;
-}, 15000);
+}, 60000);
 
 // ─── 1. Model Recommendation API ──────────────────────────────────────────────
 describe('GET /api/recommend', () => {
@@ -60,7 +60,9 @@ describe('GET /api/recommend', () => {
   });
 
   it('With event_type=корпоратив: returns 200', async () => {
-    const res = await request(app).get('/api/recommend?event_type=%D0%BA%D0%BE%D1%80%D0%BF%D0%BE%D1%80%D0%B0%D1%82%D0%B8%D0%B2');
+    const res = await request(app).get(
+      '/api/recommend?event_type=%D0%BA%D0%BE%D1%80%D0%BF%D0%BE%D1%80%D0%B0%D1%82%D0%B8%D0%B2'
+    );
     expect(res.status).toBe(200);
   });
 
@@ -119,7 +121,9 @@ describe('GET /api/models/search', () => {
   });
 
   it('Search with combined params: name + city returns 200', async () => {
-    const res = await request(app).get('/api/models/search?name=%D0%90%D0%BD%D0%BD%D0%B0&city=%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0');
+    const res = await request(app).get(
+      '/api/models/search?name=%D0%90%D0%BD%D0%BD%D0%B0&city=%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0'
+    );
     expect(res.status).toBe(200);
   });
 

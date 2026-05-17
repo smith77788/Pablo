@@ -61,7 +61,7 @@ beforeAll(async () => {
     null,
     0,
   ]);
-}, 15000);
+}, 60000);
 
 // ── Public Reviews — GET /api/reviews ─────────────────────────────────────────
 

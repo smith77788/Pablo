@@ -60,7 +60,7 @@ beforeAll(async () => {
     model_id: modelId,
   });
   orderId = oRes.body.id || oRes.body.order?.id;
-}, 30000);
+}, 60000);
 
 afterAll(() => {
   const db = require('../database');

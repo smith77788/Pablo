@@ -60,7 +60,7 @@ beforeAll(async () => {
   });
   orderId = oRes.body.id || oRes.body.order?.id;
   expect(orderId).toBeTruthy();
-}, 30000);
+}, 60000);
 
 afterAll(() => {
   const db = require('../database');

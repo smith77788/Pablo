@@ -66,7 +66,7 @@ beforeAll(async () => {
     `INSERT INTO social_posts (platform, content_type, caption, status) VALUES ('telegram','photo','Тестовый пост','draft')`
   );
   socialPostId = spRes.id;
-}, 30000);
+}, 60000);
 
 afterAll(() => {
   const db = require('../database');

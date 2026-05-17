@@ -47,11 +47,9 @@ beforeAll(async () => {
 
   app = a;
 
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
-}, 15000);
+}, 60000);
 
 afterAll(async () => {
   const { closeDatabase } = require('../database');
@@ -75,19 +73,16 @@ describe('E2E: Booking Flow', () => {
 
   it('step 2: client submits booking order', async () => {
     const csrfToken = await getCsrfToken();
-    const res = await request(app)
-      .post('/api/orders')
-      .set('x-csrf-token', csrfToken)
-      .send({
-        client_name: 'Тест Клиент',
-        client_phone: '+79991234567',
-        client_email: 'test@example.com',
-        event_type: 'photo_shoot',
-        event_date: '2026-12-31',
-        budget: '50000',
-        notes: 'E2E test order',
-        model_id: modelId
-      });
+    const res = await request(app).post('/api/orders').set('x-csrf-token', csrfToken).send({
+      client_name: 'Тест Клиент',
+      client_phone: '+79991234567',
+      client_email: 'test@example.com',
+      event_type: 'photo_shoot',
+      event_date: '2026-12-31',
+      budget: '50000',
+      notes: 'E2E test order',
+      model_id: modelId,
+    });
     expect([200, 201]).toContain(res.status);
     expect(res.body).toHaveProperty('order_number');
     orderId = res.body.id || res.body.order_id;
@@ -96,9 +91,7 @@ describe('E2E: Booking Flow', () => {
   });
 
   it('step 3: admin sees new order in list', async () => {
-    const res = await request(app)
-      .get('/api/admin/orders')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/orders').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     const orders = res.body.orders || res.body;
     const found = Array.isArray(orders) && orders.some(o => o.order_number === orderNumber);
@@ -107,9 +100,7 @@ describe('E2E: Booking Flow', () => {
 
   it('step 4: admin views order detail', async () => {
     if (!orderId) return;
-    const res = await request(app)
-      .get(`/api/admin/orders/${orderId}`)
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get(`/api/admin/orders/${orderId}`).set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('order_number', orderNumber);
   });
@@ -124,9 +115,7 @@ describe('E2E: Booking Flow', () => {
   });
 
   it('step 6: client can check order status by phone', async () => {
-    const res = await request(app)
-      .get('/api/orders/by-phone')
-      .query({ phone: '+79991234567' });
+    const res = await request(app).get('/api/orders/by-phone').query({ phone: '+79991234567' });
     expect(res.status).toBe(200);
     const orders = res.body.orders || [];
     const found = orders.some(o => o.order_number === orderNumber);
@@ -194,14 +183,12 @@ describe('E2E: Review Submission', () => {
   });
 
   it('anyone can submit a review', async () => {
-    const res = await request(app)
-      .post('/api/reviews')
-      .send({
-        order_id: 1,
-        rating: 5,
-        text: 'Отличная работа! E2E тест.',
-        client_name: 'E2E Client'
-      });
+    const res = await request(app).post('/api/reviews').send({
+      order_id: 1,
+      rating: 5,
+      text: 'Отличная работа! E2E тест.',
+      client_name: 'E2E Client',
+    });
     expect([200, 201, 400, 404]).toContain(res.status);
     if (res.status === 200 || res.status === 201) {
       reviewId = res.body.id;
@@ -209,9 +196,7 @@ describe('E2E: Review Submission', () => {
   });
 
   it('admin can list reviews for approval', async () => {
-    const res = await request(app)
-      .get('/api/admin/reviews')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 

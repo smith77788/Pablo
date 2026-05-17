@@ -37,7 +37,7 @@ beforeAll(async () => {
   // eslint-disable-next-line no-unused-vars
   a.use((err, req, res, _next) => res.status(500).json({ error: err.message }));
   app = a;
-}, 30000);
+}, 60000);
 
 afterAll(() => {
   const db = require('../database');

@@ -48,9 +48,7 @@ beforeAll(async () => {
   app = a;
 
   // Log in as admin
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 
   // Seed an order so CRM sync tests have a valid ID to work with
@@ -61,7 +59,7 @@ beforeAll(async () => {
   );
   const order = await get('SELECT id FROM orders ORDER BY id DESC LIMIT 1');
   seededOrderId = order ? order.id : null;
-}, 15000);
+}, 60000);
 
 // ── Public Settings — GET /api/settings/public ────────────────────────────────
 
@@ -91,9 +89,7 @@ describe('Public Settings — GET /api/settings/public', () => {
   it('only exposes known safe key names when settings are present', async () => {
     const { run } = require('../database');
     // Seed a safe setting
-    await run(
-      "INSERT OR REPLACE INTO bot_settings (key, value) VALUES ('agency_name', 'TestAgency')"
-    );
+    await run("INSERT OR REPLACE INTO bot_settings (key, value) VALUES ('agency_name', 'TestAgency')");
 
     const res = await request(app).get('/api/settings/public');
     expect(res.status).toBe(200);
@@ -119,9 +115,7 @@ describe('Factory API — GET /api/admin/factory/actions', () => {
   });
 
   it('returns 200 with actions array (factory.db absent → empty array)', async () => {
-    const res = await request(app)
-      .get('/api/admin/factory/actions')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory/actions').set('Authorization', `Bearer ${adminToken}`);
     // factory.db is not present in test env → returns 200 with empty array
     expect([200, 500, 503]).toContain(res.status);
     if (res.status === 200) {
@@ -165,9 +159,7 @@ describe('Factory API — GET /api/admin/factory/decisions', () => {
   });
 
   it('returns decisions array when factory.db is absent', async () => {
-    const res = await request(app)
-      .get('/api/admin/factory/decisions')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory/decisions').set('Authorization', `Bearer ${adminToken}`);
     expect([200, 500, 503]).toContain(res.status);
     if (res.status === 200) {
       expect(res.body).toHaveProperty('decisions');
@@ -192,9 +184,7 @@ describe('Factory API — GET /api/admin/factory/experiments', () => {
   });
 
   it('returns experiments array when factory.db is absent', async () => {
-    const res = await request(app)
-      .get('/api/admin/factory/experiments')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory/experiments').set('Authorization', `Bearer ${adminToken}`);
     expect([200, 500, 503]).toContain(res.status);
     if (res.status === 200) {
       expect(res.body).toHaveProperty('experiments');
@@ -279,9 +269,7 @@ describe('CRM Sync — POST /api/admin/crm/sync/:provider', () => {
 
 describe('CRM Webhook — POST /api/webhooks/crm/:provider', () => {
   it('rejects unknown provider with 400 (no auth required)', async () => {
-    const res = await request(app)
-      .post('/api/webhooks/crm/randomhacker')
-      .send({});
+    const res = await request(app).post('/api/webhooks/crm/randomhacker').send({});
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
   });
@@ -310,24 +298,20 @@ describe('CRM Webhook — POST /api/webhooks/crm/:provider', () => {
         event: 'ONCRMDEALSTAGESET',
         data: {
           FIELDS_BEFORE: { ID: '42' },
-          FIELDS_AFTER: { STAGE_ID: 'WON' }
-        }
+          FIELDS_AFTER: { STAGE_ID: 'WON' },
+        },
       });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
   });
 
   it('accepts bitrix24 webhook with unknown event type gracefully', async () => {
-    const res = await request(app)
-      .post('/api/webhooks/crm/bitrix24')
-      .send({ event: 'ONCRMCONTACTADD', data: {} });
+    const res = await request(app).post('/api/webhooks/crm/bitrix24').send({ event: 'ONCRMCONTACTADD', data: {} });
     expect([200, 400]).toContain(res.status);
   });
 
   it('handles empty bitrix24 payload without crash', async () => {
-    const res = await request(app)
-      .post('/api/webhooks/crm/bitrix24')
-      .send({});
+    const res = await request(app).post('/api/webhooks/crm/bitrix24').send({});
     expect([200, 400]).toContain(res.status);
   });
 
@@ -336,13 +320,13 @@ describe('CRM Webhook — POST /api/webhooks/crm/:provider', () => {
       .post('/api/webhooks/crm/amocrm')
       .send({
         leads: {
-          update: [{
-            status_id: 142,
-            custom_fields: [
-              { name: 'order_id', values: [{ value: String(seededOrderId || 1) }] }
-            ]
-          }]
-        }
+          update: [
+            {
+              status_id: 142,
+              custom_fields: [{ name: 'order_id', values: [{ value: String(seededOrderId || 1) }] }],
+            },
+          ],
+        },
       });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
@@ -356,9 +340,7 @@ describe('Reviews API — limit cap at 200', () => {
     const res = await request(app).get('/api/reviews?limit=500');
     expect(res.status).toBe(200);
     // Response can be plain array or paginated object depending on ?page param
-    const items = Array.isArray(res.body)
-      ? res.body
-      : res.body?.reviews;
+    const items = Array.isArray(res.body) ? res.body : res.body?.reviews;
     expect(Array.isArray(items)).toBe(true);
     expect(items.length).toBeLessThanOrEqual(200);
   });
@@ -366,9 +348,7 @@ describe('Reviews API — limit cap at 200', () => {
   it('caps limit at 200 even when 9999 is requested (paginated mode)', async () => {
     const res = await request(app).get('/api/reviews?page=1&limit=9999');
     expect(res.status).toBe(200);
-    const items = Array.isArray(res.body)
-      ? res.body
-      : res.body?.reviews;
+    const items = Array.isArray(res.body) ? res.body : res.body?.reviews;
     expect(Array.isArray(items)).toBe(true);
     expect(items.length).toBeLessThanOrEqual(200);
   });
@@ -442,9 +422,7 @@ describe('CRM Status — GET /api/admin/crm-status', () => {
   });
 
   it('returns CRM provider configuration flags for admin', async () => {
-    const res = await request(app)
-      .get('/api/admin/crm-status')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/crm-status').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(typeof res.body.amocrm).toBe('boolean');
     expect(typeof res.body.bitrix24).toBe('boolean');

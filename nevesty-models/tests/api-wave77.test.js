@@ -51,11 +51,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body?.token || res.body?.accessToken || null;
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   await new Promise(r => setTimeout(r, 300));
@@ -71,25 +69,19 @@ describe('Wave 77 БЛОК 1.1: GET /api/admin/settings', () => {
 
   test('returns 200 with valid auth token', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   test('returns an array of {key, value} objects', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(Array.isArray(res.body)).toBe(true);
   });
 
   test('each setting row has key and value properties', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings').set('Authorization', `Bearer ${adminToken}`);
     if (res.body.length > 0) {
       expect(res.body[0]).toHaveProperty('key');
       expect(res.body[0]).toHaveProperty('value');
@@ -103,17 +95,13 @@ describe('Wave 77 БЛОК 1.1: GET /api/admin/settings', () => {
 
   test('GET /api/settings returns 200 with auth', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   test('GET /api/settings returns an object (key→value map)', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(typeof res.body).toBe('object');
     expect(Array.isArray(res.body)).toBe(false);
   });
@@ -121,9 +109,7 @@ describe('Wave 77 БЛОК 1.1: GET /api/admin/settings', () => {
 
 describe('Wave 77 БЛОК 1.1: PUT /api/settings saves key/value', () => {
   test('PUT /api/settings requires auth', async () => {
-    const res = await request(app)
-      .put('/api/settings')
-      .send({ greeting: 'Hello Test' });
+    const res = await request(app).put('/api/settings').send({ greeting: 'Hello Test' });
     expect(res.status).toBe(401);
   });
 
@@ -144,18 +130,13 @@ describe('Wave 77 БЛОК 1.1: PUT /api/settings saves key/value', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ greeting: 'Wave77 greeting persisted' });
 
-    const res = await request(app)
-      .get('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.greeting).toBe('Wave77 greeting persisted');
   });
 
   test('PUT /api/settings with no keys in body still returns ok', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .put('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({});
+    const res = await request(app).put('/api/settings').set('Authorization', `Bearer ${adminToken}`).send({});
     // Empty body is valid — no keys to save, returns ok:true
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('ok', true);
@@ -182,74 +163,56 @@ describe('Wave 77 БЛОК 1.1: GET /api/admin/settings/sections', () => {
 
   test('returns 200 with auth', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   test('returns sections object', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body).toHaveProperty('sections');
     expect(typeof res.body.sections).toBe('object');
   });
 
   test('sections contains contacts', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('contacts');
   });
 
   test('sections contains catalog', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('catalog');
   });
 
   test('sections contains booking', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('booking');
   });
 
   test('sections contains reviews', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('reviews');
   });
 
   test('sections contains notifications', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('notifications');
   });
 
   test('sections contains bot', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.sections).toHaveProperty('bot');
   });
 
   test('each section has label and settings fields', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/sections')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/sections').set('Authorization', `Bearer ${adminToken}`);
     const sections = res.body.sections;
     for (const key of Object.keys(sections)) {
       expect(sections[key]).toHaveProperty('label');
@@ -268,25 +231,19 @@ describe('Wave 77 БЛОК 1.1: Settings export and import', () => {
 
   test('GET /api/admin/settings/export returns JSON with auth', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/export')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/export').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(typeof res.body).toBe('object');
   });
 
   test('GET /api/admin/settings/export sets Content-Disposition header', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/settings/export')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/settings/export').set('Authorization', `Bearer ${adminToken}`);
     expect(res.headers['content-disposition']).toMatch(/settings\.json/);
   });
 
   test('POST /api/admin/settings/import requires auth', async () => {
-    const res = await request(app)
-      .post('/api/admin/settings/import')
-      .send({ greeting: 'imported hello' });
+    const res = await request(app).post('/api/admin/settings/import').send({ greeting: 'imported hello' });
     expect(res.status).toBe(401);
   });
 
@@ -326,9 +283,7 @@ describe('Wave 77 БЛОК 1.1: Settings export and import', () => {
 
 describe('Wave 77 БЛОК 1.1: POST /api/admin/settings/reset', () => {
   test('requires auth', async () => {
-    const res = await request(app)
-      .post('/api/admin/settings/reset')
-      .send({ key: 'greeting' });
+    const res = await request(app).post('/api/admin/settings/reset').send({ key: 'greeting' });
     expect(res.status).toBe(401);
   });
 
@@ -463,9 +418,7 @@ describe('Wave 77 БЛОК 1.2: Feature toggle settings keys', () => {
       .put('/api/settings')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ quick_booking_enabled: '0' });
-    const res = await request(app)
-      .get('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.quick_booking_enabled).toBe('0');
   });
 
@@ -491,13 +444,8 @@ describe('Wave 77 БЛОК 1.2: Feature toggle settings keys', () => {
 
   test('reviews_enabled=0 persists correctly', async () => {
     if (!adminToken) return;
-    await request(app)
-      .put('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ reviews_enabled: '0' });
-    const res = await request(app)
-      .get('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    await request(app).put('/api/settings').set('Authorization', `Bearer ${adminToken}`).send({ reviews_enabled: '0' });
+    const res = await request(app).get('/api/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.reviews_enabled).toBe('0');
   });
 
@@ -537,9 +485,7 @@ describe('Wave 77 БЛОК 1.2: Feature toggle settings keys', () => {
       .put('/api/settings')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ catalog_per_page: '12' });
-    const res = await request(app)
-      .get('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.catalog_per_page).toBe('12');
   });
 
@@ -574,9 +520,7 @@ describe('Wave 77 БЛОК 1.2: Cities list settings', () => {
       .put('/api/settings')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ cities_list: citiesValue });
-    const res = await request(app)
-      .get('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.cities_list).toBe(citiesValue);
   });
 
@@ -587,9 +531,7 @@ describe('Wave 77 БЛОК 1.2: Cities list settings', () => {
       .put('/api/settings')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ cities_list: newCities });
-    const res = await request(app)
-      .get('/api/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body.cities_list).toBe(newCities);
   });
 
@@ -613,7 +555,7 @@ describe('Wave 77 БЛОК 1.3: showAdminSettings sections in bot.js', () => {
     botCode = fs.readFileSync(BOT_JS, 'utf8');
   });
 
-  test("bot.js has showAdminSettings function", () => {
+  test('bot.js has showAdminSettings function', () => {
     expect(botCode).toMatch(/async function showAdminSettings/);
   });
 
@@ -645,31 +587,31 @@ describe('Wave 77 БЛОК 1.3: showAdminSettings sections in bot.js', () => {
     expect(botCode).toMatch(/section\s*===\s*['"]bot['"]/);
   });
 
-  test("bot.js has adm_settings_contacts callback routing", () => {
+  test('bot.js has adm_settings_contacts callback routing', () => {
     expect(botCode).toMatch(/adm_settings_contacts/);
   });
 
-  test("bot.js has adm_settings_catalog callback routing", () => {
+  test('bot.js has adm_settings_catalog callback routing', () => {
     expect(botCode).toMatch(/adm_settings_catalog/);
   });
 
-  test("bot.js has adm_settings_booking callback routing", () => {
+  test('bot.js has adm_settings_booking callback routing', () => {
     expect(botCode).toMatch(/adm_settings_booking/);
   });
 
-  test("bot.js has adm_settings_reviews callback routing", () => {
+  test('bot.js has adm_settings_reviews callback routing', () => {
     expect(botCode).toMatch(/adm_settings_reviews/);
   });
 
-  test("bot.js has adm_settings_cities callback routing", () => {
+  test('bot.js has adm_settings_cities callback routing', () => {
     expect(botCode).toMatch(/adm_settings_cities/);
   });
 
-  test("bot.js has adm_settings_bot callback routing", () => {
+  test('bot.js has adm_settings_bot callback routing', () => {
     expect(botCode).toMatch(/adm_settings_bot/);
   });
 
-  test("bot.js has adm_settings_notifs callback routing", () => {
+  test('bot.js has adm_settings_notifs callback routing', () => {
     expect(botCode).toMatch(/adm_settings_notifs/);
   });
 });

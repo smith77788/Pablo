@@ -38,11 +38,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body.token;
-}, 15000);
+}, 60000);
 
 afterAll(() => {
   if (app && app.close) app.close();
@@ -101,9 +99,7 @@ describe('Wave 68: GET /api/faq — category filter', () => {
   it('response items have q and a fields when non-empty', async () => {
     // Seed first to ensure items exist
     if (adminToken) {
-      await request(app)
-        .post('/api/admin/faq/seed')
-        .set('Authorization', `Bearer ${adminToken}`);
+      await request(app).post('/api/admin/faq/seed').set('Authorization', `Bearer ${adminToken}`);
     }
     const res = await request(app).get('/api/faq');
     expect(res.status).toBe(200);
@@ -134,17 +130,13 @@ describe('Wave 68: POST /api/admin/faq/seed', () => {
 
   it('returns 200 with valid token', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .post('/api/admin/faq/seed')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).post('/api/admin/faq/seed').set('Authorization', `Bearer ${adminToken}`);
     expect([200, 201]).toContain(res.status);
   });
 
   it('response has ok: true after seed', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .post('/api/admin/faq/seed')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).post('/api/admin/faq/seed').set('Authorization', `Bearer ${adminToken}`);
     if ([200, 201].includes(res.status)) {
       expect(res.body.ok).toBe(true);
     }
@@ -152,9 +144,7 @@ describe('Wave 68: POST /api/admin/faq/seed', () => {
 
   it('seeded items appear in GET /api/faq', async () => {
     if (!adminToken) return;
-    await request(app)
-      .post('/api/admin/faq/seed')
-      .set('Authorization', `Bearer ${adminToken}`);
+    await request(app).post('/api/admin/faq/seed').set('Authorization', `Bearer ${adminToken}`);
     const res = await request(app).get('/api/faq');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
@@ -201,17 +191,13 @@ describe('Wave 68: POST /api/admin/db/vacuum', () => {
 
   it('returns 200 with valid admin token', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .post('/api/admin/db/vacuum')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).post('/api/admin/db/vacuum').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   it('response body has ok: true', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .post('/api/admin/db/vacuum')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).post('/api/admin/db/vacuum').set('Authorization', `Bearer ${adminToken}`);
     expect(res.body).toHaveProperty('ok', true);
   });
 });

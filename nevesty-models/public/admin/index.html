@@ -2112,9 +2112,7 @@
       async function loadAgentFeed() {
         const el = document.getElementById('agentFeed');
         try {
-          const logs = await _admin
-            .apiFetch('/admin/agent-logs?limit=3')
-            .catch(() => fetch('/api/agent-logs?limit=3').then(r => r.json()));
+          const logs = await _admin.apiFetch('/admin/agent-logs?limit=3');
           if (!Array.isArray(logs) || !logs.length) {
             el.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Активности агентов ещё нет</div>';
             return;

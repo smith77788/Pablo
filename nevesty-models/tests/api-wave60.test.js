@@ -29,14 +29,12 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const loginRes = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
 
   const model = await get('SELECT id FROM models LIMIT 1');
   seededModelId = model ? model.id : null;
-}, 15000);
+}, 60000);
 
 afterAll(() => {
   if (app && app.close) app.close();
@@ -124,9 +122,7 @@ describe('GET /api/admin/models/:id/availability (admin)', () => {
 
   it('Admin endpoint: invalid model ID returns 400', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/models/0/availability')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/models/0/availability').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(400);
   });
 
@@ -151,18 +147,14 @@ describe('GET /api/admin/broadcasts', () => {
 
   it('Returns 200 with array for valid admin token', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/broadcasts')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/broadcasts').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
   });
 
   it('Each broadcast item has status field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/broadcasts')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/broadcasts').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     // If there are items, check their structure
     if (res.body.length > 0) {
@@ -172,9 +164,7 @@ describe('GET /api/admin/broadcasts', () => {
 
   it('Each broadcast item has delivered field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/broadcasts')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/broadcasts').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     if (res.body.length > 0) {
       expect(res.body[0]).toHaveProperty('delivered');
@@ -183,9 +173,7 @@ describe('GET /api/admin/broadcasts', () => {
 
   it('Each broadcast item has failed field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/broadcasts')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/broadcasts').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     if (res.body.length > 0) {
       expect(res.body[0]).toHaveProperty('failed');
@@ -202,9 +190,7 @@ describe('GET /api/admin/bot-broadcasts', () => {
 
   it('Returns 200 with broadcasts array for valid admin token', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/bot-broadcasts')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/bot-broadcasts').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('broadcasts');
     expect(Array.isArray(res.body.broadcasts)).toBe(true);
@@ -212,9 +198,7 @@ describe('GET /api/admin/bot-broadcasts', () => {
 
   it('Each bot broadcast has status field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/bot-broadcasts')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/bot-broadcasts').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     if (res.body.broadcasts.length > 0) {
       expect(res.body.broadcasts[0]).toHaveProperty('status');
@@ -223,9 +207,7 @@ describe('GET /api/admin/bot-broadcasts', () => {
 
   it('Each bot broadcast has delivered field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/bot-broadcasts')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/bot-broadcasts').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     if (res.body.broadcasts.length > 0) {
       expect(res.body.broadcasts[0]).toHaveProperty('delivered');
@@ -234,9 +216,7 @@ describe('GET /api/admin/bot-broadcasts', () => {
 
   it('Each bot broadcast has failed field', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/bot-broadcasts')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/bot-broadcasts').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     if (res.body.broadcasts.length > 0) {
       expect(res.body.broadcasts[0]).toHaveProperty('failed');

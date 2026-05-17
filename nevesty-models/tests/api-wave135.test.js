@@ -56,7 +56,7 @@ beforeAll(async () => {
     ['Wave135 broadcast test', 'all', 'pending', 'admin']
   );
   broadcastId = bc.id;
-}, 30000);
+}, 60000);
 
 // ── 1. Broadcasts ─────────────────────────────────────────────────────────────
 

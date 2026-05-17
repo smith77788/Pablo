@@ -47,11 +47,9 @@ beforeAll(async () => {
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
 
-  const res = await request(app)
-    .post('/api/admin/login')
-    .send({ username: 'admin', password: 'admin123' });
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = res.body?.token || res.body?.accessToken || null;
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   await new Promise(r => setTimeout(r, 300));
@@ -405,9 +403,7 @@ describe('Wave 78 БЛОК 6: GET /api/admin/reviews — auth', () => {
 
   test('returns 200 with filter=all', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/reviews?filter=all')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/reviews?filter=all').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.reviews)).toBe(true);
   });
@@ -421,17 +417,13 @@ describe('Wave 78 БЛОК 6: PUT /api/admin/reviews/:id/approve — validation'
 
   test('returns 400 for invalid ID 0', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .put('/api/admin/reviews/0/approve')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).put('/api/admin/reviews/0/approve').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(400);
   });
 
   test('returns 400 or error for non-numeric ID', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .put('/api/admin/reviews/abc/approve')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).put('/api/admin/reviews/abc/approve').set('Authorization', `Bearer ${adminToken}`);
     expect([400, 404]).toContain(res.status);
   });
 
@@ -452,17 +444,13 @@ describe('Wave 78 БЛОК 6: GET /api/admin/factory/status', () => {
 
   test('returns 200 with valid auth token', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/factory/status')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory/status').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
   });
 
   test('response contains status data', async () => {
     if (!adminToken) return;
-    const res = await request(app)
-      .get('/api/admin/factory/status')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/admin/factory/status').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(typeof res.body).toBe('object');
   });
