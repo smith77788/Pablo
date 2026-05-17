@@ -8,8 +8,8 @@
 set -e
 
 PABLO_BRANCH="claude/modeling-agency-website-jp2Qd"
-VELVET_REPO="https://github.com/smith77788/velvet-house-concierge-9fba01e9.git"
-VELVET_DIR="velvet-house-concierge-9fba01e9"
+VELVET_REPO="https://github.com/smith77788/pablo-760fe3a5.git"
+VELVET_DIR="pablo-760fe3a5"
 PABLO_DIR="pablo-source"
 
 echo "🔄 Syncing Pablo lovable-export → velvet-house-concierge..."
