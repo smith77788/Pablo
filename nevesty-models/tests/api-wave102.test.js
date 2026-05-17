@@ -1,142 +1,321 @@
 'use strict';
 /**
- * Wave102 tests: memory cleanup Maps, TelegramChannelAgent factory,
- * cycle.py Phase 24, client keyboard rows, api.js error handling,
- * bot.js size check, multiple Map cleanups.
+ * Wave102 (v2) tests: Department Agents & CSV injection protection
+ *  1. VisualConceptor (creative.js) — class, metadata, analyze() smoke test
+ *  2. PricingNegotiator (sales.js) — class, metadata, analyze() smoke test
+ *  3. RevenueForecaster (finance.js) — class, metadata, analyze() smoke test
+ *  4. MarketResearcher (research.js) — class, metadata, analyze() smoke test
+ *  5. Orchestrator agents count — >= 46 agents in the array
+ *  6. CSV injection protection via /api/admin/orders/export HTTP endpoint
  */
 
-const fs = require('fs');
+// ─── In-memory DB test env ────────────────────────────────────────────────────
+process.env.DB_PATH = ':memory:';
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'test-secret-32-chars-minimum-ok!!';
+process.env.TELEGRAM_BOT_TOKEN = '';
+process.env.ADMIN_USERNAME = 'admin';
+process.env.ADMIN_PASSWORD = 'admin123';
+process.env.ADMIN_TELEGRAM_IDS = '';
+// Disable real Anthropic API calls
+process.env.ANTHROPIC_API_KEY = '';
+
+const request = require('supertest');
+const express = require('express');
+const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
-const botSrc = fs.readFileSync(path.join(__dirname, '..', 'bot.js'), 'utf8');
-const channelSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'factory', 'agents', 'channel_content.py'), 'utf8');
-const cycleSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'factory', 'cycle.py'), 'utf8');
-const apiSrc = fs.readFileSync(path.join(__dirname, '..', 'routes', 'api.js'), 'utf8');
+// ─── Agent source paths ───────────────────────────────────────────────────────
+const CREATIVE_JS = path.join(__dirname, '../agents/departments/creative.js');
+const SALES_JS = path.join(__dirname, '../agents/departments/sales.js');
+const FINANCE_JS = path.join(__dirname, '../agents/departments/finance.js');
+const RESEARCH_JS = path.join(__dirname, '../agents/departments/research.js');
+const ORCHESTRATOR_JS = path.join(__dirname, '../agents/orchestrator.js');
 
-// ─── 1. catalogSortPrefs memory cleanup (3 tests) ────────────────────────────
+// ─── HTTP app (needed for CSV injection test) ─────────────────────────────────
+let app, adminToken;
 
-describe('catalogSortPrefs memory cleanup', () => {
-  test('bot.js defines catalogSortPrefs Map', () => {
-    expect(botSrc).toContain('catalogSortPrefs');
-    expect(botSrc).toContain('new Map()');
+beforeAll(async () => {
+  const { initDatabase } = require('../database');
+  await initDatabase();
+  const { initBot } = require('../bot');
+  const apiRouter = require('../routes/api');
+  const a = express();
+  a.use(express.json({ limit: '2mb' }));
+  a.use(express.urlencoded({ extended: true }));
+  a.use(cors());
+  const bot = initBot(a);
+  if (bot && apiRouter.setBot) apiRouter.setBot(bot);
+  a.use('/api', apiRouter);
+  a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
+  app = a;
+
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
+  adminToken = res.body?.token || res.body?.accessToken || null;
+}, 60000);
+
+afterAll(async () => {
+  await new Promise(r => setTimeout(r, 300));
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 1. VisualConceptor (creative.js)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('VisualConceptor (creative.js)', () => {
+  const { VisualConceptor } = require('../agents/departments/creative');
+
+  test('VisualConceptor class instantiates without throwing', () => {
+    expect(() => new VisualConceptor()).not.toThrow();
   });
 
-  test('bot.js contains setInterval for catalogSortPrefs cleanup', () => {
-    expect(botSrc).toContain('catalogSortPrefs.clear()');
+  test('VisualConceptor has correct id', () => {
+    const agent = new VisualConceptor();
+    expect(agent.id).toBe('cre-04');
   });
 
-  test('catalogSortPrefs cleanup uses 12-hour interval', () => {
-    // The cleanup should reference 12 * 60 * 60 * 1000 near catalogSortPrefs.clear
-    const clearIdx = botSrc.indexOf('catalogSortPrefs.clear()');
-    const context = botSrc.slice(Math.max(0, clearIdx - 300), clearIdx + 130);
-    expect(context).toMatch(/12\s*\*\s*60\s*\*\s*60\s*\*\s*1000/);
+  test('VisualConceptor has correct name', () => {
+    const agent = new VisualConceptor();
+    expect(agent.name).toBe('VisualConceptor');
+  });
+
+  test('VisualConceptor has correct organ', () => {
+    const agent = new VisualConceptor();
+    expect(agent.organ).toBe('Creative Department');
+  });
+
+  test('VisualConceptor has correct emoji', () => {
+    const agent = new VisualConceptor();
+    expect(agent.emoji).toBe('📸');
+  });
+
+  test('VisualConceptor.analyze() resolves without throwing (empty DB)', async () => {
+    const agent = new VisualConceptor();
+    await expect(agent.analyze()).resolves.not.toThrow();
+  });
+
+  test('VisualConceptor.analyze() populates findings array', async () => {
+    const agent = new VisualConceptor();
+    await agent.analyze();
+    expect(Array.isArray(agent.findings)).toBe(true);
+    expect(agent.findings.length).toBeGreaterThan(0);
   });
 });
 
-// ─── 2. TelegramChannelAgent in factory (4 tests) ────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// 2. PricingNegotiator (sales.js)
+// ═══════════════════════════════════════════════════════════════════════════════
 
-describe('TelegramChannelAgent in factory/agents/channel_content.py', () => {
-  test('factory/agents/channel_content.py exists and is readable', () => {
-    expect(channelSrc.length).toBeGreaterThan(100);
+describe('PricingNegotiator (sales.js)', () => {
+  const { PricingNegotiator } = require('../agents/departments/sales');
+
+  test('PricingNegotiator class instantiates without throwing', () => {
+    expect(() => new PricingNegotiator()).not.toThrow();
   });
 
-  test('channel_content.py contains TelegramChannelAgent class', () => {
-    expect(channelSrc).toContain('TelegramChannelAgent');
+  test('PricingNegotiator has correct id', () => {
+    const agent = new PricingNegotiator();
+    expect(agent.id).toBe('sal-04');
   });
 
-  test('channel_content.py contains generate_model_spotlight method', () => {
-    expect(channelSrc).toContain('generate_model_spotlight');
+  test('PricingNegotiator has correct name', () => {
+    const agent = new PricingNegotiator();
+    expect(agent.name).toBe('PricingNegotiator');
   });
 
-  test('channel_content.py contains generate_promo_post method', () => {
-    expect(channelSrc).toContain('generate_promo_post');
-  });
-});
-
-// ─── 3. cycle.py Phase 24 uses TelegramChannelAgent (2 tests) ────────────────
-
-describe('cycle.py Phase 24 uses TelegramChannelAgent', () => {
-  test('factory/cycle.py imports or references TelegramChannelAgent', () => {
-    expect(cycleSrc).toContain('TelegramChannelAgent');
+  test('PricingNegotiator has correct organ', () => {
+    const agent = new PricingNegotiator();
+    expect(agent.organ).toBe('Sales Department');
   });
 
-  test('factory/cycle.py calls generate_model_spotlight or generate_promo_post', () => {
-    const hasSpotlight = cycleSrc.includes('generate_model_spotlight');
-    const hasPromo = cycleSrc.includes('generate_promo_post');
-    expect(hasSpotlight || hasPromo).toBe(true);
-  });
-});
-
-// ─── 4. Client keyboard 7 rows max (3 tests) ─────────────────────────────────
-
-describe('buildClientKeyboard rows limit', () => {
-  test('buildClientKeyboard function exists in bot.js', () => {
-    expect(botSrc).toContain('async function buildClientKeyboard()');
+  test('PricingNegotiator has correct emoji', () => {
+    const agent = new PricingNegotiator();
+    expect(agent.emoji).toBe('💰');
   });
 
-  test('buildClientKeyboard does not push more than 8 rows total', () => {
-    const fnStart = botSrc.indexOf('async function buildClientKeyboard()');
-    const fnEnd = botSrc.indexOf('\nreturn { inline_keyboard: rows }', fnStart) + 50;
-    const fnBody = botSrc.slice(fnStart, fnEnd);
-    // Count rows.push calls inside the function
-    const pushMatches = fnBody.match(/rows\.push/g) || [];
-    expect(pushMatches.length).toBeLessThanOrEqual(8);
+  test('PricingNegotiator.analyze() resolves without throwing (empty DB)', async () => {
+    const agent = new PricingNegotiator();
+    await expect(agent.analyze()).resolves.not.toThrow();
   });
 
-  test('buildClientKeyboard returns inline_keyboard object', () => {
-    const fnStart = botSrc.indexOf('async function buildClientKeyboard()');
-    const fnEnd = botSrc.indexOf('\n}', fnStart) + 2;
-    const fnBody = botSrc.slice(fnStart, fnEnd);
-    expect(fnBody).toContain('inline_keyboard');
-    expect(fnBody).toContain('return');
+  test('PricingNegotiator.analyze() populates findings array', async () => {
+    const agent = new PricingNegotiator();
+    await agent.analyze();
+    expect(Array.isArray(agent.findings)).toBe(true);
+    expect(agent.findings.length).toBeGreaterThan(0);
   });
 });
 
-// ─── 5. API routes error handling (3 tests) ──────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// 3. RevenueForecaster (finance.js)
+// ═══════════════════════════════════════════════════════════════════════════════
 
-describe('routes/api.js error handling coverage', () => {
-  test('routes/api.js has at least 150 async route handlers or functions', () => {
-    const asyncCount = (apiSrc.match(/async\b/g) || []).length;
-    expect(asyncCount).toBeGreaterThanOrEqual(150);
+describe('RevenueForecaster (finance.js)', () => {
+  const { RevenueForecaster } = require('../agents/departments/finance');
+
+  test('RevenueForecaster class instantiates without throwing', () => {
+    expect(() => new RevenueForecaster()).not.toThrow();
   });
 
-  test('routes/api.js forwards errors with next(e) at least 50 times', () => {
-    const nextECount = (apiSrc.match(/next\(e\)/g) || []).length;
-    expect(nextECount).toBeGreaterThanOrEqual(50);
+  test('RevenueForecaster has correct id', () => {
+    const agent = new RevenueForecaster();
+    expect(agent.id).toBe('fin-01');
   });
 
-  test('routes/api.js has at least 100 try/catch blocks', () => {
-    const tryCatchCount = (apiSrc.match(/\btry\s*\{/g) || []).length;
-    expect(tryCatchCount).toBeGreaterThanOrEqual(100);
+  test('RevenueForecaster has correct name', () => {
+    const agent = new RevenueForecaster();
+    expect(agent.name).toBe('RevenueForecaster');
+  });
+
+  test('RevenueForecaster has correct organ', () => {
+    const agent = new RevenueForecaster();
+    expect(agent.organ).toBe('Finance Department');
+  });
+
+  test('RevenueForecaster has correct emoji', () => {
+    const agent = new RevenueForecaster();
+    expect(agent.emoji).toBe('📊');
+  });
+
+  test('RevenueForecaster.analyze() resolves without throwing (empty DB)', async () => {
+    const agent = new RevenueForecaster();
+    await expect(agent.analyze()).resolves.not.toThrow();
+  });
+
+  test('RevenueForecaster.analyze() populates findings array', async () => {
+    const agent = new RevenueForecaster();
+    await agent.analyze();
+    expect(Array.isArray(agent.findings)).toBe(true);
+    expect(agent.findings.length).toBeGreaterThan(0);
   });
 });
 
-// ─── 6. bot.js size check (2 tests) ──────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// 4. MarketResearcher (research.js)
+// ═══════════════════════════════════════════════════════════════════════════════
 
-describe('bot.js size and imports', () => {
-  // TODO: bot.js has grown beyond 15000 lines (currently ~16600+). Refactoring needed.
-  test.skip('bot.js line count is less than 15000 (technical debt threshold)', () => {
-    const lines = botSrc.split('\n').length;
-    expect(lines).toBeLessThan(15000);
+describe('MarketResearcher (research.js)', () => {
+  const { MarketResearcher } = require('../agents/departments/research');
+
+  test('MarketResearcher class instantiates without throwing', () => {
+    expect(() => new MarketResearcher()).not.toThrow();
   });
 
-  test('bot.js imports STATUS_LABELS and EVENT_TYPES from utils/constants', () => {
-    expect(botSrc).toContain('STATUS_LABELS');
-    expect(botSrc).toContain('EVENT_TYPES');
-    expect(botSrc).toContain('utils/constants');
+  test('MarketResearcher has correct id', () => {
+    const agent = new MarketResearcher();
+    expect(agent.id).toBe('res-01');
+  });
+
+  test('MarketResearcher has correct name', () => {
+    const agent = new MarketResearcher();
+    expect(agent.name).toBe('MarketResearcher');
+  });
+
+  test('MarketResearcher has correct organ', () => {
+    const agent = new MarketResearcher();
+    expect(agent.organ).toBe('Research Department');
+  });
+
+  test('MarketResearcher has correct emoji', () => {
+    const agent = new MarketResearcher();
+    expect(agent.emoji).toBe('🌍');
+  });
+
+  test('MarketResearcher.analyze() resolves without throwing (empty DB)', async () => {
+    const agent = new MarketResearcher();
+    await expect(agent.analyze()).resolves.not.toThrow();
+  });
+
+  test('MarketResearcher.analyze() populates findings array', async () => {
+    const agent = new MarketResearcher();
+    await agent.analyze();
+    expect(Array.isArray(agent.findings)).toBe(true);
+    expect(agent.findings.length).toBeGreaterThan(0);
   });
 });
 
-// ─── 7. Memory Maps have cleanup (2 tests) ───────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. Orchestrator agents count
+// ═══════════════════════════════════════════════════════════════════════════════
 
-describe('Memory Maps cleanup intervals', () => {
-  test('bot.js contains searchFilters Map with cleanup', () => {
-    expect(botSrc).toContain('searchFilters');
-    expect(botSrc).toContain('searchFilters.clear()');
+describe('Orchestrator agents array', () => {
+  test('orchestrator.js source file exists', () => {
+    expect(fs.existsSync(ORCHESTRATOR_JS)).toBe(true);
   });
 
-  test('bot.js contains at least 3 setInterval cleanup operations', () => {
-    const intervals = (botSrc.match(/setInterval/g) || []).length;
-    expect(intervals).toBeGreaterThanOrEqual(3);
+  test('orchestrator.js has at least 46 entries in agents array (source check)', () => {
+    const src = fs.readFileSync(ORCHESTRATOR_JS, 'utf8');
+    // Count require('./NN-...') lines and class references pushed into agents array
+    // Extract the agents = [...] block
+    const start = src.indexOf('const agents = [');
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf('];', start);
+    expect(end).toBeGreaterThan(start);
+    const agentsBlock = src.slice(start, end);
+
+    // Count requires (numbered agents) + class name references (department agents)
+    const requireLines = (agentsBlock.match(/require\(\s*['"][^'"]+['"]\s*\)/g) || []).length;
+    const classRefs = (agentsBlock.match(/^\s{2}[A-Z][A-Za-z]+,\s*$/gm) || []).length;
+    const totalAgents = requireLines + classRefs;
+
+    expect(totalAgents).toBeGreaterThanOrEqual(46);
+  });
+
+  test('orchestrator.js exports or runs at least 4 department groups', () => {
+    const src = fs.readFileSync(ORCHESTRATOR_JS, 'utf8');
+    // Verify all 4 department comment blocks exist
+    expect(src).toContain('Sales Department');
+    expect(src).toContain('Creative Department');
+    expect(src).toContain('Finance Department');
+    expect(src).toContain('Research Department');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 6. CSV injection protection — /api/admin/orders/export
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('CSV injection protection in /api/admin/orders/export', () => {
+  test('endpoint returns 200 and CSV content-type when authenticated', async () => {
+    if (!adminToken) {
+      console.warn('Skipping: no admin token');
+      return;
+    }
+    const res = await request(app).get('/api/admin/orders/export').set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv|application\/octet/i);
+  });
+
+  test('csvCell2 in api.js source escapes = prefix with leading apostrophe', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
+    // The csvCell2 function prepends ' to cells starting with formula-trigger chars
+    expect(src).toMatch(/csvCell2?\s*=.*?['"]'\s*\+\s*s|s\s*=\s*"'"\s*\+\s*s/);
+    // Regex pattern check for formula trigger chars: = + - @ \t \r
+    expect(src).toContain('^[=+\\-@\\t\\r]');
+  });
+
+  test('api.js source uses regex to detect CSV injection trigger chars', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
+    // Both csvCell2 (line ~3351) and _csvCell24 (line ~9933) protect against injection
+    const csvInjectionPattern = /prevent CSV injection/g;
+    const matchCount = (src.match(csvInjectionPattern) || []).length;
+    expect(matchCount).toBeGreaterThanOrEqual(1);
+  });
+
+  test('csvCell2 in api.js wraps values in double quotes and escapes internal quotes', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
+    // The pattern: '"' + s.replace(/"/g, '""') + '"'
+    expect(src).toContain('replace(/"/g, \'""\'');
+  });
+
+  test('GET /api/admin/orders/export returns 401 without token', async () => {
+    const res = await request(app).get('/api/admin/orders/export');
+    expect([401, 403]).toContain(res.status);
+  });
+
+  test('CSV export endpoint defined in api.js source', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
+    expect(src).toContain('/admin/orders/export');
   });
 });

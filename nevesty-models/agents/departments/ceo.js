@@ -11,6 +11,14 @@
  *   • bot_settings['ceo_last_decision']  — in data.db
  *   • factory.db → ceo_decisions         — for Factory dashboard
  *   • factory.db → growth_actions        — actionable tasks
+ *   • agent_discussions (topic='ceo_decision') — for tracking
+ *
+ * StrategicDecisionMaker (БЛОК 5.3 additions):
+ *   • Aggregates agent_logs last 24h by agent (SUCCESS / ERROR counts)
+ *   • Loads last ceo_decision from agent_discussions (topic='ceo_decision')
+ *   • Simple heuristic: decision older than 7 days → status 'reviewed'
+ *   • Rule-based fallback decision when Claude API unavailable
+ *   • Saves decisions with topic='ceo_decision'
  */
 'use strict';
 
@@ -100,6 +108,283 @@ async function saveSetting(key, value) {
 /** Returns true if today is Monday (server local time). */
 function isMonday() {
   return new Date().getDay() === 1;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// StrategicDecisionMaker — БЛОК 5.3 additions
+// ═════════════════════════════════════════════════════════════════════════════
+
+class StrategicDecisionMaker {
+  /**
+   * 1. Aggregate agent_logs for the last 24 hours.
+   *    Groups by from_name and counts SUCCESS / ERROR occurrences in message text.
+   *
+   * @returns {{ byAgent: Record<string,{success:number,error:number,total:number}>,
+   *             totalSuccess: number, totalError: number }}
+   */
+  static async aggregateAgentLogs() {
+    let rows = [];
+    try {
+      rows = await dbAll(`
+        SELECT from_name, message
+        FROM agent_logs
+        WHERE created_at > datetime('now', '-24 hours')
+        ORDER BY created_at DESC
+        LIMIT 500
+      `);
+    } catch {
+      return { byAgent: {}, totalSuccess: 0, totalError: 0 };
+    }
+
+    const byAgent = {};
+    let totalSuccess = 0;
+    let totalError = 0;
+
+    for (const row of rows) {
+      const agent = row.from_name || 'unknown';
+      if (!byAgent[agent]) byAgent[agent] = { success: 0, error: 0, total: 0 };
+      byAgent[agent].total += 1;
+
+      // Heuristic: look for common success / error markers in log messages
+      const msg = (row.message || '').toLowerCase();
+      const isError =
+        msg.includes('error') ||
+        msg.includes('ошибк') ||
+        msg.includes('failed') ||
+        msg.includes('exception') ||
+        msg.includes('критич') ||
+        msg.includes('❌') ||
+        msg.includes('🔴');
+      const isSuccess =
+        msg.includes('success') ||
+        msg.includes('ok') ||
+        msg.includes('done') ||
+        msg.includes('завершен') ||
+        msg.includes('сохранен') ||
+        msg.includes('✅') ||
+        msg.includes('complete');
+
+      if (isError) {
+        byAgent[agent].error += 1;
+        totalError += 1;
+      } else if (isSuccess) {
+        byAgent[agent].success += 1;
+        totalSuccess += 1;
+      }
+    }
+
+    return { byAgent, totalSuccess, totalError };
+  }
+
+  /**
+   * 2. Load the last CEO decision from agent_discussions (topic='ceo_decision').
+   *
+   * @returns {{ id:number, message:string, created_at:string }|null}
+   */
+  static async loadLastCeoDecision() {
+    try {
+      return await dbGet(`
+        SELECT id, message, created_at
+        FROM agent_discussions
+        WHERE topic = 'ceo_decision'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 3. Check whether the previous decision is "reviewed".
+   *    Simple heuristic: if the decision was made > 7 days ago → 'reviewed'.
+   *    Otherwise → 'pending'.
+   *
+   * @param {{ created_at:string }|null} lastDecision
+   * @returns {'reviewed'|'pending'|'none'}
+   */
+  static evaluateDecisionStatus(lastDecision) {
+    if (!lastDecision) return 'none';
+    const createdAt = new Date(lastDecision.created_at);
+    if (Number.isNaN(createdAt.getTime())) return 'none';
+    const ageMs = Date.now() - createdAt.getTime();
+    const ageDays = ageMs / (1000 * 60 * 60 * 24);
+    return ageDays > 7 ? 'reviewed' : 'pending';
+  }
+
+  /**
+   * 4a. Rule-based strategic decision — used when Claude API is unavailable.
+   *
+   * Priority rules (in order):
+   *   a) Error rate > 30% of last 24h logs → stabilise infrastructure
+   *   b) No new orders in the last 7 days → marketing / activate leads
+   *   c) Otherwise → growth based on most popular event_type from orders
+   *
+   * @param {{ totalError:number, totalSuccess:number, byAgent:object }} logStats
+   * @param {object} metrics  — output of StrategicCEO#loadMetrics()
+   * @returns {object}  same shape as makeStrategicDecision() result
+   */
+  static async buildRuleBasedDecision(logStats, metrics) {
+    const totalLogs = logStats.totalSuccess + logStats.totalError;
+    const errorRate = totalLogs > 0 ? logStats.totalError / totalLogs : 0;
+
+    // Rule a — stabilise
+    if (errorRate > 0.3 || (metrics.agentHealth && metrics.agentHealth.critical >= 3)) {
+      const worstAgents = Object.entries(logStats.byAgent)
+        .filter(([, s]) => s.error > 0)
+        .sort(([, a], [, b]) => b.error - a.error)
+        .slice(0, 3)
+        .map(([name]) => name)
+        .join(', ');
+
+      return {
+        decision: 'Приоритет: стабилизация инфраструктуры',
+        rationale: `Уровень ошибок агентов за 24ч составил ${(errorRate * 100).toFixed(0)}% (${logStats.totalError} из ${totalLogs} событий). Наиболее проблемные агенты: ${worstAgents || 'неизвестны'}.`,
+        department_focus: 'tech',
+        priority_action: 'Провести аудит упавших агентов, устранить первопричину ошибок',
+        expected_impact: 'Снижение уровня ошибок до < 10% за следующие 24 часа',
+        growth_action: {
+          action_type: 'ops',
+          channel: 'all',
+          description: 'Исправить критические ошибки агентов и восстановить стабильность системы',
+        },
+      };
+    }
+
+    // Rule b — no new orders in 7 days
+    const ordersLastWeek = metrics.orders?.lastWeek ?? 0;
+    if (ordersLastWeek === 0) {
+      return {
+        decision: 'Приоритет: маркетинг — активировать лиды',
+        rationale:
+          'За последние 7 дней не зафиксировано ни одной новой заявки. Необходима срочная активация существующих лидов и привлечение новых клиентов.',
+        department_focus: 'sales',
+        priority_action: 'Запустить рассылку по базе клиентов с акционным предложением',
+        expected_impact: 'Получить минимум 1-2 новых заявки в течение 48 часов',
+        growth_action: {
+          action_type: 'social',
+          channel: 'telegram',
+          description: 'Активировать лиды: рассылка по базе + пост в соцсетях с промо-предложением',
+        },
+      };
+    }
+
+    // Rule c — growth: find most popular event_type from recent orders
+    let popularEventType = 'фотосессия';
+    try {
+      const row = await dbGet(`
+        SELECT event_type, COUNT(*) as cnt
+        FROM orders
+        WHERE created_at > datetime('now', '-30 days')
+          AND event_type IS NOT NULL AND event_type != ''
+        GROUP BY event_type
+        ORDER BY cnt DESC
+        LIMIT 1
+      `);
+      if (row?.event_type) popularEventType = row.event_type;
+    } catch {}
+
+    return {
+      decision: `Приоритет: рост — ${popularEventType}`,
+      rationale: `Инфраструктура работает стабильно (ошибок ${logStats.totalError} из ${totalLogs}). Активность заявок в норме (${ordersLastWeek} за неделю). Фокус на развитии самого востребованного направления: ${popularEventType}.`,
+      department_focus: 'sales',
+      priority_action: `Усилить продвижение услуги "${popularEventType}": обновить описание, добавить кейсы`,
+      expected_impact: `Рост заявок по направлению "${popularEventType}" на 20% за 7 дней`,
+      growth_action: {
+        action_type: 'sales',
+        channel: 'all',
+        description: `Создать промо-материалы и усилить продвижение "${popularEventType}"`,
+      },
+    };
+  }
+
+  /**
+   * 5. Save CEO decision to agent_discussions with topic='ceo_decision'.
+   *
+   * @param {object} decision
+   */
+  static async saveDecisionAsDiscussion(decision) {
+    const decText = [
+      decision.decision,
+      '',
+      `Основание: ${decision.rationale}`,
+      '',
+      `Приоритетное действие: ${decision.priority_action}`,
+      `Ожидаемый результат: ${decision.expected_impact || '—'}`,
+    ].join('\n');
+
+    await dbRun(`INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`, [
+      'StrategicCEO',
+      'all',
+      'ceo_decision',
+      decText,
+    ]).catch(() => {});
+  }
+
+  /**
+   * Full pipeline: aggregate logs → load last decision → evaluate status →
+   * make rule-based decision → save to agent_discussions.
+   *
+   * Returns a summary object that StrategicCEO can use to add findings.
+   *
+   * @param {object} metrics  — from StrategicCEO#loadMetrics()
+   * @param {Agent}  agent    — StrategicCEO instance (for addFinding)
+   * @param {Function} log    — factoryLog-compatible async (name, msg)
+   */
+  static async run(metrics, agent, log) {
+    // Step 1 — aggregate agent_logs
+    const logStats = await StrategicDecisionMaker.aggregateAgentLogs();
+
+    const agentCount = Object.keys(logStats.byAgent).length;
+    await log(
+      agent.name,
+      `StrategicDecisionMaker: agent_logs 24h — agents: ${agentCount}, success: ${logStats.totalSuccess}, error: ${logStats.totalError}`
+    );
+
+    // Step 2 — load last CEO decision from agent_discussions
+    const lastDecision = await StrategicDecisionMaker.loadLastCeoDecision();
+
+    // Step 3 — evaluate previous decision status (heuristic)
+    const prevStatus = StrategicDecisionMaker.evaluateDecisionStatus(lastDecision);
+
+    if (lastDecision) {
+      const statusLabel = prevStatus === 'reviewed' ? '✅ рассмотрено (> 7 дней)' : '⏳ на исполнении (< 7 дней)';
+      agent.addFinding(
+        'INFO',
+        `📋 Предыдущее CEO-решение [${lastDecision.created_at?.slice(0, 10)}]: ${statusLabel} — "${lastDecision.message?.slice(0, 80)}"`
+      );
+    }
+
+    // Step 4 — rule-based decision
+    const ruleDecision = await StrategicDecisionMaker.buildRuleBasedDecision(logStats, metrics);
+
+    agent.addFinding(
+      'INFO',
+      `🏛️ [Rule-based] ${ruleDecision.decision} | Focus: ${ruleDecision.department_focus} | Action: ${ruleDecision.priority_action.slice(0, 80)}`
+    );
+
+    // Step 5 — save decision as discussion with topic='ceo_decision'
+    await StrategicDecisionMaker.saveDecisionAsDiscussion(ruleDecision);
+    await log(
+      agent.name,
+      `StrategicDecisionMaker: decision saved → topic=ceo_decision: ${ruleDecision.decision.slice(0, 80)}`
+    );
+
+    // Also persist to bot_settings for quick access
+    try {
+      await saveSetting(
+        'ceo_rule_based_decision',
+        JSON.stringify({
+          ...ruleDecision,
+          prev_decision_status: prevStatus,
+          log_stats: { totalSuccess: logStats.totalSuccess, totalError: logStats.totalError, agentCount },
+          created_at: new Date().toISOString(),
+        })
+      );
+    } catch {}
+
+    return { logStats, prevStatus, ruleDecision };
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -643,6 +928,16 @@ class StrategicCEO extends Agent {
 
     // 5. Propose A/B experiment (every cycle)
     await this.proposeExperiment();
+
+    // 6. StrategicDecisionMaker — БЛОК 5.3
+    //    Aggregates agent_logs, evaluates previous ceo_decision status,
+    //    builds a rule-based fallback decision and saves it with topic='ceo_decision'.
+    try {
+      await StrategicDecisionMaker.run(metrics, this, factoryLog);
+    } catch (e) {
+      this.addFinding('MEDIUM', `StrategicDecisionMaker error: ${e.message}`);
+      await factoryLog(this.name, `StrategicDecisionMaker error: ${e.message}`);
+    }
   }
 }
 
@@ -666,4 +961,4 @@ async function runCEO() {
 
 if (require.main === module) runCEO().then(() => process.exit(0));
 
-module.exports = { StrategicCEO };
+module.exports = { StrategicCEO, StrategicDecisionMaker };
