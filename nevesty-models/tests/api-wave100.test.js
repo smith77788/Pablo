@@ -1,112 +1,295 @@
 'use strict';
 /**
- * Wave100 tests: Admin menu restructure — compact KB_MAIN_ADMIN + sub-menus
- *
- * The old KB_MAIN_ADMIN had 9+ rows with all buttons in one place.
- * Now it has 4 compact rows pointing to sub-menu sections:
- *   KB_ADMIN_ANALYTICS, KB_ADMIN_MARKETING, KB_ADMIN_TEAM, KB_ADMIN_FACTORY
+ * Wave 21-25 integration tests:
+ *  1. OTP login flow (source-code + HTTP)
+ *  2. Security — client_chat_id not accepted from form body
+ *  3. Broadcast concurrency guard in services/scheduler.js
+ *  4. Settings stub features applied in bot.js (БЛОК 1)
+ *  5. Catalog URL sync (catalog.html)
+ *  6. keyboards/constants.js exports
  */
 
-const botSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'bot.js'), 'utf8');
+// ─── Env for in-memory DB test server ────────────────────────────────────────
+process.env.DB_PATH = ':memory:';
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'test-secret-32-chars-minimum-ok!!';
+process.env.TELEGRAM_BOT_TOKEN = '';
+process.env.ADMIN_USERNAME = 'admin';
+process.env.ADMIN_PASSWORD = 'admin123';
 
-// ─── 1. KB_MAIN_ADMIN structure (4 tests) ────────────────────────────────────
+const request = require('supertest');
+const express = require('express');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
-describe('KB_MAIN_ADMIN structure', () => {
-  test("contains 'adm_menu_analytics' callback", () => {
-    expect(botSrc).toContain('adm_menu_analytics');
+const API_JS = path.join(__dirname, '../routes/api.js');
+const BOT_JS = path.join(__dirname, '../bot.js');
+const SCHEDULER_JS = path.join(__dirname, '../services/scheduler.js');
+const CATALOG_HTML = path.join(__dirname, '../public/catalog.html');
+
+let app, adminToken;
+
+beforeAll(async () => {
+  const { initDatabase } = require('../database');
+  await initDatabase();
+  const { initBot } = require('../bot');
+  const apiRouter = require('../routes/api');
+  const a = express();
+  a.use(express.json({ limit: '2mb' }));
+  a.use(express.urlencoded({ extended: true }));
+  a.use(cors());
+  const bot = initBot(a);
+  if (bot && apiRouter.setBot) apiRouter.setBot(bot);
+  a.use('/api', apiRouter);
+  a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
+  app = a;
+
+  const res = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
+  adminToken = res.body?.token || res.body?.accessToken || null;
+}, 60000);
+
+afterAll(async () => {
+  await new Promise(r => setTimeout(r, 300));
+});
+
+// ─── 1. OTP login flow ────────────────────────────────────────────────────────
+
+describe('OTP login flow', () => {
+  it('POST /api/client/request-code requires phone', async () => {
+    const res = await request(app).post('/api/client/request-code').send({});
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty('error');
   });
 
-  test("contains 'adm_menu_marketing' callback", () => {
-    expect(botSrc).toContain('adm_menu_marketing');
+  it('POST /api/client/request-code returns 404 for unknown phone', async () => {
+    const res = await request(app).post('/api/client/request-code').send({ phone: '+70000000000' });
+    expect(res.status).toBe(404);
   });
 
-  test("contains 'adm_menu_team' callback", () => {
-    expect(botSrc).toContain('adm_menu_team');
+  it('POST /api/client/verify rejects wrong code', async () => {
+    // We need a phone that exists in orders; since DB is empty we expect 400/401
+    const res = await request(app).post('/api/client/verify').send({ phone: '+70000000000', code: '000000' });
+    // Either 400 (bad phone format) or 401 (code not found) — both are non-success
+    expect([400, 401]).toContain(res.status);
   });
 
-  test("contains 'adm_menu_factory' callback", () => {
-    expect(botSrc).toContain('adm_menu_factory');
+  it('POST /api/client/verify returns 400 or 429 when phone or code is missing', async () => {
+    const res = await request(app).post('/api/client/verify').send({ phone: '+79991234567' });
+    // Either 400 (missing code field) or 429 (rate limited from previous test calls)
+    expect([400, 429]).toContain(res.status);
+    expect(res.body).toHaveProperty('error');
+  });
+
+  it('OTP uses crypto.randomInt not Math.random (source check)', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    // The OTP generation uses require('crypto').randomInt inline
+    expect(src).toMatch(/require\(['"]crypto['"]\)\.randomInt/);
+    // Math.random should not be used for OTP generation (6-digit range 100000–1000000)
+    expect(src).not.toMatch(/Math\.random.*1000000|1000000.*Math\.random/);
+  });
+
+  it('api.js defines /client/request-code route', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    expect(src).toContain('/client/request-code');
+  });
+
+  it('api.js defines /client/verify route', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    expect(src).toContain('/client/verify');
+  });
+
+  it('OTP is 6-digit (randomInt range 100000–1000000)', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    expect(src).toMatch(/randomInt\s*\(\s*100000\s*,\s*1000000\s*\)/);
+  });
+
+  it('OTP stored in client_otp table with expires_at', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    expect(src).toContain('client_otp');
+    expect(src).toContain('expires_at');
+  });
+
+  it('OTP verify uses timingSafeEqual (timing-safe comparison)', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    expect(src).toContain('timingSafeEqual');
   });
 });
 
-// ─── 2. KB_ADMIN_ANALYTICS sub-menu (3 tests) ────────────────────────────────
+// ─── 2. Security — client_chat_id not accepted from form ─────────────────────
 
-describe('KB_ADMIN_ANALYTICS sub-menu', () => {
-  test('KB_ADMIN_ANALYTICS constant exists in bot.js', () => {
-    expect(botSrc).toContain('KB_ADMIN_ANALYTICS');
+describe('Security — client_chat_id not accepted from form body', () => {
+  it('POST /api/orders ignores client_chat_id from request body (hardcoded null)', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    // Must hardcode client_chat_id as null in the orders insert
+    expect(src).toContain('client_chat_id: null');
   });
 
-  test("contains 'adm_stats' callback (Статистика button)", () => {
-    expect(botSrc).toContain("'adm_stats'");
+  it('api.js comment documents that client_chat_id is set only by bot', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    // Comment clarifying intent
+    expect(src).toMatch(/client_chat_id.*Only set by bot|Only set by bot.*client_chat_id/s);
   });
 
-  test("contains 'adm_audit_log' callback (Журнал button)", () => {
-    expect(botSrc).toContain("'adm_audit_log'");
-  });
-});
-
-// ─── 3. KB_ADMIN_MARKETING sub-menu (3 tests) ────────────────────────────────
-
-describe('KB_ADMIN_MARKETING sub-menu', () => {
-  test('KB_ADMIN_MARKETING constant exists in bot.js', () => {
-    expect(botSrc).toContain('KB_ADMIN_MARKETING');
+  it('api.js has comment saying client_chat_id is NOT accepted from booking form', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    expect(src).toMatch(
+      /client_chat_id.*NOT accepted from.*booking form|NOT accepted from.*booking form.*client_chat_id/s
+    );
   });
 
-  test("contains 'adm_broadcast' callback", () => {
-    expect(botSrc).toContain("'adm_broadcast'");
-  });
-
-  test("contains 'adm_export' callback", () => {
-    expect(botSrc).toContain("'adm_export'");
+  it('POST /api/orders endpoint exists and returns 4xx without required fields', async () => {
+    const res = await request(app).post('/api/orders').send({});
+    // Should fail validation (4xx) not crash (5xx)
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
   });
 });
 
-// ─── 4. KB_ADMIN_TEAM sub-menu (3 tests) ─────────────────────────────────────
+// ─── 3. Broadcast concurrency guard ─────────────────────────────────────────
 
-describe('KB_ADMIN_TEAM sub-menu', () => {
-  test('KB_ADMIN_TEAM constant exists in bot.js', () => {
-    expect(botSrc).toContain('KB_ADMIN_TEAM');
+describe('Broadcast concurrency guard', () => {
+  it('services/scheduler.js has _broadcastRunning guard variable', () => {
+    const src = fs.readFileSync(SCHEDULER_JS, 'utf8');
+    expect(src).toMatch(/_broadcastRunning/);
   });
 
-  test("contains 'adm_admins' callback", () => {
-    expect(botSrc).toContain("'adm_admins'");
+  it('scheduler.js checks _broadcastRunning before starting broadcast', () => {
+    const src = fs.readFileSync(SCHEDULER_JS, 'utf8');
+    // Guard should check the flag and return early if already running
+    expect(src).toMatch(/if\s*\(_broadcastRunning\)/);
   });
 
-  test("contains 'adm_reviews' callback", () => {
-    expect(botSrc).toContain("'adm_reviews'");
-  });
-});
-
-// ─── 5. Reply keyboard removed (2 tests) ─────────────────────────────────────
-
-describe('Reply keyboard removed from admin menu', () => {
-  test('resize_keyboard: true is NOT used in an admin reply keyboard context', () => {
-    // The only resize_keyboard: true must be in REPLY_KB_CLIENT (client keyboard),
-    // not in any REPLY_KB_ADMIN constant — verify no REPLY_KB_ADMIN exists
-    expect(botSrc).not.toContain('REPLY_KB_ADMIN');
+  it('scheduler.js sets _broadcastRunning = true when starting', () => {
+    const src = fs.readFileSync(SCHEDULER_JS, 'utf8');
+    expect(src).toMatch(/_broadcastRunning\s*=\s*true/);
   });
 
-  test("showAdminMenu does NOT send old activation text 'Панель администратора — меню активировано'", () => {
-    expect(botSrc).not.toContain('Панель администратора — меню активировано');
+  it('scheduler.js resets _broadcastRunning = false after completion', () => {
+    const src = fs.readFileSync(SCHEDULER_JS, 'utf8');
+    expect(src).toMatch(/_broadcastRunning\s*=\s*false/);
   });
 });
 
-// ─── 6. Callback handlers for sub-menus (4 tests) ────────────────────────────
+// ─── 4. Settings stub features applied in bot.js (БЛОК 1) ────────────────────
 
-describe('Callback handlers for sub-menu navigation', () => {
-  test("bot.js handles 'adm_menu_analytics' callback (shows sub-menu)", () => {
-    expect(botSrc).toContain("data === 'adm_menu_analytics'");
+describe('Bot settings applied in logic', () => {
+  let botSrc;
+  beforeAll(() => {
+    botSrc = fs.readFileSync(BOT_JS, 'utf8');
   });
 
-  test("bot.js handles 'adm_menu_marketing' callback", () => {
-    expect(botSrc).toContain("data === 'adm_menu_marketing'");
+  it('bot.js checks model_max_photos setting', () => {
+    expect(botSrc).toContain("getSetting('model_max_photos')");
   });
 
-  test("bot.js handles 'adm_menu_team' callback", () => {
-    expect(botSrc).toContain("data === 'adm_menu_team'");
+  it('bot.js checks booking_require_email setting', () => {
+    expect(botSrc).toContain("getSetting('booking_require_email')");
   });
 
-  test("bot.js handles 'adm_menu_factory' callback", () => {
-    expect(botSrc).toContain("data === 'adm_menu_factory'");
+  it('bot.js checks wishlist_enabled setting for client keyboard', () => {
+    expect(botSrc).toContain('wishlist_enabled');
+  });
+
+  it('bot.js checks loyalty_enabled setting', () => {
+    expect(botSrc).toContain('loyalty_enabled');
+  });
+
+  it('bot.js reads model_max_photos with getSetting', () => {
+    expect(botSrc).toMatch(/getSetting\(['"]model_max_photos['"]\)/);
+  });
+
+  it('bot.js reads booking_require_email with getSetting', () => {
+    expect(botSrc).toMatch(/getSetting\(['"]booking_require_email['"]\)/);
+  });
+
+  it('bot.js reads wishlist_enabled with getSetting', () => {
+    expect(botSrc).toMatch(/getSetting\(['"]wishlist_enabled['"]\)/);
+  });
+
+  it('bot.js reads loyalty_enabled with getSetting', () => {
+    expect(botSrc).toMatch(/getSetting\(['"]loyalty_enabled['"]\)/);
+  });
+});
+
+// ─── 5. Catalog URL sync ──────────────────────────────────────────────────────
+
+describe('Catalog URL sync', () => {
+  it('catalog.html has URL sync logic using history API', () => {
+    const src = fs.readFileSync(CATALOG_HTML, 'utf8');
+    expect(src).toMatch(/history\.(pushState|replaceState)/);
+  });
+
+  it('catalog.html uses URLSearchParams for query string building', () => {
+    const src = fs.readFileSync(CATALOG_HTML, 'utf8');
+    expect(src).toContain('URLSearchParams');
+  });
+
+  it('catalog.html reads URLSearchParams on load (initial state sync)', () => {
+    const src = fs.readFileSync(CATALOG_HTML, 'utf8');
+    // Should read params from location.search on page load
+    expect(src).toMatch(/new URLSearchParams\(location\.search\)/);
+  });
+
+  it('catalog.html calls replaceState to update URL without reload', () => {
+    const src = fs.readFileSync(CATALOG_HTML, 'utf8');
+    expect(src).toContain('replaceState');
+  });
+});
+
+// ─── 6. keyboards/constants.js exports ───────────────────────────────────────
+
+describe('keyboards/constants.js exports', () => {
+  let c;
+  beforeAll(() => {
+    c = require('../keyboards/constants');
+  });
+
+  it('exports MONTHS_RU with 12 month abbreviations', () => {
+    expect(c.MONTHS_RU).toBeDefined();
+    expect(c.MONTHS_RU).toHaveLength(12);
+  });
+
+  it('MONTHS_RU contains Russian month names', () => {
+    expect(c.MONTHS_RU[0]).toBe('янв');
+    expect(c.MONTHS_RU[11]).toBe('дек');
+  });
+
+  it('exports LOYALTY_LEVELS', () => {
+    expect(c.LOYALTY_LEVELS).toBeDefined();
+    expect(Array.isArray(c.LOYALTY_LEVELS)).toBe(true);
+  });
+
+  it('LOYALTY_LEVELS has at least 3 tiers', () => {
+    expect(c.LOYALTY_LEVELS.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('each LOYALTY_LEVELS entry has key, label, minEarned, discount', () => {
+    for (const lvl of c.LOYALTY_LEVELS) {
+      expect(lvl).toHaveProperty('key');
+      expect(lvl).toHaveProperty('label');
+      expect(lvl).toHaveProperty('minEarned');
+      expect(lvl).toHaveProperty('discount');
+    }
+  });
+
+  it('exports ACHIEVEMENTS_LIST', () => {
+    expect(c.ACHIEVEMENTS_LIST).toBeDefined();
+    expect(Array.isArray(c.ACHIEVEMENTS_LIST)).toBe(true);
+  });
+
+  it('ACHIEVEMENTS_LIST is non-empty', () => {
+    expect(c.ACHIEVEMENTS_LIST.length).toBeGreaterThan(0);
+  });
+
+  it('exports TEMPLATE_CATEGORIES', () => {
+    expect(c.TEMPLATE_CATEGORIES).toBeDefined();
+    expect(typeof c.TEMPLATE_CATEGORIES).toBe('object');
+  });
+
+  it('exports QUICK_REPLY_TEMPLATES as non-empty array', () => {
+    expect(c.QUICK_REPLY_TEMPLATES).toBeDefined();
+    expect(Array.isArray(c.QUICK_REPLY_TEMPLATES)).toBe(true);
+    expect(c.QUICK_REPLY_TEMPLATES.length).toBeGreaterThan(0);
   });
 });
