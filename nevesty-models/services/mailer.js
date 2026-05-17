@@ -482,12 +482,18 @@ function getAdminEmails() {
     .filter(Boolean);
 }
 
+// ─── Aliases for alternative import names ────────────────────────────────────
+const sendStatusUpdate = sendStatusChange;
+const sendReviewRequest = sendReviewInvitation;
+
 module.exports = {
   sendOrderConfirmation,
   sendStatusChange,
+  sendStatusUpdate, // alias
   sendManagerNotification,
   sendContactFormEmail,
   sendReviewInvitation,
+  sendReviewRequest, // alias
   sendPasswordReset,
   sendTestEmail,
   getAdminEmails,

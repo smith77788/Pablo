@@ -1418,7 +1418,7 @@ router.patch('/models/:id', auth, async (req, res, next) => {
 // ─── Models admin list with filters/pagination ────────────────────────────────
 router.get('/admin/models', auth, async (req, res, next) => {
   try {
-    const { page = 0, sort = 'name', limit = 15, archived, search } = req.query;
+    const { page = 0, sort = 'name', limit = 15, archived, search, featured } = req.query;
     const offset = (parseInt(page) || 0) * (parseInt(limit) || 15);
 
     const sortMap = {
@@ -1440,6 +1440,10 @@ router.get('/admin/models', auth, async (req, res, next) => {
       wherePlain.push('archived=?');
       whereAliased.push('m.archived=?');
       params.push(archivedVal);
+    }
+    if (featured === '1') {
+      wherePlain.push('featured=1');
+      whereAliased.push('m.featured=1');
     }
     if (search) {
       wherePlain.push('name LIKE ?');
@@ -8422,6 +8426,146 @@ router.get('/admin/system', auth, async (req, res, next) => {
 // ─── CRM incoming webhooks (БЛОК 10.3) ───────────────────────────────────────
 const { registerWebhooks: _registerCrmWebhooks } = require('../services/crm');
 _registerCrmWebhooks(router);
+
+// ─── Admin Clients ────────────────────────────────────────────────────────────
+
+// GET /api/admin/clients?search=&filter=all&page=1&limit=20
+router.get('/admin/clients', auth, async (req, res, next) => {
+  try {
+    const search = (req.query.search || '').trim();
+    const filter = req.query.filter || 'all';
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+
+    const whereParams = [];
+    let where = '1=1';
+    if (search) {
+      where += ' AND (o.client_name LIKE ? OR o.client_phone LIKE ?)';
+      whereParams.push(`%${search}%`, `%${search}%`);
+    }
+
+    let having = '1=1';
+    if (filter === 'active') {
+      having = "MAX(o.created_at) >= datetime('now', '-30 days')";
+    } else if (filter === 'vip') {
+      having = 'COUNT(o.id) >= 3';
+    } else if (filter === 'new') {
+      having = 'COUNT(o.id) = 0';
+    }
+
+    const innerQ = `
+      SELECT
+        o.client_name,
+        o.client_phone,
+        o.client_telegram,
+        COUNT(o.id)                                        AS total_orders,
+        SUM(CASE WHEN o.status='done' THEN 1 ELSE 0 END)  AS done_orders,
+        MAX(o.created_at)                                  AS last_activity,
+        SUM(CAST(o.budget AS REAL))                        AS total_budget,
+        MIN(o.created_at)                                  AS registered_at
+      FROM orders o
+      WHERE ${where}
+      GROUP BY o.client_phone
+      HAVING ${having}
+    `;
+
+    const countRow = await get(`SELECT COUNT(*) as n FROM (${innerQ})`, whereParams);
+
+    const clients = await query(`${innerQ} ORDER BY last_activity DESC LIMIT ? OFFSET ?`, [
+      ...whereParams,
+      limit,
+      offset,
+    ]);
+
+    res.json({
+      clients,
+      total: countRow?.n || 0,
+      page,
+      pages: Math.ceil((countRow?.n || 0) / limit),
+      limit,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/clients/:phone — client profile (phone URL-encoded)
+router.get('/admin/clients/:phone', auth, async (req, res, next) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const like = `%${phone}%`;
+
+    const profile = await get(
+      `SELECT
+         o.client_name,
+         o.client_phone,
+         o.client_telegram,
+         o.client_email,
+         COUNT(o.id)                                        AS total_orders,
+         SUM(CASE WHEN o.status='done' THEN 1 ELSE 0 END)  AS done_orders,
+         SUM(CAST(o.budget AS REAL))                        AS total_budget,
+         AVG(CAST(o.budget AS REAL))                        AS avg_budget,
+         MIN(o.created_at)                                  AS registered_at,
+         MAX(o.created_at)                                  AS last_activity
+       FROM orders o
+       WHERE o.client_phone LIKE ?
+       GROUP BY o.client_phone`,
+      [like]
+    );
+
+    if (!profile) return res.status(404).json({ error: 'Клиент не найден' });
+
+    const favModels = await query(
+      `SELECT m.name, m.photo_url, COUNT(o.id) AS cnt
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE o.client_phone LIKE ? AND o.model_id IS NOT NULL
+       GROUP BY o.model_id
+       ORDER BY cnt DESC
+       LIMIT 3`,
+      [like]
+    );
+
+    res.json({ ...profile, fav_models: favModels });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/clients/:phone/orders — order history for client
+router.get('/admin/clients/:phone/orders', auth, async (req, res, next) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const like = `%${phone}%`;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+
+    const [countRow, orders] = await Promise.all([
+      get(`SELECT COUNT(*) as n FROM orders WHERE client_phone LIKE ?`, [like]),
+      query(
+        `SELECT o.*, m.name AS model_name
+         FROM orders o
+         LEFT JOIN models m ON o.model_id = m.id
+         WHERE o.client_phone LIKE ?
+         ORDER BY o.created_at DESC
+         LIMIT ? OFFSET ?`,
+        [like, limit, offset]
+      ),
+    ]);
+
+    res.json({
+      orders,
+      total: countRow?.n || 0,
+      page,
+      pages: Math.ceil((countRow?.n || 0) / limit),
+      limit,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 
 module.exports = router;
 module.exports.setBot = setBot;

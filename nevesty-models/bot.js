@@ -934,10 +934,12 @@ async function showCatalog(chatId, cat, page, filter) {
       ];
     });
 
-    // Pagination
+    // Pagination — encode cat and city so filters survive page turns
+    // Format: cat_page_{cat}_{city}_{page}  (city/cat may be empty string)
+    const cityEnc = activeCity || '';
     const nav = [];
-    if (page > 0) nav.push({ text: '◀️', callback_data: `cat_cat_${cat}_${page - 1}` });
-    if ((page + 1) * perPage < total) nav.push({ text: '▶️', callback_data: `cat_cat_${cat}_${page + 1}` });
+    if (page > 0) nav.push({ text: '◀️', callback_data: `cat_page_${cat}_${cityEnc}_${page - 1}` });
+    if ((page + 1) * perPage < total) nav.push({ text: '▶️', callback_data: `cat_page_${cat}_${cityEnc}_${page + 1}` });
 
     const keyboard = [
       catFilterRow,
@@ -953,7 +955,7 @@ async function showCatalog(chatId, cat, page, filter) {
     ];
 
     const label = CATEGORIES[cat] || 'Все';
-    const cityLabel = filter.city ? ` — 🏙 ${esc(filter.city)}` : '';
+    const cityLabel = activeCity ? ` — 🏙 ${esc(activeCity)}` : '';
     const pageInfo = Math.ceil(total / perPage) > 1 ? ` \\(стр\\. ${page + 1}/${Math.ceil(total / perPage)}\\)` : '';
     const featuredCount = models.filter(mo => mo.featured).length;
     const featuredNote = featuredCount > 0 ? `\n⭐ — топ\\-модели` : '';
@@ -1034,7 +1036,7 @@ async function showModel(chatId, modelId, backBtn = null) {
     // Enhanced stats
     if (reviewCount > 0)
       lines.push(`${ratingStars(reviewAvg)} *${reviewCount}* ${ru_plural(reviewCount, 'отзыв', 'отзыва', 'отзывов')}`);
-    if (completedOrders > 0) lines.push(`📋 *${esc(String(completedOrders))}* заявок`);
+    if (completedOrders > 0) lines.push(`📋 Заказов: *${esc(String(completedOrders))}*`);
     const viewCount = (m.view_count || 0) + 1; // +1 for the just-incremented count
     if (viewCount > 50) lines.push(`🔥 Популярная`);
     if (viewCount > 0) lines.push(`👁 *${viewCount}* просмотров`);
@@ -6566,12 +6568,20 @@ function initBot(app) {
         return;
       }
 
-      // ── Фильтр по городу
+      // ── Сброс фильтра города (early-exit before cat_city_ generic handler)
+      if (data === 'cat_city_clear_0') {
+        catalogCityPrefs.set(String(chatId), '');
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0, { city: '' });
+      }
+
+      // ── Фильтр по городу — сохраняем город и текущую категорию
       if (data.startsWith('cat_city_')) {
         const parts = data.replace('cat_city_', '').split('_');
         const page = parseInt(parts.pop()) || 0;
         const city = parts.join('_');
-        return showCatalogByCity(chatId, city, page);
+        const currentCat = catalogCatPrefs.get(String(chatId)) || '';
+        catalogCityPrefs.set(String(chatId), city);
+        return showCatalog(chatId, currentCat, page, { city });
       }
 
       // ── Booking: budget confirmation (budget below minimum)
@@ -9239,22 +9249,47 @@ function initBot(app) {
       }
 
       // ── Категории каталога (быстрые фильтры)
+      if (data === 'cat_filter_all') return showCatalog(chatId, '', 0);
       if (data === 'cat_filter_fashion') return showCatalog(chatId, 'fashion', 0, { category: 'fashion' });
       if (data === 'cat_filter_commercial') return showCatalog(chatId, 'commercial', 0, { category: 'commercial' });
       if (data === 'cat_filter_events') return showCatalog(chatId, 'events', 0, { category: 'events' });
 
       // ── Сортировка каталога
-      if (data === 'cat_sort_featured') {
+      if (data === 'cat_sort_rating' || data === 'cat_sort_featured') {
         catalogSortPrefs.set(String(chatId), 'featured');
-        return showCatalog(chatId, '', 0);
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0);
       }
-      if (data === 'cat_sort_newest') {
+      if (data === 'cat_sort_new' || data === 'cat_sort_newest') {
         catalogSortPrefs.set(String(chatId), 'newest');
-        return showCatalog(chatId, '', 0);
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0);
+      }
+      if (data === 'cat_sort_orders') {
+        catalogSortPrefs.set(String(chatId), 'orders');
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0);
       }
       if (data === 'cat_sort_alpha') {
         catalogSortPrefs.set(String(chatId), 'alpha');
-        return showCatalog(chatId, '', 0);
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0);
+      }
+
+      // ── Пагинация с сохранением фильтров: cat_page_{cat}_{city}_{page}
+      if (data.startsWith('cat_page_')) {
+        const raw = data.replace('cat_page_', '');
+        const lastUnderscore = raw.lastIndexOf('_');
+        const pg = parseInt(raw.slice(lastUnderscore + 1)) || 0;
+        const rest = raw.slice(0, lastUnderscore); // {cat}_{city}
+        // city is the last segment, cat may be empty
+        const secondUnder = rest.lastIndexOf('_');
+        let pgCat, pgCity;
+        if (secondUnder === -1) {
+          // only one segment — could be cat or city; cat is empty means it's city
+          pgCat = '';
+          pgCity = rest;
+        } else {
+          pgCat = rest.slice(0, secondUnder);
+          pgCity = rest.slice(secondUnder + 1);
+        }
+        return showCatalog(chatId, pgCat, pg, { city: pgCity || '' });
       }
 
       // ── Поиск модели по параметрам (мульти-фильтр, БЛОК 2.4)
@@ -11347,7 +11382,7 @@ async function showFaq(chatId) {
 async function showUserProfile(chatId, firstName) {
   try {
     const referralEnabledProfile = await getSetting('referral_enabled').catch(() => '1');
-    const [orders, lastOrderFull, prefs] = await Promise.all([
+    const [orders, lastOrderFull, prefs, wishlistCount, completedBudget] = await Promise.all([
       query(
         `SELECT o.id, o.status, o.created_at, o.order_number, m.name AS model_name FROM orders o
          LEFT JOIN models m ON m.id = o.model_id
@@ -11360,6 +11395,12 @@ async function showUserProfile(chatId, firstName) {
         [String(chatId)]
       ).catch(() => null),
       get(`SELECT * FROM client_prefs WHERE chat_id=?`, [chatId]).catch(() => null),
+      get(`SELECT COUNT(*) as c FROM wishlists WHERE chat_id=?`, [String(chatId)]).catch(() => ({ c: 0 })),
+      get(
+        `SELECT SUM(CAST(REPLACE(REPLACE(REPLACE(budget,' ',''),'₽',''),',','.') AS REAL)) as total
+         FROM orders WHERE client_chat_id=? AND status='completed' AND budget IS NOT NULL AND budget != ''`,
+        [String(chatId)]
+      ).catch(() => null),
     ]);
 
     // Resolve name/phone/email: client_prefs takes priority, fallback to last order
@@ -11367,11 +11408,13 @@ async function showUserProfile(chatId, firstName) {
     const displayPhone = prefs?.phone || lastOrderFull?.client_phone || null;
     const displayEmail = prefs?.email || lastOrderFull?.client_email || null;
 
-    // Profile edit buttons — one action per row for clarity
+    // Profile edit buttons — all three contact edits on one row, then settings
     const profileEditButtons = [
-      [{ text: '✏️ Изменить имя', callback_data: 'profile_edit_name' }],
-      [{ text: '📱 Изменить телефон', callback_data: 'profile_edit_phone' }],
-      [{ text: '📧 Изменить email', callback_data: 'profile_edit_email' }],
+      [
+        { text: '✏️ Изменить имя', callback_data: 'profile_edit_name' },
+        { text: '📞 Изменить телефон', callback_data: 'profile_edit_phone' },
+        { text: '📧 Изменить email', callback_data: 'profile_edit_email' },
+      ],
       [
         { text: '🔔 Уведомления', callback_data: 'client_notif_settings' },
         { text: '⚙️ Настройки', callback_data: 'client_settings' },
@@ -11463,6 +11506,13 @@ async function showUserProfile(chatId, firstName) {
     text += `Активных: ${activeOrders}\n`;
     text += `Завершённых: ${completedOrders}\n`;
     if (cancelledOrders) text += `Отменённых: ${cancelledOrders}\n`;
+    // Budget sum for completed orders
+    const budgetSum = completedBudget?.total ? Math.round(completedBudget.total) : null;
+    if (budgetSum) text += `💰 Сумма бюджетов \\(завершённые\\): *${esc(budgetSum.toLocaleString('ru'))} ₽*\n`;
+    // Wishlist count
+    const favCount = wishlistCount?.c || 0;
+    if (favCount > 0)
+      text += `❤️ В избранном: *${favCount}* ${favCount === 1 ? 'модель' : favCount < 5 ? 'модели' : 'моделей'}\n`;
 
     const statusOrder = ['new', 'reviewing', 'confirmed', 'in_progress', 'completed', 'cancelled'];
     const statusDetails = statusOrder.filter(st => counts[st]);
@@ -12443,7 +12493,7 @@ _Цены ориентировочные\\. Точная стоимость со
 
 // ─── Каталог по городу ────────────────────────────────────────────────────────
 
-async function showCatalogByCity(chatId, city, page = 0) {
+async function _showCatalogByCity(chatId, city, page = 0) {
   try {
     const _rawPerPageCity = parseInt(await getSetting('catalog_per_page').catch(() => '5')) || 5;
     const perPage = Math.min(20, Math.max(1, _rawPerPageCity));
@@ -13790,6 +13840,20 @@ function _registerNewFeatures() {
             )
           );
           await bot.editMessageReplyMarkup({ inline_keyboard: favKb }, { chat_id: chatId, message_id: msgId });
+        } catch {}
+        // Follow-up notification message with wishlist quick-access
+        try {
+          await safeSend(chatId, `❤️ *${esc(favModel.name)}* добавлена в избранное\\!\nПросмотреть список: /wishlist`, {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '❤️ Моё избранное', callback_data: 'fav_list_0' },
+                  { text: '← К модели', callback_data: `cat_model_${favModelId}` },
+                ],
+              ],
+            },
+          });
         } catch {}
         return;
       }
