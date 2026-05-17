@@ -559,7 +559,7 @@
     updateActiveFilterBadge();
 
     // Count
-    countEl.textContent = `Найдено ${list.length} ${plural(list.length)}`;
+    if (countEl) countEl.textContent = `Найдено ${list.length} ${plural(list.length)}`;
 
     if (!list.length) {
       grid.innerHTML = `
