@@ -23,17 +23,24 @@ async function showAdminStats(chatId) {
   try {
     const budgetExpr = `CAST(REPLACE(REPLACE(REPLACE(REPLACE(budget,'₽',''),'руб',''),' ',''),',','.') AS REAL)`;
 
+    // Build calendar-month boundary (first day of current month)
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+
     const [
       total,
       todayOrders,
       weekOrders,
       monthOrders,
-      active,
+      calMonthOrders,
+      statusNew,
+      statusConfirmed,
+      statusInProgress,
       done,
       canc,
       newClientsMonth,
       totalNew,
-      confirmed,
+      confirmedCount,
       totalClients,
       // Models counts
       totalModels,
@@ -41,23 +48,29 @@ async function showAdminStats(chatId) {
       featuredModels,
     ] = await Promise.all([
       get('SELECT COUNT(*) as n FROM orders'),
-      get("SELECT COUNT(*) as n FROM orders WHERE date(created_at) = date('now')"),
+      get("SELECT COUNT(*) as n FROM orders WHERE date(created_at,'localtime') = date('now','localtime')"),
       get("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-7 days')"),
       get("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-30 days')"),
-      get("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','confirmed','in_progress')"),
+      get(`SELECT COUNT(*) as n FROM orders WHERE date(created_at) >= ?`, [monthStart]),
+      get("SELECT COUNT(*) as n FROM orders WHERE status='new'"),
+      get("SELECT COUNT(*) as n FROM orders WHERE status='confirmed'"),
+      get("SELECT COUNT(*) as n FROM orders WHERE status='in_progress'"),
       get("SELECT COUNT(*) as n FROM orders WHERE status='completed'"),
       get("SELECT COUNT(*) as n FROM orders WHERE status='cancelled'"),
-      // New clients: first order ever placed in last 30 days
-      get(`SELECT COUNT(DISTINCT client_chat_id) as n
+      // New clients: first order placed this calendar month
+      get(
+        `SELECT COUNT(DISTINCT client_chat_id) as n
            FROM orders
            WHERE client_chat_id IS NOT NULL AND client_chat_id != ''
              AND CAST(client_chat_id AS INTEGER) > 0
-             AND created_at >= datetime('now','-30 days')
+             AND date(created_at) >= ?
              AND client_chat_id NOT IN (
                SELECT client_chat_id FROM orders
                WHERE client_chat_id IS NOT NULL
-                 AND created_at < datetime('now','-30 days')
-             )`),
+                 AND date(created_at) < ?
+             )`,
+        [monthStart, monthStart]
+      ),
       get("SELECT COUNT(*) as n FROM orders WHERE status != 'cancelled'"),
       get("SELECT COUNT(*) as n FROM orders WHERE status IN ('confirmed','completed')"),
       get(
@@ -69,19 +82,35 @@ async function showAdminStats(chatId) {
       get('SELECT COUNT(*) as n FROM models WHERE archived=0 AND featured=1').catch(() => ({ n: 0 })),
     ]);
 
-    // Conversion: new→confirmed ratio
-    const conversion = (totalNew.n || 0) > 0 ? Math.round(((confirmed.n || 0) / totalNew.n) * 100) : 0;
+    // Active orders = new + confirmed + in_progress
+    const activeCount = (statusNew?.n || 0) + (statusConfirmed?.n || 0) + (statusInProgress?.n || 0);
+
+    // Conversion: confirmed / (confirmed+completed+cancelled) — meaningful funnel
+    const funnelTotal = (confirmedCount?.n || 0) + (canc?.n || 0);
+    const conversion =
+      funnelTotal > 0
+        ? Math.round(((confirmedCount?.n || 0) / funnelTotal) * 100)
+        : (totalNew.n || 0) > 0
+          ? Math.round(((confirmedCount?.n || 0) / totalNew.n) * 100)
+          : 0;
 
     // Revenue: sum of budgets for confirmed+completed orders
-    let revenue = { total: 0, month: 0 };
+    let revenue = { total: 0, week: 0, month: 0, calMonth: 0 };
     let avgCheck = null;
     try {
-      const [revTotal, revMonth, avgRow] = await Promise.all([
+      const [revTotal, revWeek, revMonth, revCalMonth, avgRow] = await Promise.all([
         get(
           `SELECT SUM(${budgetExpr}) as s FROM orders WHERE status IN ('confirmed','completed') AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`
         ),
         get(
+          `SELECT SUM(${budgetExpr}) as s FROM orders WHERE status IN ('confirmed','completed') AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*' AND created_at >= datetime('now','-7 days')`
+        ),
+        get(
           `SELECT SUM(${budgetExpr}) as s FROM orders WHERE status IN ('confirmed','completed') AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*' AND created_at >= datetime('now','-30 days')`
+        ),
+        get(
+          `SELECT SUM(${budgetExpr}) as s FROM orders WHERE status IN ('confirmed','completed') AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*' AND date(created_at) >= ?`,
+          [monthStart]
         ),
         get(
           `SELECT AVG(${budgetExpr}) as avg FROM orders WHERE status IN ('confirmed','completed') AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`
@@ -89,7 +118,9 @@ async function showAdminStats(chatId) {
       ]);
       revenue = {
         total: Math.round(revTotal?.s || 0),
+        week: Math.round(revWeek?.s || 0),
         month: Math.round(revMonth?.s || 0),
+        calMonth: Math.round(revCalMonth?.s || 0),
       };
       if (avgRow?.avg) avgCheck = Math.round(avgRow.avg);
     } catch {}
@@ -121,19 +152,6 @@ async function showAdminStats(chatId) {
       );
     } catch {}
 
-    // Top-5 models by view count (bonus insight)
-    let topViewed = [];
-    try {
-      topViewed = await query(`
-        SELECT name, view_count,
-          (SELECT COUNT(*) FROM orders WHERE model_id=models.id AND status NOT IN ('cancelled')) as order_count
-        FROM models
-        WHERE archived=0
-        ORDER BY view_count DESC
-        LIMIT 5
-      `);
-    } catch {}
-
     // Average deal cycle (days from new to completed)
     let avgCycleDays = null;
     try {
@@ -156,69 +174,81 @@ async function showAdminStats(chatId) {
       repeatClients = rc?.n || 0;
     } catch {}
 
+    // Month label for display (e.g. "Май")
+    const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+    const currentMonthLabel = monthNames[now.getMonth()];
+
     const fmt = n => {
       if (!n || isNaN(n)) return esc('0');
       return esc(Math.round(n).toLocaleString('ru'));
     };
 
-    let text = `📊 *Статистика агентства*\n\n`;
+    let text = `📊 *Статистика агентства*\n`;
+    text += `_Обновлено: ${esc(now.toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}_\n\n`;
 
     // ── Заявки section ──────────────────────────────
     text += `📋 *Заявки*\n`;
-    text += `• Сегодня: ${esc(String(todayOrders.n))}\n`;
-    text += `• Неделя \\(7 дней\\): ${esc(String(weekOrders.n))}\n`;
-    text += `• Месяц \\(30 дней\\): ${esc(String(monthOrders.n))}\n`;
-    text += `• Всего: ${esc(String(total.n))}\n`;
-    text += `• Активных сейчас \\(new/confirmed/in\\_progress\\): *${esc(String(active.n))}*\n`;
-    text += `• Конверсия new→confirmed: *${esc(String(conversion))}%*\n`;
+    text += `├ Сегодня: *${esc(String(todayOrders.n))}*\n`;
+    text += `├ За 7 дней: ${esc(String(weekOrders.n))}\n`;
+    text += `├ ${esc(currentMonthLabel)} \\(текущий месяц\\): *${esc(String(calMonthOrders.n))}*\n`;
+    text += `├ За 30 дней: ${esc(String(monthOrders.n))}\n`;
+    text += `└ Всего: ${esc(String(total.n))}\n`;
+
+    // ── Status breakdown ────────────────────────────
+    text += `\n🔄 *Статус заявок*\n`;
+    text += `├ 🔵 Новые: *${esc(String(statusNew?.n || 0))}*\n`;
+    text += `├ ✅ Подтверждённые: ${esc(String(statusConfirmed?.n || 0))}\n`;
+    text += `├ 🔧 В работе: ${esc(String(statusInProgress?.n || 0))}\n`;
+    text += `├ 🏁 Завершённые: ${esc(String(done?.n || 0))}\n`;
+    text += `├ ❌ Отменённые: ${esc(String(canc?.n || 0))}\n`;
+    text += `├ 🟠 Активных всего: *${esc(String(activeCount))}*\n`;
+    text += `└ 📈 Конверсия new→confirmed: *${esc(String(conversion))}%*\n`;
 
     // ── Revenue section ──────────────────────────────
     text += `\n💰 *Выручка* _\\(confirmed \\+ completed\\)_\n`;
-    text += `• За месяц: *${fmt(revenue.month)} руб\\.*\n`;
-    text += `• Всего: ${fmt(revenue.total)} руб\\.\n`;
-    if (avgCheck) text += `• Средний чек: ${fmt(avgCheck)} руб\\.\n`;
+    text += `├ Сегодня/неделя: ${fmt(revenue.week)} руб\\.\n`;
+    text += `├ ${esc(currentMonthLabel)} \\(тек\\. месяц\\): *${fmt(revenue.calMonth)} руб\\.*\n`;
+    text += `├ За 30 дней: ${fmt(revenue.month)} руб\\.\n`;
+    text += `├ За всё время: ${fmt(revenue.total)} руб\\.\n`;
+    if (avgCheck) {
+      text += `└ Средний чек: *${fmt(avgCheck)} руб\\.*\n`;
+    } else {
+      text += `└ Средний чек: —\n`;
+    }
+
+    // ── Top-3 models ─────────────────────────────────
+    if (topModels.length) {
+      text += `\n👑 *Топ\\-3 модели по заявкам*\n`;
+      const medals = ['🥇', '🥈', '🥉'];
+      topModels.forEach((m, i) => {
+        const isLast = i === topModels.length - 1;
+        text += `${isLast ? '└' : '├'} ${medals[i] || `${i + 1}\\.`} ${esc(m.name)} — ${esc(String(m.cnt))} зак\\.\n`;
+      });
+    }
 
     // ── Models section ───────────────────────────────
     text += `\n💃 *Модели*\n`;
-    text += `• Всего: ${esc(String(totalModels?.n || 0))}\n`;
-    text += `• Активных \\(available\\): ${esc(String(activeModels?.n || 0))}\n`;
-    text += `• Топовых \\(featured\\): ${esc(String(featuredModels?.n || 0))}\n`;
-
-    if (topModels.length) {
-      text += `\n👑 *Топ\\-3 модели по заявкам*\n`;
-      topModels.forEach((m, i) => {
-        text += `${i + 1}\\. ${esc(m.name)} — ${esc(String(m.cnt))} заявок\n`;
-      });
-    }
+    text += `├ Всего активных: ${esc(String(totalModels?.n || 0))}\n`;
+    text += `├ Доступных: *${esc(String(activeModels?.n || 0))}*\n`;
+    text += `└ Топовых \\(featured\\): ${esc(String(featuredModels?.n || 0))}\n`;
 
     // ── Clients section ──────────────────────────────
     text += `\n👥 *Клиенты*\n`;
-    text += `• Всего уникальных: ${esc(String(totalClients?.n || 0))}\n`;
-    text += `• Новых за месяц: ${esc(String(newClientsMonth?.n || 0))}\n`;
-    text += `• Повторных \\(>1 заявки\\): ${esc(String(repeatClients))}\n`;
+    text += `├ Всего уникальных: ${esc(String(totalClients?.n || 0))}\n`;
+    text += `├ Новых в ${esc(currentMonthLabel)}: *${esc(String(newClientsMonth?.n || 0))}*\n`;
+    text += `└ Повторных \\(>1 заявки\\): ${esc(String(repeatClients))}\n`;
 
-    // ── Additional metrics (bonus) ───────────────────
-    if (done.n > 0 || canc.n > 0) {
-      text += `\n_✅ Завершено: ${esc(String(done.n))}  ❌ Отменено: ${esc(String(canc.n))}_\n`;
-    }
-    if (avgCycleDays !== null) {
-      text += `_⏱ Средний цикл сделки: ${esc(String(avgCycleDays))} дн\\._\n`;
-    }
-
-    // Top-2 cities
-    if (topCities.length) {
-      text += `\n🏙️ *Топ\\-2 города*\n`;
-      topCities.forEach((c, i) => {
-        text += `${i + 1}\\. ${esc(c.city)} — ${esc(String(c.cnt))} заявок\n`;
-      });
-    }
-
-    // Top-5 by views (bonus)
-    if (topViewed.length) {
-      text += `\n👁 *Топ\\-5 по просмотрам:*\n`;
-      topViewed.forEach((m, i) => {
-        text += `  ${i + 1}\\. ${esc(m.name)} — 👁 ${esc(String(m.view_count || 0))} просм\\., 📋 ${esc(String(m.order_count || 0))} заявок\n`;
-      });
+    // ── Additional metrics ───────────────────────────
+    if (avgCycleDays !== null || topCities.length) {
+      text += `\n📌 *Дополнительно*\n`;
+      if (avgCycleDays !== null) {
+        text += `${topCities.length ? '├' : '└'} ⏱ Средний цикл сделки: ${esc(String(avgCycleDays))} дн\\.\n`;
+      }
+      if (topCities.length) {
+        text += `└ 🏙️ Топ города: `;
+        text += topCities.map(c => `${esc(c.city)} \\(${esc(String(c.cnt))}\\)`).join(', ');
+        text += `\n`;
+      }
     }
 
     // Broadcast stats
@@ -240,6 +270,10 @@ async function showAdminStats(chatId) {
           [
             { text: '📤 Экспорт CSV', callback_data: 'adm_stats_csv' },
             { text: '📋 Все заявки', callback_data: 'adm_orders__0' },
+          ],
+          [
+            { text: '📥 Новые заявки', callback_data: 'adm_ord_filter_new' },
+            { text: '🏁 Завершённые', callback_data: 'adm_ord_filter_completed' },
           ],
           [{ text: '📊 Аналитика (сайт)', url: 'https://nevesty-models.ru/admin/analytics.html' }],
         ],

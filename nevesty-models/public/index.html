@@ -639,43 +639,7 @@
             <h2 id="reviews-heading">Отзывы клиентов</h2>
             <div class="gold-line"></div>
           </div>
-          <div id="reviews-container" class="reviews-grid">
-            <div class="skeleton skeleton-card" aria-hidden="true"></div>
-            <div class="skeleton skeleton-card" aria-hidden="true"></div>
-            <div class="skeleton skeleton-card" aria-hidden="true"></div>
-          </div>
-          <div
-            id="reviews-pagination"
-            style="
-              display: none;
-              justify-content: center;
-              align-items: center;
-              gap: 16px;
-              margin-top: 32px;
-              flex-wrap: wrap;
-            "
-          >
-            <button
-              id="reviews-prev"
-              class="btn-outline"
-              onclick="loadReviewsPage(currentReviewsPage - 1)"
-              style="font-size: 0.85rem; padding: 12px 28px"
-              aria-label="Предыдущая страница отзывов"
-              disabled
-            >
-              ◀ Назад
-            </button>
-            <span id="reviews-page-info" style="color: var(--text-muted); font-size: 0.85rem"></span>
-            <button
-              id="reviews-next"
-              class="btn-outline"
-              onclick="loadReviewsPage(currentReviewsPage + 1)"
-              style="font-size: 0.85rem; padding: 12px 28px"
-              aria-label="Следующая страница отзывов"
-            >
-              Вперёд ▶
-            </button>
-          </div>
+          <div id="reviews-container" class="reviews-grid" aria-live="polite" aria-busy="true"></div>
         </div>
       </section>
 
@@ -1571,19 +1535,33 @@
             pCards[2].textContent = Number(d.pricing_premium_from).toLocaleString('ru-RU');
         })
         .catch(() => {});
-      // ─── Reviews with pagination ──────────────────────────────────────────────────
-      var currentReviewsPage = 1;
-      var reviewsLimit = 6;
-
-      function loadReviewsPage(page) {
-        page = Math.max(1, page);
+      // ─── Reviews: load from /api/reviews/public ──────────────────────────────────
+      (async function initReviews() {
         const cont = document.getElementById('reviews-container');
         if (!cont) return;
-        cont.innerHTML =
-          '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:24px">Загрузка отзывов…</div>';
 
-        const stars = n =>
-          '★'.repeat(Math.max(1, Math.min(5, n || 5))) + '☆'.repeat(5 - Math.max(1, Math.min(5, n || 5)));
+        // Show skeleton cards while loading
+        cont.innerHTML = `
+          <div class="skeleton review-skeleton-card" aria-hidden="true"></div>
+          <div class="skeleton review-skeleton-card" aria-hidden="true"></div>
+          <div class="skeleton review-skeleton-card" aria-hidden="true"></div>`;
+
+        const esc = s =>
+          String(s || '').replace(
+            /[&<>"']/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+          );
+        const stars = n => {
+          const filled = Math.max(1, Math.min(5, n || 5));
+          return (
+            '<span class="review-stars-filled">' +
+            '★'.repeat(filled) +
+            '</span>' +
+            '<span class="review-stars-empty">' +
+            '☆'.repeat(5 - filled) +
+            '</span>'
+          );
+        };
         const fmtDate = s => {
           try {
             return new Date(s).toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -1595,128 +1573,60 @@
           t = String(t || '');
           return t.length > len ? t.slice(0, len).trimEnd() + '…' : t;
         };
-        const esc = s =>
-          String(s || '').replace(
-            /[&<>"']/g,
-            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
-          );
 
-        fetch('/api/reviews?page=' + page + '&limit=' + reviewsLimit)
-          .then(r => (r.ok ? r.json() : null))
-          .then(data => {
-            if (!data) throw new Error('fetch error');
-            // API returns { reviews, total, page, pages, limit } when page param is present
-            const list = Array.isArray(data) ? data : data.reviews || [];
-            const total = data.total || list.length;
-            const pages = data.pages || Math.ceil(total / reviewsLimit);
-            currentReviewsPage = data.page || page;
-
-            if (!list.length) {
-              if (page > 1) {
-                // Went past last page — go back
-                loadReviewsPage(1);
-                return;
-              }
-              cont.innerHTML = '';
-              const section = document.getElementById('reviews');
-              if (section) section.style.display = 'none';
-              return;
-            }
-
-            cont.innerHTML = list
-              .map(
-                r => `
-        <div class="testimonial-card" style="background:var(--bg2);border:1px solid var(--border);padding:28px;border-radius:2px;display:flex;flex-direction:column;gap:0">
-          <div style="color:#f59e0b;font-size:1.1rem;margin-bottom:10px">${stars(r.rating)}</div>
-          <p style="color:var(--text);font-size:0.9rem;line-height:1.6;margin-bottom:16px;flex:1">"${esc(truncate(r.text, 200))}"</p>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-            <div style="display:flex;align-items:center;gap:10px">
-              <div style="width:36px;height:36px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:0.9rem;flex-shrink:0">${esc((r.client_name || 'А').charAt(0).toUpperCase())}</div>
-              <div>
-                <div style="color:var(--white);font-size:0.85rem;font-weight:600">${esc(r.client_name || 'Клиент')}</div>
-                ${r.model_name ? `<div style="color:var(--text-muted);font-size:0.75rem">Модель: ${esc(r.model_name)}</div>` : ''}
-              </div>
-            </div>
-            ${r.created_at ? `<div style="color:var(--text-muted);font-size:0.72rem;white-space:nowrap">${fmtDate(r.created_at)}</div>` : ''}
-          </div>
-        </div>`
-              )
-              .join('');
-
-            // Pagination controls
-            const pag = document.getElementById('reviews-pagination');
-            if (pag) {
-              pag.style.display = pages > 1 ? 'flex' : 'none';
-              const prevBtn = document.getElementById('reviews-prev');
-              const nextBtn = document.getElementById('reviews-next');
-              const info = document.getElementById('reviews-page-info');
-              if (prevBtn) prevBtn.disabled = currentReviewsPage <= 1;
-              if (nextBtn) nextBtn.disabled = currentReviewsPage >= pages;
-              if (info) info.textContent = 'Страница ' + currentReviewsPage + ' из ' + pages;
-            }
-
-            // Append action buttons (once)
-            const section = document.getElementById('reviews');
-            if (section && !section.querySelector('.reviews-actions')) {
-              const actions = document.createElement('div');
-              actions.className = 'reviews-actions';
-              actions.style.cssText = 'display:flex;gap:16px;justify-content:center;margin-top:24px;flex-wrap:wrap';
-              actions.innerHTML = `
-          <a href="/catalog.html" class="btn-outline" style="font-size:0.85rem;padding:14px 36px">Все отзывы</a>
-          <a href="https://t.me/Verdiktnikbot" target="_blank" rel="noopener" class="btn-primary" style="font-size:0.85rem;padding:14px 36px">Оставить отзыв</a>`;
-              section.querySelector('.container').appendChild(actions);
-            }
-          })
-          .catch(() => {
-            if (cont)
-              cont.innerHTML =
-                '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:24px">Ошибка загрузки отзывов</div>';
-          });
-      }
-
-      // ─── loadReviews: uses /api/reviews/public endpoint ──────────────────────────
-      async function loadReviews() {
         try {
           const res = await fetch('/api/reviews/public?limit=6');
+          if (!res.ok) throw new Error('HTTP ' + res.status);
           const data = await res.json();
-          const grid = document.getElementById('reviews-container');
-          if (!grid || !data.reviews?.length) {
-            if (grid) grid.innerHTML = '<p class="no-reviews">Будьте первым, кто оставит отзыв!</p>';
+          const list = data.reviews || [];
+          cont.setAttribute('aria-busy', 'false');
+
+          if (!list.length) {
+            cont.innerHTML = `
+              <div class="reviews-empty">
+                <div class="reviews-empty-icon">★</div>
+                <p>Будьте первым, кто оставит отзыв!</p>
+                <a href="https://t.me/Verdiktnikbot" target="_blank" rel="noopener" class="btn-primary" style="font-size:0.85rem;padding:12px 32px;margin-top:12px;display:inline-block">Оставить отзыв</a>
+              </div>`;
             return;
           }
-          const esc = s =>
-            String(s || '').replace(
-              /[&<>"']/g,
-              c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
-            );
-          const stars = n =>
-            '★'.repeat(Math.max(1, Math.min(5, n || 5))) + '☆'.repeat(5 - Math.max(1, Math.min(5, n || 5)));
-          const fmtDate = s => {
-            try {
-              return new Date(s).toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
-            } catch {
-              return '';
-            }
-          };
-          grid.innerHTML = data.reviews
+
+          cont.innerHTML = list
             .map(
               r => `
-            <div class="review-card">
-              <div class="review-stars">${stars(r.rating)}</div>
-              <p class="review-text">"${esc(r.text || '—')}"</p>
-              <div class="review-author">${esc(r.client_name || 'Клиент')}</div>
-              ${r.model_name ? `<div class="review-model">Модель: ${esc(r.model_name)}</div>` : ''}
-              ${r.created_at ? `<div class="review-date">${fmtDate(r.created_at)}</div>` : ''}
-            </div>`
+            <article class="review-card" aria-label="Отзыв от ${esc(r.client_name || 'клиента')}">
+              <div class="review-stars" aria-label="Рейтинг: ${r.rating || 5} из 5">${stars(r.rating)}</div>
+              <p class="review-text">"${esc(truncate(r.text || '—', 220))}"</p>
+              <footer class="review-footer">
+                <div class="review-avatar" aria-hidden="true">${esc((r.client_name || 'К').charAt(0).toUpperCase())}</div>
+                <div class="review-meta">
+                  <div class="review-author">${esc(r.client_name || 'Клиент')}</div>
+                  ${r.model_name ? `<div class="review-model">Модель: ${esc(r.model_name)}</div>` : ''}
+                  ${r.created_at ? `<time class="review-date" datetime="${esc(r.created_at)}">${fmtDate(r.created_at)}</time>` : ''}
+                </div>
+              </footer>
+            </article>`
             )
             .join('');
+
+          // Append action buttons
+          const section = document.getElementById('reviews');
+          if (section && !section.querySelector('.reviews-actions')) {
+            const actions = document.createElement('div');
+            actions.className = 'reviews-actions';
+            actions.innerHTML = `
+              <a href="/catalog.html" class="btn-outline" style="font-size:0.85rem;padding:14px 36px">Все отзывы</a>
+              <a href="https://t.me/Verdiktnikbot" target="_blank" rel="noopener" class="btn-primary" style="font-size:0.85rem;padding:14px 36px">Оставить отзыв</a>`;
+            section.querySelector('.container').appendChild(actions);
+          }
         } catch (err) {
           console.error('[Reviews]', err);
+          cont.innerHTML = `
+            <div class="reviews-error">
+              <span>⚠</span> Не удалось загрузить отзывы. <button onclick="location.reload()" class="btn-outline" style="font-size:0.8rem;padding:8px 20px;margin-left:8px">Обновить</button>
+            </div>`;
         }
-      }
-
-      // Load reviews on page init
-      if (document.getElementById('reviews-container')) loadReviewsPage(1);
+      })();
     </script>
 
     <!-- PWA Install Banner -->
