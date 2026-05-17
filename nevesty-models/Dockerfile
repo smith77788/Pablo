@@ -43,6 +43,6 @@ EXPOSE 3000
 
 # Health check via /api/health endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/api/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{const j=JSON.parse(d);process.exit(j.status==='healthy'||j.status==='degraded'?0:1)}catch{process.exit(r.statusCode===200?0:1)}})}).on('error',()=>process.exit(1))"
+  CMD node -e "require('http').get('http://localhost:3000/api/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{const j=JSON.parse(d);process.exit(j.status==='ok'||j.status==='degraded'?0:1)}catch{process.exit(r.statusCode===200?0:1)}})}).on('error',()=>process.exit(1))"
 
 CMD ["node", "server.js"]
