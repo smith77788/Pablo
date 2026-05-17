@@ -618,20 +618,38 @@
       }
 
       async function toggleAvailable(id, current) {
-        await fetch(`/api/admin/models/${id}`, {
-          method: 'PATCH',
-          headers,
-          body: JSON.stringify({ available: current ? 0 : 1 }),
-        });
-        loadModels();
+        try {
+          const resp = await fetch(`/api/admin/models/${id}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ available: current ? 0 : 1 }),
+          });
+          if (!resp.ok) {
+            const d = await resp.json().catch(() => ({}));
+            if (window._admin?.toast) _admin.toast('Ошибка: ' + (d.error || resp.status), 'error');
+            return;
+          }
+          loadModels();
+        } catch (e) {
+          if (window._admin?.toast) _admin.toast('Ошибка сети: ' + e.message, 'error');
+        }
       }
       async function toggleFeatured(id, current) {
-        await fetch(`/api/admin/models/${id}`, {
-          method: 'PATCH',
-          headers,
-          body: JSON.stringify({ featured: current ? 0 : 1 }),
-        });
-        loadModels();
+        try {
+          const resp = await fetch(`/api/admin/models/${id}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ featured: current ? 0 : 1 }),
+          });
+          if (!resp.ok) {
+            const d = await resp.json().catch(() => ({}));
+            if (window._admin?.toast) _admin.toast('Ошибка: ' + (d.error || resp.status), 'error');
+            return;
+          }
+          loadModels();
+        } catch (e) {
+          if (window._admin?.toast) _admin.toast('Ошибка сети: ' + e.message, 'error');
+        }
       }
       async function archiveModel(id, archived) {
         const msg = archived
@@ -639,15 +657,33 @@
           : 'Архивировать модель? Она будет скрыта из каталога и сохранена в архиве.';
         if (!confirm(msg)) return;
         const endpoint = archived ? `/api/admin/models/${id}/restore` : `/api/admin/models/${id}/archive`;
-        await fetch(endpoint, { method: 'PATCH', headers });
-        loadModels();
+        try {
+          const resp = await fetch(endpoint, { method: 'PATCH', headers });
+          if (!resp.ok) {
+            const d = await resp.json().catch(() => ({}));
+            if (window._admin?.toast) _admin.toast('Ошибка: ' + (d.error || resp.status), 'error');
+            return;
+          }
+          loadModels();
+        } catch (e) {
+          if (window._admin?.toast) _admin.toast('Ошибка сети: ' + e.message, 'error');
+        }
       }
 
       async function deleteModelPermanent(id) {
         if (!confirm('Удалить модель навсегда? Это действие нельзя отменить.')) return;
         if (!confirm('Подтвердите: все фото и данные модели будут удалены безвозвратно.')) return;
-        await fetch(`/api/admin/models/${id}`, { method: 'DELETE', headers });
-        loadModels();
+        try {
+          const resp = await fetch(`/api/admin/models/${id}`, { method: 'DELETE', headers });
+          if (!resp.ok) {
+            const d = await resp.json().catch(() => ({}));
+            if (window._admin?.toast) _admin.toast('Ошибка удаления: ' + (d.error || resp.status), 'error');
+            return;
+          }
+          loadModels();
+        } catch (e) {
+          if (window._admin?.toast) _admin.toast('Ошибка сети: ' + e.message, 'error');
+        }
       }
 
       async function duplicateModel(id) {
