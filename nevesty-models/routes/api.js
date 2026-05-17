@@ -4344,7 +4344,7 @@ router.get('/pricing', publicSettingsLimiter, async (req, res) => {
 });
 
 // GET /api/stats/public — public statistics for about page (cached 10 min)
-router.get('/stats/public', async (req, res) => {
+router.get('/stats/public', publicSettingsLimiter, async (req, res) => {
   try {
     const cacheKey = 'stats:public';
     const cached = cache.get(cacheKey);
@@ -4726,7 +4726,7 @@ router.put('/settings', auth, async (req, res, next) => {
 });
 
 // ─── Reviews (public) ─────────────────────────────────────────────────────────
-router.get('/reviews', async (req, res, next) => {
+router.get('/reviews', catalogLimiter, async (req, res, next) => {
   try {
     const usePagination = req.query.page !== undefined;
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -4767,7 +4767,7 @@ router.get('/reviews', async (req, res, next) => {
 });
 
 // ─── Reviews recent (public, for homepage) ────────────────────────────────────
-router.get('/reviews/recent', async (req, res, next) => {
+router.get('/reviews/recent', catalogLimiter, async (req, res, next) => {
   try {
     const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 5));
     const rows = await query(
@@ -4787,7 +4787,7 @@ router.get('/reviews/recent', async (req, res, next) => {
 });
 
 // ─── Reviews (public, explicit endpoint) ──────────────────────────────────────
-router.get('/reviews/public', async (req, res, next) => {
+router.get('/reviews/public', catalogLimiter, async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 6, 20);
     const reviews = await query(
@@ -8265,7 +8265,7 @@ router.post('/client/ai-budget', aiBudgetLimiter, async (req, res) => {
 // ─── FAQ (public) ─────────────────────────────────────────────────────────────
 
 // GET /api/faq/categories — returns distinct categories with counts
-router.get('/faq/categories', async (req, res, next) => {
+router.get('/faq/categories', publicSettingsLimiter, async (req, res, next) => {
   try {
     const rows = await query(
       `SELECT DISTINCT COALESCE(category, 'general') as category, COUNT(*) as count
