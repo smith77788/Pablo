@@ -702,12 +702,17 @@ initLazyImages();
 (function initInstallPrompt() {
   let deferredPrompt = null;
 
+  // Don't show if already installed (standalone mode)
+  if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) return;
+
   window.addEventListener('beforeinstallprompt', e => {
     e.preventDefault();
     deferredPrompt = e;
 
-    // Show install banner after 30 seconds
+    // Show install banner after 30 seconds (only once per session)
+    if (sessionStorage.getItem('nm-install-dismissed')) return;
     setTimeout(() => {
+      if (!deferredPrompt) return;
       const banner = document.getElementById('install-banner');
       if (banner) banner.style.display = 'flex';
     }, 30000);
@@ -717,12 +722,21 @@ initLazyImages();
   document.addEventListener('click', async e => {
     const btn = e.target.closest('#install-btn');
     if (!btn || !deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
+    const prompt = deferredPrompt;
+    deferredPrompt = null;
+    prompt.prompt();
+    const { outcome } = await prompt.userChoice;
     if (outcome === 'accepted') {
       document.getElementById('install-banner')?.remove();
     }
-    deferredPrompt = null;
+  });
+
+  // Dismiss button — hide for session
+  document.addEventListener('click', e => {
+    const closeBtn = e.target.closest('[data-dismiss="install-banner"]');
+    if (!closeBtn) return;
+    document.getElementById('install-banner')?.remove();
+    sessionStorage.setItem('nm-install-dismissed', '1');
   });
 
   // Hide banner when app is installed
@@ -730,6 +744,38 @@ initLazyImages();
     document.getElementById('install-banner')?.remove();
     deferredPrompt = null;
   });
+})();
+
+/* ─── Track recently visited pages for offline.html ─── */
+(function trackRecentPages() {
+  try {
+    const KEY = 'nm-recent-pages';
+    const MAX = 10;
+    const url = location.pathname + location.search;
+    const title = document.title || url;
+    const now = Date.now();
+
+    let pages = [];
+    try {
+      pages = JSON.parse(localStorage.getItem(KEY) || '[]');
+      if (!Array.isArray(pages)) pages = [];
+    } catch (_) {
+      pages = [];
+    }
+
+    // Remove duplicate URL if present
+    pages = pages.filter(p => p.url !== url);
+
+    // Prepend current page
+    pages.unshift({ url, title, ts: now });
+
+    // Keep only newest MAX entries
+    if (pages.length > MAX) pages = pages.slice(0, MAX);
+
+    localStorage.setItem(KEY, JSON.stringify(pages));
+  } catch (_) {
+    // localStorage may be unavailable (private mode, quota exceeded)
+  }
 })();
 
 /* ─── Card shine mouse tracking ─────────────────────────────── */

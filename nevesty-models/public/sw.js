@@ -1,8 +1,10 @@
 'use strict';
 
-const STATIC_CACHE = 'nevesty-static-v5';
-const API_CACHE = 'nevesty-api-v1';
-const IMAGE_CACHE = 'nevesty-images-v1';
+const CACHE_VERSION = 'v6';
+const STATIC_CACHE = `nevesty-static-${CACHE_VERSION}`;
+const API_CACHE = `nevesty-api-${CACHE_VERSION}`;
+const IMAGE_CACHE = `nevesty-images-${CACHE_VERSION}`;
+const IMAGE_CACHE_LIMIT = 50;
 
 // All current caches — anything else will be deleted on activate
 const CURRENT_CACHES = [STATIC_CACHE, API_CACHE, IMAGE_CACHE, 'nm-pending-forms'];
@@ -41,7 +43,6 @@ const PRECACHE_URLS = [
 
 // ── Install: precache static assets ──────────────────────────────────────────
 self.addEventListener('install', event => {
-  self.skipWaiting();
   event.waitUntil(
     caches
       .open(STATIC_CACHE)
@@ -50,6 +51,7 @@ self.addEventListener('install', event => {
           .addAll(PRECACHE_URLS.map(url => new Request(url, { credentials: 'same-origin' })))
           .catch(err => console.warn('[SW] Precache partial failure:', err))
       )
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -72,21 +74,31 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
 
-  // Uploads: CacheFirst with 7-day TTL
+  // Uploads (user photos): CacheFirst with 7-day TTL and 50-item limit
   if (url.pathname.startsWith('/uploads/')) {
-    event.respondWith(cacheFirstWithTTL(request, IMAGE_CACHE, 7 * 24 * 60 * 60 * 1000));
+    event.respondWith(cacheFirstWithTTLAndLimit(request, IMAGE_CACHE, 7 * 24 * 60 * 60 * 1000, IMAGE_CACHE_LIMIT));
     return;
   }
 
-  // API: NetworkFirst with 5-second timeout, fallback to API_CACHE
+  // API: NetworkFirst for public endpoints with fallback; short timeout
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(networkFirstWithTimeout(request, API_CACHE, 5000));
+    const isPublicApi =
+      url.pathname.startsWith('/api/models') ||
+      url.pathname.startsWith('/api/reviews/public') ||
+      url.pathname.startsWith('/api/settings/public');
+    event.respondWith(networkFirstWithTimeout(request, isPublicApi ? API_CACHE : null, 5000));
     return;
   }
 
-  // Static assets (CSS, JS, fonts, images, icons): CacheFirst
-  if (url.pathname.match(/\.(css|js|woff2?|ttf|otf|svg|png|jpg|jpeg|webp|ico)$/)) {
+  // Static assets (CSS, JS, fonts): Cache First
+  if (url.pathname.match(/\.(css|js|woff2?|ttf|otf)$/)) {
     event.respondWith(cacheFirst(request, STATIC_CACHE));
+    return;
+  }
+
+  // Images and icons: Cache First with limit
+  if (url.pathname.match(/\.(svg|png|jpg|jpeg|webp|ico|gif|avif)$/)) {
+    event.respondWith(cacheFirstWithLimit(request, IMAGE_CACHE, IMAGE_CACHE_LIMIT));
     return;
   }
 
@@ -111,8 +123,26 @@ async function cacheFirst(request, cacheName) {
   }
 }
 
-// ── Strategy: CacheFirst with TTL (for /uploads/) ────────────────────────────
-async function cacheFirstWithTTL(request, cacheName, ttlMs) {
+// ── Strategy: CacheFirst with limit (for static images) ──────────────────────
+async function cacheFirstWithLimit(request, cacheName, limit) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      await evictIfNeeded(cache, limit);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    return offlineFallback(request);
+  }
+}
+
+// ── Strategy: CacheFirst with TTL + limit (for /uploads/) ────────────────────
+async function cacheFirstWithTTLAndLimit(request, cacheName, ttlMs, limit) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
   if (cached) {
@@ -120,11 +150,14 @@ async function cacheFirstWithTTL(request, cacheName, ttlMs) {
     if (!dateHeader || Date.now() - parseInt(dateHeader, 10) < ttlMs) {
       return cached;
     }
+    // Expired — delete and re-fetch
+    await cache.delete(request);
   }
 
   try {
     const response = await fetch(request);
     if (response.ok) {
+      await evictIfNeeded(cache, limit);
       const headers = new Headers(response.headers);
       headers.set('sw-cached-date', String(Date.now()));
       const timestamped = new Response(await response.blob(), {
@@ -138,6 +171,16 @@ async function cacheFirstWithTTL(request, cacheName, ttlMs) {
   } catch {
     if (cached) return cached;
     return offlineFallback(request);
+  }
+}
+
+// ── Helper: evict oldest entries when cache exceeds limit ────────────────────
+async function evictIfNeeded(cache, limit) {
+  const keys = await cache.keys();
+  if (keys.length >= limit) {
+    // Delete oldest entries (first in list = oldest)
+    const toDelete = keys.slice(0, keys.length - limit + 1);
+    await Promise.all(toDelete.map(key => cache.delete(key)));
   }
 }
 
@@ -159,19 +202,21 @@ async function networkFirst(request, cacheName) {
 
 // ── Strategy: NetworkFirst with timeout (for /api/) ───────────────────────────
 async function networkFirstWithTimeout(request, cacheName, timeoutMs) {
-  const cache = await caches.open(cacheName);
+  const cache = cacheName ? await caches.open(cacheName) : null;
 
   const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('SW timeout')), timeoutMs));
 
   try {
     const response = await Promise.race([fetch(request), timeoutPromise]);
-    if (response.ok) {
+    if (response.ok && cache) {
       cache.put(request, response.clone());
     }
     return response;
   } catch {
-    const cached = await cache.match(request);
-    if (cached) return cached;
+    if (cache) {
+      const cached = await cache.match(request);
+      if (cached) return cached;
+    }
     return new Response(JSON.stringify({ error: 'Нет подключения к сети' }), {
       status: 503,
       headers: { 'Content-Type': 'application/json; charset=utf-8' },

@@ -68,7 +68,23 @@
       .icon-wrap svg {
         width: 100%;
         height: 100%;
-        filter: drop-shadow(0 0 12px rgba(201, 169, 110, 0.25));
+      }
+
+      /* Pulsing WiFi glow animation */
+      .icon-wrap {
+        animation: wifiPulse 2s ease-in-out infinite;
+      }
+
+      @keyframes wifiPulse {
+        0%,
+        100% {
+          filter: drop-shadow(0 0 4px rgba(201, 169, 110, 0.15));
+          transform: scale(1);
+        }
+        50% {
+          filter: drop-shadow(0 0 18px rgba(201, 169, 110, 0.5));
+          transform: scale(1.05);
+        }
       }
 
       /* Interference flicker on the whole icon */
@@ -302,6 +318,7 @@
 
       /* ── Reduced motion ── */
       @media (prefers-reduced-motion: reduce) {
+        .icon-wrap,
         .icon-signal,
         .bar-1,
         .bar-2,
@@ -465,7 +482,7 @@
       <h1>Нет подключения к сети</h1>
       <p>Проверьте интернет-соединение и попробуйте снова.<br />Ранее просмотренные страницы доступны ниже.</p>
 
-      <button class="btn-retry" onclick="window.location.reload()">Повторить</button>
+      <button class="btn-retry" onclick="location.reload()">Попробовать снова</button>
 
       <div class="recent-section" id="recent-section" style="display: none">
         <p class="recent-title">Недавно просмотренные</p>
@@ -486,7 +503,7 @@
 
       (function () {
         try {
-          var raw = localStorage.getItem('nm_recent_pages');
+          var raw = localStorage.getItem('nm-recent-pages') || localStorage.getItem('nm_recent_pages');
           var pages = raw ? JSON.parse(raw) : [];
 
           if (pages.length > 0) {

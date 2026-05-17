@@ -4,18 +4,31 @@
   "description": "Профессиональное модельное агентство — бронирование онлайн",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
   "background_color": "#080808",
   "theme_color": "#C9A96E",
   "lang": "ru",
   "orientation": "portrait-primary",
-  "categories": ["business", "lifestyle"],
+  "categories": ["business", "shopping"],
   "icons": [
-    {"src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "maskable any"},
-    {"src": "/icons/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable any"}
+    { "src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "maskable any" },
+    { "src": "/icons/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable any" }
   ],
   "screenshots": [
-    {"src": "/og-image.jpg", "sizes": "1200x630", "type": "image/jpeg", "form_factor": "wide",   "label": "Nevesty Models — главная страница"},
-    {"src": "/og-image.jpg", "sizes": "1200x630", "type": "image/jpeg", "form_factor": "narrow", "label": "Nevesty Models — каталог моделей"}
+    {
+      "src": "/og-image.jpg",
+      "sizes": "1200x630",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Nevesty Models — главная страница"
+    },
+    {
+      "src": "/og-image.jpg",
+      "sizes": "1200x630",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Nevesty Models — каталог моделей"
+    }
   ],
   "shortcuts": [
     {
@@ -23,21 +36,21 @@
       "short_name": "Каталог",
       "description": "Просмотреть каталог профессиональных моделей",
       "url": "/catalog.html",
-      "icons": [{"src": "/icons/icon-192.svg", "sizes": "192x192"}]
+      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192" }]
     },
     {
       "name": "Забронировать",
       "short_name": "Заявка",
       "description": "Оформить бронирование модели",
       "url": "/booking.html",
-      "icons": [{"src": "/icons/icon-192.svg", "sizes": "192x192"}]
+      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192" }]
     },
     {
       "name": "Мои заявки",
       "short_name": "Заявки",
       "description": "Просмотреть статус заявок",
       "url": "/cabinet.html",
-      "icons": [{"src": "/icons/icon-192.svg", "sizes": "192x192"}]
+      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192" }]
     }
   ],
   "prefer_related_applications": false

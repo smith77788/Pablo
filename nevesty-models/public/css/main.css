@@ -4473,3 +4473,15 @@ img[data-zoom]:hover {
 }
 
 /* ─── END OF NEW UI COMPONENTS ───────────────────────────────────── */
+
+/* ─── MODEL ORDERS COUNT BADGE (W2) ─────────────────────────────── */
+.model-orders-count {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: rgba(201, 169, 110, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(201, 169, 110, 0.2);
+  display: inline-block;
+  vertical-align: middle;
+}
