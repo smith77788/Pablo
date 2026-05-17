@@ -1106,6 +1106,29 @@ async function initDatabase() {
   await run(`ALTER TABLE faq ADD COLUMN keywords TEXT DEFAULT '[]'`).catch(() => {});
   await run(`ALTER TABLE faq ADD COLUMN use_count INTEGER DEFAULT 0`).catch(() => {});
 
+  // Schema v42 — uptime_logs table for public status page history (БЛОК 35)
+  const v42 = await get(`SELECT version FROM schema_versions WHERE version=42`).catch(() => null);
+  if (!v42) {
+    await run(`CREATE TABLE IF NOT EXISTS uptime_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      checked_at TEXT DEFAULT (datetime('now')),
+      status TEXT DEFAULT 'ok',
+      latency_ms INTEGER
+    )`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_uptime_logs_checked_at ON uptime_logs(checked_at DESC)`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_uptime_logs_status ON uptime_logs(status)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(42, 'uptime_logs for public status page 90-day history (БЛОК 35)')`
+    ).catch(() => {});
+  }
+  // Idempotent — ensure uptime_logs exists even on DBs that skipped v42
+  await run(`CREATE TABLE IF NOT EXISTS uptime_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    checked_at TEXT DEFAULT (datetime('now')),
+    status TEXT DEFAULT 'ok',
+    latency_ms INTEGER
+  )`).catch(() => {});
+
   // Seed FAQ items if empty (БЛОК 34 — full seed with keywords + categories)
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
