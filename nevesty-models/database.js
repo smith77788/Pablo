@@ -1129,6 +1129,12 @@ async function initDatabase() {
     latency_ms INTEGER
   )`).catch(() => {});
 
+  // БЛОК 6.5 — Performance: composite indexes for common query patterns
+  // idx_reviews_approved_created: public API filters by approved + orders by created_at
+  await run(`CREATE INDEX IF NOT EXISTS idx_reviews_approved_created ON reviews(approved, created_at DESC)`).catch(
+    () => {}
+  );
+
   // Seed FAQ items if empty (БЛОК 34 — full seed with keywords + categories)
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {

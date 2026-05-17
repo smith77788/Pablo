@@ -8611,7 +8611,7 @@ function initBot(app) {
             reply_markup: {
               inline_keyboard: [
                 [{ text: '⚠️ Да, удалить', callback_data: `adm_ig_del_confirm_${postId}` }],
-                [{ text: '← Назад', callback_data: 'adm_social_posts' }],
+                [{ text: '← Назад', callback_data: 'adm_social' }],
               ],
             },
           }
@@ -10165,10 +10165,27 @@ function initBot(app) {
         const id = parseInt(data.replace('adm_quick_confirm_', ''));
         return adminChangeStatus(chatId, id, 'confirmed');
       }
+      if (data.startsWith('adm_quick_complete_confirm_')) {
+        if (!isAdmin(chatId)) return;
+        const id = parseInt(data.replace('adm_quick_complete_confirm_', ''));
+        return adminChangeStatus(chatId, id, 'completed');
+      }
       if (data.startsWith('adm_quick_complete_')) {
         if (!isAdmin(chatId)) return;
         const id = parseInt(data.replace('adm_quick_complete_', ''));
-        return adminChangeStatus(chatId, id, 'completed');
+        const qcOrder = await get('SELECT order_number, client_name FROM orders WHERE id=?', [id]).catch(() => null);
+        const qcLabel = qcOrder
+          ? `${esc(qcOrder.order_number)}${qcOrder.client_name ? ` \\(${esc(qcOrder.client_name)}\\)` : ''}`
+          : String(id);
+        return safeSend(chatId, `🏁 *Завершить заявку ${qcLabel}?*\n\nКлиент получит уведомление и бонусные баллы\\.`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '✅ Да, завершить', callback_data: `adm_quick_complete_confirm_${id}` }],
+              [{ text: '← Назад к заявке', callback_data: `adm_order_${id}` }],
+            ],
+          },
+        });
       }
 
       // ── Assign manager: show list

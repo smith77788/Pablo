@@ -1100,7 +1100,7 @@
               aria-label="Ваш номер телефону"
             />
             <div class="cabinet-login-hint">Формат: +7 (XXX) XXX-XX-XX або 8XXXXXXXXXX</div>
-            <button class="cabinet-login-btn" id="searchBtn" onclick="Cabinet.search()">Знайти заявки →</button>
+            <button class="cabinet-login-btn" id="searchBtn" onclick="Cabinet.requestCode()">Отримати код →</button>
             <div class="cabinet-login-hint" style="margin-top: 12px">
               Немає заявок?
               <a href="/booking.html" style="color: var(--gold); text-decoration: none">Оформити першу →</a>
@@ -2010,8 +2010,10 @@
           hideError();
 
           const btn = document.getElementById('searchBtn');
-          btn.disabled = true;
-          btn.textContent = 'Отправка…';
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Відправка…';
+          }
 
           try {
             const r = await fetch('/api/client/request-code', {
@@ -2028,15 +2030,23 @@
             // Show OTP step
             document.getElementById('stepPhone').style.display = 'none';
             document.getElementById('stepCode').style.display = '';
+            const hintEl = document.getElementById('otpHint');
             if (data.code_debug) {
-              document.getElementById('otpHint').textContent = `Тестовый режим: ваш код ${data.code_debug}`;
+              if (hintEl) hintEl.textContent = `Тестовый режим: ваш код ${data.code_debug}`;
+            } else if (hintEl) {
+              hintEl.textContent =
+                data.via === 'telegram'
+                  ? 'Код надіслано у Telegram. Введіть його нижче.'
+                  : 'Код надіслано на ваш телефон. Введіть його нижче.';
             }
             document.getElementById('otpInput').focus();
           } catch (e) {
             showError('Ошибка соединения. Попробуйте позже.');
           } finally {
-            btn.disabled = false;
-            btn.textContent = 'Получить код';
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = 'Отримати код →';
+            }
           }
         }
 
@@ -2066,11 +2076,12 @@
               return;
             }
 
-            // Store client token and load orders
+            // Store client token and load orders using JWT
             sessionStorage.setItem('cabinet_phone', _phone);
-            sessionStorage.setItem('cabinet_token', data.token);
+            localStorage.setItem('nm_client_token', data.token);
+            _authToken = data.token;
             showSkeleton();
-            await loadOrders(phone10);
+            await loadOrdersAuth(phone10, data.token);
           } catch (e) {
             showError('Ошибка соединения. Попробуйте позже.');
           } finally {
@@ -2551,7 +2562,7 @@
 
           // Enter key support on phone input
           document.getElementById('phoneInput').addEventListener('keydown', e => {
-            if (e.key === 'Enter') search();
+            if (e.key === 'Enter') requestCode();
           });
 
           // Enter key support on OTP input
@@ -2591,6 +2602,7 @@
         // Expose public API
         window.Cabinet = {
           search,
+          requestCode,
           loginByPhone,
           loadOrdersAuth,
           logout,

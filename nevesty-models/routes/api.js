@@ -7240,10 +7240,13 @@ router.post('/client/request-code', clientOtpLimiter, async (req, res, next) => 
     const phone10 = normalizePhone(rawPhone);
     if (!phone10) return res.status(400).json({ error: 'Укажите корректный номер телефона' });
 
-    // Check if phone has any orders in the system
+    // Check if phone has any orders in the system; also fetch chat_id for Telegram delivery
     const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
     const ph = patterns.map(() => '?').join(',');
-    const order = await get(`SELECT id FROM orders WHERE client_phone IN (${ph}) LIMIT 1`, patterns);
+    const order = await get(
+      `SELECT id, client_chat_id FROM orders WHERE client_phone IN (${ph}) ORDER BY created_at DESC LIMIT 1`,
+      patterns
+    );
     if (!order) return res.status(404).json({ error: 'Заявки с этим номером не найдены' });
 
     // Generate 6-digit code
@@ -7255,16 +7258,38 @@ router.post('/client/request-code', clientOtpLimiter, async (req, res, next) => 
       code,
     ]);
 
-    // Try to send SMS
-    const sms = require('../services/sms');
-    const phoneE164 = '+7' + phone10;
-    await sms
-      .sendSMS(phoneE164, `Ваш код для входа в личный кабинет Nevesty Models: ${code}. Действует 10 минут.`)
-      .catch(e => console.log('[OTP] SMS send skipped:', e.message));
+    let sentViaTelegram = false;
+
+    // Try to send via Telegram bot (primary channel if client has chat_id)
+    if (order.client_chat_id && botInstance) {
+      try {
+        const chatId = order.client_chat_id;
+        const tgText =
+          `🔐 *Ваш код для входа в личный кабинет:*\n\n` + `*${code}*\n\n` + `Код действителен 10 минут\\.`;
+        await botInstance.instance.sendMessage(chatId, tgText, { parse_mode: 'MarkdownV2' });
+        sentViaTelegram = true;
+        console.log('[OTP] Sent via Telegram to chat', chatId);
+      } catch (e) {
+        console.warn('[OTP] Telegram send failed:', e.message);
+      }
+    }
+
+    // Try to send SMS as fallback (or in parallel if no Telegram)
+    if (!sentViaTelegram) {
+      const sms = require('../services/sms');
+      const phoneE164 = '+7' + phone10;
+      await sms
+        .sendSMS(phoneE164, `Ваш код для входа в личный кабинет Nevesty Models: ${code}. Действует 10 минут.`)
+        .catch(e => console.log('[OTP] SMS send skipped:', e.message));
+    }
 
     // Only expose OTP code in explicit development environment to prevent accidental production leak
     const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
-    res.json({ ok: true, ...(isDev ? { code_debug: code } : {}) });
+    res.json({
+      ok: true,
+      via: sentViaTelegram ? 'telegram' : 'sms',
+      ...(isDev ? { code_debug: code } : {}),
+    });
   } catch (e) {
     next(e);
   }

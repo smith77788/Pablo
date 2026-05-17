@@ -15,7 +15,7 @@
     "lint:all": "eslint .",
     "lint:legacy": "eslint bot.js server.js routes/api.js",
     "check": "node --check bot.js && node --check server.js && node --check routes/api.js",
-    "test": "jest --forceExit",
+    "test": "jest --forceExit --runInBand",
     "test:e2e": "jest tests/e2e*.test.js --forceExit",
     "test:coverage": "jest --coverage --coverageDirectory=coverage --forceExit",
     "test:watch": "jest --watch --forceExit",
@@ -32,8 +32,7 @@
     "testPathIgnorePatterns": [
       "/node_modules/"
     ],
-    "testTimeout": 60000,
-    "runInBand": true
+    "testTimeout": 60000
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
