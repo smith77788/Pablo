@@ -5,6 +5,9 @@ Disallow: /admin/
 Disallow: /uploads/
 Disallow: /backups/
 Disallow: /offline.html
+Disallow: /cabinet.html
+Disallow: /model-cabinet.html
+Disallow: /webapp.html
 Crawl-delay: 2
 
 Sitemap: https://nevesty-models.ru/sitemap.xml
@@ -14,6 +17,9 @@ Allow: /
 Disallow: /api/
 Disallow: /admin/
 Disallow: /offline.html
+Disallow: /cabinet.html
+Disallow: /model-cabinet.html
+Disallow: /webapp.html
 
 User-agent: Yandex
 Allow: /
@@ -21,5 +27,8 @@ Disallow: /api/
 Disallow: /admin/
 Disallow: /uploads/
 Disallow: /offline.html
+Disallow: /cabinet.html
+Disallow: /model-cabinet.html
+Disallow: /webapp.html
 Crawl-delay: 3
 Host: nevesty-models.ru

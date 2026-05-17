@@ -8029,9 +8029,32 @@ function initBot(app) {
           },
         });
       }
+      if (data.startsWith('adm_complete_confirm_')) {
+        if (!isAdmin(chatId)) return;
+        return adminChangeStatus(chatId, parseInt(data.replace('adm_complete_confirm_', '')), 'completed');
+      }
       if (data.startsWith('adm_complete_')) {
         if (!isAdmin(chatId)) return;
-        return adminChangeStatus(chatId, parseInt(data.replace('adm_complete_', '')), 'completed');
+        const completeId = parseInt(data.replace('adm_complete_', ''));
+        const completeOrder = await get('SELECT order_number, client_name FROM orders WHERE id=?', [completeId]).catch(
+          () => null
+        );
+        const completeLabel = completeOrder
+          ? `${esc(completeOrder.order_number)}${completeOrder.client_name ? ` \\(${esc(completeOrder.client_name)}\\)` : ''}`
+          : String(completeId);
+        return safeSend(
+          chatId,
+          `🏁 *Завершить заявку ${completeLabel}?*\n\nКлиент получит уведомление о завершении заказа и бонусные баллы\\.`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '✅ Да, завершить', callback_data: `adm_complete_confirm_${completeId}` }],
+                [{ text: '← Назад', callback_data: `adm_order_${completeId}` }],
+              ],
+            },
+          }
+        );
       }
 
       // ── Invoice: send payment link to client (admin action)
@@ -8562,16 +8585,37 @@ function initBot(app) {
         }
         return showSocialPostsPanel(chatId, 0, 'all');
       }
+      if (data.startsWith('adm_ig_del_confirm_')) {
+        if (!isAdmin(chatId)) return;
+        const postId = parseInt(data.replace('adm_ig_del_confirm_', ''), 10);
+        if (!postId) return;
+        try {
+          await run(`DELETE FROM social_posts WHERE id=?`, [postId]);
+          await bot.answerCallbackQuery(q.id, { text: '🗑 Пост удалён' }).catch(() => {});
+          return showSocialPostsPanel(chatId, 0, 'all');
+        } catch (e) {
+          return safeSend(chatId, '❌ Ошибка при удалении поста\\.', { parse_mode: 'MarkdownV2' });
+        }
+      }
       if (data.startsWith('adm_ig_del_')) {
         if (!isAdmin(chatId)) return;
         const postId = parseInt(data.replace('adm_ig_del_', ''), 10);
         if (!postId) return;
-        try {
-          await run(`DELETE FROM social_posts WHERE id=?`, [postId]);
-          return safeSend(chatId, `🗑 Пост \\#${esc(String(postId))} удалён ✓`, { parse_mode: 'MarkdownV2' });
-        } catch (e) {
-          return safeSend(chatId, '❌ Ошибка при удалении поста\\.', { parse_mode: 'MarkdownV2' });
-        }
+        const post = await get('SELECT caption FROM social_posts WHERE id=?', [postId]).catch(() => null);
+        const postLabel = post?.caption ? esc(post.caption.slice(0, 60)) : esc(String(postId));
+        return safeSend(
+          chatId,
+          `🗑 *Удалить пост \\#${esc(String(postId))}?*\n\n_${postLabel}_\n\nЭто действие необратимо\\.`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '⚠️ Да, удалить', callback_data: `adm_ig_del_confirm_${postId}` }],
+                [{ text: '← Назад', callback_data: 'adm_social_posts' }],
+              ],
+            },
+          }
+        );
       }
       // Toggle налаштування каталогу
       if (data === 'adm_catalog_sort_date') {
@@ -8896,12 +8940,27 @@ function initBot(app) {
         await bot.answerCallbackQuery(q.id, { text: newActive ? '✅ Активирован' : '⏸ Деактивирован' }).catch(() => {});
         return showAdminPromoList(chatId);
       }
-      if (data.startsWith('adm_promo_del_')) {
+      if (data.startsWith('adm_promo_del_confirm_')) {
         if (!isAdmin(chatId)) return;
-        const pid = parseInt(data.replace('adm_promo_del_', ''));
+        const pid = parseInt(data.replace('adm_promo_del_confirm_', ''));
         await run('DELETE FROM promo_codes WHERE id=?', [pid]).catch(() => {});
         await bot.answerCallbackQuery(q.id, { text: '🗑 Удалён' }).catch(() => {});
         return showAdminPromoList(chatId);
+      }
+      if (data.startsWith('adm_promo_del_')) {
+        if (!isAdmin(chatId)) return;
+        const pid = parseInt(data.replace('adm_promo_del_', ''));
+        const promo = await get('SELECT code FROM promo_codes WHERE id=?', [pid]).catch(() => null);
+        const promoLabel = promo?.code ? esc(promo.code) : esc(String(pid));
+        return safeSend(chatId, `🗑 *Удалить промокод ${promoLabel}?*\n\nЭто действие необратимо\\.`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '⚠️ Да, удалить', callback_data: `adm_promo_del_confirm_${pid}` }],
+              [{ text: '← Назад', callback_data: 'adm_promos' }],
+            ],
+          },
+        });
       }
       if (data === 'adm_promo_dtype_percent' || data === 'adm_promo_dtype_fixed') {
         if (!isAdmin(chatId)) return;
