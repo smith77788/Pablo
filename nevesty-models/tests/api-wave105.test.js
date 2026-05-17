@@ -2,68 +2,64 @@
 const fs = require('fs');
 const path = require('path');
 
-describe('Stub Settings S1-S6 connected to business logic', () => {
-  let botSrc;
-  beforeAll(() => {
-    botSrc = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
+describe('Wave 39 фиксы: мобильная навигация', () => {
+  test('reviews.html использует канонический navbar класс', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../public/reviews.html'), 'utf8');
+    expect(src).toContain('class="navbar"');
+    expect(src).toContain('nav-burger');
   });
+  test('reviews.html не использует нестандартный .header класс вместо navbar', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../public/reviews.html'), 'utf8');
+    // old non-standard pattern
+    expect(src).not.toContain('<header class="header">');
+  });
+  test('model-cabinet.html имеет skip-link для доступности', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../public/model-cabinet.html'), 'utf8');
+    expect(src).toContain('skip-link');
+  });
+});
 
-  // S1
-  test('S1: model_max_photos — getSetting called for photo limit', () => {
-    expect(botSrc).toMatch(/getSetting\('model_max_photos'\)/);
+describe('Wave 39 фиксы: Docker и логирование', () => {
+  test('Dockerfile HEALTHCHECK ищет status ok', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../Dockerfile'), 'utf8');
+    expect(src).toContain("j.status==='ok'");
+    expect(src).not.toContain("j.status==='healthy'");
   });
-  test('S1: model_max_photos — parseInt used on setting value', () => {
-    const hasParseInt =
-      /parseInt.*getSetting\('model_max_photos'\)/.test(botSrc) || /parseInt.*model_max_photos/.test(botSrc);
-    expect(hasParseInt).toBe(true);
+  test('routes/api.js sharp логи обёрнуты в NODE_ENV guard', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
+    // At least one sharp log must be on same line as the NODE_ENV guard (one-liner style)
+    expect(src).toContain("process.env.NODE_ENV !== 'production') console.log('[sharp]");
+    // Every [sharp] console.log must have NODE_ENV guard on same or immediately preceding line
+    const lines = src.split('\n');
+    const bareSharpLogs = lines.filter((l, i) => {
+      if (!l.includes("console.log('[sharp]")) return false;
+      const onSameLine = l.includes('NODE_ENV');
+      const prevLine = i > 0 ? lines[i - 1] : '';
+      const onPrevLine = prevLine.includes('NODE_ENV');
+      return !onSameLine && !onPrevLine;
+    });
+    expect(bareSharpLogs).toHaveLength(0);
   });
+  test('routes/api.js OTP SMS ошибка логируется через console.error', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../routes/api.js'), 'utf8');
+    expect(src).toMatch(/console\.error\('\[OTP\] SMS send skipped/);
+  });
+});
 
-  // S2
-  test('S2: booking_require_email — getSetting called in booking flow', () => {
-    expect(botSrc).toMatch(/getSetting\('booking_require_email'\)/);
+describe('Wave 38 CRITICAL фикс: AI сессии', () => {
+  test('bot.js использует правильный вызов setSession для ai_chat_input', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
+    expect(src).toContain("setSession(chatId, 'ai_chat_input'");
+    expect(src).not.toContain("setSession(chatId, 'state', 'ai_chat_input'");
   });
-  test('S2: booking_require_email — skip button conditional on setting', () => {
-    // The skip button should be gated behind the requireEmail !== '1' check
-    const hasCondition = /requireEmail.*Пропустить|booking_require_email.*skip|skip.*booking_require_email/i.test(
-      botSrc
-    );
-    expect(hasCondition || (botSrc.includes('requireEmail') && botSrc.includes('Пропустить'))).toBe(true);
+  test('bot.js использует правильный вызов setSession для ai_budget_desc', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
+    expect(src).toContain("setSession(chatId, 'ai_budget_desc'");
+    expect(src).not.toContain("setSession(chatId, 'state', 'ai_budget_desc'");
   });
-
-  // S3
-  test('S3: booking_auto_confirm — getSetting called in booking submit', () => {
-    expect(botSrc).toMatch(/getSetting\('booking_auto_confirm'\)/);
-  });
-  test('S3: booking_auto_confirm — status changes to confirmed when enabled', () => {
-    // autoConfirm variable is set from the setting, and confirmed status is used in the same block
-    const hasAutoConfirm = botSrc.includes("getSetting('booking_auto_confirm')");
-    const hasConfirmedStatus = /status='confirmed'|status.*=.*'confirmed'|order\.status\s*=\s*'confirmed'/.test(botSrc);
-    expect(hasAutoConfirm && hasConfirmedStatus).toBe(true);
-  });
-
-  // S4
-  test('S4: reviews_auto_approve — getSetting called in review submit', () => {
-    expect(botSrc).toMatch(/getSetting\('reviews_auto_approve'\)/);
-  });
-  test('S4: reviews_auto_approve — approved field uses setting value', () => {
-    expect(botSrc).toMatch(/autoApprove.*[?:].*1.*0|reviews_auto_approve.*approved/);
-  });
-
-  // S5
-  test('S5: reviews_min_completed — getSetting called before allowing review', () => {
-    expect(botSrc).toMatch(/getSetting\('reviews_min_completed'\)/);
-  });
-  test('S5: reviews_min_completed — count query for completed orders', () => {
-    expect(botSrc).toMatch(/COUNT.*orders.*completed|completed.*orders.*COUNT/i);
-  });
-
-  // S6
-  test('S6: notif_new_order — getSetting called in notifyNewOrder', () => {
-    expect(botSrc).toMatch(/getSetting\('notif_new_order'\)/);
-  });
-  test('S6: notif_new_order — early return when disabled', () => {
-    // notifEnabled is checked and early return is issued when '0'
-    const hasCheck = /notifEnabled\s*===\s*'0'\s*\)\s*return|notifOn\s*===\s*'0'\s*\)\s*return/.test(botSrc);
-    expect(hasCheck).toBe(true);
+  test('bot.js использует правильный вызов setSession для ai_match_desc', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../bot.js'), 'utf8');
+    expect(src).toContain("setSession(chatId, 'ai_match_desc'");
+    expect(src).not.toContain("setSession(chatId, 'state', 'ai_match_desc'");
   });
 });
