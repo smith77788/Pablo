@@ -8389,7 +8389,7 @@ async function generateSitemap() {
   const modelUrls = models
     .map(m => {
       const lastmod = (m.updated_at || m.created_at || '').split('T')[0] || today;
-      return `  <url>\n    <loc>${baseUrl}/model.html?id=${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
+      return `  <url>\n    <loc>${baseUrl}/model/${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
     })
     .join('\n');
 
@@ -8440,7 +8440,7 @@ router.get('/sitemap.xml', async (req, res, next) => {
     const modelUrls = models
       .map(m => {
         const lastmod = m.updated_at ? m.updated_at.split('T')[0] || m.updated_at.slice(0, 10) : today;
-        return `  <url>\n    <loc>${baseUrl}/model.html?id=${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
+        return `  <url>\n    <loc>${baseUrl}/model/${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
       })
       .join('\n');
 
