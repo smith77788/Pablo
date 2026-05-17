@@ -2770,61 +2770,91 @@ html.light .services {
   left: 0;
   right: 0;
   z-index: 9998;
-  background: rgba(10, 10, 10, 0.97);
-  border-top: 1px solid rgba(201, 169, 110, 0.3);
-  padding: 16px 24px;
+  background: var(--bg2, #0d0d0d);
+  border-top: 2px solid var(--gold, #c9a96e);
+  padding: 20px 24px;
   display: flex;
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
-  backdrop-filter: blur(12px);
+  box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.5);
   transform: translateY(100%);
-  transition: transform 0.35s ease;
+  transition: transform 0.4s ease;
 }
 .cookie-banner.visible {
   transform: translateY(0);
 }
-.cookie-banner p {
+.cookie-text {
   flex: 1;
   min-width: 200px;
   margin: 0;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  line-height: 1.5;
+  font-size: 0.875rem;
+  color: var(--text-muted, #a0a0a0);
+  line-height: 1.6;
 }
-.cookie-banner a {
-  color: var(--gold);
+.cookie-text a {
+  color: var(--gold, #c9a96e);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
-.cookie-banner-btns {
+.cookie-text a:hover {
+  opacity: 0.8;
+}
+.cookie-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 .cookie-btn-accept {
-  padding: 9px 22px;
-  background: var(--gold);
+  padding: 10px 22px;
+  background: var(--gold, #c9a96e);
   color: #000;
   border: none;
+  border-radius: 6px;
   font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition:
+    opacity 0.2s,
+    transform 0.15s;
+  white-space: nowrap;
 }
 .cookie-btn-accept:hover {
-  background: var(--gold-light);
+  opacity: 0.88;
+  transform: translateY(-1px);
 }
-.cookie-btn-more {
-  padding: 9px 16px;
+.cookie-btn-necessary {
+  padding: 10px 16px;
   background: transparent;
-  border: 1px solid rgba(201, 169, 110, 0.4);
-  color: var(--gold);
+  border: 1px solid rgba(201, 169, 110, 0.45);
+  color: var(--gold, #c9a96e);
+  border-radius: 6px;
   font-size: 0.82rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+  white-space: nowrap;
 }
-.cookie-btn-more:hover {
-  background: rgba(201, 169, 110, 0.08);
+.cookie-btn-necessary:hover {
+  background: rgba(201, 169, 110, 0.1);
+  border-color: rgba(201, 169, 110, 0.7);
+}
+@media (max-width: 600px) {
+  .cookie-banner {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px;
+  }
+  .cookie-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .cookie-btn-accept,
+  .cookie-btn-necessary {
+    flex: 1;
+    text-align: center;
+  }
 }
 
 /* ─── QUICK BOOKING MODAL ────────────────────────── */
