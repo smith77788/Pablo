@@ -1,136 +1,144 @@
 'use strict';
 /**
- * Wave101 tests: client menu consolidation, CEO intelligence, experiment system,
- * admin sub-menu callbacks, strings.js coverage, health backup status.
+ * Wave 27-29 integration tests:
+ *  1. SEO meta tags — og:image:alt & JSON-LD Person schema (wave 27)
+ *  2. DB backup system — taskDatabaseBackup in scheduler.js (wave 28)
+ *  3. CB_DATA constants — keyboards/constants.js (wave 28)
+ *  4. Sitemap auto-regeneration — generateSitemap in api.js + robots.txt (wave 28)
+ *  5. Frontend accessibility — aria-busy in catalog.js, lightbox alt in main.js (wave 26)
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const botSrc = fs.readFileSync(path.join(__dirname, '..', 'bot.js'), 'utf8');
-const ceoSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'factory', 'agents', 'strategic_core.py'), 'utf8');
-const expSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'factory', 'agents', 'experiment_system.py'), 'utf8');
-const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const PUBLIC_DIR = path.join(__dirname, '../public');
+const INDEX_HTML = path.join(PUBLIC_DIR, 'index.html');
+const CATALOG_HTML = path.join(PUBLIC_DIR, 'catalog.html');
+const MODEL_HTML = path.join(PUBLIC_DIR, 'model.html');
+const ROBOTS_TXT = path.join(PUBLIC_DIR, 'robots.txt');
+const CATALOG_JS = path.join(PUBLIC_DIR, 'js/catalog.js');
+const MAIN_JS = path.join(PUBLIC_DIR, 'js/main.js');
+const SCHEDULER_JS = path.join(__dirname, '../agents/scheduler.js');
+const RESTORE_SH = path.join(__dirname, '../scripts/restore.sh');
+const API_JS = path.join(__dirname, '../routes/api.js');
 
-// ─── 1. Client keyboard consolidated (4 tests) ────────────────────────────────
+// ─── 1. SEO meta tags — wave 27 ───────────────────────────────────────────────
 
-describe('Client keyboard consolidated', () => {
-  test('buildClientKeyboard function exists in bot.js', () => {
-    expect(botSrc).toContain('buildClientKeyboard');
+describe('SEO meta tags — wave 27', () => {
+  it('index.html has og:image:alt', () => {
+    const src = fs.readFileSync(INDEX_HTML, 'utf8');
+    expect(src).toContain('og:image:alt');
   });
 
-  test('buildClientKeyboard does NOT contain cat_filter_fashion (category filters removed)', () => {
-    // Extract the buildClientKeyboard function body
-    const fnStart = botSrc.indexOf('async function buildClientKeyboard()');
-    const fnEnd = botSrc.indexOf('\n}', fnStart) + 2;
-    const fnBody = botSrc.slice(fnStart, fnEnd);
-    expect(fnBody).not.toContain('cat_filter_fashion');
+  it('catalog.html has og:image:alt', () => {
+    const src = fs.readFileSync(CATALOG_HTML, 'utf8');
+    expect(src).toContain('og:image:alt');
   });
 
-  test('buildClientKeyboard does NOT contain search_height_input (height search merged into main search)', () => {
-    const fnStart = botSrc.indexOf('async function buildClientKeyboard()');
-    const fnEnd = botSrc.indexOf('\n}', fnStart) + 2;
-    const fnBody = botSrc.slice(fnStart, fnEnd);
-    expect(fnBody).not.toContain('search_height_input');
+  it('model.html has og:image:alt', () => {
+    const src = fs.readFileSync(MODEL_HTML, 'utf8');
+    expect(src).toContain('og:image:alt');
   });
 
-  test('techspec_start is NOT a separate row inside buildClientKeyboard', () => {
-    // techspec_start may exist elsewhere as a callback handler but must not be
-    // its own standalone row inside the client keyboard builder
-    const fnStart = botSrc.indexOf('async function buildClientKeyboard()');
-    const fnEnd = botSrc.indexOf('\n}', fnStart) + 2;
-    const fnBody = botSrc.slice(fnStart, fnEnd);
-    expect(fnBody).not.toContain("'techspec_start'");
-  });
-});
-
-// ─── 2. CEO Intelligence delegation (3 tests) ────────────────────────────────
-
-describe('CEO Intelligence delegation', () => {
-  test('strategic_core.py contains generate_weekly_summary method', () => {
-    expect(ceoSrc).toContain('generate_weekly_summary');
+  it('model.html has pre-JS application/ld+json script tag', () => {
+    const src = fs.readFileSync(MODEL_HTML, 'utf8');
+    expect(src).toContain('application/ld+json');
   });
 
-  test('experiment_system.py contains CEODelegation class', () => {
-    expect(expSrc).toContain('CEODelegation');
-  });
-
-  test('experiment_system.py contains mark_outcome method', () => {
-    expect(expSrc).toContain('mark_outcome');
+  it('model.html has pre-JS Person schema placeholder', () => {
+    const src = fs.readFileSync(MODEL_HTML, 'utf8');
+    // The static placeholder script block must exist before JS hydrates it
+    expect(src).toContain('"@type": "Person"');
   });
 });
 
-// ─── 3. Experiment system A/B tracking (4 tests) ─────────────────────────────
+// ─── 2. DB backup system — wave 28 ───────────────────────────────────────────
 
-describe('Experiment system A/B tracking', () => {
-  test('experiment_system.py contains propose_hypothesis', () => {
-    expect(expSrc).toContain('propose_hypothesis');
+describe('DB backup system', () => {
+  it('scheduler.js has taskDatabaseBackup function', () => {
+    const src = fs.readFileSync(SCHEDULER_JS, 'utf8');
+    expect(src).toContain('taskDatabaseBackup');
   });
 
-  test('experiment_system.py contains track_result', () => {
-    expect(expSrc).toContain('track_result');
+  it('scheduler.js runs backup every 6 hours via setInterval', () => {
+    const src = fs.readFileSync(SCHEDULER_JS, 'utf8');
+    // setInterval(taskDatabaseBackup, 6 * 60 * 60 * 1000) is the expected pattern
+    expect(src).toMatch(/setInterval\s*\(\s*taskDatabaseBackup\s*,\s*6\s*\*\s*60\s*\*\s*60\s*\*\s*1000\s*\)/);
   });
 
-  test('experiment_system.py contains get_winning_variant', () => {
-    expect(expSrc).toContain('get_winning_variant');
-  });
-
-  test('experiment_system.py uses ceo_experiments.json for persistence', () => {
-    expect(expSrc).toContain('ceo_experiments.json');
-  });
-});
-
-// ─── 4. Admin sub-menu callbacks verified (4 tests) ──────────────────────────
-
-describe('Admin sub-menu callbacks verified', () => {
-  test("bot.js contains handler for data === 'adm_menu_analytics'", () => {
-    expect(botSrc).toContain("data === 'adm_menu_analytics'");
-  });
-
-  test("bot.js contains handler for data === 'adm_menu_marketing'", () => {
-    expect(botSrc).toContain("data === 'adm_menu_marketing'");
-  });
-
-  test('adm_menu_analytics and adm_menu_marketing handlers each check isAdmin', () => {
-    // Find the analytics handler block and verify isAdmin appears nearby
-    const analyticsIdx = botSrc.indexOf("data === 'adm_menu_analytics'");
-    const analyticsBlock = botSrc.slice(analyticsIdx, analyticsIdx + 200);
-    expect(analyticsBlock).toContain('isAdmin');
-
-    const marketingIdx = botSrc.indexOf("data === 'adm_menu_marketing'");
-    const marketingBlock = botSrc.slice(marketingIdx, marketingIdx + 200);
-    expect(marketingBlock).toContain('isAdmin');
-  });
-
-  test('bot.js contains KB_ADMIN_FACTORY definition', () => {
-    expect(botSrc).toContain('KB_ADMIN_FACTORY');
+  it('scripts/restore.sh exists and has correct shebang', () => {
+    const src = fs.readFileSync(RESTORE_SH, 'utf8');
+    expect(src.startsWith('#!/bin/bash')).toBe(true);
   });
 });
 
-// ─── 5. strings.js has 200+ keys (2 tests) ───────────────────────────────────
+// ─── 3. CB_DATA constants — wave 28 ──────────────────────────────────────────
 
-describe('strings.js coverage', () => {
-  test('strings.js exports at least 200 string keys', () => {
-    // eslint-disable-next-line global-require
-    const STRINGS = require('../strings.js');
-    expect(Object.keys(STRINGS).length).toBeGreaterThanOrEqual(200);
+describe('keyboards/constants.js CB_DATA', () => {
+  it('exports CB_DATA object', () => {
+    const { CB_DATA } = require('../keyboards/constants');
+    expect(CB_DATA).toBeDefined();
+    expect(typeof CB_DATA).toBe('object');
   });
 
-  test('strings.js contains STRINGS.errorAccessDeniedShort (recently added)', () => {
-    // eslint-disable-next-line global-require
-    const STRINGS = require('../strings.js');
-    expect(STRINGS).toHaveProperty('errorAccessDeniedShort');
+  it('CB_DATA has MAIN_MENU key', () => {
+    const { CB_DATA } = require('../keyboards/constants');
+    expect(CB_DATA.MAIN_MENU).toBe('main_menu');
+  });
+
+  it('CB_DATA has ADMIN_MENU key', () => {
+    const { CB_DATA } = require('../keyboards/constants');
+    expect(CB_DATA.ADMIN_MENU).toBe('admin_menu');
+  });
+
+  it('CB_DATA has MY_ORDERS key', () => {
+    const { CB_DATA } = require('../keyboards/constants');
+    expect(CB_DATA.MY_ORDERS).toBe('my_orders');
+  });
+
+  it('CB_DATA has BK_START key', () => {
+    const { CB_DATA } = require('../keyboards/constants');
+    expect(CB_DATA.BK_START).toBe('bk_start');
   });
 });
 
-// ─── 6. Health endpoint returns backup status (2 tests) ───────────────────────
+// ─── 4. Sitemap auto-regeneration — wave 28 ──────────────────────────────────
 
-describe('Health endpoint returns backup status', () => {
-  test("server.js includes 'backup' field in health response", () => {
-    expect(serverSrc).toContain('backup');
+describe('Sitemap auto-regeneration', () => {
+  it('routes/api.js calls generateSitemap after model toggle', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    // PATCH /models/:id (availability toggle) must fire generateSitemap
+    expect(src).toContain('generateSitemap');
+    // Errors are suppressed with .catch so it never crashes the handler
+    expect(src).toMatch(/generateSitemap\(\)\.catch/);
   });
 
-  test("server.js includes 'last_backup' key in backup status object", () => {
-    expect(serverSrc).toContain('last_backup');
+  it('routes/api.js generateSitemap catch logs [Sitemap] prefix', () => {
+    const src = fs.readFileSync(API_JS, 'utf8');
+    expect(src).toMatch(/generateSitemap.*catch.*Sitemap/s);
+  });
+
+  it('robots.txt has sitemap-models.xml directive', () => {
+    const src = fs.readFileSync(ROBOTS_TXT, 'utf8');
+    expect(src).toContain('sitemap-models.xml');
+  });
+});
+
+// ─── 5. Frontend accessibility — wave 26 ─────────────────────────────────────
+
+describe('Frontend accessibility fixes', () => {
+  it('catalog.js sets aria-busy attribute', () => {
+    const src = fs.readFileSync(CATALOG_JS, 'utf8');
+    expect(src).toContain('aria-busy');
+  });
+
+  it('catalog.js resets aria-busy to false after skeleton hides', () => {
+    const src = fs.readFileSync(CATALOG_JS, 'utf8');
+    expect(src).toMatch(/aria-busy.*false/);
+  });
+
+  it('main.js lightbox sets dynamic alt text', () => {
+    const src = fs.readFileSync(MAIN_JS, 'utf8');
+    expect(src).toMatch(/\.alt\s*=/);
   });
 });

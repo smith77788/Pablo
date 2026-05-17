@@ -31,6 +31,8 @@ let bookingLimiter = (req, res, next) => next(); // fallback: no-op — 5/hour f
 let wishlistLimiter = (req, res, next) => next(); // fallback: no-op — 60/15min for wishlist
 let publicSettingsLimiter = (req, res, next) => next(); // fallback: no-op — 60/min for /settings/public
 let catalogLimiter = (req, res, next) => next(); // fallback: no-op — 120/min for catalog
+let orderStatusLimiter = (req, res, next) => next(); // fallback: no-op — 30/min for public order-status lookups
+let csrfLimiter = (req, res, next) => next(); // fallback: no-op — 60/min for /csrf-token
 try {
   if (process.env.NODE_ENV === 'test') throw new Error('skip-rate-limit-in-test');
   const rateLimit = require('express-rate-limit');
@@ -100,6 +102,22 @@ try {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Слишком много запросов к каталогу. Попробуйте позже.' },
+  });
+  // Order status lookup: 30 req/min per IP — public status/history/cancel endpoints
+  orderStatusLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много запросов. Попробуйте позже.' },
+  });
+  // CSRF token: 60 req/min per IP — prevents token-farming abuse
+  csrfLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много запросов. Попробуйте позже.' },
   });
 } catch {
   /* express-rate-limit not available */
@@ -308,7 +326,7 @@ const uploadCsv = multer({
 });
 
 // ─── Public config ────────────────────────────────────────────────────────────
-router.get('/config', (req, res) => {
+router.get('/config', publicSettingsLimiter, (req, res) => {
   res.json({
     bot_username: process.env.BOT_USERNAME || '',
     agency_phone: process.env.AGENCY_PHONE || '',
@@ -317,14 +335,14 @@ router.get('/config', (req, res) => {
 });
 
 // ─── CSRF token ───────────────────────────────────────────────────────────────
-router.get('/csrf-token', (req, res) => {
+router.get('/csrf-token', csrfLimiter, (req, res) => {
   const ip = req.ip || '';
   const { generateToken } = require('../middleware/csrf');
   res.json({ token: generateToken(ip) });
 });
 
 // ─── Cities list (public) ─────────────────────────────────────────────────────
-router.get('/cities', async (req, res) => {
+router.get('/cities', publicSettingsLimiter, async (req, res) => {
   try {
     const citiesSetting =
       (await getSetting('cities_list').catch(() => null)) || 'Москва,Санкт-Петербург,Краснодар,Екатеринбург';
@@ -1199,7 +1217,7 @@ router.get('/models/search', catalogLimiter, async (req, res, next) => {
 });
 
 // ─── Related models (public) ──────────────────────────────────────────────────
-router.get('/models/related', async (req, res) => {
+router.get('/models/related', catalogLimiter, async (req, res) => {
   try {
     const { category, city, limit = 4, exclude } = req.query;
     const where = ['archived=0', 'available=1'];
@@ -1228,7 +1246,7 @@ router.get('/models/related', async (req, res) => {
 });
 
 // ─── Model recommendation engine (public) ─────────────────────────────────────
-router.get('/recommend', async (req, res) => {
+router.get('/recommend', catalogLimiter, async (req, res) => {
   try {
     const { event_type, budget, city, limit = 5 } = req.query;
     const limitN = Math.min(20, Math.max(1, parseInt(limit) || 5));
@@ -1292,7 +1310,7 @@ router.get('/recommend', async (req, res) => {
 
 // GET /api/budget-estimate?event_type=X&model_count=N&duration_hours=N
 // Returns estimated budget range for a booking (no auth needed — public helper)
-router.get('/budget-estimate', (req, res) => {
+router.get('/budget-estimate', publicSettingsLimiter, (req, res) => {
   try {
     const { event_type = '', model_count = '1', duration_hours = '4' } = req.query;
     const count = Math.min(20, Math.max(1, parseInt(model_count) || 1));
@@ -1377,7 +1395,7 @@ router.get('/models/my-orders', strictLimiter, async (req, res) => {
   }
 });
 
-router.get('/models/:id', async (req, res, next) => {
+router.get('/models/:id', catalogLimiter, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
@@ -1951,7 +1969,7 @@ router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
 
 // ─── Model photos portfolio API (БЛОК 16) ────────────────────────────────────
 // GET /api/models/:id/photos — public: list all photos for a model
-router.get('/models/:id/photos', async (req, res, next) => {
+router.get('/models/:id/photos', catalogLimiter, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid model ID' });
@@ -2488,7 +2506,7 @@ router.post('/models/:id/view', async (req, res) => {
 // Public: check model availability for a date OR get busy dates for a month
 // GET /api/models/:id/availability?date=YYYY-MM-DD  → single date check
 // GET /api/models/:id/availability?month=YYYY-MM    → list of busy dates in month
-router.get('/models/:id/availability', async (req, res, next) => {
+router.get('/models/:id/availability', catalogLimiter, async (req, res, next) => {
   try {
     const { date, month } = req.query;
     const modelId = parseInt(req.params.id);
@@ -2536,7 +2554,7 @@ router.get('/models/:id/availability', async (req, res, next) => {
 
 // GET /api/models/:id/availability?month=YYYY-MM — per-date availability array (БЛОК 22)
 // Returns [{date, available}] for dates from today up to 90 days
-router.get('/models/:id/availability-schedule', async (req, res, next) => {
+router.get('/models/:id/availability-schedule', catalogLimiter, async (req, res, next) => {
   try {
     const modelId = parseInt(req.params.id);
     if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
@@ -2823,7 +2841,7 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
   }
 });
 
-router.get('/orders/status/:order_number', async (req, res, next) => {
+router.get('/orders/status/:order_number', orderStatusLimiter, async (req, res, next) => {
   try {
     const order = await get(
       `SELECT o.id, o.order_number, o.status, o.event_type, o.event_date, o.client_name, o.created_at,
@@ -2841,7 +2859,7 @@ router.get('/orders/status/:order_number', async (req, res, next) => {
 });
 
 // GET /api/orders/status?number=ORD-XXXX — public status check by query param
-router.get('/orders/status', async (req, res, next) => {
+router.get('/orders/status', orderStatusLimiter, async (req, res, next) => {
   try {
     const number = (req.query.number || '').trim().toUpperCase();
     if (!number) return res.status(400).json({ error: 'Укажите номер заявки' });
@@ -2861,7 +2879,7 @@ router.get('/orders/status', async (req, res, next) => {
 });
 
 // GET /api/orders/status/:order_number/history — public status history (no auth, sanitized)
-router.get('/orders/status/:order_number/history', async (req, res, next) => {
+router.get('/orders/status/:order_number/history', orderStatusLimiter, async (req, res, next) => {
   try {
     const number = req.params.order_number.toUpperCase();
     const order = await get('SELECT id FROM orders WHERE order_number = ?', [number]);
@@ -2883,7 +2901,7 @@ router.get('/orders/status/:order_number/history', async (req, res, next) => {
 
 // PATCH /api/orders/status/:order_number/cancel — public cancel (only new/confirmed)
 // Requires client_phone in body to verify ownership; prevents cancelling other clients' orders.
-router.patch('/orders/status/:order_number/cancel', async (req, res, next) => {
+router.patch('/orders/status/:order_number/cancel', orderStatusLimiter, async (req, res, next) => {
   try {
     const number = req.params.order_number.toUpperCase();
     const clientPhone = (req.body?.client_phone || '').trim().replace(/\D/g, '');
@@ -3004,7 +3022,7 @@ router.get('/orders/by-phone', byPhoneLimiter, async (req, res, next) => {
 // ─── Favorites (wishlist) — stored by localStorage key on site, chat_id in bot ─
 // GET  /api/favorites?ids=1,2,3        → public, returns model stubs for given IDs
 // POST /api/favorites/check            → check if model is in DB (validation)
-router.get('/favorites', async (req, res, next) => {
+router.get('/favorites', catalogLimiter, async (req, res, next) => {
   try {
     const rawIds = (req.query.ids || '')
       .split(',')
@@ -4237,7 +4255,7 @@ router.get('/settings/public', publicSettingsLimiter, async (req, res) => {
 
 // GET /api/pricing — public pricing tiers (no auth required, cached 5 min)
 // Tries price_packages table first; falls back to bot_settings overrides on 3 hardcoded tiers
-router.get('/pricing', async (req, res) => {
+router.get('/pricing', publicSettingsLimiter, async (req, res) => {
   const DEFAULT_PRICING = [
     {
       id: 'start',
