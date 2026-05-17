@@ -475,6 +475,30 @@
           grid-template-columns: 1fr;
         }
       }
+
+      /* ── Respect prefers-reduced-motion ── */
+      @media (prefers-reduced-motion: reduce) {
+        .skel-img,
+        .skel-line,
+        .skeleton,
+        .load-bar,
+        .empty-state-icon {
+          animation: none !important;
+        }
+        .featured-badge {
+          animation: none !important;
+        }
+        .model-card .model-card-img img,
+        .model-card .model-card-img picture img {
+          transition: none !important;
+        }
+        .model-card-hover-overlay {
+          transition: none !important;
+        }
+        #catalogGrid {
+          transition: none !important;
+        }
+      }
     </style>
     <script>
       if (typeof tailwind !== 'undefined') {

@@ -777,7 +777,7 @@
         id="quickBookingModal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="qbModalTitle"
+        aria-labelledby="qbm2ModalTitle"
         style="
           display: none;
           position: fixed;
@@ -826,14 +826,16 @@
           >
             Быстрая заявка
           </div>
-          <h3 id="qbModalTitle" style="font-size: 1.5rem; color: var(--white); margin-bottom: 8px">Заказать звонок</h3>
+          <h3 id="qbm2ModalTitle" style="font-size: 1.5rem; color: var(--white); margin-bottom: 8px">
+            Заказать звонок
+          </h3>
           <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 24px">
             Оставьте имя и телефон — менеджер свяжется в течение часа
           </p>
-          <div id="qbForm" role="form" aria-label="Форма быстрой заявки">
+          <div id="qbm2Form" role="form" aria-label="Форма быстрой заявки">
             <div style="margin-bottom: 16px">
               <label
-                for="qbName"
+                for="qbm2Name"
                 style="
                   font-size: 0.7rem;
                   letter-spacing: 1px;
@@ -846,7 +848,7 @@
               >
               <input
                 type="text"
-                id="qbName"
+                id="qbm2Name"
                 placeholder="Иван Иванов"
                 class="form-control"
                 autocomplete="name"
@@ -855,7 +857,7 @@
             </div>
             <div style="margin-bottom: 24px">
               <label
-                for="qbPhone"
+                for="qbm2Phone"
                 style="
                   font-size: 0.7rem;
                   letter-spacing: 1px;
@@ -868,7 +870,7 @@
               >
               <input
                 type="tel"
-                id="qbPhone"
+                id="qbm2Phone"
                 placeholder="+7 (999) 000-00-00"
                 class="form-control"
                 autocomplete="tel"
@@ -877,7 +879,7 @@
               />
             </div>
             <div
-              id="qbError"
+              id="qbm2Error"
               role="alert"
               style="color: #f44336; font-size: 0.8rem; margin-bottom: 12px; display: none"
             ></div>
@@ -890,7 +892,7 @@
               Отправить заявку
             </button>
           </div>
-          <div id="qbSuccess" style="display: none; text-align: center; padding: 20px 0">
+          <div id="qbm2Success" style="display: none; text-align: center; padding: 20px 0">
             <div style="font-size: 3rem; margin-bottom: 16px">✦</div>
             <h4 style="color: var(--white); margin-bottom: 8px">Заявка принята!</h4>
             <p style="color: var(--text-muted); font-size: 0.85rem">Менеджер позвонит вам в течение часа.</p>
@@ -903,7 +905,7 @@
           const m = document.getElementById('quickBookingModal');
           m.style.display = 'flex';
           document.body.style.overflow = 'hidden';
-          document.getElementById('qbName').focus();
+          document.getElementById('qbm2Name').focus();
         }
         function closeQuickBooking() {
           document.getElementById('quickBookingModal').style.display = 'none';
@@ -913,9 +915,9 @@
           if (e.target === this) closeQuickBooking();
         });
         async function submitQuickBooking() {
-          const name = document.getElementById('qbName').value.trim();
-          const phone = document.getElementById('qbPhone').value.trim();
-          const err = document.getElementById('qbError');
+          const name = document.getElementById('qbm2Name').value.trim();
+          const phone = document.getElementById('qbm2Phone').value.trim();
+          const err = document.getElementById('qbm2Error');
           err.style.display = 'none';
           if (!name || name.length < 2) {
             err.textContent = 'Введите имя';
@@ -945,8 +947,8 @@
               err.style.display = 'block';
               return;
             }
-            document.getElementById('qbForm').style.display = 'none';
-            document.getElementById('qbSuccess').style.display = 'block';
+            document.getElementById('qbm2Form').style.display = 'none';
+            document.getElementById('qbm2Success').style.display = 'block';
             if (d.order_number) document.getElementById('qbOrderNum').textContent = 'Номер заявки: ' + d.order_number;
           } catch (e) {
             err.textContent = 'Ошибка сети. Попробуйте позже.';
