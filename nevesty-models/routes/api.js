@@ -2809,7 +2809,7 @@ router.get('/admin/orders/export', auth, async (req, res, next) => {
       where += " AND o.created_at >= date('now', '-30 days')";
     }
     const orders = await query(
-      `SELECT o.order_number, o.status, o.created_at, o.event_type, o.event_date,
+      `SELECT o.id, o.order_number, o.status, o.created_at, o.event_type, o.event_date,
               o.event_duration, o.location, o.client_name, o.client_phone, o.client_email,
               o.client_telegram, m.name as model_name, o.budget, o.comments,
               o.internal_note, o.paid_at
@@ -2842,6 +2842,7 @@ router.get('/admin/orders/export', auth, async (req, res, next) => {
     };
     const csvRow2 = cols => cols.map(csvCell2).join(SEP);
     const headers = [
+      'ID',
       'Номер',
       'Статус',
       'Создана',
@@ -2863,6 +2864,7 @@ router.get('/admin/orders/export', auth, async (req, res, next) => {
       headers.join(SEP),
       ...orders.map(o =>
         csvRow2([
+          o.id,
           o.order_number,
           STATUS_RU[o.status] || o.status,
           o.created_at,
