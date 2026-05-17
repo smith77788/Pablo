@@ -2264,7 +2264,14 @@
     <script src="/js/cookie-consent.js" defer></script>
 
     <!-- QUICK BOOKING POPUP MODAL -->
-    <div class="qb-modal" id="qbModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle">
+    <div
+      class="qb-modal"
+      id="qbModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="qbModalTitle"
+      aria-hidden="true"
+    >
       <div class="qb-modal-box">
         <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
         <div id="qbForm">
@@ -2287,10 +2294,12 @@
             placeholder="+7 999 123-45-67"
             autocomplete="tel"
             aria-required="true"
+            aria-describedby="qbPhone-hint-catalog"
           />
+          <span id="qbPhone-hint-catalog" class="sr-only">Формат: +7 (XXX) XXX-XX-XX</span>
           <label for="qbComment" class="sr-only">Тип мероприятия</label>
           <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
-          <button class="qb-btn" onclick="submitQb()">Отправить заявку →</button>
+          <button class="qb-btn" onclick="submitQb()" aria-label="Отправить быструю заявку">Отправить заявку →</button>
         </div>
         <div class="qb-success" id="qbSuccess">
           <div class="qb-success-icon">✅</div>
