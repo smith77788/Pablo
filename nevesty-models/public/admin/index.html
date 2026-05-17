@@ -1762,7 +1762,12 @@
             <!-- Последние заявки (compact 5 rows) -->
             <div class="section-card">
               <div class="section-card-header">
-                <div class="section-card-title">📋 Последние заявки</div>
+                <div class="section-card-title">
+                  🔔 Последние заявки
+                  <span style="font-size: 0.72rem; font-weight: 400; color: #10b981; margin-left: 6px"
+                    ><span class="live-dot"></span>Live</span
+                  >
+                </div>
                 <a href="/admin/orders.html" class="btn btn-sm btn-ghost">Все заявки →</a>
               </div>
               <div class="section-card-body">
@@ -3099,6 +3104,232 @@
         }
       }
 
+      /* ─── БЛОК 15: SVG Sparkline renderer ───────────────── */
+      function renderSparkline(container, data, color) {
+        if (!container) return;
+        color = color || '#c9a84c';
+        if (!data || data.length < 2) {
+          container.innerHTML = '';
+          return;
+        }
+        const max = Math.max(...data, 1);
+        const min = Math.min(...data, 0);
+        const range = max - min || 1;
+        const pts = data
+          .map((v, i) => {
+            const x = (i / (data.length - 1)) * 100;
+            const y = 100 - ((v - min) / range) * 90;
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+          })
+          .join(' ');
+        const firstY = (100 - ((data[0] - min) / range) * 90).toFixed(1);
+        const lastY = (100 - ((data[data.length - 1] - min) / range) * 90).toFixed(1);
+        const areaPts = `0,${firstY} ${pts} 100,${lastY} 100,100 0,100`;
+        const uid = container.id || 'sp' + Math.random().toString(36).slice(2, 7);
+        container.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="sg_${uid}" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="${color}" stop-opacity="0.22"/>
+              <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <polygon points="${areaPts}" fill="url(#sg_${uid})"/>
+          <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>`;
+      }
+
+      /* ─── БЛОК 15: Trend badge helper ───────────────────── */
+      function makeTrendBadge(el, current, previous) {
+        if (!el) return;
+        if (previous == null || previous === 0) {
+          el.textContent = '';
+          el.className = 'kgc-trend';
+          return;
+        }
+        const delta = current - previous;
+        const pct = Math.round(Math.abs(delta / previous) * 100);
+        if (delta > 0) {
+          el.textContent = '↑ +' + pct + '%';
+          el.className = 'kgc-trend up';
+        } else if (delta < 0) {
+          el.textContent = '↓ −' + pct + '%';
+          el.className = 'kgc-trend down';
+        } else {
+          el.textContent = '→ 0%';
+          el.className = 'kgc-trend neutral';
+        }
+      }
+
+      /* ─── БЛОК 15: KPI Grid with sparklines ─────────────── */
+      async function loadKpiGrid15() {
+        try {
+          const [dailyData, ext, stats] = await Promise.allSettled([
+            _admin.apiFetch('/admin/stats/daily?days=7'),
+            _admin.apiFetch('/admin/stats/extended2'),
+            _admin.apiFetch('/admin/stats'),
+          ]);
+          const daily = dailyData.status === 'fulfilled' ? dailyData.value : null;
+          const extD = ext.status === 'fulfilled' ? ext.value : null;
+          const statsD = stats.status === 'fulfilled' ? stats.value : null;
+          const counts7d = (daily?.days || []).map(d => d.count);
+
+          // Orders today
+          const ordersToday = extD?.today_orders ?? statsD?.orders_today ?? 0;
+          const ordersYest = counts7d.length >= 2 ? counts7d[counts7d.length - 2] : null;
+          const oValEl = document.getElementById('kgc-orders-val');
+          if (oValEl) {
+            const prev = parseInt(oValEl.textContent) || 0;
+            if (String(ordersToday) !== oValEl.textContent) {
+              animateCounter(oValEl, prev, ordersToday, 600);
+              const card = document.getElementById('kgc-orders');
+              if (card) {
+                card.classList.remove('updated');
+                void card.offsetWidth;
+                card.classList.add('updated');
+              }
+            }
+          }
+          makeTrendBadge(document.getElementById('kgc-orders-trend'), ordersToday, ordersYest);
+          renderSparkline(document.getElementById('kgc-orders-spark'), counts7d, '#c9a84c');
+
+          // Revenue (30 days)
+          if (extD?.revenue_30d != null) {
+            const rev30 = extD.revenue_30d;
+            const rEl = document.getElementById('kgc-revenue-val');
+            if (rEl) {
+              rEl.textContent =
+                rev30 >= 1000000
+                  ? (rev30 / 1000000).toFixed(1) + 'M ₽'
+                  : rev30 >= 1000
+                    ? (rev30 / 1000).toFixed(0) + 'к ₽'
+                    : Math.round(rev30) + ' ₽';
+            }
+            const totalO = statsD?.total_orders || 1;
+            const avgPer = rev30 / totalO;
+            const revSpark = counts7d.map(c => c * avgPer);
+            renderSparkline(document.getElementById('kgc-revenue-spark'), revSpark, '#10b981');
+            makeTrendBadge(
+              document.getElementById('kgc-revenue-trend'),
+              revSpark[revSpark.length - 1] || 0,
+              revSpark.length >= 2 ? revSpark[revSpark.length - 2] : null
+            );
+          }
+
+          // New clients (30 days)
+          if (extD?.new_clients_30d != null) {
+            const cEl = document.getElementById('kgc-clients-val');
+            if (cEl) cEl.textContent = extD.new_clients_30d;
+            renderSparkline(document.getElementById('kgc-clients-spark'), counts7d, '#8b5cf6');
+            makeTrendBadge(
+              document.getElementById('kgc-clients-trend'),
+              counts7d[counts7d.length - 1] || 0,
+              counts7d.length >= 2 ? counts7d[counts7d.length - 2] : null
+            );
+          }
+
+          // Conversion rate
+          if (statsD?.conversion_rate != null) {
+            const cvEl = document.getElementById('kgc-conv-val');
+            if (cvEl) cvEl.textContent = statsD.conversion_rate.toFixed(1) + '%';
+            const t = statsD.orders_trend;
+            if (t) makeTrendBadge(document.getElementById('kgc-conv-trend'), t.current_7d || 0, t.previous_7d || 0);
+            renderSparkline(document.getElementById('kgc-conv-spark'), counts7d, '#3b82f6');
+          }
+        } catch (e) {
+          console.warn('loadKpiGrid15:', e.message);
+        }
+      }
+
+      /* ─── БЛОК 15: System status bar ────────────────────── */
+      async function loadSysStatusBar() {
+        const dbDot = document.getElementById('sys-db-dot');
+        const dbText = document.getElementById('sys-db-text');
+        const botDot = document.getElementById('sys-bot-dot');
+        const botText = document.getElementById('sys-bot-text');
+        const backupText = document.getElementById('sys-backup-text');
+        const memText = document.getElementById('sys-memory-text');
+        const lastUpd = document.getElementById('sys-last-update');
+        try {
+          const h = await fetch('/api/health').then(r => r.json());
+
+          // DB
+          const db = h.components?.database || {};
+          if (dbDot) dbDot.className = 'sys-dot ' + (db.status === 'ok' ? 'ok' : 'error');
+          if (dbText)
+            dbText.textContent =
+              db.status === 'ok'
+                ? 'БД: ОК' + (db.latency_ms != null ? ' (' + db.latency_ms + 'ms)' : '')
+                : 'БД: Ошибка';
+
+          // Bot
+          const botOk = h.components?.bot?.status === 'ok' || h.bot === 'connected';
+          if (botDot) botDot.className = 'sys-dot ' + (botOk ? 'ok' : 'warn');
+          if (botText) botText.textContent = botOk ? 'Бот: активен' : 'Бот: откл.';
+
+          // Backup
+          const bk = h.backup || h.components?.backup || {};
+          if (backupText) {
+            if (bk.last_backup_ago_hours != null) {
+              const ago = bk.last_backup_ago_hours;
+              backupText.textContent =
+                ago < 1
+                  ? 'Бэкап: только что'
+                  : ago < 24
+                    ? 'Бэкап: ' + Math.round(ago) + 'ч назад'
+                    : 'Бэкап: ' + Math.round(ago / 24) + 'д назад';
+              backupText.style.color = ago > 48 ? '#ef4444' : ago > 24 ? '#f59e0b' : '#10b981';
+            } else {
+              backupText.textContent = 'Бэкап: —';
+              backupText.style.color = 'var(--text-dim)';
+            }
+          }
+
+          // Memory
+          const mb = h.memory_mb || h.metrics?.memory_rss_mb || h.metrics?.memory_mb;
+          if (memText) memText.textContent = mb ? 'Память: ' + Math.round(mb) + ' MB' : '';
+
+          if (lastUpd) {
+            lastUpd.textContent =
+              'Обновлено: ' +
+              new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          }
+        } catch {
+          if (dbDot) dbDot.className = 'sys-dot error';
+          if (dbText) dbText.textContent = 'БД: недоступна';
+          if (botDot) botDot.className = 'sys-dot error';
+          if (botText) botText.textContent = 'Бот: недоступен';
+        }
+      }
+
+      /* ─── БЛОК 15: Live recent orders refresh ─────────────── */
+      async function loadLiveRecentOrders() {
+        const tbody = document.getElementById('recentOrders');
+        if (!tbody) return;
+        try {
+          const data = await _admin.apiFetch('/admin/orders?limit=5&page=1');
+          const orders = (data.orders || []).slice(0, 5);
+          if (!orders.length) {
+            tbody.innerHTML =
+              '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-dim)">Заявок ещё нет</td></tr>';
+            return;
+          }
+          tbody.innerHTML = orders
+            .map(
+              o => `
+            <tr onclick="window.location='/admin/orders.html?id=${o.id}'" style="cursor:pointer">
+              <td><strong>${_admin.escapeHtml(o.order_number)}</strong></td>
+              <td>${_admin.escapeHtml(o.client_name)}<br><span style="font-size:0.7rem;color:var(--text-dim)">${_admin.escapeHtml(o.client_phone || '')}</span></td>
+              <td>${_admin.EVENT_LABELS[o.event_type] || o.event_type || '—'}</td>
+              <td>${_admin.formatDate(o.event_date || o.created_at)}</td>
+              <td>${colorBadge(o.status)}</td>
+            </tr>`
+            )
+            .join('');
+        } catch {
+          /* keep previous */
+        }
+      }
+
       /* ─── Init ───────────────────────────────────────────── */
       loadDashboard();
       loadActivityFeed();
@@ -3113,6 +3344,10 @@
       loadRecentMessages();
       loadFactoryStatus();
       loadUpcomingEvents();
+      // БЛОК 15
+      loadKpiGrid15();
+      loadSysStatusBar();
+      loadLiveRecentOrders();
 
       // Auto-refresh every 30 seconds
       setInterval(loadDashboard, 30000);
@@ -3132,6 +3367,10 @@
       setInterval(loadUpcomingEvents, 300000);
       // Refresh Factory status every 5 minutes
       setInterval(loadFactoryStatus, 300000);
+      // БЛОК 15 auto-refresh
+      setInterval(loadKpiGrid15, 30000);
+      setInterval(loadSysStatusBar, 30000);
+      setInterval(loadLiveRecentOrders, 30000);
     </script>
   </body>
 </html>

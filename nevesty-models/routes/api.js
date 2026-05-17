@@ -2480,6 +2480,77 @@ router.get('/models/:id/availability', async (req, res, next) => {
   }
 });
 
+// GET /api/models/:id/availability?month=YYYY-MM — per-date availability array (БЛОК 22)
+// Returns [{date, available}] for dates from today up to 90 days
+router.get('/models/:id/availability-schedule', async (req, res, next) => {
+  try {
+    const modelId = parseInt(req.params.id);
+    if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    const { month } = req.query;
+
+    const model = await get('SELECT id, available FROM models WHERE id=? AND archived=0', [modelId]);
+    if (!model) return res.status(404).json({ error: 'Model not found' });
+
+    // Compute date window: today .. today+90 days, filtered by requested month if given
+    const todayDate = new Date();
+    const todayStr = todayDate.toISOString().slice(0, 10);
+    const maxDate = new Date(todayDate.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const maxStr = maxDate.toISOString().slice(0, 10);
+
+    let fromStr = todayStr;
+    let toStr = maxStr;
+    if (month) {
+      if (!/^d{4}-d{2}$/.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' });
+      const [yr, mo] = month.split('-').map(Number);
+      if (mo < 1 || mo > 12) return res.status(400).json({ error: 'month must be 01-12' });
+      const mFirst = `${month}-01`;
+      const lastDay = new Date(yr, mo, 0);
+      const mLast = `${month}-${String(lastDay.getDate()).padStart(2, '0')}`;
+      fromStr = mFirst > todayStr ? mFirst : todayStr;
+      toStr = mLast < maxStr ? mLast : maxStr;
+    }
+
+    // Get all schedule overrides for this model in the window
+    const scheduleRows = await query(
+      `SELECT date, is_available FROM model_availability_schedule WHERE model_id=? AND date BETWEEN ? AND ? ORDER BY date`,
+      [modelId, fromStr, toStr]
+    );
+    const scheduleMap = {};
+    for (const r of scheduleRows) {
+      scheduleMap[r.date] = r.is_available === 1;
+    }
+
+    // Also check old model_busy_dates for backward compatibility
+    const busyRows = await query(
+      `SELECT busy_date FROM model_busy_dates WHERE model_id=? AND busy_date BETWEEN ? AND ? ORDER BY busy_date`,
+      [modelId, fromStr, toStr]
+    );
+    const busySet = new Set(busyRows.map(r => r.busy_date));
+
+    // Build date array
+    const result = [];
+    const cur = new Date(fromStr + 'T00:00:00Z');
+    const end = new Date(toStr + 'T00:00:00Z');
+    while (cur <= end) {
+      const d = cur.toISOString().slice(0, 10);
+      let available;
+      if (d in scheduleMap) {
+        available = scheduleMap[d];
+      } else if (busySet.has(d)) {
+        available = false;
+      } else {
+        available = model.available === 1;
+      }
+      result.push({ date: d, available });
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── Orders (public) ──────────────────────────────────────────────────────────
 router.post('/orders', bookingLimiter, async (req, res, next) => {
   try {
@@ -8980,6 +9051,220 @@ router.get('/admin/clients/:phone/orders', auth, async (req, res, next) => {
       pages: Math.ceil((countRow?.n || 0) / limit),
       limit,
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── БЛОК 19: Incoming Webhook System ────────────────────────────────────────
+// Shared webhook authentication middleware — validates X-Webhook-Secret header
+function webhookAuth(req, res, next) {
+  const secret = req.headers['x-webhook-secret'];
+  const expected = process.env.INCOMING_WEBHOOK_SECRET;
+  if (!expected) {
+    return res.status(503).json({ error: 'Webhook not configured on server' });
+  }
+  if (!secret || secret !== expected) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  next();
+}
+
+// Helper — log every incoming webhook request (non-blocking)
+async function logWebhook(endpoint, payload, status, ip) {
+  try {
+    await run('INSERT INTO webhook_logs (endpoint, payload, status, ip) VALUES (?,?,?,?)', [
+      endpoint,
+      payload ? JSON.stringify(payload) : null,
+      status,
+      ip || null,
+    ]);
+  } catch {} // silently ignore log failures
+}
+
+// POST /api/webhooks/order — accept orders from external systems (CRM, partner site)
+router.post('/webhooks/order', webhookAuth, async (req, res, next) => {
+  const ip = req.ip || req.headers['x-forwarded-for'] || '';
+  try {
+    const { client_name, client_phone, service_type, event_date, notes, source } = req.body;
+
+    // Validate required fields
+    if (!sanitize(client_name, 100)) {
+      await logWebhook('/webhooks/order', req.body, 400, ip);
+      return res.status(400).json({ error: 'client_name is required' });
+    }
+    if (!client_phone || !validatePhone(client_phone)) {
+      await logWebhook('/webhooks/order', req.body, 400, ip);
+      return res.status(400).json({ error: 'valid client_phone is required' });
+    }
+    if (event_date && !validateDate(event_date)) {
+      await logWebhook('/webhooks/order', req.body, 400, ip);
+      return res.status(400).json({ error: 'event_date must be YYYY-MM-DD' });
+    }
+
+    // Map service_type → event_type (allow known types, fallback to 'other')
+    const eventType = ALLOWED_EVENT_TYPES.includes(service_type) ? service_type : 'other';
+
+    const order_number = generateOrderNumber();
+    const s = {
+      client_name: sanitize(client_name, 100),
+      client_phone: client_phone.trim().slice(0, 20),
+      event_type: eventType,
+      event_date: event_date || null,
+      comments: sanitize(notes, 2000),
+      utm_source: sanitize(source, 100) || 'webhook',
+    };
+
+    const result = await run(
+      `INSERT INTO orders (order_number, client_name, client_phone, event_type, event_date, comments, utm_source)
+       VALUES (?,?,?,?,?,?,?)`,
+      [order_number, s.client_name, s.client_phone, s.event_type, s.event_date, s.comments, s.utm_source]
+    );
+
+    // Notify manager via bot
+    if (botInstance) {
+      botInstance
+        .notifyNewOrder({ id: result.id, order_number, ...s })
+        .catch(e => console.error('[webhook/order] bot notify:', e.message));
+    } else {
+      // Direct Telegram fallback when bot instance not available
+      const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+      const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '')
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean);
+      if (tgToken && adminIds.length) {
+        const tgText =
+          `📥 Заявка через Webhook!\n` +
+          `Источник: ${s.utm_source}\n` +
+          `Имя: ${s.client_name}\n` +
+          `Телефон: ${s.client_phone}\n` +
+          `Услуга: ${s.event_type}\n` +
+          (s.event_date ? `Дата: ${s.event_date}\n` : '') +
+          (s.comments ? `Комментарий: ${s.comments}` : '');
+        for (const adminId of adminIds) {
+          fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: adminId, text: tgText }),
+          }).catch(e => console.error('[webhook/order] tg direct notify:', e.message));
+        }
+      }
+    }
+
+    await logWebhook('/webhooks/order', req.body, 201, ip);
+    return res.status(201).json({ ok: true, order_id: result.id, order_number });
+  } catch (e) {
+    await logWebhook('/webhooks/order', req.body, 500, ip);
+    next(e);
+  }
+});
+
+// POST /api/webhooks/review — accept reviews from external forms
+router.post('/webhooks/review', webhookAuth, async (req, res, next) => {
+  const ip = req.ip || req.headers['x-forwarded-for'] || '';
+  try {
+    const { client_name, rating, text, model_id } = req.body;
+
+    if (!sanitize(client_name, 100)) {
+      await logWebhook('/webhooks/review', req.body, 400, ip);
+      return res.status(400).json({ error: 'client_name is required' });
+    }
+    const ratingNum = parseInt(rating, 10);
+    if (!ratingNum || ratingNum < 1 || ratingNum > 5) {
+      await logWebhook('/webhooks/review', req.body, 400, ip);
+      return res.status(400).json({ error: 'rating must be an integer 1–5' });
+    }
+    if (!sanitize(text, 5000)) {
+      await logWebhook('/webhooks/review', req.body, 400, ip);
+      return res.status(400).json({ error: 'review text is required' });
+    }
+
+    const modelId = model_id ? parseInt(model_id, 10) || null : null;
+    // Verify model exists if provided
+    if (modelId) {
+      const model = await get('SELECT id FROM models WHERE id = ? AND archived = 0', [modelId]);
+      if (!model) {
+        await logWebhook('/webhooks/review', req.body, 400, ip);
+        return res.status(400).json({ error: 'model not found' });
+      }
+    }
+
+    const result = await run(
+      `INSERT INTO reviews (client_name, rating, text, model_id, approved, status) VALUES (?,?,?,?,0,'pending')`,
+      [sanitize(client_name, 100), ratingNum, sanitize(text, 5000), modelId]
+    );
+
+    // Notify admin via Telegram
+    const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+    const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '')
+      .split(',')
+      .map(x => x.trim())
+      .filter(Boolean);
+    if (tgToken && adminIds.length) {
+      const stars = '⭐'.repeat(ratingNum);
+      const tgText =
+        `📝 Новый отзыв (webhook)\n${stars}\n` +
+        `Автор: ${sanitize(client_name, 100)}\n` +
+        `Текст: ${sanitize(text, 300)}\n` +
+        `Статус: на модерации`;
+      for (const adminId of adminIds) {
+        fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: adminId, text: tgText }),
+        }).catch(e => console.error('[webhook/review] tg notify:', e.message));
+      }
+    }
+
+    await logWebhook('/webhooks/review', req.body, 201, ip);
+    return res.status(201).json({ ok: true, review_id: result.id });
+  } catch (e) {
+    await logWebhook('/webhooks/review', req.body, 500, ip);
+    next(e);
+  }
+});
+
+// GET /api/admin/webhooks/logs — view recent webhook log entries (admin only)
+router.get('/admin/webhooks/logs', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+    const endpoint = req.query.endpoint || null;
+
+    const conditions = [];
+    const params = [];
+    if (endpoint) {
+      conditions.push('endpoint = ?');
+      params.push(endpoint);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const [rows, countRow] = await Promise.all([
+      query(
+        `SELECT id, endpoint, payload, status, ip, created_at
+         FROM webhook_logs
+         ${where}
+         ORDER BY created_at DESC
+         LIMIT ? OFFSET ?`,
+        [...params, limit, offset]
+      ),
+      get(`SELECT COUNT(*) as n FROM webhook_logs ${where}`, params),
+    ]);
+
+    // Parse payload JSON strings back to objects for readability
+    const logs = rows.map(r => ({
+      ...r,
+      payload: (() => {
+        try {
+          return r.payload ? JSON.parse(r.payload) : null;
+        } catch {
+          return r.payload;
+        }
+      })(),
+    }));
+
+    res.json({ logs, total: countRow?.n || 0, limit, offset });
   } catch (e) {
     next(e);
   }
