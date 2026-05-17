@@ -938,6 +938,96 @@ class StrategicCEO extends Agent {
       this.addFinding('MEDIUM', `StrategicDecisionMaker error: ${e.message}`);
       await factoryLog(this.name, `StrategicDecisionMaker error: ${e.message}`);
     }
+
+    // 7. Track A/B experiment results — БЛОК 5.4
+    const tracker = new ExperimentTracker();
+    await tracker.run(this).catch(e => this.addFinding('LOW', `ExperimentTracker ошибка: ${e.message}`));
+  }
+}
+
+// ─── БЛОК 5.4: ExperimentTracker ─────────────────────────────────────────────
+
+class ExperimentTracker {
+  // Загружает текущий активный эксперимент из bot_settings
+  async loadActiveExperiment() {
+    const raw = await dbGet("SELECT value FROM bot_settings WHERE key='ceo_last_experiment'").catch(() => null);
+    if (!raw?.value) return null;
+    try {
+      return JSON.parse(raw.value);
+    } catch {
+      return null;
+    }
+  }
+
+  // Вычисляет результат: сравнивает метрику ДО и ПОСЛЕ начала эксперимента
+  async evaluateExperiment(experiment) {
+    if (!experiment?.metric || !experiment?.proposed_at) return null;
+    const startDate = new Date(experiment.proposed_at);
+    const daysSince = (Date.now() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSince < (experiment.duration_days || 7)) {
+      return { status: 'in_progress', daysSince: Math.round(daysSince), durationDays: experiment.duration_days || 7 };
+    }
+
+    // Получаем данные за период эксперимента vs предыдущий период
+    const periodMs = daysSince * 24 * 60 * 60 * 1000;
+    const [afterRows, beforeRows] = await Promise.all([
+      dbAll(`SELECT COUNT(*) as n FROM orders WHERE created_at >= ? AND status != 'cancelled'`, [
+        startDate.toISOString(),
+      ]).catch(() => [{ n: 0 }]),
+      dbAll(`SELECT COUNT(*) as n FROM orders WHERE created_at < ? AND created_at >= ? AND status != 'cancelled'`, [
+        startDate.toISOString(),
+        new Date(startDate - periodMs).toISOString(),
+      ]).catch(() => [{ n: 0 }]),
+    ]);
+    const after = afterRows[0]?.n ?? 0;
+    const before = beforeRows[0]?.n ?? 0;
+    const delta = before > 0 ? Math.round(((after - before) / before) * 100) : null;
+    const success = delta !== null && delta > 5; // >5% рост считается успехом
+
+    return { status: success ? 'success' : 'no_effect', after, before, delta, daysSince: Math.round(daysSince) };
+  }
+
+  // Сохраняет результат и архивирует эксперимент
+  async archiveExperiment(experiment, result) {
+    const archived = { ...experiment, result, archived_at: new Date().toISOString() };
+    // Получить историю экспериментов
+    const histRaw = await dbGet("SELECT value FROM bot_settings WHERE key='ceo_experiment_history'").catch(() => null);
+    let history = [];
+    try {
+      history = JSON.parse(histRaw?.value || '[]');
+    } catch {}
+    history.unshift(archived);
+    if (history.length > 20) history = history.slice(0, 20);
+    await dbRun('INSERT OR REPLACE INTO bot_settings(key,value) VALUES(?,?)', [
+      'ceo_experiment_history',
+      JSON.stringify(history),
+    ]).catch(() => {});
+    // Сбросить текущий эксперимент
+    await dbRun("DELETE FROM bot_settings WHERE key='ceo_last_experiment'").catch(() => {});
+  }
+
+  async run(ceoAgent) {
+    const experiment = await this.loadActiveExperiment();
+    if (!experiment) {
+      ceoAgent.addFinding('INFO', 'ExperimentTracker: нет активного эксперимента для отслеживания');
+      return;
+    }
+    const result = await this.evaluateExperiment(experiment);
+    if (!result) return;
+    if (result.status === 'in_progress') {
+      ceoAgent.addFinding(
+        'INFO',
+        `ExperimentTracker: A/B эксперимент в процессе: ${result.daysSince}/${result.durationDays} дней. Гипотеза: ${experiment.hypothesis?.slice(0, 80) || '—'}`
+      );
+      return;
+    }
+    const emoji = result.status === 'success' ? '✅' : '⚠️';
+    const deltaStr = result.delta !== null ? `${result.delta > 0 ? '+' : ''}${result.delta}%` : 'н/д';
+    ceoAgent.addFinding(
+      result.status === 'success' ? 'INFO' : 'LOW',
+      `${emoji} ExperimentTracker: эксперимент завершён (${result.daysSince} дней). Заявок до: ${result.before}, после: ${result.after} (${deltaStr}). Статус: ${result.status}`
+    );
+    await this.archiveExperiment(experiment, result);
   }
 }
 
