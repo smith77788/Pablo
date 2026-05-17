@@ -11,6 +11,7 @@ Disallow: /webapp.html
 Crawl-delay: 2
 
 Sitemap: https://nevesty-models.ru/sitemap.xml
+Sitemap: https://nevesty-models.ru/sitemap-models.xml
 
 User-agent: Googlebot
 Allow: /
