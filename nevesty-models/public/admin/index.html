@@ -1086,6 +1086,9 @@
         .server-health-badge {
           display: none;
         }
+        .two-col-grid {
+          grid-template-columns: 1fr !important;
+        }
       }
 
       /* ─── БЛОК 15: System status bar ────────────────────── */
@@ -1905,7 +1908,10 @@
           </div>
 
           <!-- ══════════════════ ROW 4: AGENT FEED + BOT INFO ══════════════════ -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px">
+          <div
+            class="two-col-grid"
+            style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px"
+          >
             <!-- Agent logs feed -->
             <div class="section-card">
               <div class="section-card-header">
@@ -3575,7 +3581,7 @@
           _sseSource = null;
         }
 
-        const token = localStorage.getItem('nm_admin_token');
+        const token = localStorage.getItem('admin_token');
         if (!token) return; // not logged in
 
         const src = new EventSource('/api/admin/events?token=' + encodeURIComponent(token));
