@@ -888,15 +888,26 @@ async function showCatalog(chatId, cat, page, filter) {
       ).catch(() => []);
       cityList = cityRows2.map(r => r.city);
     }
+    // City row — show checkmark on active city, clicking active city clears filter
     const cityRows = [];
     for (let i = 0; i < cityList.length; i += 2) {
-      const row = [{ text: '🏙 ' + cityList[i], callback_data: 'cat_city_' + cityList[i] + '_0' }];
-      if (cityList[i + 1])
-        row.push({
-          text: '🏙 ' + cityList[i + 1],
-          callback_data: 'cat_city_' + cityList[i + 1] + '_0',
+      const c1 = cityList[i];
+      const c1Active = activeCity === c1;
+      const cityRow = [
+        {
+          text: (c1Active ? '✅ ' : '🏙 ') + c1,
+          callback_data: c1Active ? 'cat_city_clear_0' : 'cat_city_' + c1 + '_0',
+        },
+      ];
+      if (cityList[i + 1]) {
+        const c2 = cityList[i + 1];
+        const c2Active = activeCity === c2;
+        cityRow.push({
+          text: (c2Active ? '✅ ' : '🏙 ') + c2,
+          callback_data: c2Active ? 'cat_city_clear_0' : 'cat_city_' + c2 + '_0',
         });
-      cityRows.push(row);
+      }
+      cityRows.push(cityRow);
     }
 
     // Load city and badge display settings in parallel
@@ -934,10 +945,11 @@ async function showCatalog(chatId, cat, page, filter) {
       ];
     });
 
-    // Pagination
+    // Pagination — encode cat+city so filters survive page turns: cat_page_{cat}_{city}_{page}
+    const cityEnc = activeCity || '';
     const nav = [];
-    if (page > 0) nav.push({ text: '◀️', callback_data: `cat_cat_${cat}_${page - 1}` });
-    if ((page + 1) * perPage < total) nav.push({ text: '▶️', callback_data: `cat_cat_${cat}_${page + 1}` });
+    if (page > 0) nav.push({ text: '◀️', callback_data: `cat_page_${cat}_${cityEnc}_${page - 1}` });
+    if ((page + 1) * perPage < total) nav.push({ text: '▶️', callback_data: `cat_page_${cat}_${cityEnc}_${page + 1}` });
 
     const keyboard = [
       catFilterRow,
@@ -953,7 +965,7 @@ async function showCatalog(chatId, cat, page, filter) {
     ];
 
     const label = CATEGORIES[cat] || 'Все';
-    const cityLabel = filter.city ? ` — 🏙 ${esc(filter.city)}` : '';
+    const cityLabel = activeCity ? ` — 🏙 ${esc(activeCity)}` : '';
     const pageInfo = Math.ceil(total / perPage) > 1 ? ` \\(стр\\. ${page + 1}/${Math.ceil(total / perPage)}\\)` : '';
     const featuredCount = models.filter(mo => mo.featured).length;
     const featuredNote = featuredCount > 0 ? `\n⭐ — топ\\-модели` : '';
@@ -1034,7 +1046,7 @@ async function showModel(chatId, modelId, backBtn = null) {
     // Enhanced stats
     if (reviewCount > 0)
       lines.push(`${ratingStars(reviewAvg)} *${reviewCount}* ${ru_plural(reviewCount, 'отзыв', 'отзыва', 'отзывов')}`);
-    if (completedOrders > 0) lines.push(`📋 *${esc(String(completedOrders))}* заявок`);
+    if (completedOrders > 0) lines.push(`📋 Заказов: *${esc(String(completedOrders))}*`);
     const viewCount = (m.view_count || 0) + 1; // +1 for the just-incremented count
     if (viewCount > 50) lines.push(`🔥 Популярная`);
     if (viewCount > 0) lines.push(`👁 *${viewCount}* просмотров`);
@@ -6588,12 +6600,20 @@ function initBot(app) {
         return;
       }
 
-      // ── Фильтр по городу
+      // ── Сброс фильтра города (клик на уже-активный город)
+      if (data === 'cat_city_clear_0') {
+        catalogCityPrefs.set(String(chatId), '');
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0, { city: '' });
+      }
+
+      // ── Фильтр по городу — сохраняем город и текущую категорию
       if (data.startsWith('cat_city_')) {
         const parts = data.replace('cat_city_', '').split('_');
         const page = parseInt(parts.pop()) || 0;
         const city = parts.join('_');
-        return showCatalogByCity(chatId, city, page);
+        const currentCat = catalogCatPrefs.get(String(chatId)) || '';
+        catalogCityPrefs.set(String(chatId), city);
+        return showCatalog(chatId, currentCat, page, { city });
       }
 
       // ── Booking: budget confirmation (budget below minimum)
@@ -9262,22 +9282,57 @@ function initBot(app) {
       }
 
       // ── Категории каталога (быстрые фильтры)
-      if (data === 'cat_filter_fashion') return showCatalog(chatId, 'fashion', 0, { category: 'fashion' });
-      if (data === 'cat_filter_commercial') return showCatalog(chatId, 'commercial', 0, { category: 'commercial' });
-      if (data === 'cat_filter_events') return showCatalog(chatId, 'events', 0, { category: 'events' });
+      if (data === 'cat_filter_all')
+        return showCatalog(chatId, '', 0, { city: catalogCityPrefs.get(String(chatId)) || '' });
+      if (data === 'cat_filter_fashion')
+        return showCatalog(chatId, 'fashion', 0, { city: catalogCityPrefs.get(String(chatId)) || '' });
+      if (data === 'cat_filter_commercial')
+        return showCatalog(chatId, 'commercial', 0, { city: catalogCityPrefs.get(String(chatId)) || '' });
+      if (data === 'cat_filter_events')
+        return showCatalog(chatId, 'events', 0, { city: catalogCityPrefs.get(String(chatId)) || '' });
 
-      // ── Сортировка каталога
-      if (data === 'cat_sort_featured') {
+      // ── Сортировка каталога (сохраняем активную категорию и город)
+      if (data === 'cat_sort_rating' || data === 'cat_sort_featured') {
         catalogSortPrefs.set(String(chatId), 'featured');
-        return showCatalog(chatId, '', 0);
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0, {
+          city: catalogCityPrefs.get(String(chatId)) || '',
+        });
       }
-      if (data === 'cat_sort_newest') {
+      if (data === 'cat_sort_new' || data === 'cat_sort_newest') {
         catalogSortPrefs.set(String(chatId), 'newest');
-        return showCatalog(chatId, '', 0);
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0, {
+          city: catalogCityPrefs.get(String(chatId)) || '',
+        });
+      }
+      if (data === 'cat_sort_orders') {
+        catalogSortPrefs.set(String(chatId), 'orders');
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0, {
+          city: catalogCityPrefs.get(String(chatId)) || '',
+        });
       }
       if (data === 'cat_sort_alpha') {
         catalogSortPrefs.set(String(chatId), 'alpha');
-        return showCatalog(chatId, '', 0);
+        return showCatalog(chatId, catalogCatPrefs.get(String(chatId)) || '', 0, {
+          city: catalogCityPrefs.get(String(chatId)) || '',
+        });
+      }
+
+      // ── Пагинация с сохранением фильтров: cat_page_{cat}_{city}_{page}
+      if (data.startsWith('cat_page_')) {
+        const raw = data.replace('cat_page_', '');
+        const lastU = raw.lastIndexOf('_');
+        const pg = parseInt(raw.slice(lastU + 1)) || 0;
+        const rest = raw.slice(0, lastU); // "{cat}_{city}"
+        const secondU = rest.lastIndexOf('_');
+        let pgCat, pgCity;
+        if (secondU === -1) {
+          pgCat = '';
+          pgCity = rest;
+        } else {
+          pgCat = rest.slice(0, secondU);
+          pgCity = rest.slice(secondU + 1);
+        }
+        return showCatalog(chatId, pgCat, pg, { city: pgCity || '' });
       }
 
       // ── Поиск модели по параметрам (мульти-фильтр, БЛОК 2.4)
@@ -12466,7 +12521,7 @@ _Цены ориентировочные\\. Точная стоимость со
 
 // ─── Каталог по городу ────────────────────────────────────────────────────────
 
-async function showCatalogByCity(chatId, city, page = 0) {
+async function _showCatalogByCity(chatId, city, page = 0) {
   try {
     const _rawPerPageCity = parseInt(await getSetting('catalog_per_page').catch(() => '5')) || 5;
     const perPage = Math.min(20, Math.max(1, _rawPerPageCity));
