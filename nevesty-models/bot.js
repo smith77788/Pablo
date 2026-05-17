@@ -9528,7 +9528,7 @@ function initBot(app) {
       if (data === 'bk_repeat_confirm') {
         const session = await getSession(chatId);
         const d = sessionData(session);
-        if (session?.state !== 'bk_repeat_confirm' || !d.client_name || !d.client_phone || !d.event_type) {
+        if (session?.state !== 'bk_repeat_confirm' || !d.client_name || !d.client_phone) {
           await clearSession(chatId);
           return safeSend(chatId, '❌ Сесія застаріла\\. Спробуйте ще раз\\.', {
             parse_mode: 'MarkdownV2',
@@ -13126,24 +13126,25 @@ async function repeatOrder(chatId, orderId) {
     // Build summary message
     const eventLabel = prefill.event_type ? EVENT_TYPES[prefill.event_type] || prefill.event_type : '—';
 
-    let text = `🔁 *Повторить заявку?*\n\n`;
-    text += `👤 Ім'я: ${esc(prefill.client_name || '—')}\n`;
+    let text = `🔁 *Повторить заявку \\#${esc(o.order_number)}?*\n\n`;
+    text += `👤 Имя: ${esc(prefill.client_name || '—')}\n`;
     text += `📱 Телефон: ${esc(prefill.client_phone || '—')}\n`;
     if (prefill.client_email) text += `📧 Email: ${esc(prefill.client_email)}\n`;
     text += `\n`;
-    text += `🎭 Тип події: ${esc(eventLabel)}\n`;
-    if (prefill.event_duration) text += `⏱ Тривалість: ${esc(String(prefill.event_duration))} год\\.\n`;
-    if (prefill.location) text += `📍 Місце: ${esc(prefill.location)}\n`;
+    text += `🎭 Тип: ${esc(eventLabel)}\n`;
+    if (o.event_date) text += `📅 Дата оригинала: ${esc(o.event_date)}\n`;
+    if (prefill.event_duration) text += `⏱ Длительность: ${esc(String(prefill.event_duration))} ч\\.\n`;
+    if (prefill.location) text += `📍 Место: ${esc(prefill.location)}\n`;
     if (prefill.budget) text += `💰 Бюджет: ${esc(prefill.budget)}\n`;
     if (prefill.model_name) text += `💃 Модель: ${esc(prefill.model_name)}\n`;
-    text += `\n_Нову заявку буде створено зі статусом «нова»\\._`;
+    text += `\n_Будет создана новая заявка со статусом «новая»\\. Контакты заполнены автоматически\\._`;
 
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '✅ Підтвердити', callback_data: 'bk_repeat_confirm' }],
-          [{ text: '❌ Скасувати', callback_data: 'bk_repeat_cancel' }],
+          [{ text: '✅ Да, повторить', callback_data: 'bk_repeat_confirm' }],
+          [{ text: '❌ Отмена', callback_data: 'bk_repeat_cancel' }],
         ],
       },
     });
@@ -13459,11 +13460,8 @@ async function bkQuickSubmit(chatId, data) {
     const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
     await clearSession(chatId);
 
-    // Auto-confirm quick orders if setting enabled
-    const autoConfirmQuick = await getSetting('booking_auto_confirm').catch(() => '0');
-    if (autoConfirmQuick === '1' && order) {
-      await run("UPDATE orders SET status='confirmed' WHERE id=?", [order.id]).catch(() => {});
-      order.status = 'confirmed';
+    // Auto-confirm: status was already set on insert; notify client and admin
+    if (autoConfirmForInsert === '1' && order) {
       notifyStatusChange(chatId, orderNum, 'confirmed').catch(() => {});
       notifyAdmin(
         `✅ *Автоподтверждение заявки*\n\n📋 *${esc(orderNum)}*\n👤 ${esc(order.client_name)}\n📞 ${esc(order.client_phone)}`,
@@ -13472,9 +13470,9 @@ async function bkQuickSubmit(chatId, data) {
     }
 
     const quickConfirmMsg =
-      autoConfirmQuick === '1'
+      autoConfirmForInsert === '1'
         ? `⚡ *Заявка подтверждена\\!*\n\nНомер: *${esc(orderNum)}*\n\nВаша заявка автоматически подтверждена\\. Менеджер позвонит на *${esc(data.quick_phone)}* для уточнения деталей\\.`
-        : `⚡ *Заявка принята\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер позвонит на *${esc(data.quick_phone)}* в ближайшее время\\.`;
+        : `⚡ *Заявка принята\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер перезвонит вам в ближайшее время\\.`;
     await safeSend(chatId, quickConfirmMsg, {
       parse_mode: 'MarkdownV2',
       reply_markup: {

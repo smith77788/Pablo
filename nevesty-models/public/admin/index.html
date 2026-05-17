@@ -1549,22 +1549,50 @@
       }
 
       /* ─── Recent activity feed ───────────────────────────── */
+
+      // Track IDs seen in previous render to detect new items
+      let _activitySeenIds = new Set();
+
+      // Map order to event type icon
+      function activityIcon(o, isNew) {
+        if (isNew && o.status === 'new') return '📋';  // new booking
+        const STATUS_ICON = {
+          new: '📋',
+          reviewing: '🔄',
+          confirmed: '🔄',
+          in_progress: '🔄',
+          completed: '🔄',
+          cancelled: '🔄',
+        };
+        return STATUS_ICON[o.status] || '📋';
+      }
+
+      // Group items by recency
+      function groupByTime(items) {
+        const now = Date.now();
+        const today = new Date().setHours(0, 0, 0, 0);
+        const yesterday = today - 86400000;
+        const groups = { 'Сейчас': [], 'Сегодня': [], 'Вчера': [], 'Ранее': [] };
+        items.forEach(item => {
+          const d = new Date(item.created_at || item.updated_at).getTime();
+          if (now - d < 3600000) groups['Сейчас'].push(item);
+          else if (d >= today) groups['Сегодня'].push(item);
+          else if (d >= yesterday) groups['Вчера'].push(item);
+          else groups['Ранее'].push(item);
+        });
+        return groups;
+      }
+
       async function loadActivityFeed() {
+        const feed = document.getElementById('activity-feed');
         try {
-          const data = await _admin.apiFetch('/admin/orders?limit=8&page=1');
-          const feed = document.getElementById('activity-feed');
+          const data = await _admin.apiFetch('/admin/orders?limit=20&page=1');
           if (!data || !data.orders || !data.orders.length) {
             feed.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim)">Заявок ще немає</div>';
+            _activitySeenIds = new Set();
             return;
           }
-          const STATUS = {
-            new: '🆕',
-            reviewing: '🔍',
-            confirmed: '✅',
-            in_progress: '▶️',
-            completed: '🏁',
-            cancelled: '❌',
-          };
+
           const STATUS_COLOR = {
             new: 'var(--gold)',
             reviewing: '#8899aa',
@@ -1573,29 +1601,58 @@
             completed: '#80cbc4',
             cancelled: 'var(--error)',
           };
-          feed.innerHTML = data.orders
-            .map(o => {
+
+          // Determine which IDs are new since last render
+          const incomingIds = new Set(data.orders.map(o => o.id));
+          const newIds = new Set([...incomingIds].filter(id => !_activitySeenIds.has(id)));
+          // On first load, don't animate everything
+          const isFirstLoad = _activitySeenIds.size === 0;
+
+          const groups = groupByTime(data.orders);
+          const groupOrder = ['Сейчас', 'Сегодня', 'Вчера', 'Ранее'];
+          let html = '';
+
+          groupOrder.forEach(label => {
+            const items = groups[label];
+            if (!items.length) return;
+            html += `<div class="activity-group-label">${label}</div>`;
+            items.forEach(o => {
+              const isNew = !isFirstLoad && newIds.has(o.id);
+              const icon = activityIcon(o, isNew);
               const d = new Date(o.created_at || o.updated_at).toLocaleDateString('ru-RU', {
                 day: 'numeric',
                 month: 'short',
                 hour: '2-digit',
                 minute: '2-digit',
               });
-              return `<div style="display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer" onclick="location.href='/admin/orders.html?id=${o.id}'">
-        <span style="font-size:1.2rem">${STATUS[o.status] || '📋'}</span>
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_admin.escapeHtml(o.client_name || '—')}</div>
-          <div style="font-size:0.75rem;color:var(--text-dim)">${_admin.escapeHtml(o.order_number || '')} · ${_admin.escapeHtml(o.event_type || '')}</div>
-        </div>
-        <div style="text-align:right;white-space:nowrap">
-          <div style="font-size:0.75rem;color:${STATUS_COLOR[o.status] || 'var(--text-muted)'}">${_admin.STATUS_LABELS[o.status] || o.status}</div>
-          <div style="font-size:0.72rem;color:var(--text-dim)">${d}</div>
-        </div>
-      </div>`;
-            })
-            .join('');
+              html += `<div class="activity-item-row${isNew ? ' activity-new' : ''}" data-id="${o.id}"
+                style="display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer"
+                onclick="location.href='/admin/orders.html?id=${o.id}'">
+                <span style="font-size:1.2rem;flex-shrink:0">${icon}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_admin.escapeHtml(o.client_name || '—')}</div>
+                  <div style="font-size:0.75rem;color:var(--text-dim)">${_admin.escapeHtml(o.order_number || '')} · ${_admin.escapeHtml(o.event_type || '')}</div>
+                </div>
+                <div style="text-align:right;white-space:nowrap;flex-shrink:0">
+                  <div style="font-size:0.75rem;color:${STATUS_COLOR[o.status] || 'var(--text-muted)'}">${_admin.STATUS_LABELS[o.status] || o.status}</div>
+                  <div style="font-size:0.72rem;color:var(--text-dim)">${d}</div>
+                </div>
+              </div>`;
+            });
+          });
+
+          feed.innerHTML = html;
+
+          // Remove animation class after 3 seconds so re-renders are clean
+          if (newIds.size > 0 && !isFirstLoad) {
+            setTimeout(() => {
+              feed.querySelectorAll('.activity-new').forEach(el => el.classList.remove('activity-new'));
+            }, 3000);
+          }
+
+          // Update seen IDs for next render
+          _activitySeenIds = incomingIds;
         } catch {
-          const feed = document.getElementById('activity-feed');
           if (feed)
             feed.innerHTML =
               '<div style="padding:20px;text-align:center;color:var(--text-dim)">Помилка завантаження</div>';
@@ -2430,8 +2487,8 @@
 
       // Auto-refresh every 30 seconds
       setInterval(loadDashboard, 30000);
-      // Refresh activity feed every 60 seconds
-      setInterval(loadActivityFeed, 60000);
+      // Refresh activity feed every 15 seconds (live)
+      setInterval(loadActivityFeed, 15000);
       // Refresh agent feed every 60 seconds
       setInterval(loadAgentFeed, 60000);
       // Refresh KPI cards every 60 seconds

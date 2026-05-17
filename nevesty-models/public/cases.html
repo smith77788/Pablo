@@ -56,25 +56,123 @@
     <link rel="stylesheet" href="/css/main.css" />
     <style>
       .page-hero {
-        padding: 80px 20px 56px;
+        padding: 100px 20px 64px;
         text-align: center;
-        background: linear-gradient(180deg, rgba(201, 169, 110, 0.05) 0%, transparent 100%);
-        border-bottom: 1px solid rgba(201, 169, 110, 0.1);
+        background: linear-gradient(160deg, rgba(201, 169, 110, 0.06) 0%, rgba(8, 8, 8, 0) 55%),
+          linear-gradient(0deg, rgba(201, 169, 110, 0.04) 0%, transparent 100%);
+        border-bottom: 1px solid rgba(201, 169, 110, 0.12);
+        position: relative;
+        overflow: hidden;
+      }
+      .page-hero::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at 50% 0%, rgba(201, 169, 110, 0.08) 0%, transparent 60%);
+        pointer-events: none;
+      }
+      .page-hero-badge {
+        display: inline-block;
+        font-size: 0.68rem;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: var(--gold);
+        border: 1px solid rgba(201, 169, 110, 0.3);
+        padding: 5px 16px;
+        margin-bottom: 20px;
       }
       .page-hero h1 {
-        font-size: clamp(2rem, 5vw, 3.5rem);
+        font-size: clamp(2.2rem, 5vw, 3.8rem);
         font-weight: 700;
-        margin: 0 0 12px;
+        margin: 0 0 14px;
+        position: relative;
       }
       .page-hero h1 em {
         color: var(--gold);
-        font-style: normal;
+        font-style: italic;
       }
       .page-hero p {
         color: var(--text-muted);
         font-size: 1.05rem;
         max-width: 540px;
         margin: 0 auto 28px;
+        line-height: 1.75;
+      }
+      .page-hero-count {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        background: rgba(201, 169, 110, 0.07);
+        border: 1px solid rgba(201, 169, 110, 0.2);
+        padding: 12px 28px;
+        margin-bottom: 32px;
+      }
+      .hero-count-num {
+        font-family: 'Playfair Display', serif;
+        font-size: 2.2rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1;
+      }
+      .hero-count-lbl {
+        font-size: 0.8rem;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+      }
+      .page-hero-actions {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+      }
+      .btn-hero-discuss {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 28px;
+        background: var(--gold);
+        color: var(--bg);
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        text-decoration: none;
+        transition: background 0.25s, transform 0.2s;
+      }
+      .btn-hero-discuss:hover {
+        background: var(--gold-light);
+        transform: translateY(2px);
+      }
+
+      /* Case image lazy reveal */
+      .case-img-wrap {
+        overflow: hidden;
+        position: relative;
+      }
+      .case-img-wrap[data-lazy-pending] .case-img {
+        animation: shimmer 1.5s ease-in-out infinite;
+      }
+      @keyframes shimmer {
+        0%, 100% { background: rgba(201, 169, 110, 0.06); }
+        50% { background: rgba(201, 169, 110, 0.13); }
+      }
+      /* Category pill badge on image */
+      .case-cat-badge {
+        position: absolute;
+        top: 14px;
+        left: 14px;
+        z-index: 2;
+        padding: 4px 12px;
+        font-size: 0.65rem;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        font-weight: 600;
+        background: rgba(8, 8, 8, 0.82);
+        color: var(--gold);
+        border: 1px solid rgba(201, 169, 110, 0.35);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
       }
 
       /* Filter tabs */
@@ -506,17 +604,25 @@
     <main id="main-content" tabindex="-1">
       <!-- Hero -->
       <div class="page-hero">
+        <div class="page-hero-badge">Портфолио агентства</div>
         <h1>Наши <em>кейсы</em></h1>
         <p>
           Реализованные проекты с командой Nevesty Models: показы, фотосессии, корпоративные мероприятия и рекламные
           кампании.
         </p>
-        <div class="cat-tabs" role="tablist">
-          <button class="cat-tab active" data-cat="all" onclick="filterCases('all', this)">Все</button>
-          <button class="cat-tab" data-cat="fashion" onclick="filterCases('fashion', this)">Fashion</button>
-          <button class="cat-tab" data-cat="commercial" onclick="filterCases('commercial', this)">Коммерческие</button>
-          <button class="cat-tab" data-cat="events" onclick="filterCases('events', this)">Мероприятия</button>
-          <button class="cat-tab" data-cat="photo" onclick="filterCases('photo', this)">Фотосессии</button>
+        <div class="page-hero-count" aria-label="Количество успешных проектов">
+          <span class="hero-count-num" id="heroCountNum">500+</span>
+          <span class="hero-count-lbl">успешных проектов</span>
+        </div>
+        <div class="page-hero-actions">
+          <div class="cat-tabs" role="tablist">
+            <button class="cat-tab active" data-cat="all" onclick="filterCases('all', this)">Все</button>
+            <button class="cat-tab" data-cat="fashion" onclick="filterCases('fashion', this)">Fashion</button>
+            <button class="cat-tab" data-cat="commercial" onclick="filterCases('commercial', this)">Коммерческие</button>
+            <button class="cat-tab" data-cat="events" onclick="filterCases('events', this)">Мероприятия</button>
+            <button class="cat-tab" data-cat="photo" onclick="filterCases('photo', this)">Фотосессии</button>
+          </div>
+          <a href="#contact-cta" class="btn-hero-discuss">Обсудить проект ↓</a>
         </div>
       </div>
 
@@ -555,7 +661,8 @@
             role="button"
             aria-label="Открыть кейс Moscow Fashion Week 2025"
           >
-            <div class="case-img-wrap">
+            <div class="case-img-wrap" data-lazy-pending>
+              <div class="case-cat-badge" aria-hidden="true">Fashion</div>
               <div class="case-img" role="img" aria-label="Показ мод Moscow Fashion Week" style="height: 220px">🎭</div>
               <div class="case-hover-overlay" aria-hidden="true">
                 <p class="case-hover-desc">
@@ -598,7 +705,8 @@
             role="button"
             aria-label="Открыть кейс рекламная кампания LIMÉ"
           >
-            <div class="case-img-wrap">
+            <div class="case-img-wrap" data-lazy-pending>
+              <div class="case-cat-badge" aria-hidden="true">Коммерческая</div>
               <div class="case-img" role="img" aria-label="Рекламная кампания для fashion-бренда" style="height: 260px">
                 📸
               </div>
@@ -643,7 +751,8 @@
             role="button"
             aria-label="Открыть кейс Юбилей Сбербанка"
           >
-            <div class="case-img-wrap">
+            <div class="case-img-wrap" data-lazy-pending>
+              <div class="case-cat-badge" aria-hidden="true">Корпоратив</div>
               <div class="case-img" role="img" aria-label="Корпоративное мероприятие" style="height: 200px">🎉</div>
               <div class="case-hover-overlay" aria-hidden="true">
                 <p class="case-hover-desc">
@@ -685,7 +794,8 @@
             role="button"
             aria-label="Открыть кейс свадебный лукбук"
           >
-            <div class="case-img-wrap">
+            <div class="case-img-wrap" data-lazy-pending>
+              <div class="case-cat-badge" aria-hidden="true">Фотосессия</div>
               <div class="case-img" role="img" aria-label="Свадебная фотосессия" style="height: 240px">💐</div>
               <div class="case-hover-overlay" aria-hidden="true">
                 <p class="case-hover-desc">
@@ -727,7 +837,8 @@
             role="button"
             aria-label="Открыть кейс Показ в ЦУМ"
           >
-            <div class="case-img-wrap">
+            <div class="case-img-wrap" data-lazy-pending>
+              <div class="case-cat-badge" aria-hidden="true">Fashion</div>
               <div class="case-img" role="img" aria-label="Показ в универмаге" style="height: 200px">🛍</div>
               <div class="case-hover-overlay" aria-hidden="true">
                 <p class="case-hover-desc">
@@ -771,7 +882,8 @@
             role="button"
             aria-label="Открыть кейс ТВ-ролик для фармацевтики"
           >
-            <div class="case-img-wrap">
+            <div class="case-img-wrap" data-lazy-pending>
+              <div class="case-cat-badge" aria-hidden="true">Видео</div>
               <div class="case-img" role="img" aria-label="Видеореклама для телевизора" style="height: 240px">🎬</div>
               <div class="case-hover-overlay" aria-hidden="true">
                 <p class="case-hover-desc">
@@ -813,7 +925,8 @@
             role="button"
             aria-label="Открыть кейс Промо-акция Samsung"
           >
-            <div class="case-img-wrap">
+            <div class="case-img-wrap" data-lazy-pending>
+              <div class="case-cat-badge" aria-hidden="true">Промо</div>
               <div class="case-img" role="img" aria-label="Промо-акция в торговом центре" style="height: 220px">🏬</div>
               <div class="case-hover-overlay" aria-hidden="true">
                 <p class="case-hover-desc">
@@ -858,7 +971,8 @@
             role="button"
             aria-label="Открыть кейс портфолио beauty-бренда"
           >
-            <div class="case-img-wrap">
+            <div class="case-img-wrap" data-lazy-pending>
+              <div class="case-cat-badge" aria-hidden="true">Фотосессия</div>
               <div class="case-img" role="img" aria-label="Модельное портфолио" style="height: 190px">✨</div>
               <div class="case-hover-overlay" aria-hidden="true">
                 <p class="case-hover-desc">
@@ -903,7 +1017,8 @@
             role="button"
             aria-label="Открыть кейс INTERCHARM"
           >
-            <div class="case-img-wrap">
+            <div class="case-img-wrap" data-lazy-pending>
+              <div class="case-cat-badge" aria-hidden="true">B2B</div>
               <div class="case-img" role="img" aria-label="Выставка и конференция" style="height: 210px">📊</div>
               <div class="case-hover-overlay" aria-hidden="true">
                 <p class="case-hover-desc">
@@ -1013,7 +1128,7 @@
       </section>
 
       <!-- CTA -->
-      <div class="cta-strip">
+      <div class="cta-strip" id="contact-cta">
         <h2>Обсудим ваш проект?</h2>
         <p>Расскажите о задаче — подберём команду, которая идеально подойдёт под формат и бюджет.</p>
         <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap">
@@ -1194,6 +1309,21 @@
       });
 
       if (typeof NM !== 'undefined') NM.analytics.event('page_view', { page: 'cases' });
+
+      // ── Lazy reveal for case card images ───────────────────────────────────
+      (function () {
+        var lazyObserver = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) {
+              entry.target.removeAttribute('data-lazy-pending');
+              lazyObserver.unobserve(entry.target);
+            }
+          });
+        }, { rootMargin: '100px 0px', threshold: 0 });
+        document.querySelectorAll('.case-img-wrap[data-lazy-pending]').forEach(function (el) {
+          lazyObserver.observe(el);
+        });
+      })();
     </script>
 
     <script type="application/ld+json">
