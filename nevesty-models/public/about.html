@@ -17,12 +17,12 @@
     <title>О нас — Nevesty Models</title>
     <meta
       name="description"
-      content="Модельное агентство Nevesty Models — 10 лет опыта, 200+ моделей, 500+ успешных проектов. Узнайте о нашей команде и ценностях."
+      content="Модельное агентство Nevesty Models — 6+ лет опыта, 200+ моделей, 1500+ успешных проектов. Узнайте о нашей команде и ценностях."
     />
     <meta property="og:title" content="О нас — Nevesty Models | Модельное агентство" />
     <meta
       property="og:description"
-      content="Nevesty Models — профессиональное модельное агентство с 2014 года. Более 200 моделей, 500+ успешных проектов. История, команда, ценности."
+      content="Nevesty Models — профессиональное модельное агентство с 2019 года. Более 200 моделей, 1500+ успешных проектов. История, команда, ценности."
     />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="https://nevesty-models.ru/images/og-default.svg" />
@@ -36,7 +36,7 @@
     <meta name="twitter:title" content="О нас — Nevesty Models | Модельное агентство" />
     <meta
       name="twitter:description"
-      content="Nevesty Models — профессиональное модельное агентство с 2014 года. Более 200 моделей, 500+ успешных проектов."
+      content="Nevesty Models — профессиональное модельное агентство с 2019 года. Более 200 моделей, 1500+ успешных проектов."
     />
     <meta name="twitter:image" content="https://nevesty-models.ru/images/og-default.svg" />
     <meta
@@ -63,10 +63,10 @@
           "name": "Nevesty Models",
           "url": "https://nevesty-models.ru",
           "logo": "https://nevesty-models.ru/og-image.jpg",
-          "foundingDate": "2014",
+          "foundingDate": "2019",
           "description": "Профессиональное модельное агентство. Модели для показов мод, фотосессий, корпоративов и рекламных съёмок.",
           "email": "info@nevesty-models.ru",
-          "numberOfEmployees": { "@type": "QuantitativeValue", "value": 20 },
+          "numberOfEmployees": { "@type": "QuantitativeValue", "minValue": 15, "maxValue": 20 },
           "sameAs": [
             "https://instagram.com/nevesty_models",
             "https://t.me/nevesty_models",
@@ -90,7 +90,7 @@
           "@context": "https://schema.org",
           "@type": "WebPage",
           "name": "О нас — Nevesty Models",
-          "description": "Модельное агентство Nevesty Models — 10 лет опыта, 200+ моделей, 500+ успешных проектов. Узнайте о нашей команде и ценностях.",
+          "description": "Модельное агентство Nevesty Models — 6+ лет опыта, 200+ моделей, 1500+ успешных проектов. Узнайте о нашей команде и ценностях.",
           "url": "https://nevesty-models.ru/about.html",
           "isPartOf": { "@type": "WebSite", "name": "Nevesty Models", "url": "https://nevesty-models.ru" },
           "inLanguage": "ru-RU",
@@ -861,27 +861,93 @@
       /* ─── CTA ────────────────────────────────────────── */
       .about-cta {
         padding: 80px 0 100px;
-        background: linear-gradient(135deg, #0f0c08, #1a1410, #0f0c08);
-        border-top: 1px solid var(--border);
+        background: linear-gradient(135deg, #c9a96e 0%, #b8943c 40%, #c9a96e 100%);
+        border-top: 1px solid rgba(201, 169, 110, 0.3);
         text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+      .about-cta::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at 50% 50%, rgba(255, 255, 255, 0.08) 0%, transparent 70%);
+        pointer-events: none;
       }
       .about-cta h2 {
         font-size: clamp(1.6rem, 3vw, 2.5rem);
-        color: var(--white);
+        color: #0f0c08;
         margin-bottom: 16px;
+        position: relative;
+        z-index: 1;
       }
       .about-cta p {
-        color: var(--text-muted);
+        color: rgba(15, 12, 8, 0.75);
         font-size: 0.95rem;
         max-width: 480px;
         margin: 0 auto 40px;
         line-height: 1.8;
+        position: relative;
+        z-index: 1;
+      }
+      .about-cta .section-tag {
+        background: rgba(15, 12, 8, 0.12);
+        color: #0f0c08;
+        border-color: rgba(15, 12, 8, 0.2);
+        position: relative;
+        z-index: 1;
       }
       .about-cta-btns {
         display: flex;
         gap: 16px;
         justify-content: center;
         flex-wrap: wrap;
+        position: relative;
+        z-index: 1;
+      }
+      .btn-cta-dark {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 32px;
+        background: #0f0c08;
+        color: #c9a96e;
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        text-decoration: none;
+        border: 2px solid #0f0c08;
+        border-radius: 2px;
+        transition:
+          background 0.25s,
+          color 0.25s;
+      }
+      .btn-cta-dark:hover {
+        background: transparent;
+        color: #0f0c08;
+      }
+      .btn-cta-outline {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 32px;
+        background: transparent;
+        color: #0f0c08;
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        text-decoration: none;
+        border: 2px solid rgba(15, 12, 8, 0.5);
+        border-radius: 2px;
+        transition:
+          background 0.25s,
+          border-color 0.25s;
+      }
+      .btn-cta-outline:hover {
+        background: rgba(15, 12, 8, 0.1);
+        border-color: #0f0c08;
       }
     </style>
     <!-- Yandex.Metrica (loads only if consent given) -->
@@ -1001,7 +1067,7 @@
         <div class="section-tag" style="margin-bottom: 20px">О компании</div>
         <h1>Nevesty <em>Models</em></h1>
         <p>
-          Профессиональное модельное агентство с 2014 года. Мы создаём незабываемые образы и обеспечиваем безупречный
+          Профессиональное модельное агентство с 2019 года. Мы создаём незабываемые образы и обеспечиваем безупречный
           сервис для каждого клиента
         </p>
       </div>
@@ -1016,11 +1082,11 @@
             <span class="about-stat-label">Моделей в базе</span>
           </div>
           <div class="about-stat">
-            <span class="about-stat-num" data-count="500">500+</span>
-            <span class="about-stat-label">Успешных заказов</span>
+            <span class="about-stat-num" data-count="1500">1500+</span>
+            <span class="about-stat-label">Успешных проектов</span>
           </div>
           <div class="about-stat">
-            <span class="about-stat-num" data-count="10" data-suffix="">10</span>
+            <span class="about-stat-num" data-count="6" data-suffix="+">6+</span>
             <span class="about-stat-label">Лет на рынке</span>
           </div>
           <div class="about-stat">
@@ -1040,15 +1106,15 @@
               <span class="story-visual-letter">N</span>
             </div>
             <div class="story-badge">
-              <strong>10</strong>
+              <strong>6+</strong>
               <span>лет опыта</span>
             </div>
           </div>
           <div class="about-story-content">
             <div class="section-tag" style="margin-bottom: 20px">Наша история</div>
-            <h2 id="story-heading">С 2014 года мы делаем мир красивее</h2>
+            <h2 id="story-heading">С 2019 года мы делаем мир красивее</h2>
             <p id="about-text-main">
-              Мы — модельное агентство полного цикла, работающее с 2014 года. За это время мы стали одним из ведущих
+              Мы — модельное агентство полного цикла, работающее с 2019 года. За это время мы стали одним из ведущих
               агентств страны, объединив в своей базе более 200 профессиональных моделей.
             </p>
             <p>
@@ -1106,7 +1172,7 @@
             </div>
             <h3 class="values-title">Пунктуальность и надёжность</h3>
             <p class="values-text">
-              Ни один проект не сорван за 10 лет работы. Мы всегда держим слово и гарантируем появление модели в точное
+              Ни один проект не сорван за 6+ лет работы. Мы всегда держим слово и гарантируем появление модели в точное
               время.
             </p>
           </div>
@@ -1270,9 +1336,9 @@
         <div class="why-us-grid">
           <div class="why-card">
             <span class="why-card-icon">🏆</span>
-            <h3>10 лет экспертизы</h3>
+            <h3>6+ лет экспертизы</h3>
             <p>
-              Работаем с 2014 года. За это время накопили уникальный опыт и выстроили систему, гарантирующую результат
+              Работаем с 2019 года. За это время накопили уникальный опыт и выстроили систему, гарантирующую результат
               для каждого клиента.
             </p>
           </div>
@@ -1318,7 +1384,7 @@
             <div class="team-name">Анна Соколова</div>
             <div class="team-role">Директор агентства</div>
             <p class="team-bio">
-              10 лет в индустрии моды. Основала агентство в 2014 году. Эксперт по кастингу и стратегическому развитию.
+              6+ лет в индустрии моды. Основала агентство в 2019 году. Эксперт по кастингу и стратегическому развитию.
             </p>
             <div class="team-card-overlay" aria-hidden="true">
               <p>
@@ -1408,14 +1474,16 @@
     </section>
 
     <!-- CTA -->
-    <section class="about-cta">
+    <section class="about-cta" aria-labelledby="cta-heading">
       <div class="container">
-        <div class="section-tag" style="margin-bottom: 16px">Готовы начать?</div>
-        <h2>Создайте незабываемый проект</h2>
-        <p>Свяжитесь с нами сегодня и получите персональную консультацию. Менеджер ответит в течение часа.</p>
+        <div class="section-tag" style="margin-bottom: 16px">Хотите работать с нами?</div>
+        <h2 id="cta-heading">Начните прямо сейчас</h2>
+        <p>
+          Присоединяйтесь к нашей команде профессионалов — как клиент или как модель. Мы найдём лучший вариант для вас.
+        </p>
         <div class="about-cta-btns">
-          <a href="/booking.html" class="btn-primary">Оформить заявку</a>
-          <a href="/contact.html" class="btn-outline">Связаться с нами</a>
+          <a href="/booking.html" class="btn-cta-dark">Стать клиентом</a>
+          <a href="/contact.html?type=model" class="btn-cta-outline">Стать моделью</a>
         </div>
       </div>
     </section>
@@ -1428,7 +1496,7 @@
             <div class="nav-logo" style="font-family: 'Playfair Display', serif; font-size: 1.3rem; color: var(--gold)">
               NEVESTY <span style="color: var(--text)">MODELS</span>
             </div>
-            <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2014 года.</p>
+            <p>Профессиональное модельное агентство. Элегантность, стиль и безупречный сервис с 2019 года.</p>
           </div>
           <div class="footer-col">
             <h4>Агентство</h4>
@@ -1745,6 +1813,33 @@
                 's, border-color 0.3s ease, box-shadow 0.3s ease';
             }
             valuesObserver.observe(el);
+          });
+
+          /* ── Team cards stagger reveal ── */
+          var teamObserver = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                  entry.target.style.opacity = '1';
+                  entry.target.style.transform = 'translateY(0)';
+                  teamObserver.unobserve(entry.target);
+                }
+              });
+            },
+            { threshold: 0.1, rootMargin: '0px 0px -30px 0px' }
+          );
+          document.querySelectorAll('.team-card').forEach(function (el, i) {
+            if (!reducedMotion) {
+              el.style.opacity = '0';
+              el.style.transform = 'translateY(28px)';
+              el.style.transition =
+                'opacity 0.55s ease ' +
+                i * 0.15 +
+                's, transform 0.55s ease ' +
+                i * 0.15 +
+                's, border-color var(--transition), transform 0.2s';
+            }
+            teamObserver.observe(el);
           });
         });
       })();
