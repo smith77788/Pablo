@@ -532,10 +532,67 @@
           </div>
         </div>
 
+        <!-- Skeleton loading (shown while searching) -->
+        <div id="searchSkeleton" style="display: none">
+          <div class="search-skeleton-grid">
+            <div class="search-skeleton-card">
+              <div class="search-skeleton-img"></div>
+              <div class="search-skeleton-body">
+                <div class="search-skel-line medium"></div>
+                <div class="search-skel-line short"></div>
+              </div>
+            </div>
+            <div class="search-skeleton-card">
+              <div class="search-skeleton-img"></div>
+              <div class="search-skeleton-body">
+                <div class="search-skel-line medium"></div>
+                <div class="search-skel-line short"></div>
+              </div>
+            </div>
+            <div class="search-skeleton-card">
+              <div class="search-skeleton-img"></div>
+              <div class="search-skeleton-body">
+                <div class="search-skel-line medium"></div>
+                <div class="search-skel-line short"></div>
+              </div>
+            </div>
+            <div class="search-skeleton-card">
+              <div class="search-skeleton-img"></div>
+              <div class="search-skeleton-body">
+                <div class="search-skel-line medium"></div>
+                <div class="search-skel-line short"></div>
+              </div>
+            </div>
+            <div class="search-skeleton-card">
+              <div class="search-skeleton-img"></div>
+              <div class="search-skeleton-body">
+                <div class="search-skel-line medium"></div>
+                <div class="search-skel-line short"></div>
+              </div>
+            </div>
+            <div class="search-skeleton-card">
+              <div class="search-skeleton-img"></div>
+              <div class="search-skeleton-body">
+                <div class="search-skel-line medium"></div>
+                <div class="search-skel-line short"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Results -->
         <div id="resultsSection" style="display: none">
           <div class="search-results-header">
             <div class="search-count" id="resultsCount" aria-live="polite"></div>
+            <div class="search-sort-wrap" id="sortControls">
+              <span class="search-sort-label">Сортировка:</span>
+              <button class="sort-btn active" data-sort="default" onclick="setSort(this, 'default')">
+                По умолчанию
+              </button>
+              <button class="sort-btn" data-sort="age_asc" onclick="setSort(this, 'age_asc')">Возраст ↑</button>
+              <button class="sort-btn" data-sort="height_desc" onclick="setSort(this, 'height_desc')">Рост ↓</button>
+              <button class="sort-btn" data-sort="name_asc" onclick="setSort(this, 'name_asc')">Имя А–Я</button>
+            </div>
           </div>
           <div class="catalog-grid" id="resultsGrid"></div>
           <div class="search-pagination" id="pagination"></div>
@@ -543,8 +600,22 @@
 
         <div id="noResults" style="display: none">
           <div class="no-results">
-            <div class="no-results-icon">✦</div>
-            <p>По вашим параметрам моделей не найдено.<br />Попробуйте изменить фильтры.</p>
+            <div class="no-results-lupe">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </div>
+            <h3>Ничего не найдено</h3>
+            <p>По вашим параметрам моделей не найдено. Попробуйте изменить фильтры.</p>
             <a href="/catalog.html" class="btn-primary" style="margin-top: 20px; display: inline-block">Все модели</a>
           </div>
         </div>
@@ -631,6 +702,8 @@
         const PAGE_SIZE = 12;
         let _currentPage = 0;
         let _totalResults = 0;
+        let _currentSort = 'default';
+        let _lastModels = [];
 
         // ── Filter state ──────────────────────────────────────────────────────────
         function getFilterState() {
@@ -691,19 +764,51 @@
           params.set('limit', PAGE_SIZE);
 
           const btn = document.getElementById('searchBtn');
+          const skeleton = document.getElementById('searchSkeleton');
           if (btn) btn.textContent = 'Поиск...';
+          // Show skeleton, hide results
+          if (skeleton) skeleton.style.display = 'block';
+          document.getElementById('resultsSection').style.display = 'none';
+          document.getElementById('noResults').style.display = 'none';
 
           try {
             const resp = await fetch(`/api/models/search?${params}`);
             const data = await resp.json();
             _totalResults = data.total || 0;
-            renderResults(data.models || [], _totalResults, _currentPage);
+            _lastModels = data.models || [];
+            renderResults(sortModels(_lastModels, _currentSort), _totalResults, _currentPage);
           } catch (e) {
-            document.getElementById('resultsSection').style.display = 'none';
             document.getElementById('noResults').style.display = 'block';
           } finally {
             if (btn) btn.textContent = 'Найти';
+            if (skeleton) skeleton.style.display = 'none';
           }
+        };
+
+        // ── Sort ──────────────────────────────────────────────────────────────────
+        function sortModels(models, sortKey) {
+          const arr = models.slice();
+          switch (sortKey) {
+            case 'age_asc':
+              arr.sort((a, b) => (a.age || 99) - (b.age || 99));
+              break;
+            case 'height_desc':
+              arr.sort((a, b) => (b.height || 0) - (a.height || 0));
+              break;
+            case 'name_asc':
+              arr.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+              break;
+            default:
+              break;
+          }
+          return arr;
+        }
+
+        window.setSort = function (btn, sortKey) {
+          _currentSort = sortKey;
+          document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          renderResults(sortModels(_lastModels, _currentSort), _totalResults, _currentPage);
         };
 
         function renderResults(models, total, page) {
@@ -723,6 +828,9 @@
 
           countEl.textContent = `Найдено: ${total} ${pluralModels(total)}`;
 
+          // Collect active text-like filters for highlight
+          const cityVal = (document.getElementById('citySelect')?.value || '').toLowerCase();
+
           grid.innerHTML = models
             .map(
               m => `
@@ -740,7 +848,7 @@
           <div class="model-card-info">
             <div class="model-card-name">${escHtml(m.name)}</div>
             <div class="model-card-meta">
-              ${[m.age ? m.age + ' лет' : '', m.height ? m.height + ' см' : '', m.city || ''].filter(Boolean).join(' · ')}
+              ${[m.age ? m.age + ' лет' : '', m.height ? m.height + ' см' : '', cityVal && m.city ? hlText(m.city, cityVal) : m.city || ''].filter(Boolean).join(' · ')}
             </div>
             <div class="model-card-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
               ${m.category ? `<span class="model-card-tag">${CATEGORY_LABELS[m.category] || m.category}</span>` : ''}
@@ -788,6 +896,11 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+        }
+        function hlText(text, query) {
+          if (!query) return escHtml(text);
+          const safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return escHtml(text).replace(new RegExp('(' + safe + ')', 'gi'), '<mark class="srch-hl">$1</mark>');
         }
         function pluralModels(n) {
           const m = n % 10;
