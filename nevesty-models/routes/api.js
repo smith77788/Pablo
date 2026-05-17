@@ -3532,11 +3532,11 @@ router.get('/stats/public', async (req, res) => {
     if (cached !== undefined) return res.json(cached);
 
     const [modelsRow, ordersRow, citiesRow] = await Promise.all([
-      get('SELECT COUNT(*) as cnt FROM models WHERE active = 1').catch(() => ({ cnt: 0 })),
+      get('SELECT COUNT(*) as cnt FROM models WHERE available = 1 AND archived = 0').catch(() => ({ cnt: 0 })),
       get("SELECT COUNT(*) as cnt FROM orders WHERE status IN ('confirmed','completed')").catch(() => ({ cnt: 0 })),
-      get("SELECT COUNT(DISTINCT city) as cnt FROM models WHERE active = 1 AND city IS NOT NULL AND city != ''").catch(
-        () => ({ cnt: 0 })
-      ),
+      get(
+        "SELECT COUNT(DISTINCT city) as cnt FROM models WHERE available = 1 AND archived = 0 AND city IS NOT NULL AND city != ''"
+      ).catch(() => ({ cnt: 0 })),
     ]);
 
     const stats = {
@@ -6294,10 +6294,9 @@ router.post('/client/verify', clientOtpLimiter, async (req, res, next) => {
 
     // Atomic attempt increment — only succeeds when attempts < 5, preventing race condition
     // where two concurrent requests both read attempts=4 and both bypass the limit check.
-    const incr = await run(
-      'UPDATE client_otp SET attempts=attempts+1 WHERE id=? AND attempts < 5 AND used=0',
-      [otp.id]
-    );
+    const incr = await run('UPDATE client_otp SET attempts=attempts+1 WHERE id=? AND attempts < 5 AND used=0', [
+      otp.id,
+    ]);
     if (!incr.changes) {
       // Either already at limit or concurrently used — invalidate and reject
       await run('UPDATE client_otp SET used=1 WHERE id=?', [otp.id]).catch(() => {});
