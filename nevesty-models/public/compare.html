@@ -611,6 +611,28 @@
         align-items: center;
         gap: 4px;
       }
+      .compare-table thead th .thead-remove {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        background: rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(244, 67, 54, 0);
+        color: var(--text-dim);
+        cursor: pointer;
+        border-radius: 50%;
+        transition: all 0.2s;
+        margin-left: 4px;
+        flex-shrink: 0;
+        padding: 0;
+      }
+      .compare-table thead th .thead-remove:hover {
+        background: rgba(244, 67, 54, 0.85);
+        border-color: rgba(244, 67, 54, 0.85);
+        color: #fff;
+        transform: scale(1.15);
+      }
 
       /* ── better cell highlight: gold = better, muted = worse ── */
       .cmp-value-cell.cell-best {
@@ -1053,6 +1075,9 @@
 
           <div class="compare-table-wrap">
             <table class="compare-table" id="compareTable" aria-label="Сравнение параметров моделей">
+              <thead id="compareThead">
+                <!-- sticky column headers rendered by JS -->
+              </thead>
               <tbody id="compareBody">
                 <!-- rendered by JS -->
               </tbody>
@@ -1252,7 +1277,7 @@
                 : `<div class="cmp-photo-placeholder">✦</div>`
             }
           </div>
-          <button class="cmp-remove-btn no-print" onclick="removeModel(${m.id})" title="Убрать из сравнения" aria-label="Убрать ${escHtml(m.name)} из сравнения">✕</button>
+          <button class="cmp-remove-btn no-print" onclick="removeModel(${m.id})" title="Убрать из сравнения" aria-label="Убрать ${escHtml(m.name)} из сравнения"><svg viewBox="0 0 14 14"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg></button>
         </td>`;
           });
           // fill empty slots
@@ -1299,6 +1324,26 @@
           return `<tr>${labelCell}${cells.join('')}</tr>`;
         }
 
+        /* ─── sticky thead builder ─── */
+        function buildTheadRow(models) {
+          const labelTh = `<th class="col-label" scope="col"></th>`;
+          const modelThs = models.map(m => {
+            if (!m) return `<th class="col-model" scope="col"></th>`;
+            return `<th class="col-model" scope="col">
+              <div class="thead-name-row">
+                <span class="thead-name">${escHtml(m.name)}</span>
+                <button class="thead-remove no-print" onclick="removeModel(${m.id})" title="Убрать ${escHtml(m.name)} из сравнения" aria-label="Убрать ${escHtml(m.name)}">
+                  <svg viewBox="0 0 14 14" width="10" height="10" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
+                </button>
+              </div>
+            </th>`;
+          });
+          for (let i = models.length; i < MAX_COMPARE; i++) {
+            modelThs.push(`<th class="col-model" scope="col"></th>`);
+          }
+          return `<tr>${labelTh}${modelThs.join('')}</tr>`;
+        }
+
         /* highlight differences: if values differ across loaded models, mark as diff */
         function buildParamRow(label, models, getter, opts = {}) {
           const labelCell = `<td class="cmp-row-label col-label">${escHtml(label)}</td>`;
@@ -1307,16 +1352,20 @@
 
           // best-value highlight (numeric)
           let best = null;
+          let worst = null;
           if (opts.highlightMax || opts.highlightMin) {
             const nums = loadedValues.filter(v => !isNaN(parseFloat(v)));
             if (nums.length > 1) {
               const parsed = nums.map(v => parseFloat(v));
-              best = opts.highlightMax ? Math.max(...parsed) : Math.min(...parsed);
+              if (opts.highlightMax) {
+                best = Math.max(...parsed);
+                worst = Math.min(...parsed);
+              } else {
+                best = Math.min(...parsed);
+                worst = Math.max(...parsed);
+              }
             }
           }
-
-          // highlightClass: 'highlight' (gold) or 'highlight-green' (green)
-          const hClass = opts.highlightClass || 'highlight';
 
           // difference detection: do loaded values differ?
           const uniqueVals = new Set(loadedValues.map(v => String(v)));
@@ -1324,10 +1373,13 @@
 
           const cells = values.map(v => {
             const empty = v == null || v === '' || v === '—';
-            const isHighlight = !empty && best !== null && parseFloat(v) === best;
-            const isDiff = hasDiff && !empty;
+            const numV = empty ? NaN : parseFloat(v);
+            const isBest = !empty && best !== null && numV === best;
+            const isWorst = !empty && worst !== null && numV === worst && !isBest;
+            const isDiff = hasDiff && !empty && !isBest && !isWorst;
             let cls = 'col-model cmp-value-cell';
-            if (isHighlight) cls += ` ${hClass}`;
+            if (isBest) cls += ' cell-best';
+            else if (isWorst) cls += ' cell-worst';
             else if (isDiff) cls += ' diff';
             return `<td class="${cls}">
           ${empty ? `<span class="cmp-value-em">—</span>` : escHtml(String(v))}
@@ -1461,6 +1513,8 @@
 
         function renderTable(models) {
           const tbody = document.getElementById('compareBody');
+          const thead = document.getElementById('compareThead');
+          if (thead) thead.innerHTML = buildTheadRow(models);
           let html = '';
 
           html += buildPhotoRow(models);
