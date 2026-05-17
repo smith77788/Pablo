@@ -600,12 +600,12 @@
         if (typeof trackEvent === 'function') {
           trackEvent('model_view', { model_id: m.id, model_name: m.name });
         }
-        openModelModal(m.id);
+        openModelModal(m.id, article);
       });
       article.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          openModelModal(m.id);
+          openModelModal(m.id, article);
         }
       });
 

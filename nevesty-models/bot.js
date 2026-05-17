@@ -8054,6 +8054,61 @@ function initBot(app) {
         const pickOrderId = parseInt(data.replace('adm_tpl_pick_', ''));
         return showTemplatePicker(chatId, pickOrderId);
       }
+      // Template category selection — saves the template (step 3 of creation/edit)
+      if (data.startsWith('adm_tpl_save_cat_')) {
+        if (!isAdmin(chatId)) return;
+        const sess = await getSession(chatId);
+        const sd = sessionData(sess);
+        if (!sd.tplName || !sd.tplText) {
+          await clearSession(chatId);
+          return showAdminTemplates(chatId);
+        }
+        const category = data.replace('adm_tpl_save_cat_', '');
+        await clearSession(chatId);
+        if (sd.editId) {
+          await run('UPDATE message_templates SET name=?, text=?, category=? WHERE id=?', [
+            sd.tplName,
+            sd.tplText,
+            category,
+            sd.editId,
+          ]).catch(() => {});
+          await bot.answerCallbackQuery(q.id, { text: '✅ Шаблон обновлён' }).catch(() => {});
+          return safeSend(
+            chatId,
+            `✅ *Шаблон обновлён\\!*\n\n*${esc(sd.tplName)}*\n${esc(TEMPLATE_CATEGORIES[category] || category)}`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '📋 К списку шаблонов', callback_data: 'adm_tpl_list' }],
+                  [{ text: '← Шаблоны', callback_data: 'adm_templates' }],
+                ],
+              },
+            }
+          );
+        } else {
+          await run('INSERT INTO message_templates (name, text, category, created_by) VALUES (?,?,?,?)', [
+            sd.tplName,
+            sd.tplText,
+            category,
+            chatId,
+          ]).catch(() => null);
+          await bot.answerCallbackQuery(q.id, { text: '✅ Шаблон создан' }).catch(() => {});
+          return safeSend(
+            chatId,
+            `✅ *Шаблон создан\\!*\n\n*${esc(sd.tplName)}*\n${esc(TEMPLATE_CATEGORIES[category] || category)}\n\n_Используйте «📤 Написать шаблоном» в карточке заявки для отправки клиенту\\._`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '➕ Ещё шаблон', callback_data: 'adm_tpl_create' }],
+                  [{ text: '📋 К списку шаблонов', callback_data: 'adm_tpl_list' }],
+                ],
+              },
+            }
+          );
+        }
+      }
 
       // ── Scheduled broadcasts
       if (data === 'adm_sched_bcast') {
@@ -10808,6 +10863,48 @@ function initBot(app) {
           {
             parse_mode: 'MarkdownV2',
             reply_markup: { inline_keyboard: [[{ text: '← К списку', callback_data: 'adm_managers' }]] },
+          }
+        );
+      }
+
+      // ── Template creation: step 1 — name input
+      if (state === 'template_name') {
+        if (!text || text.length < 2) {
+          return safeSend(chatId, '❌ Название слишком короткое\\. Введите название шаблона:', {
+            parse_mode: 'MarkdownV2',
+          });
+        }
+        const tplEditId = d.editId || null;
+        await setSession(chatId, 'template_text', { tplName: text.slice(0, 100), editId: tplEditId });
+        return safeSend(
+          chatId,
+          `📋 *${tplEditId ? 'Редактирование' : 'Новый'} шаблон — шаг 2/3*\n\nНазвание: *${esc(text.slice(0, 100))}*\n\nВведите текст шаблона\\.\nДоступные переменные:\n• \\{\\{client\\_name\\}\\} — имя клиента\n• \\{\\{order\\_number\\}\\} — номер заявки\n• \\{\\{event\\_date\\}\\} — дата события`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_templates' }]] },
+          }
+        );
+      }
+
+      // ── Template creation: step 2 — text input
+      if (state === 'template_text') {
+        if (!text || text.length < 2) {
+          return safeSend(chatId, '❌ Текст шаблона слишком короткий\\. Введите текст:', {
+            parse_mode: 'MarkdownV2',
+          });
+        }
+        const tplBodyText = text.slice(0, 2000);
+        await setSession(chatId, 'template_category', { tplName: d.tplName, tplText: tplBodyText, editId: d.editId });
+        const tplCatKeyboard = Object.entries(TEMPLATE_CATEGORIES).map(([key, label]) => [
+          { text: label, callback_data: `adm_tpl_save_cat_${key}` },
+        ]);
+        tplCatKeyboard.push([{ text: '❌ Отмена', callback_data: 'adm_templates' }]);
+        return safeSend(
+          chatId,
+          `📋 *${d.editId ? 'Редактирование' : 'Новый'} шаблон — шаг 3/3*\n\nВыберите категорию:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: tplCatKeyboard },
           }
         );
       }

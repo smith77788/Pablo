@@ -31,7 +31,8 @@
 }
 
 /* ─── LIGHT THEME VARIABLES ──────────────────────── */
-[data-theme='light'] {
+[data-theme='light'],
+.light {
   /* --gold darkened to #7a5c0a to ensure 4.5:1 contrast on light backgrounds (WCAG AA) */
   --gold: #7a5c0a;
   --gold-light: #b8860b;
