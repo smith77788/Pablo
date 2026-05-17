@@ -277,13 +277,6 @@ function setSessionReminder(chatId) {
   sessionReminderTimers[chatId] = t;
 }
 
-// ─── Booking progress helper ──────────────────────────────────────────────────
-function _bookingProgress(step, total = 4) {
-  const filled = '●'.repeat(step);
-  const empty = '○'.repeat(total - step);
-  return `[${filled}${empty}] Шаг ${step}/${total}`;
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // ─── UTM link helper ──────────────────────────────────────────────────────────
@@ -1038,11 +1031,6 @@ async function showCatalog(chatId, cat, page, filter) {
   } catch (e) {
     console.error('[Bot] showCatalog:', e.message);
   }
-}
-
-// Alias: showCatalogFiltered — filter by category (БЛОК 2.7)
-async function _showCatalogFiltered(chatId, page, category) {
-  return showCatalog(chatId, category || '', page || 0, { category: category || '' });
 }
 
 async function showModel(chatId, modelId, backBtn = null) {
@@ -5366,79 +5354,6 @@ async function exportClientsCSV(chatId) {
 }
 
 // ─── БЛОК 33: Расширенные отчёты ─────────────────────────────────────────────
-
-/**
- * generateWeeklyReport() — отправляет всем админам еженедельный отчёт.
- * Вызывается каждый понедельник в 09:00 из scheduler.js.
- */
-async function _generateWeeklyReport() {
-  try {
-    const budgetExpr = `CAST(REPLACE(REPLACE(REPLACE(REPLACE(budget,'₽',''),'руб',''),' ',''),',','.') AS REAL)`;
-    const [orders, revenue, newClients, topModel, topServices] = await Promise.all([
-      get("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-7 days')"),
-      get(
-        `SELECT SUM(${budgetExpr}) as s FROM orders WHERE status='completed' AND created_at >= datetime('now','-7 days') AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`
-      ),
-      get(
-        "SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE created_at >= datetime('now','-7 days') AND client_chat_id IS NOT NULL AND CAST(client_chat_id AS INTEGER) > 0"
-      ),
-      get(
-        "SELECT m.name, COUNT(*) as cnt FROM orders o JOIN models m ON m.id=o.model_id WHERE o.model_id IS NOT NULL AND o.created_at >= datetime('now','-7 days') GROUP BY o.model_id ORDER BY cnt DESC LIMIT 1"
-      ),
-      query(
-        "SELECT event_type, COUNT(*) as cnt FROM orders WHERE event_type IS NOT NULL AND event_type != '' AND created_at >= datetime('now','-7 days') GROUP BY event_type ORDER BY cnt DESC LIMIT 3"
-      ),
-    ]);
-
-    const [done, canc] = await Promise.all([
-      get("SELECT COUNT(*) as n FROM orders WHERE status='completed' AND created_at >= datetime('now','-7 days')"),
-      get("SELECT COUNT(*) as n FROM orders WHERE status='cancelled' AND created_at >= datetime('now','-7 days')"),
-    ]);
-
-    const revenueVal = Math.round(revenue?.s || 0);
-    const ordersVal = orders?.n || 0;
-    const now = new Date();
-    const weekLabel = now.toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-    let text = `📊 *Еженедельный отчёт* \\(по ${esc(weekLabel)}\\)\n\n`;
-    text += `📋 Новых заявок: *${esc(String(ordersVal))}*\n`;
-    text += `✅ Завершено: *${esc(String(done?.n || 0))}*\n`;
-    text += `❌ Отменено: *${esc(String(canc?.n || 0))}*\n`;
-    text += `💰 Выручка: *${esc(revenueVal.toLocaleString('ru'))} ₽*\n`;
-    text += `👥 Новых клиентов: *${esc(String(newClients?.n || 0))}*\n`;
-
-    if (topModel?.name) {
-      text += `\n🏆 Топ модель: *${esc(topModel.name)}* \\(${esc(String(topModel.cnt))} заявок\\)\n`;
-    }
-    if (topServices.length) {
-      text += `\n🎯 Топ сервисы:\n`;
-      const medals = ['🥇', '🥈', '🥉'];
-      topServices.forEach((s, i) => {
-        text += `${medals[i] || `${i + 1}\\.`} ${esc(s.event_type)} — ${esc(String(s.cnt))}\n`;
-      });
-    }
-    text += `\n_Автоматический отчёт каждый понедельник в 09:00_`;
-
-    const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
-    for (const adminId of adminIds) {
-      await safeSend(adminId, text, {
-        parse_mode: 'MarkdownV2',
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '📊 Статистика', callback_data: 'adm_stats' },
-              { text: '📅 Отчёт по периоду', callback_data: 'adm_report_period' },
-            ],
-            [{ text: '📥 Выгрузить CSV', callback_data: 'adm_report_week_csv' }],
-          ],
-        },
-      }).catch(() => {});
-    }
-    console.log('[Bot] Weekly report sent to', adminIds.length, 'admins');
-  } catch (e) {
-    console.error('[Bot] generateWeeklyReport:', e.message);
-  }
-}
 
 /**
  * showModelReport(chatId, modelId) — детальный отчёт по конкретной модели.
@@ -14511,91 +14426,6 @@ async function showAdminExperiments(chatId) {
     parse_mode: 'MarkdownV2',
     reply_markup: { inline_keyboard: [[{ text: '← Factory панель', callback_data: 'adm_factory' }]] },
   });
-}
-
-// ─── Admin Reviews ────────────────────────────────────────────────────────────
-
-async function _showAdminReviews(chatId) {
-  if (!isAdmin(chatId)) return;
-  try {
-    const [pendingCount, approvedCount, totalCount] = await Promise.all([
-      get("SELECT COUNT(*) as n FROM reviews WHERE approved=0 AND (status IS NULL OR status != 'rejected')"),
-      get('SELECT COUNT(*) as n FROM reviews WHERE approved=1'),
-      get('SELECT COUNT(*) as n FROM reviews'),
-    ]);
-    const text = `*⭐ Управление отзывами*\n\nОжидают одобрения: *${esc(String(pendingCount.n))}*\nОдобрено: *${esc(String(approvedCount.n))}*\nВсего: *${esc(String(totalCount.n))}*`;
-    return safeSend(chatId, text, {
-      parse_mode: 'MarkdownV2',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: `⏳ Ожидают (${pendingCount.n})`, callback_data: 'adm_rev_pending' },
-            { text: `✅ Одобрены (${approvedCount.n})`, callback_data: 'adm_rev_approved' },
-            { text: `📋 Все (${totalCount.n})`, callback_data: 'adm_rev_all' },
-          ],
-          [{ text: '← Меню', callback_data: 'admin_menu' }],
-        ],
-      },
-    });
-  } catch (e) {
-    console.error('[Bot] showAdminReviews:', e.message);
-  }
-}
-
-async function _showAdminReviewsList(chatId, filter) {
-  if (!isAdmin(chatId)) return;
-  try {
-    let reviews;
-    if (filter === 'pending') {
-      reviews = await query(
-        "SELECT * FROM reviews WHERE approved=0 AND (status IS NULL OR status != 'rejected') ORDER BY created_at DESC LIMIT 15"
-      ).catch(() => []);
-    } else if (filter === 'approved') {
-      reviews = await query('SELECT * FROM reviews WHERE approved=1 ORDER BY created_at DESC LIMIT 15').catch(() => []);
-    } else {
-      reviews = await query('SELECT * FROM reviews ORDER BY created_at DESC LIMIT 15').catch(() => []);
-    }
-
-    const filterLabels = { pending: 'ожидающих одобрения', approved: 'одобренных', all: 'отзывов' };
-    const filterBtns = [
-      { text: '⏳ Ожидают', callback_data: 'adm_rev_pending' },
-      { text: '✅ Одобрены', callback_data: 'adm_rev_approved' },
-      { text: '📋 Все', callback_data: 'adm_rev_all' },
-    ];
-
-    if (!reviews.length) {
-      return safeSend(chatId, `Нет ${filterLabels[filter] || 'отзывов'}.`, {
-        reply_markup: { inline_keyboard: [filterBtns, [{ text: '← К отзывам', callback_data: 'adm_reviews' }]] },
-      });
-    }
-
-    for (const r of reviews) {
-      const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating || 1)));
-      const preview = r.text ? r.text.slice(0, 120) + (r.text.length > 120 ? '…' : '') : '';
-      const statusIcon = r.approved ? '✅' : r.status === 'rejected' ? '❌' : '⏳';
-      const msgText = `${statusIcon} *Отзыв \\#${esc(String(r.id))}*\n👤 ${esc(r.client_name || 'Клиент')}\n${stars}\n\n${esc(preview)}`;
-      const btns = [];
-      if (!r.approved || r.status === 'rejected') {
-        btns.push({ text: '✅ Одобрить', callback_data: `rev_approve_${r.id}` });
-      }
-      if (r.approved || r.status !== 'rejected') {
-        btns.push({ text: '❌ Отклонить', callback_data: `rev_reject_${r.id}` });
-      }
-      btns.push({ text: '🔍 Подробнее', callback_data: `rev_view_${r.id}` });
-      btns.push({ text: '🗑 Удалить', callback_data: `rev_delete_${r.id}` });
-      await safeSend(chatId, msgText, {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [btns] },
-      });
-    }
-
-    const label = filter === 'pending' ? 'ожидают одобрения' : filter === 'approved' ? 'одобрено' : 'всего';
-    return safeSend(chatId, `${label}: ${reviews.length}`, {
-      reply_markup: { inline_keyboard: [filterBtns, [{ text: '← К отзывам', callback_data: 'adm_reviews' }]] },
-    });
-  } catch (e) {
-    console.error('[Bot] showAdminReviewsList:', e.message);
-  }
 }
 
 // ─── Топ-модели ───────────────────────────────────────────────────────────────
