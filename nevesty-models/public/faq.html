@@ -791,8 +791,9 @@
 
     <script>
       // ─── FAQ state ─────────────────────────────────────────────────────────────
-      let faqItems = [];
-      let _activeCat = '';
+      var faqItems = [];
+      var _activeCat = '';
+      var _searchTimer = null;
 
       // ─── Escape HTML ───────────────────────────────────────────────────────────
       function escHtml(s) {
@@ -802,14 +803,14 @@
       // ─── Highlight search term ─────────────────────────────────────────────────
       function highlight(text, query) {
         if (!query) return escHtml(text);
-        const safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        var safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         return escHtml(text).replace(new RegExp('(' + safe + ')', 'gi'), '<mark class="faq-hl">$1</mark>');
       }
 
       // ─── Inject Schema.org FAQPage ─────────────────────────────────────────────
       function injectFaqSchema(items) {
         if (!items.length) return;
-        const schema = {
+        var schema = {
           '@context': 'https://schema.org',
           '@type': 'FAQPage',
           mainEntity: items.map(function (item) {
@@ -847,6 +848,16 @@
           body.classList.add('open');
           body.setAttribute('aria-hidden', 'false');
           btn.setAttribute('aria-expanded', 'true');
+          // Update URL hash for anchor links
+          var anchorId = item.getAttribute('id');
+          if (anchorId && history.replaceState) {
+            history.replaceState(null, '', '#' + anchorId);
+          }
+        } else {
+          // Closed — clear hash
+          if (history.replaceState) {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+          }
         }
       }
 
@@ -855,22 +866,26 @@
         if (!items.length) return '';
         return items
           .map(function (item, i) {
-            var btnId = 'faq-btn-' + i;
+            var faqId = item.id ? 'faq-' + item.id : 'faq-' + (i + 1);
+            var btnId = 'faq-btn-' + (item.id || i + 1);
+            var answerId = 'faq-answer-' + (item.id || i + 1);
             return (
-              '<div class="faq-accordion-item" role="listitem">' +
+              '<div class="faq-accordion-item" id="' +
+              faqId +
+              '" role="listitem">' +
               '<button class="faq-accordion-btn" id="' +
               btnId +
               '" aria-expanded="false"' +
-              ' aria-controls="faq-answer-' +
-              i +
+              ' aria-controls="' +
+              answerId +
               '" onclick="toggleItem(this)">' +
               '<span class="faq-accordion-q">' +
               highlight(item.q, query) +
               '</span>' +
               '<span class="faq-accordion-icon" aria-hidden="true">+</span>' +
               '</button>' +
-              '<div class="faq-accordion-body" id="faq-answer-' +
-              i +
+              '<div class="faq-accordion-body" id="' +
+              answerId +
               '" role="region"' +
               ' aria-labelledby="' +
               btnId +
@@ -883,6 +898,20 @@
             );
           })
           .join('');
+      }
+
+      // ─── Open item by anchor hash ──────────────────────────────────────────────
+      function openItemByHash() {
+        var hash = window.location.hash; // e.g. "#faq-3"
+        if (!hash) return;
+        var itemEl = document.querySelector(hash);
+        if (!itemEl || !itemEl.classList.contains('faq-accordion-item')) return;
+        var btn = itemEl.querySelector('.faq-accordion-btn');
+        if (!btn) return;
+        setTimeout(function () {
+          toggleItem(btn);
+          itemEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 120);
       }
 
       // ─── Category filter ───────────────────────────────────────────────────────
@@ -900,7 +929,14 @@
           btn.className = 'faq-cat-btn';
           btn.dataset.cat = cat;
           btn.textContent = cat + ' (' + cats[cat] + ')';
-          btn.setAttribute('onclick', "setCatFilter(this, '" + cat.replace(/'/g, "\\'") + "')");
+          btn.addEventListener(
+            'click',
+            (function (c) {
+              return function () {
+                setCatFilter(btn, c);
+              };
+            })(cat)
+          );
           wrap.appendChild(btn);
         });
       }
@@ -914,11 +950,14 @@
         filterFaq(query);
       }
 
-      // ─── Search input handler ──────────────────────────────────────────────────
+      // ─── Debounced search input handler (200ms) ────────────────────────────────
       function onFaqSearchInput(value) {
         var clearBtn = document.getElementById('faqSearchClear');
         if (clearBtn) clearBtn.style.display = value.length ? 'block' : 'none';
-        filterFaq(value);
+        clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(function () {
+          filterFaq(value);
+        }, 200);
       }
 
       function clearFaqSearch() {
@@ -929,7 +968,31 @@
           input.focus();
         }
         if (clearBtn) clearBtn.style.display = 'none';
+        clearTimeout(_searchTimer);
         filterFaq('');
+      }
+
+      // ─── Update results counter ────────────────────────────────────────────────
+      function updateResultsCounter(shown, total, isFiltering) {
+        var counterEl = document.getElementById('faqResultsCounter');
+        if (!counterEl) return;
+        if (!isFiltering) {
+          counterEl.classList.add('hidden');
+          counterEl.textContent = '';
+          return;
+        }
+        counterEl.classList.remove('hidden');
+        if (shown === 0) {
+          counterEl.textContent = 'Ничего не найдено';
+        } else {
+          counterEl.innerHTML =
+            'Показано <strong>' +
+            shown +
+            '</strong> из <strong>' +
+            total +
+            '</strong> ' +
+            plural(total, 'вопроса', 'вопросов', 'вопросов');
+        }
       }
 
       // ─── Filter FAQ by search query ────────────────────────────────────────────
@@ -937,6 +1000,7 @@
         var q = query.trim().toLowerCase();
         var accordion = document.getElementById('faqAccordion');
         var emptyEl = document.getElementById('faqEmpty');
+        var isFiltering = q.length > 0 || _activeCat !== '';
 
         var pool = _activeCat
           ? faqItems.filter(function (item) {
@@ -951,6 +1015,7 @@
           : pool;
 
         accordion.innerHTML = buildAccordion(filtered, q ? query.trim() : '');
+        updateResultsCounter(filtered.length, faqItems.length, isFiltering);
 
         if (filtered.length === 0) {
           emptyEl.style.display = 'block';
@@ -958,6 +1023,8 @@
         } else {
           emptyEl.style.display = 'none';
           accordion.style.display = 'flex';
+          // Re-check anchor after re-render
+          openItemByHash();
         }
       }
 
@@ -992,7 +1059,7 @@
               badge.style.visibility = 'visible';
             }
 
-            // Inject Schema.org FAQPage
+            // Inject Schema.org FAQPage (all items, not filtered)
             injectFaqSchema(faqItems);
 
             // Build category filter buttons
@@ -1001,6 +1068,9 @@
             // Render accordion
             accordion.innerHTML = buildAccordion(faqItems, '');
             if (ctaEl) ctaEl.style.display = faqItems.length ? 'block' : 'none';
+
+            // Handle anchor link from URL (e.g. /faq.html#faq-3)
+            openItemByHash();
           })
           .catch(function (err) {
             console.error('FAQ load error:', err);
