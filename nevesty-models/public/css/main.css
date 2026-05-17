@@ -26,6 +26,22 @@
   --skeleton-highlight: #3a3a3a;
 }
 
+/* ─── LIGHT THEME VARIABLES ──────────────────────── */
+[data-theme='light'] {
+  --gold: #b8860b;
+  --gold-light: #d4a853;
+  --gold-dark: #8b6914;
+  --bg: #f8f6f2;
+  --bg2: #f0ece4;
+  --bg3: #e8e2d8;
+  --border: #d4c9b0;
+  --text: #1a1a1a;
+  --text-muted: #555;
+  --text-dim: #888;
+  --skeleton-base: #e0d9ce;
+  --skeleton-highlight: #ede6db;
+}
+
 html {
   scroll-behavior: smooth;
 }
