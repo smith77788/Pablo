@@ -780,11 +780,15 @@ async function showAdminMenu(chatId, name) {
 // ── Catalog with category filter ──────────────────────────────────────────────
 
 // Per-user sort preferences for catalog (in-memory)
-const catalogSortPrefs = new Map(); // chatId → 'featured' | 'alpha'
-// Cleanup stale sort preferences every 12 hours to prevent unbounded growth
+const catalogSortPrefs = new Map(); // chatId → 'featured' | 'alpha' | 'newest' | 'orders'
+const catalogCatPrefs = new Map(); // chatId → current category filter ('' = all)
+const catalogCityPrefs = new Map(); // chatId → current city filter ('' = all)
+// Cleanup stale preferences every 12 hours to prevent unbounded growth
 setInterval(
   () => {
     catalogSortPrefs.clear();
+    catalogCatPrefs.clear();
+    catalogCityPrefs.clear();
   },
   12 * 60 * 60 * 1000
 ).unref();
@@ -802,17 +806,28 @@ async function showCatalog(chatId, cat, page, filter) {
     if (!cat) cat = filter.category || '';
     page = page || 0;
 
+    // Persist / restore category and city filters per user
+    const chatKey = String(chatId);
+    if (cat !== undefined && cat !== null) catalogCatPrefs.set(chatKey, cat);
+    else cat = catalogCatPrefs.get(chatKey) || '';
+    if (filter.city !== undefined) catalogCityPrefs.set(chatKey, filter.city || '');
+    const activeCity = filter.city !== undefined ? filter.city || '' : catalogCityPrefs.get(chatKey) || '';
+
     // Per-user sort preference + global catalog_sort setting
-    const sortPref = catalogSortPrefs.get(String(chatId)) || 'featured';
+    const sortPref = catalogSortPrefs.get(chatKey) || 'featured';
     const globalSort = await getSetting('catalog_sort').catch(() => 'featured');
     const effectiveSort = sortPref && sortPref !== 'featured' ? sortPref : globalSort || 'featured';
     // Support both old ('alpha'/'date') and new ('name'/'newest') sort value names
-    const orderClause =
-      effectiveSort === 'alpha' || effectiveSort === 'name'
-        ? 'ORDER BY name ASC'
-        : effectiveSort === 'date' || effectiveSort === 'newest'
-          ? 'ORDER BY id DESC'
-          : 'ORDER BY featured DESC, name ASC';
+    let orderClause;
+    if (effectiveSort === 'alpha' || effectiveSort === 'name') {
+      orderClause = 'ORDER BY name ASC';
+    } else if (effectiveSort === 'date' || effectiveSort === 'newest') {
+      orderClause = 'ORDER BY id DESC';
+    } else if (effectiveSort === 'orders') {
+      orderClause = 'ORDER BY (SELECT COUNT(*) FROM orders o WHERE o.model_id=models.id) DESC, name ASC';
+    } else {
+      orderClause = 'ORDER BY featured DESC, name ASC';
+    }
 
     // Build WHERE clause
     const conditions = ['available=1', 'COALESCE(archived,0)=0'];
@@ -821,9 +836,9 @@ async function showCatalog(chatId, cat, page, filter) {
       conditions.push('category=?');
       params.push(cat);
     }
-    if (filter.city) {
+    if (activeCity) {
       conditions.push('city=?');
-      params.push(filter.city);
+      params.push(activeCity);
     }
     const where = conditions.join(' AND ');
     const models = await query(`SELECT * FROM models WHERE ${where} ${orderClause}`, params);
@@ -840,21 +855,22 @@ async function showCatalog(chatId, cat, page, filter) {
     const total = models.length;
     const slice = models.slice(page * perPage, page * perPage + perPage);
 
-    // Category filter buttons (fashion / commercial / events)
+    // Category filter buttons (all / fashion / commercial / events)
     const catFilterRow = [
-      { text: (cat === 'fashion' ? '✅ ' : '') + '💄 Фэшн', callback_data: 'cat_filter_fashion' },
-      { text: (cat === 'commercial' ? '✅ ' : '') + '📸 Коммерческая', callback_data: 'cat_filter_commercial' },
-      { text: (cat === 'events' ? '✅ ' : '') + '🎉 Мероприятия', callback_data: 'cat_filter_events' },
+      { text: (!cat ? '✅ ' : '') + '🗂 Все', callback_data: 'cat_filter_all' },
+      { text: (cat === 'fashion' ? '✅ ' : '') + '👗 Fashion', callback_data: 'cat_filter_fashion' },
+      { text: (cat === 'commercial' ? '✅ ' : '') + '📸 Commercial', callback_data: 'cat_filter_commercial' },
+      { text: (cat === 'events' ? '✅ ' : '') + '🎉 Events', callback_data: 'cat_filter_events' },
     ];
 
     // Sort row
     const sortRow = [
-      { text: (sortPref === 'featured' ? '✅ ' : '') + '⭐ Топ', callback_data: 'cat_sort_featured' },
+      { text: (sortPref === 'featured' ? '✅ ' : '') + '⭐ По рейтингу', callback_data: 'cat_sort_rating' },
       {
-        text: (sortPref === 'newest' || sortPref === 'date' ? '✅ ' : '') + '🆕 Нові',
-        callback_data: 'cat_sort_newest',
+        text: (sortPref === 'newest' || sortPref === 'date' ? '✅ ' : '') + '🆕 По новизне',
+        callback_data: 'cat_sort_new',
       },
-      { text: (sortPref === 'alpha' || sortPref === 'name' ? '✅ ' : '') + '🔤 А-Я', callback_data: 'cat_sort_alpha' },
+      { text: (sortPref === 'orders' ? '✅ ' : '') + '📊 По заказам', callback_data: 'cat_sort_orders' },
     ];
 
     // Dynamic city buttons from settings, fallback to DB distinct cities

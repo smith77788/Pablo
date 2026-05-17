@@ -7,38 +7,75 @@
     <meta name="robots" content="noindex, nofollow" />
     <link rel="stylesheet" href="/css/admin.css" />
     <style>
-      /* ─── Tab nav ─────────────────────────────────────── */
-      .settings-tabs {
+      /* ─── Settings sidebar layout ────────────────────── */
+      .settings-layout {
         display: flex;
         gap: 0;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 28px;
-        overflow-x: auto;
-        scrollbar-width: none;
+        align-items: flex-start;
+        min-height: calc(100vh - 120px);
       }
-      .settings-tabs::-webkit-scrollbar {
-        display: none;
+      .settings-sidebar {
+        width: 220px;
+        flex-shrink: 0;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 8px 0;
+        position: sticky;
+        top: 16px;
+        max-height: calc(100vh - 140px);
+        overflow-y: auto;
+        scrollbar-width: thin;
+      }
+      .settings-sidebar::-webkit-scrollbar {
+        width: 4px;
+      }
+      .settings-sidebar::-webkit-scrollbar-thumb {
+        background: var(--border2);
+        border-radius: 2px;
+      }
+      .settings-sidebar-label {
+        font-size: 0.62rem;
+        letter-spacing: 1.8px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        padding: 14px 16px 4px;
+        font-weight: 600;
+      }
+      .settings-sidebar-label:first-child {
+        padding-top: 6px;
       }
       .tab-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
         background: none;
         border: none;
-        border-bottom: 2px solid transparent;
+        border-left: 2px solid transparent;
         color: var(--text-muted);
-        padding: 12px 20px;
-        font-size: 0.82rem;
-        font-weight: 500;
-        letter-spacing: 0.3px;
+        padding: 9px 16px;
+        font-size: 0.83rem;
+        font-weight: 400;
+        text-align: left;
         white-space: nowrap;
-        transition: all 0.2s;
+        transition: all 0.18s;
         cursor: pointer;
-        margin-bottom: -1px;
       }
       .tab-btn:hover {
         color: var(--text);
+        background: rgba(255, 255, 255, 0.03);
       }
       .tab-btn.active {
         color: var(--gold);
-        border-bottom-color: var(--gold);
+        border-left-color: var(--gold);
+        background: rgba(201, 169, 110, 0.08);
+        font-weight: 500;
+      }
+      .settings-content-wrap {
+        flex: 1;
+        min-width: 0;
+        padding-left: 24px;
       }
 
       /* ─── Tab panes ───────────────────────────────────── */
@@ -406,1835 +443,1941 @@
             </div>
           </div>
 
-          <!-- Tab navigation -->
-          <div class="settings-tabs" role="tablist">
-            <button
-              class="tab-btn active"
-              role="tab"
-              aria-selected="true"
-              onclick="switchTab('profile')"
-              id="tab-profile"
-            >
-              👤 Профиль
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('bot')" id="tab-bot">
-              🤖 Бот
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('contacts')" id="tab-contacts">
-              📞 Контакты
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('pricing')" id="tab-pricing">
-              💰 Прайс
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('booking')" id="tab-booking">
-              📅 Бронирование
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('catalog')" id="tab-catalog">
-              📋 Каталог
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('features')" id="tab-features">
-              🔧 Функции бота
-            </button>
-            <button
-              class="tab-btn"
-              role="tab"
-              aria-selected="false"
-              onclick="switchTab('appearance')"
-              id="tab-appearance"
-            >
-              🎨 Внешний вид
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('notif')" id="tab-notif">
-              🔔 Уведомления
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('email')" id="tab-email">
-              📧 Email
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('payment')" id="tab-payment">
-              💳 Оплата
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('crm')" id="tab-crm">
-              🔗 CRM
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('password')" id="tab-password">
-              🔑 Пароль
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('faq')" id="tab-faq">
-              ❓ FAQ
-            </button>
-            <button
-              class="tab-btn"
-              role="tab"
-              aria-selected="false"
-              onclick="switchTab('broadcast')"
-              id="tab-broadcast"
-            >
-              📢 Рассылка
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('totp')" id="tab-totp">
-              🔐 2FA
-            </button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('limits')" id="tab-limits">
-              📊 Лимиты
-            </button>
-            <button
-              class="tab-btn"
-              role="tab"
-              aria-selected="false"
-              onclick="switchTab('instagram')"
-              id="tab-instagram"
-            >
-              📱 Instagram
-            </button>
-          </div>
+          <!-- Settings sidebar + content layout -->
+          <div class="settings-layout">
+            <aside class="settings-sidebar" role="tablist" aria-label="Разделы настроек">
+              <div class="settings-sidebar-label">Основное</div>
+              <button
+                class="tab-btn active"
+                role="tab"
+                aria-selected="true"
+                onclick="switchTab('profile')"
+                id="tab-profile"
+              >
+                👤 Профиль
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                onclick="switchTab('password')"
+                id="tab-password"
+              >
+                🔑 Пароль и безопасность
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('totp')" id="tab-totp">
+                🔐 2FA
+              </button>
 
-          <!-- ═══ TAB: Профиль ═══════════════════════════════════════════════════ -->
-          <div class="tab-pane active" id="pane-profile">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">👤 Профиль администратора</div></div>
-              <div class="section-card-body padded" style="max-width: 520px">
-                <div class="admin-form-group">
-                  <label>Логин</label>
-                  <input class="admin-input" type="text" id="p_username" disabled />
-                </div>
-                <div class="admin-form-group">
-                  <label>Email</label>
-                  <input class="admin-input" type="email" id="p_email" placeholder="admin@example.com" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Telegram ID</label>
-                  <input
-                    class="admin-input"
-                    type="text"
-                    id="p_telegram_id"
-                    placeholder="Числовой Telegram ID для уведомлений"
-                  />
-                  <div class="field-note">
-                    Узнайте ваш ID через <strong style="color: var(--gold)">@userinfobot</strong> в Telegram
-                  </div>
-                </div>
-                <button class="btn btn-md btn-gold" id="btnSaveProfile" onclick="saveProfile(this)">
-                  Сохранить профиль
-                </button>
-              </div>
-            </div>
-          </div>
+              <div class="settings-sidebar-label">Контакты и тексты</div>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                onclick="switchTab('contacts')"
+                id="tab-contacts"
+              >
+                💬 Контакты
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                onclick="switchTab('appearance')"
+                id="tab-appearance"
+              >
+                🎨 Внешний вид
+              </button>
 
-          <!-- ═══ TAB: Бот ════════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-bot">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">🤖 Тексты бота</div></div>
-              <div class="section-card-body padded">
-                <!-- Greeting -->
-                <div class="admin-form-group">
-                  <div class="form-label-row">
-                    <label>Приветствие при /start</label>
-                    <span class="restore-link" onclick="restoreDefault('greeting')">Вернуть по умолчанию</span>
-                  </div>
-                  <textarea
-                    class="admin-input"
-                    id="greeting"
-                    rows="5"
-                    style="resize: vertical"
-                    oninput="updateCharCount(this, 'cnt_greeting', 500)"
-                    placeholder="Привет, {name}! Добро пожаловать в Nevesty Models..."
-                  ></textarea>
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px">
-                    <div class="field-note">
-                      Используйте <code style="color: var(--gold)">{name}</code> для имени клиента
+              <div class="settings-sidebar-label">Уведомления</div>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('notif')" id="tab-notif">
+                🔔 Уведомления
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('email')" id="tab-email">
+                📧 Email / SMTP
+              </button>
+
+              <div class="settings-sidebar-label">Каталог и модели</div>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('catalog')" id="tab-catalog">
+                📋 Каталог
+              </button>
+
+              <div class="settings-sidebar-label">Бронирование</div>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('booking')" id="tab-booking">
+                🛒 Бронирование
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('payment')" id="tab-payment">
+                💳 Оплата
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('pricing')" id="tab-pricing">
+                💰 Прайс-лист
+              </button>
+
+              <div class="settings-sidebar-label">Отзывы и функции</div>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                onclick="switchTab('features')"
+                id="tab-features"
+              >
+                ⭐ Функции и отзывы
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('faq')" id="tab-faq">
+                ❓ FAQ
+              </button>
+
+              <div class="settings-sidebar-label">Бот и интерфейс</div>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('bot')" id="tab-bot">
+                🤖 Тексты бота
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                onclick="switchTab('broadcast')"
+                id="tab-broadcast"
+              >
+                📢 Рассылка
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                onclick="switchTab('instagram')"
+                id="tab-instagram"
+              >
+                📱 Instagram
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('crm')" id="tab-crm">
+                🔗 CRM
+              </button>
+
+              <div class="settings-sidebar-label">Лимиты</div>
+              <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('limits')" id="tab-limits">
+                📊 Лимиты
+              </button>
+            </aside>
+            <div class="settings-content-wrap">
+              <!-- ═══ TAB: Профиль ═══════════════════════════════════════════════════ -->
+              <div class="tab-pane active" id="pane-profile">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">👤 Профиль администратора</div></div>
+                  <div class="section-card-body padded" style="max-width: 520px">
+                    <div class="admin-form-group">
+                      <label>Логин</label>
+                      <input class="admin-input" type="text" id="p_username" disabled />
                     </div>
-                    <div class="char-count" id="cnt_greeting">0 / 500</div>
-                  </div>
-                  <button class="btn btn-sm btn-ghost" style="margin-top: 10px" onclick="previewGreeting()">
-                    👁 Предпросмотр в Telegram
-                  </button>
-                  <div class="tg-preview-wrap" id="greetingPreview">
-                    <div class="tg-preview-label">Telegram — как увидит клиент</div>
-                    <div class="tg-bubble" id="greetingPreviewText"></div>
-                    <div class="tg-bubble-meta">Nevesty Models Bot · только что</div>
-                  </div>
-                </div>
-
-                <!-- About -->
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <div class="form-label-row">
-                    <label>О нас (/about)</label>
-                    <span class="restore-link" onclick="restoreDefault('about_text')">Вернуть по умолчанию</span>
-                  </div>
-                  <textarea
-                    class="admin-input"
-                    id="about_text"
-                    rows="5"
-                    style="resize: vertical"
-                    oninput="updateCharCount(this, 'cnt_about', 1000)"
-                    placeholder="Nevesty Models — элитное модельное агентство..."
-                  ></textarea>
-                  <div class="char-count" id="cnt_about" style="margin-top: 5px">0 / 1000</div>
-                </div>
-
-                <!-- Manager hours -->
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Часы работы менеджера</label>
-                  <input
-                    class="admin-input"
-                    type="text"
-                    id="manager_hours"
-                    placeholder="Пн–Пт 10:00–20:00, Сб 11:00–18:00"
-                  />
-                  <div class="field-note">Отображается клиентам в боте</div>
-                </div>
-
-                <!-- Manager auto-reply -->
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Авто-ответ менеджера</label>
-                  <textarea
-                    class="admin-input"
-                    id="manager_reply"
-                    rows="3"
-                    style="resize: vertical"
-                    placeholder="Спасибо за ваше сообщение! Менеджер ответит в ближайшее время."
-                  ></textarea>
-                </div>
-
-                <!-- Pricing text -->
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Текст прайс-листа в боте</label>
-                  <textarea
-                    class="admin-input"
-                    id="pricing_text"
-                    rows="6"
-                    style="resize: vertical"
-                    placeholder="✨ Прайс-лист&#10;&#10;• Деловые мероприятия: от 15 000 ₽&#10;• Фотосессии: от 8 000 ₽&#10;• Показы мод: от 30 000 ₽"
-                  ></textarea>
-                  <div class="field-note">
-                    Отображается по кнопке «📋 Прайс» в меню клиента (если включён Калькулятор)
-                  </div>
-                </div>
-
-                <!-- Site URL -->
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>URL сайта</label>
-                  <input class="admin-input" type="url" id="site_url" placeholder="https://nevesty-models.ru" />
-                  <div class="field-note">Используется в ссылках, которые бот отправляет клиентам</div>
-                </div>
-
-                <!-- Telegram channel -->
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Telegram-канал агентства</label>
-                  <div style="position: relative">
-                    <span
-                      style="
-                        position: absolute;
-                        left: 14px;
-                        top: 50%;
-                        transform: translateY(-50%);
-                        color: var(--text-dim);
-                        font-size: 0.9rem;
-                      "
-                      >@</span
-                    >
-                    <input
-                      class="admin-input"
-                      type="text"
-                      id="tg_channel"
-                      placeholder="nevesty_models"
-                      style="padding-left: 28px"
-                    />
-                  </div>
-                  <div class="field-note">Кнопка «Наш канал» появится в главном меню клиента</div>
-                </div>
-
-                <!-- Welcome photo URL -->
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Фото приветствия (URL)</label>
-                  <input
-                    class="admin-input"
-                    type="url"
-                    id="welcome_photo_url"
-                    placeholder="https://example.com/welcome.jpg"
-                  />
-                  <div class="field-note">Отправляется клиенту при первом /start вместо текста</div>
-                </div>
-
-                <!-- Main menu text -->
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Текст главного меню</label>
-                  <textarea
-                    class="admin-input"
-                    id="main_menu_text"
-                    rows="3"
-                    style="resize: vertical"
-                    placeholder="Выберите действие из меню ниже:"
-                  ></textarea>
-                  <div class="field-note">Текст, отображаемый вместе с кнопками главного меню клиента</div>
-                </div>
-
-                <div class="sticky-save-bar">
-                  <button class="btn btn-md btn-gold" id="btnSaveBot" onclick="saveBot(this)">
-                    Сохранить тексты бота
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Bot commands reference -->
-            <div class="section-card" style="margin-top: 24px">
-              <div class="section-card-header"><div class="section-card-title">📋 Команды бота — справочник</div></div>
-              <div class="section-card-body padded">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px">
-                  <div>
-                    <div class="settings-divider">Для менеджеров</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); line-height: 2.2">
-                      <div><code style="color: var(--gold)">/start</code> — приветствие и команды</div>
-                      <div><code style="color: var(--gold)">/orders</code> — последние 10 заявок</div>
-                      <div><code style="color: var(--gold)">/new_orders</code> — только новые заявки</div>
-                      <div><code style="color: var(--gold)">/models</code> — список моделей</div>
-                      <div><code style="color: var(--gold)">/stats</code> — статистика агентства</div>
+                    <div class="admin-form-group">
+                      <label>Email</label>
+                      <input class="admin-input" type="email" id="p_email" placeholder="admin@example.com" />
                     </div>
-                  </div>
-                  <div>
-                    <div class="settings-divider">Для клиентов</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); line-height: 2.2">
-                      <div><code style="color: var(--gold)">/start</code> — приветствие с кнопками</div>
-                      <div><code style="color: var(--gold)">/status NM-XXXX</code> — статус заявки</div>
-                      <div>Любое сообщение — переслать менеджеру</div>
-                      <div><code style="color: var(--gold)">/start NM-XXXX</code> — привязать заявку</div>
+                    <div class="admin-form-group">
+                      <label>Telegram ID</label>
+                      <input
+                        class="admin-input"
+                        type="text"
+                        id="p_telegram_id"
+                        placeholder="Числовой Telegram ID для уведомлений"
+                      />
+                      <div class="field-note">
+                        Узнайте ваш ID через <strong style="color: var(--gold)">@userinfobot</strong> в Telegram
+                      </div>
                     </div>
-                  </div>
-                </div>
-                <div
-                  style="
-                    margin-top: 20px;
-                    padding: 14px 16px;
-                    background: var(--bg2);
-                    border: 1px solid var(--border);
-                    font-size: 0.82rem;
-                    color: var(--text-muted);
-                    line-height: 1.9;
-                  "
-                >
-                  <strong style="color: var(--text)">⚙️ Первичная настройка:</strong><br />
-                  1. Создайте бота через <strong style="color: var(--gold)">@BotFather</strong> в Telegram<br />
-                  2. Скопируйте токен → файл <code style="color: var(--gold)">.env</code> →
-                  <code>TELEGRAM_BOT_TOKEN</code><br />
-                  3. Узнайте свой Telegram ID через <strong style="color: var(--gold)">@userinfobot</strong><br />
-                  4. Добавьте ID в <code>.env</code> → <code>ADMIN_TELEGRAM_IDS</code> (через запятую)
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Контакты ═══════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-contacts">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">📞 Контакты агентства</div></div>
-              <div class="section-card-body padded" style="max-width: 560px">
-                <div class="admin-form-group">
-                  <label>Телефон агентства</label>
-                  <input class="admin-input" type="text" id="contacts_phone" placeholder="+7 (999) 123-45-67" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Email агентства</label>
-                  <input class="admin-input" type="email" id="contacts_email" placeholder="info@nevesty-models.ru" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Instagram</label>
-                  <div style="position: relative">
-                    <span
-                      style="
-                        position: absolute;
-                        left: 14px;
-                        top: 50%;
-                        transform: translateY(-50%);
-                        color: var(--text-dim);
-                        font-size: 0.9rem;
-                      "
-                      >@</span
-                    >
-                    <input
-                      class="admin-input"
-                      type="text"
-                      id="contacts_instagram"
-                      placeholder="nevesty_models"
-                      style="padding-left: 28px"
-                    />
-                  </div>
-                </div>
-                <div class="admin-form-group">
-                  <label>WhatsApp</label>
-                  <input class="admin-input" type="text" id="contacts_whatsapp" placeholder="+7 (999) 123-45-67" />
-                  <div class="field-note">Номер телефона в формате WhatsApp (для ссылки wa.me)</div>
-                </div>
-                <div class="admin-form-group">
-                  <label>Адрес</label>
-                  <input
-                    class="admin-input"
-                    type="text"
-                    id="contacts_address"
-                    placeholder="Москва, ул. Пречистенка, 1"
-                  />
-                </div>
-                <div class="sticky-save-bar">
-                  <button class="btn btn-md btn-gold" id="btnSaveContacts" onclick="saveContacts(this)">
-                    Сохранить контакты
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Прайс ══════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-pricing">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">💰 Прайс-лист</div></div>
-              <div class="section-card-body padded">
-                <div class="admin-form-group">
-                  <div class="form-label-row" style="margin-bottom: 8px">
-                    <label style="margin: 0">Текст прайс-листа</label>
-                    <div class="char-count" id="cnt_pricing">0 / 2000</div>
-                  </div>
-                  <textarea
-                    class="admin-input"
-                    id="pricing"
-                    rows="12"
-                    style="resize: vertical"
-                    oninput="updateCharCount(this, 'cnt_pricing', 2000)"
-                    placeholder="Фотосессия — от 15 000 ₽ / 4 ч&#10;Показ мод — от 25 000 ₽&#10;Корпоратив — от 20 000 ₽ / 3 ч&#10;..."
-                  ></textarea>
-                  <div class="field-note">Текст отображается в боте по команде /pricing и на сайте</div>
-                </div>
-
-                <!-- Pricing tier minimums -->
-                <div class="form-row-3" style="margin-top: 16px">
-                  <div class="admin-form-group">
-                    <label>Цена Старт (от, ₽)</label>
-                    <input type="number" class="admin-input" id="pricing_start_from" placeholder="8000" min="0" />
-                  </div>
-                  <div class="admin-form-group">
-                    <label>Цена Мероприятие (от, ₽)</label>
-                    <input type="number" class="admin-input" id="pricing_event_from" placeholder="15000" min="0" />
-                  </div>
-                  <div class="admin-form-group">
-                    <label>Цена Премиум (от, ₽)</label>
-                    <input type="number" class="admin-input" id="pricing_premium_from" placeholder="30000" min="0" />
-                  </div>
-                </div>
-                <div class="field-note" style="margin-top: 4px">
-                  Минимальные цены для карточек на странице Цены и калькулятора. Оставьте пустым для значений по
-                  умолчанию.
-                </div>
-                <div class="sticky-save-bar">
-                  <button class="btn btn-md btn-gold" id="btnSavePricing" onclick="savePricing(this)">
-                    Сохранить прайс
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Бронирование ═══════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-booking">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">📅 Настройки бронирования</div></div>
-              <div class="section-card-body padded" style="max-width: 560px">
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Быстрая заявка</div>
-                    <div class="toggle-row-desc">
-                      Кнопка быстрой заявки (имя + телефон) отображается на сайте и в боте
-                    </div>
-                  </div>
-                  <span
-                    class="restore-link"
-                    style="margin-left: 8px"
-                    onclick="resetSetting('quick_booking_enabled')"
-                    title="Сбросить к умолчанию"
-                    >🔄</span
-                  >
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="quick_booking_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Авто-подтверждение</div>
-                    <div class="toggle-row-desc">Новые заявки автоматически переводятся в статус "Подтверждена"</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="booking_auto_confirm" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Требовать email</div>
-                    <div class="toggle-row-desc">Email становится обязательным полем при оформлении заявки</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="booking_require_email" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Авто-подтверждение (booking_autoconfirm)</div>
-                    <div class="toggle-row-desc">Альтернативный ключ авто-подтверждения для внешних интеграций</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input
-                      type="checkbox"
-                      id="booking_autoconfirm"
-                      onchange="saveSetting('booking_autoconfirm', this.checked ? '1' : '0')"
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Минимальный бюджет</label>
-                  <input class="admin-input" type="text" id="booking_min_budget" placeholder="5000" />
-                  <div class="field-note">
-                    Минимальная сумма заявки в рублях. Оставьте пустым для отключения ограничения.
-                  </div>
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Сообщение после бронирования</label>
-                  <textarea
-                    class="admin-input"
-                    id="booking_confirm_msg"
-                    rows="4"
-                    style="resize: vertical"
-                    placeholder="Ваша заявка принята! Менеджер свяжется с вами в ближайшее время."
-                  ></textarea>
-                  <div class="field-note">Это сообщение клиент получит сразу после подачи заявки</div>
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Текст страницы «Спасибо»</label>
-                  <textarea
-                    class="admin-input"
-                    id="booking_thanks_text"
-                    rows="3"
-                    style="resize: vertical"
-                    placeholder="Спасибо за заявку! Наш менеджер свяжется с вами в течение 24 часов."
-                  ></textarea>
-                  <div class="field-note">
-                    Текст отображается на странице подтверждения после успешного бронирования
-                  </div>
-                </div>
-
-                <div class="sticky-save-bar">
-                  <button class="btn btn-md btn-gold" id="btnSaveBooking" onclick="saveBooking(this)">
-                    Сохранить настройки бронирования
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Каталог ════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-catalog">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">📋 Настройки каталога</div></div>
-              <div class="section-card-body padded" style="max-width: 560px">
-                <div class="admin-form-group">
-                  <label>Заголовок каталога</label>
-                  <input class="admin-input" type="text" id="catalog_title" placeholder="Наши модели" />
-                  <div class="field-note">Заголовок страницы каталога на сайте</div>
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 16px">
-                  <div class="form-label-row">
-                    <label>Количество моделей на странице</label>
-                    <span class="restore-link" onclick="resetSetting('catalog_per_page', 'catalog_per_page')"
-                      >🔄 По умолчанию</span
-                    >
-                  </div>
-                  <input class="admin-input" type="number" id="catalog_per_page" placeholder="12" min="1" max="100" />
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 16px">
-                  <label>Сортировка по умолчанию</label>
-                  <select class="admin-input" id="catalog_default_sort">
-                    <option value="id_desc">Сначала новые</option>
-                    <option value="name_asc">По алфавиту</option>
-                    <option value="available_first">Сначала доступные</option>
-                  </select>
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 16px">
-                  <div class="form-label-row">
-                    <label>Сортировка каталога</label>
-                    <span class="restore-link" onclick="resetSetting('catalog_sort', 'catalog_sort')"
-                      >🔄 По умолчанию</span
-                    >
-                  </div>
-                  <select class="admin-input" id="catalog_sort">
-                    <option value="featured">По топу (featured першими)</option>
-                    <option value="name">По алфавіту</option>
-                    <option value="newest">По новизні</option>
-                    <option value="rating">По рейтингу</option>
-                  </select>
-                </div>
-
-                <div class="toggle-row" style="margin-top: 8px">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Показывать город</div>
-                    <div class="toggle-row-desc">Город модели отображается в карточке каталога</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="catalog_show_city" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Бейдж "Топ-модель"</div>
-                    <div class="toggle-row-desc">Отображать бейдж на карточках featured-моделей</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="catalog_badge_top" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 20px">
-                  <label>Список городов</label>
-                  <textarea
-                    class="admin-input"
-                    id="cities_list"
-                    rows="4"
-                    style="resize: vertical"
-                    placeholder="Москва, Санкт-Петербург, Казань, Краснодар, Екатеринбург"
-                  ></textarea>
-                  <div class="field-note">Города через запятую. Используются в фильтрах каталога и боте.</div>
-                </div>
-
-                <div class="sticky-save-bar">
-                  <button class="btn btn-md btn-gold" id="btnSaveCatalog" onclick="saveCatalog(this)">
-                    Сохранить настройки каталога
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Функции бота ═══════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-features">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">🔧 Функции бота</div></div>
-              <div class="section-card-body padded" style="max-width: 560px">
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Wishlist (Избранное)</div>
-                    <div class="toggle-row-desc">Клиенты могут добавлять моделей в список избранного</div>
-                  </div>
-                  <span
-                    class="restore-link"
-                    style="margin-left: 8px"
-                    onclick="resetSetting('wishlist_enabled')"
-                    title="Сбросить к умолчанию"
-                    >🔄</span
-                  >
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="wishlist_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Поиск моделей</div>
-                    <div class="toggle-row-desc">Поиск по имени и параметрам модели через бота</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="search_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Отзывы</div>
-                    <div class="toggle-row-desc">Клиенты могут оставлять отзывы о работе с агентством</div>
-                  </div>
-                  <span
-                    class="restore-link"
-                    style="margin-left: 8px"
-                    onclick="resetSetting('reviews_enabled')"
-                    title="Сбросить к умолчанию"
-                    >🔄</span
-                  >
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="reviews_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Программа лояльности</div>
-                    <div class="toggle-row-desc">Баллы и скидки для постоянных клиентов</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="loyalty_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Реферальная программа</div>
-                    <div class="toggle-row-desc">Клиенты получают бонус за приглашение новых клиентов</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="referral_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">FAQ в боте</div>
-                    <div class="toggle-row-desc">Раздел FAQ доступен клиентам через главное меню</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="faq_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Калькулятор стоимости</div>
-                    <div class="toggle-row-desc">Интерактивный калькулятор доступен клиентам в боте</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="calc_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <!-- Reviews sub-section -->
-                <div class="settings-divider" style="margin-top: 24px">Настройки отзывов</div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Авто-одобрение отзывов</div>
-                    <div class="toggle-row-desc">Отзывы публикуются без модерации</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="reviews_auto_approve" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 16px">
-                  <label>Мин. завершённых заявок для отзыва</label>
-                  <input
-                    class="admin-input"
-                    type="number"
-                    id="reviews_min_completed"
-                    placeholder="1"
-                    min="1"
-                    max="10"
-                  />
-                  <div class="field-note">Клиент может оставить отзыв только после N завершённых заявок</div>
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 16px">
-                  <label>Приглашение к отзыву</label>
-                  <textarea
-                    class="admin-input"
-                    id="reviews_prompt_text"
-                    rows="3"
-                    style="resize: vertical"
-                    placeholder="Понравилось сотрудничество? Оставьте отзыв — это займёт 1 минуту"
-                  ></textarea>
-                  <div class="field-note">Отправляется клиенту после завершения заявки</div>
-                </div>
-
-                <div class="sticky-save-bar">
-                  <button class="btn btn-md btn-gold" id="btnSaveFeatures" onclick="saveFeatures(this)">
-                    Сохранить функции бота
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Внешний вид ════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-appearance">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">🎨 Внешний вид сайта</div></div>
-              <div class="section-card-body padded" style="max-width: 560px">
-                <div class="settings-divider">Агентство</div>
-                <div class="admin-form-group">
-                  <label>Название агентства</label>
-                  <input class="admin-input" type="text" id="s_agency_name" placeholder="Nevesty Models" />
-                  <div class="field-note">Отображается в шапке сайта и в боте</div>
-                </div>
-                <div class="admin-form-group">
-                  <label>Слоган / подзаголовок</label>
-                  <input
-                    class="admin-input"
-                    type="text"
-                    id="s_tagline"
-                    placeholder="Элитное модельное агентство Москвы"
-                  />
-                  <div class="field-note">Подзаголовок на главной странице (hero-секция)</div>
-                </div>
-
-                <div class="settings-divider" style="margin-top: 24px">Фоновое изображение</div>
-                <div class="admin-form-group">
-                  <label>URL hero-изображения</label>
-                  <input class="admin-input" type="url" id="s_hero_image" placeholder="https://example.com/hero.jpg" />
-                  <div class="field-note">Прямая ссылка на изображение (рекомендуется 1920×1080 px)</div>
-                </div>
-                <div id="heroPreviewWrap" style="display: none; margin-top: 12px">
-                  <div
-                    style="
-                      font-size: 0.72rem;
-                      letter-spacing: 2px;
-                      text-transform: uppercase;
-                      color: var(--text-dim);
-                      margin-bottom: 8px;
-                    "
-                  >
-                    Предпросмотр
-                  </div>
-                  <img
-                    id="heroPreviewImg"
-                    src=""
-                    alt="Hero preview"
-                    style="width: 100%; max-height: 180px; object-fit: cover; border: 1px solid var(--border)"
-                  />
-                </div>
-
-                <button
-                  class="btn btn-md btn-ghost"
-                  style="margin-top: 16px; margin-right: 8px"
-                  onclick="previewHero()"
-                >
-                  👁 Предпросмотр
-                </button>
-                <button class="btn btn-md btn-gold" id="btnSaveAppearance" onclick="saveAppearance(this)">
-                  Сохранить внешний вид
-                </button>
-              </div>
-            </div>
-
-            <!-- Integrations -->
-            <div class="section-card" style="margin-top: 24px">
-              <div class="section-card-header"><div class="section-card-title">📊 Интеграции</div></div>
-              <div class="section-card-body padded" style="max-width: 560px">
-                <div class="admin-form-group">
-                  <label>Webhook URL</label>
-                  <input
-                    class="admin-input"
-                    type="url"
-                    id="s_webhook_url"
-                    placeholder="https://hooks.example.com/notify"
-                  />
-                  <div class="field-note">POST-запрос отправляется при новой заявке</div>
-                </div>
-
-                <div style="margin-top: 20px">
-                  <div class="toggle-row">
-                    <div class="toggle-row-info">
-                      <div class="toggle-row-title">Telegram-уведомления включены</div>
-                      <div class="toggle-row-desc">Бот отправляет сообщения менеджерам при новых заявках</div>
-                    </div>
-                    <label class="toggle-switch">
-                      <input type="checkbox" id="s_tg_notif_enabled" checked />
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
-                </div>
-
-                <div class="settings-divider" style="margin-top: 24px">Аналитика</div>
-                <div class="admin-form-group">
-                  <label>Google Analytics 4 ID (G-XXXXXXXXXX)</label>
-                  <input
-                    type="text"
-                    id="s_ga_measurement_id"
-                    class="admin-input"
-                    placeholder="G-XXXXXXXXXX"
-                    maxlength="20"
-                  />
-                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px">
-                    Вставте Measurement ID з Google Analytics 4
-                  </div>
-                </div>
-                <div class="admin-form-group">
-                  <label>Яндекс.Метрика — номер счётчика</label>
-                  <input type="text" id="s_ym_counter_id" class="admin-input" placeholder="12345678" maxlength="20" />
-                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px">
-                    Номер счётчика Яндекс.Метрики (только цифры). Загружается только при наличии согласия на cookie.
-                  </div>
-                </div>
-
-                <button
-                  class="btn btn-md btn-gold"
-                  id="btnSaveIntegrations"
-                  onclick="saveIntegrations(this)"
-                  style="margin-top: 20px"
-                >
-                  Сохранить интеграции
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Уведомления ═════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-notif">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">🔔 Настройки уведомлений</div></div>
-              <div class="section-card-body padded" style="max-width: 560px">
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Новая заявка</div>
-                    <div class="toggle-row-desc">Уведомлять в Telegram при поступлении новой заявки</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="notify_new_order" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Смена статуса</div>
-                    <div class="toggle-row-desc">Уведомлять клиента при изменении статуса его заявки</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="notify_status_change" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Новый отзыв</div>
-                    <div class="toggle-row-desc">Уведомлять менеджера, когда клиент оставил отзыв</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="notify_review" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Новое сообщение от клиента</div>
-                    <div class="toggle-row-desc">Уведомлять менеджера, когда клиент написал в бот</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="notify_message" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">SMS-уведомления клиентам</div>
-                    <div class="toggle-row-desc">Отправлять SMS при смене статуса заявки (требует SMS.ru)</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="sms_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Уведомления об отзывах</div>
-                    <div class="toggle-row-desc">Уведомлять менеджера о новых отзывах (notifications_reviews)</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input
-                      type="checkbox"
-                      id="notifications_reviews"
-                      onchange="saveSetting('notifications_reviews', this.checked ? '1' : '0')"
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Уведомления о сообщениях</div>
-                    <div class="toggle-row-desc">
-                      Уведомлять менеджера о новых сообщениях от клиентов (notifications_messages)
-                    </div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input
-                      type="checkbox"
-                      id="notifications_messages"
-                      onchange="saveSetting('notifications_messages', this.checked ? '1' : '0')"
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="settings-divider" style="margin-top: 20px">Дополнительные ключи уведомлений</div>
-
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Новая заявка (notif_new_order)</div>
-                    <div class="toggle-row-desc">Альтернативный ключ: уведомление при поступлении новой заявки</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input
-                      type="checkbox"
-                      id="notif_new_order"
-                      onchange="saveSetting('notif_new_order', this.checked ? '1' : '0')"
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Новый отзыв (notif_new_review)</div>
-                    <div class="toggle-row-desc">Альтернативный ключ: уведомление при поступлении нового отзыва</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input
-                      type="checkbox"
-                      id="notif_new_review"
-                      onchange="saveSetting('notif_new_review', this.checked ? '1' : '0')"
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Новое сообщение (notif_new_message)</div>
-                    <div class="toggle-row-desc">Альтернативный ключ: уведомление при новом сообщении от клиента</div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input
-                      type="checkbox"
-                      id="notif_new_message"
-                      onchange="saveSetting('notif_new_message', this.checked ? '1' : '0')"
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-
-                <div class="sticky-save-bar">
-                  <button class="btn btn-md btn-gold" id="btnSaveNotif" onclick="saveNotif(this)">Сохранить</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Email ══════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-email">
-            <div class="section-card" style="max-width: 600px">
-              <div class="section-card-header"><div class="section-card-title">📧 Настройки Email (SMTP)</div></div>
-              <div class="section-card-body padded">
-                <p style="font-size: 0.82rem; color: var(--text-muted); margin: 0 0 18px; line-height: 1.6">
-                  SMTP-параметры задаются через переменные окружения <code style="color: var(--gold)">.env</code>. Здесь
-                  отображается текущее состояние.
-                </p>
-
-                <div
-                  id="emailStatusBanner"
-                  style="padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; font-size: 0.85rem; display: none"
-                ></div>
-
-                <div class="settings-divider">Текущая конфигурация SMTP</div>
-
-                <div class="admin-form-group">
-                  <label>SMTP хост</label>
-                  <input class="admin-input" type="text" id="em_smtp_host" disabled placeholder="Не задан" />
-                  <div class="field-note">Переменная <code>SMTP_HOST</code> в .env</div>
-                </div>
-                <div class="admin-form-group">
-                  <label>SMTP порт</label>
-                  <input
-                    class="admin-input"
-                    type="text"
-                    id="em_smtp_port"
-                    disabled
-                    placeholder="587"
-                    style="max-width: 120px"
-                  />
-                  <div class="field-note">587 (TLS) или 465 (SSL). Переменная <code>SMTP_PORT</code></div>
-                </div>
-                <div class="admin-form-group">
-                  <label>SMTP пользователь</label>
-                  <input class="admin-input" type="text" id="em_smtp_user" disabled placeholder="Не задан" />
-                  <div class="field-note">Переменная <code>SMTP_USER</code> (отображается маскированным)</div>
-                </div>
-                <div class="admin-form-group">
-                  <label>Адрес «От» (From)</label>
-                  <input
-                    class="admin-input"
-                    type="text"
-                    id="em_smtp_from"
-                    disabled
-                    placeholder="Nevesty Models &lt;noreply@nevesty.ru&gt;"
-                  />
-                  <div class="field-note">Переменная <code>SMTP_FROM</code></div>
-                </div>
-                <div class="admin-form-group">
-                  <label>Email администраторов (получатели уведомлений)</label>
-                  <input class="admin-input" type="text" id="em_admin_emails" disabled placeholder="Не задан" />
-                  <div class="field-note">Переменная <code>ADMIN_EMAILS</code> (запятая между адресами)</div>
-                </div>
-
-                <div class="settings-divider">Тестовое письмо</div>
-
-                <div class="admin-form-group">
-                  <label>Отправить тест на email</label>
-                  <div style="display: flex; gap: 10px; align-items: center">
-                    <input
-                      class="admin-input"
-                      type="email"
-                      id="em_test_email"
-                      placeholder="your@email.com"
-                      style="flex: 1"
-                    />
-                    <button class="btn btn-md btn-gold" id="btnEmailTest" onclick="sendEmailTest(this)">
-                      Отправить тест
+                    <button class="btn btn-md btn-gold" id="btnSaveProfile" onclick="saveProfile(this)">
+                      Сохранить профиль
                     </button>
                   </div>
-                  <div class="field-note">Оставьте пустым, чтобы отправить на email вашего профиля.</div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Бот ════════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-bot">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">🤖 Тексты бота</div></div>
+                  <div class="section-card-body padded">
+                    <!-- Greeting -->
+                    <div class="admin-form-group">
+                      <div class="form-label-row">
+                        <label>Приветствие при /start</label>
+                        <span class="restore-link" onclick="restoreDefault('greeting')">Вернуть по умолчанию</span>
+                      </div>
+                      <textarea
+                        class="admin-input"
+                        id="greeting"
+                        rows="5"
+                        style="resize: vertical"
+                        oninput="updateCharCount(this, 'cnt_greeting', 500)"
+                        placeholder="Привет, {name}! Добро пожаловать в Nevesty Models..."
+                      ></textarea>
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px">
+                        <div class="field-note">
+                          Используйте <code style="color: var(--gold)">{name}</code> для имени клиента
+                        </div>
+                        <div class="char-count" id="cnt_greeting">0 / 500</div>
+                      </div>
+                      <button class="btn btn-sm btn-ghost" style="margin-top: 10px" onclick="previewGreeting()">
+                        👁 Предпросмотр в Telegram
+                      </button>
+                      <div class="tg-preview-wrap" id="greetingPreview">
+                        <div class="tg-preview-label">Telegram — как увидит клиент</div>
+                        <div class="tg-bubble" id="greetingPreviewText"></div>
+                        <div class="tg-bubble-meta">Nevesty Models Bot · только что</div>
+                      </div>
+                    </div>
+
+                    <!-- About -->
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <div class="form-label-row">
+                        <label>О нас (/about)</label>
+                        <span class="restore-link" onclick="restoreDefault('about_text')">Вернуть по умолчанию</span>
+                      </div>
+                      <textarea
+                        class="admin-input"
+                        id="about_text"
+                        rows="5"
+                        style="resize: vertical"
+                        oninput="updateCharCount(this, 'cnt_about', 1000)"
+                        placeholder="Nevesty Models — элитное модельное агентство..."
+                      ></textarea>
+                      <div class="char-count" id="cnt_about" style="margin-top: 5px">0 / 1000</div>
+                    </div>
+
+                    <!-- Manager hours -->
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Часы работы менеджера</label>
+                      <input
+                        class="admin-input"
+                        type="text"
+                        id="manager_hours"
+                        placeholder="Пн–Пт 10:00–20:00, Сб 11:00–18:00"
+                      />
+                      <div class="field-note">Отображается клиентам в боте</div>
+                    </div>
+
+                    <!-- Manager auto-reply -->
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Авто-ответ менеджера</label>
+                      <textarea
+                        class="admin-input"
+                        id="manager_reply"
+                        rows="3"
+                        style="resize: vertical"
+                        placeholder="Спасибо за ваше сообщение! Менеджер ответит в ближайшее время."
+                      ></textarea>
+                    </div>
+
+                    <!-- Pricing text -->
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Текст прайс-листа в боте</label>
+                      <textarea
+                        class="admin-input"
+                        id="pricing_text"
+                        rows="6"
+                        style="resize: vertical"
+                        placeholder="✨ Прайс-лист&#10;&#10;• Деловые мероприятия: от 15 000 ₽&#10;• Фотосессии: от 8 000 ₽&#10;• Показы мод: от 30 000 ₽"
+                      ></textarea>
+                      <div class="field-note">
+                        Отображается по кнопке «📋 Прайс» в меню клиента (если включён Калькулятор)
+                      </div>
+                    </div>
+
+                    <!-- Site URL -->
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>URL сайта</label>
+                      <input class="admin-input" type="url" id="site_url" placeholder="https://nevesty-models.ru" />
+                      <div class="field-note">Используется в ссылках, которые бот отправляет клиентам</div>
+                    </div>
+
+                    <!-- Telegram channel -->
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Telegram-канал агентства</label>
+                      <div style="position: relative">
+                        <span
+                          style="
+                            position: absolute;
+                            left: 14px;
+                            top: 50%;
+                            transform: translateY(-50%);
+                            color: var(--text-dim);
+                            font-size: 0.9rem;
+                          "
+                          >@</span
+                        >
+                        <input
+                          class="admin-input"
+                          type="text"
+                          id="tg_channel"
+                          placeholder="nevesty_models"
+                          style="padding-left: 28px"
+                        />
+                      </div>
+                      <div class="field-note">Кнопка «Наш канал» появится в главном меню клиента</div>
+                    </div>
+
+                    <!-- Welcome photo URL -->
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Фото приветствия (URL)</label>
+                      <input
+                        class="admin-input"
+                        type="url"
+                        id="welcome_photo_url"
+                        placeholder="https://example.com/welcome.jpg"
+                      />
+                      <div class="field-note">Отправляется клиенту при первом /start вместо текста</div>
+                    </div>
+
+                    <!-- Main menu text -->
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Текст главного меню</label>
+                      <textarea
+                        class="admin-input"
+                        id="main_menu_text"
+                        rows="3"
+                        style="resize: vertical"
+                        placeholder="Выберите действие из меню ниже:"
+                      ></textarea>
+                      <div class="field-note">Текст, отображаемый вместе с кнопками главного меню клиента</div>
+                    </div>
+
+                    <div class="sticky-save-bar">
+                      <button class="btn btn-md btn-gold" id="btnSaveBot" onclick="saveBot(this)">
+                        Сохранить тексты бота
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div
-                  id="emailTestResult"
-                  style="display: none; margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 0.84rem"
-                ></div>
+                <!-- Bot commands reference -->
+                <div class="section-card" style="margin-top: 24px">
+                  <div class="section-card-header">
+                    <div class="section-card-title">📋 Команды бота — справочник</div>
+                  </div>
+                  <div class="section-card-body padded">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px">
+                      <div>
+                        <div class="settings-divider">Для менеджеров</div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); line-height: 2.2">
+                          <div><code style="color: var(--gold)">/start</code> — приветствие и команды</div>
+                          <div><code style="color: var(--gold)">/orders</code> — последние 10 заявок</div>
+                          <div><code style="color: var(--gold)">/new_orders</code> — только новые заявки</div>
+                          <div><code style="color: var(--gold)">/models</code> — список моделей</div>
+                          <div><code style="color: var(--gold)">/stats</code> — статистика агентства</div>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="settings-divider">Для клиентов</div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); line-height: 2.2">
+                          <div><code style="color: var(--gold)">/start</code> — приветствие с кнопками</div>
+                          <div><code style="color: var(--gold)">/status NM-XXXX</code> — статус заявки</div>
+                          <div>Любое сообщение — переслать менеджеру</div>
+                          <div><code style="color: var(--gold)">/start NM-XXXX</code> — привязать заявку</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      style="
+                        margin-top: 20px;
+                        padding: 14px 16px;
+                        background: var(--bg2);
+                        border: 1px solid var(--border);
+                        font-size: 0.82rem;
+                        color: var(--text-muted);
+                        line-height: 1.9;
+                      "
+                    >
+                      <strong style="color: var(--text)">⚙️ Первичная настройка:</strong><br />
+                      1. Создайте бота через <strong style="color: var(--gold)">@BotFather</strong> в Telegram<br />
+                      2. Скопируйте токен → файл <code style="color: var(--gold)">.env</code> →
+                      <code>TELEGRAM_BOT_TOKEN</code><br />
+                      3. Узнайте свой Telegram ID через <strong style="color: var(--gold)">@userinfobot</strong><br />
+                      4. Добавьте ID в <code>.env</code> → <code>ADMIN_TELEGRAM_IDS</code> (через запятую)
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-                <div class="settings-divider">Пример .env</div>
-                <pre
-                  style="
-                    background: var(--bg2);
-                    border: 1px solid var(--border);
-                    border-radius: 8px;
-                    padding: 16px;
-                    font-size: 0.78rem;
-                    color: #aaa;
-                    overflow-x: auto;
-                    line-height: 1.7;
-                    margin: 0;
-                  "
-                >
+              <!-- ═══ TAB: Контакты ═══════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-contacts">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">📞 Контакты агентства</div></div>
+                  <div class="section-card-body padded" style="max-width: 560px">
+                    <div class="admin-form-group">
+                      <label>Телефон агентства</label>
+                      <input class="admin-input" type="text" id="contacts_phone" placeholder="+7 (999) 123-45-67" />
+                    </div>
+                    <div class="admin-form-group">
+                      <label>Email агентства</label>
+                      <input
+                        class="admin-input"
+                        type="email"
+                        id="contacts_email"
+                        placeholder="info@nevesty-models.ru"
+                      />
+                    </div>
+                    <div class="admin-form-group">
+                      <label>Instagram</label>
+                      <div style="position: relative">
+                        <span
+                          style="
+                            position: absolute;
+                            left: 14px;
+                            top: 50%;
+                            transform: translateY(-50%);
+                            color: var(--text-dim);
+                            font-size: 0.9rem;
+                          "
+                          >@</span
+                        >
+                        <input
+                          class="admin-input"
+                          type="text"
+                          id="contacts_instagram"
+                          placeholder="nevesty_models"
+                          style="padding-left: 28px"
+                        />
+                      </div>
+                    </div>
+                    <div class="admin-form-group">
+                      <label>WhatsApp</label>
+                      <input class="admin-input" type="text" id="contacts_whatsapp" placeholder="+7 (999) 123-45-67" />
+                      <div class="field-note">Номер телефона в формате WhatsApp (для ссылки wa.me)</div>
+                    </div>
+                    <div class="admin-form-group">
+                      <label>Адрес</label>
+                      <input
+                        class="admin-input"
+                        type="text"
+                        id="contacts_address"
+                        placeholder="Москва, ул. Пречистенка, 1"
+                      />
+                    </div>
+                    <div class="sticky-save-bar">
+                      <button class="btn btn-md btn-gold" id="btnSaveContacts" onclick="saveContacts(this)">
+                        Сохранить контакты
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Прайс ══════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-pricing">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">💰 Прайс-лист</div></div>
+                  <div class="section-card-body padded">
+                    <div class="admin-form-group">
+                      <div class="form-label-row" style="margin-bottom: 8px">
+                        <label style="margin: 0">Текст прайс-листа</label>
+                        <div class="char-count" id="cnt_pricing">0 / 2000</div>
+                      </div>
+                      <textarea
+                        class="admin-input"
+                        id="pricing"
+                        rows="12"
+                        style="resize: vertical"
+                        oninput="updateCharCount(this, 'cnt_pricing', 2000)"
+                        placeholder="Фотосессия — от 15 000 ₽ / 4 ч&#10;Показ мод — от 25 000 ₽&#10;Корпоратив — от 20 000 ₽ / 3 ч&#10;..."
+                      ></textarea>
+                      <div class="field-note">Текст отображается в боте по команде /pricing и на сайте</div>
+                    </div>
+
+                    <!-- Pricing tier minimums -->
+                    <div class="form-row-3" style="margin-top: 16px">
+                      <div class="admin-form-group">
+                        <label>Цена Старт (от, ₽)</label>
+                        <input type="number" class="admin-input" id="pricing_start_from" placeholder="8000" min="0" />
+                      </div>
+                      <div class="admin-form-group">
+                        <label>Цена Мероприятие (от, ₽)</label>
+                        <input type="number" class="admin-input" id="pricing_event_from" placeholder="15000" min="0" />
+                      </div>
+                      <div class="admin-form-group">
+                        <label>Цена Премиум (от, ₽)</label>
+                        <input
+                          type="number"
+                          class="admin-input"
+                          id="pricing_premium_from"
+                          placeholder="30000"
+                          min="0"
+                        />
+                      </div>
+                    </div>
+                    <div class="field-note" style="margin-top: 4px">
+                      Минимальные цены для карточек на странице Цены и калькулятора. Оставьте пустым для значений по
+                      умолчанию.
+                    </div>
+                    <div class="sticky-save-bar">
+                      <button class="btn btn-md btn-gold" id="btnSavePricing" onclick="savePricing(this)">
+                        Сохранить прайс
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Бронирование ═══════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-booking">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">📅 Настройки бронирования</div></div>
+                  <div class="section-card-body padded" style="max-width: 560px">
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Быстрая заявка</div>
+                        <div class="toggle-row-desc">
+                          Кнопка быстрой заявки (имя + телефон) отображается на сайте и в боте
+                        </div>
+                      </div>
+                      <span
+                        class="restore-link"
+                        style="margin-left: 8px"
+                        onclick="resetSetting('quick_booking_enabled')"
+                        title="Сбросить к умолчанию"
+                        >🔄</span
+                      >
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="quick_booking_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Авто-подтверждение</div>
+                        <div class="toggle-row-desc">
+                          Новые заявки автоматически переводятся в статус "Подтверждена"
+                        </div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="booking_auto_confirm" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Требовать email</div>
+                        <div class="toggle-row-desc">Email становится обязательным полем при оформлении заявки</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="booking_require_email" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Авто-подтверждение (booking_autoconfirm)</div>
+                        <div class="toggle-row-desc">Альтернативный ключ авто-подтверждения для внешних интеграций</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input
+                          type="checkbox"
+                          id="booking_autoconfirm"
+                          onchange="saveSetting('booking_autoconfirm', this.checked ? '1' : '0')"
+                        />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Минимальный бюджет</label>
+                      <input class="admin-input" type="text" id="booking_min_budget" placeholder="5000" />
+                      <div class="field-note">
+                        Минимальная сумма заявки в рублях. Оставьте пустым для отключения ограничения.
+                      </div>
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Сообщение после бронирования</label>
+                      <textarea
+                        class="admin-input"
+                        id="booking_confirm_msg"
+                        rows="4"
+                        style="resize: vertical"
+                        placeholder="Ваша заявка принята! Менеджер свяжется с вами в ближайшее время."
+                      ></textarea>
+                      <div class="field-note">Это сообщение клиент получит сразу после подачи заявки</div>
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Текст страницы «Спасибо»</label>
+                      <textarea
+                        class="admin-input"
+                        id="booking_thanks_text"
+                        rows="3"
+                        style="resize: vertical"
+                        placeholder="Спасибо за заявку! Наш менеджер свяжется с вами в течение 24 часов."
+                      ></textarea>
+                      <div class="field-note">
+                        Текст отображается на странице подтверждения после успешного бронирования
+                      </div>
+                    </div>
+
+                    <div class="sticky-save-bar">
+                      <button class="btn btn-md btn-gold" id="btnSaveBooking" onclick="saveBooking(this)">
+                        Сохранить настройки бронирования
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Каталог ════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-catalog">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">📋 Настройки каталога</div></div>
+                  <div class="section-card-body padded" style="max-width: 560px">
+                    <div class="admin-form-group">
+                      <label>Заголовок каталога</label>
+                      <input class="admin-input" type="text" id="catalog_title" placeholder="Наши модели" />
+                      <div class="field-note">Заголовок страницы каталога на сайте</div>
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 16px">
+                      <div class="form-label-row">
+                        <label>Количество моделей на странице</label>
+                        <span class="restore-link" onclick="resetSetting('catalog_per_page', 'catalog_per_page')"
+                          >🔄 По умолчанию</span
+                        >
+                      </div>
+                      <input
+                        class="admin-input"
+                        type="number"
+                        id="catalog_per_page"
+                        placeholder="12"
+                        min="1"
+                        max="100"
+                      />
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 16px">
+                      <label>Сортировка по умолчанию</label>
+                      <select class="admin-input" id="catalog_default_sort">
+                        <option value="id_desc">Сначала новые</option>
+                        <option value="name_asc">По алфавиту</option>
+                        <option value="available_first">Сначала доступные</option>
+                      </select>
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 16px">
+                      <div class="form-label-row">
+                        <label>Сортировка каталога</label>
+                        <span class="restore-link" onclick="resetSetting('catalog_sort', 'catalog_sort')"
+                          >🔄 По умолчанию</span
+                        >
+                      </div>
+                      <select class="admin-input" id="catalog_sort">
+                        <option value="featured">По топу (featured першими)</option>
+                        <option value="name">По алфавіту</option>
+                        <option value="newest">По новизні</option>
+                        <option value="rating">По рейтингу</option>
+                      </select>
+                    </div>
+
+                    <div class="toggle-row" style="margin-top: 8px">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Показывать город</div>
+                        <div class="toggle-row-desc">Город модели отображается в карточке каталога</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="catalog_show_city" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Бейдж "Топ-модель"</div>
+                        <div class="toggle-row-desc">Отображать бейдж на карточках featured-моделей</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="catalog_badge_top" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 20px">
+                      <label>Список городов</label>
+                      <textarea
+                        class="admin-input"
+                        id="cities_list"
+                        rows="4"
+                        style="resize: vertical"
+                        placeholder="Москва, Санкт-Петербург, Казань, Краснодар, Екатеринбург"
+                      ></textarea>
+                      <div class="field-note">Города через запятую. Используются в фильтрах каталога и боте.</div>
+                    </div>
+
+                    <div class="sticky-save-bar">
+                      <button class="btn btn-md btn-gold" id="btnSaveCatalog" onclick="saveCatalog(this)">
+                        Сохранить настройки каталога
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Функции бота ═══════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-features">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">🔧 Функции бота</div></div>
+                  <div class="section-card-body padded" style="max-width: 560px">
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Wishlist (Избранное)</div>
+                        <div class="toggle-row-desc">Клиенты могут добавлять моделей в список избранного</div>
+                      </div>
+                      <span
+                        class="restore-link"
+                        style="margin-left: 8px"
+                        onclick="resetSetting('wishlist_enabled')"
+                        title="Сбросить к умолчанию"
+                        >🔄</span
+                      >
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="wishlist_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Поиск моделей</div>
+                        <div class="toggle-row-desc">Поиск по имени и параметрам модели через бота</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="search_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Отзывы</div>
+                        <div class="toggle-row-desc">Клиенты могут оставлять отзывы о работе с агентством</div>
+                      </div>
+                      <span
+                        class="restore-link"
+                        style="margin-left: 8px"
+                        onclick="resetSetting('reviews_enabled')"
+                        title="Сбросить к умолчанию"
+                        >🔄</span
+                      >
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="reviews_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Программа лояльности</div>
+                        <div class="toggle-row-desc">Баллы и скидки для постоянных клиентов</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="loyalty_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Реферальная программа</div>
+                        <div class="toggle-row-desc">Клиенты получают бонус за приглашение новых клиентов</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="referral_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">FAQ в боте</div>
+                        <div class="toggle-row-desc">Раздел FAQ доступен клиентам через главное меню</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="faq_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Калькулятор стоимости</div>
+                        <div class="toggle-row-desc">Интерактивный калькулятор доступен клиентам в боте</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="calc_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <!-- Reviews sub-section -->
+                    <div class="settings-divider" style="margin-top: 24px">Настройки отзывов</div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Авто-одобрение отзывов</div>
+                        <div class="toggle-row-desc">Отзывы публикуются без модерации</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="reviews_auto_approve" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 16px">
+                      <label>Мин. завершённых заявок для отзыва</label>
+                      <input
+                        class="admin-input"
+                        type="number"
+                        id="reviews_min_completed"
+                        placeholder="1"
+                        min="1"
+                        max="10"
+                      />
+                      <div class="field-note">Клиент может оставить отзыв только после N завершённых заявок</div>
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 16px">
+                      <label>Приглашение к отзыву</label>
+                      <textarea
+                        class="admin-input"
+                        id="reviews_prompt_text"
+                        rows="3"
+                        style="resize: vertical"
+                        placeholder="Понравилось сотрудничество? Оставьте отзыв — это займёт 1 минуту"
+                      ></textarea>
+                      <div class="field-note">Отправляется клиенту после завершения заявки</div>
+                    </div>
+
+                    <div class="sticky-save-bar">
+                      <button class="btn btn-md btn-gold" id="btnSaveFeatures" onclick="saveFeatures(this)">
+                        Сохранить функции бота
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Внешний вид ════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-appearance">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">🎨 Внешний вид сайта</div></div>
+                  <div class="section-card-body padded" style="max-width: 560px">
+                    <div class="settings-divider">Агентство</div>
+                    <div class="admin-form-group">
+                      <label>Название агентства</label>
+                      <input class="admin-input" type="text" id="s_agency_name" placeholder="Nevesty Models" />
+                      <div class="field-note">Отображается в шапке сайта и в боте</div>
+                    </div>
+                    <div class="admin-form-group">
+                      <label>Слоган / подзаголовок</label>
+                      <input
+                        class="admin-input"
+                        type="text"
+                        id="s_tagline"
+                        placeholder="Элитное модельное агентство Москвы"
+                      />
+                      <div class="field-note">Подзаголовок на главной странице (hero-секция)</div>
+                    </div>
+
+                    <div class="settings-divider" style="margin-top: 24px">Фоновое изображение</div>
+                    <div class="admin-form-group">
+                      <label>URL hero-изображения</label>
+                      <input
+                        class="admin-input"
+                        type="url"
+                        id="s_hero_image"
+                        placeholder="https://example.com/hero.jpg"
+                      />
+                      <div class="field-note">Прямая ссылка на изображение (рекомендуется 1920×1080 px)</div>
+                    </div>
+                    <div id="heroPreviewWrap" style="display: none; margin-top: 12px">
+                      <div
+                        style="
+                          font-size: 0.72rem;
+                          letter-spacing: 2px;
+                          text-transform: uppercase;
+                          color: var(--text-dim);
+                          margin-bottom: 8px;
+                        "
+                      >
+                        Предпросмотр
+                      </div>
+                      <img
+                        id="heroPreviewImg"
+                        src=""
+                        alt="Hero preview"
+                        style="width: 100%; max-height: 180px; object-fit: cover; border: 1px solid var(--border)"
+                      />
+                    </div>
+
+                    <button
+                      class="btn btn-md btn-ghost"
+                      style="margin-top: 16px; margin-right: 8px"
+                      onclick="previewHero()"
+                    >
+                      👁 Предпросмотр
+                    </button>
+                    <button class="btn btn-md btn-gold" id="btnSaveAppearance" onclick="saveAppearance(this)">
+                      Сохранить внешний вид
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Integrations -->
+                <div class="section-card" style="margin-top: 24px">
+                  <div class="section-card-header"><div class="section-card-title">📊 Интеграции</div></div>
+                  <div class="section-card-body padded" style="max-width: 560px">
+                    <div class="admin-form-group">
+                      <label>Webhook URL</label>
+                      <input
+                        class="admin-input"
+                        type="url"
+                        id="s_webhook_url"
+                        placeholder="https://hooks.example.com/notify"
+                      />
+                      <div class="field-note">POST-запрос отправляется при новой заявке</div>
+                    </div>
+
+                    <div style="margin-top: 20px">
+                      <div class="toggle-row">
+                        <div class="toggle-row-info">
+                          <div class="toggle-row-title">Telegram-уведомления включены</div>
+                          <div class="toggle-row-desc">Бот отправляет сообщения менеджерам при новых заявках</div>
+                        </div>
+                        <label class="toggle-switch">
+                          <input type="checkbox" id="s_tg_notif_enabled" checked />
+                          <span class="toggle-slider"></span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="settings-divider" style="margin-top: 24px">Аналитика</div>
+                    <div class="admin-form-group">
+                      <label>Google Analytics 4 ID (G-XXXXXXXXXX)</label>
+                      <input
+                        type="text"
+                        id="s_ga_measurement_id"
+                        class="admin-input"
+                        placeholder="G-XXXXXXXXXX"
+                        maxlength="20"
+                      />
+                      <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px">
+                        Вставте Measurement ID з Google Analytics 4
+                      </div>
+                    </div>
+                    <div class="admin-form-group">
+                      <label>Яндекс.Метрика — номер счётчика</label>
+                      <input
+                        type="text"
+                        id="s_ym_counter_id"
+                        class="admin-input"
+                        placeholder="12345678"
+                        maxlength="20"
+                      />
+                      <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px">
+                        Номер счётчика Яндекс.Метрики (только цифры). Загружается только при наличии согласия на cookie.
+                      </div>
+                    </div>
+
+                    <button
+                      class="btn btn-md btn-gold"
+                      id="btnSaveIntegrations"
+                      onclick="saveIntegrations(this)"
+                      style="margin-top: 20px"
+                    >
+                      Сохранить интеграции
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Уведомления ═════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-notif">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">🔔 Настройки уведомлений</div></div>
+                  <div class="section-card-body padded" style="max-width: 560px">
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Новая заявка</div>
+                        <div class="toggle-row-desc">Уведомлять в Telegram при поступлении новой заявки</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="notify_new_order" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Смена статуса</div>
+                        <div class="toggle-row-desc">Уведомлять клиента при изменении статуса его заявки</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="notify_status_change" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Новый отзыв</div>
+                        <div class="toggle-row-desc">Уведомлять менеджера, когда клиент оставил отзыв</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="notify_review" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Новое сообщение от клиента</div>
+                        <div class="toggle-row-desc">Уведомлять менеджера, когда клиент написал в бот</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="notify_message" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">SMS-уведомления клиентам</div>
+                        <div class="toggle-row-desc">Отправлять SMS при смене статуса заявки (требует SMS.ru)</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="sms_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Уведомления об отзывах</div>
+                        <div class="toggle-row-desc">Уведомлять менеджера о новых отзывах (notifications_reviews)</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input
+                          type="checkbox"
+                          id="notifications_reviews"
+                          onchange="saveSetting('notifications_reviews', this.checked ? '1' : '0')"
+                        />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Уведомления о сообщениях</div>
+                        <div class="toggle-row-desc">
+                          Уведомлять менеджера о новых сообщениях от клиентов (notifications_messages)
+                        </div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input
+                          type="checkbox"
+                          id="notifications_messages"
+                          onchange="saveSetting('notifications_messages', this.checked ? '1' : '0')"
+                        />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="settings-divider" style="margin-top: 20px">Дополнительные ключи уведомлений</div>
+
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Новая заявка (notif_new_order)</div>
+                        <div class="toggle-row-desc">Альтернативный ключ: уведомление при поступлении новой заявки</div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input
+                          type="checkbox"
+                          id="notif_new_order"
+                          onchange="saveSetting('notif_new_order', this.checked ? '1' : '0')"
+                        />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Новый отзыв (notif_new_review)</div>
+                        <div class="toggle-row-desc">
+                          Альтернативный ключ: уведомление при поступлении нового отзыва
+                        </div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input
+                          type="checkbox"
+                          id="notif_new_review"
+                          onchange="saveSetting('notif_new_review', this.checked ? '1' : '0')"
+                        />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Новое сообщение (notif_new_message)</div>
+                        <div class="toggle-row-desc">
+                          Альтернативный ключ: уведомление при новом сообщении от клиента
+                        </div>
+                      </div>
+                      <label class="toggle-switch">
+                        <input
+                          type="checkbox"
+                          id="notif_new_message"
+                          onchange="saveSetting('notif_new_message', this.checked ? '1' : '0')"
+                        />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="sticky-save-bar">
+                      <button class="btn btn-md btn-gold" id="btnSaveNotif" onclick="saveNotif(this)">Сохранить</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Email ══════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-email">
+                <div class="section-card" style="max-width: 600px">
+                  <div class="section-card-header"><div class="section-card-title">📧 Настройки Email (SMTP)</div></div>
+                  <div class="section-card-body padded">
+                    <p style="font-size: 0.82rem; color: var(--text-muted); margin: 0 0 18px; line-height: 1.6">
+                      SMTP-параметры задаются через переменные окружения <code style="color: var(--gold)">.env</code>.
+                      Здесь отображается текущее состояние.
+                    </p>
+
+                    <div
+                      id="emailStatusBanner"
+                      style="
+                        padding: 14px 18px;
+                        border-radius: 8px;
+                        margin-bottom: 20px;
+                        font-size: 0.85rem;
+                        display: none;
+                      "
+                    ></div>
+
+                    <div class="settings-divider">Текущая конфигурация SMTP</div>
+
+                    <div class="admin-form-group">
+                      <label>SMTP хост</label>
+                      <input class="admin-input" type="text" id="em_smtp_host" disabled placeholder="Не задан" />
+                      <div class="field-note">Переменная <code>SMTP_HOST</code> в .env</div>
+                    </div>
+                    <div class="admin-form-group">
+                      <label>SMTP порт</label>
+                      <input
+                        class="admin-input"
+                        type="text"
+                        id="em_smtp_port"
+                        disabled
+                        placeholder="587"
+                        style="max-width: 120px"
+                      />
+                      <div class="field-note">587 (TLS) или 465 (SSL). Переменная <code>SMTP_PORT</code></div>
+                    </div>
+                    <div class="admin-form-group">
+                      <label>SMTP пользователь</label>
+                      <input class="admin-input" type="text" id="em_smtp_user" disabled placeholder="Не задан" />
+                      <div class="field-note">Переменная <code>SMTP_USER</code> (отображается маскированным)</div>
+                    </div>
+                    <div class="admin-form-group">
+                      <label>Адрес «От» (From)</label>
+                      <input
+                        class="admin-input"
+                        type="text"
+                        id="em_smtp_from"
+                        disabled
+                        placeholder="Nevesty Models &lt;noreply@nevesty.ru&gt;"
+                      />
+                      <div class="field-note">Переменная <code>SMTP_FROM</code></div>
+                    </div>
+                    <div class="admin-form-group">
+                      <label>Email администраторов (получатели уведомлений)</label>
+                      <input class="admin-input" type="text" id="em_admin_emails" disabled placeholder="Не задан" />
+                      <div class="field-note">Переменная <code>ADMIN_EMAILS</code> (запятая между адресами)</div>
+                    </div>
+
+                    <div class="settings-divider">Тестовое письмо</div>
+
+                    <div class="admin-form-group">
+                      <label>Отправить тест на email</label>
+                      <div style="display: flex; gap: 10px; align-items: center">
+                        <input
+                          class="admin-input"
+                          type="email"
+                          id="em_test_email"
+                          placeholder="your@email.com"
+                          style="flex: 1"
+                        />
+                        <button class="btn btn-md btn-gold" id="btnEmailTest" onclick="sendEmailTest(this)">
+                          Отправить тест
+                        </button>
+                      </div>
+                      <div class="field-note">Оставьте пустым, чтобы отправить на email вашего профиля.</div>
+                    </div>
+
+                    <div
+                      id="emailTestResult"
+                      style="
+                        display: none;
+                        margin-top: 12px;
+                        padding: 12px 16px;
+                        border-radius: 8px;
+                        font-size: 0.84rem;
+                      "
+                    ></div>
+
+                    <div class="settings-divider">Пример .env</div>
+                    <pre
+                      style="
+                        background: var(--bg2);
+                        border: 1px solid var(--border);
+                        border-radius: 8px;
+                        padding: 16px;
+                        font-size: 0.78rem;
+                        color: #aaa;
+                        overflow-x: auto;
+                        line-height: 1.7;
+                        margin: 0;
+                      "
+                    >
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your@gmail.com
 SMTP_PASS=your_app_password
 SMTP_FROM=Nevesty Models &lt;noreply@nevesty.ru&gt;
 ADMIN_EMAILS=admin@nevesty.ru,manager@nevesty.ru</pre
-                >
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Оплата ══════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-payment">
-            <div class="section-card" style="max-width: 600px">
-              <div class="section-card-header"><div class="section-card-title">💳 Настройки оплаты</div></div>
-              <div class="section-card-body padded">
-                <div class="admin-form-group">
-                  <label class="admin-label">Провайдер оплаты</label>
-                  <select class="admin-input" id="s_payment_provider">
-                    <option value="disabled">Отключено</option>
-                    <option value="yookassa">ЮKassa</option>
-                    <option value="stripe">Stripe</option>
-                  </select>
-                  <div class="field-note">Выберите систему приёма платежей или отключите оплату</div>
-                </div>
-
-                <div class="admin-form-group" id="payment_yookassa_fields" style="display: none">
-                  <label class="admin-label">ЮKassa Shop ID</label>
-                  <input
-                    class="admin-input"
-                    type="text"
-                    id="s_yookassa_shop_id"
-                    placeholder="Ваш shopId из личного кабинета ЮKassa"
-                  />
-                  <div class="field-note">
-                    Задаётся через env <code>YOOKASSA_SHOP_ID</code> — отображается для справки
-                  </div>
-                </div>
-
-                <div class="admin-form-group" id="payment_stripe_fields" style="display: none">
-                  <label class="admin-label">Stripe Secret Key</label>
-                  <input
-                    class="admin-input"
-                    type="password"
-                    id="s_stripe_secret_key"
-                    placeholder="sk_live_... (задаётся в .env)"
-                    autocomplete="off"
-                  />
-                  <div class="field-note">Задаётся через env <code>STRIPE_SECRET_KEY</code></div>
-                </div>
-
-                <div class="admin-form-group">
-                  <label class="admin-label">Минимальная сумма для предоплаты (%)</label>
-                  <input
-                    class="admin-input"
-                    type="number"
-                    id="s_payment_prepay_percent"
-                    min="0"
-                    max="100"
-                    step="5"
-                    placeholder="50"
-                  />
-                  <div class="field-note">Процент от суммы заявки, который клиент платит авансом. 0 — полная сумма</div>
-                </div>
-
-                <div class="admin-form-group">
-                  <label class="admin-label">Минимальная сумма (₽)</label>
-                  <input
-                    class="admin-input"
-                    type="number"
-                    id="s_payment_min_amount"
-                    min="0"
-                    step="100"
-                    placeholder="1000"
-                  />
-                  <div class="field-note">Минимальная сумма платежа в рублях</div>
-                </div>
-
-                <div
-                  style="
-                    background: #fff3cd;
-                    border: 1px solid #ffc107;
-                    border-radius: 8px;
-                    padding: 14px;
-                    margin: 16px 0;
-                    font-size: 0.82rem;
-                    color: #856404;
-                    line-height: 1.6;
-                  "
-                >
-                  <strong>Важно:</strong> Ключи API (<code>YOOKASSA_SECRET_KEY</code>, <code>STRIPE_SECRET_KEY</code>,
-                  <code>STRIPE_WEBHOOK_SECRET</code>) задаются в файле <code>.env</code> и не хранятся в базе данных.
-                  Настройки выше влияют только на выбор провайдера и параметры предоплаты.
-                </div>
-
-                <div
-                  style="
-                    background: #e8f5e9;
-                    border: 1px solid #4caf50;
-                    border-radius: 8px;
-                    padding: 14px;
-                    margin: 16px 0;
-                    font-size: 0.82rem;
-                    color: #2e7d32;
-                    line-height: 1.6;
-                  "
-                >
-                  <strong>Webhook-адреса для настройки в личном кабинете:</strong><br />
-                  <code>ЮKassa:</code> <code id="webhook_yookassa_url">/api/webhooks/yookassa</code><br />
-                  <code>Stripe:</code> <code id="webhook_stripe_url">/api/webhooks/stripe</code>
-                </div>
-
-                <button class="btn btn-md btn-gold" id="btnSavePayment" onclick="savePaymentSettings(this)">
-                  Сохранить настройки оплаты
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: CRM ══════════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-crm">
-            <div class="section-card" style="max-width: 600px">
-              <div class="section-card-header"><div class="section-card-title">🔗 CRM-интеграции</div></div>
-              <div class="section-card-body padded">
-                <div
-                  style="
-                    background: #e8f5e9;
-                    border: 1px solid #4caf50;
-                    border-radius: 8px;
-                    padding: 14px;
-                    margin-bottom: 20px;
-                    font-size: 0.82rem;
-                    color: #2e7d32;
-                    line-height: 1.6;
-                  "
-                >
-                  При создании заявки и смене статуса система автоматически отправит данные во все настроенные CRM.
-                  Оставьте поля пустыми, чтобы отключить интеграцию.
-                </div>
-
-                <div class="admin-form-group">
-                  <label class="admin-label">Общий вебхук URL</label>
-                  <input
-                    class="admin-input"
-                    type="url"
-                    id="crm_webhook_url"
-                    placeholder="https://your-crm.com/webhook"
-                  />
-                  <div class="field-note">Универсальный вебхук — POST с JSON {event, order, timestamp}</div>
-                </div>
-
-                <div class="admin-form-group">
-                  <label class="admin-label">Секрет вебхука</label>
-                  <input
-                    class="admin-input"
-                    type="password"
-                    id="crm_webhook_secret"
-                    placeholder="my-secret-token"
-                    autocomplete="off"
-                  />
-                  <div class="field-note">Передаётся в заголовке <code>X-Webhook-Secret</code> для верификации</div>
-                </div>
-
-                <hr style="border: none; border-top: 1px solid var(--border); margin: 20px 0" />
-
-                <div class="admin-form-group">
-                  <label class="admin-label">AmoCRM — вебхук URL</label>
-                  <input
-                    class="admin-input"
-                    type="url"
-                    id="amocrm_webhook_url"
-                    placeholder="https://your-domain.amocrm.ru/api/v4/leads"
-                  />
-                  <div class="field-note">URL для создания сделки в AmoCRM при новой заявке</div>
-                </div>
-
-                <div class="admin-form-group">
-                  <label class="admin-label">AmoCRM — API ключ</label>
-                  <input
-                    class="admin-input"
-                    type="password"
-                    id="amocrm_api_key"
-                    placeholder="Bearer token из личного кабинета AmoCRM"
-                    autocomplete="off"
-                  />
-                  <div class="field-note">Передаётся в заголовке <code>Authorization: Bearer ...</code></div>
-                </div>
-
-                <hr style="border: none; border-top: 1px solid var(--border); margin: 20px 0" />
-
-                <div class="admin-form-group">
-                  <label class="admin-label">Bitrix24 — вебхук URL</label>
-                  <input
-                    class="admin-input"
-                    type="url"
-                    id="bitrix24_webhook_url"
-                    placeholder="https://your-domain.bitrix24.ru/rest/1/xxxx/"
-                  />
-                  <div class="field-note">
-                    URL входящего вебхука из раздела «Разработчикам» → «Входящие вебхуки». Должен заканчиваться на
-                    <code>/</code>
-                  </div>
-                </div>
-
-                <button class="btn btn-md btn-gold" id="btnSaveCRM" onclick="saveCRMSettings(this)">
-                  Сохранить настройки CRM
-                </button>
-
-                <hr style="border: none; border-top: 1px solid var(--border); margin: 20px 0" />
-
-                <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 8px; font-weight: 600">
-                  Статус ENV-переменных (только для чтения)
-                </div>
-                <div class="admin-form-group" style="margin-bottom: 6px">
-                  <span style="font-size: 0.82rem; color: var(--text-secondary)">Generic Webhook:</span>
-                  <span id="env_crm_generic" style="margin-left: 8px; font-size: 0.82rem">…</span>
-                </div>
-                <div class="admin-form-group" style="margin-bottom: 6px">
-                  <span style="font-size: 0.82rem; color: var(--text-secondary)">AmoCRM:</span>
-                  <span id="env_crm_amocrm" style="margin-left: 8px; font-size: 0.82rem">…</span>
-                </div>
-                <div class="admin-form-group" style="margin-bottom: 6px">
-                  <span style="font-size: 0.82rem; color: var(--text-secondary)">Bitrix24:</span>
-                  <span id="env_crm_bitrix24" style="margin-left: 8px; font-size: 0.82rem">…</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: Пароль ══════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-password">
-            <div class="section-card" style="max-width: 520px">
-              <div class="section-card-header"><div class="section-card-title">🔑 Изменить пароль</div></div>
-              <div class="section-card-body padded">
-                <div class="admin-form-group">
-                  <label>Текущий пароль</label>
-                  <input class="admin-input" type="password" id="p_current" autocomplete="current-password" />
-                </div>
-                <div class="admin-form-group">
-                  <label>Новый пароль</label>
-                  <input class="admin-input" type="password" id="p_new" autocomplete="new-password" />
-                  <div class="field-note">Минимум 6 символов</div>
-                </div>
-                <div class="admin-form-group">
-                  <label>Повторите новый пароль</label>
-                  <input class="admin-input" type="password" id="p_confirm" autocomplete="new-password" />
-                </div>
-                <button class="btn btn-md btn-gold" id="btnChangePwd" onclick="changePassword(this)">
-                  Изменить пароль
-                </button>
-              </div>
-            </div>
-
-            <!-- Danger zone -->
-            <div class="danger-zone">
-              <div class="danger-zone-header">⚠️ Опасная зона</div>
-              <div class="danger-zone-body">
-                <div class="danger-action">
-                  <div class="danger-action-info">
-                    <strong>Очистить кэш сессий</strong>
-                    <span>Все активные сессии будут завершены. Потребуется повторный вход.</span>
-                  </div>
-                  <button
-                    class="btn btn-md btn-ghost"
-                    style="border-color: var(--error); color: var(--error); white-space: nowrap"
-                    onclick="clearSessions()"
-                  >
-                    Очистить кэш
-                  </button>
-                </div>
-                <div class="danger-action">
-                  <div class="danger-action-info">
-                    <strong>Экспортировать все заявки</strong>
-                    <span>Скачать CSV-файл со всеми заявками агентства</span>
-                  </div>
-                  <button class="btn btn-md btn-ghost" style="white-space: nowrap" onclick="exportOrders()">
-                    ⬇ Скачать CSV
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: FAQ ════════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-faq">
-            <div class="section-card">
-              <div class="section-card-header">
-                <div class="section-card-title">❓ Управление FAQ</div>
-                <a
-                  href="/faq.html"
-                  target="_blank"
-                  style="font-size: 0.75rem; color: var(--gold); text-decoration: none"
-                  >↗ Просмотр страницы FAQ</a
-                >
-              </div>
-              <div class="section-card-body padded">
-                <div id="faq-list" style="margin-bottom: 16px">
-                  <!-- FAQ items loaded here -->
-                </div>
-
-                <div
-                  class="section-card"
-                  style="padding: 16px; background: var(--bg-card, var(--bg)); border: 1px solid var(--border)"
-                >
-                  <h4 style="margin: 0 0 12px; font-size: 0.95rem; color: var(--text)">➕ Добавить вопрос</h4>
-                  <div class="admin-form-group">
-                    <label>Вопрос</label>
-                    <input
-                      type="text"
-                      id="faq-new-q"
-                      placeholder="Как забронировать модель?"
-                      maxlength="500"
-                      class="admin-input"
-                    />
-                  </div>
-                  <div class="admin-form-group" style="margin-top: 8px">
-                    <label>Ответ</label>
-                    <textarea
-                      id="faq-new-a"
-                      rows="3"
-                      placeholder="Ответ..."
-                      maxlength="2000"
-                      class="admin-input"
-                      style="resize: vertical"
-                    ></textarea>
-                  </div>
-                  <div class="admin-form-group" style="margin-top: 8px">
-                    <label>Порядок (число, меньше = выше)</label>
-                    <input
-                      type="number"
-                      id="faq-new-order"
-                      value="0"
-                      min="0"
-                      max="999"
-                      class="admin-input"
-                      style="width: 80px"
-                    />
-                  </div>
-                  <button onclick="addFaqItem()" class="btn btn-md btn-gold" style="margin-top: 8px">
-                    ➕ Добавить
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ─── Broadcast tab pane ────────────────────────────────── -->
-          <div class="tab-pane" id="pane-broadcast">
-            <div class="section-card">
-              <div class="section-card-header">
-                <div class="section-card-title">📢 Создать рассылку</div>
-              </div>
-              <div class="section-card-body padded" style="max-width: 620px">
-                <div class="admin-form-group">
-                  <label>Текст сообщения</label>
-                  <textarea
-                    id="bc-text"
-                    rows="5"
-                    maxlength="4096"
-                    placeholder="Текст рассылки..."
-                    class="admin-input"
-                    style="resize: vertical"
-                    oninput="document.getElementById('bc-char').textContent = this.value.length + '/4096'"
-                  ></textarea>
-                  <div class="char-count" id="bc-char">0/4096</div>
-                </div>
-                <div class="admin-form-group" style="margin-top: 12px">
-                  <label>Фото (URL, необязательно)</label>
-                  <input type="url" id="bc-photo" class="admin-input" placeholder="https://..." />
-                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px">
-                    Если указан URL — рассылка отправляется с изображением
-                  </div>
-                </div>
-                <div style="display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap">
-                  <div class="admin-form-group" style="flex: 1; min-width: 160px">
-                    <label>Аудитория</label>
-                    <select id="bc-segment" class="admin-input">
-                      <option value="all">Все клиенты</option>
-                      <option value="completed">Завершили заявку</option>
-                      <option value="active">Активные клиенты</option>
-                    </select>
-                  </div>
-                  <div class="admin-form-group" style="flex: 1; min-width: 200px">
-                    <label>Запланировать (пусто = немедленно)</label>
-                    <input type="datetime-local" id="bc-schedule" class="admin-input" />
-                  </div>
-                </div>
-                <div style="display: flex; gap: 12px; margin-top: 16px; align-items: center">
-                  <button onclick="createBroadcast()" class="btn btn-md btn-gold">📢 Запустить рассылку</button>
-                  <span id="bc-status" style="font-size: 0.8rem; color: var(--text-muted)"></span>
-                </div>
-              </div>
-            </div>
-            <div class="section-card" style="margin-top: 20px">
-              <div class="section-card-header">
-                <div class="section-card-title">📋 История рассылок</div>
-                <button
-                  onclick="loadBroadcasts()"
-                  style="background: none; border: none; color: var(--gold); cursor: pointer; font-size: 0.8rem"
-                >
-                  🔄 Обновить
-                </button>
-              </div>
-              <div class="section-card-body padded">
-                <div id="bc-list">
-                  <div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 20px">
-                    Загрузка...
+                    >
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <!-- ═══ TAB: Лимиты ═══════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-limits">
-            <div class="section-card">
-              <div class="section-card-header"><div class="section-card-title">📊 Лимиты</div></div>
-              <div class="section-card-body padded" style="max-width: 560px">
-                <div class="admin-form-group">
-                  <label>Макс. фотографий на модель</label>
-                  <input class="admin-input" type="number" id="model_max_photos" placeholder="20" min="1" max="200" />
-                  <div class="field-note">Максимальное количество фотографий в профиле одной модели</div>
-                </div>
-
-                <div class="admin-form-group" style="margin-top: 16px">
-                  <label>Макс. активных заявок на клиента</label>
-                  <input
-                    class="admin-input"
-                    type="number"
-                    id="client_max_active_orders"
-                    placeholder="5"
-                    min="1"
-                    max="100"
-                  />
-                  <div class="field-note">Максимальное количество незавершённых заявок от одного клиента</div>
-                </div>
-
-                <div class="sticky-save-bar">
-                  <button class="btn btn-md btn-gold" id="btnSaveLimits" onclick="saveLimits(this)">
-                    Сохранить лимиты
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ TAB: 2FA ════════════════════════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-totp">
-            <div class="section-card" style="max-width: 560px">
-              <div class="section-card-header">
-                <div class="section-card-title">🔐 Двухфакторная аутентификация</div>
-              </div>
-              <div class="section-card-body padded">
-                <!-- Status bar -->
-                <div
-                  id="totp-status-bar"
-                  style="
-                    padding: 12px 16px;
-                    border-radius: 8px;
-                    margin-bottom: 20px;
-                    font-size: 0.85rem;
-                    display: flex;
-                    align-items: center;
-                    gap: 10px;
-                  "
-                >
-                  <span id="totp-status-icon">⏳</span>
-                  <span id="totp-status-text">Загрузка статуса...</span>
-                </div>
-                <!-- 2FA DISABLED: Setup flow -->
-                <div id="totp-setup-section" style="display: none">
-                  <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 16px">
-                    Защитите аккаунт с помощью приложения-аутентификатора (Google Authenticator, Authy и др.)
-                  </p>
-                  <button class="btn btn-md btn-gold" id="btnSetup2FA" onclick="startTotpSetup()">Настроить 2FA</button>
-                  <!-- QR / verification panel -->
-                  <div id="totp-qr-panel" style="display: none; margin-top: 20px">
-                    <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 12px">
-                      1. Отсканируйте QR-код приложением-аутентификатором
-                    </p>
-                    <div style="text-align: center; margin-bottom: 16px">
-                      <img
-                        id="totp-qr-img"
-                        src=""
-                        alt="QR-код 2FA"
-                        style="width: 200px; height: 200px; border: 4px solid var(--bg2); border-radius: 8px"
-                      />
+              <!-- ═══ TAB: Оплата ══════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-payment">
+                <div class="section-card" style="max-width: 600px">
+                  <div class="section-card-header"><div class="section-card-title">💳 Настройки оплаты</div></div>
+                  <div class="section-card-body padded">
+                    <div class="admin-form-group">
+                      <label class="admin-label">Провайдер оплаты</label>
+                      <select class="admin-input" id="s_payment_provider">
+                        <option value="disabled">Отключено</option>
+                        <option value="yookassa">ЮKassa</option>
+                        <option value="stripe">Stripe</option>
+                      </select>
+                      <div class="field-note">Выберите систему приёма платежей или отключите оплату</div>
                     </div>
-                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px">
-                      Или введите ключ вручную:
-                    </p>
-                    <div
-                      style="
-                        font-family: monospace;
-                        font-size: 0.85rem;
-                        background: var(--bg2);
-                        padding: 10px 14px;
-                        border-radius: 6px;
-                        word-break: break-all;
-                        margin-bottom: 16px;
-                      "
-                      id="totp-manual-key"
-                    ></div>
-                    <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 10px">
-                      2. Введите 6-значный код из приложения для подтверждения
-                    </p>
-                    <div class="admin-form-group" style="max-width: 200px">
+
+                    <div class="admin-form-group" id="payment_yookassa_fields" style="display: none">
+                      <label class="admin-label">ЮKassa Shop ID</label>
+                      <input
+                        class="admin-input"
+                        type="text"
+                        id="s_yookassa_shop_id"
+                        placeholder="Ваш shopId из личного кабинета ЮKassa"
+                      />
+                      <div class="field-note">
+                        Задаётся через env <code>YOOKASSA_SHOP_ID</code> — отображается для справки
+                      </div>
+                    </div>
+
+                    <div class="admin-form-group" id="payment_stripe_fields" style="display: none">
+                      <label class="admin-label">Stripe Secret Key</label>
+                      <input
+                        class="admin-input"
+                        type="password"
+                        id="s_stripe_secret_key"
+                        placeholder="sk_live_... (задаётся в .env)"
+                        autocomplete="off"
+                      />
+                      <div class="field-note">Задаётся через env <code>STRIPE_SECRET_KEY</code></div>
+                    </div>
+
+                    <div class="admin-form-group">
+                      <label class="admin-label">Минимальная сумма для предоплаты (%)</label>
                       <input
                         class="admin-input"
                         type="number"
-                        id="totp-enable-code"
-                        placeholder="000000"
-                        maxlength="6"
-                        inputmode="numeric"
-                        style="font-size: 1.2rem; letter-spacing: 0.2em; text-align: center"
+                        id="s_payment_prepay_percent"
+                        min="0"
+                        max="100"
+                        step="5"
+                        placeholder="50"
                       />
+                      <div class="field-note">
+                        Процент от суммы заявки, который клиент платит авансом. 0 — полная сумма
+                      </div>
                     </div>
+
+                    <div class="admin-form-group">
+                      <label class="admin-label">Минимальная сумма (₽)</label>
+                      <input
+                        class="admin-input"
+                        type="number"
+                        id="s_payment_min_amount"
+                        min="0"
+                        step="100"
+                        placeholder="1000"
+                      />
+                      <div class="field-note">Минимальная сумма платежа в рублях</div>
+                    </div>
+
                     <div
-                      id="totp-enable-error"
-                      style="color: var(--error); font-size: 0.8rem; margin-bottom: 10px"
-                    ></div>
-                    <button class="btn btn-md btn-gold" id="btnEnable2FA" onclick="enableTotp()">Включить 2FA</button>
+                      style="
+                        background: #fff3cd;
+                        border: 1px solid #ffc107;
+                        border-radius: 8px;
+                        padding: 14px;
+                        margin: 16px 0;
+                        font-size: 0.82rem;
+                        color: #856404;
+                        line-height: 1.6;
+                      "
+                    >
+                      <strong>Важно:</strong> Ключи API (<code>YOOKASSA_SECRET_KEY</code>,
+                      <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_WEBHOOK_SECRET</code>) задаются в файле
+                      <code>.env</code> и не хранятся в базе данных. Настройки выше влияют только на выбор провайдера и
+                      параметры предоплаты.
+                    </div>
+
+                    <div
+                      style="
+                        background: #e8f5e9;
+                        border: 1px solid #4caf50;
+                        border-radius: 8px;
+                        padding: 14px;
+                        margin: 16px 0;
+                        font-size: 0.82rem;
+                        color: #2e7d32;
+                        line-height: 1.6;
+                      "
+                    >
+                      <strong>Webhook-адреса для настройки в личном кабинете:</strong><br />
+                      <code>ЮKassa:</code> <code id="webhook_yookassa_url">/api/webhooks/yookassa</code><br />
+                      <code>Stripe:</code> <code id="webhook_stripe_url">/api/webhooks/stripe</code>
+                    </div>
+
+                    <button class="btn btn-md btn-gold" id="btnSavePayment" onclick="savePaymentSettings(this)">
+                      Сохранить настройки оплаты
+                    </button>
                   </div>
-                </div>
-                <!-- 2FA ENABLED: Disable flow -->
-                <div id="totp-disable-section" style="display: none">
-                  <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 16px">
-                    Для отключения двухфакторной аутентификации введите код из приложения.
-                  </p>
-                  <div class="admin-form-group" style="max-width: 200px">
-                    <label>Текущий код 2FA</label>
-                    <input
-                      class="admin-input"
-                      type="number"
-                      id="totp-disable-code"
-                      placeholder="000000"
-                      maxlength="6"
-                      inputmode="numeric"
-                      style="font-size: 1.1rem; letter-spacing: 0.15em; text-align: center"
-                    />
-                  </div>
-                  <div
-                    id="totp-disable-error"
-                    style="color: var(--error); font-size: 0.8rem; margin-bottom: 10px"
-                  ></div>
-                  <button
-                    class="btn btn-md"
-                    id="btnDisable2FA"
-                    style="
-                      background: rgba(244, 67, 54, 0.15);
-                      color: var(--error);
-                      border: 1px solid rgba(244, 67, 54, 0.4);
-                    "
-                    onclick="disableTotp()"
-                  >
-                    Отключить 2FA
-                  </button>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <!-- ═══ TAB: Instagram и соцсети ═══════════════════════════════════════ -->
-          <div class="tab-pane" id="pane-instagram">
-            <div class="section-card" style="max-width: 600px">
-              <div class="section-card-header"><div class="section-card-title">📱 Instagram и соцсети</div></div>
-              <div class="section-card-body padded">
-                <div class="toggle-row">
-                  <div class="toggle-row-info">
-                    <div class="toggle-row-title">Instagram-интеграция</div>
-                    <div class="toggle-row-desc">
-                      Автоматическая публикация постов и синхронизация через Instagram API
+              <!-- ═══ TAB: CRM ══════════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-crm">
+                <div class="section-card" style="max-width: 600px">
+                  <div class="section-card-header"><div class="section-card-title">🔗 CRM-интеграции</div></div>
+                  <div class="section-card-body padded">
+                    <div
+                      style="
+                        background: #e8f5e9;
+                        border: 1px solid #4caf50;
+                        border-radius: 8px;
+                        padding: 14px;
+                        margin-bottom: 20px;
+                        font-size: 0.82rem;
+                        color: #2e7d32;
+                        line-height: 1.6;
+                      "
+                    >
+                      При создании заявки и смене статуса система автоматически отправит данные во все настроенные CRM.
+                      Оставьте поля пустыми, чтобы отключить интеграцию.
+                    </div>
+
+                    <div class="admin-form-group">
+                      <label class="admin-label">Общий вебхук URL</label>
+                      <input
+                        class="admin-input"
+                        type="url"
+                        id="crm_webhook_url"
+                        placeholder="https://your-crm.com/webhook"
+                      />
+                      <div class="field-note">Универсальный вебхук — POST с JSON {event, order, timestamp}</div>
+                    </div>
+
+                    <div class="admin-form-group">
+                      <label class="admin-label">Секрет вебхука</label>
+                      <input
+                        class="admin-input"
+                        type="password"
+                        id="crm_webhook_secret"
+                        placeholder="my-secret-token"
+                        autocomplete="off"
+                      />
+                      <div class="field-note">Передаётся в заголовке <code>X-Webhook-Secret</code> для верификации</div>
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid var(--border); margin: 20px 0" />
+
+                    <div class="admin-form-group">
+                      <label class="admin-label">AmoCRM — вебхук URL</label>
+                      <input
+                        class="admin-input"
+                        type="url"
+                        id="amocrm_webhook_url"
+                        placeholder="https://your-domain.amocrm.ru/api/v4/leads"
+                      />
+                      <div class="field-note">URL для создания сделки в AmoCRM при новой заявке</div>
+                    </div>
+
+                    <div class="admin-form-group">
+                      <label class="admin-label">AmoCRM — API ключ</label>
+                      <input
+                        class="admin-input"
+                        type="password"
+                        id="amocrm_api_key"
+                        placeholder="Bearer token из личного кабинета AmoCRM"
+                        autocomplete="off"
+                      />
+                      <div class="field-note">Передаётся в заголовке <code>Authorization: Bearer ...</code></div>
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid var(--border); margin: 20px 0" />
+
+                    <div class="admin-form-group">
+                      <label class="admin-label">Bitrix24 — вебхук URL</label>
+                      <input
+                        class="admin-input"
+                        type="url"
+                        id="bitrix24_webhook_url"
+                        placeholder="https://your-domain.bitrix24.ru/rest/1/xxxx/"
+                      />
+                      <div class="field-note">
+                        URL входящего вебхука из раздела «Разработчикам» → «Входящие вебхуки». Должен заканчиваться на
+                        <code>/</code>
+                      </div>
+                    </div>
+
+                    <button class="btn btn-md btn-gold" id="btnSaveCRM" onclick="saveCRMSettings(this)">
+                      Сохранить настройки CRM
+                    </button>
+
+                    <hr style="border: none; border-top: 1px solid var(--border); margin: 20px 0" />
+
+                    <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 8px; font-weight: 600">
+                      Статус ENV-переменных (только для чтения)
+                    </div>
+                    <div class="admin-form-group" style="margin-bottom: 6px">
+                      <span style="font-size: 0.82rem; color: var(--text-secondary)">Generic Webhook:</span>
+                      <span id="env_crm_generic" style="margin-left: 8px; font-size: 0.82rem">…</span>
+                    </div>
+                    <div class="admin-form-group" style="margin-bottom: 6px">
+                      <span style="font-size: 0.82rem; color: var(--text-secondary)">AmoCRM:</span>
+                      <span id="env_crm_amocrm" style="margin-left: 8px; font-size: 0.82rem">…</span>
+                    </div>
+                    <div class="admin-form-group" style="margin-bottom: 6px">
+                      <span style="font-size: 0.82rem; color: var(--text-secondary)">Bitrix24:</span>
+                      <span id="env_crm_bitrix24" style="margin-left: 8px; font-size: 0.82rem">…</span>
                     </div>
                   </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="instagram_enabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
                 </div>
+              </div>
 
-                <div
-                  style="
-                    background: rgba(201, 169, 110, 0.08);
-                    border: 1px solid rgba(201, 169, 110, 0.25);
-                    border-radius: 8px;
-                    padding: 14px 16px;
-                    margin: 16px 0;
-                    font-size: 0.82rem;
-                    color: var(--text-muted);
-                    line-height: 1.7;
-                  "
-                >
-                  <strong style="color: var(--gold)">⚙️ Требуемые переменные окружения (.env)</strong><br />
-                  Для публикации необходимо задать в файле <code>.env</code>:<br />
-                  <code>INSTAGRAM_BUSINESS_ACCOUNT_ID</code> — ID бизнес-аккаунта<br />
-                  <code>INSTAGRAM_ACCESS_TOKEN</code> — долгосрочный токен доступа<br />
-                  <code>INSTAGRAM_APP_SECRET</code> — секрет приложения Facebook<br />
-                  <code>INSTAGRAM_WEBHOOK_VERIFY_TOKEN</code> — токен для верификации вебхука
-                </div>
-
-                <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 20px">
-                  📖
-                  <a
-                    href="https://developers.facebook.com/docs/instagram-api/getting-started"
-                    target="_blank"
-                    rel="noopener"
-                    style="color: var(--gold)"
-                    >Инструкция по настройке Instagram Business API</a
-                  >
-                </div>
-
-                <!-- Stats widget -->
-                <div
-                  style="
-                    border: 1px solid var(--border);
-                    border-radius: 8px;
-                    padding: 16px;
-                    background: var(--bg2);
-                    margin-bottom: 20px;
-                  "
-                >
-                  <div
-                    style="
-                      font-size: 0.75rem;
-                      letter-spacing: 1.5px;
-                      text-transform: uppercase;
-                      color: var(--gold);
-                      margin-bottom: 12px;
-                    "
-                  >
-                    📊 Статистика публикаций
+              <!-- ═══ TAB: Пароль ══════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-password">
+                <div class="section-card" style="max-width: 520px">
+                  <div class="section-card-header"><div class="section-card-title">🔑 Изменить пароль</div></div>
+                  <div class="section-card-body padded">
+                    <div class="admin-form-group">
+                      <label>Текущий пароль</label>
+                      <input class="admin-input" type="password" id="p_current" autocomplete="current-password" />
+                    </div>
+                    <div class="admin-form-group">
+                      <label>Новый пароль</label>
+                      <input class="admin-input" type="password" id="p_new" autocomplete="new-password" />
+                      <div class="field-note">Минимум 6 символов</div>
+                    </div>
+                    <div class="admin-form-group">
+                      <label>Повторите новый пароль</label>
+                      <input class="admin-input" type="password" id="p_confirm" autocomplete="new-password" />
+                    </div>
+                    <button class="btn btn-md btn-gold" id="btnChangePwd" onclick="changePassword(this)">
+                      Изменить пароль
+                    </button>
                   </div>
-                  <div id="ig-stats-loading" style="font-size: 0.83rem; color: var(--text-muted)">Загрузка...</div>
-                  <div id="ig-stats-content" style="display: none">
-                    <div style="display: flex; gap: 24px; flex-wrap: wrap">
-                      <div>
-                        <div style="font-size: 1.6rem; font-weight: 700; color: var(--text)" id="ig-stat-total">—</div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px">постов всего</div>
+                </div>
+
+                <!-- Danger zone -->
+                <div class="danger-zone">
+                  <div class="danger-zone-header">⚠️ Опасная зона</div>
+                  <div class="danger-zone-body">
+                    <div class="danger-action">
+                      <div class="danger-action-info">
+                        <strong>Очистить кэш сессий</strong>
+                        <span>Все активные сессии будут завершены. Потребуется повторный вход.</span>
                       </div>
-                      <div>
-                        <div style="font-size: 1.6rem; font-weight: 700; color: var(--text)" id="ig-stat-last">—</div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px">
-                          последняя публикация
+                      <button
+                        class="btn btn-md btn-ghost"
+                        style="border-color: var(--error); color: var(--error); white-space: nowrap"
+                        onclick="clearSessions()"
+                      >
+                        Очистить кэш
+                      </button>
+                    </div>
+                    <div class="danger-action">
+                      <div class="danger-action-info">
+                        <strong>Экспортировать все заявки</strong>
+                        <span>Скачать CSV-файл со всеми заявками агентства</span>
+                      </div>
+                      <button class="btn btn-md btn-ghost" style="white-space: nowrap" onclick="exportOrders()">
+                        ⬇ Скачать CSV
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: FAQ ════════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-faq">
+                <div class="section-card">
+                  <div class="section-card-header">
+                    <div class="section-card-title">❓ Управление FAQ</div>
+                    <a
+                      href="/faq.html"
+                      target="_blank"
+                      style="font-size: 0.75rem; color: var(--gold); text-decoration: none"
+                      >↗ Просмотр страницы FAQ</a
+                    >
+                  </div>
+                  <div class="section-card-body padded">
+                    <div id="faq-list" style="margin-bottom: 16px">
+                      <!-- FAQ items loaded here -->
+                    </div>
+
+                    <div
+                      class="section-card"
+                      style="padding: 16px; background: var(--bg-card, var(--bg)); border: 1px solid var(--border)"
+                    >
+                      <h4 style="margin: 0 0 12px; font-size: 0.95rem; color: var(--text)">➕ Добавить вопрос</h4>
+                      <div class="admin-form-group">
+                        <label>Вопрос</label>
+                        <input
+                          type="text"
+                          id="faq-new-q"
+                          placeholder="Как забронировать модель?"
+                          maxlength="500"
+                          class="admin-input"
+                        />
+                      </div>
+                      <div class="admin-form-group" style="margin-top: 8px">
+                        <label>Ответ</label>
+                        <textarea
+                          id="faq-new-a"
+                          rows="3"
+                          placeholder="Ответ..."
+                          maxlength="2000"
+                          class="admin-input"
+                          style="resize: vertical"
+                        ></textarea>
+                      </div>
+                      <div class="admin-form-group" style="margin-top: 8px">
+                        <label>Порядок (число, меньше = выше)</label>
+                        <input
+                          type="number"
+                          id="faq-new-order"
+                          value="0"
+                          min="0"
+                          max="999"
+                          class="admin-input"
+                          style="width: 80px"
+                        />
+                      </div>
+                      <button onclick="addFaqItem()" class="btn btn-md btn-gold" style="margin-top: 8px">
+                        ➕ Добавить
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ─── Broadcast tab pane ────────────────────────────────── -->
+              <div class="tab-pane" id="pane-broadcast">
+                <div class="section-card">
+                  <div class="section-card-header">
+                    <div class="section-card-title">📢 Создать рассылку</div>
+                  </div>
+                  <div class="section-card-body padded" style="max-width: 620px">
+                    <div class="admin-form-group">
+                      <label>Текст сообщения</label>
+                      <textarea
+                        id="bc-text"
+                        rows="5"
+                        maxlength="4096"
+                        placeholder="Текст рассылки..."
+                        class="admin-input"
+                        style="resize: vertical"
+                        oninput="document.getElementById('bc-char').textContent = this.value.length + '/4096'"
+                      ></textarea>
+                      <div class="char-count" id="bc-char">0/4096</div>
+                    </div>
+                    <div class="admin-form-group" style="margin-top: 12px">
+                      <label>Фото (URL, необязательно)</label>
+                      <input type="url" id="bc-photo" class="admin-input" placeholder="https://..." />
+                      <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px">
+                        Если указан URL — рассылка отправляется с изображением
+                      </div>
+                    </div>
+                    <div style="display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap">
+                      <div class="admin-form-group" style="flex: 1; min-width: 160px">
+                        <label>Аудитория</label>
+                        <select id="bc-segment" class="admin-input">
+                          <option value="all">Все клиенты</option>
+                          <option value="completed">Завершили заявку</option>
+                          <option value="active">Активные клиенты</option>
+                        </select>
+                      </div>
+                      <div class="admin-form-group" style="flex: 1; min-width: 200px">
+                        <label>Запланировать (пусто = немедленно)</label>
+                        <input type="datetime-local" id="bc-schedule" class="admin-input" />
+                      </div>
+                    </div>
+                    <div style="display: flex; gap: 12px; margin-top: 16px; align-items: center">
+                      <button onclick="createBroadcast()" class="btn btn-md btn-gold">📢 Запустить рассылку</button>
+                      <span id="bc-status" style="font-size: 0.8rem; color: var(--text-muted)"></span>
+                    </div>
+                  </div>
+                </div>
+                <div class="section-card" style="margin-top: 20px">
+                  <div class="section-card-header">
+                    <div class="section-card-title">📋 История рассылок</div>
+                    <button
+                      onclick="loadBroadcasts()"
+                      style="background: none; border: none; color: var(--gold); cursor: pointer; font-size: 0.8rem"
+                    >
+                      🔄 Обновить
+                    </button>
+                  </div>
+                  <div class="section-card-body padded">
+                    <div id="bc-list">
+                      <div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 20px">
+                        Загрузка...
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Лимиты ═══════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-limits">
+                <div class="section-card">
+                  <div class="section-card-header"><div class="section-card-title">📊 Лимиты</div></div>
+                  <div class="section-card-body padded" style="max-width: 560px">
+                    <div class="admin-form-group">
+                      <label>Макс. фотографий на модель</label>
+                      <input
+                        class="admin-input"
+                        type="number"
+                        id="model_max_photos"
+                        placeholder="20"
+                        min="1"
+                        max="200"
+                      />
+                      <div class="field-note">Максимальное количество фотографий в профиле одной модели</div>
+                    </div>
+
+                    <div class="admin-form-group" style="margin-top: 16px">
+                      <label>Макс. активных заявок на клиента</label>
+                      <input
+                        class="admin-input"
+                        type="number"
+                        id="client_max_active_orders"
+                        placeholder="5"
+                        min="1"
+                        max="100"
+                      />
+                      <div class="field-note">Максимальное количество незавершённых заявок от одного клиента</div>
+                    </div>
+
+                    <div class="sticky-save-bar">
+                      <button class="btn btn-md btn-gold" id="btnSaveLimits" onclick="saveLimits(this)">
+                        Сохранить лимиты
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: 2FA ════════════════════════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-totp">
+                <div class="section-card" style="max-width: 560px">
+                  <div class="section-card-header">
+                    <div class="section-card-title">🔐 Двухфакторная аутентификация</div>
+                  </div>
+                  <div class="section-card-body padded">
+                    <!-- Status bar -->
+                    <div
+                      id="totp-status-bar"
+                      style="
+                        padding: 12px 16px;
+                        border-radius: 8px;
+                        margin-bottom: 20px;
+                        font-size: 0.85rem;
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                      "
+                    >
+                      <span id="totp-status-icon">⏳</span>
+                      <span id="totp-status-text">Загрузка статуса...</span>
+                    </div>
+                    <!-- 2FA DISABLED: Setup flow -->
+                    <div id="totp-setup-section" style="display: none">
+                      <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 16px">
+                        Защитите аккаунт с помощью приложения-аутентификатора (Google Authenticator, Authy и др.)
+                      </p>
+                      <button class="btn btn-md btn-gold" id="btnSetup2FA" onclick="startTotpSetup()">
+                        Настроить 2FA
+                      </button>
+                      <!-- QR / verification panel -->
+                      <div id="totp-qr-panel" style="display: none; margin-top: 20px">
+                        <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 12px">
+                          1. Отсканируйте QR-код приложением-аутентификатором
+                        </p>
+                        <div style="text-align: center; margin-bottom: 16px">
+                          <img
+                            id="totp-qr-img"
+                            src=""
+                            alt="QR-код 2FA"
+                            style="width: 200px; height: 200px; border: 4px solid var(--bg2); border-radius: 8px"
+                          />
+                        </div>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px">
+                          Или введите ключ вручную:
+                        </p>
+                        <div
+                          style="
+                            font-family: monospace;
+                            font-size: 0.85rem;
+                            background: var(--bg2);
+                            padding: 10px 14px;
+                            border-radius: 6px;
+                            word-break: break-all;
+                            margin-bottom: 16px;
+                          "
+                          id="totp-manual-key"
+                        ></div>
+                        <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 10px">
+                          2. Введите 6-значный код из приложения для подтверждения
+                        </p>
+                        <div class="admin-form-group" style="max-width: 200px">
+                          <input
+                            class="admin-input"
+                            type="number"
+                            id="totp-enable-code"
+                            placeholder="000000"
+                            maxlength="6"
+                            inputmode="numeric"
+                            style="font-size: 1.2rem; letter-spacing: 0.2em; text-align: center"
+                          />
+                        </div>
+                        <div
+                          id="totp-enable-error"
+                          style="color: var(--error); font-size: 0.8rem; margin-bottom: 10px"
+                        ></div>
+                        <button class="btn btn-md btn-gold" id="btnEnable2FA" onclick="enableTotp()">
+                          Включить 2FA
+                        </button>
+                      </div>
+                    </div>
+                    <!-- 2FA ENABLED: Disable flow -->
+                    <div id="totp-disable-section" style="display: none">
+                      <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 16px">
+                        Для отключения двухфакторной аутентификации введите код из приложения.
+                      </p>
+                      <div class="admin-form-group" style="max-width: 200px">
+                        <label>Текущий код 2FA</label>
+                        <input
+                          class="admin-input"
+                          type="number"
+                          id="totp-disable-code"
+                          placeholder="000000"
+                          maxlength="6"
+                          inputmode="numeric"
+                          style="font-size: 1.1rem; letter-spacing: 0.15em; text-align: center"
+                        />
+                      </div>
+                      <div
+                        id="totp-disable-error"
+                        style="color: var(--error); font-size: 0.8rem; margin-bottom: 10px"
+                      ></div>
+                      <button
+                        class="btn btn-md"
+                        id="btnDisable2FA"
+                        style="
+                          background: rgba(244, 67, 54, 0.15);
+                          color: var(--error);
+                          border: 1px solid rgba(244, 67, 54, 0.4);
+                        "
+                        onclick="disableTotp()"
+                      >
+                        Отключить 2FA
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ TAB: Instagram и соцсети ═══════════════════════════════════════ -->
+              <div class="tab-pane" id="pane-instagram">
+                <div class="section-card" style="max-width: 600px">
+                  <div class="section-card-header"><div class="section-card-title">📱 Instagram и соцсети</div></div>
+                  <div class="section-card-body padded">
+                    <div class="toggle-row">
+                      <div class="toggle-row-info">
+                        <div class="toggle-row-title">Instagram-интеграция</div>
+                        <div class="toggle-row-desc">
+                          Автоматическая публикация постов и синхронизация через Instagram API
                         </div>
                       </div>
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="instagram_enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+
+                    <div
+                      style="
+                        background: rgba(201, 169, 110, 0.08);
+                        border: 1px solid rgba(201, 169, 110, 0.25);
+                        border-radius: 8px;
+                        padding: 14px 16px;
+                        margin: 16px 0;
+                        font-size: 0.82rem;
+                        color: var(--text-muted);
+                        line-height: 1.7;
+                      "
+                    >
+                      <strong style="color: var(--gold)">⚙️ Требуемые переменные окружения (.env)</strong><br />
+                      Для публикации необходимо задать в файле <code>.env</code>:<br />
+                      <code>INSTAGRAM_BUSINESS_ACCOUNT_ID</code> — ID бизнес-аккаунта<br />
+                      <code>INSTAGRAM_ACCESS_TOKEN</code> — долгосрочный токен доступа<br />
+                      <code>INSTAGRAM_APP_SECRET</code> — секрет приложения Facebook<br />
+                      <code>INSTAGRAM_WEBHOOK_VERIFY_TOKEN</code> — токен для верификации вебхука
+                    </div>
+
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 20px">
+                      📖
+                      <a
+                        href="https://developers.facebook.com/docs/instagram-api/getting-started"
+                        target="_blank"
+                        rel="noopener"
+                        style="color: var(--gold)"
+                        >Инструкция по настройке Instagram Business API</a
+                      >
+                    </div>
+
+                    <!-- Stats widget -->
+                    <div
+                      style="
+                        border: 1px solid var(--border);
+                        border-radius: 8px;
+                        padding: 16px;
+                        background: var(--bg2);
+                        margin-bottom: 20px;
+                      "
+                    >
+                      <div
+                        style="
+                          font-size: 0.75rem;
+                          letter-spacing: 1.5px;
+                          text-transform: uppercase;
+                          color: var(--gold);
+                          margin-bottom: 12px;
+                        "
+                      >
+                        📊 Статистика публикаций
+                      </div>
+                      <div id="ig-stats-loading" style="font-size: 0.83rem; color: var(--text-muted)">Загрузка...</div>
+                      <div id="ig-stats-content" style="display: none">
+                        <div style="display: flex; gap: 24px; flex-wrap: wrap">
+                          <div>
+                            <div style="font-size: 1.6rem; font-weight: 700; color: var(--text)" id="ig-stat-total">
+                              —
+                            </div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px">
+                              постов всего
+                            </div>
+                          </div>
+                          <div>
+                            <div style="font-size: 1.6rem; font-weight: 700; color: var(--text)" id="ig-stat-last">
+                              —
+                            </div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px">
+                              последняя публикация
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        id="ig-stats-error"
+                        style="display: none; font-size: 0.82rem; color: var(--text-muted); font-style: italic"
+                      ></div>
+                    </div>
+
+                    <button class="btn btn-sm btn-ghost" onclick="loadInstagramStats()" style="margin-bottom: 20px">
+                      🔄 Обновить статистику
+                    </button>
+
+                    <div style="margin-bottom: 20px">
+                      <a
+                        href="/admin/social.html"
+                        class="btn btn-sm btn-ghost"
+                        style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none"
+                      >
+                        📋 Перейти к очереди публикаций соцсетей
+                      </a>
+                    </div>
+
+                    <div class="sticky-save-bar">
+                      <button class="btn btn-md btn-gold" id="btnSaveInstagram" onclick="saveInstagram(this)">
+                        Сохранить настройки Instagram
+                      </button>
                     </div>
                   </div>
-                  <div
-                    id="ig-stats-error"
-                    style="display: none; font-size: 0.82rem; color: var(--text-muted); font-style: italic"
-                  ></div>
-                </div>
-
-                <button class="btn btn-sm btn-ghost" onclick="loadInstagramStats()" style="margin-bottom: 20px">
-                  🔄 Обновить статистику
-                </button>
-
-                <div style="margin-bottom: 20px">
-                  <a
-                    href="/admin/social.html"
-                    class="btn btn-sm btn-ghost"
-                    style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none"
-                  >
-                    📋 Перейти к очереди публикаций соцсетей
-                  </a>
-                </div>
-
-                <div class="sticky-save-bar">
-                  <button class="btn btn-md btn-gold" id="btnSaveInstagram" onclick="saveInstagram(this)">
-                    Сохранить настройки Instagram
-                  </button>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <!-- ─── Sticky global save bar ──────────────────────────── -->
-          <div
-            class="sticky bottom-0 bg-white border-t px-6 py-4"
-            style="
-              position: sticky;
-              bottom: 0;
-              background: var(--bg);
-              border-top: 1px solid var(--border);
-              padding: 14px 0;
-              margin-top: 28px;
-              display: flex;
-              align-items: center;
-              gap: 16px;
-              z-index: 10;
-            "
-          >
-            <button
-              id="save-btn"
-              onclick="saveAll()"
-              style="
-                padding: 12px 24px;
-                background: var(--gold);
-                color: #000;
-                border: none;
-                border-radius: 10px;
-                font-size: 0.9rem;
-                font-weight: 600;
-                cursor: pointer;
-                transition: opacity 0.2s;
-              "
-            >
-              Сохранить все настройки
-            </button>
-            <span id="save-all-status" style="font-size: 0.8rem; color: var(--text-muted)"></span>
+              <!-- ─── Sticky global save bar ──────────────────────────── -->
+              <div
+                style="
+                  position: sticky;
+                  bottom: 0;
+                  background: var(--bg);
+                  border-top: 1px solid var(--border);
+                  padding: 14px 0;
+                  margin-top: 28px;
+                  display: flex;
+                  align-items: center;
+                  gap: 16px;
+                  z-index: 10;
+                "
+              >
+                <button
+                  id="save-btn"
+                  onclick="saveAll()"
+                  style="
+                    padding: 12px 24px;
+                    background: var(--gold);
+                    color: #000;
+                    border: none;
+                    border-radius: 10px;
+                    font-size: 0.9rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: opacity 0.2s;
+                  "
+                >
+                  Сохранить все настройки
+                </button>
+                <span id="save-all-status" style="font-size: 0.8rem; color: var(--text-muted)"></span>
+              </div>
+            </div>
+            <!-- /.settings-content-wrap -->
           </div>
+          <!-- /.settings-layout -->
         </div>
         <!-- /.page-content -->
       </div>
