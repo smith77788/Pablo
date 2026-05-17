@@ -100,10 +100,10 @@
       .cases-section {
         padding: 56px 20px 80px;
       }
+      /* Masonry-like grid with CSS columns */
       .cases-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-        gap: 24px;
+        columns: 3 320px;
+        column-gap: 24px;
         max-width: 1100px;
         margin: 0 auto;
       }
@@ -112,24 +112,92 @@
         border: 1px solid var(--border);
         overflow: hidden;
         transition:
-          transform 0.3s,
-          border-color 0.3s;
+          transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+          border-color 0.3s,
+          box-shadow 0.3s;
         cursor: pointer;
+        position: relative;
+        break-inside: avoid;
+        margin-bottom: 24px;
+        display: inline-block;
+        width: 100%;
       }
       .case-card:hover {
-        transform: translateY(-4px);
-        border-color: rgba(201, 169, 110, 0.4);
+        transform: translateY(-6px);
+        border-color: rgba(201, 169, 110, 0.5);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
       }
+
+      /* Hover overlay with description */
+      .case-hover-overlay {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(0deg, rgba(8, 8, 8, 0.94) 0%, rgba(8, 8, 8, 0.6) 55%, rgba(8, 8, 8, 0) 100%);
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        padding: 22px 20px 18px;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+      }
+      .case-card:hover .case-hover-overlay {
+        opacity: 1;
+      }
+      .case-hover-desc {
+        font-size: 0.82rem;
+        color: rgba(255, 255, 255, 0.85);
+        line-height: 1.6;
+        margin-bottom: 10px;
+      }
+      .case-hover-meta {
+        display: flex;
+        gap: 12px;
+        font-size: 0.72rem;
+        color: var(--gold);
+        opacity: 0.85;
+        flex-wrap: wrap;
+      }
+      .case-hover-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        background: var(--gold);
+        color: var(--bg);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        border: none;
+        cursor: pointer;
+        margin-top: 10px;
+        pointer-events: auto;
+        transition: background 0.2s;
+        align-self: flex-start;
+      }
+      .case-hover-btn:hover {
+        background: var(--gold-light, #d4b87a);
+      }
+
       .case-img {
         width: 100%;
-        height: 220px;
+        min-height: 180px;
         object-fit: cover;
         background: rgba(201, 169, 110, 0.08);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 3rem;
+        font-size: 3.5rem;
         color: rgba(201, 169, 110, 0.3);
+        transition: transform 0.4s ease;
+      }
+      .case-card:hover .case-img {
+        transform: scale(1.04);
+      }
+      .case-img-wrap {
+        overflow: hidden;
+        position: relative;
       }
       .case-body {
         padding: 20px;
@@ -159,11 +227,137 @@
         color: var(--text-dim);
         border-top: 1px solid var(--border);
         padding-top: 14px;
+        flex-wrap: wrap;
       }
       .case-meta span {
         display: flex;
         align-items: center;
         gap: 4px;
+      }
+
+      /* Filter animation */
+      .case-card {
+        transition:
+          transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+          border-color 0.3s,
+          box-shadow 0.3s,
+          opacity 0.28s ease;
+      }
+      .case-card.hidden {
+        display: none;
+      }
+      @keyframes caseCardIn {
+        from {
+          opacity: 0;
+          transform: translateY(16px) scale(0.97);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+      .case-card.animating {
+        animation: caseCardIn 0.32s ease both;
+      }
+
+      /* Lightbox */
+      .case-lightbox {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.92);
+        z-index: 9000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        backdrop-filter: blur(8px);
+      }
+      .case-lightbox.open {
+        display: flex;
+      }
+      .lightbox-inner {
+        background: var(--bg2, #111);
+        border: 1px solid rgba(201, 169, 110, 0.25);
+        max-width: 680px;
+        width: 100%;
+        max-height: 90vh;
+        overflow-y: auto;
+        position: relative;
+        animation: lightboxIn 0.25s ease both;
+      }
+      @keyframes lightboxIn {
+        from {
+          opacity: 0;
+          transform: scale(0.93) translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1) translateY(0);
+        }
+      }
+      .lightbox-close {
+        position: absolute;
+        top: 14px;
+        right: 16px;
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        font-size: 1.3rem;
+        cursor: pointer;
+        z-index: 2;
+        padding: 4px 8px;
+        transition: color 0.2s;
+      }
+      .lightbox-close:hover {
+        color: var(--gold);
+      }
+      .lightbox-img {
+        width: 100%;
+        min-height: 240px;
+        background: rgba(201, 169, 110, 0.06);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 4.5rem;
+        color: rgba(201, 169, 110, 0.3);
+      }
+      .lightbox-body {
+        padding: 28px;
+      }
+      .lightbox-cat {
+        font-size: 0.65rem;
+        letter-spacing: 2.5px;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 10px;
+      }
+      .lightbox-title {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--white);
+        margin-bottom: 12px;
+      }
+      .lightbox-desc {
+        font-size: 0.88rem;
+        color: var(--text-muted);
+        line-height: 1.75;
+        margin-bottom: 20px;
+      }
+      .lightbox-meta {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        border-top: 1px solid var(--border);
+        padding-top: 16px;
+      }
+      .lightbox-cta {
+        margin-top: 20px;
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
       }
 
       /* Stats row */
@@ -213,10 +407,14 @@
 
       @media (max-width: 640px) {
         .cases-grid {
-          grid-template-columns: 1fr;
+          columns: 1;
         }
         .stats-strip-inner {
           gap: 28px;
+        }
+        .case-hover-overlay {
+          opacity: 1;
+          background: linear-gradient(0deg, rgba(8, 8, 8, 0.7) 0%, rgba(8, 8, 8, 0) 60%);
         }
       }
     </style>
@@ -341,8 +539,34 @@
       <section class="cases-section" aria-labelledby="cases-heading">
         <h2 id="cases-heading" class="sr-only">Кейсы агентства</h2>
         <div class="cases-grid" id="casesGrid">
-          <article class="case-card" data-cat="fashion">
-            <div class="case-img" role="img" aria-label="Показ мод Moscow Fashion Week">🎭</div>
+          <article
+            class="case-card"
+            data-cat="fashion"
+            data-idx="0"
+            onclick="openLightbox(0)"
+            tabindex="0"
+            role="button"
+            aria-label="Открыть кейс Moscow Fashion Week 2025"
+          >
+            <div class="case-img-wrap">
+              <div class="case-img" role="img" aria-label="Показ мод Moscow Fashion Week" style="height: 220px">🎭</div>
+              <div class="case-hover-overlay" aria-hidden="true">
+                <p class="case-hover-desc">
+                  Предоставили 12 моделей для показа молодого российского дизайнера. Подготовка — 3 дня: кастинг,
+                  примерки, репетиции.
+                </p>
+                <div class="case-hover-meta"><span>📍 Москва</span><span>👥 12 моделей</span><span>⏱ 2 дня</span></div>
+                <button
+                  class="case-hover-btn"
+                  onclick="
+                    event.stopPropagation();
+                    openLightbox(0);
+                  "
+                >
+                  Подробнее →
+                </button>
+              </div>
+            </div>
             <div class="case-body">
               <div class="case-cat">Fashion</div>
               <h3 class="case-title">Moscow Fashion Week 2025</h3>
@@ -358,8 +582,36 @@
             </div>
           </article>
 
-          <article class="case-card" data-cat="commercial">
-            <div class="case-img" role="img" aria-label="Рекламная кампания для fashion-бренда">📸</div>
+          <article
+            class="case-card"
+            data-cat="commercial"
+            data-idx="1"
+            onclick="openLightbox(1)"
+            tabindex="0"
+            role="button"
+            aria-label="Открыть кейс рекламная кампания LIMÉ"
+          >
+            <div class="case-img-wrap">
+              <div class="case-img" role="img" aria-label="Рекламная кампания для fashion-бренда" style="height: 260px">
+                📸
+              </div>
+              <div class="case-hover-overlay" aria-hidden="true">
+                <p class="case-hover-desc">
+                  Комплексная съёмка лукбука для крупного российского бренда одежды. 3 дня съёмок, 5 моделей, 200+
+                  образов.
+                </p>
+                <div class="case-hover-meta"><span>📍 СПб</span><span>👥 5 моделей</span><span>⏱ 3 дня</span></div>
+                <button
+                  class="case-hover-btn"
+                  onclick="
+                    event.stopPropagation();
+                    openLightbox(1);
+                  "
+                >
+                  Подробнее →
+                </button>
+              </div>
+            </div>
             <div class="case-body">
               <div class="case-cat">Коммерческая съёмка</div>
               <h3 class="case-title">Рекламная кампания LIMÉ</h3>
@@ -375,8 +627,33 @@
             </div>
           </article>
 
-          <article class="case-card" data-cat="events">
-            <div class="case-img" role="img" aria-label="Корпоративное мероприятие">🎉</div>
+          <article
+            class="case-card"
+            data-cat="events"
+            data-idx="2"
+            onclick="openLightbox(2)"
+            tabindex="0"
+            role="button"
+            aria-label="Открыть кейс Юбилей Сбербанка"
+          >
+            <div class="case-img-wrap">
+              <div class="case-img" role="img" aria-label="Корпоративное мероприятие" style="height: 200px">🎉</div>
+              <div class="case-hover-overlay" aria-hidden="true">
+                <p class="case-hover-desc">
+                  Хостес и промо-модели на торжественном вечере крупного банка. Встреча гостей, VIP-сопровождение.
+                </p>
+                <div class="case-hover-meta"><span>📍 Москва</span><span>👥 8 хостес</span><span>⏱ 1 вечер</span></div>
+                <button
+                  class="case-hover-btn"
+                  onclick="
+                    event.stopPropagation();
+                    openLightbox(2);
+                  "
+                >
+                  Подробнее →
+                </button>
+              </div>
+            </div>
             <div class="case-body">
               <div class="case-cat">Корпоратив</div>
               <h3 class="case-title">Юбилей Сбербанка — 500 гостей</h3>
@@ -392,8 +669,33 @@
             </div>
           </article>
 
-          <article class="case-card" data-cat="photo">
-            <div class="case-img" role="img" aria-label="Свадебная фотосессия">💐</div>
+          <article
+            class="case-card"
+            data-cat="photo"
+            data-idx="3"
+            onclick="openLightbox(3)"
+            tabindex="0"
+            role="button"
+            aria-label="Открыть кейс свадебный лукбук"
+          >
+            <div class="case-img-wrap">
+              <div class="case-img" role="img" aria-label="Свадебная фотосессия" style="height: 240px">💐</div>
+              <div class="case-hover-overlay" aria-hidden="true">
+                <p class="case-hover-desc">
+                  Съёмка коллекции свадебных платьев. Студийная и уличная локации, 3 образа на каждой модели.
+                </p>
+                <div class="case-hover-meta"><span>📍 Москва</span><span>👥 3 модели</span><span>⏱ 1 день</span></div>
+                <button
+                  class="case-hover-btn"
+                  onclick="
+                    event.stopPropagation();
+                    openLightbox(3);
+                  "
+                >
+                  Подробнее →
+                </button>
+              </div>
+            </div>
             <div class="case-body">
               <div class="case-cat">Фотосессия</div>
               <h3 class="case-title">Свадебный лукбук для салона</h3>
