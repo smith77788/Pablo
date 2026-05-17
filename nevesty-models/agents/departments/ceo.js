@@ -729,12 +729,27 @@ class StrategicCEO extends Agent {
         return;
       }
       const experiment = JSON.parse(jsonMatch[0]);
+      const proposedAt = new Date().toISOString();
 
       // Persist experiment proposal
-      await saveSetting(
-        'ceo_last_experiment',
-        JSON.stringify({ ...experiment, proposed_at: new Date().toISOString() })
-      );
+      await saveSetting('ceo_last_experiment', JSON.stringify({ ...experiment, proposed_at: proposedAt }));
+
+      // Also write to ab_experiments table so showAdminExperiments in bot.js can display it
+      const expId = `ceo_${Date.now()}`;
+      await dbRun(
+        `INSERT OR IGNORE INTO ab_experiments
+           (id, hypothesis, metric, effort, expected_lift, status, department, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'proposed', 'CEO', ?, ?)`,
+        [
+          expId,
+          experiment.hypothesis || '',
+          experiment.metric || '',
+          experiment.effort || 'medium',
+          experiment.expected_lift || '',
+          proposedAt,
+          proposedAt,
+        ]
+      ).catch(() => {});
 
       this.addFinding(
         'INFO',
