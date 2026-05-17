@@ -20,7 +20,7 @@
     <meta property="og:site_name" content="Nevesty Models" />
     <meta property="og:locale" content="ru_RU" />
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="404 — Страница не найдена | Nevesty Models" />
+    <meta name="twitter:title" content="404 — Невесты Моделей" />
     <meta
       name="twitter:description"
       content="Страница не найдена. Возможно, страница была удалена или вы перешли по неверной ссылке."
@@ -33,11 +33,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="dns-prefetch" href="https://api.telegram.org" />
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet" />
     <link rel="preload" href="/css/main.css" as="style" />
     <link rel="stylesheet" href="/css/main.css" />
     <!-- Google Analytics 4 (loads only if consent given) -->
     <script>
-      window._ga_id = ''; // loaded from API
+      window._ga_id = '';
       fetch('/api/settings/public')
         .then(r => r.json())
         .then(d => {
@@ -59,7 +60,6 @@
         })
         .catch(() => {});
     </script>
-    <!-- Analytics wrapper -->
     <script src="/js/analytics.js"></script>
     <!-- Yandex.Metrica (loads only if consent given) -->
     <script>
@@ -90,8 +90,8 @@
         })
         .catch(() => {});
     </script>
-    <!-- /Yandex.Metrica -->
     <style>
+      /* ── Page layout ── */
       .page-404 {
         min-height: 100vh;
         display: flex;
@@ -99,110 +99,235 @@
         align-items: center;
         justify-content: center;
         text-align: center;
-        padding: 40px 24px;
+        padding: 80px 24px 60px;
         position: relative;
         overflow: hidden;
       }
 
+      /* Radial gold glow background */
       .page-404::before {
         content: '';
         position: absolute;
         inset: 0;
-        background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(201, 169, 110, 0.06) 0%, transparent 70%);
+        background:
+          radial-gradient(ellipse 55% 45% at 50% 40%, rgba(201, 169, 110, 0.08) 0%, transparent 70%),
+          radial-gradient(ellipse 30% 20% at 20% 80%, rgba(201, 169, 110, 0.04) 0%, transparent 60%),
+          radial-gradient(ellipse 30% 20% at 80% 80%, rgba(201, 169, 110, 0.04) 0%, transparent 60%);
         pointer-events: none;
       }
 
+      /* ── Huge 404 number ── */
       .err-code {
-        font-size: clamp(7rem, 22vw, 16rem);
+        font-family: 'Playfair Display', Georgia, serif;
+        font-size: clamp(8rem, 26vw, 18rem);
         font-weight: 900;
-        line-height: 1;
-        background: linear-gradient(135deg, #c9a96e 0%, #e8d5a3 40%, #c9a96e 65%, #9a7840 100%);
+        line-height: 0.9;
+        background: linear-gradient(135deg, #9a7840 0%, #c9a96e 25%, #f0deb0 50%, #c9a96e 75%, #9a7840 100%);
+        background-size: 200% 200%;
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
         user-select: none;
-        letter-spacing: -0.03em;
-        margin-bottom: -16px;
-        animation: pulse404 3s ease-in-out infinite;
+        letter-spacing: -0.04em;
+        margin-bottom: 8px;
+        animation:
+          shimmer404 4s ease-in-out infinite,
+          glow404 3s ease-in-out infinite;
+        position: relative;
+        z-index: 1;
       }
 
-      @keyframes pulse404 {
+      @keyframes shimmer404 {
         0%,
         100% {
-          opacity: 1;
-          filter: drop-shadow(0 0 24px rgba(201, 169, 110, 0.28));
+          background-position: 0% 50%;
         }
         50% {
-          opacity: 0.82;
-          filter: drop-shadow(0 0 48px rgba(201, 169, 110, 0.52));
+          background-position: 100% 50%;
         }
       }
 
+      @keyframes glow404 {
+        0%,
+        100% {
+          filter: drop-shadow(0 0 20px rgba(201, 169, 110, 0.25));
+        }
+        50% {
+          filter: drop-shadow(0 0 60px rgba(201, 169, 110, 0.55));
+        }
+      }
+
+      /* ── Animated search icon ── */
+      .err-icon {
+        margin: 0 auto 28px;
+        width: 72px;
+        height: 72px;
+        position: relative;
+        animation: sway 2.8s ease-in-out infinite;
+        transform-origin: 50% 30%;
+        z-index: 1;
+      }
+
+      @keyframes sway {
+        0%,
+        100% {
+          transform: rotate(-8deg);
+        }
+        50% {
+          transform: rotate(8deg);
+        }
+      }
+
+      .err-icon svg {
+        width: 100%;
+        height: 100%;
+        filter: drop-shadow(0 4px 16px rgba(201, 169, 110, 0.4));
+      }
+
+      /* ── Divider ── */
       .err-divider {
-        width: 60px;
+        width: 80px;
         height: 1px;
         background: linear-gradient(90deg, transparent, var(--gold), transparent);
-        margin: 0 auto 28px;
+        margin: 0 auto 20px;
       }
 
+      /* ── Label ── */
       .err-label {
-        font-size: 0.7rem;
-        letter-spacing: 4px;
+        font-size: 0.65rem;
+        letter-spacing: 5px;
         text-transform: uppercase;
         color: var(--gold);
-        margin-bottom: 16px;
+        margin-bottom: 14px;
+        font-family: 'Playfair Display', serif;
       }
 
+      /* ── Title ── */
       .err-title {
-        font-size: clamp(1.6rem, 4vw, 2.4rem);
+        font-family: 'Playfair Display', Georgia, serif;
+        font-size: clamp(1.6rem, 4vw, 2.6rem);
         font-weight: 700;
         color: var(--text);
-        margin-bottom: 16px;
+        margin-bottom: 14px;
+        line-height: 1.2;
       }
 
+      /* ── Description ── */
       .err-desc {
         color: var(--text-muted);
         font-size: 0.95rem;
-        max-width: 440px;
-        line-height: 1.7;
-        margin-bottom: 40px;
+        max-width: 460px;
+        line-height: 1.8;
+        margin-bottom: 36px;
       }
 
+      /* ── Action buttons ── */
       .err-actions {
         display: flex;
         gap: 14px;
         flex-wrap: wrap;
         justify-content: center;
-        margin-bottom: 32px;
+        margin-bottom: 24px;
       }
 
+      /* ── Back link ── */
       .err-back {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        padding: 11px 24px;
+        padding: 10px 22px;
         background: transparent;
-        border: 1px solid rgba(201, 169, 110, 0.35);
-        border-radius: 8px;
+        border: 1px solid rgba(201, 169, 110, 0.3);
+        border-radius: 6px;
         color: var(--gold);
-        font-size: 0.875rem;
+        font-size: 0.82rem;
         font-family: inherit;
         cursor: pointer;
         text-decoration: none;
+        letter-spacing: 0.02em;
         transition:
           background 0.2s,
           border-color 0.2s;
+        margin-bottom: 48px;
       }
       .err-back:hover {
-        background: rgba(201, 169, 110, 0.1);
+        background: rgba(201, 169, 110, 0.08);
         border-color: var(--gold);
       }
       .err-back svg {
-        width: 15px;
-        height: 15px;
+        width: 14px;
+        height: 14px;
         flex-shrink: 0;
       }
 
+      /* ── Featured model teaser ── */
+      .err-model {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 28px 32px;
+        border: 1px solid rgba(201, 169, 110, 0.15);
+        border-radius: 12px;
+        background: rgba(201, 169, 110, 0.04);
+        max-width: 300px;
+        text-decoration: none;
+        transition:
+          border-color 0.25s,
+          background 0.25s;
+        margin-top: 8px;
+      }
+      .err-model:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+        background: rgba(201, 169, 110, 0.07);
+      }
+      .err-model.visible {
+        display: flex;
+      }
+      .err-model-hint {
+        font-size: 0.65rem;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        color: var(--gold);
+        opacity: 0.7;
+      }
+      .err-model-photo {
+        width: 88px;
+        height: 110px;
+        border-radius: 6px;
+        object-fit: cover;
+        border: 1px solid rgba(201, 169, 110, 0.2);
+      }
+      .err-model-photo-placeholder {
+        width: 88px;
+        height: 110px;
+        border-radius: 6px;
+        background: rgba(201, 169, 110, 0.06);
+        border: 1px solid rgba(201, 169, 110, 0.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .err-model-name {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .err-model-sub {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
+      .err-model-cta {
+        font-size: 0.72rem;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: var(--gold);
+        border-bottom: 1px solid rgba(201, 169, 110, 0.35);
+        padding-bottom: 2px;
+      }
+
+      /* ── Corner ornaments ── */
       .err-corner {
         position: absolute;
         width: 80px;
@@ -237,6 +362,19 @@
         }
         .err-actions {
           gap: 10px;
+        }
+        .err-model {
+          padding: 20px 24px;
+        }
+      }
+
+      /* ── Reduced motion ── */
+      @media (prefers-reduced-motion: reduce) {
+        .err-code {
+          animation: none;
+        }
+        .err-icon {
+          animation: none;
         }
       }
     </style>
@@ -296,16 +434,50 @@
       <div class="err-corner err-corner-bl" aria-hidden="true"></div>
       <div class="err-corner err-corner-br" aria-hidden="true"></div>
 
+      <!-- Big 404 -->
       <div class="err-code" aria-label="Ошибка 404">404</div>
+
+      <!-- Animated search/question icon -->
+      <div class="err-icon" aria-hidden="true">
+        <svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="30" cy="30" r="18" stroke="#c9a96e" stroke-width="2.5" />
+          <line x1="43" y1="43" x2="58" y2="58" stroke="#c9a96e" stroke-width="2.5" stroke-linecap="round" />
+          <!-- Question mark inside magnifier -->
+          <text
+            x="24"
+            y="37"
+            font-family="Georgia, serif"
+            font-size="18"
+            font-weight="700"
+            fill="#c9a96e"
+            opacity="0.85"
+          >
+            ?
+          </text>
+          <!-- Gleam on lens -->
+          <circle cx="23" cy="23" r="4" fill="url(#gleam)" opacity="0.35" />
+          <defs>
+            <radialGradient id="gleam" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#f0deb0" />
+              <stop offset="100%" stop-color="#c9a96e" stop-opacity="0" />
+            </radialGradient>
+          </defs>
+        </svg>
+      </div>
+
       <div class="err-divider" aria-hidden="true"></div>
-      <div class="err-label" aria-hidden="true">Ошибка</div>
+      <div class="err-label" aria-hidden="true">Ошибка · 404</div>
       <h1 class="err-title">Страница не найдена</h1>
-      <p class="err-desc">Возможно, страница была удалена или вы перешли по неверной ссылке.</p>
+      <p class="err-desc">
+        Возможно, страница была удалена или вы перешли по неверной ссылке.<br />Воспользуйтесь навигацией или вернитесь
+        на главную.
+      </p>
+
       <nav class="err-actions" aria-label="Полезные ссылки">
-        <a href="/catalog.html" class="btn-outline" style="padding: 13px 28px; font-size: 0.85rem">Каталог моделей</a>
-        <a href="/booking.html" class="btn-outline" style="padding: 13px 28px; font-size: 0.85rem">Бронирование</a>
-        <a href="/" class="btn-primary" style="padding: 13px 28px; font-size: 0.85rem">На главную</a>
+        <a href="/" class="btn-primary" style="padding: 13px 32px; font-size: 0.85rem">На главную</a>
+        <a href="/catalog.html" class="btn-outline" style="padding: 13px 28px; font-size: 0.85rem">В каталог</a>
       </nav>
+
       <button
         class="err-back"
         onclick="history.length > 1 ? history.back() : (window.location.href = '/')"
@@ -324,6 +496,54 @@
         </svg>
         Вернуться назад
       </button>
+
+      <!-- Featured model teaser -->
+      <a class="err-model" id="featuredModel" href="/catalog.html" aria-label="Посмотреть модель">
+        <span class="err-model-hint">Пока вы здесь, посмотрите</span>
+        <div class="err-model-photo-placeholder" id="modelPhotoWrap" aria-hidden="true">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#c9a96e" stroke-width="1.5">
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+          </svg>
+        </div>
+        <span class="err-model-name" id="modelName">Каталог моделей</span>
+        <span class="err-model-sub" id="modelSub">Найдите своё вдохновение</span>
+        <span class="err-model-cta">Смотреть профиль</span>
+      </a>
     </main>
+
+    <script>
+      // Load featured model from API
+      (function () {
+        fetch('/api/models?limit=1&featured=1')
+          .then(r => r.json())
+          .then(data => {
+            const models = Array.isArray(data) ? data : data.models || data.data || [];
+            if (!models.length) return;
+            const m = models[0];
+            const container = document.getElementById('featuredModel');
+            const wrap = document.getElementById('modelPhotoWrap');
+            const nameEl = document.getElementById('modelName');
+            const subEl = document.getElementById('modelSub');
+
+            if (m.name) nameEl.textContent = m.name;
+            if (m.age || m.city)
+              subEl.textContent = [m.age ? m.age + ' лет' : null, m.city].filter(Boolean).join(' · ');
+            if (m.id) container.href = '/catalog.html#model-' + m.id;
+
+            const photo = m.photo || m.photo_url || m.avatar;
+            if (photo) {
+              const img = document.createElement('img');
+              img.className = 'err-model-photo';
+              img.src = photo.startsWith('http') ? photo : '/uploads/' + photo;
+              img.alt = m.name || 'Модель';
+              img.loading = 'lazy';
+              wrap.replaceWith(img);
+            }
+            container.classList.add('visible');
+          })
+          .catch(() => {});
+      })();
+    </script>
   </body>
 </html>
