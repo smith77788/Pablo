@@ -21,6 +21,21 @@ let app;
 let adminToken;
 
 beforeAll(async () => {
+  // Initialize globals that server.js normally sets up
+  if (!global.sseClients) global.sseClients = new Map();
+  if (!global.broadcastSSE) {
+    global.broadcastSSE = function broadcastSSE(event, data) {
+      const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+      global.sseClients.forEach((res, clientId) => {
+        try {
+          res.write(payload);
+        } catch {
+          global.sseClients.delete(clientId);
+        }
+      });
+    };
+  }
+
   const { initDatabase } = require('../database');
   await initDatabase();
   require('../bot');
@@ -127,24 +142,27 @@ describe('SSE endpoint', () => {
     expect(res.status).toBe(401);
   });
 
-  test('GET /api/admin/events с auth → Content-Type text/event-stream', async () => {
-    const res = await request(app)
-      .get(`/api/admin/events?token=${adminToken}`)
-      .timeout({ response: 3000 })
-      .buffer(false)
-      .parse((res, callback) => {
-        // Collect a tiny bit then abort
-        res.once('data', () => {
-          res.destroy();
-          callback(null, '');
+  test('GET /api/admin/events с auth → Content-Type text/event-stream', done => {
+    const http = require('http');
+    const server = http.createServer(app);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      const req = http.get(`http://127.0.0.1:${port}/api/admin/events?token=${adminToken}`, res => {
+        const contentType = res.headers['content-type'] || '';
+        req.destroy(); // close immediately after getting headers
+        server.close(() => {
+          try {
+            expect(contentType).toMatch(/text\/event-stream/i);
+            done();
+          } catch (e) {
+            done(e);
+          }
         });
-        res.once('error', () => callback(null, ''));
-        res.once('end', () => callback(null, ''));
       });
-
-    // Accept any successful response — the connection is closed by the client
-    const contentType = res.headers['content-type'] || '';
-    expect(contentType).toMatch(/text\/event-stream/i);
+      req.on('error', err => {
+        server.close(() => done(err));
+      });
+    });
   });
 
   test('broadcastSSE функция экспортируется из server', () => {
