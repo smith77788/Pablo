@@ -536,10 +536,226 @@
         }
       }
 
+      /* ── sticky table header ── */
+      .compare-table-wrap {
+        position: relative;
+      }
+      .cmp-sticky-head {
+        position: sticky;
+        top: 64px; /* below navbar */
+        z-index: 20;
+        background: var(--bg, #080808);
+        border-bottom: 2px solid var(--border);
+        display: none; /* shown by JS when table is rendered */
+      }
+      .cmp-sticky-head.visible {
+        display: table;
+      }
+      /* sticky thead row inside the table */
+      .compare-table thead th {
+        position: sticky;
+        top: 64px;
+        z-index: 20;
+        background: var(--bg2, #111);
+        border-bottom: 2px solid rgba(201, 169, 110, 0.4);
+        padding: 10px 14px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        vertical-align: middle;
+      }
+      .compare-table thead th.col-model {
+        border-left: 1px solid var(--border);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 0; /* table-fixed will control widths */
+      }
+      .compare-table thead th .thead-name {
+        color: var(--white);
+        font-family: 'Playfair Display', serif;
+        font-size: 0.88rem;
+        font-weight: 400;
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .compare-table thead th .thead-remove {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        background: rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(244, 67, 54, 0);
+        color: var(--text-dim);
+        font-size: 0.7rem;
+        cursor: pointer;
+        border-radius: 50%;
+        transition: all 0.2s;
+        margin-left: 6px;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }
+      .compare-table thead th .thead-remove:hover {
+        background: rgba(244, 67, 54, 0.85);
+        border-color: rgba(244, 67, 54, 0.85);
+        color: #fff;
+        transform: scale(1.15);
+      }
+      .thead-name-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      /* ── better cell highlight: gold = better, muted = worse ── */
+      .cmp-value-cell.cell-best {
+        background: rgba(201, 169, 110, 0.13);
+        color: var(--gold);
+        font-weight: 600;
+        position: relative;
+      }
+      .cmp-value-cell.cell-best::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--gold);
+      }
+      .cmp-value-cell.cell-worst {
+        color: var(--text-dim);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      /* ── remove button in photo cell: hover red cross ── */
+      .cmp-remove-btn {
+        border-radius: 50%;
+        font-size: 0.75rem;
+      }
+      .cmp-remove-btn svg {
+        width: 12px;
+        height: 12px;
+        stroke: currentColor;
+        stroke-width: 2.5;
+        fill: none;
+      }
+
+      /* ── beautiful empty state ── */
+      .compare-empty-state {
+        text-align: center;
+        padding: 100px 24px 80px;
+      }
+      .compare-empty-icon-wrap {
+        width: 120px;
+        height: 120px;
+        margin: 0 auto 28px;
+        border-radius: 50%;
+        border: 1px solid rgba(201, 169, 110, 0.25);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+      }
+      .compare-empty-icon-wrap::before {
+        content: '';
+        position: absolute;
+        inset: -8px;
+        border-radius: 50%;
+        border: 1px solid rgba(201, 169, 110, 0.1);
+      }
+      .compare-empty-icon-wrap::after {
+        content: '';
+        position: absolute;
+        inset: -18px;
+        border-radius: 50%;
+        border: 1px solid rgba(201, 169, 110, 0.05);
+      }
+      .compare-empty-icon-inner {
+        font-size: 3rem;
+        opacity: 0.6;
+      }
+      .compare-empty-state h2 {
+        font-family: 'Playfair Display', serif;
+        font-size: 2rem;
+        color: var(--white);
+        margin-bottom: 14px;
+        font-weight: 400;
+      }
+      .compare-empty-state p {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        line-height: 1.7;
+        margin-bottom: 40px;
+        max-width: 380px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .compare-empty-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .compare-empty-hint {
+        margin-top: 40px;
+        padding-top: 32px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        gap: 32px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .compare-empty-hint-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-dim);
+        font-size: 0.78rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        max-width: 120px;
+        text-align: center;
+      }
+      .compare-empty-hint-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: var(--bg3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+      }
+
+      /* ── mobile: scroll with snap ── */
       @media (max-width: 640px) {
+        .compare-table-wrap {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scroll-snap-type: x mandatory;
+          scroll-padding-left: 90px;
+        }
+        .compare-table {
+          min-width: 480px;
+        }
         .compare-table .col-label {
           width: 90px;
           min-width: 80px;
+          position: sticky;
+          left: 0;
+          z-index: 10;
+          background: var(--bg, #080808);
+        }
+        .compare-table .col-model {
+          scroll-snap-align: start;
+          min-width: 130px;
         }
         .cmp-row-label {
           font-size: 0.6rem;
@@ -567,6 +783,26 @@
         .cmp-tool-btn {
           padding: 8px 14px;
           font-size: 0.68rem;
+        }
+        .compare-table thead th {
+          top: 56px;
+          padding: 8px 10px;
+        }
+      }
+
+      /* ── reduced motion ── */
+      @media (prefers-reduced-motion: reduce) {
+        .cmp-remove-btn,
+        .cmp-btn-book,
+        .cmp-btn-profile,
+        .cmp-btn-fav,
+        .cmp-tool-btn,
+        .cmp-add-btn,
+        .toast {
+          transition: none !important;
+        }
+        .cmp-score-bar-fill {
+          transition: none !important;
         }
       }
     </style>
@@ -725,10 +961,29 @@
         <!-- empty state -->
         <div id="emptyState" style="display: none">
           <div class="compare-empty-state">
-            <div class="compare-empty-icon">⚖️</div>
+            <div class="compare-empty-icon-wrap">
+              <div class="compare-empty-icon-inner">⚖️</div>
+            </div>
             <h2>Нет моделей для сравнения</h2>
-            <p>Добавьте модели через каталог, нажав кнопку «⚖️ Сравнить» на карточке</p>
-            <a href="/catalog.html" class="btn-primary">Перейти в каталог</a>
+            <p>Добавьте до 3 моделей через каталог, нажав кнопку «⚖️ Сравнить» на карточке модели</p>
+            <div class="compare-empty-actions">
+              <a href="/catalog.html" class="btn-primary">Перейти в каталог</a>
+              <a href="/favorites.html" class="btn-outline">❤️ Из избранного</a>
+            </div>
+            <div class="compare-empty-hint">
+              <div class="compare-empty-hint-item">
+                <div class="compare-empty-hint-icon">1️⃣</div>
+                Откройте каталог
+              </div>
+              <div class="compare-empty-hint-item">
+                <div class="compare-empty-hint-icon">⚖️</div>
+                Нажмите «Сравнить» на карточке
+              </div>
+              <div class="compare-empty-hint-item">
+                <div class="compare-empty-hint-icon">✨</div>
+                Сравните до 3 моделей
+              </div>
+            </div>
           </div>
         </div>
 
