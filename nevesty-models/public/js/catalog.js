@@ -145,7 +145,10 @@
     if (!res.ok) throw new Error('HTTP ' + res.status);
     allModels = await res.json();
   } catch (e) {
-    if (skeleton) skeleton.style.display = 'none';
+    if (skeleton) {
+      skeleton.style.display = 'none';
+      skeleton.setAttribute('aria-busy', 'false');
+    }
     if (grid) grid.style.display = '';
     if (grid) grid.innerHTML = '<p class="no-results">Ошибка загрузки. Попробуйте обновить страницу.</p>';
     if (countEl) countEl.textContent = '';
@@ -153,7 +156,10 @@
   }
 
   // Hide skeleton, show grid
-  if (skeleton) skeleton.style.display = 'none';
+  if (skeleton) {
+    skeleton.style.display = 'none';
+    skeleton.setAttribute('aria-busy', 'false');
+  }
   if (grid) grid.style.display = '';
 
   // ── Populate city dropdown from /api/cities (admin-managed list) ─────────────

@@ -166,10 +166,12 @@ function renderStars(rating) {
 
   let _photos = [];
   let _idx = 0;
+  let _modelName = '';
 
-  function lbShow(photos, idx) {
+  function lbShow(photos, idx, modelName) {
     _photos = photos;
     _idx = idx;
+    _modelName = modelName || '';
     _render();
     lb.classList.add('lb-open');
     document.body.style.overflow = 'hidden';
@@ -184,7 +186,10 @@ function renderStars(rating) {
   }
 
   function _render() {
-    document.getElementById('lb-img').src = _photos[_idx];
+    const img = document.getElementById('lb-img');
+    img.src = _photos[_idx];
+    const photoLabel = _photos.length > 1 ? ` — фото ${_idx + 1} из ${_photos.length}` : '';
+    img.alt = _modelName ? `${_modelName}${photoLabel}` : `Фото${photoLabel}`;
     const counter = document.getElementById('lb-counter');
     counter.textContent = _photos.length > 1 ? `${_idx + 1} / ${_photos.length}` : '';
     document.getElementById('lb-prev').style.display = _photos.length > 1 ? 'flex' : 'none';
@@ -239,6 +244,7 @@ function openModelModal(id, triggerEl) {
 
       window._currentModalPhotos = allPhotos;
       window._currentModalPhotoIdx = 0;
+      window._currentModalModelName = m.name || '';
 
       const thumbsHtml = allPhotos
         .slice(0, 6)
@@ -256,7 +262,7 @@ function openModelModal(id, triggerEl) {
       const mainImgHtml =
         m.photo_main || allPhotos[0]
           ? `<img id="modalMainImg" src="${m.photo_main || allPhotos[0]}" alt="${m.name}"
-               onclick="window._lightbox && window._lightbox.show(window._currentModalPhotos, window._currentModalPhotoIdx || 0)"
+               onclick="window._lightbox && window._lightbox.show(window._currentModalPhotos, window._currentModalPhotoIdx || 0, window._currentModalModelName)"
                title="Нажмите для просмотра в полном размере" />`
           : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
                 background:var(--bg3);font-family:'Playfair Display',serif;
