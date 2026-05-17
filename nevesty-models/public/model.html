@@ -2305,6 +2305,129 @@
           }
         }
 
+        // ── Gallery rendering (masonry) ────────────────────────────────────────────
+        const GALLERY_INITIAL = 9;
+        let _allGalleryPhotos = [];
+        let _galleryModelName = '';
+        let _galleryShown = 0;
+
+        function renderGallery(photos, modelName) {
+          _allGalleryPhotos = photos;
+          _galleryModelName = modelName || '';
+          _galleryShown = 0;
+          const grid = el('galleryGrid');
+          if (!grid) return;
+          grid.innerHTML = '';
+
+          const countEl = el('galleryPhotoCount');
+          const loadMoreBtn = el('galleryLoadMore');
+
+          if (!photos.length) {
+            for (let i = 0; i < 6; i++) {
+              const ph = document.createElement('div');
+              ph.className = 'model-gallery-placeholder';
+              ph.textContent = '✦';
+              grid.appendChild(ph);
+            }
+            if (countEl) countEl.style.display = 'none';
+            if (loadMoreBtn) loadMoreBtn.style.display = 'none';
+            return;
+          }
+
+          if (countEl) {
+            countEl.textContent = photos.length + ' фото';
+            countEl.style.display = '';
+          }
+
+          const initial = Math.min(photos.length, GALLERY_INITIAL);
+          for (let i = 0; i < initial; i++) {
+            appendGalleryItem(grid, photos, i);
+          }
+          _galleryShown = initial;
+
+          if (loadMoreBtn) {
+            const remaining = photos.length - GALLERY_INITIAL;
+            if (remaining > 0) {
+              loadMoreBtn.textContent = 'Показать ещё (' + remaining + ')';
+              loadMoreBtn.style.display = 'block';
+            } else {
+              loadMoreBtn.style.display = 'none';
+            }
+          }
+        }
+
+        function appendGalleryItem(grid, photos, i) {
+          const item = document.createElement('div');
+          item.className = 'model-gallery-item reveal-item';
+          item.setAttribute('role', 'button');
+          item.setAttribute('tabindex', '0');
+          item.setAttribute('aria-label', 'Открыть фото ' + (i + 1));
+
+          const img = document.createElement('img');
+          img.src = photos[i];
+          img.alt = _galleryModelName + ' — фото ' + (i + 1);
+          img.loading = i < 3 ? 'eager' : 'lazy';
+          img.decoding = 'async';
+
+          const overlay = document.createElement('div');
+          overlay.className = 'gallery-overlay';
+          overlay.innerHTML = '<span class="gallery-overlay-icon">🔍</span>';
+
+          item.appendChild(img);
+          item.appendChild(overlay);
+
+          const capturedIdx = i;
+          const openFn = function () {
+            openLightbox(_allGalleryPhotos, capturedIdx);
+          };
+          item.addEventListener('click', openFn);
+          item.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openFn();
+            }
+          });
+
+          grid.appendChild(item);
+        }
+
+        window.galleryLoadMore = function () {
+          const grid = el('galleryGrid');
+          const loadMoreBtn = el('galleryLoadMore');
+          if (!grid) return;
+          const BATCH = 9;
+          const end = Math.min(_galleryShown + BATCH, _allGalleryPhotos.length);
+          for (let i = _galleryShown; i < end; i++) {
+            appendGalleryItem(grid, _allGalleryPhotos, i);
+          }
+          _galleryShown = end;
+          if (typeof window._observeRevealItems === 'function') window._observeRevealItems();
+          if (loadMoreBtn) {
+            const remaining = _allGalleryPhotos.length - _galleryShown;
+            if (remaining > 0) {
+              loadMoreBtn.textContent = 'Показать ещё (' + remaining + ')';
+            } else {
+              loadMoreBtn.style.display = 'none';
+            }
+          }
+        };
+
+        async function fetchModelPhotos(modelId, modelName, fallbackPhotos) {
+          try {
+            const resp = await fetch('/api/models/' + encodeURIComponent(modelId) + '/photos');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const photos = Array.isArray(data) ? data : Array.isArray(data.photos) ? data.photos : null;
+            if (!photos || photos.length === 0) return;
+            if (photos.length > fallbackPhotos.length) {
+              renderGallery(photos, modelName);
+              if (typeof window._observeRevealItems === 'function') window._observeRevealItems();
+            }
+          } catch (e) {
+            // No dedicated /photos endpoint — fallback already rendered
+          }
+        }
+
         // ── lightbox ───────────────────────────────────────────────────────────────
         let _lbPhotos = [],
           _lbIdx = 0,

@@ -2312,15 +2312,45 @@
     <button class="floating-cta" onclick="openQbModal()" aria-label="Оставить заявку">⚡ Заявка</button>
 
     <script>
-      function openQbModal() {
-        document.getElementById('qbModal')?.classList.add('open');
+      var _qbModalTrigger = null;
+      function openQbModal(triggerEl) {
+        _qbModalTrigger = triggerEl || document.activeElement;
+        var modal = document.getElementById('qbModal');
+        modal?.classList.add('open');
+        modal?.removeAttribute('aria-hidden');
         document.getElementById('qbName')?.focus();
       }
       function closeQbModal() {
-        document.getElementById('qbModal')?.classList.remove('open');
+        var modal = document.getElementById('qbModal');
+        modal?.classList.remove('open');
+        modal?.setAttribute('aria-hidden', 'true');
+        if (_qbModalTrigger && _qbModalTrigger.focus) _qbModalTrigger.focus();
+        _qbModalTrigger = null;
       }
       document.getElementById('qbModal')?.addEventListener('click', e => {
         if (e.target.id === 'qbModal') closeQbModal();
+      });
+      // Focus trap for qbModal
+      document.getElementById('qbModal')?.addEventListener('keydown', function (e) {
+        if (e.key !== 'Tab') return;
+        var focusable = this.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
+        var arr = Array.from(focusable).filter(function (el) {
+          return !el.disabled;
+        });
+        if (!arr.length) return;
+        var first = arr[0],
+          last = arr[arr.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
       });
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeQbModal();

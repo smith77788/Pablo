@@ -6549,6 +6549,7 @@ function initBot(app) {
       }
 
       // ── Pay order (client taps "💳 Оплатить" on confirmed order)
+      // ── Pay order (client taps "💳 Оплатить") — Telegram Stars
       if (data.startsWith('pay_order_')) {
         const orderId = parseInt(data.replace('pay_order_', ''));
         const ord = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(() => null);
@@ -6556,45 +6557,17 @@ function initBot(app) {
           return safeSend(chatId, RU.ORDER_NOT_FOUND);
         }
         if (ord.payment_status === 'paid') {
-          return safeSend(chatId, '✅ Эта заявка уже оплачена\\.', { parse_mode: 'MarkdownV2' });
+          return safeSend(chatId, '✅ Эта заявка уже оплачена\.', { parse_mode: 'MarkdownV2' });
         }
         try {
-          const { createPayment } = require('./services/payments');
-          const returnUrl = `${SITE_URL.replace(/\/$/, '')}/order-status.html?id=${ord.id}`;
-          const result = await createPayment(ord, returnUrl);
-          // Save payment ID to DB
-          await run('UPDATE orders SET payment_id=?, payment_status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [
-            result.paymentId,
-            'pending',
-            ord.id,
-          ]).catch(() => {});
-          if (result.confirmationUrl) {
-            return safeSend(
-              chatId,
-              `💳 *Оплата заявки ${esc(ord.order_number)}*\n\nНажмите кнопку ниже для перехода к оплате:`,
-              {
-                parse_mode: 'MarkdownV2',
-                reply_markup: {
-                  inline_keyboard: [
-                    [{ text: '💳 Перейти к оплате', url: result.confirmationUrl }],
-                    [{ text: '← Назад к заявке', callback_data: `client_order_${orderId}` }],
-                  ],
-                },
-              }
-            );
-          } else {
-            return safeSend(
-              chatId,
-              `💳 *Оплата инициирована*\n\nID платежа: \`${esc(result.paymentId || '')}\`\n\nОбратитесь к менеджеру для завершения оплаты\\.`,
-              { parse_mode: 'MarkdownV2' }
-            );
-          }
+          await sendStarsInvoice(chatId, ord);
         } catch (e) {
-          console.error('[Bot] pay_order:', e.message);
-          return safeSend(chatId, '❌ Ошибка при создании платежа\\. Обратитесь к менеджеру\\.', {
+          console.error('[Bot] pay_order Stars:', e.message);
+          return safeSend(chatId, '❌ Ошибка при отправке счёта\. Обратитесь к менеджеру\.', {
             parse_mode: 'MarkdownV2',
           });
         }
+        return;
       }
 
       // ── Booking: start
