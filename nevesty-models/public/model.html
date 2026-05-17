@@ -2663,7 +2663,10 @@
         }
         const btn = document.querySelector('#qbForm .qb-btn');
         const origText = btn ? btn.textContent : '';
-        if (btn) { btn.disabled = true; btn.textContent = 'Отправка...'; }
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Отправка...';
+        }
         try {
           const r = await fetch('/api/orders', {
             method: 'POST',
@@ -2683,7 +2686,10 @@
           setTimeout(closeQbModal, 3000);
         } catch (e) {
           showToast('Ошибка: ' + (e.message || 'Попробуйте позже'), 'error');
-          if (btn) { btn.disabled = false; btn.textContent = origText; }
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = origText;
+          }
         }
       }
     </script>

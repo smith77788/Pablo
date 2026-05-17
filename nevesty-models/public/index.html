@@ -355,9 +355,34 @@
           <a href="/reviews.html">Отзывы</a>
           <a href="/faq.html">FAQ</a>
           <a href="/contact.html">Контакты</a>
-          <a href="/favorites.html" aria-label="Избранное" style="font-size: 1.1rem"
-            ><span aria-hidden="true">❤️</span></a
-          >
+          <a
+            href="/favorites.html"
+            aria-label="Избранное"
+            id="fav-nav-link"
+            style="
+              display: inline-flex;
+              align-items: center;
+              gap: 4px;
+              font-size: 1rem;
+              text-decoration: none;
+              color: var(--text-muted);
+            "
+            ><span aria-hidden="true">❤️</span>
+            <span
+              id="fav-nav-badge"
+              style="
+                background: red;
+                color: white;
+                border-radius: 50%;
+                padding: 0 5px;
+                font-size: 0.7rem;
+                min-width: 18px;
+                text-align: center;
+                display: inline-block;
+                line-height: 18px;
+              "
+            ></span>
+          </a>
           <a href="/cabinet.html" style="font-size: 0.9rem" aria-label="Мои заявки"
             ><span aria-hidden="true">👤</span> Мои заявки</a
           >
@@ -2419,6 +2444,23 @@
           });
           imgObserver.observe(featuredGrid, { childList: true, subtree: true });
         }
+      })();
+    </script>
+    <script>
+      // ── Favorites nav badge ────────────────────────────────────────────────
+      (function () {
+        function updateFavBadge() {
+          try {
+            const favs = JSON.parse(localStorage.getItem('nm_favorites') || '[]');
+            const count = favs.length;
+            const badge = document.getElementById('fav-nav-badge');
+            if (badge) badge.textContent = count > 0 ? count : '';
+          } catch {}
+        }
+        updateFavBadge();
+        window.addEventListener('storage', function (e) {
+          if (e.key === 'nm_favorites') updateFavBadge();
+        });
       })();
     </script>
   </body>
