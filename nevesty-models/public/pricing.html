@@ -71,6 +71,64 @@
         margin: 0 auto;
       }
 
+      /* ─── Billing toggle ────────────────────────── */
+      .billing-toggle-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        margin-bottom: 40px;
+      }
+      .billing-label {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: color 0.2s;
+        user-select: none;
+      }
+      .billing-label.active {
+        color: var(--gold);
+        font-weight: 600;
+      }
+      .billing-switch {
+        width: 48px;
+        height: 26px;
+        background: var(--border);
+        border-radius: 13px;
+        position: relative;
+        cursor: pointer;
+        border: none;
+        transition: background 0.3s;
+        flex-shrink: 0;
+      }
+      .billing-switch.yearly {
+        background: rgba(201, 169, 110, 0.4);
+      }
+      .billing-switch::after {
+        content: '';
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--gold);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .billing-switch.yearly::after {
+        transform: translateX(22px);
+      }
+      .billing-discount-badge {
+        background: rgba(201, 169, 110, 0.15);
+        border: 1px solid rgba(201, 169, 110, 0.4);
+        color: var(--gold);
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 1px;
+        padding: 3px 8px;
+        border-radius: 20px;
+      }
+
       /* ─── Pricing cards ─────────────────────── */
       .pricing-section {
         padding: 64px 20px;
@@ -84,7 +142,7 @@
         text-align: center;
         color: var(--text-muted);
         font-size: 0.9rem;
-        margin-bottom: 40px;
+        margin-bottom: 24px;
       }
       .pricing-grid {
         display: grid;
@@ -98,13 +156,35 @@
         border: 1px solid var(--border);
         padding: 32px 28px;
         transition:
-          border-color 0.3s,
-          transform 0.3s;
+          border-color 0.35s,
+          transform 0.35s,
+          box-shadow 0.35s;
         position: relative;
       }
-      .pricing-card:hover {
-        border-color: rgba(201, 169, 110, 0.5);
-        transform: translateY(-4px);
+      @media (prefers-reduced-motion: no-preference) {
+        .pricing-card:hover {
+          border-color: rgba(201, 169, 110, 0.6);
+          transform: scale(1.02) translateY(-4px);
+          box-shadow:
+            0 0 28px rgba(201, 169, 110, 0.2),
+            0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        .pricing-card.featured {
+          animation: featuredGlow 2.6s ease-in-out infinite;
+        }
+        @keyframes featuredGlow {
+          0%,
+          100% {
+            box-shadow:
+              0 0 0 1px rgba(201, 169, 110, 0.3),
+              0 0 16px rgba(201, 169, 110, 0.08);
+          }
+          50% {
+            box-shadow:
+              0 0 0 2px rgba(201, 169, 110, 0.55),
+              0 0 32px rgba(201, 169, 110, 0.2);
+          }
+        }
       }
       .pricing-card.featured {
         border-color: rgba(201, 169, 110, 0.5);
@@ -121,6 +201,17 @@
         font-weight: 700;
         letter-spacing: 1px;
         text-transform: uppercase;
+      }
+      /* original price struck through when yearly billing */
+      .pricing-price-original {
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        text-decoration: line-through;
+        display: none;
+        margin-bottom: 2px;
+      }
+      .pricing-grid.billing-yearly .pricing-price-original {
+        display: block;
       }
       .pricing-name {
         font-size: 0.75rem;
@@ -466,10 +557,25 @@
       <section class="pricing-section" aria-labelledby="pricing-heading">
         <h2 id="pricing-heading">Пакеты услуг</h2>
         <p class="sub">Фиксированные пакеты — отправная точка для расчёта</p>
+
+        <!-- Billing toggle -->
+        <div class="billing-toggle-wrap" id="billingToggleWrap">
+          <span class="billing-label active" id="lblMonth" onclick="setBilling('month')">Разовый заказ</span>
+          <button
+            class="billing-switch"
+            id="billingSwitchBtn"
+            aria-label="Переключить тип оплаты"
+            onclick="toggleBilling()"
+          ></button>
+          <span class="billing-label" id="lblYear" onclick="setBilling('year')">Абонемент</span>
+          <span class="billing-discount-badge">−20%</span>
+        </div>
+
         <div class="pricing-grid" id="pricing-grid">
           <div class="pricing-card">
             <div class="pricing-name">Старт</div>
-            <div class="pricing-price">от 8 000 <span>₽</span></div>
+            <div class="pricing-price-original" data-full="8000">от 8 000 ₽</div>
+            <div class="pricing-price" data-base="8000">от 8 000 <span>₽</span></div>
             <div class="pricing-duration">за 2 часа</div>
             <div class="pricing-divider"></div>
             <div class="pricing-feature">Фотосессия или съёмка</div>

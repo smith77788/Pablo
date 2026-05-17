@@ -155,17 +155,29 @@
         gap: 10px;
       }
       .cabinet-user-avatar {
-        width: 40px;
-        height: 40px;
+        width: 48px;
+        height: 48px;
         background: linear-gradient(135deg, var(--gold-dark), var(--gold));
         border-radius: 50%;
+        border: 2px solid var(--gold);
+        box-shadow:
+          0 0 0 3px rgba(201, 169, 110, 0.18),
+          0 2px 12px rgba(201, 169, 110, 0.18);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 1rem;
+        font-size: 1.1rem;
+        font-family: 'Playfair Display', serif;
         color: var(--bg);
         font-weight: 700;
         flex-shrink: 0;
+        letter-spacing: 0.5px;
+        transition: box-shadow 0.3s;
+      }
+      .cabinet-user-avatar:hover {
+        box-shadow:
+          0 0 0 4px rgba(201, 169, 110, 0.32),
+          0 4px 18px rgba(201, 169, 110, 0.28);
       }
       .cabinet-user-info {
         flex: 1;
@@ -289,13 +301,29 @@
       .status-badge {
         display: inline-flex;
         align-items: center;
-        gap: 5px;
-        padding: 4px 10px;
+        gap: 6px;
+        padding: 5px 12px;
         font-size: 0.7rem;
         font-weight: 700;
         letter-spacing: 0.5px;
         text-transform: uppercase;
         white-space: nowrap;
+        border-radius: 2px;
+        transition:
+          background 0.4s ease,
+          color 0.4s ease,
+          border-color 0.4s ease,
+          box-shadow 0.4s ease;
+      }
+      .status-badge::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+        display: inline-block;
+        flex-shrink: 0;
+        transition: background 0.4s ease;
       }
       /* Status colors: new=blue, confirmed=yellow, in_progress=orange, completed=green, cancelled=grey */
       .status-badge.new {
