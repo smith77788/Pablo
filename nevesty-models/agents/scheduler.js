@@ -23,34 +23,36 @@ try {
 const AutoFixer = require('./auto-fixer');
 const { tgSend, logAgent, dbAll, dbRun, dbGet } = require('./lib/base');
 
-const INTERVAL_MS = 15 * 60 * 1000;   // 15 минут
-const CYCLE_LOG_LIMIT = 10000;         // храним до 10000 записей в agent_logs
+const INTERVAL_MS = 15 * 60 * 1000; // 15 минут
+const CYCLE_LOG_LIMIT = 10000; // храним до 10000 записей в agent_logs
 
-let cycleNumber   = 0;
-let lastScore     = null;
-let totalFixed    = 0;
-let totalCycles   = 0;
-const startupTime   = Date.now();
-let cycleRunning  = false;  // circuit breaker: skip if prev cycle still running
+let cycleNumber = 0;
+let lastScore = null;
+let totalFixed = 0;
+let totalCycles = 0;
+const startupTime = Date.now();
+let cycleRunning = false; // circuit breaker: skip if prev cycle still running
 
 // ─── Детальная запись каждого цикла ──────────────────────────────────────────
 
 async function logCycleStart(cycleNum) {
   const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  await dbRun(
-    `INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`,
-    ['Scheduler', 'all', `Цикл #${cycleNum} старт`,
-     `🧬 Цикл #${cycleNum} начат в ${ts}. Аптайм: ${formatUptime(Date.now() - startupTime)}.`]
-  ).catch(() => {});
+  await dbRun(`INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`, [
+    'Scheduler',
+    'all',
+    `Цикл #${cycleNum} старт`,
+    `🧬 Цикл #${cycleNum} начат в ${ts}. Аптайм: ${formatUptime(Date.now() - startupTime)}.`,
+  ]).catch(() => {});
 }
 
 async function logCycleEnd(cycleNum, score, fixed, elapsed) {
   const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  await dbRun(
-    `INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`,
-    ['Scheduler', 'all', `Цикл #${cycleNum} завершён`,
-     `✅ Цикл #${cycleNum} завершён в ${ts}. Score=${score}%, исправлено=${fixed}, время=${elapsed}с. Итого за сессию: циклов=${totalCycles}, исправлений=${totalFixed}.`]
-  ).catch(() => {});
+  await dbRun(`INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`, [
+    'Scheduler',
+    'all',
+    `Цикл #${cycleNum} завершён`,
+    `✅ Цикл #${cycleNum} завершён в ${ts}. Score=${score}%, исправлено=${fixed}, время=${elapsed}с. Итого за сессию: циклов=${totalCycles}, исправлений=${totalFixed}.`,
+  ]).catch(() => {});
 }
 
 function formatUptime(ms) {
@@ -74,13 +76,11 @@ async function pruneOldLogs() {
       );
     }
     // Оставляем 30 дней обсуждений
-    await dbRun(
-      `DELETE FROM agent_discussions WHERE created_at < datetime('now', '-30 days')`
-    ).catch(() => {});
+    await dbRun(`DELETE FROM agent_discussions WHERE created_at < datetime('now', '-30 days')`).catch(() => {});
     // Оставляем 7 дней открытых findings (закрытые — навсегда)
-    await dbRun(
-      `DELETE FROM agent_findings WHERE status='open' AND created_at < datetime('now', '-7 days')`
-    ).catch(() => {});
+    await dbRun(`DELETE FROM agent_findings WHERE status='open' AND created_at < datetime('now', '-7 days')`).catch(
+      () => {}
+    );
   } catch {}
 }
 
@@ -110,7 +110,10 @@ async function runCycle() {
       totalFixed += autoFixed.length;
       await tgSend(
         `🔧 AutoFixer [цикл #${cycleNumber}]:\n` +
-        autoFixed.slice(0, 5).map(f => `• ${f}`).join('\n')
+          autoFixed
+            .slice(0, 5)
+            .map(f => `• ${f}`)
+            .join('\n')
       ).catch(() => {});
     }
 
@@ -124,8 +127,8 @@ async function runCycle() {
     if (lastScore !== null && healthScore < lastScore - 15) {
       await tgSend(
         `⚠️ Health Score деградировал: ${lastScore}% → ${healthScore}%\n` +
-        `🔴 ${criticalCount} крит, 🟠 ${highCount} высоких\n` +
-        `Цикл #${cycleNumber} — проверьте бот.`
+          `🔴 ${criticalCount} крит, 🟠 ${highCount} высоких\n` +
+          `Цикл #${cycleNumber} — проверьте бот.`
       ).catch(() => {});
     }
 
@@ -136,19 +139,22 @@ async function runCycle() {
     lastScore = healthScore;
 
     await logCycleEnd(cycleNumber, healthScore, autoFixed.length + orchFixed, elapsed);
-    await logAgent('Scheduler',
+    await logAgent(
+      'Scheduler',
       `Цикл #${cycleNumber}: Score=${healthScore}% autoFixed=${autoFixed.length} orchFixed=${orchFixed} ${elapsed}с`
     );
-    console.log(`[Scheduler] Цикл #${cycleNumber} done. Score=${healthScore}% fixed=${autoFixed.length + orchFixed} (${elapsed}с)`);
-
+    console.log(
+      `[Scheduler] Цикл #${cycleNumber} done. Score=${healthScore}% fixed=${autoFixed.length + orchFixed} (${elapsed}с)`
+    );
   } catch (err) {
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     console.error(`[Scheduler] Цикл #${cycleNumber} ERROR (${elapsed}с):`, err.message);
-    await dbRun(
-      `INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`,
-      ['Scheduler', 'all', `❌ Цикл #${cycleNumber} ошибка`,
-       `Ошибка в цикле #${cycleNumber}: ${err.message}. Следующая попытка через ${INTERVAL_MS/60000} мин.`]
-    ).catch(() => {});
+    await dbRun(`INSERT INTO agent_discussions (from_agent, to_agent, topic, message) VALUES (?,?,?,?)`, [
+      'Scheduler',
+      'all',
+      `❌ Цикл #${cycleNumber} ошибка`,
+      `Ошибка в цикле #${cycleNumber}: ${err.message}. Следующая попытка через ${INTERVAL_MS / 60000} мин.`,
+    ]).catch(() => {});
     // Не спамим в Telegram при повторных ошибках
     if (cycleNumber <= 3 || cycleNumber % 10 === 0) {
       await tgSend(`🚨 Organism error [цикл #${cycleNumber}]: ${err.message}`).catch(() => {});
@@ -161,10 +167,10 @@ async function runCycle() {
 // ─── Вспомогательные задачи (cron-like, проверка каждую минуту) ──────────────
 
 const { execSync } = require('child_process');
-const fs           = require('fs');
-const NOTIFY_PATH  = '/home/user/Pablo/nevesty-models/tools/notify.js';
-const NOTIFY_CWD   = '/home/user/Pablo/nevesty-models';
-const FACTORY_DB   = '/home/user/Pablo/factory/factory.db';
+const fs = require('fs');
+const NOTIFY_PATH = '/home/user/Pablo/nevesty-models/tools/notify.js';
+const NOTIFY_CWD = '/home/user/Pablo/nevesty-models';
+const FACTORY_DB = '/home/user/Pablo/factory/factory.db';
 
 // ─── escapeMarkdown helper ────────────────────────────────────────────────────
 function escapeMarkdown(text) {
@@ -233,13 +239,12 @@ async function taskDatabaseBackup() {
     fs.copyFileSync(dbPath, backupPath);
 
     // Keep only last 28 backups (7 days × 4/day)
-    const backups = fs.readdirSync(backupDir)
+    const backups = fs
+      .readdirSync(backupDir)
       .filter(f => f.startsWith('nevesty-') && f.endsWith('.db'))
       .sort();
     if (backups.length > 28) {
-      backups.slice(0, backups.length - 28).forEach(f =>
-        fs.unlinkSync(path.join(backupDir, f))
-      );
+      backups.slice(0, backups.length - 28).forEach(f => fs.unlinkSync(path.join(backupDir, f)));
     }
 
     console.log(`[Scheduler] DB backup: ${backupPath}`);
@@ -263,6 +268,8 @@ function getBot() {
 // ─── Задача: отправка запроса отзыва через 24ч после завершения заявки ────────
 const reviewFollowup = async () => {
   try {
+    // Use completed_at (schema v28) when available, fall back to updated_at for older rows.
+    // Window: 24h-72h after completion, no existing review, not yet invited.
     const completed = await dbAll(`
       SELECT o.id, o.client_chat_id, o.order_number, o.client_name
       FROM orders o
@@ -271,9 +278,10 @@ const reviewFollowup = async () => {
         AND o.client_chat_id IS NOT NULL
         AND CAST(o.client_chat_id AS INTEGER) > 0
         AND r.id IS NULL
-        AND datetime(o.updated_at) < datetime('now', '-24 hours')
-        AND datetime(o.updated_at) > datetime('now', '-48 hours')
+        AND datetime(COALESCE(o.completed_at, o.updated_at), '+24 hours') <= datetime('now')
+        AND datetime(COALESCE(o.completed_at, o.updated_at), '+72 hours') >= datetime('now')
         AND o.review_requested IS NULL
+      LIMIT 10
     `).catch(() => []);
 
     if (!completed.length) return;
@@ -283,17 +291,24 @@ const reviewFollowup = async () => {
     for (const order of completed) {
       try {
         // Check client notification prefs
-        const prefs = await dbGet('SELECT notify_review FROM client_prefs WHERE chat_id=?', [order.client_chat_id]).catch(() => null);
+        const prefs = await dbGet('SELECT notify_review FROM client_prefs WHERE chat_id=?', [
+          order.client_chat_id,
+        ]).catch(() => null);
         if (prefs && prefs.notify_review === 0) continue;
 
-        await bot.sendMessage(order.client_chat_id,
-          `⭐ *${escapeMarkdown(order.client_name || 'Здравствуйте')}*, ваша заявка завершена\\!\n\nКак всё прошло? Оставьте отзыв — это займёт минуту и поможет другим клиентам выбрать модель\\.`, {
-          parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [
-            [{ text: '⭐ Оставить отзыв', callback_data: `leave_review_${order.id}` }],
-            [{ text: '✅ Всё хорошо, спасибо', callback_data: 'review_skip' }]
-          ]}
-        });
+        await bot.sendMessage(
+          order.client_chat_id,
+          `⭐ *${escapeMarkdown(order.client_name || 'Здравствуйте')}*, ваша заявка завершена\\!\n\nКак всё прошло? Оставьте отзыв — это займёт минуту и поможет другим клиентам выбрать модель\\.`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '⭐ Оставить отзыв', callback_data: `leave_review_${order.id}` }],
+                [{ text: '✅ Всё хорошо, спасибо', callback_data: 'review_skip' }],
+              ],
+            },
+          }
+        );
 
         // Mark as requested
         await dbRun('UPDATE orders SET review_requested=CURRENT_TIMESTAMP WHERE id=?', [order.id]).catch(() => {});
@@ -326,10 +341,13 @@ const processScheduledBroadcasts = async () => {
     for (const bcast of pending) {
       try {
         // Mark as processing to avoid double-send
-        await dbRun("UPDATE scheduled_broadcasts SET status='processing' WHERE id=? AND status='pending'", [bcast.id]).catch(() => {});
+        await dbRun("UPDATE scheduled_broadcasts SET status='processing' WHERE id=? AND status='pending'", [
+          bcast.id,
+        ]).catch(() => {});
 
         // Get recipients by segment
-        let recipientsQuery = "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''";
+        let recipientsQuery =
+          "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''";
         if (bcast.segment === 'completed') {
           recipientsQuery += " AND status='completed'";
         } else if (bcast.segment === 'active') {
@@ -337,7 +355,8 @@ const processScheduledBroadcasts = async () => {
         }
         const recipients = await dbAll(recipientsQuery).catch(() => []);
 
-        let sent = 0, failed = 0;
+        let sent = 0,
+          failed = 0;
         const msgText = `📢 *Сообщение от Nevesty Models*\n\n${escapeMarkdown(bcast.text)}`;
         const hasPhoto = bcast.photo_url && /^https?:\/\/.+/i.test(bcast.photo_url);
 
@@ -349,7 +368,9 @@ const processScheduledBroadcasts = async () => {
               await bot.sendMessage(r.client_chat_id, msgText, { parse_mode: 'MarkdownV2' });
             }
             sent++;
-          } catch { failed++; }
+          } catch {
+            failed++;
+          }
           await new Promise(resolve => setTimeout(resolve, 60)); // Rate limit: ~16 msg/sec
         }
 
@@ -394,19 +415,27 @@ async function taskReEngagement() {
     const bot = getBot();
     if (!bot) return;
 
-    for (const client of inactive.slice(0, 20)) { // Max 20 per run
+    for (const client of inactive.slice(0, 20)) {
+      // Max 20 per run
       try {
-        const prefs = await dbGet('SELECT notify_promo FROM client_prefs WHERE chat_id=?', [client.client_chat_id]).catch(() => null);
+        const prefs = await dbGet('SELECT notify_promo FROM client_prefs WHERE chat_id=?', [
+          client.client_chat_id,
+        ]).catch(() => null);
         if (prefs && prefs.notify_promo === 0) continue;
 
-        await bot.sendMessage(client.client_chat_id,
-          `👋 *${escapeMarkdown(client.name || 'Здравствуйте')}\\!*\n\nДавно не видели вас в нашем агентстве\\. У нас появились новые модели\\!\n\n💃 Посмотрите каталог — возможно найдёте подходящую для вашего следующего события\\.`, {
-          parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [
-            [{ text: '💃 Открыть каталог', callback_data: 'cat_cat__0' }],
-            [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }]
-          ]}
-        });
+        await bot.sendMessage(
+          client.client_chat_id,
+          `👋 *${escapeMarkdown(client.name || 'Здравствуйте')}\\!*\n\nДавно не видели вас в нашем агентстве\\. У нас появились новые модели\\!\n\n💃 Посмотрите каталог — возможно найдёте подходящую для вашего следующего события\\.`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💃 Открыть каталог', callback_data: 'cat_cat__0' }],
+                [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
+              ],
+            },
+          }
+        );
         await new Promise(resolve => setTimeout(resolve, 500)); // Throttle
       } catch {}
     }
@@ -418,15 +447,62 @@ async function taskReEngagement() {
 // Таск 4: Ежедневно 09:00 — утренний отчёт
 async function taskDailyReport() {
   try {
-    const today        = new Date().toISOString().split('T')[0];
-    const todayOrders  = await dbGet('SELECT COUNT(*) as cnt FROM orders WHERE date(created_at)=?', [today]);
-    const activeOrders = await dbGet("SELECT COUNT(*) as cnt FROM orders WHERE status IN ('new','reviewing','confirmed','in_progress')");
-    const pendingRevs  = await dbGet('SELECT COUNT(*) as cnt FROM reviews WHERE approved=0');
-    const msg =
+    const today = new Date().toISOString().split('T')[0];
+    const todayOrders = await dbGet('SELECT COUNT(*) as cnt FROM orders WHERE date(created_at)=?', [today]);
+    const activeOrders = await dbGet(
+      "SELECT COUNT(*) as cnt FROM orders WHERE status IN ('new','reviewing','confirmed','in_progress')"
+    );
+    const pendingRevs = await dbGet('SELECT COUNT(*) as cnt FROM reviews WHERE approved=0');
+
+    // Новые клиенты за сегодня (первая заявка от chat_id)
+    const newClients = await dbGet(
+      `
+      SELECT COUNT(DISTINCT o.client_chat_id) as cnt
+      FROM orders o
+      WHERE date(o.created_at) = ?
+        AND o.client_chat_id IS NOT NULL
+        AND CAST(o.client_chat_id AS INTEGER) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM orders o2
+          WHERE o2.client_chat_id = o.client_chat_id
+            AND o2.created_at < o.created_at
+        )
+    `,
+      [today]
+    ).catch(() => null);
+
+    // Топ-1 модель по новым заявкам за сегодня
+    const topModel = await dbGet(
+      `
+      SELECT m.name, COUNT(o.id) as cnt
+      FROM orders o
+      JOIN models m ON m.id = o.model_id
+      WHERE date(o.created_at) = ?
+        AND o.model_id IS NOT NULL
+      GROUP BY o.model_id
+      ORDER BY cnt DESC
+      LIMIT 1
+    `,
+      [today]
+    ).catch(() => null);
+
+    // Незакрытые заявки (new + confirmed)
+    const unclosedOrders = await dbGet("SELECT COUNT(*) as cnt FROM orders WHERE status IN ('new','confirmed')").catch(
+      () => null
+    );
+
+    let msg =
       `📊 Утренний отчёт\n\n` +
       `Заявок сегодня: ${todayOrders?.cnt || 0}\n` +
+      `Новых клиентов за день: ${newClients?.cnt || 0}\n` +
       `Активных заявок: ${activeOrders?.cnt || 0}\n` +
+      `Незакрытых заявок (new+confirmed): ${unclosedOrders?.cnt || 0}\n` +
       `Отзывов на модерации: ${pendingRevs?.cnt || 0}`;
+
+    if (topModel?.name) {
+      msg += `\n🏆 Топ модель дня: ${topModel.name} (${topModel.cnt} заявок)`;
+    }
+
     notify(msg);
   } catch (e) {
     console.error('[Scheduler] daily report error:', e.message);
@@ -448,15 +524,27 @@ async function taskSessionCleanup() {
 // Таск 6: 1-го числа каждого месяца — персональный ежемесячный отчёт клиентам
 async function taskMonthlyClientReport() {
   try {
-    const now  = new Date();
+    const now = new Date();
     // Month label for the previous month
     const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const monthNames = ['января','февраля','марта','апреля','мая','июня',
-                        'июля','августа','сентября','октября','ноября','декабря'];
+    const monthNames = [
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
     const monthLabel = monthNames[prevMonth.getMonth()];
-    const year       = prevMonth.getFullYear();
-    const monthStart = `${year}-${String(prevMonth.getMonth() + 1).padStart(2,'0')}-01`;
-    const monthEnd   = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}-01`;
+    const year = prevMonth.getFullYear();
+    const monthStart = `${year}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}-01`;
+    const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 
     // Active clients: at least 1 order in the last year
     const clients = await dbAll(`
@@ -478,8 +566,9 @@ async function taskMonthlyClientReport() {
     for (const client of clients) {
       try {
         // Check notification prefs
-        const prefs = await dbGet('SELECT notify_promo FROM client_prefs WHERE chat_id=?',
-          [client.client_chat_id]).catch(() => null);
+        const prefs = await dbGet('SELECT notify_promo FROM client_prefs WHERE chat_id=?', [
+          client.client_chat_id,
+        ]).catch(() => null);
         if (prefs && prefs.notify_promo === 0) continue;
 
         // Orders last month
@@ -497,39 +586,41 @@ async function taskMonthlyClientReport() {
         ).catch(() => null);
 
         // Current level
-        const lp = await dbGet(
-          `SELECT total_earned FROM loyalty_points WHERE chat_id=?`,
-          [client.client_chat_id]
-        ).catch(() => null);
+        const lp = await dbGet(`SELECT total_earned FROM loyalty_points WHERE chat_id=?`, [
+          client.client_chat_id,
+        ]).catch(() => null);
 
         const totalEarned = lp?.total_earned || 0;
         let levelLabel;
-        if      (totalEarned >= 5000) levelLabel = '💎 Платиновый';
+        if (totalEarned >= 5000) levelLabel = '💎 Платиновый';
         else if (totalEarned >= 2000) levelLabel = '🥇 Золотой';
-        else if (totalEarned >= 500)  levelLabel = '🥈 Серебряный';
-        else                          levelLabel = '🥉 Бронзовый';
+        else if (totalEarned >= 500) levelLabel = '🥈 Серебряный';
+        else levelLabel = '🥉 Бронзовый';
 
         const ordCnt = monthOrders?.cnt || 0;
-        const pts    = monthPoints?.total || 0;
-        const name   = (client.client_name || '').split(' ')[0] || 'Здравствуйте';
+        const pts = monthPoints?.total || 0;
+        const name = (client.client_name || '').split(' ')[0] || 'Здравствуйте';
 
-        const safeName  = escapeMarkdown(name);
+        const safeName = escapeMarkdown(name);
         const safeMonth = escapeMarkdown(monthLabel + ' ' + year);
         const safeLevel = escapeMarkdown(levelLabel);
 
-        await bot.sendMessage(client.client_chat_id,
+        await bot.sendMessage(
+          client.client_chat_id,
           `📊 *Итоги ${safeMonth}*\n\n` +
-          `*${safeName}*, вот ваш личный итог за месяц\\:\n\n` +
-          `📋 Заявок оформлено: *${ordCnt}*\n` +
-          `💫 Накоплено баллов: *\\+${pts}*\n` +
-          `🏅 Уровень лояльности: *${safeLevel}*\n\n` +
-          `_Спасибо, что выбираете Nevesty Models\\!_`,
+            `*${safeName}*, вот ваш личный итог за месяц\\:\n\n` +
+            `📋 Заявок оформлено: *${ordCnt}*\n` +
+            `💫 Накоплено баллов: *\\+${pts}*\n` +
+            `🏅 Уровень лояльности: *${safeLevel}*\n\n` +
+            `_Спасибо, что выбираете Nevesty Models\\!_`,
           {
             parse_mode: 'MarkdownV2',
-            reply_markup: { inline_keyboard: [
-              [{ text: '💫 Мои баллы', callback_data: 'loyalty' }],
-              [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
-            ]}
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💫 Мои баллы', callback_data: 'loyalty' }],
+                [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
+              ],
+            },
           }
         );
         await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit
@@ -543,6 +634,34 @@ async function taskMonthlyClientReport() {
   }
 }
 
+// Таск 7: каждые 6 часов — напоминание менеджеру о зависших заявках (status='new', 48+ ч)
+async function taskRemindStaleOrders() {
+  try {
+    const stale = await dbAll(`
+      SELECT o.id, o.order_number, o.client_name, o.created_at
+      FROM orders o
+      WHERE o.status = 'new'
+        AND o.created_at < datetime('now', '-48 hours')
+        AND o.reminded_at IS NULL
+    `).catch(() => []);
+
+    for (const order of stale) {
+      const hoursWaiting = Math.round((Date.now() - new Date(order.created_at).getTime()) / 3600000);
+      notify(
+        `⚠️ Заявка #${order.order_number || order.id} от ${order.client_name} ` +
+          `ожидает обработки ${hoursWaiting} часов! Статус: new. Назначьте менеджера.`
+      );
+      await dbRun(`UPDATE orders SET reminded_at = datetime('now') WHERE id = ?`, [order.id]).catch(() => {});
+    }
+
+    if (stale.length > 0) {
+      console.log(`[Scheduler] Stale order reminders sent: ${stale.length}`);
+    }
+  } catch (e) {
+    console.error('[Scheduler] remindStaleOrders error:', e.message);
+  }
+}
+
 // ─── Планировщик дополнительных задач (тик каждые 60 сек) ───────────────────
 
 // Каждые 6 часов — Factory health (с момента старта)
@@ -550,10 +669,10 @@ let _lastFactoryCheck = 0;
 const FACTORY_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 setInterval(() => {
-  const now  = new Date();
-  const h    = now.getHours();
-  const m    = now.getMinutes();
-  const dow  = now.getDay(); // 0=Sun,1=Mon,...
+  const now = new Date();
+  const h = now.getHours();
+  const m = now.getMinutes();
+  const dow = now.getDay(); // 0=Sun,1=Mon,...
 
   // Воскресенье 03:00 — VACUUM
   if (shouldRun('vacuum', h, m, dow, 3, 0, 0)) {
@@ -596,9 +715,10 @@ setInterval(() => {
 
 // ─── Напоминание о незавершённых заявках (каждые 6 часов) ────────────────────
 
-setInterval(async () => {
-  try {
-    const staleBookings = await dbAll(`
+setInterval(
+  async () => {
+    try {
+      const staleBookings = await dbAll(`
       SELECT s.chat_id, s.state, s.updated_at
       FROM telegram_sessions s
       WHERE s.state LIKE 'bk_%'
@@ -606,44 +726,51 @@ setInterval(async () => {
         AND CAST(s.chat_id AS INTEGER) > 0
     `).catch(() => []);
 
-    for (const s of staleBookings) {
-      try {
-        const TelegramBot = require('node-telegram-bot-api');
-        const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
-        await bot.sendMessage(s.chat_id,
-          '⏰ Вы начали оформлять заявку, но не завершили\\. Продолжить?', {
-          parse_mode: 'MarkdownV2',
-          reply_markup: { inline_keyboard: [
-            [{ text: '📋 Продолжить заявку', callback_data: 'bk_start' }],
-            [{ text: '❌ Отмена', callback_data: 'cancel_booking' }]
-          ]}
-        });
-      } catch {} // Ignore if user blocked bot
-    }
+      for (const s of staleBookings) {
+        try {
+          const TelegramBot = require('node-telegram-bot-api');
+          const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
+          await bot.sendMessage(s.chat_id, '⏰ Вы начали оформлять заявку, но не завершили\\. Продолжить?', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '📋 Продолжить заявку', callback_data: 'bk_start' }],
+                [{ text: '❌ Отмена', callback_data: 'cancel_booking' }],
+              ],
+            },
+          });
+        } catch {} // Ignore if user blocked bot
+      }
 
-    if (staleBookings.length > 0) {
-      console.log(`[Scheduler] Booking reminders sent: ${staleBookings.length}`);
+      if (staleBookings.length > 0) {
+        console.log(`[Scheduler] Booking reminders sent: ${staleBookings.length}`);
+      }
+    } catch (e) {
+      console.error('[Scheduler] booking reminder error:', e.message);
     }
-  } catch (e) {
-    console.error('[Scheduler] booking reminder error:', e.message);
-  }
-}, 6 * 60 * 60 * 1000);
+  },
+  6 * 60 * 60 * 1000
+);
+
+// Каждые 6 часов — напоминание менеджеру о зависших заявках (status='new', 48+ ч)
+taskRemindStaleOrders(); // первый запуск сразу после старта
+setInterval(taskRemindStaleOrders, 6 * 60 * 60 * 1000);
 
 // ─── Запуск ──────────────────────────────────────────────────────────────────
 
 console.log('🧬 Living Organism Scheduler запущен (28 агентов, каждые 15 мин)');
 
-const uptimeStr = () => formatUptime(Date.now() - startupTime);
+const _uptimeStr = () => formatUptime(Date.now() - startupTime); // kept for debugging
 
 tgSend(
   `🟢 Organism запущен\n` +
-  `28 агентов | цикл каждые 15 мин\n\n` +
-  `Агенты:\n` +
-  `• 25 аналитиков (UX, Security, DB, Booking...)\n` +
-  `• 💰 Sales Analyst — конверсия и продажи\n` +
-  `• 📝 Content Manager — контент бота\n` +
-  `• 📊 Activity Logger — аудит каждого действия\n\n` +
-  `Первая проверка начинается...`
+    `28 агентов | цикл каждые 15 мин\n\n` +
+    `Агенты:\n` +
+    `• 25 аналитиков (UX, Security, DB, Booking...)\n` +
+    `• 💰 Sales Analyst — конверсия и продажи\n` +
+    `• 📝 Content Manager — контент бота\n` +
+    `• 📊 Activity Logger — аудит каждого действия\n\n` +
+    `Первая проверка начинается...`
 ).catch(() => {});
 
 // Первый цикл — сразу
