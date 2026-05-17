@@ -78,6 +78,24 @@ const CALC_TIERS = {
   premium: { label: 'Премиум', mult: 1.35 },
 };
 
+// ─── Common callback_data strings (gradual migration from magic strings) ─────
+const CB_DATA = {
+  MAIN_MENU: 'main_menu',
+  ADMIN_MENU: 'admin_menu',
+  MY_ORDERS: 'my_orders',
+  BK_START: 'bk_start',
+  BK_CANCEL: 'bk_cancel',
+  CAT_CAT: 'cat_cat__0',
+  ADM_ORDERS: 'adm_orders__0',
+  ADM_SETTINGS: 'adm_settings',
+  ADM_FACTORY: 'adm_factory',
+  ADM_PROMOS: 'adm_promos',
+  FAV_LIST: 'fav_list',
+  PROFILE: 'profile',
+  SEARCH: 'cat_search',
+  REFERRAL: 'referral',
+};
+
 // ─── FAQ category labels (line 13526 in bot.js) ───────────────────────────────
 const FAQ_CATEGORY_LABELS = {
   pricing: '💰 Цены',
@@ -97,4 +115,5 @@ module.exports = {
   DEFAULT_RATES,
   CALC_TIERS,
   FAQ_CATEGORY_LABELS,
+  CB_DATA,
 };

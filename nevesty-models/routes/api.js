@@ -1431,6 +1431,7 @@ router.patch('/models/:id', auth, async (req, res, next) => {
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
     await run('UPDATE models SET available = ? WHERE id = ?', [val, id]);
     cache.delByPrefix('catalog:'); // invalidate catalog cache
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ ok: true, available: val });
   } catch (e) {
     next(e);
@@ -1905,6 +1906,7 @@ router.post('/admin/models/:id/duplicate', auth, async (req, res, next) => {
       ]
     );
     cache.delByPrefix('catalog:');
+    generateSitemap().catch(e => console.error('[Sitemap]', e.message));
     res.json({ id: result.id, ok: true });
   } catch (e) {
     next(e);
