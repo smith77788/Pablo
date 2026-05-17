@@ -723,6 +723,141 @@
         transition: none;
       }
 
+      /* ─── НАШИ ЦЕННОСТИ ────────────────────────────── */
+      .values-section {
+        padding: 80px 0;
+        background: var(--bg);
+        border-top: 1px solid var(--border);
+      }
+      .values-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 28px;
+        margin-top: 48px;
+      }
+      @media (max-width: 768px) {
+        .values-grid {
+          grid-template-columns: 1fr;
+          gap: 20px;
+        }
+      }
+      .values-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        padding: 36px 28px;
+        text-align: center;
+        border-radius: var(--radius);
+        transition:
+          border-color 0.3s ease,
+          transform 0.3s ease,
+          box-shadow 0.3s ease;
+        position: relative;
+        overflow: hidden;
+      }
+      .values-card::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(135deg, rgba(201, 169, 110, 0.04) 0%, transparent 60%);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+      .values-card:hover {
+        border-color: rgba(201, 169, 110, 0.45);
+        transform: translateY(-6px);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+      }
+      .values-card:hover::before {
+        opacity: 1;
+      }
+      .values-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 20px;
+        background: rgba(201, 169, 110, 0.08);
+        border: 1px solid rgba(201, 169, 110, 0.2);
+        border-radius: 50%;
+        color: var(--gold);
+        position: relative;
+        z-index: 1;
+      }
+      .values-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--white);
+        margin-bottom: 12px;
+        position: relative;
+        z-index: 1;
+      }
+      .values-text {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        line-height: 1.7;
+        position: relative;
+        z-index: 1;
+      }
+
+      /* ─── ПРОГРЕСС-БАРЫ ─────────────────────────────── */
+      .progress-section {
+        padding: 80px 0;
+        background: var(--bg2);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      .progress-bars-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 36px 60px;
+        margin-top: 48px;
+        max-width: 900px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      @media (max-width: 640px) {
+        .progress-bars-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .progress-item {
+        position: relative;
+      }
+      .progress-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 10px;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+      }
+      .progress-pct {
+        font-size: 0.75rem;
+        color: var(--gold);
+        font-weight: 600;
+        min-width: 36px;
+        text-align: right;
+      }
+      .progress-track {
+        height: 4px;
+        background: rgba(201, 169, 110, 0.1);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--gold-dark), var(--gold), var(--gold-light));
+        border-radius: 2px;
+        transition: width 1.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .progress-fill {
+          transition: none;
+        }
+      }
+
       /* ─── CTA ────────────────────────────────────────── */
       .about-cta {
         padding: 80px 0 100px;
@@ -1537,6 +1672,71 @@
               timelineObserver.observe(el);
             });
           }
+
+          /* ── Animated progress bars ── */
+          var progressObserver = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (entry) {
+                if (!entry.isIntersecting) return;
+                progressObserver.unobserve(entry.target);
+                var fill = entry.target.querySelector('.progress-fill');
+                var pct = entry.target.querySelector('.progress-pct');
+                var target = parseInt(entry.target.dataset.percent, 10) || 0;
+                if (reducedMotion) {
+                  if (fill) fill.style.width = target + '%';
+                  if (pct) pct.textContent = target + '%';
+                  return;
+                }
+                // Animate fill width
+                requestAnimationFrame(function () {
+                  if (fill) fill.style.width = target + '%';
+                });
+                // Animate percentage counter
+                if (pct) {
+                  var startTime2 = null;
+                  var step2 = function (ts) {
+                    if (!startTime2) startTime2 = ts;
+                    var progress2 = Math.min((ts - startTime2) / 1400, 1);
+                    var eased2 = 1 - Math.pow(1 - progress2, 3);
+                    pct.textContent = Math.round(target * eased2) + '%';
+                    if (progress2 < 1) requestAnimationFrame(step2);
+                  };
+                  requestAnimationFrame(step2);
+                }
+              });
+            },
+            { threshold: 0.3 }
+          );
+          document.querySelectorAll('.progress-item').forEach(function (el) {
+            progressObserver.observe(el);
+          });
+
+          /* ── Values cards stagger reveal ── */
+          var valuesObserver = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                  entry.target.style.opacity = '1';
+                  entry.target.style.transform = 'translateY(0)';
+                  valuesObserver.unobserve(entry.target);
+                }
+              });
+            },
+            { threshold: 0.1, rootMargin: '0px 0px -30px 0px' }
+          );
+          document.querySelectorAll('.values-card').forEach(function (el, i) {
+            if (!reducedMotion) {
+              el.style.opacity = '0';
+              el.style.transform = 'translateY(24px)';
+              el.style.transition =
+                'opacity 0.5s ease ' +
+                i * 0.12 +
+                's, transform 0.5s ease ' +
+                i * 0.12 +
+                's, border-color 0.3s ease, box-shadow 0.3s ease';
+            }
+            valuesObserver.observe(el);
+          });
         });
       })();
     </script>
