@@ -325,36 +325,41 @@
         flex-shrink: 0;
         transition: background 0.4s ease;
       }
-      /* Status colors: new=blue, confirmed=yellow, in_progress=orange, completed=green, cancelled=grey */
+      /* Status colors: new=blue, reviewing=amber, confirmed=gold, in_progress=purple, completed=green, cancelled=red */
       .status-badge.new {
-        background: rgba(59, 130, 246, 0.15);
+        background: rgba(59, 130, 246, 0.14);
         color: #93c5fd;
-        border: 1px solid rgba(59, 130, 246, 0.3);
+        border: 1px solid rgba(59, 130, 246, 0.35);
+        box-shadow: 0 0 8px rgba(59, 130, 246, 0.1);
       }
       .status-badge.reviewing {
-        background: rgba(245, 158, 11, 0.15);
+        background: rgba(245, 158, 11, 0.14);
         color: #fcd34d;
-        border: 1px solid rgba(245, 158, 11, 0.3);
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        box-shadow: 0 0 8px rgba(245, 158, 11, 0.1);
       }
       .status-badge.confirmed {
-        background: rgba(234, 179, 8, 0.15);
-        color: #fde047;
-        border: 1px solid rgba(234, 179, 8, 0.3);
+        background: rgba(201, 169, 110, 0.14);
+        color: var(--gold);
+        border: 1px solid rgba(201, 169, 110, 0.4);
+        box-shadow: 0 0 8px rgba(201, 169, 110, 0.12);
       }
       .status-badge.in_progress {
-        background: rgba(249, 115, 22, 0.15);
-        color: #fdba74;
-        border: 1px solid rgba(249, 115, 22, 0.3);
+        background: rgba(171, 71, 188, 0.14);
+        color: #ce93d8;
+        border: 1px solid rgba(171, 71, 188, 0.35);
+        box-shadow: 0 0 8px rgba(171, 71, 188, 0.1);
       }
       .status-badge.completed {
-        background: rgba(34, 197, 94, 0.15);
+        background: rgba(34, 197, 94, 0.14);
         color: #86efac;
-        border: 1px solid rgba(34, 197, 94, 0.3);
+        border: 1px solid rgba(34, 197, 94, 0.35);
+        box-shadow: 0 0 8px rgba(34, 197, 94, 0.1);
       }
       .status-badge.cancelled {
-        background: rgba(107, 114, 128, 0.15);
-        color: #9ca3af;
-        border: 1px solid rgba(107, 114, 128, 0.3);
+        background: rgba(239, 68, 68, 0.1);
+        color: #fca5a5;
+        border: 1px solid rgba(239, 68, 68, 0.25);
       }
 
       /* ── Progress bar ── */
@@ -700,14 +705,65 @@
       @keyframes pulse-badge {
         0%,
         100% {
-          opacity: 1;
+          box-shadow: 0 0 8px rgba(59, 130, 246, 0.1);
         }
         50% {
-          opacity: 0.55;
+          box-shadow: 0 0 16px rgba(59, 130, 246, 0.3);
         }
       }
       .status-badge.new {
-        animation: pulse-badge 2s ease-in-out infinite;
+        animation: pulse-badge 2.2s ease-in-out infinite;
+      }
+
+      /* ── Status flash on WS update ── */
+      @keyframes status-flash {
+        0% {
+          border-color: rgba(201, 169, 110, 0.8);
+          box-shadow: 0 0 20px rgba(201, 169, 110, 0.4);
+        }
+        100% {
+          border-color: var(--border);
+          box-shadow: none;
+        }
+      }
+      .order-card.ws-flash {
+        animation: status-flash 1.4s ease-out forwards;
+      }
+
+      /* ── Timeline ── */
+      .order-timeline {
+        margin: 16px 0 0;
+        padding: 14px 18px;
+        background: var(--bg3);
+        border-left: 2px solid rgba(201, 169, 110, 0.3);
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        line-height: 1.7;
+      }
+      .order-timeline-title {
+        font-size: 0.65rem;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        margin-bottom: 8px;
+      }
+      .order-timeline-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 4px 0;
+        position: relative;
+      }
+      .order-timeline-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: rgba(201, 169, 110, 0.5);
+        flex-shrink: 0;
+        margin-top: 5px;
+      }
+      .order-timeline-item:last-child .order-timeline-dot {
+        background: var(--gold);
       }
 
       /* ── Profile section ── */
@@ -1535,12 +1591,11 @@
             }
           }
 
-          // Flash animation on the card
-          card.style.transition = 'border-color 0.3s';
-          card.style.borderColor = 'rgba(201,169,110,0.6)';
-          setTimeout(() => {
-            card.style.borderColor = '';
-          }, 1200);
+          // Flash animation on the card using CSS animation class
+          card.classList.remove('ws-flash');
+          void card.offsetWidth; // force reflow
+          card.classList.add('ws-flash');
+          setTimeout(() => card.classList.remove('ws-flash'), 1500);
 
           // Show toast
           toast(`Статус заявки обновлён: ${STATUS_LABELS_WS[safeStatus] || safeStatus}`, 'info');
@@ -1773,6 +1828,44 @@
           return html;
         }
 
+        // ── Build timeline ────────────────────────────────────────────
+        function buildTimeline(order) {
+          const items = [];
+          if (order.created_at) {
+            items.push({ date: order.created_at, label: 'Заявка подана' });
+          }
+          if (order.status !== 'new' && order.status !== 'cancelled') {
+            items.push({ date: null, label: 'Взята в работу' });
+          }
+          if (order.status === 'confirmed' || order.status === 'in_progress' || order.status === 'completed') {
+            items.push({ date: null, label: 'Подтверждена' });
+          }
+          if (order.status === 'in_progress' || order.status === 'completed') {
+            items.push({ date: null, label: 'Выполняется' });
+          }
+          if (order.status === 'completed') {
+            items.push({ date: null, label: 'Завершена' });
+          }
+          if (order.status === 'cancelled') {
+            items.push({ date: null, label: 'Отменена' });
+          }
+          if (order.event_date) {
+            items.push({ date: order.event_date, label: 'Дата мероприятия', isEvent: true });
+          }
+          if (items.length <= 1) return '';
+          return `<div class="order-timeline">
+            <div class="order-timeline-title">История заявки</div>
+            ${items
+              .map(
+                item => `<div class="order-timeline-item">
+              <div class="order-timeline-dot" ${item.isEvent ? 'style="background:var(--gold)"' : ''}></div>
+              <div>${escapeHtml(item.label)}${item.date ? `<span style="color:var(--text-dim);font-size:0.73rem;margin-left:8px">${fmtDate(item.date)}</span>` : ''}</div>
+            </div>`
+              )
+              .join('')}
+          </div>`;
+        }
+
         // ── Build order card HTML ─────────────────────────────────────
         function buildOrderCard(order, idx) {
           const icon = EVENT_ICONS[order.event_type] || '📋';
@@ -1818,6 +1911,8 @@
 
             ${order.comments ? `<div class="order-detail-desc"><strong style="font-size:0.7rem;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase">Описание</strong><br/>${escapeHtml(order.comments)}</div>` : ''}
 
+            ${buildTimeline(order)}
+
             <div class="order-actions">
               ${
                 order.status === 'completed' || order.status === 'cancelled'
@@ -1849,7 +1944,18 @@
           const phone10 = normalizePhone(_phone);
 
           document.getElementById('userPhone').textContent = formatPhoneDisplay(phone10);
-          document.getElementById('userAvatar').textContent = phone10 ? phone10.slice(-2) : '?';
+          // Avatar: show initials from name if available, else last 2 digits of phone
+          const nameEl = document.getElementById('profileName');
+          const nameText = nameEl ? nameEl.textContent.trim() : '';
+          let avatarText = '?';
+          if (nameText && nameText !== '—') {
+            const parts = nameText.split(' ').filter(Boolean);
+            avatarText =
+              parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : nameText.slice(0, 2).toUpperCase();
+          } else if (phone10) {
+            avatarText = phone10.slice(-2);
+          }
+          document.getElementById('userAvatar').textContent = avatarText;
           document.getElementById('userCount').textContent =
             orders.length === 0
               ? 'нет заявок'
