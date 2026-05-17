@@ -6408,7 +6408,7 @@ async function showAIChatHelp(chatId) {
       },
     }
   );
-  await setSession(chatId, 'state', 'ai_chat_input');
+  await setSession(chatId, 'ai_chat_input', {});
 }
 
 // ─── Order Timeline ────────────────────────────────────────────────────────────
@@ -7148,7 +7148,7 @@ function initBot(app) {
       if (data === 'referral') return showReferralProgram(chatId);
       if (data === 'calculator') return showPriceCalculator(chatId);
       if (data === 'ai_budget') {
-        await setSession(chatId, 'state', 'ai_budget_desc');
+        await setSession(chatId, 'ai_budget_desc', {});
         return showAiBudgetEstimate(chatId);
       }
       if (data === 'ai_chat_start') return showAIChatHelp(chatId);
@@ -10597,6 +10597,13 @@ function initBot(app) {
         return showPhotoGalleryManager(chatId, modelId);
       }
 
+      // ── Cancel admin action — clear session and return to admin menu
+      if (data === 'adm_main') {
+        if (!isAdmin(chatId)) return;
+        await clearSession(chatId);
+        return showAdminMenu(chatId, q.from?.first_name);
+      }
+
       // ── Прямой ответ клиенту (direct_reply_chatId — из вопроса менеджеру)
       if (data.startsWith('direct_reply_')) {
         if (!isAdmin(chatId)) return;
@@ -12792,7 +12799,7 @@ function initBot(app) {
         return safeSend(chatId, esc('❌ AI помощник временно недоступен.'), { parse_mode: 'MarkdownV2' });
       }
 
-      await safeSend(chatId, esc('⏳ Думаю\\.\\.\\.'), { parse_mode: 'MarkdownV2' });
+      await safeSend(chatId, '⏳ Думаю\\.\\.\\.', { parse_mode: 'MarkdownV2' });
 
       try {
         const [faqRows, contactsPhone] = await Promise.all([
@@ -12834,7 +12841,7 @@ function initBot(app) {
       } catch (e) {
         console.error('[Bot] ai_chat_input:', e.message);
         await clearSession(chatId);
-        await safeSend(chatId, esc('❌ Не удалось получить ответ\\. Попробуйте позже или напишите менеджеру\\.'), {
+        await safeSend(chatId, '❌ Не удалось получить ответ\\. Попробуйте позже или напишите менеджеру\\.', {
           parse_mode: 'MarkdownV2',
           reply_markup: {
             inline_keyboard: [[{ text: '📞 Написать менеджеру', callback_data: 'msg_manager_start' }]],
@@ -15043,7 +15050,7 @@ async function showSearchResultsV2(chatId, page) {
 // ─── AI підбір моделей ────────────────────────────────────────────────────────
 
 async function startAiMatch(chatId) {
-  await setSession(chatId, 'state', 'ai_match_desc');
+  await setSession(chatId, 'ai_match_desc', {});
   return safeSend(
     chatId,
     '🤖 *AI подбор модели*\n\nОпишите ваше мероприятие — и AI подберёт лучших моделей из каталога\\.\n\n_Например: "Корпоратив на 50 человек в Москве, нужны 2 модели для встречи гостей, бюджет 30000₽"_\n\n💡 Чем подробнее описание — тем точнее подбор\\.\n\n_Или /cancel для отмены_',
