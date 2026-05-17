@@ -73,6 +73,7 @@ const ACTIVE_BOOKING_STATES = new Set([
   'profile_edit_phone',
   'profile_edit_email',
   'ai_match_desc',
+  'ai_match_input',
   'techspec_input',
   'ai_budget_desc',
   'ai_chat_input',
@@ -6310,29 +6311,20 @@ function initBot(app) {
       if (data === 'check_status') return showStatusInput(chatId);
       if (data === 'adm_stats' || data === 'adm_stats_refresh') {
         if (!isAdmin(chatId)) {
-          await bot
-            .answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true })
-            .catch(() => {});
-          return;
+          return safeSend(chatId, '⛔ Нет доступа');
         }
         return showAdminStats(chatId);
       }
       if (data === 'adm_stats_csv') {
         if (!isAdmin(chatId)) {
-          await bot
-            .answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true })
-            .catch(() => {});
-          return;
+          return safeSend(chatId, '⛔ Нет доступа');
         }
         const csvUrl = `${SITE_URL.replace(/\/$/, '')}/api/admin/orders/export?format=csv`;
         return safeSend(chatId, esc(`📎 Ссылка на экспорт заявок (CSV):\n${csvUrl}`), { parse_mode: 'MarkdownV2' });
       }
       if (data === 'adm_organism') {
         if (!isAdmin(chatId)) {
-          await bot
-            .answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true })
-            .catch(() => {});
-          return;
+          return safeSend(chatId, '⛔ Нет доступа');
         }
         return showOrganismStatus(chatId);
       }
@@ -7365,10 +7357,7 @@ function initBot(app) {
       // ── Settings
       if (data === 'adm_settings') {
         if (!isAdmin(chatId)) {
-          await bot
-            .answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true })
-            .catch(() => {});
-          return;
+          return safeSend(chatId, '⛔ Нет доступа');
         }
         return showAdminSettings(chatId, 'main');
       }
@@ -7934,6 +7923,23 @@ function initBot(app) {
         if (!isAdmin(chatId)) return;
         return showAuditLog(chatId, 0);
       }
+      // ── Broadcast: segment alias callbacks (adm_bcast_seg_*) — roadmap 3.5
+      if (data === 'adm_bcast_seg_all') {
+        if (!isAdmin(chatId)) return;
+        await bot.answerCallbackQuery(q.id, { text: '👥 Все клиенты' }).catch(() => {});
+        return _askBroadcastText(chatId, 'all');
+      }
+      if (data === 'adm_bcast_seg_completed') {
+        if (!isAdmin(chatId)) return;
+        await bot.answerCallbackQuery(q.id, { text: '✅ Завершённые заявки' }).catch(() => {});
+        return _askBroadcastText(chatId, 'completed');
+      }
+      if (data.startsWith('adm_bcast_seg_city_')) {
+        if (!isAdmin(chatId)) return;
+        const bcastCity = data.slice('adm_bcast_seg_city_'.length);
+        await bot.answerCallbackQuery(q.id, { text: `🏙 Город: ${bcastCity}` }).catch(() => {});
+        return _askBroadcastText(chatId, `city:${bcastCity}`);
+      }
       // ── Broadcast: new segment selection (adm_bc_seg_*)
       if (data === 'adm_bc_seg_all') {
         if (!isAdmin(chatId)) return;
@@ -8463,19 +8469,13 @@ function initBot(app) {
       }
       if (data === 'adm_admins') {
         if (!isAdmin(chatId)) {
-          await bot
-            .answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true })
-            .catch(() => {});
-          return;
+          return safeSend(chatId, '⛔ Нет доступа');
         }
         return showAdminManagement(chatId);
       }
       if (data === 'adm_export') {
         if (!isAdmin(chatId)) {
-          await bot
-            .answerCallbackQuery(q.id, { text: STRINGS.errorAccessDeniedShort, show_alert: true })
-            .catch(() => {});
-          return;
+          return safeSend(chatId, '⛔ Нет доступа');
         }
         return showExportMenu(chatId);
       }
@@ -11020,7 +11020,7 @@ function initBot(app) {
     }
 
     // ── AI підбір моделей: опис замовлення
-    if (state === 'ai_match_desc') {
+    if (state === 'ai_match_desc' || state === 'ai_match_input') {
       const desc = text ? text.trim() : '';
       if (desc.length < 10)
         return safeSend(chatId, 'Опишіть детальніше \\(мінімум 10 символів\\):', { parse_mode: 'MarkdownV2' });

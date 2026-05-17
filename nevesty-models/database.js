@@ -836,6 +836,18 @@ async function initDatabase() {
     ).catch(() => {});
   }
 
+  // Schema v30 — review_invitation_sent_at column on orders to track delayed review email
+  const v30 = await get(`SELECT version FROM schema_versions WHERE version=30`).catch(() => null);
+  if (!v30) {
+    await run(`ALTER TABLE orders ADD COLUMN review_invitation_sent_at DATETIME DEFAULT NULL`).catch(() => {});
+    await run(
+      `CREATE INDEX IF NOT EXISTS idx_orders_review_invitation_sent_at ON orders(review_invitation_sent_at)`
+    ).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(30, 'orders.review_invitation_sent_at for 24h delayed review invitation tracking')`
+    ).catch(() => {});
+  }
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {

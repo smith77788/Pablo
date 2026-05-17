@@ -2514,7 +2514,10 @@ router.patch('/orders/status/:order_number/cancel', async (req, res, next) => {
     if (!clientPhone) {
       return res.status(400).json({ error: 'Укажите номер телефона для подтверждения отмены' });
     }
-    const order = await get('SELECT id, status, client_phone FROM orders WHERE order_number = ?', [number]);
+    const order = await get(
+      'SELECT id, status, client_phone, client_email, client_name, order_number FROM orders WHERE order_number = ?',
+      [number]
+    );
     if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
     // Owner check: normalise both phone numbers and compare
     const orderPhone = (order.client_phone || '').replace(/\D/g, '');
@@ -2524,16 +2527,23 @@ router.patch('/orders/status/:order_number/cancel', async (req, res, next) => {
     if (!['new', 'confirmed'].includes(order.status)) {
       return res.status(400).json({ error: 'Отменить можно только заявки со статусом "Новая" или "Подтверждена"' });
     }
+    const prevStatus = order.status;
     await run(
       `UPDATE orders SET status='cancelled', updated_at=CURRENT_TIMESTAMP, cancelled_at=COALESCE(cancelled_at, datetime('now')) WHERE id=?`,
       [order.id]
     );
     await run(`INSERT INTO order_status_history (order_id, old_status, new_status, changed_by) VALUES (?,?,?,?)`, [
       order.id,
-      order.status,
+      prevStatus,
       'cancelled',
       'client',
     ]);
+    // ─── Email notification on client self-cancel ────────────────────────────
+    if (order.client_email) {
+      mailer
+        .sendStatusChange(order.client_email, order, prevStatus, 'cancelled')
+        .catch(e => console.error('[mailer] client cancel email error:', e.message));
+    }
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -3663,14 +3673,10 @@ router.post('/admin/users/:id/reset-password', auth, async (req, res, next) => {
     const newPassword = crypto.randomBytes(10).toString('base64').replace(/[+/=]/g, '').slice(0, 12);
     const hash = await bcrypt.hash(newPassword, 10);
     await run('UPDATE admins SET password_hash=? WHERE id=?', [hash, id]);
-    if (target.email && mailer && mailer.send) {
-      mailer
-        .send({
-          to: target.email,
-          subject: 'Nevesty Models — сброс пароля',
-          html: `<p>Ваш новый пароль: <strong>${newPassword}</strong></p><p>Смените его после входа.</p>`,
-        })
-        .catch(() => {});
+    if (target.email && mailer && mailer.sendPasswordReset) {
+      // sendPasswordReset expects a reset link; for admin-initiated reset we pass the login URL
+      const loginUrl = `${process.env.SITE_URL || 'http://localhost:3000'}/admin/login.html`;
+      mailer.sendPasswordReset(target.email, loginUrl).catch(() => {});
     }
     res.json({ ok: true, new_password: newPassword });
   } catch (e) {
@@ -4820,12 +4826,9 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
         .sendStatusChange(order.client_email, order, order.prev_status, status)
         .catch(e => console.error('[mailer] status change error:', e.message));
     }
-    // ─── Review invitation email on order completion ──────────────────────────
-    if (status === 'completed' && status !== order.prev_status && order.client_email) {
-      mailer
-        .sendReviewInvitation(order.client_email, order.order_number, order.client_name)
-        .catch(e => console.error('[mailer] review invitation error:', e.message));
-    }
+    // ─── Review invitation email on order completion (sent via 24h scheduler) ─
+    // The scheduler (sendDelayedReviewInvitations) handles this 24h after completed_at.
+    // No immediate send here to avoid duplicate emails.
     // ─── SMS notification on status change ───────────────────────────────────
     if (order.client_phone && status !== order.prev_status) {
       try {
