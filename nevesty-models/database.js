@@ -866,6 +866,64 @@ async function initDatabase() {
     ).catch(() => {});
   }
 
+  // Schema v32 — deposit_amount for Telegram Stars payments (БЛОК 8.1)
+  const v32 = await get(`SELECT version FROM schema_versions WHERE version=32`).catch(() => null);
+  if (!v32) {
+    await run(`ALTER TABLE orders ADD COLUMN deposit_amount INTEGER DEFAULT NULL`).catch(() => {});
+    await run(`ALTER TABLE orders ADD COLUMN stars_payment_charge_id TEXT DEFAULT NULL`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_orders_stars_charge ON orders(stars_payment_charge_id)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(32, 'orders.deposit_amount & stars_payment_charge_id for Telegram Stars payments (БЛОК 8.1)')`
+    ).catch(() => {});
+  }
+
+  // Schema v33 — message_templates table (БЛОК 3.7)
+  const v33 = await get(`SELECT version FROM schema_versions WHERE version=33`).catch(() => null);
+  if (!v33) {
+    await run(`CREATE TABLE IF NOT EXISTS message_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      text TEXT NOT NULL,
+      category TEXT DEFAULT 'general',
+      created_by INTEGER,
+      use_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_msg_tpl_category ON message_templates(category)`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_msg_tpl_use_count ON message_templates(use_count DESC)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(33, 'message_templates for quick client messaging (БЛОК 3.7)')`
+    ).catch(() => {});
+  }
+
+  // Schema v34 — error_logs table for uncaught exceptions / unhandled rejections (БЛОК 6.4)
+  const v34 = await get(`SELECT version FROM schema_versions WHERE version=34`).catch(() => null);
+  if (!v34) {
+    await run(`CREATE TABLE IF NOT EXISTS error_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      level TEXT DEFAULT 'error',
+      context TEXT,
+      message TEXT NOT NULL,
+      stack TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_error_logs_created ON error_logs(created_at DESC)`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_error_logs_level ON error_logs(level)`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_error_logs_context ON error_logs(context)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(34, 'error_logs table for server crash/rejection monitoring (БЛОК 6.4)')`
+    ).catch(() => {});
+  }
+  // Idempotent — create error_logs if it somehow doesn't exist yet
+  await run(`CREATE TABLE IF NOT EXISTS error_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    level TEXT DEFAULT 'error',
+    context TEXT,
+    message TEXT NOT NULL,
+    stack TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`).catch(() => {});
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {

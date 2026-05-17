@@ -95,6 +95,7 @@ function isActiveInputState(state) {
   if (state.startsWith('adm_personal_msg_')) return true;
   if (state.startsWith('adm_rev_reply_text_')) return true;
   if (state.startsWith('model_decline_reason_')) return true;
+  if (state === 'template_name' || state === 'template_text') return true;
   if (
     [
       'adm_broadcast_msg',
@@ -535,6 +536,7 @@ const KB_ADMIN_MARKETING = {
       { text: '📤 Экспорт заявок', callback_data: 'adm_export' },
       { text: '📸 Соцсети', callback_data: 'adm_social' },
     ],
+    [{ text: '📋 Шаблоны сообщений', callback_data: 'adm_templates' }],
     [{ text: '◀️ Главное меню', callback_data: 'admin_menu' }],
   ],
 };
@@ -2005,6 +2007,147 @@ async function bkSubmit(chatId, data) {
 // [MOVED TO handlers/admin.js]
 // async function showAdminOrders(chatId, statusFilter, page = 0) { ... }
 
+// ─── Message Templates (БЛОК 3.7) ────────────────────────────────────────────
+
+const TEMPLATE_CATEGORIES = {
+  general: '📌 Общие',
+  booking: '📅 Бронирование',
+  payment: '💳 Оплата',
+  reminder: '⏰ Напоминания',
+};
+
+function _renderTemplate(text, vars) {
+  return text
+    .replace(/\{\{client_name\}\}/g, vars.client_name || '')
+    .replace(/\{\{order_number\}\}/g, vars.order_number || '')
+    .replace(/\{\{event_date\}\}/g, vars.event_date || '');
+}
+
+async function _showAdminTemplates(chatId) {
+  if (!isAdmin(chatId)) return;
+  const count = await get('SELECT COUNT(*) as n FROM message_templates').catch(() => ({ n: 0 }));
+  const text = `📋 *Шаблоны сообщений*\n\nСохранённых шаблонов: *${count.n}*\n\nШаблоны позволяют быстро отправлять типовые сообщения клиентам с автоматической подстановкой данных заявки\\.`;
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '➕ Создать', callback_data: 'adm_tpl_create' },
+          { text: '📋 Все шаблоны', callback_data: 'adm_tpl_list' },
+        ],
+        [{ text: '🏷 По категориям', callback_data: 'adm_tpl_categories' }],
+        [{ text: '◀️ Главное меню', callback_data: 'admin_menu' }],
+      ],
+    },
+  });
+}
+
+async function _showAdminTemplateList(chatId, category = null) {
+  if (!isAdmin(chatId)) return;
+  let templates;
+  if (category) {
+    templates = await query('SELECT * FROM message_templates WHERE category=? ORDER BY use_count DESC, id DESC', [
+      category,
+    ]).catch(() => []);
+  } else {
+    templates = await query('SELECT * FROM message_templates ORDER BY use_count DESC, id DESC LIMIT 50').catch(
+      () => []
+    );
+  }
+
+  const catLabel = category ? TEMPLATE_CATEGORIES[category] || category : 'Все';
+  const header = `📋 *Шаблоны — ${esc(catLabel)}*`;
+
+  if (!templates.length) {
+    return safeSend(chatId, `${header}\n\n_Шаблонов пока нет\\._`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ Создать шаблон', callback_data: 'adm_tpl_create' }],
+          [{ text: '← Назад', callback_data: 'adm_templates' }],
+        ],
+      },
+    });
+  }
+
+  let text = `${header}\n\n`;
+  const keyboard = [];
+
+  for (const tpl of templates) {
+    const catIcon = Object.keys(TEMPLATE_CATEGORIES).includes(tpl.category)
+      ? TEMPLATE_CATEGORIES[tpl.category].split(' ')[0]
+      : '📌';
+    const preview = tpl.name.length > 28 ? tpl.name.slice(0, 28) + '…' : tpl.name;
+    text += `${catIcon} *${esc(tpl.name)}*\n`;
+    const previewText = tpl.text.length > 60 ? tpl.text.slice(0, 60) + '…' : tpl.text;
+    text += `_${esc(previewText)}_\n`;
+    text += `🔢 Использований: ${tpl.use_count}\n\n`;
+    keyboard.push([
+      { text: `📤 ${preview}`, callback_data: `adm_tpl_send_${tpl.id}` },
+      { text: '✏️', callback_data: `adm_tpl_edit_${tpl.id}` },
+      { text: '🗑', callback_data: `adm_tpl_del_${tpl.id}` },
+    ]);
+  }
+
+  keyboard.push([{ text: '➕ Создать шаблон', callback_data: 'adm_tpl_create' }]);
+  keyboard.push([{ text: '← Назад', callback_data: 'adm_templates' }]);
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard },
+  });
+}
+
+async function _showAdminTemplateCategories(chatId) {
+  if (!isAdmin(chatId)) return;
+  const keyboard = Object.entries(TEMPLATE_CATEGORIES).map(([key, label]) => [
+    { text: label, callback_data: `adm_tpl_cat_${key}` },
+  ]);
+  keyboard.push([{ text: '← Назад', callback_data: 'adm_templates' }]);
+  return safeSend(chatId, '🏷 *Шаблоны по категориям*\n\nВыберите категорию:', {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard },
+  });
+}
+
+// Show template picker for sending from a specific order card
+async function _showTemplatePicker(chatId, orderId) {
+  if (!isAdmin(chatId)) return;
+  const order = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(() => null);
+  if (!order) return safeSend(chatId, RU.ORDER_NOT_FOUND);
+
+  const templates = await query('SELECT * FROM message_templates ORDER BY use_count DESC, id DESC LIMIT 30').catch(
+    () => []
+  );
+
+  if (!templates.length) {
+    return safeSend(chatId, `📋 *Шаблоны сообщений*\n\n_Шаблонов пока нет\\. Создайте первый\\!_`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ Создать шаблон', callback_data: 'adm_tpl_create' }],
+          [{ text: '← К заявке', callback_data: `adm_order_${orderId}` }],
+        ],
+      },
+    });
+  }
+
+  const keyboard = templates.map(tpl => {
+    const label = tpl.name.length > 35 ? tpl.name.slice(0, 35) + '…' : tpl.name;
+    return [{ text: `📤 ${label}`, callback_data: `adm_tpl_order_send_${orderId}_${tpl.id}` }];
+  });
+  keyboard.push([{ text: '← К заявке', callback_data: `adm_order_${orderId}` }]);
+
+  return safeSend(
+    chatId,
+    `📤 *Выберите шаблон*\n\nКлиент: *${esc(order.client_name)}* \\(${esc(order.order_number)}\\)\n\nВыберите шаблон для отправки:`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: keyboard },
+    }
+  );
+}
+
 async function showAdminOrder(chatId, orderId) {
   try {
     const o = await get(
@@ -2130,6 +2273,10 @@ async function showAdminOrder(chatId, orderId) {
       { text: '🕐 История статусов', callback_data: `adm_order_history_${orderId}` },
     ]);
     keyboard.push([{ text: '📝 Заметка', callback_data: `adm_order_note_${orderId}` }]);
+    // Template message button — shown when order has a client chat ID
+    if (o.client_chat_id) {
+      keyboard.push([{ text: '📤 Написать шаблоном', callback_data: `adm_tpl_pick_${orderId}` }]);
+    }
     // Quick replies button — shown when order has a client chat ID
     if (o.client_chat_id) {
       keyboard.push([{ text: '⚡ Быстрые ответы', callback_data: `adm_qr_${o.client_chat_id}` }]);
@@ -6314,6 +6461,13 @@ function initBot(app) {
           return safeSend(chatId, '⛔ Нет доступа');
         }
         return showAdminStats(chatId);
+      }
+      if (data.startsWith('adm_stats_period_')) {
+        if (!isAdmin(chatId)) {
+          return safeSend(chatId, '⛔ Нет доступа');
+        }
+        const period = data.replace('adm_stats_period_', '');
+        return showAdminStats(chatId, period);
       }
       if (data === 'adm_stats_csv') {
         if (!isAdmin(chatId)) {
@@ -11617,6 +11771,34 @@ async function sendClientReminder(telegramId, text) {
   }
 }
 
+// ─── Telegram Stars Payment (БЛОК 8.1) ───────────────────────────────────────
+
+/**
+ * Send a Telegram Stars invoice to the client.
+ * @param {number|string} chatId  — target chat (client)
+ * @param {object} order          — order row from DB
+ */
+async function sendStarsInvoice(chatId, order) {
+  if (!bot) return;
+  // Use deposit_amount if set, otherwise fall back to payment_amount, then 1000 Stars
+  const amount = order.deposit_amount || order.payment_amount || 1000;
+  const eventLabel = EVENT_TYPES[order.event_type] || order.event_type || 'услуги';
+  try {
+    await bot.sendInvoice(
+      chatId,
+      `Бронирование модели`,
+      `Заявка #${order.order_number} — ${eventLabel}`,
+      `order_${order.id}`,
+      '', // provider_token — must be empty for Stars (XTR)
+      'XTR', // Telegram Stars currency
+      [{ label: 'Предоплата', amount }]
+    );
+  } catch (e) {
+    console.error('[Stars] sendStarsInvoice error:', e.message);
+    throw e;
+  }
+}
+
 async function notifyPaymentSuccess(clientChatId, orderNumber) {
   if (!bot || !clientChatId) return;
   await safeSend(
@@ -14559,6 +14741,82 @@ function _registerNewFeatures() {
       return showSearchMenu(chatId);
     }
   });
+
+  // ── Telegram Stars: pre_checkout_query ────────────────────────────────────
+  bot.on('pre_checkout_query', async query => {
+    try {
+      await bot.answerPreCheckoutQuery(query.id, true);
+    } catch (e) {
+      console.error('[Stars] pre_checkout_query error:', e.message);
+      try {
+        await bot.answerPreCheckoutQuery(query.id, false, 'Ошибка при проверке платежа');
+      } catch {}
+    }
+  });
+
+  // ── Telegram Stars: successful_payment ────────────────────────────────────
+  bot.on('message', async msg => {
+    if (!msg.successful_payment) return;
+    try {
+      const chatId = msg.chat.id;
+      const sp = msg.successful_payment;
+      const payload = sp.invoice_payload; // "order_123"
+      const orderId = parseInt(payload.replace('order_', ''), 10);
+      if (!orderId || isNaN(orderId)) {
+        console.error('[Stars] successful_payment: invalid orderId from payload:', payload);
+        return;
+      }
+      const order = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(() => null);
+      if (!order) {
+        console.error('[Stars] successful_payment: order not found, id:', orderId);
+        return;
+      }
+      // Persist payment info
+      await run(
+        `UPDATE orders SET
+          payment_status='paid',
+          paid_at=CURRENT_TIMESTAMP,
+          stars_payment_charge_id=?,
+          updated_at=CURRENT_TIMESTAMP
+         WHERE id=?`,
+        [sp.telegram_payment_charge_id || null, orderId]
+      ).catch(() => {});
+
+      // Notify client
+      await safeSend(
+        chatId,
+        `✅ *Оплата получена\\!*\n\nВаша заявка *${esc(order.order_number)}* подтверждена\\. Спасибо\\! Менеджер свяжется с вами для уточнения деталей\\.`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📋 Мои заявки', callback_data: 'my_orders' }],
+              [{ text: '🏠 Меню', callback_data: 'main_menu' }],
+            ],
+          },
+        }
+      );
+
+      // Notify admins
+      const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+      for (const adminId of adminIds) {
+        safeSend(
+          adminId,
+          `💰 *Оплата через Stars получена\\!*\n\nЗаявка *${esc(order.order_number)}*\nКлиент: ${esc(order.client_name || '—')}\nСумма: ${sp.total_amount} ⭐\nCharge ID: \`${esc(sp.telegram_payment_charge_id || '—')}\``,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [[{ text: '📋 Открыть заявку', callback_data: `adm_order_${orderId}` }]],
+            },
+          }
+        ).catch(() => {});
+      }
+
+      console.log(`[Stars] Payment confirmed: order #${order.order_number}, charge ${sp.telegram_payment_charge_id}`);
+    } catch (e) {
+      console.error('[Stars] successful_payment handler error:', e.message);
+    }
+  });
 }
 
 module.exports = {
@@ -14569,5 +14827,6 @@ module.exports = {
   sendMessageToClient,
   sendClientReminder,
   notifyPaymentSuccess,
+  sendStarsInvoice,
   _registerNewFeatures,
 };

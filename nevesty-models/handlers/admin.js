@@ -18,8 +18,24 @@ function init(deps) {
   ({ safeSend, isAdmin, esc } = deps);
 }
 
-async function showAdminStats(chatId) {
+// ── Period definitions for adm_stats_period_* callbacks ─────────────────────
+const STATS_PERIODS = {
+  7: { label: '7 дней', days: 7 },
+  30: { label: '30 дней', days: 30 },
+  90: { label: '90 дней', days: 90 },
+  all: { label: 'Всё время', days: null },
+};
+
+/**
+ * showAdminStats(chatId, period)
+ * period: '7' | '30' | '90' | 'all'  (default: '30')
+ */
+async function showAdminStats(chatId, period = '30') {
   if (!isAdmin(chatId)) return;
+  // Validate period
+  if (!STATS_PERIODS[period]) period = '30';
+  const { label: periodLabel, days: periodDays } = STATS_PERIODS[period];
+
   try {
     const budgetExpr = `CAST(REPLACE(REPLACE(REPLACE(REPLACE(budget,'₽',''),'руб',''),' ',''),',','.') AS REAL)`;
 
@@ -27,6 +43,11 @@ async function showAdminStats(chatId) {
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 
+    // Period date filter: datetime clause for WHERE
+    const periodFilter = periodDays ? `AND created_at >= datetime('now','-${periodDays} days')` : '';
+    const periodFilterNoAnd = periodDays ? `created_at >= datetime('now','-${periodDays} days')` : '1=1';
+
+    // ── Main order counts (global for funnel base) ────────────────────────────
     const [
       total,
       todayOrders,
@@ -38,7 +59,7 @@ async function showAdminStats(chatId) {
       statusInProgress,
       done,
       canc,
-      newClientsMonth,
+      _newClientsMonth,
       totalNew,
       confirmedCount,
       totalClients,
@@ -96,7 +117,7 @@ async function showAdminStats(chatId) {
 
     // Revenue: sum of budgets for confirmed+completed orders
     let revenue = { total: 0, week: 0, month: 0, calMonth: 0 };
-    let avgCheck = null;
+    let _avgCheck = null;
     try {
       const [revTotal, revWeek, revMonth, revCalMonth, avgRow] = await Promise.all([
         get(
@@ -122,10 +143,83 @@ async function showAdminStats(chatId) {
         month: Math.round(revMonth?.s || 0),
         calMonth: Math.round(revCalMonth?.s || 0),
       };
-      if (avgRow?.avg) avgCheck = Math.round(avgRow.avg);
+      if (avgRow?.avg) _avgCheck = Math.round(avgRow.avg);
     } catch {}
 
-    // Top-3 models by total order count (all non-cancelled)
+    // ── ВОРОНКА ПРОДАЖ (period-filtered) ────────────────────────────────────
+    let funnelData = { received: 0, confirmed: 0, completed: 0, cancelled: 0 };
+    try {
+      const [fReceived, fConfirmed, fCompleted, fCancelled] = await Promise.all([
+        get(`SELECT COUNT(*) as n FROM orders WHERE ${periodFilterNoAnd}`),
+        get(`SELECT COUNT(*) as n FROM orders WHERE status='confirmed' ${periodFilter}`),
+        get(`SELECT COUNT(*) as n FROM orders WHERE status='completed' ${periodFilter}`),
+        get(`SELECT COUNT(*) as n FROM orders WHERE status='cancelled' ${periodFilter}`),
+      ]);
+      funnelData = {
+        received: fReceived?.n || 0,
+        confirmed: fConfirmed?.n || 0,
+        completed: fCompleted?.n || 0,
+        cancelled: fCancelled?.n || 0,
+      };
+    } catch {}
+
+    // ── ТОП-3 СЕРВИСА (event_type, period-filtered) ───────────────────────────
+    let topServices = [];
+    try {
+      topServices = await query(
+        `SELECT event_type, COUNT(*) as cnt
+         FROM orders
+         WHERE event_type IS NOT NULL AND event_type != ''
+           ${periodFilter}
+         GROUP BY event_type
+         ORDER BY cnt DESC
+         LIMIT 3`
+      );
+    } catch {}
+
+    // ── СРЕДНИЙ ЧЕК за период ────────────────────────────────────────────────
+    let avgCheckPeriod = null;
+    try {
+      const avgRow = await get(
+        `SELECT AVG(${budgetExpr}) as avg
+         FROM orders
+         WHERE status='completed'
+           AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'
+           ${periodFilter}`
+      );
+      if (avgRow?.avg) avgCheckPeriod = Math.round(avgRow.avg);
+    } catch {}
+
+    // ── НОВЫЕ КЛИЕНТЫ ЗА 30 ДНЕЙ (always fixed 30d for this metric) ─────────
+    let newClients30d = 0;
+    try {
+      const ncRow = await get(
+        `SELECT COUNT(DISTINCT client_chat_id) as n
+         FROM orders
+         WHERE client_chat_id IS NOT NULL AND client_chat_id != ''
+           AND CAST(client_chat_id AS INTEGER) > 0
+           AND created_at > datetime('now','-30 days')`
+      );
+      newClients30d = ncRow?.n || 0;
+    } catch {}
+
+    // ── ТОП-5 МОДЕЛЕЙ ПО ЗАГРУЗКЕ (period-filtered) ──────────────────────────
+    let topModelsByLoad = [];
+    try {
+      const loadFilter = periodDays ? `AND o.created_at > datetime('now','-${periodDays} days')` : '';
+      topModelsByLoad = await query(
+        `SELECT m.name, COUNT(o.id) as bookings
+         FROM orders o
+         JOIN models m ON o.model_id = m.id
+         WHERE o.status != 'cancelled'
+           ${loadFilter}
+         GROUP BY m.id
+         ORDER BY bookings DESC
+         LIMIT 5`
+      );
+    } catch {}
+
+    // ── Top-3 models by total order count (all non-cancelled) ────────────────
     let topModels = [];
     try {
       topModels = await query(
@@ -138,7 +232,7 @@ async function showAdminStats(chatId) {
       );
     } catch {}
 
-    // Top-3 cities by order count (via model city)
+    // ── Top-3 cities by order count (via model city) ─────────────────────────
     let topCities = [];
     try {
       topCities = await query(
@@ -183,37 +277,84 @@ async function showAdminStats(chatId) {
       return esc(Math.round(n).toLocaleString('ru'));
     };
 
-    let text = `📊 *Статистика агентства*\n`;
-    text += `_Обновлено: ${esc(now.toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}_\n\n`;
+    const pct = (part, total) => {
+      if (!total || total === 0) return '0';
+      return String(Math.round((part / total) * 100));
+    };
 
-    // ── Заявки section ──────────────────────────────
-    text += `📋 *Заявки:*\n`;
+    // ── Build message ─────────────────────────────────────────────────────────
+    let text = `📊 *Статистика агентства*\n`;
+    text += `_Период: ${esc(periodLabel)} · ${esc(now.toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}_\n\n`;
+
+    // ── 1. Воронка продаж ────────────────────────────────────────────────────
+    text += `🔽 *Воронка продаж \\(${esc(periodLabel)}\\):*\n`;
+    text += `┌ 📥 Заявок получено: *${esc(String(funnelData.received))}*\n`;
+    text += `├ ✅ Подтверждено: *${esc(String(funnelData.confirmed))}* \\(${esc(pct(funnelData.confirmed, funnelData.received))}%\\)\n`;
+    text += `├ 🏁 Завершено: *${esc(String(funnelData.completed))}* \\(${esc(pct(funnelData.completed, funnelData.received))}%\\)\n`;
+    text += `└ ❌ Отменено: *${esc(String(funnelData.cancelled))}* \\(${esc(pct(funnelData.cancelled, funnelData.received))}%\\)\n`;
+
+    // ── 2. Топ-3 популярных сервиса ──────────────────────────────────────────
+    if (topServices.length) {
+      text += `\n🎯 *Топ сервисы \\(${esc(periodLabel)}\\):*\n`;
+      const svcMedals = ['🥇', '🥈', '🥉'];
+      topServices.forEach((s, i) => {
+        text += `${svcMedals[i] || `${i + 1}\\.`} ${esc(s.event_type)} — *${esc(String(s.cnt))}* заявок\n`;
+      });
+    }
+
+    // ── 3. Средний чек за период ─────────────────────────────────────────────
+    text += `\n💰 *Финансы \\(${esc(periodLabel)}\\):*\n`;
+    if (avgCheckPeriod) {
+      text += `• 💳 Средний чек: *${fmt(avgCheckPeriod)} ₽*\n`;
+    } else {
+      text += `• 💳 Средний чек: —\n`;
+    }
+    text += `• Выручка за месяц: *${fmt(revenue.calMonth)} ₽*\n`;
+    text += `• Конверсия: *${esc(String(conversion))}%*\n`;
+
+    // ── 4. Новые клиенты за 30 дней ──────────────────────────────────────────
+    text += `\n👥 *Клиенты:*\n`;
+    text += `• 🆕 Новых за 30 дней: *${esc(String(newClients30d))}*\n`;
+    text += `• 🔄 Повторных клиентов: ${esc(String(repeatClients))}\n`;
+    text += `• 📊 Всего уникальных: ${esc(String(totalClients?.n || 0))}\n`;
+
+    // ── 5. Топ-5 моделей по загрузке ─────────────────────────────────────────
+    if (topModelsByLoad.length) {
+      text += `\n💃 *Топ модели по загрузке \\(${esc(periodLabel)}\\):*\n`;
+      const loadMedals = ['🥇', '🥈', '🥉', '4\\.', '5\\.'];
+      topModelsByLoad.forEach((m, i) => {
+        const prefix = i < 3 ? loadMedals[i] : `${esc(String(i + 1))}\\.`;
+        text += `${prefix} ${esc(m.name)} — *${esc(String(m.bookings))}* бронирований\n`;
+      });
+    }
+
+    // ── Заявки section ──────────────────────────────────────────────────────
+    text += `\n📋 *Заявки:*\n`;
     text += `• Сегодня: *${esc(String(todayOrders.n))}*\n`;
     text += `• Неделя: ${esc(String(weekOrders.n))}\n`;
     text += `• Месяц \\(${esc(currentMonthLabel)}\\): *${esc(String(calMonthOrders.n))}*\n`;
     text += `• За 30 дней: ${esc(String(monthOrders.n))}\n`;
     text += `• Всего: ${esc(String(total.n))}\n`;
 
-    // ── Revenue section ──────────────────────────────
-    text += `\n💰 *Финансы:*\n`;
-    text += `• Выручка за месяц: *${fmt(revenue.calMonth)} ₽*\n`;
-    if (avgCheck) {
-      text += `• Средний чек: *${fmt(avgCheck)} ₽*\n`;
-    } else {
-      text += `• Средний чек: —\n`;
-    }
-    text += `• Конверсия: *${esc(String(conversion))}%*\n`;
+    // ── Status breakdown ─────────────────────────────────────────────────────
+    text += `\n🔄 *Статус заявок \\(всего\\):*\n`;
+    text += `• 🔵 Новые: *${esc(String(statusNew?.n || 0))}*\n`;
+    text += `• ✅ Подтверждённые: ${esc(String(statusConfirmed?.n || 0))}\n`;
+    text += `• 🔧 В работе: ${esc(String(statusInProgress?.n || 0))}\n`;
+    text += `• 🏁 Завершённые: ${esc(String(done?.n || 0))}\n`;
+    text += `• ❌ Отменённые: ${esc(String(canc?.n || 0))}\n`;
+    text += `• 📌 Активных сейчас: *${esc(String(activeCount))}*\n`;
 
-    // ── Top-3 models ─────────────────────────────────
+    // ── Top-3 models (all time) ───────────────────────────────────────────────
     if (topModels.length) {
-      text += `\n🏆 *Топ модели:*\n`;
+      text += `\n🏆 *Топ модели \\(всё время\\):*\n`;
       const medals = ['🥇', '🥈', '🥉'];
       topModels.forEach((m, i) => {
         text += `${esc(String(i + 1))}\\. ${medals[i] || ''} ${esc(m.name)} — ${esc(String(m.cnt))} заявок\n`;
       });
     }
 
-    // ── Top-3 cities ─────────────────────────────────
+    // ── Top-3 cities ─────────────────────────────────────────────────────────
     if (topCities.length) {
       text += `\n🏙 *Топ города:*\n`;
       topCities.forEach((c, i) => {
@@ -221,27 +362,13 @@ async function showAdminStats(chatId) {
       });
     }
 
-    // ── Clients + Active ─────────────────────────────
-    text += `\n👥 Новых клиентов за месяц: *${esc(String(newClientsMonth?.n || 0))}*\n`;
-    text += `📌 Активных заявок: *${esc(String(activeCount))}*\n`;
-
-    // ── Status breakdown ────────────────────────────
-    text += `\n🔄 *Статус заявок:*\n`;
-    text += `• 🔵 Новые: *${esc(String(statusNew?.n || 0))}*\n`;
-    text += `• ✅ Подтверждённые: ${esc(String(statusConfirmed?.n || 0))}\n`;
-    text += `• 🔧 В работе: ${esc(String(statusInProgress?.n || 0))}\n`;
-    text += `• 🏁 Завершённые: ${esc(String(done?.n || 0))}\n`;
-    text += `• ❌ Отменённые: ${esc(String(canc?.n || 0))}\n`;
-
-    // ── Models section ───────────────────────────────
+    // ── Models section ───────────────────────────────────────────────────────
     text += `\n💃 *Модели:*\n`;
     text += `• Всего активных: ${esc(String(totalModels?.n || 0))}\n`;
     text += `• Доступных: *${esc(String(activeModels?.n || 0))}*\n`;
-    text += `• Всего уникальных клиентов: ${esc(String(totalClients?.n || 0))}\n`;
     text += `• Топовых \\(featured\\): ${esc(String(featuredModels?.n || 0))}\n`;
-    text += `• Повторных клиентов: ${esc(String(repeatClients))}\n`;
 
-    // ── Additional metrics ───────────────────────────
+    // ── Additional metrics ───────────────────────────────────────────────────
     if (avgCycleDays !== null || revenue.total > 0) {
       text += `\n📈 *Итого:*\n`;
       text += `• Выручка за всё время: ${fmt(revenue.total)} ₽\n`;
@@ -258,12 +385,21 @@ async function showAdminStats(chatId) {
       text += `\n📢 *Рассылки:* ${esc(String(bcastRow.total))} отправлено, ${esc(String(bcastRow.sent || 0))} доставлено\n`;
     }
 
+    // ── Period filter buttons ─────────────────────────────────────────────────
+    const periodRow = [
+      { text: period === '7' ? '✅ 7д' : '7д', callback_data: 'adm_stats_period_7' },
+      { text: period === '30' ? '✅ 30д' : '30д', callback_data: 'adm_stats_period_30' },
+      { text: period === '90' ? '✅ 90д' : '90д', callback_data: 'adm_stats_period_90' },
+      { text: period === 'all' ? '✅ Всё время' : 'Всё время', callback_data: 'adm_stats_period_all' },
+    ];
+
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
+          periodRow,
           [
-            { text: '🔄 Обновить', callback_data: 'adm_stats_refresh' },
+            { text: '🔄 Обновить', callback_data: `adm_stats_period_${period}` },
             { text: '← Меню', callback_data: 'admin_menu' },
           ],
           [

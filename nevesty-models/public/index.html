@@ -419,7 +419,7 @@
     </style>
   </head>
   <body>
-    <a href="#main-content" class="skip-link">Перейти к содержимому</a>
+    <a href="#main-content" class="skip-link">Перейти к основному содержанию</a>
     <!-- NAVBAR -->
     <nav class="navbar" id="navbar" role="navigation" aria-label="Главное меню">
       <div class="nav-inner">
@@ -591,6 +591,7 @@
               placeholder="+7 (999) 123-45-67"
               aria-label="Номер телефона"
               aria-required="true"
+              aria-describedby="qf-phone-hint"
               autocomplete="tel"
               style="
                 flex: 1;
@@ -602,6 +603,7 @@
                 color: #fff;
               "
             />
+            <span id="qf-phone-hint" class="sr-only">Формат: +7 (XXX) XXX-XX-XX</span>
             <button
               id="qf-submit-btn"
               onclick="quickSubmitForm()"
@@ -814,7 +816,14 @@
       </section>
 
       <!-- QUICK BOOKING POPUP MODAL -->
-      <div class="qb-modal" id="qbModal" role="dialog" aria-modal="true" aria-labelledby="qbModalTitle">
+      <div
+        class="qb-modal"
+        id="qbModal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="qbModalTitle"
+        aria-hidden="true"
+      >
         <div class="qb-modal-box">
           <button class="qb-close" onclick="closeQbModal()" aria-label="Закрыть">✕</button>
           <div id="qbForm">
@@ -837,7 +846,9 @@
               placeholder="+7 999 123-45-67"
               autocomplete="tel"
               aria-required="true"
+              aria-describedby="qbPhone-hint"
             />
+            <span id="qbPhone-hint" class="sr-only">Формат: +7 (XXX) XXX-XX-XX</span>
             <label for="qbComment" class="sr-only">Тип мероприятия</label>
             <input class="qb-input" id="qbComment" type="text" placeholder="Тип мероприятия (необязательно)" />
             <button class="qb-btn" onclick="submitQb()" aria-label="Отправить быструю заявку">
@@ -851,15 +862,43 @@
         </div>
       </div>
       <script>
-        function openQbModal() {
-          document.getElementById('qbModal')?.classList.add('open');
+        var _qbModalTrigger = null;
+        function openQbModal(triggerEl) {
+          _qbModalTrigger = triggerEl || document.activeElement;
+          var modal = document.getElementById('qbModal');
+          modal?.classList.add('open');
+          modal?.removeAttribute('aria-hidden');
           document.getElementById('qbName')?.focus();
         }
         function closeQbModal() {
-          document.getElementById('qbModal')?.classList.remove('open');
+          var modal = document.getElementById('qbModal');
+          modal?.classList.remove('open');
+          modal?.setAttribute('aria-hidden', 'true');
+          if (_qbModalTrigger && _qbModalTrigger.focus) _qbModalTrigger.focus();
+          _qbModalTrigger = null;
         }
         document.getElementById('qbModal')?.addEventListener('click', e => {
           if (e.target.id === 'qbModal') closeQbModal();
+        });
+        // Focus trap for qbModal
+        document.getElementById('qbModal')?.addEventListener('keydown', function (e) {
+          if (e.key !== 'Tab') return;
+          var focusable = this.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
+          var arr = Array.from(focusable).filter(el => !el.disabled);
+          if (!arr.length) return;
+          var first = arr[0],
+            last = arr[arr.length - 1];
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
         });
         document.addEventListener('keydown', e => {
           if (e.key === 'Escape') closeQbModal();
@@ -930,6 +969,7 @@
         role="dialog"
         aria-modal="true"
         aria-labelledby="qbm2ModalTitle"
+        aria-hidden="true"
         style="
           display: none;
           position: fixed;
@@ -1053,18 +1093,45 @@
         </div>
       </div>
       <script>
-        function openQuickBooking() {
+        var _quickBookingTrigger = null;
+        function openQuickBooking(triggerEl) {
+          _quickBookingTrigger = triggerEl || document.activeElement;
           const m = document.getElementById('quickBookingModal');
           m.style.display = 'flex';
+          m.removeAttribute('aria-hidden');
           document.body.style.overflow = 'hidden';
           document.getElementById('qbm2Name').focus();
         }
         function closeQuickBooking() {
-          document.getElementById('quickBookingModal').style.display = 'none';
+          const m = document.getElementById('quickBookingModal');
+          m.style.display = 'none';
+          m.setAttribute('aria-hidden', 'true');
           document.body.style.overflow = '';
+          if (_quickBookingTrigger && _quickBookingTrigger.focus) _quickBookingTrigger.focus();
+          _quickBookingTrigger = null;
         }
         document.getElementById('quickBookingModal').addEventListener('click', function (e) {
           if (e.target === this) closeQuickBooking();
+        });
+        // Focus trap for quickBookingModal
+        document.getElementById('quickBookingModal').addEventListener('keydown', function (e) {
+          if (e.key !== 'Tab') return;
+          var focusable = this.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
+          var arr = Array.from(focusable).filter(el => !el.disabled);
+          if (!arr.length) return;
+          var first = arr[0],
+            last = arr[arr.length - 1];
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
         });
         async function submitQuickBooking() {
           const name = document.getElementById('qbm2Name').value.trim();
@@ -1961,6 +2028,11 @@
           "paymentAccepted": "Cash, Credit Card",
           "areaServed": "RU",
           "numberOfEmployees": { "@type": "QuantitativeValue", "value": 20 },
+          "address": {
+            "@type": "PostalAddress",
+            "addressLocality": "Москва",
+            "addressCountry": "RU"
+          },
           "sameAs": [
             "https://instagram.com/nevesty_models",
             "https://t.me/nevesty_models",

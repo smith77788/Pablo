@@ -391,34 +391,73 @@
         line-height: 1.2;
       }
 
-      /* ─── GALLERY ─────────────────────────────────────── */
+      /* ─── GALLERY — masonry columns ──────────────────── */
+      .gallery-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .gallery-photo-count {
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 3px 10px;
+        letter-spacing: 0.5px;
+      }
       .model-gallery-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 4px;
+        columns: 3;
+        column-gap: 8px;
         margin-bottom: 40px;
       }
       .model-gallery-item {
-        position: relative;
-        padding-bottom: 133%;
+        break-inside: avoid;
+        margin-bottom: 8px;
         overflow: hidden;
         background: var(--bg3);
         cursor: pointer;
+        position: relative;
+        border-radius: 2px;
       }
       .model-gallery-item img {
-        position: absolute;
-        inset: 0;
+        display: block;
         width: 100%;
-        height: 100%;
-        object-fit: cover;
+        height: auto;
         transition: transform 0.4s ease;
       }
       .model-gallery-item:hover img {
         transform: scale(1.05);
       }
-      .model-gallery-placeholder {
+      .model-gallery-item .gallery-overlay {
         position: absolute;
         inset: 0;
+        background: rgba(0, 0, 0, 0);
+        transition: background 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .model-gallery-item:hover .gallery-overlay {
+        background: rgba(0, 0, 0, 0.25);
+      }
+      .gallery-overlay-icon {
+        color: #fff;
+        font-size: 1.5rem;
+        opacity: 0;
+        transform: scale(0.7);
+        transition:
+          opacity 0.25s ease,
+          transform 0.25s ease;
+      }
+      .model-gallery-item:hover .gallery-overlay-icon {
+        opacity: 1;
+        transform: scale(1);
+      }
+      .model-gallery-placeholder {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -426,6 +465,76 @@
         font-family: 'Playfair Display', serif;
         font-size: 2rem;
         color: rgba(201, 169, 110, 0.1);
+        aspect-ratio: 3 / 4;
+      }
+      /* Gallery load-more */
+      .gallery-load-more {
+        display: none;
+        width: 100%;
+        margin: 4px 0 16px;
+        padding: 12px;
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: all 0.2s;
+        border-radius: 2px;
+      }
+      .gallery-load-more:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      @media (max-width: 768px) {
+        .model-gallery-grid {
+          columns: 2;
+        }
+      }
+      @media (max-width: 480px) {
+        .model-gallery-grid {
+          columns: 2;
+          column-gap: 6px;
+        }
+        .model-gallery-item {
+          margin-bottom: 6px;
+        }
+      }
+
+      /* ─── LIGHTBOX thumbnails strip ──────────────────── */
+      #lightboxThumbs {
+        position: absolute;
+        bottom: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 6px;
+        max-width: 90vw;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding: 4px 8px;
+        pointer-events: all;
+      }
+      #lightboxThumbs::-webkit-scrollbar {
+        display: none;
+      }
+      .lb-thumb {
+        width: 44px;
+        height: 56px;
+        object-fit: cover;
+        border-radius: 2px;
+        opacity: 0.45;
+        transition:
+          opacity 0.2s,
+          outline 0.2s;
+        cursor: pointer;
+        flex-shrink: 0;
+        outline: 2px solid transparent;
+      }
+      .lb-thumb.active {
+        opacity: 1;
+        outline-color: var(--gold);
       }
 
       /* ─── SIDEBAR / CTA ──────────────────────────────── */
@@ -593,9 +702,7 @@
         .model-stats {
           grid-template-columns: repeat(2, 1fr);
         }
-        .model-gallery-grid {
-          grid-template-columns: repeat(2, 1fr);
-        }
+        /* masonry columns override handled in gallery CSS above */
         .model-profile {
           padding: 0 16px 60px;
         }
@@ -973,7 +1080,7 @@
       /* Keyboard-hint strip */
       #lightboxHint {
         position: absolute;
-        bottom: 52px;
+        bottom: 20px;
         left: 50%;
         transform: translateX(-50%);
         font-size: 0.7rem;
@@ -1275,8 +1382,14 @@
               <div class="model-tab-panel active" id="tab-photos" role="tabpanel" aria-labelledby="tab-btn-photos">
                 <!-- Gallery -->
                 <div id="gallerySection">
-                  <span class="model-section-title">Портфолио</span>
+                  <div class="gallery-section-header">
+                    <span class="model-section-title" style="margin-bottom: 0">Портфолио</span>
+                    <span class="gallery-photo-count" id="galleryPhotoCount" style="display: none"></span>
+                  </div>
                   <div class="model-gallery-grid" id="galleryGrid"></div>
+                  <button class="gallery-load-more" id="galleryLoadMore" onclick="galleryLoadMore()">
+                    Показать ещё фото
+                  </button>
                 </div>
 
                 <!-- Availability calendar section -->
@@ -1533,7 +1646,7 @@
 
     <!-- Sticky mobile CTA — appears after scrolling past hero -->
     <div class="sticky-book-mobile" id="stickyBookMobile" aria-hidden="true">
-      <a class="btn-book-mobile" id="stickyBookBtn" href="/booking.html"> 📋 Забронировать </a>
+      <a class="btn-book-mobile" id="stickyBookBtn" href="/booking.html"> 📅 Забронировать </a>
     </div>
 
     <!-- Sticky desktop CTA — bottom-right button, visible only on desktop after hero scroll -->
@@ -1641,17 +1754,20 @@
       >
         ›
       </button>
+      <!-- Thumbnail strip (shown when >= 2 photos) -->
+      <div id="lightboxThumbs" role="list" aria-label="Миниатюры фото"></div>
       <div
         id="lightboxCounter"
         style="
           position: absolute;
-          bottom: 20px;
+          bottom: 48px;
           left: 50%;
           transform: translateX(-50%);
           color: #fff;
           font-size: 0.85rem;
           opacity: 0.7;
           pointer-events: none;
+          white-space: nowrap;
         "
       ></div>
       <div id="lightboxHint">← → для навигации · ESC для закрытия</div>
@@ -2010,38 +2126,16 @@
             if (paramsEmpty) paramsEmpty.style.display = 'block';
           }
 
-          // Gallery (main photo + extra photos from array)
-          const allPhotos = [];
-          if (m.photo_main) allPhotos.push(m.photo_main);
-          const extras = Array.isArray(m.photos) ? m.photos : [];
-          extras.forEach(p => {
-            if (p && !allPhotos.includes(p)) allPhotos.push(p);
+          // Gallery — collect photos from model data, then try dedicated endpoint
+          const _galleryBasePhotos = [];
+          if (m.photo_main) _galleryBasePhotos.push(m.photo_main);
+          (Array.isArray(m.photos) ? m.photos : []).forEach(p => {
+            if (p && !_galleryBasePhotos.includes(p)) _galleryBasePhotos.push(p);
           });
 
-          const galleryGrid = el('galleryGrid');
-          const GALLERY_SLOTS = 6;
-          const realPhotos = allPhotos.slice(0, GALLERY_SLOTS);
-          for (let i = 0; i < GALLERY_SLOTS; i++) {
-            const item = document.createElement('div');
-            item.className = 'model-gallery-item';
-            if (allPhotos[i]) {
-              const img = document.createElement('img');
-              img.src = allPhotos[i];
-              img.alt = `${m.name} — фото ${i + 1}`;
-              img.loading = 'lazy';
-              img.style.cursor = 'zoom-in';
-              item.appendChild(img);
-              const capturedIdx = i;
-              item.addEventListener('click', () => openLightbox(realPhotos, capturedIdx));
-            } else {
-              const ph = document.createElement('div');
-              ph.className = 'model-gallery-placeholder';
-              ph.textContent = '✦';
-              item.style.cursor = 'default';
-              item.appendChild(ph);
-            }
-            galleryGrid.appendChild(item);
-          }
+          // Render gallery with masonry layout; then try to fetch more from /api/models/:id/photos
+          renderGallery(_galleryBasePhotos, m.name);
+          fetchModelPhotos(m.id, m.name, _galleryBasePhotos);
 
           // Video support
           if (m.video_url) {
@@ -2219,6 +2313,9 @@
           _lbPhotos = Array.isArray(photos) ? photos : [photos];
           _lbIdx = idx || 0;
           _lbTrigger = document.activeElement;
+          // Reset thumbnail strip on new photo set
+          const thumbsEl = el('lightboxThumbs');
+          if (thumbsEl) delete thumbsEl.dataset.built;
           updateLightboxImg();
           const lb = el('lightbox');
           lb.style.display = 'flex';
@@ -2249,11 +2346,45 @@
             img.classList.remove('lb-loading');
           };
           tmp.src = newSrc;
-          const counter = el('lightboxCounter');
           const total = _lbPhotos.length;
+          const counter = el('lightboxCounter');
           if (counter) counter.textContent = total > 1 ? `${_lbIdx + 1} / ${total}` : '';
           // Update alt text with photo position for screen readers
           img.alt = total > 1 ? `Фото модели ${_lbIdx + 1} из ${total}` : 'Фото модели';
+          // Thumbnail strip
+          const thumbsEl = el('lightboxThumbs');
+          if (thumbsEl) {
+            if (total < 2) {
+              thumbsEl.style.display = 'none';
+            } else {
+              // Build thumbnails only once; then just update active class
+              if (!thumbsEl.dataset.built || thumbsEl.dataset.built !== String(total)) {
+                thumbsEl.innerHTML = '';
+                _lbPhotos.forEach((src, i) => {
+                  const t = document.createElement('img');
+                  t.className = 'lb-thumb';
+                  t.src = src;
+                  t.alt = '';
+                  t.loading = 'lazy';
+                  t.setAttribute('role', 'listitem');
+                  t.addEventListener('click', () => {
+                    _lbIdx = i;
+                    updateLightboxImg();
+                  });
+                  thumbsEl.appendChild(t);
+                });
+                thumbsEl.dataset.built = String(total);
+              }
+              // Sync active class
+              thumbsEl.querySelectorAll('.lb-thumb').forEach((t, i) => {
+                t.classList.toggle('active', i === _lbIdx);
+              });
+              // Scroll active thumb into view
+              const activeThumb = thumbsEl.querySelectorAll('.lb-thumb')[_lbIdx];
+              if (activeThumb) activeThumb.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' });
+              thumbsEl.style.display = 'flex';
+            }
+          }
         }
         window.prevPhoto = function () {
           _lbIdx = (_lbIdx - 1 + _lbPhotos.length) % _lbPhotos.length;

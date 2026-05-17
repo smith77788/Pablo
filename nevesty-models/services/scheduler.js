@@ -411,6 +411,177 @@ function checkMemoryUsage() {
   }
 }
 
+// ─── БЛОК 11.1: Client reminder tasks ─────────────────────────────────────────
+
+/**
+ * Reminder 1: 24h before shooting.
+ * Every hour — find confirmed orders whose event_date is tomorrow
+ * and reminder_24h_sent IS NULL, then send a Telegram message.
+ */
+async function sendShootingReminder24h() {
+  try {
+    const { query, run } = require('../database');
+    const botModule = require('../bot');
+
+    const orders = await query(`
+      SELECT o.id, o.order_number, o.client_chat_id, o.event_date, o.event_time, o.location
+      FROM orders o
+      WHERE o.status = 'confirmed'
+        AND date(o.event_date) = date('now', '+1 day')
+        AND o.reminder_24h_sent IS NULL
+        AND o.client_chat_id IS NOT NULL
+        AND o.client_chat_id != ''
+    `).catch(() => []);
+
+    if (!orders.length) return;
+
+    let sent = 0;
+    for (const order of orders) {
+      try {
+        const timeStr = order.event_time ? ` в ${order.event_time}` : '';
+        const locationStr = order.location ? `\n📍 Адрес: ${order.location}` : '';
+        const text =
+          `📅 *Напоминание о съёмке*\n\n` +
+          `Завтра ваша съёмка${timeStr}\\.\n` +
+          `Заявка \\#${order.order_number}` +
+          (locationStr ? `\n${locationStr}` : '') +
+          `\n\nЕсли есть вопросы — напишите менеджеру\\.`;
+
+        const ok = await botModule.sendClientReminder(order.client_chat_id, text);
+        if (ok) {
+          await run(`UPDATE orders SET reminder_24h_sent = datetime('now') WHERE id = ?`, [order.id]);
+          sent++;
+        }
+      } catch (e) {
+        console.error('[scheduler] 24h reminder error for order', order.id, e.message);
+      }
+    }
+
+    if (sent > 0) console.log(`[scheduler] 24h shooting reminders sent: ${sent}`);
+  } catch (e) {
+    console.error('[scheduler] sendShootingReminder24h error:', e.message);
+  }
+}
+
+/**
+ * Reminder 2: Stale pending orders (client hasn't completed the form).
+ * Every hour — find orders with status='pending' that haven't been updated
+ * for more than 2 hours and haven't been reminded yet (reminded_at IS NULL).
+ */
+async function remindStalePendingOrders() {
+  try {
+    const { query, run } = require('../database');
+    const botModule = require('../bot');
+
+    const orders = await query(`
+      SELECT o.id, o.order_number, o.client_chat_id, o.client_name
+      FROM orders o
+      WHERE o.status = 'pending'
+        AND o.updated_at < datetime('now', '-2 hours')
+        AND o.reminded_at IS NULL
+        AND o.client_chat_id IS NOT NULL
+        AND o.client_chat_id != ''
+    `).catch(() => []);
+
+    if (!orders.length) return;
+
+    let sent = 0;
+    for (const order of orders) {
+      try {
+        const text =
+          `📋 *Незавершённая заявка*\n\n` +
+          `Вы начали оформление заявки \\#${order.order_number}, ` +
+          `но не заполнили все данные\\.\n\n` +
+          `Пожалуйста, завершите заявку или напишите менеджеру — мы поможем\\.`;
+
+        const ok = await botModule.sendClientReminder(order.client_chat_id, text);
+        if (ok) {
+          await run(`UPDATE orders SET reminded_at = datetime('now') WHERE id = ?`, [order.id]);
+          sent++;
+        }
+      } catch (e) {
+        console.error('[scheduler] pending reminder error for order', order.id, e.message);
+      }
+    }
+
+    if (sent > 0) console.log(`[scheduler] Stale pending order reminders sent: ${sent}`);
+  } catch (e) {
+    console.error('[scheduler] remindStalePendingOrders error:', e.message);
+  }
+}
+
+/**
+ * Reminder 3: Post-shoot congratulation.
+ * Every hour — find orders with status='completed' where event_date was yesterday
+ * (i.e. >= 1 hour ago but within the same day) and completed_reminder_sent IS NULL.
+ * We check event_date < date('now') so we send after the day has passed.
+ */
+async function sendCompletedShootingCongrats() {
+  try {
+    const { query, run } = require('../database');
+    const botModule = require('../bot');
+
+    const orders = await query(`
+      SELECT o.id, o.order_number, o.client_chat_id, o.event_date
+      FROM orders o
+      WHERE o.status = 'completed'
+        AND o.event_date IS NOT NULL
+        AND date(o.event_date) < date('now')
+        AND date(o.event_date) >= date('now', '-2 days')
+        AND o.completed_reminder_sent IS NULL
+        AND o.client_chat_id IS NOT NULL
+        AND o.client_chat_id != ''
+    `).catch(() => []);
+
+    if (!orders.length) return;
+
+    let sent = 0;
+    for (const order of orders) {
+      try {
+        const text =
+          `🎉 *Спасибо за съёмку\\!*\n\n` +
+          `Мы рады были поработать с вами\\.\n` +
+          `Надеемся увидеть вас снова\\! 💃\n\n` +
+          `Если хотите оставить отзыв или забронировать следующую съёмку — мы всегда на связи\\.`;
+
+        const ok = await botModule.sendClientReminder(order.client_chat_id, text);
+        if (ok) {
+          await run(`UPDATE orders SET completed_reminder_sent = datetime('now') WHERE id = ?`, [order.id]);
+          sent++;
+        }
+      } catch (e) {
+        console.error('[scheduler] completed congrats error for order', order.id, e.message);
+      }
+    }
+
+    if (sent > 0) console.log(`[scheduler] Post-shoot congratulations sent: ${sent}`);
+  } catch (e) {
+    console.error('[scheduler] sendCompletedShootingCongrats error:', e.message);
+  }
+}
+
+// ─── БЛОК 6.4: Pending orders queue alert ─────────────────────────────────────
+// Alert if > 10 'new' orders have been waiting > 1 hour without attention
+async function checkPendingOrdersQueue() {
+  try {
+    const { get: dbGet } = require('../database');
+    const staleThreshold = parseInt(process.env.QUEUE_ALERT_THRESHOLD || '10');
+    const row = await dbGet(
+      `SELECT COUNT(*) as n FROM orders WHERE status='new' AND created_at < datetime('now', '-1 hour')`
+    );
+    const staleCount = row?.n || 0;
+    if (staleCount > staleThreshold) {
+      const msg = `⚠️ Накопилось ${staleCount} необработанных заявок! Проверьте панель.`;
+      console.warn('[scheduler]', msg);
+      _notify(msg);
+    } else if (staleCount > 0) {
+      console.log(`[scheduler] Queue check: ${staleCount} stale new orders (threshold: ${staleThreshold})`);
+    }
+  } catch (e) {
+    console.error('[scheduler] checkPendingOrdersQueue error:', e.message);
+  }
+}
+
 function _scheduleOnce(fn, delayMs, name) {
   const timer = setTimeout(() => {
     fn();
@@ -491,8 +662,14 @@ function start() {
   scheduleEveryMinutes(processScheduledBroadcasts, 'Scheduled broadcasts processor', 1);
   // Memory usage monitor: check every hour
   scheduleEvery(checkMemoryUsage, 'Memory monitor', 1);
+  // БЛОК 11.1 — Client reminder tasks (every hour)
+  scheduleEvery(sendShootingReminder24h, '24h shooting reminder', 1);
+  scheduleEvery(remindStalePendingOrders, 'Stale pending order reminder', 1);
+  scheduleEvery(sendCompletedShootingCongrats, 'Post-shoot congratulation', 1);
+  // БЛОК 6.4 — Pending orders queue alert (every hour)
+  scheduleEvery(checkPendingOrdersQueue, 'Pending orders queue alert (every 1h)', 1);
   console.log(
-    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), WAL size monitor (every 1h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h), scheduled broadcasts processor (every 1min), memory monitor (every 1h)'
+    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), WAL size monitor (every 1h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h), scheduled broadcasts processor (every 1min), memory monitor (every 1h), 24h shooting reminder (every 1h), stale pending reminder (every 1h), post-shoot congrats (every 1h), pending queue alert (every 1h)'
   );
 }
 

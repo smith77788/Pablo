@@ -7846,7 +7846,7 @@ router.post('/chat/ask', chatLimiter, async (req, res) => {
 // ─── SEO: Generate static sitemap.xml ────────────────────────────────────────
 async function generateSitemap() {
   const models = await query(
-    'SELECT id, name, created_at FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id'
+    'SELECT id, updated_at, created_at FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id'
   );
   const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
   const today = new Date().toISOString().split('T')[0];
@@ -7855,14 +7855,13 @@ async function generateSitemap() {
     { path: '/', priority: '1.0', freq: 'daily' },
     { path: '/catalog.html', priority: '0.9', freq: 'daily' },
     { path: '/booking.html', priority: '0.9', freq: 'weekly' },
-    { path: '/about.html', priority: '0.7', freq: 'monthly' },
+    { path: '/pricing.html', priority: '0.7', freq: 'weekly' },
     { path: '/reviews.html', priority: '0.7', freq: 'weekly' },
+    { path: '/cases.html', priority: '0.7', freq: 'monthly' },
+    { path: '/about.html', priority: '0.7', freq: 'monthly' },
     { path: '/faq.html', priority: '0.6', freq: 'monthly' },
     { path: '/contact.html', priority: '0.6', freq: 'monthly' },
-    { path: '/pricing.html', priority: '0.7', freq: 'weekly' },
-    { path: '/cases.html', priority: '0.7', freq: 'monthly' },
     { path: '/search.html', priority: '0.6', freq: 'weekly' },
-    { path: '/favorites.html', priority: '0.5', freq: 'weekly' },
   ];
 
   const staticUrls = staticPages
@@ -7874,8 +7873,8 @@ async function generateSitemap() {
 
   const modelUrls = models
     .map(m => {
-      const lastmod = m.created_at ? m.created_at.split('T')[0] : today;
-      return `  <url>\n    <loc>${baseUrl}/model/${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
+      const lastmod = (m.updated_at || m.created_at || '').split('T')[0] || today;
+      return `  <url>\n    <loc>${baseUrl}/model.html?id=${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
     })
     .join('\n');
 
@@ -7889,6 +7888,52 @@ router.get('/admin/sitemap/regenerate', auth, async (req, res, next) => {
   try {
     await generateSitemap();
     res.json({ ok: true, message: 'Sitemap regenerated successfully' });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── SEO: Dynamic sitemap.xml (full, replaces static file) ────────────────────
+router.get('/sitemap.xml', async (req, res, next) => {
+  try {
+    const models = await query(
+      'SELECT id, updated_at FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id'
+    );
+    const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
+    const today = new Date().toISOString().split('T')[0];
+
+    const staticPages = [
+      { path: '/', priority: '1.0', freq: 'daily' },
+      { path: '/catalog.html', priority: '0.9', freq: 'daily' },
+      { path: '/booking.html', priority: '0.9', freq: 'weekly' },
+      { path: '/pricing.html', priority: '0.7', freq: 'weekly' },
+      { path: '/reviews.html', priority: '0.7', freq: 'weekly' },
+      { path: '/cases.html', priority: '0.7', freq: 'monthly' },
+      { path: '/about.html', priority: '0.7', freq: 'monthly' },
+      { path: '/faq.html', priority: '0.6', freq: 'monthly' },
+      { path: '/contact.html', priority: '0.6', freq: 'monthly' },
+      { path: '/search.html', priority: '0.6', freq: 'weekly' },
+    ];
+
+    const staticUrls = staticPages
+      .map(
+        p =>
+          `  <url>\n    <loc>${baseUrl}${p.path}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${p.freq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`
+      )
+      .join('\n');
+
+    const modelUrls = models
+      .map(m => {
+        const lastmod = m.updated_at ? m.updated_at.split('T')[0] || m.updated_at.slice(0, 10) : today;
+        return `  <url>\n    <loc>${baseUrl}/model.html?id=${m.id}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
+      })
+      .join('\n');
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${staticUrls}\n${modelUrls}\n</urlset>`;
+
+    res.set('Content-Type', 'application/xml');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(xml);
   } catch (e) {
     next(e);
   }
@@ -8746,6 +8791,51 @@ router.get('/admin/clients/:phone/orders', auth, async (req, res, next) => {
       page,
       pages: Math.ceil((countRow?.n || 0) / limit),
       limit,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── БЛОК 6.4: Error logs endpoint ────────────────────────────────────────────
+// GET /api/admin/logs?level=error&context=bot&limit=50
+// Returns recent entries from error_logs table for the admin dashboard.
+router.get('/admin/logs', auth, async (req, res, next) => {
+  try {
+    const level = req.query.level || null;
+    const context = req.query.context || null;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+
+    const conditions = [];
+    const params = [];
+
+    if (level) {
+      conditions.push('level = ?');
+      params.push(level);
+    }
+    if (context) {
+      conditions.push('context = ?');
+      params.push(context);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = await query(
+      `SELECT id, level, context, message, stack, created_at
+       FROM error_logs
+       ${where}
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+
+    const countRow = await get(`SELECT COUNT(*) as n FROM error_logs ${where}`, params);
+
+    res.json({
+      logs: rows,
+      total: countRow?.n || 0,
+      limit,
+      offset,
     });
   } catch (e) {
     next(e);

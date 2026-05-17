@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const compression = require('compression');
-const { initDatabase, get: dbGet, closeDatabase } = require('./database');
+const { initDatabase, get: dbGet, run: dbRun, closeDatabase } = require('./database');
 const { initBot } = require('./bot');
 const apiRouter = require('./routes/api');
 const { WebSocketServer } = require('ws');
@@ -275,20 +275,21 @@ app.get('/sitemap.xml', async (req, res) => {
   try {
     const { query: dbQuery } = require('./database');
     const models = await dbQuery(
-      'SELECT id, name, created_at FROM models WHERE available=1 AND archived=0 ORDER BY created_at DESC'
+      'SELECT id, updated_at, created_at FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id'
     );
     const baseUrl = process.env.SITE_URL || 'https://nevesty-models.ru';
 
     const modelUrls = models
-      .map(
-        m => `
+      .map(m => {
+        const lastmod = (m.updated_at || m.created_at || '').split('T')[0] || new Date().toISOString().split('T')[0];
+        return `
   <url>
-    <loc>${baseUrl}/model/${m.id}</loc>
-    <lastmod>${m.created_at ? m.created_at.split('T')[0] : new Date().toISOString().split('T')[0]}</lastmod>
+    <loc>${baseUrl}/model.html?id=${m.id}</loc>
+    <lastmod>${lastmod}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
-  </url>`
-      )
+  </url>`;
+      })
       .join('');
 
     const today = new Date().toISOString().split('T')[0];
@@ -510,6 +511,8 @@ async function buildHealthResponse() {
   let tableCount = 0;
   let ordersByStatus = {};
   let _dbSchemaVersion = null;
+  let queuePending = 0;
+  let queueStale = 0;
 
   // Backup status — read from disk (scheduler writes files asynchronously)
   let backupStatus = { status: 'unknown', last_backup: null, count: 0 };
@@ -582,21 +585,30 @@ async function buildHealthResponse() {
     const pageSize = pageSizeRow?.page_size || 4096;
     dbSizeMb = Math.round(((pageCount * pageSize) / 1024 / 1024) * 10) / 10;
 
-    // Orders by status for metrics endpoint
-    const statusRows = await Promise.all([
-      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='new'"),
-      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='confirmed'"),
-      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='in_progress'"),
-      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='completed'"),
-      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='cancelled'"),
-    ]);
+    // Orders by status for metrics endpoint + queue stats
+    const [statusNew, statusConfirmed, statusInProgress, statusCompleted, statusCancelled, pendingRow, staleRow] =
+      await Promise.all([
+        dbGet("SELECT COUNT(*) as n FROM orders WHERE status='new'"),
+        dbGet("SELECT COUNT(*) as n FROM orders WHERE status='confirmed'"),
+        dbGet("SELECT COUNT(*) as n FROM orders WHERE status='in_progress'"),
+        dbGet("SELECT COUNT(*) as n FROM orders WHERE status='completed'"),
+        dbGet("SELECT COUNT(*) as n FROM orders WHERE status='cancelled'"),
+        // Queue: pending = new orders not yet confirmed
+        dbGet("SELECT COUNT(*) as n FROM orders WHERE status='new'"),
+        // Stale: orders that are new/confirmed but older than 1 hour
+        dbGet(
+          `SELECT COUNT(*) as n FROM orders WHERE status IN ('new','confirmed') AND created_at < datetime('now', '-1 hour')`
+        ),
+      ]);
     ordersByStatus = {
-      new: statusRows[0]?.n || 0,
-      confirmed: statusRows[1]?.n || 0,
-      in_progress: statusRows[2]?.n || 0,
-      completed: statusRows[3]?.n || 0,
-      cancelled: statusRows[4]?.n || 0,
+      new: statusNew?.n || 0,
+      confirmed: statusConfirmed?.n || 0,
+      in_progress: statusInProgress?.n || 0,
+      completed: statusCompleted?.n || 0,
+      cancelled: statusCancelled?.n || 0,
     };
+    queuePending = pendingRow?.n || 0;
+    queueStale = staleRow?.n || 0;
   } catch (e) {
     dbStatus = 'error';
     dbError = e.message;
@@ -776,6 +788,11 @@ async function buildHealthResponse() {
       active_orders: activeOrders,
       models_count: modelsCount,
       orders_by_status: ordersByStatus,
+    },
+    // Queue status (БЛОК 6.4)
+    queue: {
+      pending_orders: queuePending,
+      stale_orders: queueStale,
     },
     // Legacy scalar fields kept for compatibility
     bot: botInstance
@@ -1165,12 +1182,31 @@ async function start() {
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+  // ─── Helper: write to error_logs table (best-effort, never throws) ─────────
+  async function writeErrorLog(level, context, message, stack) {
+    try {
+      await dbRun(`INSERT INTO error_logs (level, context, message, stack) VALUES (?, ?, ?, ?)`, [
+        level,
+        context,
+        String(message).substring(0, 2000),
+        stack ? String(stack).substring(0, 4000) : null,
+      ]);
+    } catch (_) {
+      /* ignore — DB may not be ready yet */
+    }
+  }
+
   process.on('uncaughtException', err => {
     console.error('[CRITICAL] Uncaught exception:', err);
+    // Log to DB (best-effort, synchronous via spawnSync to avoid async issues before exit)
+    const errMsg = String(err.message || err).substring(0, 500);
+    const errStack = err.stack ? String(err.stack).substring(0, 3000) : null;
+    // Fire-and-forget DB insert (may not complete before exit, but worth trying)
+    writeErrorLog('error', 'server', errMsg, errStack).catch(() => {});
     // Attempt to notify admin via Telegram before crashing (args as array — no shell injection)
     try {
       const { spawnSync } = require('child_process');
-      const msg = `🚨 КРИТИЧНА ПОМИЛКА: ${String(err.message || err).substring(0, 100)}`;
+      const msg = `🚨 КРИТИЧНА ПОМИЛКА: ${errMsg.substring(0, 200)}`;
       spawnSync(process.execPath, [require('path').join(__dirname, 'tools/notify.js'), '--from', 'Server', msg], {
         timeout: 5000,
       });
@@ -1181,6 +1217,20 @@ async function start() {
   });
   process.on('unhandledRejection', reason => {
     console.error('[ERROR] Unhandled rejection:', reason);
+    // Log unhandled rejections to error_logs table (best-effort, non-blocking)
+    const errMsg = reason instanceof Error ? reason.message : String(reason);
+    const errStack = reason instanceof Error ? reason.stack : null;
+    writeErrorLog('error', 'server', `UnhandledRejection: ${errMsg}`.substring(0, 500), errStack).catch(() => {});
+    // Notify admin via Telegram for unhandled rejections (non-blocking, best-effort)
+    try {
+      const { spawnSync } = require('child_process');
+      const msg = `⚠️ Unhandled rejection: ${errMsg.substring(0, 150)}`;
+      spawnSync(process.execPath, [require('path').join(__dirname, 'tools/notify.js'), '--from', 'Server', msg], {
+        timeout: 3000,
+      });
+    } catch (_) {
+      /* best-effort */
+    }
   });
 }
 
