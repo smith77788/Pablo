@@ -185,7 +185,10 @@ describe('API routes structure', () => {
   test('GET /api/reviews/public returns array', async () => {
     const res = await request(app).get('/api/reviews/public');
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
+    // The route returns { ok: true, reviews: [...] }
+    const body = res.body;
+    const reviews = Array.isArray(body) ? body : body.reviews;
+    expect(Array.isArray(reviews)).toBe(true);
   });
 
   test('GET /api/admin/users requires auth', async () => {
