@@ -1231,6 +1231,7 @@
       role="dialog"
       aria-modal="true"
       aria-labelledby="aiMatchTitle"
+      aria-hidden="true"
     >
       <div
         style="
@@ -2107,20 +2108,49 @@
         document.body.removeChild(ta);
       }
 
-      function openAiMatchModal() {
+      var _aiMatchTrigger = null;
+      function openAiMatchModal(triggerEl) {
+        _aiMatchTrigger = triggerEl || document.activeElement;
         const modal = document.getElementById('aiMatchModal');
         modal.style.display = 'flex';
+        modal.removeAttribute('aria-hidden');
         document.getElementById('aiMatchResults').innerHTML = '';
         setTimeout(() => document.getElementById('aiMatchDesc').focus(), 100);
       }
       function closeAiMatchModal() {
-        document.getElementById('aiMatchModal').style.display = 'none';
+        const modal = document.getElementById('aiMatchModal');
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+        if (_aiMatchTrigger && _aiMatchTrigger.focus) _aiMatchTrigger.focus();
+        _aiMatchTrigger = null;
       }
       document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && document.getElementById('aiMatchModal').style.display === 'flex') closeAiMatchModal();
       });
       document.getElementById('aiMatchModal').addEventListener('click', function (e) {
         if (e.target === this) closeAiMatchModal();
+      });
+      // Focus trap for aiMatchModal
+      document.getElementById('aiMatchModal').addEventListener('keydown', function (e) {
+        if (e.key !== 'Tab' || this.style.display !== 'flex') return;
+        var focusable = this.querySelectorAll('button, textarea, input, [tabindex]:not([tabindex="-1"])');
+        var arr = Array.from(focusable).filter(function (el) {
+          return !el.disabled;
+        });
+        if (!arr.length) return;
+        var first = arr[0],
+          last = arr[arr.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
       });
 
       async function runAiMatchCatalog() {

@@ -218,7 +218,10 @@ function renderStars(rating) {
 })();
 
 /* ─── Model detail modal ───────────────────────────── */
-function openModelModal(id) {
+let _modelModalTrigger = null;
+
+function openModelModal(id, triggerEl) {
+  _modelModalTrigger = triggerEl || document.activeElement;
   apiFetch(`/models/${id}`)
     .then(m => {
       // GA4: select_item event (model card clicked in catalog/homepage)
@@ -310,8 +313,14 @@ function openModelModal(id) {
 
       const modal = document.getElementById('modelModal');
       modal.classList.add('open');
+      modal.removeAttribute('aria-hidden');
       document.body.style.overflow = 'hidden';
-      modal.focus();
+      // Focus first interactive element inside modal
+      const firstFocusable = modal.querySelector(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (firstFocusable) firstFocusable.focus();
+      else modal.focus();
     })
     .catch(() => toast('Не удалось загрузить данные модели', 'error'));
 }
@@ -423,7 +432,13 @@ document.addEventListener('keydown', e => {
 });
 function closeModal() {
   modalOverlay?.classList.remove('open');
+  modalOverlay?.setAttribute('aria-hidden', 'true');
   document.body.style.overflow = '';
+  // Return focus to the element that triggered the modal
+  if (_modelModalTrigger && _modelModalTrigger.focus) {
+    _modelModalTrigger.focus();
+    _modelModalTrigger = null;
+  }
 }
 window.closeModal = closeModal;
 

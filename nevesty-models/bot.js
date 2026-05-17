@@ -1461,13 +1461,18 @@ async function showClientOrder(chatId, orderId) {
     // Payment info in message
     if (o.payment_status === 'paid') {
       text += `\n💳 *Оплата:* ✅ Оплачено\n`;
-    } else if (o.payment_id && o.payment_status === 'pending') {
+    } else if (o.payment_status === 'pending') {
       text += `\n💳 *Оплата:* ⏳ Ожидает оплаты\n`;
+      if (o.deposit_amount) {
+        text += `Сумма предоплаты: *${esc(String(o.deposit_amount))} ⭐*\n`;
+      }
+    } else if (o.deposit_amount && o.status === 'confirmed') {
+      text += `\n💳 *Предоплата:* ${esc(String(o.deposit_amount))} ⭐ \\(Telegram Stars\\)\n`;
     }
-    // Show Pay button for confirmed orders that are not yet paid
+    // Show Pay button for confirmed orders that are not yet paid (Stars)
     const payBtn =
       o.status === 'confirmed' && o.payment_status !== 'paid'
-        ? [{ text: '💳 Оплатить', callback_data: `pay_order_${o.id}` }]
+        ? [{ text: '⭐ Оплатить через Stars', callback_data: `pay_order_${o.id}` }]
         : [];
 
     const kb = [
@@ -2285,6 +2290,10 @@ async function showAdminOrder(chatId, orderId) {
     if (o.status === 'confirmed' && o.client_chat_id) {
       const invoiceLabel = o.invoice_sent_at ? '💳 Счёт выставлен повторно' : '💳 Выставить счёт';
       keyboard.push([{ text: invoiceLabel, callback_data: `adm_invoice_${orderId}` }]);
+      // Stars payment button (Telegram native)
+      if (o.payment_status !== 'paid') {
+        keyboard.push([{ text: '⭐ Оплата через Stars', callback_data: `adm_pay_order_${orderId}` }]);
+      }
     }
     // Paid badge row for paid orders
     if (o.paid_at) {
@@ -14276,6 +14285,31 @@ function _registerNewFeatures() {
           await bot.editMessageReplyMarkup({ inline_keyboard: newRemKb }, { chat_id: chatId, message_id: msgId });
         } catch {}
         return;
+      }
+
+      // ── Admin: send Stars invoice to client (adm_pay_order_)
+      if (data.startsWith('adm_pay_order_')) {
+        if (!isAdmin(chatId)) return;
+        const orderId = parseInt(data.replace('adm_pay_order_', ''));
+        const order = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(() => null);
+        if (!order) return safeSend(chatId, '❌ Заявка не найдена');
+        if (!order.client_chat_id) return safeSend(chatId, '❌ У клиента нет Telegram чата');
+        if (order.payment_status === 'paid') {
+          return safeSend(chatId, '✅ Заявка уже оплачена\.', { parse_mode: 'MarkdownV2' });
+        }
+        try {
+          await sendStarsInvoice(order.client_chat_id, order);
+          await run(
+            'UPDATE orders SET payment_status=?, invoice_sent_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+            ['pending', orderId]
+          ).catch(() => {});
+          return safeSend(chatId, `✅ Счёт в Telegram Stars отправлен клиенту\.`, { parse_mode: 'MarkdownV2' });
+        } catch (e) {
+          console.error('[Stars] adm_pay_order_:', e.message);
+          return safeSend(chatId, '❌ Ошибка при отправке счёта в Stars\. Проверьте настройки бота\.', {
+            parse_mode: 'MarkdownV2',
+          });
+        }
       }
 
       // Category search
