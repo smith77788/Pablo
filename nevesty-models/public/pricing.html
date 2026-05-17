@@ -269,6 +269,85 @@
         width: 100%;
       }
 
+      /* ─── Package card selection ───────────── */
+      .pricing-card {
+        cursor: pointer;
+      }
+      .pricing-card.selected {
+        border-color: var(--gold) !important;
+        box-shadow:
+          0 0 0 2px rgba(201, 169, 110, 0.5),
+          0 0 32px rgba(201, 169, 110, 0.2) !important;
+        transform: scale(1.02) translateY(-4px);
+      }
+      .pricing-card.selected .pricing-cta {
+        background: var(--gold);
+        color: #000;
+        font-weight: 700;
+      }
+      .pkg-book-wrap {
+        display: none;
+        text-align: center;
+        margin-top: 20px;
+        padding: 16px;
+        background: rgba(201, 169, 110, 0.06);
+        border: 1px solid rgba(201, 169, 110, 0.2);
+      }
+      .pkg-book-wrap.visible {
+        display: block;
+      }
+      .pkg-book-hint {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin-bottom: 10px;
+      }
+
+      /* ─── Slider ────────────────────────────── */
+      .calc-slider-wrap {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .calc-slider {
+        flex: 1;
+        -webkit-appearance: none;
+        appearance: none;
+        height: 4px;
+        background: var(--border);
+        outline: none;
+        border-radius: 2px;
+        cursor: pointer;
+      }
+      .calc-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--gold);
+        cursor: pointer;
+        box-shadow: 0 0 6px rgba(201, 169, 110, 0.5);
+        transition: box-shadow 0.2s;
+      }
+      .calc-slider::-webkit-slider-thumb:hover {
+        box-shadow: 0 0 12px rgba(201, 169, 110, 0.7);
+      }
+      .calc-slider::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--gold);
+        cursor: pointer;
+        border: none;
+      }
+      .calc-slider-val {
+        min-width: 64px;
+        text-align: right;
+        font-size: 0.9rem;
+        color: var(--gold);
+        font-weight: 600;
+      }
+
       /* ─── Calculator ────────────────────────── */
       .calc-section {
         padding: 64px 20px;
@@ -893,12 +972,19 @@
             </div>
 
             <div class="calc-row">
-              <label class="calc-label">Длительность</label>
-              <div class="option-group" id="hoursGroup">
-                <button class="option-btn active" data-key="hours" data-val="2">2 часа</button>
-                <button class="option-btn" data-key="hours" data-val="4">4 часа</button>
-                <button class="option-btn" data-key="hours" data-val="6">6 часов</button>
-                <button class="option-btn" data-key="hours" data-val="8">8 часов</button>
+              <label class="calc-label" for="hoursSlider">Длительность</label>
+              <div class="calc-slider-wrap">
+                <input
+                  type="range"
+                  id="hoursSlider"
+                  class="calc-slider"
+                  min="1"
+                  max="12"
+                  value="2"
+                  step="1"
+                  aria-label="Длительность в часах"
+                />
+                <span class="calc-slider-val" id="hoursSliderVal">2 ч</span>
               </div>
             </div>
 
@@ -912,13 +998,32 @@
             </div>
 
             <div class="calc-row">
-              <label class="calc-label">Количество моделей</label>
-              <div class="option-group" id="countGroup">
-                <button class="option-btn active" data-key="count" data-val="1">1</button>
-                <button class="option-btn" data-key="count" data-val="2">2</button>
-                <button class="option-btn" data-key="count" data-val="3">3</button>
-                <button class="option-btn" data-key="count" data-val="5">5+</button>
+              <label class="calc-label" for="countSlider">Количество моделей</label>
+              <div class="calc-slider-wrap">
+                <input
+                  type="range"
+                  id="countSlider"
+                  class="calc-slider"
+                  min="1"
+                  max="5"
+                  value="1"
+                  step="1"
+                  aria-label="Количество моделей"
+                />
+                <span class="calc-slider-val" id="countSliderVal">1 мод.</span>
               </div>
+            </div>
+
+            <div class="calc-row">
+              <label class="calc-label" for="citySelect">Город</label>
+              <select id="citySelect" class="calc-select" aria-label="Выберите город">
+                <option value="msk">Москва</option>
+                <option value="spb">Санкт-Петербург</option>
+                <option value="ekb">Екатеринбург</option>
+                <option value="nsk">Новосибирск</option>
+                <option value="kzn">Казань</option>
+                <option value="other">Другой город (+5 000 ₽)</option>
+              </select>
             </div>
 
             <div class="calc-row">

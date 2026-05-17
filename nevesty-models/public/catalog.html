@@ -213,7 +213,7 @@
         margin-bottom: 0;
       }
 
-      /* ── Card hover: image zoom + overlay slide-up ── */
+      /* ── Card hover: image zoom + overlay slide-up + gold glow ── */
       .model-card .model-card-img {
         overflow: hidden;
       }
@@ -225,6 +225,14 @@
       .model-card:hover .model-card-img img,
       .model-card:hover .model-card-img picture img {
         transform: scale(1.05) !important;
+      }
+      /* Gold border glow on card hover */
+      .model-card:hover {
+        box-shadow:
+          0 12px 36px rgba(0, 0, 0, 0.45),
+          0 0 0 1.5px rgba(201, 169, 110, 0.7),
+          0 0 18px rgba(201, 169, 110, 0.22) !important;
+        border-color: rgba(201, 169, 110, 0.55) !important;
       }
       /* Overlay: name + button slides from bottom */
       .model-card-hover-overlay {
@@ -1116,6 +1124,24 @@
                   <div class="skel-line w-100"></div>
                 </div>
               </div>
+              <div class="skel-card">
+                <div class="skel-img"></div>
+                <div class="skel-body">
+                  <div class="skel-line w-60"></div>
+                  <div class="skel-line w-40"></div>
+                  <div class="skel-line w-80"></div>
+                  <div class="skel-line w-100"></div>
+                </div>
+              </div>
+              <div class="skel-card">
+                <div class="skel-img"></div>
+                <div class="skel-body">
+                  <div class="skel-line w-60"></div>
+                  <div class="skel-line w-40"></div>
+                  <div class="skel-line w-80"></div>
+                  <div class="skel-line w-100"></div>
+                </div>
+              </div>
             </div>
             <div
               class="catalog-grid"
@@ -1594,7 +1620,7 @@
       }
 
       function showSkeletons(count) {
-        count = count || 6;
+        count = count || 9;
         // Primary catalog skeleton
         var skeleton = document.getElementById('catalogSkeleton');
         var grid = document.getElementById('catalogGrid');
@@ -1674,9 +1700,22 @@
             '<div class="hover-overlay-name">' +
             _escHtml(modelName) +
             '</div>' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
             '<a href="/model.html?id=' +
             parseInt(modelId || 0) +
-            '" class="hover-overlay-btn" tabindex="-1" onclick="event.stopPropagation()">Смотреть профиль</a>';
+            '" class="hover-overlay-btn" tabindex="-1" onclick="event.stopPropagation()">Подробнее</a>' +
+            '<button class="hover-overlay-fav" tabindex="-1" onclick="event.stopPropagation();(function(btn,id){' +
+            "var favs=[];try{favs=JSON.parse(localStorage.getItem('nm_favorites')||'[]');}catch(e){}" +
+            "var idx=favs.findIndex(function(f){return typeof f==='object'?f.id==id:f==id;});" +
+            "if(idx===-1){favs.push(id);btn.textContent='❤️';btn.title='В избранном';}" +
+            "else{favs.splice(idx,1);btn.textContent='🤍';btn.title='В избранное';}" +
+            "try{localStorage.setItem('nm_favorites',JSON.stringify(favs));}catch(e){}" +
+            '})(this,' +
+            parseInt(modelId || 0) +
+            ')" ' +
+            'title="В избранное" style="width:34px;height:34px;border:none;background:rgba(0,0,0,0.5);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;flex-shrink:0;">' +
+            '🤍</button>' +
+            '</div>';
           imgContainer.appendChild(overlay);
         }
 

@@ -1043,13 +1043,13 @@
       <!-- Model Performance Table -->
       <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
         <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <h3 class="font-semibold text-gray-800 dark:text-white">🏆 Топ моделей — детальная таблица</h3>
+          <h3 class="font-semibold text-gray-800 dark:text-white">🏆 Топ-5 моделей — детальная таблица</h3>
           <span class="text-xs text-gray-400 dark:text-gray-500">за выбранный период</span>
         </div>
         <div id="models-table-skeleton" class="animate-pulse space-y-2">
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-full"></div>
-          <div class="bg-gray-200 dark:bg-gray-700 rounded h-8 w-3/4"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-12 w-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-12 w-full"></div>
+          <div class="bg-gray-200 dark:bg-gray-700 rounded h-12 w-3/4"></div>
         </div>
         <div id="models-table-wrap" style="display: none" class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -1059,8 +1059,9 @@
                 <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Модель</th>
                 <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Заявок</th>
                 <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Завершено</th>
-                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Ср. бюджет</th>
-                <th class="py-2 font-medium text-gray-600 dark:text-gray-400 text-center">Действие</th>
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Выручка</th>
+                <th class="py-2 pr-3 font-medium text-gray-600 dark:text-gray-400 text-right">Рейтинг</th>
+                <th class="py-2 font-medium text-gray-600 dark:text-gray-400 text-center">Открыть</th>
               </tr>
             </thead>
             <tbody id="models-table-rows"></tbody>
@@ -2029,6 +2030,24 @@
       }
 
       // ── Model performance table ───────────────────────────────────────────────────
+      function modelAvatar(m) {
+        const initials = (m.name || '—')
+          .split(' ')
+          .map(w => w[0] || '')
+          .slice(0, 2)
+          .join('')
+          .toUpperCase();
+        const colors = ['#ec4899', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b'];
+        const bg = colors[(m.id || 0) % colors.length];
+        if (m.photo_main) {
+          return `<img src="${escHtml(m.photo_main)}" alt="${escHtml(initials)}"
+            style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;"
+            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+            <div style="display:none;width:36px;height:36px;border-radius:50%;background:${bg};color:#fff;font-size:12px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0;">${initials}</div>`;
+        }
+        return `<div style="width:36px;height:36px;border-radius:50%;background:${bg};color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initials}</div>`;
+      }
+
       function renderModelsTable(models) {
         const sk = document.getElementById('models-table-skeleton');
         const wrap = document.getElementById('models-table-wrap');
@@ -2038,36 +2057,44 @@
           if (empty) empty.style.display = '';
           return;
         }
-        const top = models.slice(0, 10);
+        const top = models.slice(0, 5);
+        const fmtBudget = v =>
+          v > 0
+            ? new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(v)
+            : '—';
+        const medals = ['🥇', '🥈', '🥉', '4', '5'];
         const tbody = document.getElementById('models-table-rows');
         tbody.innerHTML = top
           .map((m, i) => {
-            const avgBudget =
-              m.avg_budget > 0
-                ? new Intl.NumberFormat('uk-UA', {
-                    style: 'currency',
-                    currency: 'UAH',
-                    maximumFractionDigits: 0,
-                  }).format(m.avg_budget)
-                : '—';
+            const totalBudget = fmtBudget(m.total_budget || 0);
             const convPct = m.orders > 0 ? Math.round((m.completed / m.orders) * 100) : 0;
-            const convColor = convPct >= 70 ? 'text-green-600' : convPct >= 40 ? 'text-yellow-600' : 'text-red-500';
-            return `<tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
-      <td class="py-2 pr-3 text-gray-400 dark:text-gray-500 font-medium">${i + 1}</td>
-      <td class="py-2 pr-3">
-        <div class="font-medium text-gray-900 dark:text-white">${escHtml(m.name || '—')}</div>
-        ${m.city ? `<div class="text-xs text-gray-400">${escHtml(m.city)}</div>` : ''}
+            const convColor = convPct >= 70 ? 'color:#16a34a' : convPct >= 40 ? 'color:#ca8a04' : 'color:#ef4444';
+            const ratingHtml =
+              m.avg_rating != null
+                ? `<span style="color:#f59e0b;font-weight:600;">${m.avg_rating}</span><span style="font-size:10px;color:#9ca3af;margin-left:2px;">/ 5 ⭐</span>`
+                : '<span style="color:#9ca3af;">—</span>';
+            return `<tr style="border-bottom:1px solid rgba(156,163,175,0.2);">
+      <td style="padding:10px 12px 10px 0;white-space:nowrap;">${medals[i]}</td>
+      <td style="padding:10px 12px 10px 0;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${modelAvatar(m)}
+          <div>
+            <div style="font-weight:600;font-size:13px;" class="text-gray-900 dark:text-white">${escHtml(m.name || '—')}</div>
+            ${m.city ? `<div style="font-size:11px;color:#9ca3af;">${escHtml(m.city)}</div>` : ''}
+          </div>
+        </div>
       </td>
-      <td class="py-2 pr-3 text-right font-semibold text-gray-800 dark:text-gray-200">${m.orders || 0}</td>
-      <td class="py-2 pr-3 text-right">
-        <span class="${convColor} font-semibold">${m.completed || 0}</span>
-        <span class="text-xs text-gray-400 ml-1">(${convPct}%)</span>
+      <td style="padding:10px 12px 10px 0;text-align:right;font-weight:600;" class="text-gray-800 dark:text-gray-200">${m.orders || 0}</td>
+      <td style="padding:10px 12px 10px 0;text-align:right;">
+        <span style="${convColor};font-weight:600;">${m.completed || 0}</span>
+        <span style="font-size:11px;color:#9ca3af;margin-left:3px;">(${convPct}%)</span>
       </td>
-      <td class="py-2 pr-3 text-right text-emerald-600 dark:text-emerald-400 font-medium">${avgBudget}</td>
-      <td class="py-2 text-center">
+      <td style="padding:10px 12px 10px 0;text-align:right;font-weight:500;" class="text-emerald-600 dark:text-emerald-400">${totalBudget}</td>
+      <td style="padding:10px 12px 10px 0;text-align:right;">${ratingHtml}</td>
+      <td style="padding:10px 0 10px 0;text-align:center;">
         <a href="/admin/models.html?id=${m.id}" target="_blank"
-           class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-pink-200 dark:border-pink-800 text-pink-600 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition-colors">
-          <i class="fas fa-eye text-xs"></i> View
+           style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;font-size:11px;border-radius:6px;border:1px solid rgba(236,72,153,0.4);color:#ec4899;text-decoration:none;">
+          <i class="fas fa-eye" style="font-size:10px;"></i> View
         </a>
       </td>
     </tr>`;
@@ -2742,12 +2769,124 @@
         }
       }
 
+      // ── New Clients Month-over-Month Comparison ────────────────────────────────────
+      async function loadNewClientsComparison() {
+        const sk = document.getElementById('new-clients-cmp-skeleton');
+        const wrap = document.getElementById('new-clients-cmp-wrap');
+        const errEl = document.getElementById('new-clients-cmp-error');
+        try {
+          const d = await fetch('/api/admin/analytics/new-clients-comparison', { headers: h }).then(r => r.json());
+          if (!d.ok) throw new Error('no data');
+          if (sk) sk.style.display = 'none';
+
+          const thisM = d.this_month || 0;
+          const lastM = d.last_month || 0;
+
+          document.getElementById('nc-this-month').textContent = thisM;
+          document.getElementById('nc-last-month').textContent = lastM;
+
+          const badge = document.getElementById('nc-trend-badge');
+          const bar = document.getElementById('nc-progress-bar');
+          if (d.trend === 'up') {
+            badge.textContent = `+${d.pct}%`;
+            badge.style.cssText = 'background:rgba(16,185,129,0.15);color:#10b981;';
+            bar.style.background = '#10b981';
+          } else if (d.trend === 'down') {
+            badge.textContent = `${d.pct}%`;
+            badge.style.cssText = 'background:rgba(239,68,68,0.15);color:#ef4444;';
+            bar.style.background = '#ef4444';
+          } else {
+            badge.textContent = '→ 0%';
+            badge.style.cssText = 'background:rgba(156,163,175,0.15);color:#6b7280;';
+            bar.style.background = '#6b7280';
+          }
+          // Progress bar width: current month vs max(this, last)
+          const maxVal = Math.max(thisM, lastM, 1);
+          bar.style.width = Math.round((thisM / maxVal) * 100) + '%';
+
+          const label90 = document.getElementById('nc-90d-label');
+          if (label90) label90.textContent = `За последние 90 дней: ${d.last_90_days || 0} уникальных клиентов`;
+
+          if (wrap) wrap.style.display = '';
+        } catch (e) {
+          if (sk) sk.style.display = 'none';
+          if (errEl) errEl.style.display = '';
+        }
+      }
+
+      // ── Deal Cycle (avg, min, max days) ───────────────────────────────────────────
+      async function loadDealCycle() {
+        const sk = document.getElementById('deal-cycle-skeleton');
+        const wrap = document.getElementById('deal-cycle-wrap');
+        const errEl = document.getElementById('deal-cycle-error');
+        try {
+          const d = await fetch('/api/admin/analytics/extended', { headers: h }).then(r => r.json());
+          if (sk) sk.style.display = 'none';
+
+          if (d.avg_cycle_days == null) {
+            if (errEl) errEl.style.display = '';
+            return;
+          }
+
+          // Also fetch min/max from deal-cycle endpoint if available, otherwise compute hint
+          const avg = d.avg_cycle_days;
+          document.getElementById('dc-avg').textContent = avg != null ? avg + ' дн.' : '—';
+          document.getElementById('dc-min').textContent = '—';
+          document.getElementById('dc-max').textContent = '—';
+          const hint = document.getElementById('dc-hint');
+          if (hint) {
+            if (avg <= 3) hint.textContent = 'Отличный темп — сделки закрываются быстро';
+            else if (avg <= 7) hint.textContent = 'Хороший цикл — типично для разовых мероприятий';
+            else if (avg <= 14) hint.textContent = 'Средний цикл — есть потенциал для ускорения';
+            else hint.textContent = 'Длинный цикл — стоит упростить этапы подтверждения';
+          }
+
+          if (wrap) wrap.style.display = '';
+        } catch (e) {
+          if (sk) sk.style.display = 'none';
+          if (errEl) errEl.style.display = '';
+        }
+      }
+
+      // ── Refresh All Widgets ────────────────────────────────────────────────────────
+      async function refreshAll() {
+        const icon = document.getElementById('refresh-icon');
+        const btn = document.getElementById('btn-refresh');
+        if (btn) btn.disabled = true;
+        if (icon) icon.classList.add('fa-spin');
+        try {
+          await Promise.all([
+            loadAll(),
+            loadMonthly(),
+            loadRevenueTrend(),
+            loadHeatmap(),
+            loadClientLtv(),
+            loadHourlyHeatmap(),
+            loadFunnel(),
+            loadRevenueChart(),
+            loadTopCities(),
+            loadForecast(),
+            loadSegments(),
+            loadSvgRevenueChart(),
+            loadSvgOrdersChart(),
+            loadKpiTrends(),
+            loadNewClientsComparison(),
+            loadDealCycle(),
+          ]);
+        } finally {
+          if (icon) icon.classList.remove('fa-spin');
+          if (btn) btn.disabled = false;
+        }
+      }
+
       // ── Call new loaders on page init ─────────────────────────────────────────────
       loadFunnel();
       loadRevenueChart();
       loadTopCities();
       loadForecast();
       loadSegments();
+      loadNewClientsComparison();
+      loadDealCycle();
 
       // ════════════════════════════════════════════════════════════════
       // ── NEW: SVG Revenue Line Chart ──────────────────────────────────

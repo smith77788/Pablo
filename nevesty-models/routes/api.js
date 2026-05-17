@@ -1352,6 +1352,14 @@ router.get('/models/:id', async (req, res, next) => {
       `SELECT busy_date FROM model_busy_dates WHERE model_id=? AND busy_date >= date('now') ORDER BY busy_date`,
       [id]
     ).catch(() => []);
+    // Aggregate rating and order_count for compare/profile pages
+    const [ratingRow, orderRow] = await Promise.all([
+      get(
+        `SELECT ROUND(AVG(rating), 1) as avg_rating, COUNT(*) as reviews_count FROM reviews WHERE model_id=? AND approved=1`,
+        [id]
+      ).catch(() => null),
+      get(`SELECT COUNT(*) as order_count FROM orders WHERE model_id=?`, [id]).catch(() => null),
+    ]);
     res.json({
       ...m,
       photos,
@@ -1359,6 +1367,10 @@ router.get('/models/:id', async (req, res, next) => {
       photo_thumb: deriveThumbUrl(m.photo_main),
       photos_thumbs: photos.map(deriveThumbUrl),
       busy_dates: busyDates.map(r => r.busy_date),
+      // Rating and order stats for compare table
+      rating: ratingRow?.avg_rating ?? null,
+      reviews_count: ratingRow?.reviews_count ?? 0,
+      order_count: orderRow?.order_count ?? m.order_count ?? 0,
     });
     // Increment view count asynchronously after response is sent
     run('UPDATE models SET view_count = COALESCE(view_count, 0) + 1 WHERE id=?', [id]).catch(() => {});
@@ -2421,7 +2433,9 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
 router.get('/orders/status/:order_number', async (req, res, next) => {
   try {
     const order = await get(
-      `SELECT o.order_number, o.status, o.event_type, o.event_date, o.client_name, o.created_at, m.name as model_name
+      `SELECT o.id, o.order_number, o.status, o.event_type, o.event_date, o.client_name, o.created_at,
+              o.budget, o.location, o.payment_status,
+              m.name as model_name, m.photo_main as model_photo, m.id as model_id
        FROM orders o LEFT JOIN models m ON o.model_id = m.id
        WHERE o.order_number = ?`,
       [req.params.order_number.toUpperCase()]
@@ -2439,13 +2453,58 @@ router.get('/orders/status', async (req, res, next) => {
     const number = (req.query.number || '').trim().toUpperCase();
     if (!number) return res.status(400).json({ error: 'Укажите номер заявки' });
     const order = await get(
-      `SELECT o.order_number, o.status, o.event_type, o.event_date, o.client_name, o.created_at, m.name as model_name
+      `SELECT o.id, o.order_number, o.status, o.event_type, o.event_date, o.client_name, o.created_at,
+              o.budget, o.location, o.payment_status,
+              m.name as model_name, m.photo_main as model_photo, m.id as model_id
        FROM orders o LEFT JOIN models m ON o.model_id = m.id
        WHERE o.order_number = ?`,
       [number]
     );
     if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
     res.json(order);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/orders/status/:order_number/history — public status history (no auth, sanitized)
+router.get('/orders/status/:order_number/history', async (req, res, next) => {
+  try {
+    const number = req.params.order_number.toUpperCase();
+    const order = await get('SELECT id FROM orders WHERE order_number = ?', [number]);
+    if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
+    const history = await query(
+      `SELECT osh.old_status, osh.new_status, osh.created_at,
+              COALESCE(a.username, 'менеджер') as changed_by
+       FROM order_status_history osh
+       LEFT JOIN admins a ON osh.changed_by = CAST(a.id AS TEXT)
+       WHERE osh.order_id = ?
+       ORDER BY osh.created_at ASC`,
+      [order.id]
+    );
+    res.json(history);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PATCH /api/orders/status/:order_number/cancel — public cancel (only new/confirmed)
+router.patch('/orders/status/:order_number/cancel', async (req, res, next) => {
+  try {
+    const number = req.params.order_number.toUpperCase();
+    const order = await get('SELECT id, status FROM orders WHERE order_number = ?', [number]);
+    if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
+    if (!['new', 'confirmed'].includes(order.status)) {
+      return res.status(400).json({ error: 'Отменить можно только заявки со статусом "Новая" или "Подтверждена"' });
+    }
+    await run(`UPDATE orders SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [order.id]);
+    await run(`INSERT INTO order_status_history (order_id, old_status, new_status, changed_by) VALUES (?,?,?,?)`, [
+      order.id,
+      order.status,
+      'cancelled',
+      'client',
+    ]);
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }

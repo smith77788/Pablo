@@ -371,6 +371,24 @@
         width: 88%;
       }
 
+      /* ─── RESULTS COUNTER ─────────────────────────────────── */
+      .faq-results-counter {
+        text-align: center;
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        letter-spacing: 0.5px;
+        margin-bottom: 20px;
+        min-height: 1.2em;
+        transition: opacity 0.2s;
+      }
+      .faq-results-counter.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .faq-results-counter strong {
+        color: var(--gold);
+      }
+
       /* ─── NO RESULTS ───────────────────────────────────────── */
       .faq-empty {
         text-align: center;
@@ -383,6 +401,24 @@
         font-size: 2.5rem;
         display: block;
         margin-bottom: 12px;
+      }
+      .faq-empty-cta {
+        margin-top: 20px;
+      }
+      .faq-empty-cta .btn-outline {
+        display: inline-block;
+        padding: 10px 24px;
+        border: 1px solid rgba(201, 169, 110, 0.5);
+        color: var(--gold);
+        font-size: 0.82rem;
+        letter-spacing: 1px;
+        text-decoration: none;
+        border-radius: 2px;
+        transition: all 0.22s;
+      }
+      .faq-empty-cta .btn-outline:hover {
+        background: rgba(201, 169, 110, 0.1);
+        border-color: var(--gold);
       }
 
       /* ─── CTA BLOCK ────────────────────────────────────────── */
@@ -600,6 +636,9 @@
           </button>
         </div>
 
+        <!-- Results counter -->
+        <div class="faq-results-counter hidden" id="faqResultsCounter" aria-live="polite" aria-atomic="true"></div>
+
         <!-- Accordion container -->
         <div
           class="faq-accordion"
@@ -629,8 +668,11 @@
         <!-- Empty / no results state -->
         <div class="faq-empty" id="faqEmpty" role="status" aria-live="polite">
           <span class="faq-empty-icon" aria-hidden="true">🔎</span>
-          По вашему запросу ничего не найдено.<br />
-          Попробуйте другой вопрос или <a href="/contact.html" style="color: var(--gold)">напишите нам напрямую</a>.
+          <strong style="color: var(--white); display: block; margin-bottom: 8px">Ничего не найдено</strong>
+          По вашему запросу нет совпадений. Попробуйте другой вопрос или напишите нам напрямую.
+          <div class="faq-empty-cta">
+            <a href="/contact.html" class="btn-outline">Написать нам</a>
+          </div>
         </div>
 
         <!-- CTA -->

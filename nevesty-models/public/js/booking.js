@@ -1462,6 +1462,7 @@
     if (!btn) return;
     btn.disabled = true;
     btn.textContent = 'Отправка...';
+    setNavBusy(true);
     try {
       const csrfToken = await getCsrfToken();
 
@@ -1694,6 +1695,7 @@
       if (typeof toast === 'function') toast(e.message || 'Ошибка при отправке заявки', 'error');
       btn.disabled = false;
       btn.textContent = 'Отправить заявку ✓';
+      setNavBusy(false);
     }
   }
 
@@ -1832,6 +1834,20 @@
     }, 2800);
   }
 
+  /* ─── Nav-busy helper: lock/unlock Back & Next buttons ─── */
+  function setNavBusy(busy) {
+    document.querySelectorAll('.btn-next, .btn-back').forEach(btn => {
+      btn.disabled = busy;
+      if (busy) {
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+      } else {
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+      }
+    });
+  }
+
   /* ─── Public API ─────────────────────────────────── */
   function goToStepPublic(n) {
     goToStep(n, n < state.step);
@@ -1850,6 +1866,7 @@
     selectService,
     submit,
     checkStatus,
+    goToStep,
     goToStepPublic,
     toggleModel,
     removeModel,
