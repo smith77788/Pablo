@@ -138,7 +138,7 @@
   // ── Show skeleton, load models ───────────────────────────────────────────────
   if (skeleton) skeleton.style.display = '';
   if (grid) grid.style.display = 'none';
-  countEl.textContent = 'Загрузка...';
+  if (countEl) countEl.textContent = 'Загрузка...';
 
   try {
     const res = await fetch('/api/models');
@@ -147,8 +147,8 @@
   } catch (e) {
     if (skeleton) skeleton.style.display = 'none';
     if (grid) grid.style.display = '';
-    grid.innerHTML = '<p class="no-results">Ошибка загрузки. Попробуйте обновить страницу.</p>';
-    countEl.textContent = '';
+    if (grid) grid.innerHTML = '<p class="no-results">Ошибка загрузки. Попробуйте обновить страницу.</p>';
+    if (countEl) countEl.textContent = '';
     return;
   }
 

@@ -3707,6 +3707,8 @@ router.get('/settings/public', publicSettingsLimiter, async (req, res) => {
       'about',
       'about_text',
       'greeting',
+      'hero_subtitle',
+      'pricing_text',
       'agency_name',
       'tagline',
       'catalog_per_page',
@@ -5972,6 +5974,36 @@ router.post('/admin/db/vacuum', auth, async (req, res, next) => {
     await run('PRAGMA wal_checkpoint(TRUNCATE)');
     await run('VACUUM');
     res.json({ ok: true, message: 'VACUUM completed successfully' });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/admin/db-backup — create a manual database backup
+router.post('/admin/db-backup', auth, async (req, res, next) => {
+  try {
+    const fsLocal = require('fs');
+    const pathLocal = require('path');
+    const backupDir = process.env.BACKUP_DIR || pathLocal.join(__dirname, '../backups');
+    const dbPath = process.env.DB_PATH || pathLocal.join(__dirname, '../database.sqlite');
+
+    if (!fsLocal.existsSync(backupDir)) {
+      fsLocal.mkdirSync(backupDir, { recursive: true });
+    }
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `backup-manual-${ts}.db`;
+    const destPath = pathLocal.join(backupDir, filename);
+
+    if (!fsLocal.existsSync(dbPath)) {
+      return res.status(404).json({ error: 'Database file not found' });
+    }
+
+    fsLocal.copyFileSync(dbPath, destPath);
+    const stat = fsLocal.statSync(destPath);
+    const sizeMb = (stat.size / (1024 * 1024)).toFixed(2);
+
+    res.json({ success: true, filename, size_mb: sizeMb });
   } catch (e) {
     next(e);
   }
@@ -8496,12 +8528,63 @@ router.get('/admin/system', auth, async (req, res, next) => {
       scheduled_jobs = scheduledBcastRow?.n || 0;
     } catch (_) {}
 
+    // Schema versions history (БЛОК 6.3)
+    let schema_versions = [];
+    let db_schema_version = null;
+    try {
+      schema_versions = await query(
+        'SELECT version, applied_at, description FROM schema_versions ORDER BY version DESC LIMIT 20'
+      ).catch(() => []);
+      if (schema_versions.length > 0) db_schema_version = schema_versions[0].version;
+    } catch (_) {}
+
+    // Row counts for key tables
+    let table_counts = {};
+    try {
+      const [ordersRow, modelsRow, clientsRow, adminsRow, reviewsRow] = await Promise.all([
+        get('SELECT COUNT(*) as n FROM orders').catch(() => null),
+        get('SELECT COUNT(*) as n FROM models').catch(() => null),
+        get(
+          "SELECT COUNT(DISTINCT client_phone) as n FROM orders WHERE client_phone IS NOT NULL AND client_phone != ''"
+        ).catch(() => null),
+        get('SELECT COUNT(*) as n FROM admins').catch(() => null),
+        get('SELECT COUNT(*) as n FROM reviews').catch(() => null),
+      ]);
+      table_counts = {
+        orders: ordersRow?.n ?? 0,
+        models: modelsRow?.n ?? 0,
+        clients: clientsRow?.n ?? 0,
+        admins: adminsRow?.n ?? 0,
+        reviews: reviewsRow?.n ?? 0,
+      };
+    } catch (_) {}
+
+    // All tables with row counts
+    let db_tables = [];
+    try {
+      const tables = await query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      ).catch(() => []);
+      if (tables.length) {
+        const unionSql = tables
+          .map(
+            t => `SELECT '${t.name.replace(/'/g, "''")}' as tbl, COUNT(*) as cnt FROM "${t.name.replace(/"/g, '""')}"`
+          )
+          .join(' UNION ALL ');
+        const countRows = await query(unionSql).catch(() => []);
+        const countMap = Object.fromEntries(countRows.map(r => [r.tbl, r.cnt]));
+        db_tables = tables.map(t => ({ name: t.name, rows: countMap[t.name] ?? 0 }));
+      }
+    } catch (_) {}
+
     res.json({
       node_version: process.version,
       uptime_seconds: Math.floor(process.uptime()),
+      uptime_hours: Math.round((process.uptime() / 3600) * 100) / 100,
       memory_mb,
       cpu_usage: cpuPercent,
       db_size_mb,
+      db_schema_version,
       uploads_count,
       active_sessions,
       scheduled_jobs,
@@ -8512,6 +8595,9 @@ router.get('/admin/system', auth, async (req, res, next) => {
       load_avg: os.loadavg().map(v => Math.round(v * 100) / 100),
       os_free_mem_mb: Math.round(os.freemem() / 1024 / 1024),
       os_total_mem_mb: Math.round(os.totalmem() / 1024 / 1024),
+      schema_versions,
+      table_counts,
+      db_tables,
     });
   } catch (e) {
     next(e);

@@ -13760,7 +13760,12 @@ async function bkQuickPhone(chatId, data) {
     `${STRINGS.quickBookingTitle}\n\n✅ Имя: *${esc(data.quick_name)}*\n\n${STRINGS.quickBookingStep2}`,
     {
       parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: STRINGS.btnCancel, callback_data: 'main_menu' }]] },
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '← Назад', callback_data: 'bk_quick' }],
+          [{ text: STRINGS.btnCancel, callback_data: 'main_menu' }],
+        ],
+      },
     }
   );
 }

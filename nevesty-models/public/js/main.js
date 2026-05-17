@@ -563,7 +563,7 @@ if (reviewsContainer) {
   const emailEl = document.getElementById('contacts-email');
   if (!phoneEl && !emailEl) return;
 
-  apiFetch('/settings')
+  apiFetch('/settings/public')
     .then(s => {
       if (s.contacts_phone && phoneEl) {
         const clean = s.contacts_phone.replace(/[^+\d]/g, '');
@@ -580,7 +580,7 @@ if (reviewsContainer) {
 
 /* ─── Dynamic settings: about-text, hero-title/subtitle ── */
 (function loadDynamicSettings() {
-  apiFetch('/settings')
+  apiFetch('/settings/public')
     .then(s => {
       const aboutEl = document.getElementById('about-text');
       if (aboutEl && s.about) {
