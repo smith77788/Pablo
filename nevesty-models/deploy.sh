@@ -32,6 +32,66 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# --------------------------------------------------------------------------
+# PRE-DEPLOY CHECKS
+# --------------------------------------------------------------------------
+echo "── Pre-deploy checks ──────────────────────────────────────────────────"
+
+# 1. Node.js version >= 18
+if ! command -v node &>/dev/null; then
+  echo "❌  node is not installed. Install Node.js >= 18." >&2
+  exit 1
+fi
+NODE_MAJOR="$(node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))')"
+if [ "$NODE_MAJOR" -lt 18 ]; then
+  echo "❌  Node.js version must be >= 18 (found: $(node --version))." >&2
+  exit 1
+fi
+echo "   ✔ Node.js $(node --version) (>= 18 required)"
+
+# 2. npm ci dry-run (only for bare-metal mode; Docker builds inside container)
+if [ "${DEPLOY_MODE:-pm2}" != "docker" ]; then
+  echo "   Verifying npm dependencies..."
+  if ! npm ci --dry-run --omit=dev > /dev/null 2>&1; then
+    echo "❌  'npm ci' pre-check failed. Verify package-lock.json is up to date." >&2
+    exit 1
+  fi
+  echo "   ✔ npm ci dry-run passed"
+fi
+
+# 3. Required environment variables
+if [ -f ".env" ]; then
+  ENV_FILE=".env"
+elif [ -f ".env.example" ]; then
+  # Allow check even without .env (will warn, not abort)
+  ENV_FILE=""
+else
+  ENV_FILE=""
+fi
+
+MISSING_VARS=()
+for VAR in BOT_TOKEN JWT_SECRET ANTHROPIC_API_KEY; do
+  # Check shell env first, then .env file
+  VAL="${!VAR:-}"
+  if [ -z "$VAL" ] && [ -n "$ENV_FILE" ]; then
+    VAL="$(grep -E "^${VAR}=" "$ENV_FILE" | head -1 | cut -d'=' -f2- | tr -d '[:space:]')" || true
+  fi
+  if [ -z "$VAL" ] || [[ "$VAL" == *"your_"* ]] || [[ "$VAL" == *"your-"* ]]; then
+    MISSING_VARS+=("$VAR")
+  fi
+done
+
+if [ "${#MISSING_VARS[@]}" -gt 0 ]; then
+  echo "❌  Required environment variable(s) not set or still placeholder:" >&2
+  for V in "${MISSING_VARS[@]}"; do echo "      - $V" >&2; done
+  echo "   Edit .env and fill in real values, then re-run deploy." >&2
+  exit 1
+fi
+echo "   ✔ Required env vars present (BOT_TOKEN, JWT_SECRET, ANTHROPIC_API_KEY)"
+
+echo "── Pre-deploy checks passed ────────────────────────────────────────────"
+echo ""
+
 echo "============================================="
 echo "  Nevesty Models — Production Deploy"
 echo "  Mode: ${DEPLOY_MODE}"
