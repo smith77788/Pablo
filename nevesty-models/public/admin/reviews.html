@@ -878,7 +878,7 @@
         await Promise.all([loadStats(), loadReviews()]);
         // Auto-refresh every 30s when on pending tab
         setInterval(() => {
-          if (currentFilter === '0') {
+          if (currentFilter === 'pending' || currentFilter === '0') {
             loadReviews();
             loadStats();
           }
