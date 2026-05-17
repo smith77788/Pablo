@@ -30,9 +30,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="dns-prefetch" href="https://api.telegram.org" />
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet" />
     <link rel="preload" href="/css/main.css" as="style" />
     <link rel="stylesheet" href="/css/main.css" />
     <style>
+      /* ── Page layout ── */
       .page-500 {
         min-height: 100vh;
         display: flex;
@@ -40,115 +42,217 @@
         align-items: center;
         justify-content: center;
         text-align: center;
-        padding: 40px 24px;
+        padding: 80px 24px 60px;
         position: relative;
         overflow: hidden;
       }
 
+      /* Reddish glow background — server error feel */
       .page-500::before {
         content: '';
         position: absolute;
         inset: 0;
-        background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(201, 169, 110, 0.06) 0%, transparent 70%);
+        background:
+          radial-gradient(ellipse 55% 45% at 50% 40%, rgba(180, 80, 70, 0.07) 0%, transparent 65%),
+          radial-gradient(ellipse 40% 30% at 50% 80%, rgba(201, 169, 110, 0.04) 0%, transparent 60%);
         pointer-events: none;
       }
 
+      /* ── Huge 500 number — warm red/gold tint ── */
       .err-code {
-        font-size: clamp(7rem, 22vw, 16rem);
+        font-family: 'Playfair Display', Georgia, serif;
+        font-size: clamp(8rem, 26vw, 18rem);
         font-weight: 900;
-        line-height: 1;
-        background: linear-gradient(135deg, #c9a96e 0%, #e8d5a3 40%, #c9a96e 65%, #9a7840 100%);
+        line-height: 0.9;
+        background: linear-gradient(135deg, #7a3a32 0%, #c9614e 20%, #d4826a 40%, #c9a96e 65%, #9a5040 100%);
+        background-size: 200% 200%;
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
         user-select: none;
-        letter-spacing: -0.03em;
-        margin-bottom: -16px;
-        animation: pulse500 3s ease-in-out infinite;
+        letter-spacing: -0.04em;
+        margin-bottom: 8px;
+        animation:
+          shimmer500 4.5s ease-in-out infinite,
+          glow500 3s ease-in-out infinite;
+        position: relative;
+        z-index: 1;
       }
 
-      @keyframes pulse500 {
+      @keyframes shimmer500 {
         0%,
         100% {
-          opacity: 1;
-          filter: drop-shadow(0 0 24px rgba(201, 169, 110, 0.28));
+          background-position: 0% 50%;
         }
         50% {
-          opacity: 0.82;
-          filter: drop-shadow(0 0 48px rgba(201, 169, 110, 0.52));
+          background-position: 100% 50%;
         }
       }
 
-      .err-divider {
-        width: 60px;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      @keyframes glow500 {
+        0%,
+        100% {
+          filter: drop-shadow(0 0 20px rgba(201, 97, 78, 0.2));
+        }
+        50% {
+          filter: drop-shadow(0 0 55px rgba(201, 97, 78, 0.45));
+        }
+      }
+
+      /* ── Spinning gear icon ── */
+      .err-icon {
         margin: 0 auto 28px;
+        width: 72px;
+        height: 72px;
+        position: relative;
+        z-index: 1;
       }
 
+      .gear-outer {
+        animation: spin 6s linear infinite;
+        transform-origin: 36px 36px;
+        transform-box: fill-box;
+      }
+      .gear-inner {
+        animation: spinReverse 4s linear infinite;
+        transform-origin: 50px 50px;
+        transform-box: fill-box;
+      }
+
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes spinReverse {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(-360deg);
+        }
+      }
+
+      /* ── Divider ── */
+      .err-divider {
+        width: 80px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(201, 97, 78, 0.6), transparent);
+        margin: 0 auto 20px;
+      }
+
+      /* ── Label ── */
       .err-label {
-        font-size: 0.7rem;
-        letter-spacing: 4px;
+        font-size: 0.65rem;
+        letter-spacing: 5px;
         text-transform: uppercase;
-        color: var(--gold);
-        margin-bottom: 16px;
+        color: #c9614e;
+        margin-bottom: 14px;
+        font-family: 'Playfair Display', serif;
       }
 
+      /* ── Title ── */
       .err-title {
-        font-size: clamp(1.6rem, 4vw, 2.4rem);
+        font-family: 'Playfair Display', Georgia, serif;
+        font-size: clamp(1.6rem, 4vw, 2.6rem);
         font-weight: 700;
         color: var(--text);
-        margin-bottom: 16px;
+        margin-bottom: 14px;
+        line-height: 1.2;
       }
 
+      /* ── Description ── */
       .err-desc {
         color: var(--text-muted);
         font-size: 0.95rem;
-        max-width: 440px;
-        line-height: 1.7;
-        margin-bottom: 40px;
+        max-width: 460px;
+        line-height: 1.8;
+        margin-bottom: 36px;
       }
 
+      /* ── Countdown badge ── */
+      .err-countdown {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        border: 1px solid rgba(201, 97, 78, 0.3);
+        border-radius: 20px;
+        font-size: 0.82rem;
+        color: #c9614e;
+        margin-bottom: 28px;
+        background: rgba(201, 97, 78, 0.05);
+      }
+      .err-countdown-num {
+        font-family: 'Playfair Display', serif;
+        font-weight: 700;
+        font-size: 1rem;
+        min-width: 22px;
+      }
+      /* Progress bar under countdown */
+      .err-progress-wrap {
+        width: 240px;
+        height: 2px;
+        background: rgba(201, 97, 78, 0.12);
+        border-radius: 2px;
+        overflow: hidden;
+        margin: 0 auto 32px;
+      }
+      .err-progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #c9614e, #c9a96e);
+        border-radius: 2px;
+        width: 100%;
+        transition: width 1s linear;
+      }
+
+      /* ── Action buttons ── */
       .err-actions {
         display: flex;
         gap: 14px;
         flex-wrap: wrap;
         justify-content: center;
-        margin-bottom: 32px;
+        margin-bottom: 24px;
       }
 
+      /* ── Back link ── */
       .err-back {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        padding: 11px 24px;
+        padding: 10px 22px;
         background: transparent;
-        border: 1px solid rgba(201, 169, 110, 0.35);
-        border-radius: 8px;
+        border: 1px solid rgba(201, 169, 110, 0.3);
+        border-radius: 6px;
         color: var(--gold);
-        font-size: 0.875rem;
+        font-size: 0.82rem;
         font-family: inherit;
         cursor: pointer;
         text-decoration: none;
+        letter-spacing: 0.02em;
         transition:
           background 0.2s,
           border-color 0.2s;
       }
       .err-back:hover {
-        background: rgba(201, 169, 110, 0.1);
+        background: rgba(201, 169, 110, 0.08);
         border-color: var(--gold);
       }
       .err-back svg {
-        width: 15px;
-        height: 15px;
+        width: 14px;
+        height: 14px;
         flex-shrink: 0;
       }
 
+      /* ── Corner ornaments ── */
       .err-corner {
         position: absolute;
         width: 80px;
         height: 80px;
-        border-color: rgba(201, 169, 110, 0.12);
+        border-color: rgba(201, 97, 78, 0.1);
         border-style: solid;
       }
       .err-corner-tl {
@@ -180,6 +284,20 @@
           gap: 10px;
         }
       }
+
+      /* ── Reduced motion ── */
+      @media (prefers-reduced-motion: reduce) {
+        .err-code {
+          animation: none;
+        }
+        .gear-outer,
+        .gear-inner {
+          animation: none;
+        }
+        .err-progress-bar {
+          transition: none;
+        }
+      }
     </style>
   </head>
   <body>
@@ -203,20 +321,112 @@
       <div class="err-corner err-corner-bl" aria-hidden="true"></div>
       <div class="err-corner err-corner-br" aria-hidden="true"></div>
 
+      <!-- Big 500 -->
       <div class="err-code" aria-label="Ошибка 500">500</div>
+
+      <!-- Spinning gear icon -->
+      <div class="err-icon" aria-hidden="true">
+        <svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Main gear (outer) -->
+          <g class="gear-outer">
+            <path
+              d="M36 20a16 16 0 1 1 0 32 16 16 0 0 1 0-32zm0 6a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"
+              fill="#c9614e"
+              opacity="0.9"
+            />
+            <!-- Teeth -->
+            <rect x="33" y="12" width="6" height="8" rx="2" fill="#c9614e" opacity="0.7" />
+            <rect x="33" y="52" width="6" height="8" rx="2" fill="#c9614e" opacity="0.7" />
+            <rect x="12" y="33" width="8" height="6" rx="2" fill="#c9614e" opacity="0.7" />
+            <rect x="52" y="33" width="8" height="6" rx="2" fill="#c9614e" opacity="0.7" />
+            <rect
+              x="18.6"
+              y="17.1"
+              width="6"
+              height="8"
+              rx="2"
+              fill="#c9614e"
+              opacity="0.55"
+              transform="rotate(45 21.6 21.1)"
+            />
+            <rect
+              x="47.4"
+              y="46.9"
+              width="6"
+              height="8"
+              rx="2"
+              fill="#c9614e"
+              opacity="0.55"
+              transform="rotate(45 50.4 50.9)"
+            />
+            <rect
+              x="18.6"
+              y="46.9"
+              width="6"
+              height="8"
+              rx="2"
+              fill="#c9614e"
+              opacity="0.55"
+              transform="rotate(-45 21.6 50.9)"
+            />
+            <rect
+              x="47.4"
+              y="17.1"
+              width="6"
+              height="8"
+              rx="2"
+              fill="#c9614e"
+              opacity="0.55"
+              transform="rotate(-45 50.4 21.1)"
+            />
+          </g>
+          <!-- Inner dot -->
+          <circle cx="36" cy="36" r="4" fill="#c9a96e" opacity="0.6" />
+        </svg>
+      </div>
+
       <div class="err-divider" aria-hidden="true"></div>
-      <div class="err-label" aria-hidden="true">Ошибка сервера</div>
-      <h1 class="err-title">Что-то пошло не так</h1>
+      <div class="err-label" aria-hidden="true">Ошибка сервера · 500</div>
+      <h1 class="err-title">Технические работы</h1>
       <p class="err-desc">
-        Произошла внутренняя ошибка сервера. Мы уже работаем над её устранением. Попробуйте обновить страницу или
-        вернитесь позже.
+        Произошла внутренняя ошибка сервера. Мы уже работаем над её устранением.<br />
+        Страница обновится автоматически.
       </p>
+
+      <!-- Countdown -->
+      <div class="err-countdown" role="timer" aria-live="polite" aria-label="Обновление через">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+        Обновление через&nbsp;<span class="err-countdown-num" id="countdownNum">30</span>&nbsp;сек
+      </div>
+      <div class="err-progress-wrap" aria-hidden="true">
+        <div class="err-progress-bar" id="progressBar"></div>
+      </div>
+
       <nav class="err-actions" aria-label="Полезные ссылки">
-        <a href="/catalog.html" class="btn-outline" style="padding: 13px 28px; font-size: 0.85rem">Каталог моделей</a>
-        <a href="/booking.html" class="btn-outline" style="padding: 13px 28px; font-size: 0.85rem">Бронирование</a>
-        <a href="/" class="btn-primary" style="padding: 13px 28px; font-size: 0.85rem">На главную</a>
+        <button
+          class="btn-primary"
+          onclick="window.location.reload()"
+          style="padding: 13px 32px; font-size: 0.85rem; cursor: pointer; border: none; font-family: inherit"
+          aria-label="Обновить страницу"
+        >
+          Обновить страницу
+        </button>
+        <a href="/" class="btn-outline" style="padding: 13px 28px; font-size: 0.85rem">На главную</a>
       </nav>
-      <button class="err-back" onclick="window.location.reload()" aria-label="Обновить страницу">
+
+      <a href="/contact.html" class="err-back">
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -226,11 +436,42 @@
           stroke-linejoin="round"
           aria-hidden="true"
         >
-          <polyline points="23 4 23 10 17 10" />
-          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
-        Обновить страницу
-      </button>
+        Связаться с нами
+      </a>
     </main>
+
+    <script>
+      (function () {
+        var TOTAL = 30;
+        var remaining = TOTAL;
+        var numEl = document.getElementById('countdownNum');
+        var bar = document.getElementById('progressBar');
+        var prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        if (prefersReduced) {
+          // Skip countdown animation — just reload after delay silently
+          setTimeout(function () {
+            window.location.reload();
+          }, TOTAL * 1000);
+          return;
+        }
+
+        // Initial bar width
+        bar.style.width = '100%';
+
+        var tick = setInterval(function () {
+          remaining -= 1;
+          numEl.textContent = remaining;
+          bar.style.width = (remaining / TOTAL) * 100 + '%';
+
+          if (remaining <= 0) {
+            clearInterval(tick);
+            window.location.reload();
+          }
+        }, 1000);
+      })();
+    </script>
   </body>
 </html>
