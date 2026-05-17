@@ -1535,7 +1535,10 @@ router.put('/admin/models/:id/json', auth, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const existing = await get('SELECT id FROM models WHERE id=?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Модель не найдена' });
     const { name, age, height, bio, instagram, phone, category, city, featured, available } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
     await run(
       `UPDATE models SET name=?,age=?,height=?,bio=?,instagram=?,phone=?,category=?,city=?,featured=?,available=? WHERE id=?`,
       [

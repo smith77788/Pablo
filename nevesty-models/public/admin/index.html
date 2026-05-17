@@ -834,7 +834,6 @@
         font-size: 0.85rem;
       }
 
-
       /* ─── Server health corner badge ────────────────────── */
       .server-health-badge {
         display: inline-flex;
@@ -1226,7 +1225,8 @@
           <div class="pending-reviews-alert" id="pendingReviewsAlert">
             <span class="pending-reviews-alert-icon">⭐</span>
             <div class="pending-reviews-alert-text">
-              Ожидают проверки: <strong><span id="pendingReviewsAlertCount">0</span> отзывов</strong> — они не видны клиентам до одобрения
+              Ожидают проверки: <strong><span id="pendingReviewsAlertCount">0</span> отзывов</strong> — они не видны
+              клиентам до одобрения
             </div>
             <a href="/admin/reviews.html?approved=0" class="pending-reviews-alert-btn">
               Одобрить отзывы (<span id="pendingReviewsAlertCount2">0</span>) →
@@ -1294,7 +1294,13 @@
             </a>
             <div class="kpi-card" title="Топ модель текущего месяца">
               <div class="kpi-card-label">🏆 Топ модель месяца</div>
-              <div class="kpi-card-value" id="k_top_model_name" style="font-size: 1.1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">—</div>
+              <div
+                class="kpi-card-value"
+                id="k_top_model_name"
+                style="font-size: 1.1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis"
+              >
+                —
+              </div>
               <div class="kpi-card-sub" id="k_top_model_orders"></div>
               <div class="kpi-card-icon">🏆</div>
             </div>
@@ -2205,7 +2211,10 @@
               alertEl.classList.add('visible');
               if (alertCnt) alertCnt.textContent = cnt;
               if (alertCnt2) alertCnt2.textContent = cnt;
-              if (qaReviewsCount) { qaReviewsCount.textContent = cnt; qaReviewsCount.classList.add('visible'); }
+              if (qaReviewsCount) {
+                qaReviewsCount.textContent = cnt;
+                qaReviewsCount.classList.add('visible');
+              }
             } else {
               alertEl.classList.remove('visible');
               if (qaReviewsCount) qaReviewsCount.classList.remove('visible');
@@ -2238,34 +2247,60 @@
           }
 
           const today = new Date().toISOString().slice(0, 10);
-          const MONTHS_SHORT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+          const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
           const EVENT_LABELS = _admin.EVENT_LABELS || {};
 
-          el.innerHTML = events.map(ev => {
-            const evDateStr = ev.event_date ? ev.event_date.slice(0, 10) : '';
-            const evDate = new Date(evDateStr + 'T00:00:00');
-            const isToday = evDateStr === today;
-            const dayNum = evDate.getDate();
-            const monStr = MONTHS_SHORT[evDate.getMonth()] || '';
-            const nowMs = new Date().setHours(0, 0, 0, 0);
-            const evMs = evDate.getTime();
-            const diffDays = Math.round((evMs - nowMs) / 86400000);
-            const daysLabel = isToday ? 'Сегодня!' : diffDays === 1 ? 'Завтра' : ('Через ' + diffDays + ' дн.');
-            const daysClass = isToday ? 'upcoming-event-days today-label' : diffDays <= 2 ? 'upcoming-event-days soon' : 'upcoming-event-days';
-            const evTypeName = EVENT_LABELS[ev.event_type] || ev.event_type || '';
-            return '<a href="/admin/orders.html?id=' + ev.id + '" class="upcoming-event-item">' +
-              '<div class="upcoming-date-badge' + (isToday ? ' today' : '') + '">' +
-                '<div class="upcoming-date-day">' + dayNum + '</div>' +
-                '<div class="upcoming-date-mon">' + monStr + '</div>' +
-              '</div>' +
-              '<div class="upcoming-event-info">' +
-                '<div class="upcoming-event-num">' + _admin.escapeHtml(ev.order_number || '') + '</div>' +
-                '<div class="upcoming-event-client">' + _admin.escapeHtml(ev.client_name || '—') + '</div>' +
-                '<div class="upcoming-event-type">' + _admin.escapeHtml(evTypeName) + '</div>' +
-              '</div>' +
-              '<div class="' + daysClass + '">' + daysLabel + '</div>' +
-            '</a>';
-          }).join('');
+          el.innerHTML = events
+            .map(ev => {
+              const evDateStr = ev.event_date ? ev.event_date.slice(0, 10) : '';
+              const evDate = new Date(evDateStr + 'T00:00:00');
+              const isToday = evDateStr === today;
+              const dayNum = evDate.getDate();
+              const monStr = MONTHS_SHORT[evDate.getMonth()] || '';
+              const nowMs = new Date().setHours(0, 0, 0, 0);
+              const evMs = evDate.getTime();
+              const diffDays = Math.round((evMs - nowMs) / 86400000);
+              const daysLabel = isToday ? 'Сегодня!' : diffDays === 1 ? 'Завтра' : 'Через ' + diffDays + ' дн.';
+              const daysClass = isToday
+                ? 'upcoming-event-days today-label'
+                : diffDays <= 2
+                  ? 'upcoming-event-days soon'
+                  : 'upcoming-event-days';
+              const evTypeName = EVENT_LABELS[ev.event_type] || ev.event_type || '';
+              return (
+                '<a href="/admin/orders.html?id=' +
+                ev.id +
+                '" class="upcoming-event-item">' +
+                '<div class="upcoming-date-badge' +
+                (isToday ? ' today' : '') +
+                '">' +
+                '<div class="upcoming-date-day">' +
+                dayNum +
+                '</div>' +
+                '<div class="upcoming-date-mon">' +
+                monStr +
+                '</div>' +
+                '</div>' +
+                '<div class="upcoming-event-info">' +
+                '<div class="upcoming-event-num">' +
+                _admin.escapeHtml(ev.order_number || '') +
+                '</div>' +
+                '<div class="upcoming-event-client">' +
+                _admin.escapeHtml(ev.client_name || '—') +
+                '</div>' +
+                '<div class="upcoming-event-type">' +
+                _admin.escapeHtml(evTypeName) +
+                '</div>' +
+                '</div>' +
+                '<div class="' +
+                daysClass +
+                '">' +
+                daysLabel +
+                '</div>' +
+                '</a>'
+              );
+            })
+            .join('');
         } catch {
           if (el) el.innerHTML = '<div class="upcoming-empty">Нет данных</div>';
         }
