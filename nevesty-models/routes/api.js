@@ -810,6 +810,37 @@ router.get('/admin/stats/extended2', auth, async (req, res, next) => {
   }
 });
 
+// ─── Daily stats endpoint (БЛОК 15) ──────────────────────────────────────────
+// GET /api/admin/stats/daily?days=7  → { days: [{day, label, count}], total }
+router.get('/admin/stats/daily', auth, async (req, res, next) => {
+  try {
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days) || 7));
+    const rows = await query(
+      `SELECT date(created_at) as day, COUNT(*) as count
+       FROM orders
+       WHERE created_at >= date('now', ? || ' days')
+       GROUP BY date(created_at)
+       ORDER BY day ASC`,
+      [`-${days - 1}`]
+    );
+    const countMap = {};
+    rows.forEach(r => {
+      countMap[r.day] = r.count;
+    });
+    const result = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+      result.push({ day: key, label, count: countMap[key] || 0 });
+    }
+    res.json({ days: result, total: rows.reduce((s, r) => s + r.count, 0) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── Orders chart — daily counts for N days ───────────────────────────────────
 router.get('/admin/orders-chart', auth, async (req, res, next) => {
   try {

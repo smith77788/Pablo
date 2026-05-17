@@ -914,6 +914,35 @@ async function initDatabase() {
       `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(34, 'error_logs table for server crash/rejection monitoring (БЛОК 6.4)')`
     ).catch(() => {});
   }
+  // Schema v35 — model_photos table for portfolio photo management (БЛОК 16)
+  const v35 = await get(`SELECT version FROM schema_versions WHERE version=35`).catch(() => null);
+  if (!v35) {
+    await run(`CREATE TABLE IF NOT EXISTS model_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      model_id INTEGER NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      url TEXT NOT NULL,
+      is_cover INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      uploaded_at TEXT DEFAULT (datetime('now'))
+    )`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_model_photos_model_id ON model_photos(model_id)`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_model_photos_cover ON model_photos(model_id, is_cover)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(35, 'model_photos table for portfolio photo management (БЛОК 16)')`
+    ).catch(() => {});
+  }
+  // Idempotent — ensure model_photos exists even on DBs that skipped v35
+  await run(`CREATE TABLE IF NOT EXISTS model_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id INTEGER NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    url TEXT NOT NULL,
+    is_cover INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,
+    uploaded_at TEXT DEFAULT (datetime('now'))
+  )`).catch(() => {});
+
   // Idempotent — create error_logs if it somehow doesn't exist yet
   await run(`CREATE TABLE IF NOT EXISTS error_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

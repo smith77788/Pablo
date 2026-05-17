@@ -466,11 +466,11 @@ app.use(
         // HTML: always revalidate
         res.setHeader('Cache-Control', 'no-cache');
       } else if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
-        // JS/CSS: 7 day cache (files are versioned or change infrequently)
-        res.setHeader('Cache-Control', 'public, max-age=604800');
+        // JS/CSS: 7 day cache with stale-while-revalidate for background refresh
+        res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
       } else if (/\.(png|jpe?g|gif|svg|webp|ico|avif)$/i.test(filePath)) {
-        // Images: 1 week cache
-        res.setHeader('Cache-Control', 'public, max-age=604800');
+        // Images: 1 week cache with stale-while-revalidate
+        res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
       }
     },
   })

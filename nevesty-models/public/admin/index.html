@@ -1183,6 +1183,73 @@
             <a href="/admin/settings.html" class="btn btn-sm btn-ghost" style="font-size: 0.72rem">Настройки бота →</a>
           </div>
 
+          <!-- ══════════════════ SYSTEM STATUS BAR (БЛОК 15) ══════════════════ -->
+          <div class="sys-status-bar" id="sysStatusBar">
+            <span class="sys-status-item" id="sys-db">
+              <span class="sys-dot" id="sys-db-dot"></span>
+              <span id="sys-db-text">БД: ...</span>
+            </span>
+            <span class="sys-status-sep">|</span>
+            <span class="sys-status-item" id="sys-bot">
+              <span class="sys-dot" id="sys-bot-dot"></span>
+              <span id="sys-bot-text">Бот: ...</span>
+            </span>
+            <span class="sys-status-sep">|</span>
+            <span class="sys-status-item">
+              <span id="sys-backup-text" style="color: var(--text-muted)">Бэкап: ...</span>
+            </span>
+            <span class="sys-status-sep">|</span>
+            <span class="sys-status-item">
+              <span id="sys-memory-text" style="color: var(--text-muted)">Память: ...</span>
+            </span>
+            <span class="sys-status-spacer"></span>
+            <span id="sys-last-update" style="font-size: 0.65rem; color: var(--text-dim)"></span>
+          </div>
+
+          <!-- ══════════════════ KPI GRID WITH SPARKLINES (БЛОК 15) ══════════════════ -->
+          <div class="kpi-grid" id="kpiGrid15">
+            <!-- Заявок сегодня -->
+            <div class="kpi-grid-card" id="kgc-orders">
+              <div class="kgc-header">
+                <div class="kgc-icon">📋</div>
+                <div class="kgc-trend" id="kgc-orders-trend"></div>
+              </div>
+              <div class="kgc-value" id="kgc-orders-val">—</div>
+              <div class="kgc-label">Заявок сегодня</div>
+              <div class="kgc-sparkline" id="kgc-orders-spark"></div>
+            </div>
+            <!-- Выручка (30 дн) -->
+            <div class="kpi-grid-card" id="kgc-revenue">
+              <div class="kgc-header">
+                <div class="kgc-icon">💰</div>
+                <div class="kgc-trend" id="kgc-revenue-trend"></div>
+              </div>
+              <div class="kgc-value gold" id="kgc-revenue-val">—</div>
+              <div class="kgc-label">Выручка (30 дней)</div>
+              <div class="kgc-sparkline" id="kgc-revenue-spark"></div>
+            </div>
+            <!-- Новых клиентов -->
+            <div class="kpi-grid-card" id="kgc-clients">
+              <div class="kgc-header">
+                <div class="kgc-icon">👤</div>
+                <div class="kgc-trend" id="kgc-clients-trend"></div>
+              </div>
+              <div class="kgc-value" id="kgc-clients-val">—</div>
+              <div class="kgc-label">Новых клиентов (30 дн)</div>
+              <div class="kgc-sparkline" id="kgc-clients-spark"></div>
+            </div>
+            <!-- Конверсия -->
+            <div class="kpi-grid-card" id="kgc-conv">
+              <div class="kgc-header">
+                <div class="kgc-icon">📈</div>
+                <div class="kgc-trend" id="kgc-conv-trend"></div>
+              </div>
+              <div class="kgc-value" id="kgc-conv-val">—</div>
+              <div class="kgc-label">Конверсия</div>
+              <div class="kgc-sparkline" id="kgc-conv-spark"></div>
+            </div>
+          </div>
+
           <!-- ══════════════════ QUICK ACTIONS ══════════════════ -->
           <div class="quick-actions" style="grid-template-columns: repeat(4, 1fr)">
             <a href="/admin/orders.html?status=new" class="qa-btn qa-btn-new">
