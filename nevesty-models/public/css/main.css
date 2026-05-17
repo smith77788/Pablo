@@ -3071,6 +3071,27 @@ html.dark .skeleton {
   }
 }
 
+/* ─── 1b. TYPING CURSOR ──────────────────────────────────────────── */
+.typing-cursor {
+  display: inline-block;
+  color: var(--gold, #c9a96e);
+  font-weight: 300;
+  margin-left: 1px;
+  opacity: 1;
+}
+.typing-cursor.blinking {
+  animation: cursorBlink 1.1s step-end infinite;
+}
+@keyframes cursorBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
 /* ─── 2. GLASSMORPHISM CARDS ──────────────────────────────────────── */
 .card-glass {
   background: rgba(255, 255, 255, 0.04);
