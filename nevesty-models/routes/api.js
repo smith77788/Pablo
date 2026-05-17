@@ -9601,6 +9601,11 @@ router.get('/admin/events', (req, res) => {
     return res.status(401).json({ error: 'Invalid token' });
   }
 
+  // Guard against connection flooding — reject when too many SSE clients are open
+  if (global.sseClients.size >= 100) {
+    return res.status(503).json({ error: 'Too many connections' });
+  }
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');

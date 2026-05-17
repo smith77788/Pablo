@@ -915,7 +915,7 @@
         const photoHtml = model?.photo_main
           ? `<img src="${esc(model.photo_main)}" alt="${esc(model.name || name)}" loading="lazy" decoding="async" />`
           : avatarSrc
-            ? `<img src="${esc(avatarSrc)}" alt="${esc(model?.name || name)}" loading="lazy" decoding="async" onerror="this.outerHTML=\`${initials}\`" />`
+            ? `<img src="${esc(avatarSrc)}" alt="${esc(model?.name || name)}" loading="lazy" decoding="async" onerror="this.style.display='none'" />`
             : initials;
         const statusCls = model?.available ? 'free' : 'busy';
         const statusTxt = model?.available ? 'Свободна' : 'Занята';
