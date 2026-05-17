@@ -99,6 +99,7 @@ function isActiveInputState(state) {
   if (state === 'template_name' || state === 'template_text') return true;
   if (['adm_promo_name', 'adm_promo_type', 'adm_promo_value', 'adm_promo_maxuses', 'adm_promo_until'].includes(state))
     return true;
+  if (['adm_faq_add_q', 'adm_faq_add_a', 'adm_faq_add_kw'].includes(state)) return true;
   if (
     [
       'adm_broadcast_msg',
@@ -8274,6 +8275,67 @@ function initBot(app) {
         await setSetting('faq_enabled', '0');
         return showAdminSettings(chatId, 'bot');
       }
+
+      // ── FAQ Management (БЛОК 34) ───────────────────────────────────────────
+      if (data === 'adm_faq') {
+        if (!isAdmin(chatId)) return;
+        return showAdminFaq(chatId);
+      }
+      if (data === 'adm_faq_list') {
+        if (!isAdmin(chatId)) return;
+        return showAdminFaqList(chatId);
+      }
+      if (data === 'adm_faq_stats') {
+        if (!isAdmin(chatId)) return;
+        return showAdminFaqStats(chatId);
+      }
+      if (data === 'adm_faq_create') {
+        if (!isAdmin(chatId)) return;
+        await setSession(chatId, 'adm_faq_add_q', {});
+        return safeSend(chatId, `➕ *Новый FAQ — шаг 1/4*\n\nВведите *вопрос*:`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_faq' }]] },
+        });
+      }
+      if (data.startsWith('adm_faq_toggle_')) {
+        if (!isAdmin(chatId)) return;
+        const fid = parseInt(data.replace('adm_faq_toggle_', ''));
+        const frow = await get('SELECT active FROM faq WHERE id=?', [fid]).catch(() => null);
+        if (!frow) return;
+        await run('UPDATE faq SET active=? WHERE id=?', [frow.active ? 0 : 1, fid]).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: frow.active ? '🔕 Скрыт' : '✅ Показан' }).catch(() => {});
+        return showAdminFaqList(chatId);
+      }
+      if (data.startsWith('adm_faq_del_')) {
+        if (!isAdmin(chatId)) return;
+        const fid = parseInt(data.replace('adm_faq_del_', ''));
+        await run('DELETE FROM faq WHERE id=?', [fid]).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: '🗑 Удалено' }).catch(() => {});
+        return showAdminFaqList(chatId);
+      }
+      // FAQ create wizard: choose category
+      if (data.startsWith('adm_faq_cat_pick_')) {
+        if (!isAdmin(chatId)) return;
+        const pickedCat = data.replace('adm_faq_cat_pick_', '');
+        const sd = sessionData(await getSession(chatId));
+        const nd = { ...sd, category: pickedCat };
+        // Save to DB
+        await run(
+          'INSERT INTO faq (question, answer, keywords, category, active, sort_order, use_count) VALUES (?, ?, ?, ?, 1, 0, 0)',
+          [nd.question, nd.answer, nd.keywords || '[]', nd.category]
+        ).catch(() => {});
+        await clearSession(chatId);
+        const catLabel = FAQ_CATEGORY_LABELS[pickedCat] || pickedCat;
+        return safeSend(chatId, `✅ *FAQ добавлен\\!*\n\n*${esc(nd.question)}*\n_${esc(catLabel)}_`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📋 Все вопросы', callback_data: 'adm_faq_list' }],
+              [{ text: '← FAQ', callback_data: 'adm_faq' }],
+            ],
+          },
+        });
+      }
       if (data === 'adm_loyalty_on') {
         if (!isAdmin(chatId)) return;
         await setSetting('loyalty_enabled', '1');
@@ -10919,6 +10981,18 @@ function initBot(app) {
         });
       }
 
+      // ── FAQ (БЛОК 34): category navigation
+      if (data.startsWith('faq_cat_')) {
+        const category = data.replace('faq_cat_', '');
+        return showFaqCategory(chatId, category);
+      }
+
+      // ── FAQ (БЛОК 34): item by ID (new category-aware handler)
+      if (data.startsWith('faq_item_')) {
+        const faqItemId = parseInt(data.replace('faq_item_', ''));
+        if (!isNaN(faqItemId)) return showFaqItem(chatId, faqItemId);
+      }
+
       // ── FAQ: "Was this helpful?" feedback callbacks
       if (data.startsWith('faq_helpful_')) {
         return safeSend(chatId, '👍 Спасибо за отзыв\\! Рады помочь\\.', { parse_mode: 'MarkdownV2' });
@@ -10935,24 +11009,11 @@ function initBot(app) {
         });
       }
 
-      // ── FAQ: отдельный вопрос
+      // ── FAQ: отдельный вопрос (legacy flat-list handler — kept for back-compat)
       if (data.startsWith('faq_')) {
         const faqId = parseInt(data.replace('faq_', ''));
-        const faq = await get('SELECT * FROM faq WHERE id=? AND active=1', [faqId]).catch(() => null);
-        if (!faq) return;
-        return safeSend(chatId, `*${esc(faq.question)}*\n\n${esc(faq.answer)}`, {
-          parse_mode: 'MarkdownV2',
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '👍 Полезно', callback_data: `faq_helpful_${faqId}` },
-                { text: '👎 Не помогло', callback_data: `faq_nothelpful_${faqId}` },
-              ],
-              [{ text: '← Все вопросы', callback_data: 'faq' }],
-              [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
-            ],
-          },
-        });
+        if (isNaN(faqId)) return;
+        return showFaqItem(chatId, faqId);
       }
 
       // ── Отмена незавершённой заявки (из напоминания)
@@ -11152,6 +11213,29 @@ function initBot(app) {
         if (text === '👤 Профиль') return showUserProfile(chatId, msg.from.first_name);
         if (text === '📞 Контакты') return showContacts(chatId);
         if (text === '📋 Тех. задание') return startTechSpec(chatId);
+
+        // ── FAQ auto-answer by keywords (БЛОК 34) ───────────────────────────
+        if (state === 'idle') {
+          const faqEnabled34 = await getSetting('faq_enabled').catch(() => '1');
+          if (faqEnabled34 !== '0') {
+            const faqMatch = await checkFaqMatch(text);
+            if (faqMatch) {
+              return safeSend(chatId, `❓ *${esc(faqMatch.question)}*\n\n${esc(faqMatch.answer)}`, {
+                parse_mode: 'MarkdownV2',
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      { text: '👍 Полезно', callback_data: `faq_helpful_${faqMatch.id}` },
+                      { text: '👎 Не помогло', callback_data: `faq_nothelpful_${faqMatch.id}` },
+                    ],
+                    [{ text: '❓ Все вопросы', callback_data: 'faq' }],
+                    [{ text: '💬 Менеджер', callback_data: 'msg_manager_start' }],
+                  ],
+                },
+              });
+            }
+          }
+        }
       }
     }
 
@@ -12779,16 +12863,192 @@ async function notifyPaymentSuccess(clientChatId, orderNumber) {
   );
 }
 
-// ─── FAQ ──────────────────────────────────────────────────────────────────────
+// ─── FAQ (БЛОК 34) ────────────────────────────────────────────────────────────
 
+const FAQ_CATEGORY_LABELS = {
+  pricing: '💰 Цены',
+  shooting: '📸 Съёмки',
+  process: '📋 Заявки',
+  delivery: '🚚 Доставка',
+  general: '❓ Общее',
+};
+
+/** Auto-match FAQ by keywords. Returns answer string or null. */
+async function checkFaqMatch(text) {
+  try {
+    const faqs = await query('SELECT * FROM faq WHERE active=1 ORDER BY sort_order ASC, id ASC');
+    for (const faq of faqs) {
+      let keywords = [];
+      try {
+        keywords = JSON.parse(faq.keywords || '[]');
+      } catch {
+        keywords = [];
+      }
+      if (keywords.some(kw => text.toLowerCase().includes(kw.toLowerCase()))) {
+        await run('UPDATE faq SET use_count=COALESCE(use_count,0)+1 WHERE id=?', [faq.id]).catch(() => {});
+        return { answer: faq.answer, question: faq.question, id: faq.id };
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** Show FAQ categories */
 async function showFaq(chatId) {
-  const faqItems = await query('SELECT * FROM faq WHERE active=1 ORDER BY sort_order ASC, id ASC').catch(() => []);
-  const keyboard = faqItems.map(faq => [{ text: `❓ ${faq.question}`, callback_data: `faq_${faq.id}` }]);
-  keyboard.push([{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]);
+  const cats = await query(
+    'SELECT category, COUNT(*) as cnt FROM faq WHERE active=1 GROUP BY category ORDER BY category ASC'
+  ).catch(() => []);
 
-  return safeSend(chatId, '❓ *Часто задаваемые вопросы*\n\nВыберите вопрос:', {
+  if (!cats.length) {
+    return safeSend(chatId, '❓ *Часто задаваемые вопросы*\n\n_Вопросы ещё не добавлены_\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
+    });
+  }
+
+  // Show category buttons in rows of 2
+  const catRows = [];
+  for (let i = 0; i < cats.length; i += 2) {
+    const row = [];
+    for (let j = i; j < Math.min(i + 2, cats.length); j++) {
+      const c = cats[j];
+      const label = FAQ_CATEGORY_LABELS[c.category] || `❓ ${c.category}`;
+      row.push({ text: `${label} (${c.cnt})`, callback_data: `faq_cat_${c.category}` });
+    }
+    catRows.push(row);
+  }
+  catRows.push([{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]);
+
+  return safeSend(chatId, '❓ *Часто задаваемые вопросы*\n\nВыберите категорию:', {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: catRows },
+  });
+}
+
+/** Show FAQ items in category */
+async function showFaqCategory(chatId, category) {
+  const items = await query('SELECT * FROM faq WHERE active=1 AND category=? ORDER BY sort_order ASC, id ASC', [
+    category,
+  ]).catch(() => []);
+
+  const catLabel = FAQ_CATEGORY_LABELS[category] || category;
+  if (!items.length) {
+    return safeSend(chatId, `${catLabel}\n\n_В этой категории пока нет вопросов\\.`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← Категории', callback_data: 'faq' }]] },
+    });
+  }
+
+  const keyboard = items.map(f => [{ text: `❓ ${f.question}`, callback_data: `faq_item_${f.id}` }]);
+  keyboard.push([{ text: '← Категории', callback_data: 'faq' }]);
+
+  return safeSend(chatId, `${catLabel}\n\nВыберите вопрос:`, {
     parse_mode: 'MarkdownV2',
     reply_markup: { inline_keyboard: keyboard },
+  });
+}
+
+/** Show single FAQ item answer */
+async function showFaqItem(chatId, faqId) {
+  const faq = await get('SELECT * FROM faq WHERE id=? AND active=1', [faqId]).catch(() => null);
+  if (!faq) return;
+  await run('UPDATE faq SET use_count=COALESCE(use_count,0)+1 WHERE id=?', [faqId]).catch(() => {});
+  const catLabel = FAQ_CATEGORY_LABELS[faq.category] || faq.category;
+  return safeSend(chatId, `*${esc(faq.question)}*\n\n${esc(faq.answer)}`, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '👍 Полезно', callback_data: `faq_helpful_${faqId}` },
+          { text: '👎 Не помогло', callback_data: `faq_nothelpful_${faqId}` },
+        ],
+        [{ text: `← ${catLabel}`, callback_data: `faq_cat_${faq.category}` }],
+        [{ text: '📋 Оформить заявку', callback_data: 'bk_start' }],
+      ],
+    },
+  });
+}
+
+/** Admin FAQ management panel */
+async function showAdminFaq(chatId) {
+  if (!isAdmin(chatId)) return;
+  const [total, activeRow, topUsed] = await Promise.all([
+    get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 })),
+    get('SELECT COUNT(*) as n FROM faq WHERE active=1').catch(() => ({ n: 0 })),
+    query('SELECT question, use_count FROM faq WHERE active=1 ORDER BY use_count DESC LIMIT 3').catch(() => []),
+  ]);
+  const topText = topUsed.length
+    ? topUsed.map((f, i) => `${i + 1}\\. ${esc(f.question)} \\(${f.use_count}×\\)`).join('\n')
+    : '_нет данных_';
+  return safeSend(
+    chatId,
+    `❓ *Управление FAQ*\n\n` +
+      `Всего вопросов: *${total.n}* \\(активных: *${activeRow.n}*\\)\n\n` +
+      `📊 *Топ\\-3 по использованию:*\n${topText}`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ Добавить вопрос', callback_data: 'adm_faq_create' }],
+          [{ text: '📋 Все вопросы', callback_data: 'adm_faq_list' }],
+          [{ text: '📊 Статистика использования', callback_data: 'adm_faq_stats' }],
+          [{ text: '← Настройки', callback_data: 'adm_settings' }],
+        ],
+      },
+    }
+  );
+}
+
+/** Admin FAQ: list all items */
+async function showAdminFaqList(chatId) {
+  if (!isAdmin(chatId)) return;
+  const items = await query('SELECT * FROM faq ORDER BY category ASC, sort_order ASC, id ASC').catch(() => []);
+  if (!items.length) {
+    return safeSend(chatId, '📋 *Список FAQ пуст*', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← FAQ', callback_data: 'adm_faq' }]] },
+    });
+  }
+  let txt = '📋 *Все вопросы FAQ:*\n\n';
+  for (const f of items) {
+    const catLabel = FAQ_CATEGORY_LABELS[f.category] || f.category;
+    const status = f.active ? '✅' : '🔕';
+    txt += `${status} \\[${esc(catLabel)}\\] *${esc(f.question)}*\n`;
+    txt += `  _${esc(f.answer.slice(0, 60))}${f.answer.length > 60 ? '…' : ''}_\n`;
+    txt += `  Использован: ${f.use_count || 0}×\n\n`;
+  }
+  const keyboard = items.map(f => [
+    { text: `${f.active ? '✅' : '🔕'} ${f.question.slice(0, 40)}`, callback_data: `adm_faq_toggle_${f.id}` },
+    { text: '🗑', callback_data: `adm_faq_del_${f.id}` },
+  ]);
+  keyboard.push([{ text: '← FAQ', callback_data: 'adm_faq' }]);
+  return safeSend(chatId, txt, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard },
+  });
+}
+
+/** Admin FAQ: usage statistics */
+async function showAdminFaqStats(chatId) {
+  if (!isAdmin(chatId)) return;
+  const items = await query('SELECT question, category, use_count FROM faq ORDER BY use_count DESC').catch(() => []);
+  if (!items.length) {
+    return safeSend(chatId, '📊 *Статистика FAQ пуста*', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← FAQ', callback_data: 'adm_faq' }]] },
+    });
+  }
+  let txt = '📊 *Статистика использования FAQ:*\n\n';
+  for (const f of items) {
+    const bar =
+      '▓'.repeat(Math.min(f.use_count || 0, 10)) + '░'.repeat(Math.max(0, 10 - Math.min(f.use_count || 0, 10)));
+    txt += `${bar} ${f.use_count || 0}× — _${esc(f.question.slice(0, 45))}${f.question.length > 45 ? '…' : ''}_\n`;
+  }
+  return safeSend(chatId, txt, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [[{ text: '← FAQ', callback_data: 'adm_faq' }]] },
   });
 }
 

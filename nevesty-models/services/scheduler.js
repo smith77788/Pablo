@@ -560,6 +560,31 @@ async function sendCompletedShootingCongrats() {
   }
 }
 
+// ─── БЛОК 35: Uptime logging — record health check every 5 minutes ────────────
+async function recordUptimeLog() {
+  try {
+    const { run: dbRun, get: dbGet } = require('../database');
+    const start = Date.now();
+    let status = 'ok';
+    let latencyMs = null;
+    try {
+      await dbGet('SELECT 1 as ok');
+      latencyMs = Date.now() - start;
+      if (latencyMs > 2000) status = 'degraded';
+    } catch (_) {
+      status = 'down';
+    }
+    await dbRun(`INSERT INTO uptime_logs (checked_at, status, latency_ms) VALUES (datetime('now'), ?, ?)`, [
+      status,
+      latencyMs,
+    ]).catch(() => {});
+    // Prune logs older than 91 days to keep the table lean
+    await dbRun(`DELETE FROM uptime_logs WHERE checked_at < datetime('now', '-91 days')`).catch(() => {});
+  } catch (e) {
+    console.error('[scheduler] recordUptimeLog error:', e.message);
+  }
+}
+
 // ─── БЛОК 6.4: Pending orders queue alert ─────────────────────────────────────
 // Alert if > 10 'new' orders have been waiting > 1 hour without attention
 async function checkPendingOrdersQueue() {
@@ -668,8 +693,11 @@ function start() {
   scheduleEvery(sendCompletedShootingCongrats, 'Post-shoot congratulation', 1);
   // БЛОК 6.4 — Pending orders queue alert (every hour)
   scheduleEvery(checkPendingOrdersQueue, 'Pending orders queue alert (every 1h)', 1);
+  // БЛОК 35 — Uptime logging: record health status every 5 minutes
+  recordUptimeLog(); // first log on startup
+  scheduleEveryMinutes(recordUptimeLog, 'Uptime log (every 5min)', 5);
   console.log(
-    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), WAL size monitor (every 1h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h), scheduled broadcasts processor (every 1min), memory monitor (every 1h), 24h shooting reminder (every 1h), stale pending reminder (every 1h), post-shoot congrats (every 1h), pending queue alert (every 1h)'
+    '[scheduler] Started: backup (every 6h), VACUUM (Sunday 03:00 + 03:30), WAL checkpoint (PASSIVE every 6h, TRUNCATE Sunday 04:00), WAL size monitor (every 1h), event reminders (daily 09:00), factory staleness check (every 6h + 30min), bot watchdog (every 5min), disk space check (every 6h), scheduled broadcasts processor (every 1min), memory monitor (every 1h), 24h shooting reminder (every 1h), stale pending reminder (every 1h), post-shoot congrats (every 1h), pending queue alert (every 1h), uptime log (every 5min)'
   );
 }
 

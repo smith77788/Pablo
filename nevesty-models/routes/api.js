@@ -10176,5 +10176,157 @@ router.get('/admin/support/messages', auth, async (req, res, next) => {
   }
 });
 
+// ─── БЛОК 35: Public status API ──────────────────────────────────────────────
+
+/**
+ * GET /api/status — public, no JWT required.
+ * Returns a simplified status payload suitable for the public /status.html page.
+ */
+router.get('/status', async (req, res, next) => {
+  try {
+    const pkg = require('../package.json');
+    const uptime = Math.floor(process.uptime());
+
+    // Quick DB ping
+    let dbStatus = 'ok';
+    let dbLatencyMs = null;
+    try {
+      const start = Date.now();
+      await get('SELECT 1 as ok');
+      dbLatencyMs = Date.now() - start;
+      if (dbLatencyMs > 2000) dbStatus = 'degraded';
+    } catch (_) {
+      dbStatus = 'error';
+    }
+
+    // Active orders count (non-sensitive aggregate)
+    let activeOrders = null;
+    try {
+      const row = await get("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','confirmed','in_progress')");
+      activeOrders = row?.n ?? 0;
+    } catch (_) {}
+
+    // Bot status — check if configured without exposing token
+    let botStatus = 'disabled';
+    if (botInstance) {
+      botStatus = 'ok';
+    } else if (
+      process.env.TELEGRAM_BOT_TOKEN &&
+      process.env.TELEGRAM_BOT_TOKEN !== 'your_bot_token_from_botfather' &&
+      process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here'
+    ) {
+      botStatus = 'configured';
+    }
+
+    // Backup status — quick filesystem check
+    let backupStatus = 'no_backups_yet';
+    try {
+      const _fs = require('fs');
+      const _path = require('path');
+      const backupDir = process.env.BACKUP_DIR || _path.join(__dirname, '../backups');
+      if (_fs.existsSync(backupDir)) {
+        const files = _fs.readdirSync(backupDir).filter(f => f.startsWith('nevesty_') && f.endsWith('.db'));
+        if (files.length > 0) backupStatus = 'ok';
+      }
+    } catch (_) {}
+
+    const overall = dbStatus === 'ok' ? 'ok' : dbStatus === 'degraded' ? 'degraded' : 'down';
+
+    res.json({
+      status: overall,
+      services: {
+        web: 'ok',
+        bot: botStatus,
+        db: dbStatus,
+        backup: backupStatus,
+      },
+      uptime_seconds: uptime,
+      db_latency_ms: dbLatencyMs,
+      active_orders: activeOrders,
+      version: pkg.version || '1.0.0',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/status/history?days=90 — public, no JWT required.
+ * Returns per-day uptime summary for the last N days (default 90, max 90).
+ * Used by /status.html to render the 90-block uptime history grid.
+ */
+router.get('/status/history', async (req, res, next) => {
+  try {
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days) || 90));
+
+    // Aggregate uptime_logs per calendar day
+    const rows = await query(
+      `SELECT
+         date(checked_at) as day,
+         COUNT(*) as total,
+         SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) as ok_count,
+         SUM(CASE WHEN status = 'degraded' THEN 1 ELSE 0 END) as degraded_count,
+         SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) as down_count,
+         ROUND(AVG(latency_ms)) as avg_latency_ms
+       FROM uptime_logs
+       WHERE checked_at >= datetime('now', ? || ' days')
+       GROUP BY date(checked_at)
+       ORDER BY day ASC`,
+      [`-${days}`]
+    ).catch(() => []);
+
+    // Build a map of existing data
+    const byDay = {};
+    for (const row of rows) {
+      let dayStatus = 'ok';
+      if (row.down_count > 0 && row.down_count >= row.total * 0.5) {
+        dayStatus = 'down';
+      } else if (row.degraded_count > 0 || row.down_count > 0) {
+        dayStatus = 'degraded';
+      }
+      const uptimePct = row.total > 0 ? Math.round((row.ok_count / row.total) * 100 * 100) / 100 : null;
+      byDay[row.day] = {
+        date: row.day,
+        status: dayStatus,
+        uptime_pct: uptimePct,
+        avg_latency_ms: row.avg_latency_ms,
+        checks: row.total,
+      };
+    }
+
+    // Fill in all days in the range (missing = no_data)
+    const result = [];
+    const now = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      result.push(
+        byDay[dateStr] || {
+          date: dateStr,
+          status: 'no_data',
+          uptime_pct: null,
+          avg_latency_ms: null,
+          checks: 0,
+        }
+      );
+    }
+
+    // Overall uptime % across the period
+    const withData = result.filter(d => d.status !== 'no_data');
+    const okDays = withData.filter(d => d.status === 'ok').length;
+    const overallPct = withData.length > 0 ? Math.round((okDays / withData.length) * 10000) / 100 : null;
+
+    res.json({
+      days: result,
+      period_days: days,
+      overall_uptime_pct: overallPct,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
 module.exports.setBot = setBot;
