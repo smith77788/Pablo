@@ -789,6 +789,64 @@
         transform: translateY(-2px);
       }
 
+      /* ─── DESKTOP STICKY CTA — bottom-right ──────────── */
+      .sticky-desktop-cta {
+        display: none; /* hidden by default; JS shows after scroll */
+        position: fixed;
+        bottom: 32px;
+        right: 32px;
+        z-index: 600;
+        padding: 14px 26px;
+        background: var(--gold);
+        color: var(--bg, #080808);
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        text-decoration: none;
+        border-radius: 4px;
+        box-shadow: 0 4px 24px rgba(201, 169, 110, 0.35);
+        opacity: 0;
+        transform: translateY(12px);
+        transition:
+          opacity 0.35s ease,
+          transform 0.35s ease,
+          background 0.2s,
+          box-shadow 0.2s;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      .sticky-desktop-cta.visible {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: all;
+      }
+      .sticky-desktop-cta:hover {
+        background: var(--gold-light, #e8d5b0);
+        box-shadow: 0 8px 32px rgba(201, 169, 110, 0.45);
+      }
+      /* Only show on desktop (>=900px) */
+      @media (max-width: 899px) {
+        .sticky-desktop-cta {
+          display: none !important;
+        }
+      }
+      @media (min-width: 900px) {
+        .sticky-desktop-cta {
+          display: block;
+        }
+      }
+      /* Reduced motion */
+      @media (prefers-reduced-motion: reduce) {
+        .sticky-desktop-cta {
+          transition: opacity 0.2s ease;
+          transform: none;
+        }
+        .sticky-desktop-cta.visible {
+          transform: none;
+        }
+      }
+
       /* ─── ENHANCED LIGHTBOX ───────────────────────────── */
       #lightbox {
         opacity: 0;
@@ -1253,6 +1311,17 @@
     <div class="sticky-book-mobile" id="stickyBookMobile" aria-hidden="true">
       <a class="btn-book-mobile" id="stickyBookBtn" href="/booking.html"> 📋 Забронировать </a>
     </div>
+
+    <!-- Sticky desktop CTA — bottom-right button, visible only on desktop after hero scroll -->
+    <a
+      id="stickyDesktopCta"
+      href="/booking.html"
+      class="sticky-desktop-cta"
+      aria-label="Оставить заявку"
+      aria-hidden="true"
+    >
+      📋 Оставить заявку
+    </a>
 
     <!-- Lightbox overlay for gallery -->
     <div
@@ -2051,19 +2120,33 @@
         // ── Sticky mobile CTA — show after scrolling past hero ────────────────────
         (function () {
           const sticky = el('stickyBookMobile');
-          if (!sticky) return;
+          const desktopCta = document.getElementById('stickyDesktopCta');
           let heroBottom = 300;
           function calcHeroBottom() {
             const hero = el('modelHero');
             if (hero) heroBottom = hero.getBoundingClientRect().bottom + window.scrollY;
           }
           function onScroll() {
-            if (window.scrollY > heroBottom - 80) {
-              sticky.classList.add('visible');
-              sticky.setAttribute('aria-hidden', 'false');
-            } else {
-              sticky.classList.remove('visible');
-              sticky.setAttribute('aria-hidden', 'true');
+            const pastHero = window.scrollY > heroBottom - 80;
+            // Mobile sticky bar
+            if (sticky) {
+              if (pastHero) {
+                sticky.classList.add('visible');
+                sticky.setAttribute('aria-hidden', 'false');
+              } else {
+                sticky.classList.remove('visible');
+                sticky.setAttribute('aria-hidden', 'true');
+              }
+            }
+            // Desktop bottom-right CTA
+            if (desktopCta) {
+              if (pastHero) {
+                desktopCta.classList.add('visible');
+                desktopCta.setAttribute('aria-hidden', 'false');
+              } else {
+                desktopCta.classList.remove('visible');
+                desktopCta.setAttribute('aria-hidden', 'true');
+              }
             }
           }
           window.addEventListener('scroll', onScroll, { passive: true });
@@ -2071,6 +2154,10 @@
           window._recalcStickyHero = function () {
             calcHeroBottom();
             onScroll();
+            // Sync desktop CTA href with booking URL
+            if (desktopCta && window._currentModel) {
+              desktopCta.href = `/booking.html?model=${window._currentModel.id}&model_id=${window._currentModel.id}&model_name=${encodeURIComponent(window._currentModel.name || '')}`;
+            }
           };
         })();
 
@@ -2261,9 +2348,9 @@
             if (typeof showToastMsg === 'function') showToastMsg('Добавлено в избранное ❤️');
             else if (typeof toast === 'function') toast('Добавлено в избранное ❤️');
             if (btn) {
-              btn.innerHTML = '<span aria-hidden="true">💔</span> В избранном';
-              btn.style.color = '#e07070';
-              btn.style.borderColor = '#e07070';
+              btn.innerHTML = '<span aria-hidden="true">💛</span> В избранном';
+              btn.style.color = 'var(--gold)';
+              btn.style.borderColor = 'var(--gold)';
             }
           } else {
             favs.splice(idx, 1);

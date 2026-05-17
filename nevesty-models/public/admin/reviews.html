@@ -534,13 +534,13 @@
             return;
           }
 
-          // Show select-all row only when there are reviews
-          const pendingReviews = reviews.filter(r => r.approved !== 1);
+          // Show select-all row only for pending reviews (not rejected, not approved)
+          const pendingReviews = reviews.filter(r => r.approved !== 1 && (r.status === 'pending' || !r.status));
           const selectAllHtml =
             pendingReviews.length > 0
               ? `<div class="select-all-row">
                <input type="checkbox" id="selectAllCb" onchange="toggleSelectAll(this)">
-               <label for="selectAllCb">Выбрать все неодобренные (${pendingReviews.length})</label>
+               <label for="selectAllCb">Выбрать все на проверке (${pendingReviews.length})</label>
              </div>`
               : '';
 
@@ -609,10 +609,13 @@
         ${replyHtml}
         <div class="review-actions">
           ${
-            !approved
-              ? `<button class="btn btn-sm btn-primary" onclick="approveReview(${r.id})">✅ Одобрить</button>
-               <button class="btn btn-sm btn-ghost" onclick="rejectReview(${r.id})">❌ Отклонить</button>`
-              : `<button class="btn btn-sm btn-ghost" onclick="rejectReview(${r.id})">🚫 Снять публикацию</button>`
+            approved
+              ? `<button class="btn btn-sm btn-ghost" onclick="rejectReview(${r.id})">🚫 Снять публикацию</button>`
+              : isRejected
+                ? `<button class="btn btn-sm btn-primary" onclick="approveReview(${r.id})">✅ Одобрить</button>
+                   <button class="btn btn-sm btn-ghost" onclick="pendingReview(${r.id})">⏳ Вернуть на проверку</button>`
+                : `<button class="btn btn-sm btn-primary" onclick="approveReview(${r.id})">✅ Одобрить</button>
+                   <button class="btn btn-sm btn-ghost" onclick="rejectReview(${r.id})">❌ Отклонить</button>`
           }
           <button class="btn btn-sm btn-danger" onclick="deleteReview(${r.id}, '${_admin.escapeHtml(r.client_name || 'Аноним').replace(/'/g, '')}')">
             🗑 Удалить

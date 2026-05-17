@@ -1281,7 +1281,7 @@
                 '</div>' +
                 '<div class="model-card-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' +
                 (m.category
-                  ? '<span class="model-card-tag">' + (CATEGORY_LABELS[m.category] || m.category) + '</span>'
+                  ? '<span class="model-card-tag">' + escHtml(CATEGORY_LABELS[m.category] || m.category) + '</span>'
                   : '') +
                 '<span style="font-size:0.7rem;padding:2px 8px;border-radius:4px;' +
                 (m.available

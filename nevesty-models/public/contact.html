@@ -1240,6 +1240,14 @@
     <script src="/js/darkmode.js"></script>
     <script src="/js/analytics.js" defer></script>
     <script>
+      // XSS-safe HTML escape helper for contact.html inline script
+      function escHtmlContact(s) {
+        if (s == null) return '';
+        return String(s).replace(
+          /[&<>"']/g,
+          c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+        );
+      }
       // Load contact info from public settings API + bot config
       Promise.all([
         fetch('/api/settings/public')
@@ -1254,43 +1262,48 @@
           const items = [];
 
           if (d.contacts_phone) {
+            const safePhone = escHtmlContact(d.contacts_phone);
+            const safePhoneTel = d.contacts_phone.replace(/[^+\d]/g, '');
             items.push(`<div class="contact-info-item">
         <div class="contact-icon-box">📞</div>
         <div>
           <div class="contact-info-label">Телефон</div>
-          <div class="contact-info-value"><a href="tel:${d.contacts_phone.replace(/[^+\d]/g, '')}">${d.contacts_phone}</a></div>
+          <div class="contact-info-value"><a href="tel:${safePhoneTel}">${safePhone}</a></div>
         </div>
       </div>`);
           }
           if (d.contacts_email) {
+            const safeEmail = escHtmlContact(d.contacts_email);
             items.push(`<div class="contact-info-item">
         <div class="contact-icon-box">✉️</div>
         <div>
           <div class="contact-info-label">Email</div>
-          <div class="contact-info-value"><a href="mailto:${d.contacts_email}">${d.contacts_email}</a></div>
+          <div class="contact-info-value"><a href="mailto:${safeEmail}">${safeEmail}</a></div>
         </div>
       </div>`);
           }
           // Support both contacts_instagram and contacts_insta aliases
           const insta = d.contacts_instagram || d.contacts_insta;
           if (insta) {
-            const handle = insta.replace(/^@/, '');
+            const handle = insta.replace(/^@/, '').replace(/[^a-zA-Z0-9._]/g, '');
+            const safeHandle = escHtmlContact(handle);
             items.push(`<div class="contact-info-item">
         <div class="contact-icon-box">📸</div>
         <div>
           <div class="contact-info-label">Instagram</div>
-          <div class="contact-info-value"><a href="https://instagram.com/${handle}" target="_blank">@${handle}</a></div>
+          <div class="contact-info-value"><a href="https://instagram.com/${safeHandle}" target="_blank">@${safeHandle}</a></div>
         </div>
       </div>`);
           }
           // Support both contacts_address and contacts_addr aliases
           const addr = d.contacts_address || d.contacts_addr;
           if (addr) {
+            const safeAddr = escHtmlContact(addr);
             items.push(`<div class="contact-info-item">
         <div class="contact-icon-box">📍</div>
         <div>
           <div class="contact-info-label">Адрес</div>
-          <div class="contact-info-value">${addr}</div>
+          <div class="contact-info-value">${safeAddr}</div>
         </div>
       </div>`);
             document.getElementById('agency-address').textContent = addr;
