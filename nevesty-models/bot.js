@@ -2547,24 +2547,41 @@ async function showAdminSettings(chatId, section) {
       getSetting('catalog_show_featured_badge'),
       getSetting('catalog_title'),
     ]);
+    const curPerPage = parseInt(perPage) || 8;
+    const curSort = sort || 'featured';
+    const sortLabel = curSort === 'date' ? 'По дате' : curSort === 'name' ? 'По имени' : 'По рейтингу';
     const text =
       `📋 Каталог и модели\n\n` +
-      `📄 Моделей на странице: ${perPage || '5'}\n` +
-      `🔃 Сортировка: ${sort === 'date' ? 'По дате' : 'По рейтингу'}\n` +
+      `📄 Моделей на странице: ${curPerPage}\n` +
+      `🔃 Сортировка: ${sortLabel}\n` +
       `🏙 Показывать город: ${showCity === '0' ? '❌' : '✅'}\n` +
       `⭐ Бейдж «Топ»: ${showBadge === '0' ? '❌' : '✅'}\n` +
       `📌 Заголовок: ${catTitle || 'Наши модели'}`;
+    // Per-page quick-select buttons (mark current with •)
+    const ppMark = n => (curPerPage === n ? `• ${n}` : String(n));
     return safeSend(chatId, text, {
       reply_markup: {
         inline_keyboard: [
+          // Per-page quick-select
           [
-            { text: '📄 Кол-во на странице', callback_data: 'adm_set_catalog_per_page' },
-            { text: '📌 Заголовок', callback_data: 'adm_set_catalog_title' },
+            { text: ppMark(8), callback_data: 'adm_catalog_per_page_8' },
+            { text: ppMark(12), callback_data: 'adm_catalog_per_page_12' },
+            { text: ppMark(16), callback_data: 'adm_catalog_per_page_16' },
+            { text: ppMark(20), callback_data: 'adm_catalog_per_page_20' },
           ],
+          // Sort: 3 options
           [
             {
-              text: sort === 'date' ? '🔃 Сорт: По рейтингу' : '🔃 Сорт: По дате',
-              callback_data: sort === 'date' ? 'adm_catalog_sort_featured' : 'adm_catalog_sort_date',
+              text: curSort === 'featured' ? '✅ Рейтинг' : '🏆 Рейтинг',
+              callback_data: 'adm_catalog_sort_featured',
+            },
+            {
+              text: curSort === 'date' ? '✅ По дате' : '📅 По дате',
+              callback_data: 'adm_catalog_sort_date',
+            },
+            {
+              text: curSort === 'name' ? '✅ По имени' : '🔤 По имени',
+              callback_data: 'adm_catalog_sort_name',
             },
           ],
           [
@@ -2572,13 +2589,12 @@ async function showAdminSettings(chatId, section) {
               text: showCity === '0' ? '🏙 Показать город' : '🏙 Скрыть город',
               callback_data: showCity === '0' ? 'adm_catalog_city_on' : 'adm_catalog_city_off',
             },
-          ],
-          [
             {
               text: showBadge === '0' ? '⭐ Показать бейдж' : '⭐ Скрыть бейдж',
               callback_data: showBadge === '0' ? 'adm_catalog_badge_on' : 'adm_catalog_badge_off',
             },
           ],
+          [{ text: '📌 Заголовок', callback_data: 'adm_set_catalog_title' }],
           [{ text: STRINGS.btnBackToSettings, callback_data: 'adm_settings' }],
         ],
       },
@@ -7518,11 +7534,29 @@ function initBot(app) {
         await setSetting('catalog_sort', 'featured');
         return showAdminSettings(chatId, 'catalog');
       }
+      if (data === 'adm_catalog_sort_name') {
+        if (!isAdmin(chatId)) return;
+        await setSetting('catalog_sort', 'name');
+        return showAdminSettings(chatId, 'catalog');
+      }
       if (data === 'adm_catalog_sort_toggle') {
         if (!isAdmin(chatId)) return;
         const cur = (await getSetting('catalog_sort')) || 'featured';
-        const next = cur === 'alpha' || cur === 'name' ? 'featured' : cur === 'featured' ? 'date' : 'alpha';
+        const next = cur === 'alpha' || cur === 'name' ? 'featured' : cur === 'featured' ? 'date' : 'name';
         await setSetting('catalog_sort', next);
+        return showAdminSettings(chatId, 'catalog');
+      }
+      // Per-page quick-select callbacks
+      if (
+        data === 'adm_catalog_per_page_8' ||
+        data === 'adm_catalog_per_page_12' ||
+        data === 'adm_catalog_per_page_16' ||
+        data === 'adm_catalog_per_page_20'
+      ) {
+        if (!isAdmin(chatId)) return;
+        const ppVal = data.replace('adm_catalog_per_page_', '');
+        await setSetting('catalog_per_page', ppVal);
+        await bot.answerCallbackQuery(q.id, { text: `📄 ${ppVal} моделей на странице` }).catch(() => {});
         return showAdminSettings(chatId, 'catalog');
       }
       if (data === 'adm_catalog_city_on') {
