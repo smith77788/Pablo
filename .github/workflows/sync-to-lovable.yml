@@ -1,0 +1,81 @@
+name: Sync to Lovable (pablo-760fe3a5)
+
+on:
+  push:
+    branches:
+      - claude/modeling-agency-website-jp2Qd
+    paths:
+      - 'src/**'
+      - 'supabase/**'
+      - 'LOVABLE_PROMPT.md'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Pablo (source)
+        uses: actions/checkout@v4
+        with:
+          path: pablo-source
+          fetch-depth: 1
+
+      - name: Checkout pablo-760fe3a5 (Lovable target)
+        uses: actions/checkout@v4
+        with:
+          repository: smith77788/pablo-760fe3a5
+          token: ${{ secrets.LOVABLE_SYNC_TOKEN }}
+          path: lovable-target
+          fetch-depth: 1
+
+      - name: Sync files
+        run: |
+          cd lovable-target
+
+          # src/components — React компоненты
+          mkdir -p src/components
+          cp -r ../pablo-source/src/components/. src/components/
+
+          # src/hooks — React hooks
+          mkdir -p src/hooks
+          cp -r ../pablo-source/src/hooks/. src/hooks/
+
+          # src/types — TypeScript типы
+          mkdir -p src/types
+          cp ../pablo-source/src/types/index.ts src/types/index.ts
+
+          # src/lib — Supabase client
+          mkdir -p src/lib
+          cp ../pablo-source/src/lib/supabase.ts src/lib/supabase.ts
+
+          # supabase/migrations — только наша миграция
+          mkdir -p supabase/migrations
+          cp ../pablo-source/supabase/migrations/003_nevesty_missing_features.sql \
+             supabase/migrations/003_nevesty_missing_features.sql
+
+          # supabase/functions — Edge Functions
+          for fn in telegram-webhook send-sms send-email payment-webhook broadcast; do
+            mkdir -p supabase/functions/$fn
+            if [ -f "../pablo-source/supabase/functions/$fn/index.ts" ]; then
+              cp ../pablo-source/supabase/functions/$fn/index.ts \
+                 supabase/functions/$fn/index.ts
+            fi
+          done
+
+          # LOVABLE_PROMPT.md
+          cp ../pablo-source/LOVABLE_PROMPT.md LOVABLE_PROMPT.md
+
+      - name: Commit and push to Lovable repo
+        run: |
+          cd lovable-target
+          git config user.name "Claude Code Sync"
+          git config user.email "noreply@anthropic.com"
+          git add -A
+
+          if git diff --staged --quiet; then
+            echo "Nothing changed, skipping commit"
+          else
+            COMMIT_MSG="sync: from Pablo $(cd ../pablo-source && git log -1 --format='%h %s')"
+            git commit -m "$COMMIT_MSG"
+            git push origin main
+            echo "✅ Pushed to pablo-760fe3a5"
+          fi
