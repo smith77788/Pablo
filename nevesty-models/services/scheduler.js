@@ -370,6 +370,22 @@ async function checkDiskSpace() {
   } catch (e) {
     console.error('[scheduler] checkDiskSpace error:', e.message);
   }
+
+  // Check filesystem usage percentage via df
+  try {
+    const { execSync } = require('child_process');
+    const dfOut = execSync("df -k . | tail -1 | awk '{print $5}'", { timeout: 5000, encoding: 'utf8' }).trim();
+    const pct = parseInt(dfOut.replace('%', ''));
+    if (!isNaN(pct) && pct > 90) {
+      const msg = `🚨 Диск заполнен на ${pct}%! Срочно освободите место.`;
+      console.warn(`[scheduler] ${msg}`);
+      _notify(msg);
+    } else if (!isNaN(pct) && pct > 80) {
+      console.warn(`[scheduler] Disk usage: ${pct}% — approaching limit`);
+    }
+  } catch (e) {
+    console.error('[scheduler] checkDiskSpace df error:', e.message);
+  }
 }
 
 function runBackup() {

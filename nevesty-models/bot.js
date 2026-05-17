@@ -3957,9 +3957,23 @@ async function _getBroadcastClients(segment) {
         [city]
       ).catch(() => []);
     } else if (segment === 'new') {
-      rows = await query(
-        "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND client_chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE status IN ('confirmed','in_progress','completed') AND client_chat_id IS NOT NULL AND client_chat_id != '')"
-      ).catch(() => []);
+      // Clients with no orders at all (from client_prefs) + clients with only cancelled/new orders
+      const [noOrdersRows, pendingOnlyRows] = await Promise.all([
+        query(
+          "SELECT chat_id as client_chat_id FROM client_prefs WHERE chat_id IS NOT NULL AND chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '')"
+        ).catch(() => []),
+        query(
+          "SELECT DISTINCT client_chat_id FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND client_chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE status IN ('confirmed','in_progress','completed') AND client_chat_id IS NOT NULL AND client_chat_id != '')"
+        ).catch(() => []),
+      ]);
+      // Merge and deduplicate
+      const seen = new Set();
+      rows = [...noOrdersRows, ...pendingOnlyRows].filter(r => {
+        const id = String(r.client_chat_id);
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
     } else {
       // default: all
       rows = await query(
@@ -4235,6 +4249,13 @@ async function doSendBroadcast(chatId) {
   }
 
   await logAdminAction(chatId, 'broadcast', null, null, { sent, failed, skipped, segment, duration: durationSec });
+
+  // Log broadcast completion to agent_logs for monitoring/audit
+  run(`INSERT INTO agent_logs (from_name, message) VALUES (?, ?)`, [
+    'Broadcast',
+    `Завершено: sent=${sent}, errors=${failed}, skipped=${skipped}, segment=${segment}, duration=${durationSec}s`,
+  ]).catch(() => {});
+
   await clearSession(chatId);
   const total = recipients.length;
   const segLabel = _bcSegmentLabel(segment);
@@ -8722,12 +8743,27 @@ function initBot(app) {
         await bot.answerCallbackQuery(q.id, { text: frow.active ? '🔕 Скрыт' : '✅ Показан' }).catch(() => {});
         return showAdminFaqList(chatId);
       }
-      if (data.startsWith('adm_faq_del_')) {
+      if (data.startsWith('adm_faq_del_confirm_')) {
         if (!isAdmin(chatId)) return;
-        const fid = parseInt(data.replace('adm_faq_del_', ''));
+        const fid = parseInt(data.replace('adm_faq_del_confirm_', ''));
         await run('DELETE FROM faq WHERE id=?', [fid]).catch(() => {});
         await bot.answerCallbackQuery(q.id, { text: '🗑 Удалено' }).catch(() => {});
         return showAdminFaqList(chatId);
+      }
+      if (data.startsWith('adm_faq_del_')) {
+        if (!isAdmin(chatId)) return;
+        const fid = parseInt(data.replace('adm_faq_del_', ''));
+        const faqRow = await get('SELECT question FROM faq WHERE id=?', [fid]).catch(() => null);
+        const faqLabel = faqRow?.question ? esc(faqRow.question.slice(0, 60)) : esc(String(fid));
+        return safeSend(chatId, `🗑 *Удалить FAQ?*\n\n_${faqLabel}_\n\nЭто действие необратимо\\.`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '⚠️ Да, удалить', callback_data: `adm_faq_del_confirm_${fid}` }],
+              [{ text: '← Назад', callback_data: 'adm_faq' }],
+            ],
+          },
+        });
       }
       // FAQ create wizard: skip keywords
       if (data === 'adm_faq_kw_skip') {
