@@ -400,11 +400,124 @@ class FollowUpSpecialist extends Agent {
   }
 }
 
-// ─── Run all three agents when invoked directly ───────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// 4. PricingNegotiator
+// ═════════════════════════════════════════════════════════════════════════════
+class PricingNegotiator extends Agent {
+  constructor() {
+    super({
+      id: 'sal-04',
+      name: 'PricingNegotiator',
+      organ: 'Sales Department',
+      emoji: '💰',
+      focus: 'Detect price sensitivity from cancelled orders and suggest budget range corrections',
+    });
+  }
+
+  async analyze() {
+    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    // ── Budget ranges ─────────────────────────────────────────────────────────
+    const ranges = [
+      { label: '0–5 000 ₽', min: 0, max: 5000 },
+      { label: '5 000–15 000 ₽', min: 5000, max: 15000 },
+      { label: '15 000–30 000 ₽', min: 15000, max: 30000 },
+      { label: '30 000+ ₽', min: 30000, max: null },
+    ];
+
+    // ── Fetch cancelled & confirmed orders for the last 90 days ──────────────
+    let cancelled, confirmed;
+    try {
+      cancelled = await dbAll(
+        `SELECT budget_amount FROM orders
+         WHERE status = 'cancelled'
+           AND created_at >= ?
+           AND budget_amount IS NOT NULL`,
+        [cutoff]
+      );
+      confirmed = await dbAll(
+        `SELECT budget_amount FROM orders
+         WHERE status IN ('confirmed', 'completed')
+           AND created_at >= ?
+           AND budget_amount IS NOT NULL`,
+        [cutoff]
+      );
+    } catch (e) {
+      this.addFinding('HIGH', `PricingNegotiator: ошибка запроса к БД: ${e.message}`);
+      return;
+    }
+
+    if (!cancelled.length && !confirmed.length) {
+      this.addFinding('OK', 'Нет данных по заказам за последние 90 дней для анализа цен');
+      return;
+    }
+
+    // Helper — count rows in a given budget range
+    const countInRange = (rows, { min, max }) =>
+      rows.filter(r => {
+        const v = Number(r.budget_amount);
+        if (isNaN(v)) return false;
+        return v >= min && (max === null || v < max);
+      }).length;
+
+    let foundHigh = false;
+
+    for (const range of ranges) {
+      const nCancelled = countInRange(cancelled, range);
+      const nConfirmed = countInRange(confirmed, range);
+      const total = nCancelled + nConfirmed;
+
+      if (total === 0) continue;
+
+      const cancelRate = Math.round((nCancelled / total) * 100);
+
+      if (cancelRate > 40) {
+        foundHigh = true;
+        this.addFinding(
+          'HIGH',
+          `Диапазон ${range.label}: cancel rate ${cancelRate}% (${nCancelled}/${total}) — ` +
+            `высокая ценовая чувствительность. Рекомендуется пересмотреть ценовое предложение ` +
+            `или добавить гибкие пакеты в этом диапазоне.`
+        );
+      } else {
+        this.addFinding('OK', `Диапазон ${range.label}: cancel rate ${cancelRate}% (${nCancelled}/${total}) — в норме`);
+      }
+    }
+
+    // ── Check for orders with missing budget ──────────────────────────────────
+    let emptyBudget;
+    try {
+      const [row] = await dbAll(
+        `SELECT COUNT(*) AS cnt FROM orders
+         WHERE (budget_amount IS NULL OR budget_amount = 0)
+           AND created_at >= ?`,
+        [cutoff]
+      );
+      emptyBudget = row ? row.cnt : 0;
+    } catch (e) {
+      this.addFinding('MEDIUM', `PricingNegotiator: ошибка проверки пустых бюджетов: ${e.message}`);
+      emptyBudget = 0;
+    }
+
+    if (emptyBudget > 5) {
+      this.addFinding(
+        'MEDIUM',
+        `${emptyBudget} заявок за 90 дней без указания бюджета — ` +
+          `уточните бюджет на этапе приёма заявки, чтобы улучшить сегментацию.`
+      );
+    }
+
+    if (!foundHigh) {
+      this.addFinding('OK', 'Критичных зон ценовой чувствительности не обнаружено');
+    }
+  }
+}
+
+// ─── Run all four agents when invoked directly ────────────────────────────────
 async function runSalesDepartment() {
   console.log('💼 Sales Department — запуск...\n');
 
-  const agents = [new LeadQualifier(), new ProposalWriter(), new FollowUpSpecialist()];
+  const agents = [new LeadQualifier(), new ProposalWriter(), new FollowUpSpecialist(), new PricingNegotiator()];
 
   for (const agent of agents) {
     console.log(`\n${agent.emoji} ${agent.name}`);
@@ -423,4 +536,4 @@ async function runSalesDepartment() {
 
 if (require.main === module) runSalesDepartment().then(() => process.exit(0));
 
-module.exports = { LeadQualifier, ProposalWriter, FollowUpSpecialist };
+module.exports = { LeadQualifier, ProposalWriter, FollowUpSpecialist, PricingNegotiator };
