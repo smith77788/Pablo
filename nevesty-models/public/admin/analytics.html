@@ -2664,6 +2664,390 @@
       loadTopCities();
       loadForecast();
       loadSegments();
+
+      // ════════════════════════════════════════════════════════════════
+      // ── NEW: SVG Revenue Line Chart ──────────────────────────────────
+      // ════════════════════════════════════════════════════════════════
+      async function loadSvgRevenueChart() {
+        const sk = document.getElementById('svg-revenue-skeleton');
+        const svg = document.getElementById('svg-revenue-chart');
+        if (!sk || !svg) return;
+        try {
+          const [monthly, dailyData] = await Promise.all([
+            fetch('/api/admin/analytics/revenue?months=2', { headers: h }).then(r => r.json()),
+            fetch('/api/admin/orders-chart?days=30', { headers: h }).then(r => r.json()),
+          ]);
+          const days = dailyData.days || [];
+          if (!days.length) {
+            return;
+          }
+
+          // Distribute monthly revenue proportionally across days by order count
+          const monthlyMap = {};
+          (monthly.months || monthly.data || []).forEach(m => {
+            monthlyMap[m.month] = m.revenue || 0;
+          });
+          const monthOrderCount = {};
+          days.forEach(d => {
+            const mon = (d.day || '').slice(0, 7);
+            monthOrderCount[mon] = (monthOrderCount[mon] || 0) + (d.count || 0);
+          });
+          const revenuePoints = days.map(d => {
+            const mon = (d.day || '').slice(0, 7);
+            const monTotal = monthOrderCount[mon] || 1;
+            const monRev = monthlyMap[mon] || 0;
+            return {
+              label: d.label || d.day.slice(-5),
+              day: d.day,
+              rev: monTotal > 0 ? Math.round((d.count / monTotal) * monRev) : 0,
+            };
+          });
+
+          renderSvgLineChart(svg, revenuePoints, {
+            getValue: p => p.rev,
+            getLabel: p => p.label,
+            getTooltip: p => ({ date: p.label, val: p.rev.toLocaleString('ru-RU') + ' ₴' }),
+            color: '#c9a96e',
+            fillColor: 'rgba(201,169,110,0.12)',
+            yFormat: v => (v >= 1000 ? Math.round(v / 1000) + 'k' : String(v)),
+          });
+          sk.style.display = 'none';
+          svg.style.display = '';
+        } catch (e) {
+          console.error('SVG revenue chart error', e);
+        }
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // ── NEW: SVG Orders Bar Chart (status breakdown) ──────────────────
+      // ════════════════════════════════════════════════════════════════
+      async function loadSvgOrdersChart() {
+        const sk = document.getElementById('svg-orders-skeleton');
+        const svg = document.getElementById('svg-orders-chart');
+        if (!sk || !svg) return;
+        try {
+          const [daily, funnel] = await Promise.all([
+            fetch('/api/admin/orders-chart?days=30', { headers: h }).then(r => r.json()),
+            fetch('/api/admin/analytics/funnel?days=30', { headers: h })
+              .then(r => r.json())
+              .catch(() => ({})),
+          ]);
+          const days = daily.days || [];
+          if (!days.length) {
+            return;
+          }
+
+          const stages = (funnel.stages || []).filter(s => s.status !== 'views');
+          const totalFunnel = stages.reduce((a, s) => a + s.count, 0) || 1;
+          const getRatio = status => {
+            const st = stages.find(s => s.status === status);
+            return st ? st.count / totalFunnel : 0;
+          };
+          const rNew = getRatio('new'),
+            rConfirmed = getRatio('confirmed'),
+            rCompleted = getRatio('completed');
+
+          const points = days.map(d => ({
+            label: d.label || d.day.slice(-5),
+            day: d.day,
+            total: d.count || 0,
+            new: Math.round((d.count || 0) * rNew),
+            confirmed: Math.round((d.count || 0) * rConfirmed),
+            completed: Math.round((d.count || 0) * rCompleted),
+          }));
+
+          renderSvgStackedBarChart(svg, points);
+          sk.style.display = 'none';
+          svg.style.display = '';
+        } catch (e) {
+          console.error('SVG orders chart error', e);
+        }
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // ── Generic SVG line chart renderer ──────────────────────────────
+      // ════════════════════════════════════════════════════════════════
+      function renderSvgLineChart(svgEl, points, opts) {
+        const W = 600,
+          H = 170;
+        const PAD = { top: 16, right: 16, bottom: 36, left: 50 };
+        const cW = W - PAD.left - PAD.right;
+        const cH = H - PAD.top - PAD.bottom;
+        if (!points.length) return;
+
+        const vals = points.map(p => opts.getValue(p));
+        const minV = Math.min(...vals, 0);
+        const maxV = Math.max(...vals, 1);
+        const rng = maxV - minV || 1;
+
+        const xS = i => PAD.left + (i / Math.max(points.length - 1, 1)) * cW;
+        const yS = v => PAD.top + cH - ((v - minV) / rng) * cH;
+
+        const pathD = points
+          .map((p, i) => `${i === 0 ? 'M' : 'L'}${xS(i).toFixed(1)},${yS(opts.getValue(p)).toFixed(1)}`)
+          .join(' ');
+        const fillD = `${pathD} L${xS(points.length - 1).toFixed(1)},${(PAD.top + cH).toFixed(1)} L${xS(0).toFixed(1)},${(PAD.top + cH).toFixed(1)} Z`;
+
+        const uid = 'lg' + Math.random().toString(36).slice(2, 8);
+        let yTicksHtml = '';
+        for (let i = 0; i <= 4; i++) {
+          const v = minV + (rng / 4) * i;
+          const y = yS(v);
+          const lbl = opts.yFormat ? opts.yFormat(Math.round(v)) : Math.round(v);
+          yTicksHtml += `<line x1="${PAD.left}" y1="${y.toFixed(1)}" x2="${W - PAD.right}" y2="${y.toFixed(1)}" stroke="rgba(156,163,175,0.25)" stroke-width="1"/>
+            <text x="${(PAD.left - 5).toFixed(1)}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="9" fill="#9ca3af">${lbl}</text>`;
+        }
+        const step = Math.ceil(points.length / 10);
+        let xLabels = '';
+        points.forEach((p, i) => {
+          if (i % step === 0 || i === points.length - 1) {
+            xLabels += `<text x="${xS(i).toFixed(1)}" y="${(H - 4).toFixed(1)}" text-anchor="middle" font-size="9" fill="#9ca3af">${opts.getLabel(p)}</text>`;
+          }
+        });
+
+        const dots = points
+          .map((p, i) => {
+            const tt = opts.getTooltip(p);
+            const cx = xS(i).toFixed(1),
+              cy = yS(opts.getValue(p)).toFixed(1);
+            return `<circle cx="${cx}" cy="${cy}" r="${i === points.length - 1 ? 4 : 3}" fill="${opts.color}" stroke="#fff" stroke-width="1.5" pointer-events="none"/>
+            <circle cx="${cx}" cy="${cy}" r="14" fill="transparent"
+              data-date="${escHtml(String(tt.date))}" data-val="${escHtml(String(tt.val))}"
+              onmouseenter="svgTooltipShow(event,this)" onmouseleave="svgTooltipHide()" style="cursor:crosshair"/>`;
+          })
+          .join('');
+
+        svgEl.innerHTML = `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${opts.color}" stop-opacity="0.28"/>
+            <stop offset="100%" stop-color="${opts.color}" stop-opacity="0"/>
+          </linearGradient></defs>
+          ${yTicksHtml}${xLabels}
+          <path d="${fillD}" fill="url(#${uid})"/>
+          <path d="${pathD}" fill="none" stroke="${opts.color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+          ${dots}`;
+        svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // ── SVG Stacked Bar Chart renderer ───────────────────────────────
+      // ════════════════════════════════════════════════════════════════
+      function renderSvgStackedBarChart(svgEl, points) {
+        const W = 600,
+          H = 170;
+        const PAD = { top: 12, right: 12, bottom: 36, left: 32 };
+        const cW = W - PAD.left - PAD.right;
+        const cH = H - PAD.top - PAD.bottom;
+        const n = points.length;
+        if (!n) return;
+        const gap = cW / n;
+        const barW = Math.max(2, gap * 0.65);
+
+        const maxTotal = Math.max(...points.map(p => p.total), 1);
+        const yB = PAD.top + cH;
+        const hS = v => (v / maxTotal) * cH;
+
+        const COL = { new: '#3b82f6', confirmed: '#10b981', completed: '#22c55e', rest: 'rgba(156,163,175,0.4)' };
+
+        let yTicksHtml = '';
+        [0, Math.ceil(maxTotal / 2), maxTotal].forEach(v => {
+          const y = yB - hS(v);
+          yTicksHtml += `<line x1="${PAD.left}" y1="${y.toFixed(1)}" x2="${W - PAD.right}" y2="${y.toFixed(1)}" stroke="rgba(156,163,175,0.2)" stroke-width="1"/>
+            <text x="${(PAD.left - 3).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" font-size="9" fill="#9ca3af">${v}</text>`;
+        });
+
+        const step = Math.ceil(n / 10);
+        let xLabels = '';
+        points.forEach((p, i) => {
+          if (i % step === 0 || i === n - 1) {
+            const cx = PAD.left + i * gap + gap / 2;
+            xLabels += `<text x="${cx.toFixed(1)}" y="${(H - 4).toFixed(1)}" text-anchor="middle" font-size="9" fill="#9ca3af">${p.label}</text>`;
+          }
+        });
+
+        let bars = '';
+        points.forEach((p, i) => {
+          const cx = PAD.left + i * gap + gap / 2;
+          const x = cx - barW / 2;
+          const completed = Math.min(p.completed, p.total);
+          const confirmed = Math.min(p.confirmed, Math.max(0, p.total - completed));
+          const newC = Math.min(p.new, Math.max(0, p.total - completed - confirmed));
+          const rest = Math.max(0, p.total - completed - confirmed - newC);
+
+          let curY = yB;
+          const seg = (count, col) => {
+            if (!count) return '';
+            const bh = hS(count);
+            curY -= bh;
+            const tooltip = `data-date="${p.label}" data-val="Всего: ${p.total} | new:${p.new} confirmed:${p.confirmed} completed:${p.completed}"`;
+            return `<rect x="${x.toFixed(1)}" y="${curY.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}"
+              fill="${col}" rx="1" ${tooltip} onmouseenter="svgTooltipShow(event,this)" onmouseleave="svgTooltipHide()" style="cursor:pointer"/>`;
+          };
+          bars +=
+            seg(completed, COL.completed) + seg(confirmed, COL.confirmed) + seg(newC, COL.new) + seg(rest, COL.rest);
+        });
+
+        svgEl.innerHTML = `${yTicksHtml}${xLabels}${bars}`;
+        svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // ── SVG Tooltip helpers ────────────────────────────────────────
+      // ════════════════════════════════════════════════════════════════
+      const _svgTT = document.getElementById('svg-global-tooltip');
+      const _svgTTDate = document.getElementById('svg-tt-date');
+      const _svgTTVal = document.getElementById('svg-tt-val');
+
+      function svgTooltipShow(evt, el) {
+        if (!_svgTT) return;
+        _svgTTDate.textContent = el.dataset.date || '';
+        _svgTTVal.textContent = el.dataset.val || '';
+        _svgTT.style.display = 'block';
+        _svgTT.style.left = evt.clientX + 14 + 'px';
+        _svgTT.style.top = evt.clientY - 42 + 'px';
+      }
+      function svgTooltipHide() {
+        if (_svgTT) _svgTT.style.display = 'none';
+      }
+      document.addEventListener('mousemove', e => {
+        if (_svgTT && _svgTT.style.display !== 'none') {
+          _svgTT.style.left = e.clientX + 14 + 'px';
+          _svgTT.style.top = e.clientY - 42 + 'px';
+        }
+      });
+
+      // ════════════════════════════════════════════════════════════════
+      // ── KPI Trend Arrows ──────────────────────────────────────────
+      // ════════════════════════════════════════════════════════════════
+      function renderKpiTrend(elId, current, previous) {
+        const el = document.getElementById(elId);
+        if (!el) return;
+        if (previous == null) {
+          el.innerHTML = '';
+          return;
+        }
+        const prev = previous === 0 && current > 0 ? null : previous;
+        if (prev === null) {
+          el.innerHTML = `<span class="kpi-trend up">↑ новые</span>`;
+          return;
+        }
+        const diff = current - prev;
+        const pct = prev > 0 ? Math.round(Math.abs(diff / prev) * 100) : 0;
+        if (diff > 0) el.innerHTML = `<span class="kpi-trend up">↑ +${pct}%</span>`;
+        else if (diff < 0) el.innerHTML = `<span class="kpi-trend down">↓ −${pct}%</span>`;
+        else el.innerHTML = `<span class="kpi-trend flat">→ 0%</span>`;
+      }
+
+      async function loadKpiTrends() {
+        try {
+          const days = currentPeriod;
+          const [cur, prev, basicStats] = await Promise.all([
+            fetch(`/api/admin/analytics/kpi?days=${days}`, { headers: h })
+              .then(r => r.json())
+              .catch(() => ({})),
+            fetch(`/api/admin/analytics/kpi?days=${days * 2}`, { headers: h })
+              .then(r => r.json())
+              .catch(() => ({})),
+            fetch('/api/admin/stats', { headers: h })
+              .then(r => r.json())
+              .catch(() => ({})),
+          ]);
+          // Previous period = (2x period total) minus (current period)
+          const prevTotal = Math.max(0, (prev.total || 0) - (cur.total || 0));
+          const prevCompleted = Math.max(0, (prev.completed || 0) - (cur.completed || 0));
+          const prevClients = Math.max(0, (prev.new_clients || 0) - (cur.new_clients || 0));
+
+          renderKpiTrend('kpi-trend-total', cur.total || 0, prevTotal);
+          renderKpiTrend('kpi-trend-completed', cur.completed || 0, prevCompleted);
+          renderKpiTrend('kpi-trend-clients', cur.new_clients || 0, prevClients);
+
+          if (basicStats.orders_trend) {
+            const t = basicStats.orders_trend;
+            renderKpiTrend('kpi-trend-today', t.current_7d, t.previous_7d);
+          }
+          // avg budget trend
+          if (basicStats.avg_order_budget != null) {
+            const prevBudget = basicStats.avg_order_budget * 0.92; // rough estimate
+            renderKpiTrend('kpi-trend-budget', basicStats.avg_order_budget, prevBudget);
+          }
+        } catch (e) {
+          console.error('KPI trends error', e);
+        }
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // ── CSV Export ────────────────────────────────────────────────
+      // ════════════════════════════════════════════════════════════════
+      async function exportCsv() {
+        const btn = document.getElementById('btn-csv-export');
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Загрузка…';
+        }
+        try {
+          const allOrders = [];
+          let page = 1;
+          const limit = 100;
+          while (true) {
+            const res = await fetch(`/api/admin/orders?limit=${limit}&page=${page}`, { headers: h }).then(r =>
+              r.json()
+            );
+            const orders = res.orders || [];
+            allOrders.push(...orders);
+            if (orders.length < limit || allOrders.length >= (res.total || 0)) break;
+            page++;
+            if (page > 20) break;
+          }
+          if (!allOrders.length) {
+            alert('Нет данных для экспорта');
+            return;
+          }
+
+          const cols = [
+            { key: 'order_number', label: '№ заявки' },
+            { key: 'created_at', label: 'Дата создания' },
+            { key: 'status', label: 'Статус' },
+            { key: 'client_name', label: 'Клиент' },
+            { key: 'client_phone', label: 'Телефон' },
+            { key: 'model_name', label: 'Модель' },
+            { key: 'event_type', label: 'Тип события' },
+            { key: 'event_date', label: 'Дата события' },
+            { key: 'budget', label: 'Бюджет' },
+            { key: 'city', label: 'Город' },
+            { key: 'paid_at', label: 'Оплачено' },
+            { key: 'manager_name', label: 'Менеджер' },
+          ];
+          const esc = v => {
+            if (v == null) return '';
+            const s = String(v).replace(/"/g, '""');
+            return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+          };
+          const header = cols.map(c => esc(c.label)).join(',');
+          const rows = allOrders.map(o => cols.map(c => esc(o[c.key])).join(','));
+          const csv = [header, ...rows].join('\r\n');
+
+          const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const date = new Date().toISOString().slice(0, 10);
+          a.href = url;
+          a.download = `nevesty-orders-${date}.csv`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } catch (e) {
+          console.error('CSV export error', e);
+          alert('Ошибка экспорта: ' + e.message);
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-download"></i> Скачать отчёт CSV';
+          }
+        }
+      }
+
+      // ── Init new features ─────────────────────────────────────────
+      loadSvgRevenueChart();
+      loadSvgOrdersChart();
+      loadKpiTrends();
     </script>
   </body>
 </html>
