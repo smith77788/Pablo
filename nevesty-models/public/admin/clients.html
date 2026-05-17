@@ -1,0 +1,1045 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Клиенты — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      /* ─── Filter chips ──────────────────────────────── */
+      .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 10px 24px;
+        border-bottom: 1px solid var(--border);
+        align-items: center;
+      }
+      .fchip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 5px 14px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        transition: all 0.15s;
+        white-space: nowrap;
+        letter-spacing: 0.3px;
+      }
+      .fchip:hover {
+        color: var(--text);
+        border-color: var(--gold);
+      }
+      .fchip.active {
+        background: rgba(201, 169, 110, 0.15);
+        color: var(--gold);
+        border-color: rgba(201, 169, 110, 0.5);
+      }
+      .fchip-count {
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        padding: 0 5px;
+        font-size: 0.7rem;
+        min-width: 18px;
+        text-align: center;
+        line-height: 1.5;
+      }
+
+      /* ─── Search input ─────────────────────────────── */
+      .search-wrap {
+        flex: 1;
+        max-width: 340px;
+        position: relative;
+      }
+      .search-wrap .search-icon {
+        position: absolute;
+        left: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-dim);
+        font-size: 0.85rem;
+        pointer-events: none;
+      }
+      .search-wrap input {
+        width: 100%;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 7px 10px 7px 32px;
+        font-size: 0.82rem;
+        outline: none;
+        border-radius: 4px;
+        transition: border-color 0.2s;
+      }
+      .search-wrap input:focus {
+        border-color: var(--gold);
+      }
+      .search-wrap input::placeholder {
+        color: var(--text-dim);
+      }
+
+      /* ─── Export button ────────────────────────────── */
+      .btn-export {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 7px 14px;
+        font-size: 0.7rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: all 0.2s;
+        border-radius: 3px;
+      }
+      .btn-export:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+
+      /* ─── Pagination ───────────────────────────────── */
+      .pagination {
+        border-top: 1px solid var(--border);
+        justify-content: flex-end;
+      }
+      .pagination-info {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        padding: 0 16px;
+        white-space: nowrap;
+      }
+
+      /* ─── Client name link ─────────────────────────── */
+      .client-link {
+        color: var(--text);
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: color 0.15s;
+      }
+      .client-link:hover {
+        color: var(--gold);
+      }
+
+      /* ─── VIP badge ────────────────────────────────── */
+      .badge-vip {
+        display: inline-block;
+        background: rgba(201, 169, 110, 0.18);
+        color: var(--gold);
+        border: 1px solid rgba(201, 169, 110, 0.4);
+        border-radius: 3px;
+        font-size: 0.65rem;
+        font-weight: 700;
+        padding: 1px 5px;
+        letter-spacing: 0.5px;
+        margin-left: 5px;
+        vertical-align: middle;
+      }
+
+      /* ─── Empty state ──────────────────────────────── */
+      .empty-state {
+        padding: 60px 24px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+      .empty-state-icon {
+        font-size: 2.5rem;
+        margin-bottom: 12px;
+        opacity: 0.4;
+      }
+
+      /* ─── Modal overlay ────────────────────────────── */
+      .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 300;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .modal-overlay.open {
+        display: flex;
+      }
+      .modal-box {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        width: 100%;
+        max-width: 760px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+        display: flex;
+        flex-direction: column;
+      }
+      .modal-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+        padding: 24px 28px 18px;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        background: var(--bg2);
+        z-index: 1;
+      }
+      .modal-avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--gold-light), var(--gold-dark));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #111;
+        flex-shrink: 0;
+      }
+      .modal-title {
+        flex: 1;
+      }
+      .modal-name {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 3px;
+      }
+      .modal-sub {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+      }
+      .modal-close {
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        font-size: 1.3rem;
+        cursor: pointer;
+        padding: 0 4px;
+        transition: color 0.15s;
+        line-height: 1;
+      }
+      .modal-close:hover {
+        color: var(--text);
+      }
+      .modal-body {
+        padding: 20px 28px 28px;
+        flex: 1;
+      }
+
+      /* ─── Profile stats cards ──────────────────────── */
+      .profile-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-bottom: 22px;
+      }
+      @media (max-width: 600px) {
+        .profile-stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .stat-card {
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 16px;
+      }
+      .stat-card-label {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+      }
+      .stat-card-value {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .stat-card-value.gold {
+        color: var(--gold);
+      }
+
+      /* ─── Profile info grid ────────────────────────── */
+      .profile-info {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px 24px;
+        margin-bottom: 22px;
+        font-size: 0.83rem;
+      }
+      .profile-info-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .profile-info-label {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .profile-info-value {
+        color: var(--text);
+        font-weight: 500;
+      }
+      .profile-info-value a {
+        color: var(--gold);
+        text-decoration: none;
+      }
+      .profile-info-value a:hover {
+        text-decoration: underline;
+      }
+
+      /* ─── Fav models ───────────────────────────────── */
+      .fav-models {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 22px;
+      }
+      .fav-model-chip {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 5px 12px 5px 6px;
+        font-size: 0.78rem;
+        color: var(--text);
+      }
+      .fav-model-avatar {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        object-fit: cover;
+        background: var(--bg4);
+      }
+      .fav-model-cnt {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+      }
+
+      /* ─── Section heading ──────────────────────────── */
+      .section-heading {
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 12px;
+      }
+
+      /* ─── Spinner ──────────────────────────────────── */
+      .spinner {
+        display: inline-block;
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--border);
+        border-top-color: var(--gold);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* ─── Order badge in modal table ───────────────── */
+      .sbadge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .sbadge-new {
+        background: rgba(59, 130, 246, 0.15);
+        color: #3b82f6;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+      }
+      .sbadge-reviewing {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+      }
+      .sbadge-confirmed {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+      .sbadge-in_progress {
+        background: rgba(139, 92, 246, 0.15);
+        color: #8b5cf6;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+      }
+      .sbadge-done {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+      .sbadge-completed {
+        background: rgba(107, 114, 128, 0.15);
+        color: #6b7280;
+        border: 1px solid rgba(107, 114, 128, 0.3);
+      }
+      .sbadge-cancelled {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+      }
+
+      /* ─── Telegram button ──────────────────────────── */
+      .btn-tg {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        background: rgba(41, 182, 246, 0.12);
+        border: 1px solid rgba(41, 182, 246, 0.35);
+        color: #29b6f6;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: all 0.15s;
+      }
+      .btn-tg:hover {
+        background: rgba(41, 182, 246, 0.22);
+        border-color: rgba(41, 182, 246, 0.6);
+      }
+
+      /* ─── Modal orders load more ───────────────────── */
+      .btn-load-more {
+        display: block;
+        width: 100%;
+        padding: 10px;
+        text-align: center;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        cursor: pointer;
+        border-radius: 4px;
+        margin-top: 10px;
+        transition: all 0.15s;
+      }
+      .btn-load-more:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-layout">
+      <!-- ─── Sidebar ──────────────────────────────────────── -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-text">Nevesty Models</div>
+          <div class="sidebar-logo-sub">Панель управления</div>
+        </div>
+        <nav class="sidebar-nav">
+          <div class="nav-section-label">Главная</div>
+          <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+          <div class="nav-section-label">Бизнес</div>
+          <a href="/admin/orders.html"
+            ><span class="nav-icon">📋</span> Заявки
+            <span class="nav-badge" id="newOrdersBadge" style="display: none">0</span></a
+          >
+          <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+          <a href="/admin/clients.html" class="active"><span class="nav-icon">👤</span> Клиенты</a>
+          <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+          <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+          <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+          <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+          <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
+          <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+          <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+          <div class="nav-section-label">AI</div>
+          <a href="/admin/social.html"><span class="nav-icon">📱</span> Соцсети</a>
+          <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+          <div class="nav-section-label">Настройки</div>
+          <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+          <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+          <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
+          <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <div class="sidebar-avatar sidebar-user-letter">A</div>
+            <div class="sidebar-user-info">
+              <strong class="sidebar-user-name">—</strong>
+              <span class="sidebar-user-role">—</span>
+            </div>
+          </div>
+          <button class="btn-logout" data-action="logout">Выйти</button>
+        </div>
+      </aside>
+
+      <!-- ─── Main ─────────────────────────────────────────── -->
+      <div class="main-content">
+        <header class="topbar">
+          <div class="topbar-title">Клиенты</div>
+          <div class="topbar-right">
+            <button class="btn-export" id="btnExport" title="Скачать CSV">⬇ Скачать CSV</button>
+          </div>
+        </header>
+
+        <!-- Filter bar -->
+        <div class="filter-bar">
+          <div class="search-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" placeholder="Имя или телефон…" autocomplete="off" />
+          </div>
+          <button class="fchip active" data-filter="all">Все <span class="fchip-count" id="cnt-all">—</span></button>
+          <button class="fchip" data-filter="active">Активные за 30д</button>
+          <button class="fchip" data-filter="vip">VIP 3+ заявки</button>
+          <button class="fchip" data-filter="new">Новые (0 заявок)</button>
+        </div>
+
+        <!-- Table -->
+        <div class="table-wrap">
+          <table class="data-table" id="clientsTable">
+            <thead>
+              <tr>
+                <th>Клиент</th>
+                <th>Телефон</th>
+                <th>Telegram</th>
+                <th class="text-right">Заявок</th>
+                <th class="text-right">Завершено</th>
+                <th class="text-right">Сумма</th>
+                <th>Последняя активность</th>
+                <th>Зарегистрирован</th>
+              </tr>
+            </thead>
+            <tbody id="clientsBody">
+              <tr>
+                <td colspan="8" class="empty-state">
+                  <div class="spinner"></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination" id="pagination" style="display: none">
+          <span class="pagination-info" id="paginationInfo"></span>
+          <button class="pagination-btn" id="btnPrev" disabled>← Пред.</button>
+          <span id="paginationPages" style="font-size: 0.8rem; color: var(--text-muted); padding: 0 8px"></span>
+          <button class="pagination-btn" id="btnNext">След. →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Client Profile Modal ──────────────────────────── -->
+    <div class="modal-overlay" id="profileModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <div class="modal-avatar" id="modalAvatar">—</div>
+          <div class="modal-title">
+            <div class="modal-name" id="modalName">—</div>
+            <div class="modal-sub" id="modalSub">—</div>
+          </div>
+          <button class="modal-close" id="modalClose">✕</button>
+        </div>
+        <div class="modal-body" id="modalBody">
+          <div style="text-align: center; padding: 32px"><span class="spinner"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/admin-auth.js"></script>
+    <script>
+      // ─── State ────────────────────────────────────────────
+      let state = {
+        search: '',
+        filter: 'all',
+        page: 1,
+        limit: 20,
+        total: 0,
+        pages: 0,
+        loading: false,
+        allClients: [], // for CSV export
+      };
+
+      // ─── Format helpers ───────────────────────────────────
+      function fmtDate(d) {
+        if (!d) return '—';
+        const dt = new Date(d);
+        if (isNaN(dt)) return '—';
+        return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      }
+
+      function fmtMoney(v) {
+        if (!v || isNaN(+v) || +v === 0) return '—';
+        return Number(v).toLocaleString('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
+      }
+
+      function relTime(d) {
+        if (!d) return '—';
+        const ms = Date.now() - new Date(d).getTime();
+        const days = Math.floor(ms / 86400000);
+        if (days === 0) return 'Сегодня';
+        if (days === 1) return 'Вчера';
+        if (days < 30) return `${days} д. назад`;
+        if (days < 365) return `${Math.floor(days / 30)} мес. назад`;
+        return `${Math.floor(days / 365)} г. назад`;
+      }
+
+      function initials(name) {
+        if (!name) return '?';
+        const parts = name.trim().split(' ');
+        if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+        return (parts[0][0] || '?').toUpperCase();
+      }
+
+      function escHtml(s) {
+        return String(s || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function statusLabel(s) {
+        const map = {
+          new: 'Новая',
+          reviewing: 'На рассмотрении',
+          confirmed: 'Подтверждена',
+          in_progress: 'В процессе',
+          done: 'Завершена',
+          completed: 'Завершена',
+          cancelled: 'Отменена',
+        };
+        return map[s] || s;
+      }
+
+      // ─── Fetch clients ────────────────────────────────────
+      async function loadClients() {
+        if (state.loading) return;
+        state.loading = true;
+        const tbody = document.getElementById('clientsBody');
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><span class="spinner"></span></td></tr>';
+
+        const params = new URLSearchParams({
+          search: state.search,
+          filter: state.filter,
+          page: state.page,
+          limit: state.limit,
+        });
+
+        try {
+          const res = await fetch('/api/admin/clients?' + params, {
+            headers: { Authorization: 'Bearer ' + localStorage.getItem('admin_token') },
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const data = await res.json();
+
+          state.total = data.total || 0;
+          state.pages = data.pages || 0;
+          state.allClients = data.clients || [];
+
+          renderTable(data.clients || []);
+          renderPagination();
+
+          // Update "all" filter count badge
+          if (state.filter === 'all' && !state.search) {
+            document.getElementById('cnt-all').textContent = state.total;
+          }
+        } catch (e) {
+          tbody.innerHTML = `<tr><td colspan="8" class="empty-state" style="color:var(--error)">Ошибка загрузки: ${escHtml(e.message)}</td></tr>`;
+        } finally {
+          state.loading = false;
+        }
+      }
+
+      function renderTable(clients) {
+        const tbody = document.getElementById('clientsBody');
+        if (!clients.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="8" class="empty-state"><div class="empty-state-icon">👤</div>Клиентов не найдено</td></tr>';
+          return;
+        }
+        tbody.innerHTML = clients
+          .map(c => {
+            const isVip = (c.total_orders || 0) >= 3;
+            const tg = c.client_telegram ? c.client_telegram.replace(/^@/, '') : '';
+            return `<tr>
+            <td>
+              <span class="client-link" data-phone="${escHtml(c.client_phone)}" data-name="${escHtml(c.client_name)}" onclick="openProfile(this)">
+                ${escHtml(c.client_name)}
+              </span>
+              ${isVip ? '<span class="badge-vip">VIP</span>' : ''}
+            </td>
+            <td style="font-family:monospace;font-size:0.82rem;color:var(--text-muted)">${escHtml(c.client_phone)}</td>
+            <td>${tg ? `<a href="https://t.me/${encodeURIComponent(tg)}" target="_blank" style="color:var(--gold);text-decoration:none;font-size:0.82rem">@${escHtml(tg)}</a>` : '<span style="color:var(--text-dim)">—</span>'}</td>
+            <td class="text-right" style="font-weight:700;color:var(--text)">${c.total_orders || 0}</td>
+            <td class="text-right" style="color:var(--text-muted)">${c.done_orders || 0}</td>
+            <td class="text-right" style="color:var(--gold)">${fmtMoney(c.total_budget)}</td>
+            <td style="color:var(--text-muted);font-size:0.8rem">${relTime(c.last_activity)}</td>
+            <td style="color:var(--text-dim);font-size:0.78rem">${fmtDate(c.registered_at)}</td>
+          </tr>`;
+          })
+          .join('');
+      }
+
+      function renderPagination() {
+        const pg = document.getElementById('pagination');
+        const info = document.getElementById('paginationInfo');
+        const pages = document.getElementById('paginationPages');
+        const btnPrev = document.getElementById('btnPrev');
+        const btnNext = document.getElementById('btnNext');
+
+        if (state.pages <= 1) {
+          pg.style.display = 'none';
+          return;
+        }
+        pg.style.display = 'flex';
+        const from = (state.page - 1) * state.limit + 1;
+        const to = Math.min(state.page * state.limit, state.total);
+        info.textContent = `${from}–${to} из ${state.total}`;
+        pages.textContent = `Стр. ${state.page} / ${state.pages}`;
+        btnPrev.disabled = state.page <= 1;
+        btnNext.disabled = state.page >= state.pages;
+      }
+
+      // ─── Profile modal ────────────────────────────────────
+      async function openProfile(el) {
+        const phone = el.dataset.phone;
+        const name = el.dataset.name;
+
+        document.getElementById('modalAvatar').textContent = initials(name);
+        document.getElementById('modalName').textContent = name;
+        document.getElementById('modalSub').textContent = phone;
+        document.getElementById('modalBody').innerHTML =
+          '<div style="text-align:center;padding:32px"><span class="spinner"></span></div>';
+        document.getElementById('profileModal').classList.add('open');
+
+        try {
+          const token = localStorage.getItem('admin_token');
+          const headers = { Authorization: 'Bearer ' + token };
+          const encPhone = encodeURIComponent(phone);
+
+          const [profRes, ordRes] = await Promise.all([
+            fetch(`/api/admin/clients/${encPhone}`, { headers }),
+            fetch(`/api/admin/clients/${encPhone}/orders?limit=10`, { headers }),
+          ]);
+
+          const prof = await profRes.json();
+          const ordData = await ordRes.json();
+
+          renderProfile(prof, ordData, phone);
+        } catch (e) {
+          document.getElementById('modalBody').innerHTML =
+            `<p style="color:var(--error)">Ошибка: ${escHtml(e.message)}</p>`;
+        }
+      }
+
+      function renderProfile(p, ordData, phone) {
+        const tg = p.client_telegram ? p.client_telegram.replace(/^@/, '') : '';
+        const encPhone = encodeURIComponent(phone);
+
+        const favHtml = (p.fav_models || [])
+          .map(
+            m => `
+          <div class="fav-model-chip">
+            ${m.photo_url ? `<img class="fav-model-avatar" src="${escHtml(m.photo_url)}" alt="">` : '<div class="fav-model-avatar" style="background:var(--bg4);display:inline-block"></div>'}
+            <span>${escHtml(m.name)}</span>
+            <span class="fav-model-cnt">${m.cnt}×</span>
+          </div>`
+          )
+          .join('');
+
+        const ordersHtml = (ordData.orders || [])
+          .map(
+            o => `
+          <tr>
+            <td style="font-family:monospace;font-size:0.78rem;color:var(--gold)">${escHtml(o.order_number)}</td>
+            <td style="font-size:0.8rem">${escHtml(o.event_type || '—')}</td>
+            <td style="font-size:0.8rem">${escHtml(o.model_name || '—')}</td>
+            <td style="font-size:0.78rem;color:var(--text-muted)">${fmtDate(o.created_at)}</td>
+            <td><span class="sbadge sbadge-${escHtml(o.status)}">${statusLabel(o.status)}</span></td>
+            <td style="font-size:0.8rem;color:var(--gold);text-align:right">${fmtMoney(o.budget)}</td>
+          </tr>`
+          )
+          .join('');
+
+        const hasMoreOrders = (ordData.total || 0) > (ordData.orders || []).length;
+
+        document.getElementById('modalSub').textContent =
+          phone + (tg ? ` · @${tg}` : '') + (p.client_email ? ` · ${p.client_email}` : '');
+
+        document.getElementById('modalBody').innerHTML = `
+          <!-- Stats -->
+          <div class="profile-stats">
+            <div class="stat-card">
+              <div class="stat-card-label">Заявок всего</div>
+              <div class="stat-card-value">${p.total_orders || 0}</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Завершено</div>
+              <div class="stat-card-value">${p.done_orders || 0}</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Средний бюджет</div>
+              <div class="stat-card-value gold">${fmtMoney(p.avg_budget)}</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Итого</div>
+              <div class="stat-card-value gold">${fmtMoney(p.total_budget)}</div>
+            </div>
+          </div>
+
+          <!-- Info -->
+          <div class="profile-info">
+            <div class="profile-info-row">
+              <span class="profile-info-label">Телефон</span>
+              <span class="profile-info-value">${escHtml(p.client_phone)}</span>
+            </div>
+            <div class="profile-info-row">
+              <span class="profile-info-label">Email</span>
+              <span class="profile-info-value">${p.client_email ? escHtml(p.client_email) : '—'}</span>
+            </div>
+            <div class="profile-info-row">
+              <span class="profile-info-label">Telegram</span>
+              <span class="profile-info-value">
+                ${tg ? `<a href="https://t.me/${encodeURIComponent(tg)}" target="_blank">@${escHtml(tg)}</a>` : '—'}
+              </span>
+            </div>
+            <div class="profile-info-row">
+              <span class="profile-info-label">Зарегистрирован</span>
+              <span class="profile-info-value">${fmtDate(p.registered_at)}</span>
+            </div>
+            <div class="profile-info-row">
+              <span class="profile-info-label">Последняя активность</span>
+              <span class="profile-info-value">${relTime(p.last_activity)}</span>
+            </div>
+          </div>
+
+          <!-- Favorite models -->
+          ${
+            (p.fav_models || []).length
+              ? `
+            <div class="section-heading">Любимые модели</div>
+            <div class="fav-models">${favHtml}</div>
+          `
+              : ''
+          }
+
+          <!-- Telegram CTA -->
+          ${
+            tg
+              ? `
+            <div style="margin-bottom:20px">
+              <a class="btn-tg" href="https://t.me/${encodeURIComponent(tg)}" target="_blank">
+                ✈ Написать в Telegram
+              </a>
+            </div>
+          `
+              : ''
+          }
+
+          <!-- Order history -->
+          <div class="section-heading">История заявок${ordData.total ? ` (${ordData.total})` : ''}</div>
+          ${
+            (ordData.orders || []).length
+              ? `
+            <div class="table-wrap" style="margin:0">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Номер</th>
+                    <th>Тип</th>
+                    <th>Модель</th>
+                    <th>Дата</th>
+                    <th>Статус</th>
+                    <th class="text-right">Бюджет</th>
+                  </tr>
+                </thead>
+                <tbody id="modalOrdersBody">${ordersHtml}</tbody>
+              </table>
+            </div>
+            ${hasMoreOrders ? `<button class="btn-load-more" onclick="loadMoreOrders('${escHtml(encPhone)}', 2, ${ordData.total})">Показать ещё (${ordData.total - (ordData.orders || []).length})</button>` : ''}
+          `
+              : '<p style="color:var(--text-muted);font-size:0.85rem">Заявок пока нет.</p>'
+          }
+        `;
+      }
+
+      async function loadMoreOrders(encPhone, page, total) {
+        const btn = document.querySelector('.btn-load-more');
+        if (btn) btn.textContent = 'Загрузка…';
+        try {
+          const res = await fetch(`/api/admin/clients/${encPhone}/orders?page=${page}&limit=20`, {
+            headers: { Authorization: 'Bearer ' + localStorage.getItem('admin_token') },
+          });
+          const data = await res.json();
+          const tbody = document.getElementById('modalOrdersBody');
+          (data.orders || []).forEach(o => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td style="font-family:monospace;font-size:0.78rem;color:var(--gold)">${escHtml(o.order_number)}</td>
+              <td style="font-size:0.8rem">${escHtml(o.event_type || '—')}</td>
+              <td style="font-size:0.8rem">${escHtml(o.model_name || '—')}</td>
+              <td style="font-size:0.78rem;color:var(--text-muted)">${fmtDate(o.created_at)}</td>
+              <td><span class="sbadge sbadge-${escHtml(o.status)}">${statusLabel(o.status)}</span></td>
+              <td style="font-size:0.8rem;color:var(--gold);text-align:right">${fmtMoney(o.budget)}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+          const loaded = page * 20;
+          if (loaded < total) {
+            btn.textContent = `Показать ещё (${total - loaded})`;
+            btn.onclick = () => loadMoreOrders(encPhone, page + 1, total);
+          } else {
+            btn.remove();
+          }
+        } catch (e) {
+          if (btn) btn.textContent = 'Ошибка — попробуйте ещё раз';
+        }
+      }
+
+      // ─── CSV Export ───────────────────────────────────────
+      async function exportCSV() {
+        const btn = document.getElementById('btnExport');
+        btn.textContent = 'Загрузка…';
+        btn.disabled = true;
+
+        try {
+          // Fetch all records (limit=1000 should cover most cases)
+          const params = new URLSearchParams({
+            search: state.search,
+            filter: state.filter,
+            page: 1,
+            limit: 1000,
+          });
+          const res = await fetch('/api/admin/clients?' + params, {
+            headers: { Authorization: 'Bearer ' + localStorage.getItem('admin_token') },
+          });
+          const data = await res.json();
+          const clients = data.clients || [];
+
+          const header = [
+            'Имя',
+            'Телефон',
+            'Telegram',
+            'Заявок всего',
+            'Завершено',
+            'Сумма (руб)',
+            'Последняя активность',
+            'Дата регистрации',
+          ];
+          const rows = clients.map(c => [
+            c.client_name,
+            c.client_phone,
+            c.client_telegram || '',
+            c.total_orders || 0,
+            c.done_orders || 0,
+            Math.round(c.total_budget || 0),
+            c.last_activity ? new Date(c.last_activity).toISOString() : '',
+            c.registered_at ? new Date(c.registered_at).toISOString() : '',
+          ]);
+
+          const csvContent = [header, ...rows]
+            .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+            .join('\n');
+
+          const blob = new Blob(['﻿' + csvContent], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `clients_${new Date().toISOString().slice(0, 10)}.csv`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          alert('Ошибка экспорта: ' + e.message);
+        } finally {
+          btn.textContent = '⬇ Скачать CSV';
+          btn.disabled = false;
+        }
+      }
+
+      // ─── Event listeners ──────────────────────────────────
+      let debounceTimer;
+      document.getElementById('searchInput').addEventListener('input', e => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          state.search = e.target.value.trim();
+          state.page = 1;
+          loadClients();
+        }, 300);
+      });
+
+      document.querySelectorAll('.fchip[data-filter]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.fchip[data-filter]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          state.filter = btn.dataset.filter;
+          state.page = 1;
+          loadClients();
+        });
+      });
+
+      document.getElementById('btnPrev').addEventListener('click', () => {
+        if (state.page > 1) {
+          state.page--;
+          loadClients();
+        }
+      });
+      document.getElementById('btnNext').addEventListener('click', () => {
+        if (state.page < state.pages) {
+          state.page++;
+          loadClients();
+        }
+      });
+
+      document.getElementById('btnExport').addEventListener('click', exportCSV);
+
+      document.getElementById('modalClose').addEventListener('click', () => {
+        document.getElementById('profileModal').classList.remove('open');
+      });
+      document.getElementById('profileModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('profileModal')) {
+          document.getElementById('profileModal').classList.remove('open');
+        }
+      });
+
+      // ─── Init ─────────────────────────────────────────────
+      document.addEventListener('DOMContentLoaded', () => {
+        loadClients();
+
+        // Load new orders badge
+        fetch('/api/admin/notifications', {
+          headers: { Authorization: 'Bearer ' + localStorage.getItem('admin_token') },
+        })
+          .then(r => r.json())
+          .then(d => {
+            const newOrders = (d.items || []).filter(i => i.type === 'new_order').length;
+            const badge = document.getElementById('newOrdersBadge');
+            if (newOrders > 0 && badge) {
+              badge.textContent = newOrders;
+              badge.style.display = '';
+            }
+          })
+          .catch(() => {});
+      });
+    </script>
+  </body>
+</html>
