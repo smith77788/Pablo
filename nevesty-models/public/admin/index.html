@@ -1535,6 +1535,7 @@
               <div class="kpi-card-label">Заявок сегодня</div>
               <div class="kpi-card-value gold" id="k_today">—</div>
               <div class="kpi-card-icon">📅</div>
+              <span class="kpi-delta" id="orders-delta" style="font-size: 12px; display: block; margin-top: 2px"></span>
             </div>
             <div class="kpi-card">
               <div class="kpi-card-label">Активных</div>
@@ -1572,6 +1573,21 @@
               </div>
               <div class="kpi-card-sub" id="k_top_model_orders"></div>
               <div class="kpi-card-icon">🏆</div>
+            </div>
+          </div>
+
+          <!-- ══════════════════ REVENUE 14-DAY CHART ══════════════════ -->
+          <div class="section-card" style="margin-bottom: 16px" id="revenueTrendCard">
+            <div class="section-card-header" style="display: flex; align-items: center; justify-content: space-between">
+              <div class="section-card-title">📈 Выручка за 14 дней</div>
+              <span style="font-size: 0.72rem; color: var(--text-dim)" id="revenue-chart-total"></span>
+            </div>
+            <div class="section-card-body padded" style="padding-bottom: 8px">
+              <div id="revenue-chart" style="width: 100%; height: 120px; position: relative"></div>
+              <div
+                id="chart-labels"
+                style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 4px"
+              ></div>
             </div>
           </div>
 
@@ -1894,7 +1910,17 @@
             <div class="section-card">
               <div class="section-card-header">
                 <div class="section-card-title">🤖 Лог агентов</div>
-                <button class="btn btn-sm btn-ghost" onclick="loadAgentFeed()">↺</button>
+                <div style="display: flex; gap: 6px; align-items: center">
+                  <button
+                    id="run-agents-btn"
+                    class="btn btn-sm btn-ghost"
+                    onclick="runAgentCheck()"
+                    title="Запустить проверку агентов"
+                  >
+                    🤖 Проверка
+                  </button>
+                  <button class="btn btn-sm btn-ghost" onclick="loadAgentFeed()">↺</button>
+                </div>
               </div>
               <div class="section-card-body padded" id="agentFeed">
                 <div style="color: var(--text-dim); font-size: 0.85rem">Загрузка...</div>
