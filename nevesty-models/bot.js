@@ -7652,6 +7652,36 @@ function initBot(app) {
         await setSetting('search_enabled', '0');
         return showAdminSettings(chatId, 'bot');
       }
+      if (data === 'adm_faq_on') {
+        if (!isAdmin(chatId)) return;
+        await setSetting('faq_enabled', '1');
+        return showAdminSettings(chatId, 'bot');
+      }
+      if (data === 'adm_faq_off') {
+        if (!isAdmin(chatId)) return;
+        await setSetting('faq_enabled', '0');
+        return showAdminSettings(chatId, 'bot');
+      }
+      if (data === 'adm_loyalty_on') {
+        if (!isAdmin(chatId)) return;
+        await setSetting('loyalty_enabled', '1');
+        return showAdminSettings(chatId, 'bot');
+      }
+      if (data === 'adm_loyalty_off') {
+        if (!isAdmin(chatId)) return;
+        await setSetting('loyalty_enabled', '0');
+        return showAdminSettings(chatId, 'bot');
+      }
+      if (data === 'adm_referral_on') {
+        if (!isAdmin(chatId)) return;
+        await setSetting('referral_enabled', '1');
+        return showAdminSettings(chatId, 'bot');
+      }
+      if (data === 'adm_referral_off') {
+        if (!isAdmin(chatId)) return;
+        await setSetting('referral_enabled', '0');
+        return showAdminSettings(chatId, 'bot');
+      }
       // adm_settings_main — alias for adm_settings (go to main settings menu)
       if (data === 'adm_settings_main') {
         if (!isAdmin(chatId)) return;
@@ -10098,6 +10128,14 @@ function initBot(app) {
                 reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings' }]] },
               }
             );
+          }
+        }
+        if (key === 'model_max_photos') {
+          const n = parseInt(text.trim(), 10);
+          if (!Number.isInteger(n) || n < 1 || n > 20) {
+            return safeSend(chatId, '❌ Введите целое число от 1 до 20:', {
+              reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings' }]] },
+            });
           }
         }
         await setSetting(key, key === 'instagram_account_id' ? text.trim() : text);
