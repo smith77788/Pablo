@@ -341,7 +341,14 @@
       <div class="nav-inner">
         <a class="nav-logo" href="/">NEVESTY<span> MODELS</span></a>
         <div class="nav-links" role="list">
-          <a href="/catalog.html">Модели</a>
+          <div class="nav-dropdown" role="listitem">
+            <a href="/catalog.html" aria-haspopup="true" aria-expanded="false">Каталог</a>
+            <div class="dropdown-menu" role="menu">
+              <a href="/catalog.html" role="menuitem">Все модели</a>
+              <a href="/catalog.html?filter=top" role="menuitem">Топ модели</a>
+              <a href="/catalog.html?filter=cities" role="menuitem">По городам</a>
+            </div>
+          </div>
           <a href="/pricing.html">Цены</a>
           <a href="/cases.html">Кейсы</a>
           <a href="/about.html">О нас</a>
@@ -409,10 +416,13 @@
       </div>
     </nav>
 
+    <!-- MOBILE MENU OVERLAY -->
+    <div class="nav-overlay" id="navOverlay" aria-hidden="true"></div>
+
     <!-- MOBILE MENU -->
     <nav class="nav-mobile" id="mobileMenu" role="navigation" aria-label="Мобильное меню">
       <button class="nav-mobile-close" id="mobileClose" aria-label="Закрыть меню">✕</button>
-      <a href="/catalog.html">Модели</a>
+      <a href="/catalog.html">Каталог</a>
       <a href="/pricing.html">Цены</a>
       <a href="/cases.html">Кейсы</a>
       <a href="/about.html">О нас</a>
