@@ -97,6 +97,8 @@ function isActiveInputState(state) {
   if (state.startsWith('adm_rev_reply_text_')) return true;
   if (state.startsWith('model_decline_reason_')) return true;
   if (state === 'template_name' || state === 'template_text') return true;
+  if (['adm_promo_name', 'adm_promo_type', 'adm_promo_value', 'adm_promo_maxuses', 'adm_promo_until'].includes(state))
+    return true;
   if (
     [
       'adm_broadcast_msg',
@@ -122,6 +124,7 @@ function isActiveInputState(state) {
       'search_height',
       'search_age',
       'broadcast_schedule_time',
+      'support_message',
     ].includes(state)
   )
     return true;
@@ -408,6 +411,48 @@ function sessionData(session) {
   }
 }
 
+// ─── i18n helper ─────────────────────────────────────────────────────────────
+const i18nCache = {};
+function t(lang, key, vars = {}) {
+  if (!i18nCache[lang]) {
+    try {
+      i18nCache[lang] = require(`./locales/${lang}.json`);
+    } catch {
+      i18nCache[lang] = require('./locales/ru.json');
+    }
+  }
+  if (!i18nCache['ru']) {
+    try {
+      i18nCache['ru'] = require('./locales/ru.json');
+    } catch {}
+  }
+  let str = (i18nCache[lang] && i18nCache[lang][key]) || (i18nCache['ru'] && i18nCache['ru'][key]) || key;
+  Object.entries(vars).forEach(([k, v]) => {
+    str = str.replace(`{${k}}`, v);
+  });
+  return str;
+}
+
+// Per-user language preference map (in-memory, backed by client_prefs.language in DB)
+const userLang = new Map(); // chatId → 'ru' | 'en' | 'uk'
+
+async function getUserLang(chatId) {
+  if (userLang.has(chatId)) return userLang.get(chatId);
+  const row = await get('SELECT language FROM client_prefs WHERE chat_id=?', [chatId]).catch(() => null);
+  const lang = row?.language || 'ru';
+  userLang.set(chatId, lang);
+  return lang;
+}
+
+async function setUserLang(chatId, lang) {
+  userLang.set(chatId, lang);
+  await run(
+    `INSERT INTO client_prefs (chat_id, language) VALUES (?,?)
+     ON CONFLICT(chat_id) DO UPDATE SET language=excluded.language, updated_at=CURRENT_TIMESTAMP`,
+    [chatId, lang]
+  ).catch(e => console.error('[Bot] setUserLang:', e.message));
+}
+
 // ─── Admin Handlers module ────────────────────────────────────────────────────
 const _adminHandlers = require('./handlers/admin');
 _adminHandlers.init({ safeSend, isAdmin, esc });
@@ -502,6 +547,9 @@ async function buildClientKeyboard() {
     { text: 'ℹ️ О нас', callback_data: 'about_us' },
     { text: '💬 Менеджер', callback_data: 'contact_mgr' },
   ]);
+
+  // Row 7: support chat (БЛОК 25)
+  rows.push([{ text: '💬 Поддержка', callback_data: 'support_chat' }]);
 
   if (SITE_URL.startsWith('https://')) {
     const webappUrl = SITE_URL.replace(/\/$/, '') + '/webapp.html';
@@ -615,6 +663,7 @@ const KB_MAIN_ADMIN = (badge, score) => {
 
 async function showMainMenu(chatId, name) {
   await clearSession(chatId);
+  const lang = await getUserLang(chatId);
   const [greeting, menuText, welcomePhoto, clientKb] = await Promise.all([
     getSetting('greeting').catch(() => null),
     getSetting('main_menu_text').catch(() => null),
@@ -628,7 +677,8 @@ async function showMainMenu(chatId, name) {
     greetingText = esc(greeting.replace('{name}', name || 'гость'));
   } else {
     const menuLabel = menuText || 'Выберите действие:';
-    greetingText = `💎 *Nevesty Models*\n\nДобро пожаловать${name ? ', ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\n${esc(menuLabel)}`;
+    const welcomeMsg = t(lang, 'welcome');
+    greetingText = `💎 *Nevesty Models*\n\n${esc(welcomeMsg)}${name ? ' ' + esc(name) : ''}\\!\n\n_Агентство профессиональных моделей — Fashion, Commercial, Events_\n\n${esc(menuLabel)}`;
   }
   // If welcome photo is configured and looks like a URL, send as photo with caption
   if (welcomePhoto && typeof welcomePhoto === 'string' && welcomePhoto.startsWith('http')) {
@@ -6465,6 +6515,22 @@ function initBot(app) {
     return showReferralProgram(msg.chat.id);
   });
 
+  // ── /language — select bot language ────────────────────────────────────────
+  bot.onText(/^\/language/, async msg => {
+    const chatId = msg.chat.id;
+    return safeSend(chatId, 'Выберите язык / Choose language / Оберіть мову:', {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🇷🇺 Русский', callback_data: 'set_lang_ru' },
+            { text: '🇬🇧 English', callback_data: 'set_lang_en' },
+            { text: '🇺🇦 Українська', callback_data: 'set_lang_uk' },
+          ],
+        ],
+      },
+    });
+  });
+
   // ── /register_model — link Telegram account to model by phone ────────────────
   bot.onText(/^\/register_model/, async msg => {
     const chatId = msg.chat.id;
@@ -6528,6 +6594,20 @@ function initBot(app) {
         if (!isAdmin(chatId)) return;
         return showAdminMenu(chatId, q.from.first_name);
       }
+      // ── Language selection
+      if (data === 'set_lang_ru' || data === 'set_lang_en' || data === 'set_lang_uk') {
+        const langMap = { set_lang_ru: 'ru', set_lang_en: 'en', set_lang_uk: 'uk' };
+        const lang = langMap[data];
+        await setUserLang(chatId, lang);
+        const _flagMap = { ru: '🇷🇺 Русский', en: '🇬🇧 English', uk: '🇺🇦 Українська' };
+        const ackMap = {
+          ru: 'Язык изменён на Русский 🇷🇺',
+          en: 'Language changed to English 🇬🇧',
+          uk: 'Мова змінена на Українська 🇺🇦',
+        };
+        return safeSend(chatId, ackMap[lang]);
+      }
+
       // ── Admin sub-menus
       if (data === 'adm_menu_analytics') {
         if (!isAdmin(chatId)) return;
@@ -8093,6 +8173,60 @@ function initBot(app) {
         await run('DELETE FROM promo_codes WHERE id=?', [pid]).catch(() => {});
         await bot.answerCallbackQuery(q.id, { text: '🗑 Удалён' }).catch(() => {});
         return showAdminPromoList(chatId);
+      }
+      if (data === 'adm_promo_dtype_percent' || data === 'adm_promo_dtype_fixed') {
+        if (!isAdmin(chatId)) return;
+        const session = await getSession(chatId);
+        const sd = sessionData(session);
+        const dtype = data === 'adm_promo_dtype_percent' ? 'percent' : 'fixed';
+        const nd = { ...sd, discount_type: dtype };
+        await setSession(chatId, 'adm_promo_value', nd);
+        const label =
+          dtype === 'percent' ? 'процент скидки \\(например: 20\\)' : 'сумму скидки в рублях \\(например: 5000\\)';
+        return safeSend(chatId, `🏷 *Промокод: ${esc(nd.code)}*\n\nШаг 3/5 — Введите ${label}:`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_promos' }]] },
+        });
+      }
+      if (data === 'adm_promo_maxuses_0') {
+        if (!isAdmin(chatId)) return;
+        const session = await getSession(chatId);
+        const sd = sessionData(session);
+        const nd = { ...sd, max_uses: null };
+        await setSession(chatId, 'adm_promo_until', nd);
+        return safeSend(
+          chatId,
+          `🏷 *Промокод: ${esc(nd.code)}*\n\nШаг 5/5 — Срок действия\\.\n_Введите дату в формате ГГГГ\\-ММ\\-ДД или нажмите «Без срока»:_`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '∞ Без срока', callback_data: 'adm_promo_until_none' }],
+                [{ text: '❌ Отмена', callback_data: 'adm_promos' }],
+              ],
+            },
+          }
+        );
+      }
+      if (data === 'adm_promo_until_none') {
+        if (!isAdmin(chatId)) return;
+        const session = await getSession(chatId);
+        const sd = sessionData(session);
+        await run(
+          `INSERT INTO promo_codes (code, discount_type, discount_value, max_uses, created_by)
+           VALUES (UPPER(?), ?, ?, ?, ?)`,
+          [sd.code, sd.discount_type, sd.discount_value, sd.max_uses || null, chatId]
+        ).catch(() => {});
+        await clearSession(chatId);
+        const discLbl = sd.discount_type === 'percent' ? `${sd.discount_value}%` : `${sd.discount_value} ₽`;
+        return safeSend(
+          chatId,
+          `✅ *Промокод создан\\!*\n\nКод: *${esc(sd.code)}*\nСкидка: ${esc(discLbl)}\nСрок: *без ограничений*`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '📋 Все коды', callback_data: 'adm_promos_all' }]] },
+          }
+        );
       }
 
       // ── Message Templates (БЛОК 3.7) ──────────────────────────────────────
@@ -11056,6 +11190,122 @@ function initBot(app) {
           {
             parse_mode: 'MarkdownV2',
             reply_markup: { inline_keyboard: [[{ text: '← К списку', callback_data: 'adm_managers' }]] },
+          }
+        );
+      }
+
+      // ── Promo code creation wizard (БЛОК 21) ──────────────────────────────
+      if (state === 'adm_promo_name') {
+        const promoCode = text.trim().toUpperCase().replace(/\s+/g, '');
+        if (!promoCode || promoCode.length < 2) {
+          return safeSend(chatId, '❌ Код слишком короткий\\. Введите код промокода:', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_promos' }]] },
+          });
+        }
+        const existingPromo = await get('SELECT id FROM promo_codes WHERE UPPER(code)=?', [promoCode]).catch(
+          () => null
+        );
+        if (existingPromo) {
+          return safeSend(chatId, `❌ Промокод *${esc(promoCode)}* уже существует\\. Введите другой код:`, {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_promos' }]] },
+          });
+        }
+        await setSession(chatId, 'adm_promo_type', { code: promoCode });
+        return safeSend(chatId, `🏷 *Промокод: ${esc(promoCode)}*\n\nШаг 2/5 — Тип скидки:`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '% Процент', callback_data: 'adm_promo_dtype_percent' },
+                { text: '₽ Фиксированная сумма', callback_data: 'adm_promo_dtype_fixed' },
+              ],
+              [{ text: '❌ Отмена', callback_data: 'adm_promos' }],
+            ],
+          },
+        });
+      }
+      if (state === 'adm_promo_value') {
+        const promoVal = parseFloat(text.replace(',', '.'));
+        const promoSd = sessionData(await getSession(chatId));
+        if (!promoVal || promoVal <= 0) {
+          return safeSend(chatId, '❌ Введите корректное число больше нуля:', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_promos' }]] },
+          });
+        }
+        if (promoSd.discount_type === 'percent' && promoVal > 100) {
+          return safeSend(chatId, '❌ Процент не может превышать 100\\. Введите значение:', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_promos' }]] },
+          });
+        }
+        const nd = { ...promoSd, discount_value: promoVal };
+        await setSession(chatId, 'adm_promo_maxuses', nd);
+        return safeSend(
+          chatId,
+          `🏷 *Промокод: ${esc(nd.code)}*\n\nШаг 4/5 — Максимальное количество использований\\.\n_Введите число или нажмите «Безлимит»:_`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '∞ Безлимит', callback_data: 'adm_promo_maxuses_0' }],
+                [{ text: '❌ Отмена', callback_data: 'adm_promos' }],
+              ],
+            },
+          }
+        );
+      }
+      if (state === 'adm_promo_maxuses') {
+        const promoSd2 = sessionData(await getSession(chatId));
+        const maxUses = parseInt(text) || 0;
+        const nd = { ...promoSd2, max_uses: maxUses > 0 ? maxUses : null };
+        await setSession(chatId, 'adm_promo_until', nd);
+        return safeSend(
+          chatId,
+          `🏷 *Промокод: ${esc(nd.code)}*\n\nШаг 5/5 — Срок действия\\.\n_Введите дату в формате ГГГГ\\-ММ\\-ДД или нажмите «Без срока»:_`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '∞ Без срока', callback_data: 'adm_promo_until_none' }],
+                [{ text: '❌ Отмена', callback_data: 'adm_promos' }],
+              ],
+            },
+          }
+        );
+      }
+      if (state === 'adm_promo_until') {
+        const promoSd3 = sessionData(await getSession(chatId));
+        const dateMatchPromo = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!dateMatchPromo) {
+          return safeSend(chatId, '❌ Неверный формат даты\\. Введите в формате ГГГГ\\-ММ\\-ДД:', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_promos' }]] },
+          });
+        }
+        await run(
+          `INSERT INTO promo_codes (code, discount_type, discount_value, max_uses, valid_until, created_by)
+           VALUES (UPPER(?), ?, ?, ?, ?, ?)`,
+          [
+            promoSd3.code,
+            promoSd3.discount_type,
+            promoSd3.discount_value,
+            promoSd3.max_uses || null,
+            text.trim(),
+            chatId,
+          ]
+        ).catch(() => {});
+        await clearSession(chatId);
+        const discLbl =
+          promoSd3.discount_type === 'percent' ? `${promoSd3.discount_value}%` : `${promoSd3.discount_value} ₽`;
+        return safeSend(
+          chatId,
+          `✅ *Промокод создан\\!*\n\nКод: *${esc(promoSd3.code)}*\nСкидка: ${esc(discLbl)}\nДо: ${esc(text.trim())}`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '📋 Все коды', callback_data: 'adm_promos_all' }]] },
           }
         );
       }

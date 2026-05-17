@@ -2790,6 +2790,16 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
       }
     }
 
+    // ─── SSE real-time: notify admin dashboard of new order (БЛОК 26) ─────────
+    if (global.broadcastSSE) {
+      global.broadcastSSE('new_order', {
+        order_number,
+        client_name: s.client_name,
+        service_type: s.event_type,
+        id: result.id,
+      });
+    }
+
     res.json({ order_number, id: result.id });
   } catch (e) {
     next(e);
@@ -5207,6 +5217,10 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
         const phone10 = order.client_phone ? String(order.client_phone).replace(/\D/g, '').slice(-10) : null;
         wsServer.notifyOrderUpdate(id, status, phone10);
       }
+    }
+    // ─── SSE real-time: notify admin dashboard of status change (БЛОК 26) ────
+    if (status !== order.prev_status) {
+      global.broadcastSSE?.('order_status', { id, status, order_number: order.order_number });
     }
     await logAudit(req, 'status_change', 'order', id, { from: order.prev_status, to: status });
     // ─── CRM webhooks on status change (non-blocking) ────────────────────────
@@ -9174,18 +9188,28 @@ function webhookAuth(req, res, next) {
   if (!expected) {
     return res.status(503).json({ error: 'Webhook not configured on server' });
   }
-  if (!secret || secret !== expected) {
+  // Use timing-safe comparison to prevent secret-oracle timing attacks
+  let authorized = false;
+  if (secret && secret.length === expected.length) {
+    try {
+      authorized = crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(expected));
+    } catch {}
+  }
+  if (!authorized) {
     return res.status(401).json({ error: 'unauthorized' });
   }
   next();
 }
 
 // Helper — log every incoming webhook request (non-blocking)
+// payload is truncated to 10 000 chars to prevent DB bloat from large bodies
 async function logWebhook(endpoint, payload, status, ip) {
   try {
+    let payloadStr = payload ? JSON.stringify(payload) : null;
+    if (payloadStr && payloadStr.length > 10000) payloadStr = payloadStr.slice(0, 10000);
     await run('INSERT INTO webhook_logs (endpoint, payload, status, ip) VALUES (?,?,?,?)', [
       endpoint,
-      payload ? JSON.stringify(payload) : null,
+      payloadStr,
       status,
       ip || null,
     ]);
@@ -9423,6 +9447,61 @@ router.get('/admin/logs', auth, async (req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+// ─── SSE: Admin real-time event stream (БЛОК 26) ─────────────────────────────
+// GET /api/admin/events — Server-Sent Events stream for admin dashboard
+// Auth: JWT token via Authorization header OR ?token= query param (for EventSource)
+router.get('/admin/events', (req, res) => {
+  // EventSource cannot set custom headers, so accept token via query param too
+  let token = null;
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7);
+  } else if (req.query.token) {
+    token = req.query.token;
+  }
+
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const jwt = require('jsonwebtoken');
+    const payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    if (payload.type && payload.type !== 'admin') {
+      return res.status(401).json({ error: 'Invalid token type' });
+    }
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering for SSE
+  res.flushHeaders();
+
+  const clientId = Date.now() + Math.random();
+  global.sseClients.set(clientId, res);
+
+  // Send initial connection confirmation
+  res.write(`event: connected\ndata: ${JSON.stringify({ clientId, ts: new Date().toISOString() })}\n\n`);
+
+  // Heartbeat every 30 seconds to keep connection alive
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(':\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      global.sseClients.delete(clientId);
+    }
+  }, 30000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    global.sseClients.delete(clientId);
+  });
 });
 
 // ─── Promo Codes (БЛОК 21) ────────────────────────────────────────────────────

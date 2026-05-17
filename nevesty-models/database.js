@@ -1056,6 +1056,37 @@ async function initDatabase() {
     UNIQUE(model_id, date)
   )`).catch(() => {});
 
+  // Schema v40 — support_messages table for client ↔ manager chat (БЛОК 25)
+  const v40 = await get(`SELECT version FROM schema_versions WHERE version=40`).catch(() => null);
+  if (!v40) {
+    await run(`CREATE TABLE IF NOT EXISTS support_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_chat_id INTEGER NOT NULL,
+      to_chat_id INTEGER,
+      message TEXT NOT NULL,
+      direction TEXT DEFAULT 'client_to_admin',
+      is_read INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_support_messages_from ON support_messages(from_chat_id)`).catch(() => {});
+    await run(
+      `CREATE INDEX IF NOT EXISTS idx_support_messages_direction ON support_messages(direction, created_at DESC)`
+    ).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(40, 'support_messages table for client↔manager chat (БЛОК 25)')`
+    ).catch(() => {});
+  }
+  // Idempotent — ensure support_messages exists even on DBs that skipped v40
+  await run(`CREATE TABLE IF NOT EXISTS support_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_chat_id INTEGER NOT NULL,
+    to_chat_id INTEGER,
+    message TEXT NOT NULL,
+    direction TEXT DEFAULT 'client_to_admin',
+    is_read INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`).catch(() => {});
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {

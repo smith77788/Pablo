@@ -1,0 +1,10 @@
+{
+  "welcome": "Welcome to Nevesty Models! 👑",
+  "catalog_btn": "📸 Model Catalog",
+  "book_btn": "📋 Submit a Request",
+  "my_orders_btn": "📁 My Orders",
+  "order_confirmed": "✅ Order #{number} confirmed!",
+  "order_cancelled": "❌ Order #{number} cancelled",
+  "promo_valid": "🎉 Promo code accepted! Discount {discount}",
+  "promo_invalid": "❌ Promo code is invalid"
+}

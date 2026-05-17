@@ -18,6 +18,23 @@ let botInstance = null;
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ─── SSE: Global Map for admin panel real-time notifications (БЛОК 26) ─────────
+const sseClients = new Map();
+global.sseClients = sseClients;
+
+function broadcastSSE(event, data) {
+  const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  sseClients.forEach((res, clientId) => {
+    try {
+      res.write(msg);
+    } catch (e) {
+      // Client disconnected, clean up
+      sseClients.delete(clientId);
+    }
+  });
+}
+global.broadcastSSE = broadcastSSE;
+
 // ─── Logging ─────────────────────────────────────────────────────────────────
 // Logs go to stdout (Docker/PM2 handles rotation via logrotate or docker logs)
 const LOG_JSON = process.env.NODE_ENV === 'production' || process.env.LOG_JSON === '1';

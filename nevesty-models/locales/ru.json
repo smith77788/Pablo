@@ -1,0 +1,10 @@
+{
+  "welcome": "Добро пожаловать в Nevesty Models! 👑",
+  "catalog_btn": "📸 Каталог моделей",
+  "book_btn": "📋 Оставить заявку",
+  "my_orders_btn": "📁 Мои заявки",
+  "order_confirmed": "✅ Заявка #{number} подтверждена!",
+  "order_cancelled": "❌ Заявка #{number} отменена",
+  "promo_valid": "🎉 Промокод принят! Скидка {discount}",
+  "promo_invalid": "❌ Промокод недействителен"
+}
