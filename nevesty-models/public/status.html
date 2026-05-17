@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Статус сервиса — Nevesty Models</title>
+    <meta name="robots" content="noindex" />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+        background: #f8f9fa;
+        color: #1a1a1a;
+        min-height: 100vh;
+      }
+      .container {
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 40px 20px;
+      }
+
+      /* Header */
+      .header {
+        margin-bottom: 32px;
+      }
+      .header h1 {
+        font-size: 1.6rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .header p {
+        color: #666;
+        margin-top: 6px;
+        font-size: 0.9rem;
+      }
+
+      /* Overall badge */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .badge-ok {
+        background: #d1fae5;
+        color: #065f46;
+      }
+      .badge-warn {
+        background: #fef9c3;
+        color: #854d0e;
+      }
+      .badge-err {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
+      /* Service rows */
+      .section {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+        margin-bottom: 20px;
+        overflow: hidden;
+      }
+      .section-title {
+        padding: 16px 20px 10px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #888;
+        border-bottom: 1px solid #f0f0f0;
+      }
+      .service-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 20px;
+        border-bottom: 1px solid #f5f5f5;
+      }
+      .service-row:last-child {
+        border-bottom: none;
+      }
+      .service-name {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.95rem;
+      }
+      .service-icon {
+        font-size: 1.1rem;
+        width: 24px;
+        text-align: center;
+      }
+      .service-status {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.85rem;
+        font-weight: 500;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .dot-ok {
+        background: #22c55e;
+      }
+      .dot-warn {
+        background: #f59e0b;
+      }
+      .dot-err {
+        background: #ef4444;
+      }
+      .dot-loading {
+        background: #d1d5db;
+        animation: pulse 1.2s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+
+      .status-ok {
+        color: #16a34a;
+      }
+      .status-warn {
+        color: #d97706;
+      }
+      .status-err {
+        color: #dc2626;
+      }
+      .status-loading {
+        color: #9ca3af;
+      }
+
+      /* Uptime bar */
+      .uptime-section {
+        padding: 16px 20px;
+      }
+      .uptime-label {
+        font-size: 0.8rem;
+        color: #888;
+        margin-bottom: 8px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .uptime-grid {
+        display: flex;
+        gap: 2px;
+        align-items: flex-end;
+      }
+      .uptime-block {
+        flex: 1;
+        height: 28px;
+        border-radius: 3px;
+        background: #d1fae5;
+        cursor: pointer;
+        position: relative;
+        transition: opacity 0.15s;
+      }
+      .uptime-block:hover {
+        opacity: 0.75;
+      }
+      .uptime-block.degraded {
+        background: #fde68a;
+      }
+      .uptime-block.down {
+        background: #fca5a5;
+      }
+      .uptime-block.no-data {
+        background: #e5e7eb;
+      }
+
+      /* Tooltip */
+      .uptime-block::after {
+        content: attr(data-tip);
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1a1a1a;
+        color: #fff;
+        font-size: 0.72rem;
+        white-space: nowrap;
+        padding: 3px 7px;
+        border-radius: 4px;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 10;
+        transition: opacity 0.15s;
+      }
+      .uptime-block:hover::after {
+        opacity: 1;
+      }
+
+      .uptime-pct {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #16a34a;
+      }
+      .uptime-pct.warn {
+        color: #d97706;
+      }
+      .uptime-pct.bad {
+        color: #dc2626;
+      }
+
+      /* Stats row */
+      .stats-row {
+        display: flex;
+        gap: 20px;
+        padding: 14px 20px;
+        flex-wrap: wrap;
+      }
+      .stat-item {
+        flex: 1;
+        min-width: 100px;
+      }
+      .stat-label {
+        font-size: 0.75rem;
+        color: #888;
+      }
+      .stat-value {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-top: 2px;
+      }
+
+      /* Footer */
+      .footer {
+        text-align: center;
+        color: #9ca3af;
+        font-size: 0.8rem;
+        margin-top: 24px;
+      }
+      .footer a {
+        color: #9ca3af;
+        text-decoration: none;
+      }
+      .footer a:hover {
+        text-decoration: underline;
+      }
+
+      .refresh-btn {
+        background: none;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        color: #444;
+        transition: background 0.15s;
+      }
+      .refresh-btn:hover {
+        background: #f3f4f6;
+      }
+
+      @media (max-width: 480px) {
+        .container {
+          padding: 20px 12px;
+        }
+        .stats-row {
+          gap: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <span id="overall-badge" class="badge badge-ok">
+          <span id="overall-dot" class="dot dot-loading"></span>
+          <span id="overall-text">Загрузка...</span>
+        </span>
+        <h1>Статус сервиса</h1>
+        <p id="lastCheck">Nevesty Models — проверка выполняется...</p>
+      </div>
+
+      <!-- Services -->
+      <div class="section">
+        <div class="section-title">Компоненты</div>
+
+        <div class="service-row">
+          <span class="service-name"><span class="service-icon">🌐</span> Веб-сайт</span>
+          <span class="service-status" id="web-status">
+            <span class="dot dot-loading"></span>
+            <span class="status-loading">Проверка...</span>
+          </span>
+        </div>
+
+        <div class="service-row">
+          <span class="service-name"><span class="service-icon">🤖</span> Telegram Бот</span>
+          <span class="service-status" id="bot-status">
+            <span class="dot dot-loading"></span>
+            <span class="status-loading">Проверка...</span>
+          </span>
+        </div>
+
+        <div class="service-row">
+          <span class="service-name"><span class="service-icon">🗄️</span> База данных</span>
+          <span class="service-status" id="db-status">
+            <span class="dot dot-loading"></span>
+            <span class="status-loading">Проверка...</span>
+          </span>
+        </div>
+
+        <div class="service-row">
+          <span class="service-name"><span class="service-icon">💾</span> Резервные копии</span>
+          <span class="service-status" id="backup-status">
+            <span class="dot dot-loading"></span>
+            <span class="status-loading">Проверка...</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="section">
+        <div class="section-title">Метрики сервера</div>
+        <div class="stats-row">
+          <div class="stat-item">
+            <div class="stat-label">Аптайм</div>
+            <div class="stat-value" id="stat-uptime">—</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Версия</div>
+            <div class="stat-value" id="stat-version">—</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Задержка БД</div>
+            <div class="stat-value" id="stat-db-latency">—</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Активных заявок</div>
+            <div class="stat-value" id="stat-orders">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 90-day uptime history -->
+      <div class="section">
+        <div class="section-title" style="display: flex; justify-content: space-between; align-items: center">
+          <span>История доступности — 90 дней</span>
+          <span id="uptime-pct" class="uptime-pct">—</span>
+        </div>
+        <div class="uptime-section">
+          <div class="uptime-grid" id="uptime-grid">
+            <!-- filled by JS -->
+          </div>
+          <div class="uptime-label" style="margin-top: 8px; margin-bottom: 0">
+            <span>90 дней назад</span>
+            <span>Сегодня</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer" style="display: flex; justify-content: space-between; align-items: center">
+        <span>Обновляется каждую минуту</span>
+        <button class="refresh-btn" onclick="checkStatus()">Обновить</button>
+      </div>
+      <div class="footer" style="margin-top: 8px">
+        <a href="/">← На главную</a>
+      </div>
+    </div>
+
+    <script>
+      // ─── Helpers ──────────────────────────────────────────────────────────────────
+      function fmtUptime(seconds) {
+        if (seconds == null) return '—';
+        const d = Math.floor(seconds / 86400);
+        const h = Math.floor((seconds % 86400) / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        if (d > 0) return `${d}д ${h}ч ${m}м`;
+        if (h > 0) return `${h}ч ${m}м`;
+        return `${m}м`;
+      }
+
+      function setServiceStatus(id, status, label) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const dotClass = status === 'ok' ? 'dot-ok' : status === 'warn' ? 'dot-warn' : 'dot-err';
+        const txtClass = status === 'ok' ? 'status-ok' : status === 'warn' ? 'status-warn' : 'status-err';
+        el.innerHTML = `<span class="dot ${dotClass}"></span><span class="${txtClass}">${label}</span>`;
+      }
+
+      function setOverall(status) {
+        const badge = document.getElementById('overall-badge');
+        const dot = document.getElementById('overall-dot');
+        const txt = document.getElementById('overall-text');
+        badge.className = 'badge';
+        dot.className = 'dot';
+        if (status === 'ok') {
+          badge.classList.add('badge-ok');
+          dot.classList.add('dot-ok');
+          txt.textContent = 'Все системы работают';
+        } else if (status === 'degraded') {
+          badge.classList.add('badge-warn');
+          dot.classList.add('dot-warn');
+          txt.textContent = 'Частичный сбой';
+        } else {
+          badge.classList.add('badge-err');
+          dot.classList.add('dot-err');
+          txt.textContent = 'Сбой сервиса';
+        }
+      }
+
+      // ─── Fetch current status ────────────────────────────────────────────────────
+      async function checkStatus() {
+        try {
+          const data = await fetch('/api/status').then(r => r.json());
+
+          // Overall
+          setOverall(data.status || 'down');
+
+          // Last check time
+          const now = new Date();
+          document.getElementById('lastCheck').textContent = 'Последняя проверка: ' + now.toLocaleTimeString('ru-RU');
+
+          // Services
+          const svc = data.services || {};
+
+          // Web
+          setServiceStatus('web-status', svc.web === 'ok' ? 'ok' : 'err', svc.web === 'ok' ? 'Работает' : 'Недоступен');
+
+          // Bot
+          const botOk = svc.bot === 'ok';
+          const botWarn = svc.bot === 'configured';
+          setServiceStatus(
+            'bot-status',
+            botOk ? 'ok' : botWarn ? 'warn' : 'err',
+            botOk ? 'Работает' : botWarn ? 'Настроен (не запущен)' : 'Недоступен'
+          );
+
+          // DB
+          const dbOk = svc.db === 'ok';
+          const dbLatency = data.db_latency_ms != null ? ` (${data.db_latency_ms}мс)` : '';
+          setServiceStatus('db-status', dbOk ? 'ok' : 'err', dbOk ? `Работает${dbLatency}` : 'Ошибка подключения');
+
+          // Backup
+          const bkStatus = svc.backup;
+          setServiceStatus(
+            'backup-status',
+            bkStatus === 'ok' ? 'ok' : bkStatus === 'no_backups_yet' ? 'warn' : 'err',
+            bkStatus === 'ok'
+              ? 'Резервные копии актуальны'
+              : bkStatus === 'no_backups_yet'
+                ? 'Нет резервных копий'
+                : 'Ошибка резервного копирования'
+          );
+
+          // Stats
+          document.getElementById('stat-uptime').textContent = fmtUptime(data.uptime_seconds);
+          document.getElementById('stat-version').textContent = data.version || '—';
+          document.getElementById('stat-db-latency').textContent =
+            data.db_latency_ms != null ? data.db_latency_ms + ' мс' : '—';
+          document.getElementById('stat-orders').textContent = data.active_orders != null ? data.active_orders : '—';
+        } catch (e) {
+          setOverall('down');
+          document.getElementById('lastCheck').textContent = 'Ошибка получения статуса. Проверьте подключение.';
+          ['web-status', 'bot-status', 'db-status', 'backup-status'].forEach(id => {
+            setServiceStatus(id, 'err', 'Недоступен');
+          });
+        }
+      }
+
+      // ─── Fetch 90-day history ─────────────────────────────────────────────────────
+      async function loadHistory() {
+        const grid = document.getElementById('uptime-grid');
+        const pctEl = document.getElementById('uptime-pct');
+        try {
+          const data = await fetch('/api/status/history?days=90').then(r => r.json());
+          const days = data.days || [];
+
+          // Build grid
+          grid.innerHTML = '';
+          let okCount = 0;
+          days.forEach(day => {
+            const block = document.createElement('div');
+            block.className = 'uptime-block';
+            if (day.status === 'ok') {
+              okCount++;
+            } else if (day.status === 'degraded') {
+              block.classList.add('degraded');
+            } else if (day.status === 'down') {
+              block.classList.add('down');
+            } else {
+              block.classList.add('no-data');
+            }
+            const uptimePct = day.uptime_pct != null ? ` (${day.uptime_pct}%)` : '';
+            block.setAttribute('data-tip', `${day.date}: ${statusLabel(day.status)}${uptimePct}`);
+            grid.appendChild(block);
+          });
+
+          // Calculate overall uptime percentage
+          const totalDays = days.filter(d => d.status !== 'no_data').length;
+          const pct = totalDays > 0 ? ((okCount / totalDays) * 100).toFixed(2) : null;
+          if (pct !== null) {
+            pctEl.textContent = pct + '%';
+            if (pct >= 99) pctEl.className = 'uptime-pct';
+            else if (pct >= 95) pctEl.className = 'uptime-pct warn';
+            else pctEl.className = 'uptime-pct bad';
+          } else {
+            pctEl.textContent = 'Нет данных';
+            pctEl.className = 'uptime-pct';
+          }
+        } catch (e) {
+          grid.innerHTML = '<span style="color:#9ca3af;font-size:0.85rem">Нет данных</span>';
+          pctEl.textContent = '—';
+        }
+      }
+
+      function statusLabel(s) {
+        if (s === 'ok') return 'Работает';
+        if (s === 'degraded') return 'Частичный сбой';
+        if (s === 'down') return 'Недоступен';
+        return 'Нет данных';
+      }
+
+      // ─── Init ─────────────────────────────────────────────────────────────────────
+      checkStatus();
+      loadHistory();
+      setInterval(checkStatus, 60000);
+      setInterval(loadHistory, 300000); // refresh history every 5 min
+    </script>
+  </body>
+</html>
