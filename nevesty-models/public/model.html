@@ -2049,7 +2049,18 @@
             const pages = data.pages || 1;
 
             if (!reviews.length && page === 1) {
-              container.innerHTML = '<p style="color:var(--text-dim);font-size:0.9rem">Пока нет отзывов</p>';
+              const bookUrl = _currentModel
+                ? `/booking.html?model=${_currentModel.id}&model_id=${_currentModel.id}&model_name=${encodeURIComponent(_currentModel.name || '')}`
+                : '/booking.html';
+              container.innerHTML = `
+                <div class="model-reviews-empty">
+                  <div class="model-reviews-empty-icon" aria-hidden="true">✦</div>
+                  <p class="model-reviews-empty-title">Пока нет отзывов</p>
+                  <p class="model-reviews-empty-sub">Будьте первым, кто оставит отзыв о работе с этой моделью</p>
+                  <a href="${escHtml(bookUrl)}" class="model-reviews-cta-btn">
+                    Оставить отзыв
+                  </a>
+                </div>`;
               el('reviews-avg') && (el('reviews-avg').style.display = 'none');
               el('reviews-pagination') && (el('reviews-pagination').innerHTML = '');
               return;
@@ -2097,7 +2108,7 @@
               )
               .join('');
 
-            // Pagination
+            // Pagination + "Leave a review" CTA
             const pag = el('reviews-pagination');
             if (pag) {
               let pagHtml = '';
@@ -2107,6 +2118,16 @@
                 pagHtml += `<button onclick="loadModelReviews(${modelId},${page + 1})" style="padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:0.8rem;border-radius:6px;cursor:pointer">Ещё отзывы →</button>`;
               if (pages > 1)
                 pagHtml += `<span style="font-size:0.75rem;color:var(--text-dim);margin-left:8px">${page} / ${pages}</span>`;
+
+              // "Leave a review" CTA — shown on first page when reviews exist
+              if (page === 1 && _currentModel) {
+                const bookUrl = `/booking.html?model=${_currentModel.id}&model_id=${_currentModel.id}&model_name=${encodeURIComponent(_currentModel.name || '')}`;
+                pagHtml += `<div style="margin-top:20px;text-align:center">
+                  <a href="${escHtml(bookUrl)}" class="model-reviews-cta-btn">
+                    ✍️ Оставить отзыв
+                  </a>
+                </div>`;
+              }
               pag.innerHTML = pagHtml;
             }
           } catch (e) {
