@@ -162,6 +162,13 @@
   }
   if (grid) grid.style.display = '';
 
+  // БЛОК 9.3: catalog_view — fire when catalog is successfully loaded
+  if (typeof trackEvent === 'function') {
+    trackEvent('catalog_view', { model_count: allModels.length });
+  } else if (window.NM?.analytics) {
+    NM.analytics.event('catalog_view', { model_count: allModels.length });
+  }
+
   // ── Populate city dropdown from /api/cities (admin-managed list) ─────────────
   try {
     const citiesRes = await fetch('/api/cities');

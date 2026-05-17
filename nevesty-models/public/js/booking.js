@@ -1163,8 +1163,11 @@
       if (!state._step1AnalyticsFired) {
         if (window.gtag) gtag('event', 'begin_checkout', { event_type: state.event_type });
         if (window.ym && window.YM_ID) ym(window.YM_ID, 'reachGoal', 'booking_start', { event_type: state.event_type });
-        // БЛОК 9.3: booking_started event
-        if (typeof trackEvent === 'function') trackEvent('booking_started', { step: 1, event_type: state.event_type });
+        // БЛОК 9.3: booking_start and booking_started events
+        if (typeof trackEvent === 'function') {
+          trackEvent('booking_start', { event_type: state.event_type });
+          trackEvent('booking_started', { step: 1, event_type: state.event_type });
+        }
       }
     }
 
@@ -1360,9 +1363,11 @@
           if (window.ym && window.YM_ID) {
             ym(window.YM_ID, 'reachGoal', 'booking_start', { event_type: state.event_type });
           }
-          // БЛОК 9.3: booking_started event
-          if (typeof trackEvent === 'function')
+          // БЛОК 9.3: booking_start and booking_started events
+          if (typeof trackEvent === 'function') {
+            trackEvent('booking_start', { event_type: state.event_type });
             trackEvent('booking_started', { step: 1, event_type: state.event_type });
+          }
           state._step1AnalyticsFired = true;
           goToStep(2);
         }
@@ -1566,6 +1571,10 @@
           currency: 'RUB',
           event_type: state.event_type,
         });
+      }
+      // БЛОК 9.3: booking_complete event (spec exact name)
+      if (typeof trackEvent === 'function') {
+        trackEvent('booking_complete', { order_number: orderNum, event_type: state.event_type, value: budgetNum });
       }
       // Yandex: booking_complete goal — БЛОК 9.3 spec
       if (typeof trackYm === 'function') {
