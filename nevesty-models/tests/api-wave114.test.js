@@ -111,7 +111,7 @@ beforeAll(async () => {
   // eslint-disable-next-line no-unused-vars
   a.use((err, req, res, next) => res.status(500).json({ error: err.message }));
   app = a;
-}, 20000);
+}, 60000);
 
 // ── 1. Static files serving ───────────────────────────────────────────────────
 

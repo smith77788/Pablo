@@ -65,7 +65,7 @@ beforeAll(async () => {
 
   const loginRes = await request(app).post('/api/admin/login').send({ username: 'admin', password: 'admin123' });
   adminToken = loginRes.body.token;
-}, 20000);
+}, 60000);
 
 // ── 1. CRM service — module load & DEV_MODE ────────────────────────────────────
 

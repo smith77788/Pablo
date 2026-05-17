@@ -1269,39 +1269,41 @@ async function initDatabase() {
     await seedSampleReviews();
   }
 
-  // VACUUM + WAL checkpoint every Sunday at 03:00
-  function scheduleVacuum() {
-    const now = new Date();
-    const nextSunday = new Date(now);
-    nextSunday.setDate(now.getDate() + ((7 - now.getDay()) % 7) || 7);
-    nextSunday.setHours(3, 0, 0, 0);
-    const delay = nextSunday - now;
-    setTimeout(async () => {
-      try {
-        await run('PRAGMA wal_checkpoint(TRUNCATE)');
-        await run('VACUUM');
-        console.log('[DB] Weekly VACUUM + WAL checkpoint completed');
-      } catch (e) {
-        console.error('[DB] VACUUM error:', e.message);
-      }
-      scheduleVacuum(); // reschedule
-    }, delay).unref(); // allow process to exit cleanly if no other work remains
-  }
-  scheduleVacuum();
-
-  // WAL checkpoint (PASSIVE) every 6 hours to keep WAL file from growing
-  const WAL_INTERVAL = 6 * 60 * 60 * 1000;
-  const walTimer = setInterval(async () => {
-    try {
-      await run('PRAGMA wal_checkpoint(PASSIVE)');
-    } catch (e) {
-      console.error('[DB] WAL checkpoint error:', e.message);
+  // VACUUM + WAL checkpoint every Sunday at 03:00 (skipped in test mode)
+  if (process.env.NODE_ENV !== 'test') {
+    function scheduleVacuum() {
+      const now = new Date();
+      const nextSunday = new Date(now);
+      nextSunday.setDate(now.getDate() + ((7 - now.getDay()) % 7) || 7);
+      nextSunday.setHours(3, 0, 0, 0);
+      const delay = nextSunday - now;
+      setTimeout(async () => {
+        try {
+          await run('PRAGMA wal_checkpoint(TRUNCATE)');
+          await run('VACUUM');
+          console.log('[DB] Weekly VACUUM + WAL checkpoint completed');
+        } catch (e) {
+          console.error('[DB] VACUUM error:', e.message);
+        }
+        scheduleVacuum(); // reschedule
+      }, delay).unref(); // allow process to exit cleanly if no other work remains
     }
-  }, WAL_INTERVAL);
-  walTimer.unref();
+    scheduleVacuum();
 
-  // Automated DB backup every 6 hours
-  scheduleBackups();
+    // WAL checkpoint (PASSIVE) every 6 hours to keep WAL file from growing
+    const WAL_INTERVAL = 6 * 60 * 60 * 1000;
+    const walTimer = setInterval(async () => {
+      try {
+        await run('PRAGMA wal_checkpoint(PASSIVE)');
+      } catch (e) {
+        console.error('[DB] WAL checkpoint error:', e.message);
+      }
+    }, WAL_INTERVAL);
+    walTimer.unref();
+
+    // Automated DB backup every 6 hours
+    scheduleBackups();
+  }
 
   console.log('Database initialized');
 }
