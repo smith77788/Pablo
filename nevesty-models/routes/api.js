@@ -2194,7 +2194,7 @@ router.patch('/admin/models/:id/availability', auth, async (req, res, next) => {
     if (!modelExists) return res.status(404).json({ error: 'Model not found' });
 
     const { date, is_available, reason } = req.body;
-    if (!date || !/^d{4}-d{2}-d{2}$/.test(date)) {
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
     }
     if (is_available === undefined || is_available === null) {
@@ -2548,7 +2548,7 @@ router.get('/models/:id/availability-schedule', async (req, res, next) => {
     let fromStr = todayStr;
     let toStr = maxStr;
     if (month) {
-      if (!/^d{4}-d{2}$/.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' });
+      if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' });
       const [yr, mo] = month.split('-').map(Number);
       if (mo < 1 || mo > 12) return res.status(400).json({ error: 'month must be 01-12' });
       const mFirst = `${month}-01`;
@@ -2625,6 +2625,7 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
       utm_source,
       utm_medium,
       utm_campaign,
+      promo_code,
     } = req.body;
 
     if (!sanitize(client_name, 100)) return res.status(400).json({ error: 'Укажите ваше имя' });
@@ -2681,9 +2682,43 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
       utm_campaign: sanitize(utm_campaign, 100) || '',
     };
 
+    // ─── Availability check (БЛОК 22) ─────────────────────────────────────
+    if (primaryModelId && event_date && /^\d{4}-\d{2}-\d{2}$/.test(event_date)) {
+      // Check model_availability_schedule first
+      const schedRow = await get('SELECT is_available FROM model_availability_schedule WHERE model_id=? AND date=?', [
+        primaryModelId,
+        event_date,
+      ]);
+      if (schedRow && schedRow.is_available === 0) {
+        return res.status(409).json({ error: 'model_unavailable', date: event_date });
+      }
+      // Fallback: check legacy model_busy_dates
+      if (!schedRow) {
+        const busyRow = await get('SELECT id FROM model_busy_dates WHERE model_id=? AND busy_date=?', [
+          primaryModelId,
+          event_date,
+        ]);
+        if (busyRow) {
+          return res.status(409).json({ error: 'model_unavailable', date: event_date });
+        }
+      }
+    }
+
+    // ─── Promo code (БЛОК 21) ─────────────────────────────────────────────────
+    let promoCodeId = null;
+    let discountAmount = null;
+    if (promo_code && typeof promo_code === 'string' && promo_code.trim()) {
+      const { resolvePromo } = require('./promo');
+      const promoResult = await resolvePromo(promo_code.trim(), null).catch(() => null);
+      if (promoResult?.valid) {
+        promoCodeId = promoResult.promo_code_id;
+        discountAmount = promoResult.discount_amount || null;
+      }
+    }
+
     const result = await run(
-      `INSERT INTO orders (order_number,client_name,client_phone,client_email,client_telegram,client_chat_id,model_id,model_ids,event_type,event_date,event_duration,location,budget,comments,utm_source,utm_medium,utm_campaign)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO orders (order_number,client_name,client_phone,client_email,client_telegram,client_chat_id,model_id,model_ids,event_type,event_date,event_duration,location,budget,comments,utm_source,utm_medium,utm_campaign,promo_code_id,discount_amount)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         order_number,
         s.client_name,
@@ -2702,8 +2737,15 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
         s.utm_source,
         s.utm_medium,
         s.utm_campaign,
+        promoCodeId,
+        discountAmount,
       ]
     );
+
+    // Increment promo used_count (non-blocking, best-effort)
+    if (promoCodeId) {
+      run('UPDATE promo_codes SET used_count = used_count + 1 WHERE id=?', [promoCodeId]).catch(() => {});
+    }
 
     if (botInstance) {
       botInstance
@@ -9382,6 +9424,10 @@ router.get('/admin/logs', auth, async (req, res, next) => {
     next(e);
   }
 });
+
+// ─── Promo Codes (БЛОК 21) ────────────────────────────────────────────────────
+const promoRouter = require('./promo');
+router.use('/', promoRouter);
 
 module.exports = router;
 module.exports.setBot = setBot;

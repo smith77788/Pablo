@@ -2199,7 +2199,7 @@
           }
 
           // Load availability section
-          loadAvailabilitySection(m.id, m.busy_dates || []);
+          loadAvailabilitySection(m.id);
 
           // Show profile, hide skeleton
           hide('skeletonView');
@@ -2214,37 +2214,66 @@
           if (typeof window._recalcStickyHero === 'function') setTimeout(window._recalcStickyHero, 100);
         }
 
-        // ── Availability section ──────────────────────────────────────────────────
-        function loadAvailabilitySection(modelId, busyDates) {
+        // ── Availability section — 30-day calendar grid (БЛОК 22) ─────────────────
+        async function loadAvailabilitySection(modelId) {
           const container = el('availabilityContent');
           if (!container) return;
-          // Filter busy dates in next 30 days
-          const today = new Date();
-          const todayStr = today.toISOString().slice(0, 10);
-          const in30 = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-          const upcomingBusy = (busyDates || []).filter(d => d >= todayStr && d <= in30);
-          if (!upcomingBusy.length) {
-            container.innerHTML = `<div style="display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:8px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);font-size:0.9rem;color:#6ee7b7">
-            <span>✅</span> <span>Свободна в ближайшие 30 дней</span>
-          </div>`;
-          } else {
+          container.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Загрузка календаря...</div>';
+          try {
+            // Fetch availability schedule for the next 30 days
+            const today = new Date();
+            const month = today.toISOString().slice(0, 7);
+            const resp = await fetch('/api/models/' + modelId + '/availability-schedule?month=' + month);
+            if (!resp.ok) throw new Error('fetch failed');
+            const days = await resp.json(); // [{date, available}]
+
+            if (!Array.isArray(days) || !days.length) {
+              container.innerHTML =
+                '<div style="color:var(--text-dim);font-size:0.85rem">Нет данных о расписании.</div>';
+              return;
+            }
+
+            // Limit to 30 days
+            const shown = days.slice(0, 30);
             const fmt = d => {
               try {
-                return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+                return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
               } catch {
                 return d;
               }
             };
-            const dateList = upcomingBusy
-              .map(
-                d =>
-                  `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);font-size:0.8rem;color:#fca5a5">${fmt(d)}</span>`
-              )
+
+            const cells = shown
+              .map(({ date, available }) => {
+                const bg = available
+                  ? 'background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);color:#6ee7b7'
+                  : 'background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);color:#fca5a5';
+                const icon = available ? '✓' : '✕';
+                const title = available ? 'Свободна' : 'Занята';
+                return `<div title="${date} — ${title}" style="${bg};border-radius:6px;padding:6px 4px;text-align:center;font-size:0.72rem;min-width:46px;cursor:default">
+                <div style="font-size:0.7rem;opacity:0.7">${fmt(date)}</div>
+                <div style="font-size:0.85rem;margin-top:2px">${icon}</div>
+              </div>`;
+              })
               .join('');
-            container.innerHTML = `<div style="padding:10px 16px;border-radius:8px;background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2)">
-            <div style="font-size:0.8rem;color:#9ca3af;margin-bottom:8px">Занята в ближайшие 30 дней:</div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px">${dateList}</div>
-          </div>`;
+
+            const allFree = shown.every(d => d.available);
+            const summary = allFree
+              ? '<div style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);font-size:0.82rem;color:#6ee7b7;margin-bottom:10px"><span>✅</span><span>Свободна в ближайшие 30 дней</span></div>'
+              : '';
+
+            container.innerHTML =
+              summary +
+              '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(50px,1fr));gap:6px;margin-top:4px">' +
+              cells +
+              '</div>' +
+              '<div style="margin-top:8px;display:flex;gap:12px;font-size:0.75rem;color:var(--text-dim)">' +
+              '<span style="color:#6ee7b7">✓ Свободна</span>' +
+              '<span style="color:#fca5a5">✕ Занята</span>' +
+              '</div>';
+          } catch (e) {
+            // Fallback: show simple status
+            container.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Расписание недоступно.</div>';
           }
         }
 

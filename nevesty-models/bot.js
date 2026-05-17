@@ -60,6 +60,7 @@ const ACTIVE_BOOKING_STATES = new Set([
   'bk_s2_loc',
   'bk_s2_budget',
   'bk_s2_comments',
+  'bk_s2_promo',
   'bk_s3_name',
   'bk_s3_phone',
   'bk_s3_email',
@@ -536,7 +537,10 @@ const KB_ADMIN_MARKETING = {
       { text: '📤 Экспорт заявок', callback_data: 'adm_export' },
       { text: '📸 Соцсети', callback_data: 'adm_social' },
     ],
-    [{ text: '📋 Шаблоны сообщений', callback_data: 'adm_templates' }],
+    [
+      { text: '📋 Шаблоны сообщений', callback_data: 'adm_templates' },
+      { text: '🏷 Промокоды', callback_data: 'adm_promos' },
+    ],
     [{ text: '◀️ Главное меню', callback_data: 'admin_menu' }],
   ],
 };
@@ -1733,6 +1737,30 @@ async function bkStep2Comments(chatId, data) {
   });
 }
 
+// STEP 2g — promo code (optional, after comments)
+async function bkStep2Promo(chatId, data) {
+  await setSession(chatId, 'bk_s2_promo', data);
+  resetSessionTimer(chatId);
+  let text =
+    stepHeader(2, STRINGS.bookingStepEventDetails) +
+    '🏷 *У вас есть промокод?*\n\n_Необязательно\\. Введите промокод, чтобы получить скидку, или пропустите этот шаг\\._';
+  if (data.promo_code) {
+    text += `\n\n✅ Применён промокод: *${esc(data.promo_code)}*`;
+    if (data.discount_amount) text += ` \\(скидка: ${esc(String(data.discount_amount))} ₽\\)`;
+  }
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🏷 Ввести промокод', callback_data: 'bk_enter_promo' }],
+        [{ text: '➡️ Пропустить', callback_data: 'bk_skip_promo' }],
+        [{ text: '← Назад', callback_data: 'bk_back_to_comments' }],
+        [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
+      ],
+    },
+  });
+}
+
 // STEP 3a — name
 async function bkStep3Name(chatId, data) {
   await setSession(chatId, 'bk_s3_name', data);
@@ -1744,7 +1772,7 @@ async function bkStep3Name(chatId, data) {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '← Назад', callback_data: 'bk_back_to_comments' }],
+          [{ text: '← Назад', callback_data: 'bk_back_to_promo' }],
           [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
         ],
       },
@@ -1842,6 +1870,10 @@ async function bkStep4Confirm(chatId, data) {
   if (data.location) text += `📍 Место: ${esc(data.location)}\n`;
   if (data.budget) text += `💰 Бюджет: ${esc(data.budget)}\n`;
   if (data.comments) text += `💬 Пожелания: ${esc(data.comments)}\n`;
+  if (data.promo_code) {
+    const discLabel = data.discount_type === 'percent' ? `${data.discount_value}%` : `${data.discount_value} ₽`;
+    text += `🏷 Промокод: *${esc(data.promo_code)}* \\(−${esc(discLabel)}\\)\n`;
+  }
   text += `\n👤 Имя: *${esc(data.client_name)}*\n`;
   text += `📞 Телефон: *${esc(data.client_phone)}*\n`;
   if (data.client_email) text += `📧 Email: ${esc(data.client_email)}\n`;
@@ -1892,8 +1924,8 @@ async function bkSubmit(chatId, data) {
       `INSERT INTO orders
         (order_number,client_name,client_phone,client_email,client_telegram,
          client_chat_id,model_id,model_ids,event_type,event_date,event_duration,
-         location,budget,comments,status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new')`,
+         location,budget,comments,status,promo_code_id,discount_amount)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new',?,?)`,
       [
         orderNum,
         data.client_name,
@@ -1909,8 +1941,14 @@ async function bkSubmit(chatId, data) {
         data.location || null,
         data.budget || null,
         data.comments || null,
+        data.promo_code_id || null,
+        data.discount_amount || null,
       ]
     );
+    // Increment promo used_count if promo was applied
+    if (data.promo_code_id) {
+      run('UPDATE promo_codes SET used_count = used_count + 1 WHERE id=?', [data.promo_code_id]).catch(() => {});
+    }
     const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
 
     // Post-insert race condition check: verify active order count wasn't exceeded
@@ -6786,7 +6824,33 @@ function initBot(app) {
       if (data === 'bk_skip_comments') {
         const session = await getSession(chatId);
         const d = sessionData(session);
+        return bkStep2Promo(chatId, d);
+      }
+      // ── Booking: promo code step
+      if (data === 'bk_skip_promo') {
+        const session = await getSession(chatId);
+        const d = sessionData(session);
         return bkStep3Name(chatId, d);
+      }
+      if (data === 'bk_enter_promo') {
+        const session = await getSession(chatId);
+        const d = sessionData(session);
+        await setSession(chatId, 'bk_s2_promo', d);
+        resetSessionTimer(chatId);
+        return safeSend(chatId, '🏷 *Введите промокод*\n\n_Введите код и нажмите отправить\\._', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '➡️ Пропустить', callback_data: 'bk_skip_promo' }],
+              [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
+            ],
+          },
+        });
+      }
+      if (data === 'bk_back_to_promo') {
+        const session = await getSession(chatId);
+        const d = sessionData(session);
+        return bkStep2Promo(chatId, d);
       }
       if (data === 'bk_skip_email') {
         const requireEmail = await getSetting('booking_require_email').catch(() => '0');
@@ -7900,6 +7964,49 @@ function initBot(app) {
       if (data === 'adm_broadcast_history') {
         if (!isAdmin(chatId)) return;
         return showBroadcastHistory(chatId);
+      }
+
+      // ── Promo Codes (БЛОК 21) ─────────────────────────────────────────────
+      if (data === 'adm_promos') {
+        if (!isAdmin(chatId)) return;
+        return showAdminPromos(chatId);
+      }
+      if (data === 'adm_promos_all') {
+        if (!isAdmin(chatId)) return;
+        return showAdminPromoList(chatId);
+      }
+      if (data === 'adm_promos_stats') {
+        if (!isAdmin(chatId)) return;
+        return showAdminPromoStats(chatId);
+      }
+      if (data === 'adm_promo_create') {
+        if (!isAdmin(chatId)) return;
+        await setSession(chatId, 'adm_promo_name', {});
+        return safeSend(
+          chatId,
+          `🏷 *Новый промокод — шаг 1/5*\n\nВведите код \\(латиница, без пробелов\\)\\.\n_Например: SUMMER2026_`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_promos' }]] },
+          }
+        );
+      }
+      if (data.startsWith('adm_promo_toggle_')) {
+        if (!isAdmin(chatId)) return;
+        const pid = parseInt(data.replace('adm_promo_toggle_', ''));
+        const promo = await get('SELECT * FROM promo_codes WHERE id=?', [pid]).catch(() => null);
+        if (!promo) return safeSend(chatId, '❌ Промокод не найден');
+        const newActive = promo.is_active ? 0 : 1;
+        await run('UPDATE promo_codes SET is_active=? WHERE id=?', [newActive, pid]);
+        await bot.answerCallbackQuery(q.id, { text: newActive ? '✅ Активирован' : '⏸ Деактивирован' }).catch(() => {});
+        return showAdminPromoList(chatId);
+      }
+      if (data.startsWith('adm_promo_del_')) {
+        if (!isAdmin(chatId)) return;
+        const pid = parseInt(data.replace('adm_promo_del_', ''));
+        await run('DELETE FROM promo_codes WHERE id=?', [pid]).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: '🗑 Удалён' }).catch(() => {});
+        return showAdminPromoList(chatId);
       }
 
       // ── Message Templates (БЛОК 3.7) ──────────────────────────────────────
@@ -11672,7 +11779,44 @@ function initBot(app) {
 
       case 'bk_s2_comments':
         d.comments = text;
+        return bkStep2Promo(chatId, d);
+
+      case 'bk_s2_promo': {
+        // User typed a promo code
+        const promoCode = text.trim().toUpperCase();
+        const { resolvePromo } = require('./routes/promo');
+        const promoResult = await resolvePromo(promoCode, null).catch(() => null);
+        if (!promoResult?.valid) {
+          const reasonMap = {
+            not_found: 'Промокод не найден',
+            expired: 'Промокод истёк',
+            limit_reached: 'Лимит использований исчерпан',
+            not_started: 'Промокод ещё не активен',
+          };
+          const reason = reasonMap[promoResult?.reason] || 'Промокод недействителен';
+          await safeSend(chatId, `❌ *${esc(reason)}*\n\nПопробуйте другой код или пропустите этот шаг\\.`, {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '➡️ Пропустить', callback_data: 'bk_skip_promo' }],
+                [{ text: STRINGS.btnCancel, callback_data: 'bk_cancel' }],
+              ],
+            },
+          });
+          return;
+        }
+        d.promo_code = promoCode;
+        d.promo_code_id = promoResult.promo_code_id;
+        d.discount_amount = promoResult.discount_amount || null;
+        d.discount_type = promoResult.discount_type;
+        d.discount_value = promoResult.discount_value;
+        await safeSend(
+          chatId,
+          `✅ *Промокод применён\\!*\n\nКод: *${esc(promoCode)}*\nТип скидки: ${promoResult.discount_type === 'percent' ? `${promoResult.discount_value}%` : `${promoResult.discount_value} ₽`}`,
+          { parse_mode: 'MarkdownV2' }
+        );
         return bkStep3Name(chatId, d);
+      }
 
       case 'bk_s3_name':
         if (text.length < 2) return safeSend(chatId, '❌ Введите имя и фамилию:');
