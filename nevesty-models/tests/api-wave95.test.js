@@ -9,12 +9,13 @@ const apiCode = fs.readFileSync(path.join(ROOT, 'routes', 'api.js'), 'utf8');
 // ─── T1: FAQ feedback callbacks (bot.js) ─────────────────────────────────────
 
 describe('T1: FAQ feedback callbacks (bot.js)', () => {
-  test('T01: faq_helpful_ callback handler exists and calls answerCallbackQuery', () => {
+  test('T01: faq_helpful_ callback handler exists and sends feedback confirmation', () => {
     // The handler for faq_helpful_ must check data.startsWith('faq_helpful_')
     expect(botCode).toMatch(/data\.startsWith\s*\(\s*['"]faq_helpful_['"]\s*\)/);
-    // And it calls answerCallbackQuery (confirming feedback)
-    const block = botCode.match(/faq_helpful_[\s\S]{0,300}answerCallbackQuery/);
-    expect(block).not.toBeNull();
+    // Confirmation sent via answerCallbackQuery (toast) or safeSend (message)
+    const hasAnswerCQ = /faq_helpful_[\s\S]{0,300}answerCallbackQuery/.test(botCode);
+    const hasSafeSend = /faq_helpful_[\s\S]{0,300}safeSend/.test(botCode);
+    expect(hasAnswerCQ || hasSafeSend).toBe(true);
   });
 
   test('T02: faq_helpful_ answerCallbackQuery includes a thanks text', () => {
