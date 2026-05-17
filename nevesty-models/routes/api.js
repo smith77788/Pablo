@@ -6552,6 +6552,36 @@ router.get('/admin/analytics/top-cities', auth, async (req, res, next) => {
   }
 });
 
+// ─── Upcoming events (next 7 days) for mini calendar ─────────────────────────
+router.get('/admin/upcoming-events', auth, async (req, res) => {
+  try {
+    const rows = await query(
+      `SELECT id, order_number, client_name, event_type, event_date, status, budget
+       FROM orders
+       WHERE date(event_date) BETWEEN date('now') AND date('now','+7 days')
+         AND status NOT IN ('cancelled')
+       ORDER BY event_date ASC
+       LIMIT 20`,
+      []
+    );
+    // Also get top model of current month
+    const topModelMonth = await get(
+      `SELECT m.id, m.name, COUNT(o.id) as order_count
+       FROM models m
+       JOIN orders o ON o.model_id = m.id
+       WHERE o.created_at >= date('now','start of month')
+         AND m.archived = 0
+       GROUP BY m.id
+       ORDER BY order_count DESC
+       LIMIT 1`,
+      []
+    );
+    res.json({ events: rows || [], top_model_month: topModelMonth || null });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Analytics: Deal cycle ────────────────────────────────────────────────────
 router.get('/admin/analytics/deal-cycle', auth, async (req, res) => {
   try {
@@ -8486,7 +8516,8 @@ router.get('/admin/clients', auth, async (req, res, next) => {
     } else if (filter === 'vip') {
       having = 'COUNT(o.id) >= 3';
     } else if (filter === 'new') {
-      having = 'COUNT(o.id) = 0';
+      // "Новые" — первая заявка не старше 7 дней
+      having = "MIN(o.created_at) >= datetime('now', '-7 days')";
     }
 
     const innerQ = `

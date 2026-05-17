@@ -1217,59 +1217,100 @@
 
           <!-- Content columns -->
           <div class="model-content">
-            <!-- Left: bio, params, gallery -->
+            <!-- Left: tabs (photos / params / reviews) -->
             <div>
-              <!-- Bio -->
+              <!-- Bio — always visible above tabs -->
               <div id="bioSection">
                 <span class="model-section-title">О модели</span>
                 <p class="model-bio-text" id="bioText"></p>
               </div>
 
-              <!-- Parameters -->
-              <div id="paramsSection">
-                <span class="model-section-title">Параметры</span>
-                <div class="model-params-grid" id="paramsGrid"></div>
+              <!-- TABS navigation -->
+              <div class="model-tabs" role="tablist" aria-label="Разделы профиля модели">
+                <button
+                  class="model-tab active"
+                  data-tab="photos"
+                  role="tab"
+                  aria-selected="true"
+                  aria-controls="tab-photos"
+                  id="tab-btn-photos"
+                >Фото</button>
+                <button
+                  class="model-tab"
+                  data-tab="params"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="tab-params"
+                  id="tab-btn-params"
+                >Параметры</button>
+                <button
+                  class="model-tab"
+                  data-tab="reviews"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="tab-reviews"
+                  id="tab-btn-reviews"
+                >Отзывы <span class="model-tab-badge" id="tab-reviews-badge" style="display:none"></span></button>
               </div>
 
-              <!-- Gallery -->
-              <div id="gallerySection">
-                <span class="model-section-title">Портфолио</span>
-                <div class="model-gallery-grid" id="galleryGrid"></div>
-              </div>
-
-              <!-- Availability calendar section -->
-              <div id="availabilitySection" style="margin-top: 40px; margin-bottom: 32px">
-                <span class="model-section-title">📅 Доступность</span>
-                <div id="availabilityContent" style="margin-top: 12px">
-                  <div style="color: var(--text-dim); font-size: 0.9rem">Загрузка...</div>
+              <!-- TAB: Photos -->
+              <div class="model-tab-panel active" id="tab-photos" role="tabpanel" aria-labelledby="tab-btn-photos">
+                <!-- Gallery -->
+                <div id="gallerySection">
+                  <span class="model-section-title">Портфолио</span>
+                  <div class="model-gallery-grid" id="galleryGrid"></div>
                 </div>
-              </div>
 
-              <!-- Reviews -->
-              <div id="model-reviews" class="mt-8" style="margin-top: 40px">
-                <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap">
-                  <span class="model-section-title" style="margin-bottom: 0">Отзывы о работе с моделью</span>
-                  <div
-                    id="reviews-avg"
-                    style="
-                      display: none;
-                      align-items: center;
-                      gap: 6px;
-                      background: rgba(201, 169, 110, 0.08);
-                      border: 1px solid rgba(201, 169, 110, 0.2);
-                      border-radius: 20px;
-                      padding: 4px 12px;
-                    "
-                  >
-                    <span id="reviews-avg-stars" style="color: var(--gold); font-size: 1rem"></span>
-                    <span id="reviews-avg-val" style="color: var(--gold); font-weight: 700; font-size: 0.9rem"></span>
-                    <span id="reviews-avg-count" style="color: var(--text-dim); font-size: 0.8rem"></span>
+                <!-- Availability calendar section -->
+                <div id="availabilitySection" style="margin-top: 40px; margin-bottom: 32px">
+                  <span class="model-section-title">📅 Доступность</span>
+                  <div id="availabilityContent" style="margin-top: 12px">
+                    <div style="color: var(--text-dim); font-size: 0.9rem">Загрузка...</div>
                   </div>
                 </div>
-                <div id="reviews-list" style="display: flex; flex-direction: column; gap: 16px">
-                  <div style="color: var(--text-dim); font-size: 0.9rem">Загрузка отзывов...</div>
+              </div>
+
+              <!-- TAB: Parameters -->
+              <div class="model-tab-panel" id="tab-params" role="tabpanel" aria-labelledby="tab-btn-params">
+                <div id="paramsSection">
+                  <span class="model-section-title">Параметры модели</span>
+                  <!-- Table view -->
+                  <table class="model-params-table" id="paramsTable">
+                    <tbody id="paramsTableBody"></tbody>
+                  </table>
+                  <div id="paramsEmpty" style="display:none;color:var(--text-dim);font-size:0.9rem;font-style:italic;padding:16px 0">Параметры не указаны.</div>
+                  <!-- Legacy pill grid (hidden, kept for JS compatibility) -->
+                  <div class="model-params-grid" id="paramsGrid" style="display:none"></div>
                 </div>
-                <div id="reviews-pagination" style="margin-top: 16px; text-align: center"></div>
+              </div>
+
+              <!-- TAB: Reviews -->
+              <div class="model-tab-panel" id="tab-reviews" role="tabpanel" aria-labelledby="tab-btn-reviews">
+                <div id="model-reviews">
+                  <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap">
+                    <span class="model-section-title" style="margin-bottom: 0">Отзывы о работе с моделью</span>
+                    <div
+                      id="reviews-avg"
+                      style="
+                        display: none;
+                        align-items: center;
+                        gap: 6px;
+                        background: rgba(201, 169, 110, 0.08);
+                        border: 1px solid rgba(201, 169, 110, 0.2);
+                        border-radius: 20px;
+                        padding: 4px 12px;
+                      "
+                    >
+                      <span id="reviews-avg-stars" style="color: var(--gold); font-size: 1rem"></span>
+                      <span id="reviews-avg-val" style="color: var(--gold); font-weight: 700; font-size: 0.9rem"></span>
+                      <span id="reviews-avg-count" style="color: var(--text-dim); font-size: 0.8rem"></span>
+                    </div>
+                  </div>
+                  <div id="reviews-list" style="display: flex; flex-direction: column; gap: 16px">
+                    <div style="color: var(--text-dim); font-size: 0.9rem">Загрузка отзывов...</div>
+                  </div>
+                  <div id="reviews-pagination" style="margin-top: 16px; text-align: center"></div>
+                </div>
               </div>
             </div>
 
@@ -1405,6 +1446,17 @@
                       />
                     </svg>
                     Telegram
+                  </button>
+                  <button
+                    onclick="shareModel('wa')"
+                    aria-label="Поделиться профилем модели в WhatsApp"
+                    class="share-btn"
+                    style="background:#25d366;color:#fff"
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                    </svg>
+                    WA
                   </button>
                   <button
                     id="copy-btn"
@@ -1883,53 +1935,48 @@
           const bioSection = el('bioSection');
           if (bioSection) bioSection.classList.add('reveal-item');
 
-          // Parameters — badge style with icons
+          // Parameters — table view with icons
           const PARAM_ICONS = {
+            Рост: '📏',
             Вес: '⚖️',
-            Грудь: '📐',
-            Талия: '〰️',
-            Бёдра: '📏',
+            'Объёмы (Г/Т/Б)': '📐',
             Обувь: '👠',
+            Возраст: '🎂',
             Волосы: '💇',
             Глаза: '👁️',
+            Город: '📍',
+            Категория: '✦',
           };
           const params = [];
+          if (m.height) params.push(['Рост', `${m.height} см`]);
           if (m.weight) params.push(['Вес', `${m.weight} кг`]);
-          if (m.bust) params.push(['Грудь', m.bust]);
-          if (m.waist) params.push(['Талия', m.waist]);
-          if (m.hips) params.push(['Бёдра', m.hips]);
-          if (m.shoe_size) params.push(['Обувь', m.shoe_size]);
+          if (m.age) params.push(['Возраст', `${m.age} лет`]);
+          // Combine bust/waist/hips into one row
+          const bwh = [m.bust, m.waist, m.hips].filter(Boolean);
+          if (bwh.length) params.push(['Объёмы (Г/Т/Б)', bwh.join(' / ') + ' см']);
+          if (m.shoe_size) params.push(['Обувь', `р. ${m.shoe_size}`]);
           if (m.hair_color) params.push(['Волосы', m.hair_color]);
           if (m.eye_color) params.push(['Глаза', m.eye_color]);
+          if (m.city) params.push(['Город', m.city]);
+          if (m.category) params.push(['Категория', CATEGORY_LABELS[m.category] || m.category]);
 
-          const paramsGrid = el('paramsGrid');
-          if (params.length) {
-            params.forEach(([label, val], i) => {
-              const item = document.createElement('div');
-              item.className = 'model-param-item reveal-item';
-              item.style.transitionDelay = `${i * 60}ms`;
-
-              const icon = document.createElement('span');
-              icon.className = 'model-param-icon';
-              icon.setAttribute('aria-hidden', 'true');
-              icon.textContent = PARAM_ICONS[label] || '✦';
-
-              const inner = document.createElement('div');
-              inner.className = 'model-param-inner';
-
-              const lbl = document.createElement('label');
-              lbl.textContent = label;
-              const spn = document.createElement('span');
-              spn.textContent = val;
-
-              inner.appendChild(lbl);
-              inner.appendChild(spn);
-              item.appendChild(icon);
-              item.appendChild(inner);
-              paramsGrid.appendChild(item);
+          const paramsTableBody = el('paramsTableBody');
+          const paramsTable = el('paramsTable');
+          const paramsEmpty = el('paramsEmpty');
+          if (params.length && paramsTableBody) {
+            params.forEach(([label, val]) => {
+              const tr = document.createElement('tr');
+              tr.innerHTML = `
+                <td class="pt-icon" aria-hidden="true">${PARAM_ICONS[label] || '✦'}</td>
+                <td class="pt-label">${escHtml(label)}</td>
+                <td class="pt-value">${escHtml(String(val))}</td>`;
+              paramsTableBody.appendChild(tr);
             });
+            if (paramsTable) paramsTable.style.display = '';
+            if (paramsEmpty) paramsEmpty.style.display = 'none';
           } else {
-            el('paramsSection').style.display = 'none';
+            if (paramsTable) paramsTable.style.display = 'none';
+            if (paramsEmpty) paramsEmpty.style.display = 'block';
           }
 
           // Gallery (main photo + extra photos from array)
@@ -2346,6 +2393,15 @@
               return;
             }
 
+            // Update reviews tab badge
+            if (page === 1 && total > 0) {
+              const badge = el('tab-reviews-badge');
+              if (badge) {
+                badge.textContent = total;
+                badge.style.display = '';
+              }
+            }
+
             // Show avg rating header
             const rated = reviews.filter(r => r.rating > 0);
             if (rated.length > 0 && page === 1) {
@@ -2423,6 +2479,7 @@
           if (platform === 'vk')
             window.open(`https://vk.com/share.php?url=${url}&title=${title}`, '_blank', 'noopener');
           if (platform === 'tg') window.open(`https://t.me/share/url?url=${url}&text=${title}`, '_blank', 'noopener');
+          if (platform === 'wa') window.open(`https://wa.me/?text=${title}%20${url}`, '_blank', 'noopener');
           if (platform === 'copy') {
             navigator.clipboard
               .writeText(window.location.href)
@@ -2595,6 +2652,33 @@
           c.appendChild(t);
           setTimeout(() => t.remove(), 3000);
         }
+
+        // ── Tab switching ─────────────────────────────────────────────────────────
+        (function () {
+          function initTabs() {
+            const tabs = document.querySelectorAll('.model-tab');
+            const panels = document.querySelectorAll('.model-tab-panel');
+            tabs.forEach(tab => {
+              tab.addEventListener('click', function () {
+                const target = this.dataset.tab;
+                tabs.forEach(t => {
+                  t.classList.remove('active');
+                  t.setAttribute('aria-selected', 'false');
+                });
+                panels.forEach(p => p.classList.remove('active'));
+                this.classList.add('active');
+                this.setAttribute('aria-selected', 'true');
+                const panel = document.getElementById('tab-' + target);
+                if (panel) panel.classList.add('active');
+                // Trigger reveal animations for newly visible items
+                if (typeof window._observeRevealItems === 'function') {
+                  setTimeout(window._observeRevealItems, 50);
+                }
+              });
+            });
+          }
+          document.addEventListener('DOMContentLoaded', initTabs);
+        })();
 
         // ── init ───────────────────────────────────────────────────────────────────
         // Support two URL patterns:

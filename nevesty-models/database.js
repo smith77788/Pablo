@@ -803,6 +803,31 @@ async function initDatabase() {
     ).catch(() => {});
   }
 
+  // Schema v28 — completed_at, cancelled_at timestamp columns for deal-cycle analytics
+  const v28 = await get(`SELECT version FROM schema_versions WHERE version=28`).catch(() => null);
+  if (!v28) {
+    await run(`ALTER TABLE orders ADD COLUMN completed_at DATETIME DEFAULT NULL`).catch(() => {});
+    await run(`ALTER TABLE orders ADD COLUMN cancelled_at DATETIME DEFAULT NULL`).catch(() => {});
+    // Backfill completed_at from updated_at for already-completed orders
+    await run(`UPDATE orders SET completed_at = updated_at WHERE status = 'completed' AND completed_at IS NULL`).catch(() => {});
+    // Backfill cancelled_at from updated_at for already-cancelled orders
+    await run(`UPDATE orders SET cancelled_at = updated_at WHERE status = 'cancelled' AND cancelled_at IS NULL`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_orders_completed_at ON orders(completed_at)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(28, 'orders.completed_at & cancelled_at for deal-cycle analytics')`
+    ).catch(() => {});
+  }
+
+  // Schema v29 — reminded_at column on orders for stale-order manager reminders
+  const v29 = await get(`SELECT version FROM schema_versions WHERE version=29`).catch(() => null);
+  if (!v29) {
+    await run(`ALTER TABLE orders ADD COLUMN reminded_at DATETIME DEFAULT NULL`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_orders_reminded_at ON orders(reminded_at)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(29, 'orders.reminded_at for stale-order manager reminders')`
+    ).catch(() => {});
+  }
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
