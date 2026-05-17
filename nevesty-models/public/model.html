@@ -737,6 +737,58 @@
         }
       }
 
+      /* ─── MODEL REVIEWS EMPTY STATE & CTA ───────────── */
+      .model-reviews-empty {
+        text-align: center;
+        padding: 48px 24px;
+        border: 1px dashed rgba(201, 169, 110, 0.2);
+        border-radius: 12px;
+        background: rgba(201, 169, 110, 0.03);
+      }
+      .model-reviews-empty-icon {
+        font-size: 2.5rem;
+        color: var(--gold);
+        opacity: 0.35;
+        margin-bottom: 16px;
+        line-height: 1;
+        font-family: 'Playfair Display', serif;
+      }
+      .model-reviews-empty-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--white);
+        margin: 0 0 8px;
+      }
+      .model-reviews-empty-sub {
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        margin: 0 0 24px;
+        line-height: 1.6;
+      }
+      .model-reviews-cta-btn {
+        display: inline-block;
+        padding: 12px 28px;
+        background: transparent;
+        border: 1px solid var(--gold);
+        color: var(--gold);
+        font-size: 0.78rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+        transition:
+          background var(--transition),
+          color var(--transition),
+          transform 0.15s;
+        border-radius: 2px;
+      }
+      .model-reviews-cta-btn:hover {
+        background: var(--gold);
+        color: var(--bg);
+        transform: translateY(-2px);
+      }
+
       /* ─── ENHANCED LIGHTBOX ───────────────────────────── */
       #lightbox {
         opacity: 0;
