@@ -943,6 +943,49 @@ async function initDatabase() {
     uploaded_at TEXT DEFAULT (datetime('now'))
   )`).catch(() => {});
 
+  // Schema v36 — promo_codes table + orders discount columns (БЛОК 21)
+  const v36 = await get(`SELECT version FROM schema_versions WHERE version=36`).catch(() => null);
+  if (!v36) {
+    await run(`CREATE TABLE IF NOT EXISTS promo_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      discount_type TEXT NOT NULL,
+      discount_value REAL NOT NULL,
+      max_uses INTEGER DEFAULT NULL,
+      used_count INTEGER DEFAULT 0,
+      valid_from TEXT,
+      valid_until TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_by INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`).catch(() => {});
+    await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_promo_codes_code ON promo_codes(code)`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_promo_codes_active ON promo_codes(is_active)`).catch(() => {});
+    // Add discount columns to orders
+    await run(`ALTER TABLE orders ADD COLUMN promo_code_id INTEGER DEFAULT NULL`).catch(() => {});
+    await run(`ALTER TABLE orders ADD COLUMN discount_amount REAL DEFAULT NULL`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_orders_promo_code ON orders(promo_code_id)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(36, 'promo_codes table + orders.promo_code_id/discount_amount (БЛОК 21)')`
+    ).catch(() => {});
+  }
+  // Idempotent — ensure promo_codes exists
+  await run(`CREATE TABLE IF NOT EXISTS promo_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    discount_type TEXT NOT NULL,
+    discount_value REAL NOT NULL,
+    max_uses INTEGER DEFAULT NULL,
+    used_count INTEGER DEFAULT 0,
+    valid_from TEXT,
+    valid_until TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`).catch(() => {});
+  await run(`ALTER TABLE orders ADD COLUMN promo_code_id INTEGER DEFAULT NULL`).catch(() => {});
+  await run(`ALTER TABLE orders ADD COLUMN discount_amount REAL DEFAULT NULL`).catch(() => {});
+
   // Idempotent — create error_logs if it somehow doesn't exist yet
   await run(`CREATE TABLE IF NOT EXISTS error_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -953,9 +996,9 @@ async function initDatabase() {
     created_at TEXT DEFAULT (datetime('now'))
   )`).catch(() => {});
 
-  // Schema v36 — webhook_logs table for incoming webhook auditing (БЛОК 19)
-  const v36 = await get(`SELECT version FROM schema_versions WHERE version=36`).catch(() => null);
-  if (!v36) {
+  // Schema v39 — webhook_logs table for incoming webhook auditing (БЛОК 19)
+  const v39 = await get(`SELECT version FROM schema_versions WHERE version=39`).catch(() => null);
+  if (!v39) {
     await run(`CREATE TABLE IF NOT EXISTS webhook_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       endpoint TEXT NOT NULL,
@@ -967,10 +1010,10 @@ async function initDatabase() {
     await run(`CREATE INDEX IF NOT EXISTS idx_webhook_logs_created ON webhook_logs(created_at DESC)`).catch(() => {});
     await run(`CREATE INDEX IF NOT EXISTS idx_webhook_logs_endpoint ON webhook_logs(endpoint)`).catch(() => {});
     await run(
-      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(36, 'webhook_logs table for incoming webhook auditing (БЛОК 19)')`
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(39, 'webhook_logs table for incoming webhook auditing (БЛОК 19)')`
     ).catch(() => {});
   }
-  // Idempotent — ensure webhook_logs exists even on DBs that skipped v36
+  // Idempotent — ensure webhook_logs exists even on DBs that skipped v39
   await run(`CREATE TABLE IF NOT EXISTS webhook_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     endpoint TEXT NOT NULL,
@@ -978,6 +1021,39 @@ async function initDatabase() {
     status INTEGER,
     ip TEXT,
     created_at TEXT DEFAULT (datetime('now'))
+  )`).catch(() => {});
+
+  // Schema v38 — model_availability_schedule: per-date calendar (БЛОК 22)
+  const v38 = await get(`SELECT version FROM schema_versions WHERE version=38`).catch(() => null);
+  if (!v38) {
+    await run(`CREATE TABLE IF NOT EXISTS model_availability_schedule (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      model_id INTEGER NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      is_available INTEGER DEFAULT 1,
+      reason TEXT,
+      order_id INTEGER REFERENCES orders(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(model_id, date)
+    )`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_mas_model_date ON model_availability_schedule(model_id, date)`).catch(
+      () => {}
+    );
+    await run(`CREATE INDEX IF NOT EXISTS idx_mas_date ON model_availability_schedule(date)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(38, 'model_availability_schedule per-date calendar (БЛОК 22)')`
+    ).catch(() => {});
+  }
+  // Idempotent — ensure model_availability_schedule exists even on DBs that skipped v38
+  await run(`CREATE TABLE IF NOT EXISTS model_availability_schedule (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id INTEGER NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    is_available INTEGER DEFAULT 1,
+    reason TEXT,
+    order_id INTEGER REFERENCES orders(id),
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(model_id, date)
   )`).catch(() => {});
 
   // Seed FAQ items if empty
