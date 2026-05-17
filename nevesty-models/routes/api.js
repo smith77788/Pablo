@@ -8220,17 +8220,14 @@ router.get('/admin/system', auth, async (req, res, next) => {
     // CPU (ratio of cpu time to wall time since process start as a %)
     const cpuUsage = process.cpuUsage();
     const uptimeMicros = process.uptime() * 1e6;
-    const cpuPercent = uptimeMicros > 0
-      ? Math.round(((cpuUsage.user + cpuUsage.system) / uptimeMicros) * 1000) / 10
-      : 0;
+    const cpuPercent =
+      uptimeMicros > 0 ? Math.round(((cpuUsage.user + cpuUsage.system) / uptimeMicros) * 1000) / 10 : 0;
 
     // DB size
     let db_size_mb = null;
     try {
       const dbSizeRow = await get('SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()');
-      db_size_mb = dbSizeRow?.size != null
-        ? Math.round((dbSizeRow.size / 1024 / 1024) * 100) / 100
-        : null;
+      db_size_mb = dbSizeRow?.size != null ? Math.round((dbSizeRow.size / 1024 / 1024) * 100) / 100 : null;
     } catch (_) {}
 
     // Uploads count
