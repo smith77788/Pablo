@@ -10335,5 +10335,20 @@ router.get('/status/history', async (req, res, next) => {
   }
 });
 
+// ─── Manual agent check trigger ──────────────────────────────────────────────
+// POST /api/admin/run-agent-check  → triggers orchestrator async, returns immediately
+router.post('/admin/run-agent-check', auth, (req, res) => {
+  res.json({ ok: true, message: 'Agent check triggered' });
+  // Run async (don't wait for response)
+  setTimeout(async () => {
+    try {
+      const { runOrchestrator } = require('../agents/orchestrator');
+      await runOrchestrator();
+    } catch (e) {
+      console.error('[agent-check] manual trigger error:', e.message);
+    }
+  }, 100);
+});
+
 module.exports = router;
 module.exports.setBot = setBot;
