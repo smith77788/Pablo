@@ -9030,6 +9030,222 @@ router.post('/cabinet/orders/:id/repeat', requireClientAuth, bookingLimiter, asy
   }
 });
 
+// ─── Client Cabinet БЛОК 32: Loyalty, Reviews, Avatar, Extended Profile ───────
+
+// Multer storage for client avatars — /uploads/avatars/{phone10}.jpg
+const avatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '../uploads/avatars');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    // Use phone10 as stable filename so re-uploads overwrite the old one
+    cb(null, `${req.clientPhone}.jpg`);
+  },
+});
+const uploadAvatar = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Допускаются только изображения'));
+  },
+});
+
+// GET /api/cabinet/loyalty — balance & transaction history
+router.get('/cabinet/loyalty', requireClientAuth, async (req, res, next) => {
+  try {
+    const chatId = req.clientChatId;
+    if (!chatId) {
+      // Client has no Telegram chat_id — return empty loyalty state
+      return res.json({ ok: true, balance: 0, level: 'bronze', history: [] });
+    }
+    const [balanceRow, history] = await Promise.all([
+      get(
+        "SELECT COALESCE(points, 0) as balance, COALESCE(total_earned, 0) as total_earned, COALESCE(level, 'bronze') as level FROM loyalty_points WHERE chat_id=?",
+        [chatId]
+      ),
+      query(
+        'SELECT id, points, type, description, order_id, created_at FROM loyalty_transactions WHERE chat_id=? ORDER BY created_at DESC LIMIT 20',
+        [chatId]
+      ),
+    ]);
+    res.json({
+      ok: true,
+      balance: balanceRow?.balance ?? 0,
+      total_earned: balanceRow?.total_earned ?? 0,
+      level: balanceRow?.level ?? 'bronze',
+      history,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/cabinet/reviews — reviews left by this client
+router.get('/cabinet/reviews', requireClientAuth, async (req, res, next) => {
+  try {
+    const chatId = req.clientChatId;
+    const phone10 = req.clientPhone;
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const ph = patterns.map(() => '?').join(',');
+
+    let reviews;
+    if (chatId) {
+      // Prefer to look up by chat_id when available
+      reviews = await query(
+        `SELECT r.id, r.client_name, r.rating, r.text, r.approved, r.created_at,
+                r.admin_reply, r.reply_at, r.order_id,
+                m.name as model_name
+         FROM reviews r
+         LEFT JOIN models m ON r.model_id = m.id
+         WHERE r.chat_id=?
+         ORDER BY r.created_at DESC`,
+        [String(chatId)]
+      );
+    } else {
+      // Fallback: match by client_name in orders that belong to this phone
+      reviews = await query(
+        `SELECT r.id, r.client_name, r.rating, r.text, r.approved, r.created_at,
+                r.admin_reply, r.reply_at, r.order_id,
+                m.name as model_name
+         FROM reviews r
+         LEFT JOIN models m ON r.model_id = m.id
+         WHERE r.client_name IN (
+           SELECT DISTINCT client_name FROM orders
+           WHERE REPLACE(REPLACE(REPLACE(REPLACE(client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+              OR REPLACE(REPLACE(REPLACE(REPLACE(client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+         )
+         ORDER BY r.created_at DESC`,
+        [...patterns, ...patterns]
+      );
+    }
+
+    res.json({ ok: true, reviews });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/cabinet/avatar — upload client avatar
+router.post(
+  '/cabinet/avatar',
+  requireClientAuth,
+  (req, res, next) =>
+    uploadAvatar.single('avatar')(req, res, err => {
+      if (err) return res.status(400).json({ ok: false, error: err.message });
+      next();
+    }),
+  async (req, res, next) => {
+    try {
+      if (!req.file) return res.status(400).json({ ok: false, error: 'Файл не загружен' });
+
+      const avatarUrl = `/uploads/avatars/${req.clientPhone}.jpg`;
+
+      // If sharp is available, re-compress to JPEG 85% and resize to 400x400 crop
+      if (sharp) {
+        try {
+          const tmpPath = req.file.path + '.tmp';
+          await sharp(req.file.path)
+            .resize(400, 400, { fit: 'cover', position: 'centre' })
+            .jpeg({ quality: 85 })
+            .toFile(tmpPath);
+          fs.renameSync(tmpPath, req.file.path);
+        } catch (_) {
+          // Conversion failed — keep original file, still serve it
+        }
+      }
+
+      // Persist avatar_url in client_prefs (keyed by chat_id if available)
+      const chatId = req.clientChatId;
+      if (chatId) {
+        await run(
+          `INSERT INTO client_prefs (chat_id, avatar_url) VALUES (?, ?)
+           ON CONFLICT(chat_id) DO UPDATE SET avatar_url=excluded.avatar_url`,
+          [String(chatId), avatarUrl]
+        ).catch(() => {});
+      }
+
+      res.json({ ok: true, avatar_url: avatarUrl });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+// GET /api/cabinet/profile/extended — profile enriched with loyalty balance, order count, last order date
+router.get('/cabinet/profile/extended', requireClientAuth, async (req, res, next) => {
+  try {
+    const phone10 = req.clientPhone;
+    const chatId = req.clientChatId;
+    const patterns = [phone10, '7' + phone10, '+7' + phone10, '8' + phone10];
+    const ph = patterns.map(() => '?').join(',');
+
+    const phoneFilter = `(
+      REPLACE(REPLACE(REPLACE(REPLACE(client_phone, '+', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+      OR REPLACE(REPLACE(REPLACE(REPLACE(client_phone, ')', ''), '-', ''), ' ', ''), '(', '') IN (${ph})
+    )`;
+
+    const [latest, stats, loyalty, prefs] = await Promise.all([
+      get(
+        `SELECT client_name, client_email, client_chat_id FROM orders WHERE ${phoneFilter}
+         ORDER BY created_at DESC LIMIT 1`,
+        [...patterns, ...patterns]
+      ),
+      get(
+        `SELECT COUNT(*) as orders_count,
+                SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled,
+                SUM(CASE WHEN status IN ('new','confirmed','in_progress') THEN 1 ELSE 0 END) as active,
+                MAX(created_at) as last_order_date
+         FROM orders WHERE ${phoneFilter}`,
+        [...patterns, ...patterns]
+      ),
+      chatId
+        ? get(
+            "SELECT COALESCE(points, 0) as balance, COALESCE(level, 'bronze') as level FROM loyalty_points WHERE chat_id=?",
+            [chatId]
+          )
+        : Promise.resolve(null),
+      chatId
+        ? get(
+            'SELECT avatar_url, notify_status, notify_promo, notify_marketing, notify_reminders FROM client_prefs WHERE chat_id=?',
+            [String(chatId)]
+          )
+        : Promise.resolve(null),
+    ]);
+
+    res.json({
+      ok: true,
+      profile: {
+        phone: phone10,
+        name: latest?.client_name || null,
+        email: latest?.client_email || null,
+        chat_id: latest?.client_chat_id || chatId || null,
+        avatar_url: prefs?.avatar_url || null,
+        notify_status: prefs?.notify_status ?? 1,
+        notify_promo: prefs?.notify_promo ?? 1,
+        notify_marketing: prefs?.notify_marketing ?? 1,
+        notify_reminders: prefs?.notify_reminders ?? 1,
+      },
+      stats: {
+        orders_count: stats?.orders_count || 0,
+        completed: stats?.completed || 0,
+        cancelled: stats?.cancelled || 0,
+        active: stats?.active || 0,
+        last_order_date: stats?.last_order_date || null,
+      },
+      loyalty: {
+        balance: loyalty?.balance ?? 0,
+        level: loyalty?.level ?? 'bronze',
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── System info endpoint for admin panel ─────────────────────────────────────
 // GET /api/admin/system — server & process stats (requires auth)
 router.get('/admin/system', auth, async (req, res, next) => {
