@@ -3525,6 +3525,146 @@ router.get('/admin/managers/:id/stats', auth, async (req, res) => {
   }
 });
 
+// ─── Admin Users Management ───────────────────────────────────────────────────
+// GET /api/admin/users — list all admins (superadmin only)
+router.get('/admin/users', auth, async (req, res, next) => {
+  try {
+    if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
+    const users = await query(
+      `SELECT id, username, email, role, telegram_id, totp_enabled, last_login, active, created_at
+       FROM admins ORDER BY created_at DESC`
+    );
+    res.json(users);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/admin/users — create admin (superadmin only)
+router.post('/admin/users', auth, async (req, res, next) => {
+  try {
+    if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
+    const { username, password, role, email, telegram_id } = req.body;
+    if (!username || !/^[a-zA-Z0-9_]{3,32}$/.test(username))
+      return res.status(400).json({ error: 'Логин: 3–32 символа, только буквы/цифры/_' });
+    if (!password || password.length < 6) return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+    if (email && !validateEmail(email)) return res.status(400).json({ error: 'Некорректный email' });
+    const existing = await get('SELECT id FROM admins WHERE username = ?', [username]);
+    if (existing) return res.status(409).json({ error: 'Логин уже занят' });
+    const allowedRoles = ['manager', 'superadmin', 'admin', 'viewer'];
+    const safeRole = allowedRoles.includes(role) ? role : 'manager';
+    const hash = await bcrypt.hash(password, 10);
+    const result = await run(
+      'INSERT INTO admins (username, email, password_hash, role, telegram_id, active) VALUES (?,?,?,?,?,1)',
+      [username, email || null, hash, safeRole, telegram_id || null]
+    );
+    res.status(201).json({ ok: true, id: result.id });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PATCH /api/admin/users/:id — update role/active/email/telegram_id (superadmin only)
+router.patch('/admin/users/:id', auth, async (req, res, next) => {
+  try {
+    if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const target = await get('SELECT id, username, role FROM admins WHERE id=?', [id]);
+    if (!target) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    const { role, active, email, telegram_id } = req.body;
+    const allowedRoles = ['manager', 'superadmin', 'admin', 'viewer'];
+
+    if (id === req.admin.id && role !== undefined && role !== req.admin.role)
+      return res.status(400).json({ error: 'Нельзя изменить свою роль' });
+    if (id === req.admin.id && active === 0) return res.status(400).json({ error: 'Нельзя деактивировать себя' });
+
+    const updates = [];
+    const values = [];
+    if (role !== undefined && allowedRoles.includes(role)) {
+      updates.push('role=?');
+      values.push(role);
+    }
+    if (active !== undefined) {
+      updates.push('active=?');
+      values.push(active ? 1 : 0);
+    }
+    if (email !== undefined) {
+      updates.push('email=?');
+      values.push(email || null);
+    }
+    if (telegram_id !== undefined) {
+      updates.push('telegram_id=?');
+      values.push(telegram_id || null);
+    }
+
+    if (!updates.length) return res.status(400).json({ error: 'Нет полей для обновления' });
+    values.push(id);
+    await run(`UPDATE admins SET ${updates.join(', ')} WHERE id=?`, values);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// DELETE /api/admin/users/:id — delete admin (superadmin only)
+router.delete('/admin/users/:id', auth, async (req, res, next) => {
+  try {
+    if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    if (id === req.admin.id) return res.status(400).json({ error: 'Нельзя удалить себя' });
+    const target = await get('SELECT id FROM admins WHERE id=?', [id]);
+    if (!target) return res.status(404).json({ error: 'Пользователь не найден' });
+    await run('DELETE FROM admins WHERE id=?', [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/admin/users/:id/reset-password — generate new password (superadmin only)
+router.post('/admin/users/:id/reset-password', auth, async (req, res, next) => {
+  try {
+    if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const target = await get('SELECT id, username, email FROM admins WHERE id=?', [id]);
+    if (!target) return res.status(404).json({ error: 'Пользователь не найден' });
+    const newPassword = crypto.randomBytes(10).toString('base64').replace(/[+/=]/g, '').slice(0, 12);
+    const hash = await bcrypt.hash(newPassword, 10);
+    await run('UPDATE admins SET password_hash=? WHERE id=?', [hash, id]);
+    if (target.email && mailer && mailer.send) {
+      mailer
+        .send({
+          to: target.email,
+          subject: 'Nevesty Models — сброс пароля',
+          html: `<p>Ваш новый пароль: <strong>${newPassword}</strong></p><p>Смените его после входа.</p>`,
+        })
+        .catch(() => {});
+    }
+    res.json({ ok: true, new_password: newPassword });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/admin/users/:id/reset-2fa — reset TOTP 2FA for a user (superadmin only)
+router.post('/admin/users/:id/reset-2fa', auth, async (req, res, next) => {
+  try {
+    if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const target = await get('SELECT id FROM admins WHERE id=?', [id]);
+    if (!target) return res.status(404).json({ error: 'Пользователь не найден' });
+    await run('UPDATE admins SET totp_secret=NULL, totp_enabled=0 WHERE id=?', [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // GET /api/settings/public — public read-only settings (no auth required, cached 5 min)
 router.get('/settings/public', publicSettingsLimiter, async (req, res) => {
   try {

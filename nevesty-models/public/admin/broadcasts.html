@@ -7,6 +7,7 @@
     <meta name="robots" content="noindex, nofollow" />
     <link rel="stylesheet" href="/css/admin.css" />
     <style>
+      /* ── Broadcast cards ─────────────────────────────────────────── */
       .broadcast-card {
         background: var(--bg1);
         border: 1px solid var(--border);
@@ -25,7 +26,6 @@
         white-space: pre-wrap;
         max-height: 100px;
         overflow: hidden;
-        position: relative;
       }
       .broadcast-meta {
         display: flex;
@@ -75,6 +75,27 @@
         color: #007bff;
         border: 1px solid rgba(0, 123, 255, 0.3);
       }
+      .stat-chip {
+        font-size: 0.78rem;
+        color: var(--text-dim);
+      }
+      .stat-chip.ok {
+        color: #28a745;
+      }
+      .stat-chip.err {
+        color: #e05555;
+      }
+      .stat-chip.pct {
+        color: var(--gold);
+        font-weight: 600;
+      }
+      .empty-state {
+        text-align: center;
+        padding: 48px;
+        color: var(--text-dim);
+      }
+
+      /* ── Create form ─────────────────────────────────────────────── */
       .create-form {
         background: var(--bg1);
         border: 1px solid var(--border);
@@ -84,7 +105,7 @@
       }
       .create-form textarea {
         width: 100%;
-        min-height: 100px;
+        min-height: 110px;
         resize: vertical;
         background: var(--bg2);
         border: 1px solid var(--border);
@@ -93,6 +114,7 @@
         padding: 12px;
         font-size: 0.9rem;
         font-family: inherit;
+        box-sizing: border-box;
       }
       .create-form textarea:focus {
         outline: none;
@@ -114,31 +136,116 @@
         color: var(--text-muted);
         margin-bottom: 6px;
       }
-      .stats-row {
+      .photo-hint {
+        font-size: 0.75rem;
+        color: var(--text-dim);
+        margin-top: 4px;
+      }
+
+      /* ── Segment radio group ──────────────────────────────────────── */
+      .segment-group {
         display: flex;
-        gap: 16px;
-        margin-top: 8px;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 6px;
       }
-      .stat-chip {
+      .segment-option {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+        user-select: none;
+      }
+      .segment-option:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+      }
+      .segment-option.selected {
+        border-color: var(--gold);
+        background: rgba(201, 169, 110, 0.07);
+      }
+      .segment-option input[type='radio'] {
+        accent-color: var(--gold);
+      }
+      .segment-label {
+        flex: 1;
+        font-size: 0.88rem;
+        color: var(--text);
+      }
+      .segment-count {
         font-size: 0.78rem;
-        color: var(--text-dim);
-      }
-      .stat-chip.ok {
-        color: #28a745;
-      }
-      .stat-chip.err {
-        color: #e05555;
-      }
-      .stat-chip.pct {
+        font-weight: 700;
         color: var(--gold);
-        font-weight: 600;
+        min-width: 32px;
+        text-align: right;
       }
-      .empty-state {
-        text-align: center;
-        padding: 48px;
+      .segment-count.loading {
         color: var(--text-dim);
+        font-weight: 400;
       }
-      /* Tabs */
+      /* city dropdown inside segment group */
+      #citySegmentRow {
+        display: none;
+        padding-left: 28px;
+      }
+      #citySegmentRow select {
+        max-width: 220px;
+      }
+
+      /* ── Recipients bar ──────────────────────────────────────────── */
+      .recipients-bar {
+        margin-top: 12px;
+        padding: 10px 14px;
+        background: rgba(201, 169, 110, 0.06);
+        border: 1px solid rgba(201, 169, 110, 0.2);
+        border-radius: 6px;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .recipients-bar strong {
+        color: var(--gold);
+        font-size: 1.05rem;
+      }
+
+      /* ── Progress bar ────────────────────────────────────────────── */
+      .progress-wrap {
+        display: none;
+        margin-top: 14px;
+        padding: 12px 14px;
+        background: rgba(0, 123, 255, 0.06);
+        border: 1px solid rgba(0, 123, 255, 0.2);
+        border-radius: 6px;
+      }
+      .progress-label {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        margin-bottom: 7px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .progress-bar-track {
+        height: 8px;
+        background: var(--bg2);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .progress-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #007bff, #00c6ff);
+        border-radius: 4px;
+        width: 0%;
+        transition: width 0.4s ease;
+      }
+
+      /* ── Tabs ────────────────────────────────────────────────────── */
       .tabs {
         display: flex;
         gap: 0;
@@ -169,10 +276,181 @@
       .tab-pane.active {
         display: block;
       }
-      .photo-hint {
+
+      /* ── History table ───────────────────────────────────────────── */
+      .hist-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.82rem;
+      }
+      .hist-table th {
+        text-align: left;
+        padding: 8px 10px;
+        color: var(--text-muted);
+        font-weight: 600;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .hist-table td {
+        padding: 10px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        vertical-align: top;
+      }
+      .hist-table tr:last-child td {
+        border-bottom: none;
+      }
+      .hist-table tr:hover td {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .hist-text {
+        max-width: 280px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--text);
+      }
+      .hist-cancel-btn {
+        background: none;
+        border: 1px solid rgba(200, 50, 50, 0.3);
+        color: #e05555;
+        border-radius: 4px;
+        padding: 2px 8px;
         font-size: 0.75rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .hist-cancel-btn:hover {
+        background: rgba(200, 50, 50, 0.08);
+      }
+
+      /* ── Telegram preview modal ──────────────────────────────────── */
+      .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.72);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal-overlay.open {
+        display: flex;
+      }
+      .modal-box {
+        background: var(--bg1);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 28px;
+        max-width: 420px;
+        width: 96%;
+        position: relative;
+      }
+      .modal-close {
+        position: absolute;
+        top: 12px;
+        right: 14px;
+        background: none;
+        border: none;
         color: var(--text-dim);
+        font-size: 1.3rem;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .modal-close:hover {
+        color: var(--text);
+      }
+      .modal-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        margin-bottom: 16px;
+      }
+
+      /* Telegram phone frame */
+      .tg-frame {
+        background: #17212b;
+        border-radius: 16px;
+        padding: 14px 12px 20px;
+        min-height: 200px;
+        max-height: 400px;
+        overflow-y: auto;
+        position: relative;
+      }
+      .tg-topbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      }
+      .tg-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #4a90d9, #7b5ea7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        color: #fff;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+      .tg-sender-name {
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: #5aacff;
+      }
+      .tg-sender-sub {
+        font-size: 0.72rem;
+        color: rgba(255, 255, 255, 0.35);
+      }
+      .tg-bubble {
+        background: #2b5278;
+        border-radius: 12px 12px 4px 12px;
+        padding: 10px 14px;
+        margin-left: auto;
+        max-width: 88%;
+        width: fit-content;
+        font-size: 0.88rem;
+        color: #fff;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+        position: relative;
+      }
+      .tg-bubble-time {
+        font-size: 0.67rem;
+        color: rgba(255, 255, 255, 0.4);
+        text-align: right;
         margin-top: 4px;
+      }
+      .tg-photo-preview {
+        max-width: 100%;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        display: block;
+      }
+      .tg-photo-placeholder {
+        background: rgba(255, 255, 255, 0.07);
+        border-radius: 8px;
+        height: 120px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255, 255, 255, 0.3);
+        font-size: 0.8rem;
+        margin-bottom: 8px;
+      }
+      .tg-count-info {
+        margin-top: 14px;
+        font-size: 0.8rem;
+        color: var(--text-dim);
+        text-align: center;
+      }
+      .tg-count-info strong {
+        color: var(--gold);
       }
     </style>
   </head>
@@ -233,80 +511,124 @@
         </header>
 
         <div class="page-content">
-          <!-- Create new broadcast -->
+          <!-- ── Create new broadcast ───────────────────────────── -->
           <div class="create-form" id="newBroadcastForm">
             <div style="font-weight: 600; font-size: 1rem; margin-bottom: 16px; color: var(--text)">
               📝 Новая рассылка
             </div>
 
-            <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 6px"
-              >Текст сообщения <span style="color: var(--gold)">*</span></label
-            >
-            <textarea id="broadcastText" placeholder="Введите текст рассылки…"></textarea>
+            <!-- Text -->
+            <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 6px">
+              Текст сообщения <span style="color: var(--gold)">*</span>
+            </label>
+            <textarea id="broadcastText" placeholder="Введите текст рассылки…" oninput="updateCharCount()"></textarea>
+            <div style="font-size: 0.72rem; color: var(--text-dim); text-align: right; margin-top: 3px">
+              <span id="charCount">0</span> / 4096
+            </div>
 
-            <div class="form-row">
-              <div>
+            <div class="form-row" style="align-items: flex-start">
+              <!-- Segment radio group -->
+              <div style="flex: 1.4; min-width: 220px">
                 <label>Аудитория</label>
-                <select id="broadcastSegment" class="admin-input">
-                  <option value="all">Все клиенты</option>
-                  <option value="completed">Завершённые заявки</option>
-                  <option value="active">Активные 30 дней</option>
-                  <option value="new">Новые (без заявок)</option>
-                  <optgroup label="По городу" id="cityOptgroup"></optgroup>
-                </select>
+                <div class="segment-group" id="segmentGroup">
+                  <label class="segment-option selected" data-seg="all">
+                    <input type="radio" name="seg" value="all" checked />
+                    <span class="segment-label">Все клиенты</span>
+                    <span class="segment-count loading" id="cnt-all">…</span>
+                  </label>
+                  <label class="segment-option" data-seg="completed">
+                    <input type="radio" name="seg" value="completed" />
+                    <span class="segment-label">Завершённые заявки</span>
+                    <span class="segment-count loading" id="cnt-completed">…</span>
+                  </label>
+                  <label class="segment-option" data-seg="active">
+                    <input type="radio" name="seg" value="active" />
+                    <span class="segment-label">Активные за 30 дней</span>
+                    <span class="segment-count loading" id="cnt-active">…</span>
+                  </label>
+                  <label class="segment-option" data-seg="new">
+                    <input type="radio" name="seg" value="new" />
+                    <span class="segment-label">Новые (без заявок)</span>
+                    <span class="segment-count loading" id="cnt-new">…</span>
+                  </label>
+                  <label class="segment-option" data-seg="city">
+                    <input type="radio" name="seg" value="city" />
+                    <span class="segment-label">По городу</span>
+                    <span class="segment-count loading" id="cnt-city">—</span>
+                  </label>
+                  <!-- City picker row (shown when "city" radio is selected) -->
+                  <div id="citySegmentRow">
+                    <select id="citySelect" class="admin-input" onchange="onCityChange()">
+                      <option value="">— выберите город —</option>
+                    </select>
+                  </div>
+                </div>
               </div>
-              <div>
-                <label>Отложить до (необязательно)</label>
-                <input type="datetime-local" id="broadcastScheduled" class="admin-input" />
-              </div>
-              <div>
-                <label>Фото (file_id или URL, необязательно)</label>
-                <input
-                  type="text"
-                  id="broadcastPhoto"
-                  class="admin-input"
-                  placeholder="Telegram file_id или https://…"
-                />
-                <div class="photo-hint">💡 Поддерживается: Telegram file_id (для фото из бота) или https:// URL</div>
+
+              <!-- Right column: photo + schedule -->
+              <div style="flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 14px">
+                <div>
+                  <label>Фото (file_id или URL, необязательно)</label>
+                  <input
+                    type="text"
+                    id="broadcastPhoto"
+                    class="admin-input"
+                    placeholder="Telegram file_id или https://…"
+                  />
+                  <div class="photo-hint">💡 Telegram file_id или https:// URL</div>
+                </div>
+                <div>
+                  <label>Отложить до (необязательно)</label>
+                  <input type="datetime-local" id="broadcastScheduled" class="admin-input" />
+                  <div class="photo-hint">Не заполнено — отправить сразу</div>
+                </div>
               </div>
             </div>
 
-            <div
-              style="
-                margin-top: 12px;
-                padding: 8px 12px;
-                background: rgba(201, 169, 110, 0.08);
-                border: 1px solid rgba(201, 169, 110, 0.2);
-                border-radius: 6px;
-                font-size: 0.82rem;
-                color: var(--text-muted);
-                display: flex;
-                align-items: center;
-                gap: 8px;
-              "
-            >
+            <!-- Recipients bar -->
+            <div class="recipients-bar">
               <span>👥 Получателей:</span>
-              <span id="recipientCount" style="font-weight: 700; color: var(--gold)">…</span>
+              <strong id="recipientCount">…</strong>
               <span id="recipientNote" style="color: var(--text-dim)"></span>
             </div>
 
-            <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center">
+            <!-- Progress bar (shown during send) -->
+            <div class="progress-wrap" id="progressWrap">
+              <div class="progress-label">
+                <span id="progressText">Отправляется…</span>
+                <span id="progressPct">0%</span>
+              </div>
+              <div class="progress-bar-track">
+                <div class="progress-bar-fill" id="progressFill"></div>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
               <button class="btn btn-gold" onclick="createBroadcast()" id="createBtn">📢 Отправить</button>
+              <button
+                class="btn"
+                onclick="openPreview()"
+                id="previewBtn"
+                style="border-color: rgba(201, 169, 110, 0.3); color: var(--gold)"
+              >
+                👁 Предпросмотр
+              </button>
               <span id="createStatus" style="font-size: 0.82rem; color: var(--text-dim)"></span>
             </div>
           </div>
 
-          <!-- List with tabs -->
+          <!-- ── Broadcast history ──────────────────────────────── -->
           <div class="section-card">
             <div class="section-card-header">
               <div class="section-card-title">📋 История рассылок</div>
             </div>
             <div class="section-card-body">
               <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('all')">Все</button>
-                <button class="tab-btn" onclick="switchTab('scheduled')">⏳ Запланированные</button>
-                <button class="tab-btn" onclick="switchTab('sent')">✅ Отправленные</button>
-                <button class="tab-btn" onclick="switchTab('cancelled')">❌ Отменённые</button>
+                <button class="tab-btn active" onclick="switchTab(this, 'all')">Все</button>
+                <button class="tab-btn" onclick="switchTab(this, 'scheduled')">⏳ Запланированные</button>
+                <button class="tab-btn" onclick="switchTab(this, 'sent')">✅ Отправленные</button>
+                <button class="tab-btn" onclick="switchTab(this, 'cancelled')">❌ Отменённые</button>
               </div>
               <div id="broadcastList">
                 <div style="padding: 24px; color: var(--text-dim)">Загрузка…</div>
@@ -314,17 +636,47 @@
             </div>
           </div>
         </div>
+        <!-- /page-content -->
+      </div>
+      <!-- /main-content -->
+    </div>
+    <!-- /admin-layout -->
+
+    <!-- ── Telegram preview modal ──────────────────────────────────── -->
+    <div class="modal-overlay" id="previewModal" onclick="closePreviewOnBg(event)">
+      <div class="modal-box">
+        <button class="modal-close" onclick="closePreview()">✕</button>
+        <div class="modal-title">👁 Предпросмотр — как увидит получатель</div>
+        <div class="tg-frame">
+          <div class="tg-topbar">
+            <div class="tg-avatar">N</div>
+            <div>
+              <div class="tg-sender-name">Nevesty Models</div>
+              <div class="tg-sender-sub">Официальный бот</div>
+            </div>
+          </div>
+          <div class="tg-bubble" id="previewBubble">
+            <div id="previewPhotoWrap"></div>
+            <div id="previewTextNode"></div>
+            <div class="tg-bubble-time" id="previewTime"></div>
+          </div>
+        </div>
+        <div class="tg-count-info" id="previewCountInfo"></div>
       </div>
     </div>
 
     <div class="toast-container" id="toastContainer"></div>
     <script src="/js/admin.js"></script>
     <script>
+      /* ────────────────────────────────────────────────────────────
+         Constants
+      ──────────────────────────────────────────────────────────── */
       const SEGMENT_LABELS = {
         all: 'Все',
         completed: 'Завершённые',
         active: 'Активные 30д',
         new: 'Новые',
+        city: 'По городу',
       };
       const STATUS_LABELS = {
         pending: 'Ожидает',
@@ -334,52 +686,351 @@
         cancelled: 'Отменено',
       };
 
+      /* ────────────────────────────────────────────────────────────
+         State
+      ──────────────────────────────────────────────────────────── */
+      let _allBroadcasts = [];
+      let _currentTab = 'all';
+      let _pollingTimer = null;
+      let _pollingId = null; // broadcast id being polled
+
+      /* ────────────────────────────────────────────────────────────
+         Helpers
+      ──────────────────────────────────────────────────────────── */
       function segmentLabel(seg) {
         if (!seg) return '—';
         if (SEGMENT_LABELS[seg]) return SEGMENT_LABELS[seg];
-        if (seg.startsWith('city_')) return '🏙 ' + seg.slice(5);
-        if (seg.startsWith('city:')) return '🏙 ' + seg.slice(5);
+        if (seg.startsWith('city_') || seg.startsWith('city:')) {
+          return '🏙 ' + seg.slice(5);
+        }
         return seg;
       }
 
       function deliveryPct(row) {
-        // Support both scheduled_broadcasts (sent_count/error_count) and bot_broadcasts (delivered/failed)
         const sent = row.delivered != null ? row.delivered || 0 : row.sent_count || 0;
         const err = row.failed != null ? row.failed || 0 : row.error_count || 0;
         const total = sent + err;
         if (total === 0) return null;
-        const pct = Math.round((sent / total) * 100);
-        return { sent, err, total, pct };
+        return { sent, err, total, pct: Math.round((sent / total) * 100) };
       }
 
-      let _allBroadcasts = [];
-      let _currentTab = 'all';
+      function updateCharCount() {
+        const n = document.getElementById('broadcastText').value.length;
+        document.getElementById('charCount').textContent = n;
+      }
+
+      /* ────────────────────────────────────────────────────────────
+         Segment radio + live counts
+      ──────────────────────────────────────────────────────────── */
+      function getSelectedSegment() {
+        const radio = document.querySelector('input[name="seg"]:checked');
+        if (!radio) return 'all';
+        if (radio.value === 'city') {
+          const city = document.getElementById('citySelect').value;
+          return city ? 'city_' + city : 'city';
+        }
+        return radio.value;
+      }
+
+      async function fetchCount(seg) {
+        if (seg === 'city' || !seg) return null;
+        try {
+          const data = await _admin.apiFetch('/admin/broadcasts/count?segment=' + encodeURIComponent(seg));
+          return data.count ?? null;
+        } catch {
+          return null;
+        }
+      }
+
+      async function loadAllCounts() {
+        const segs = ['all', 'completed', 'active', 'new'];
+        const results = await Promise.allSettled(segs.map(s => fetchCount(s)));
+        segs.forEach((seg, i) => {
+          const el = document.getElementById('cnt-' + seg);
+          if (!el) return;
+          const val = results[i].status === 'fulfilled' ? results[i].value : null;
+          el.textContent = val != null ? val : '?';
+          el.classList.remove('loading');
+        });
+        // After all counts loaded, update recipient bar for selected segment
+        refreshRecipientBar();
+      }
+
+      async function refreshRecipientBar() {
+        const seg = getSelectedSegment();
+        const el = document.getElementById('recipientCount');
+        const note = document.getElementById('recipientNote');
+        if (!el) return;
+
+        if (seg === 'city' || seg === '') {
+          el.textContent = '—';
+          if (note) note.textContent = 'Выберите город';
+          return;
+        }
+        el.textContent = '…';
+        if (note) note.textContent = '';
+        const count = await fetchCount(seg);
+        el.textContent = count != null ? count : '?';
+        if (note) note.textContent = count === 0 ? '(нет получателей с Telegram)' : '';
+      }
+
+      async function onCityChange() {
+        const city = document.getElementById('citySelect').value;
+        const cntEl = document.getElementById('cnt-city');
+        if (!city) {
+          if (cntEl) {
+            cntEl.textContent = '—';
+            cntEl.classList.add('loading');
+          }
+          refreshRecipientBar();
+          return;
+        }
+        if (cntEl) {
+          cntEl.textContent = '…';
+          cntEl.classList.add('loading');
+        }
+        const count = await fetchCount('city_' + city);
+        if (cntEl) {
+          cntEl.textContent = count != null ? count : '?';
+          cntEl.classList.remove('loading');
+        }
+        refreshRecipientBar();
+      }
+
+      // Wire up segment radios
+      document.getElementById('segmentGroup').addEventListener('change', function (e) {
+        if (e.target.name !== 'seg') return;
+        // Update selected styling
+        document.querySelectorAll('.segment-option').forEach(opt => {
+          opt.classList.toggle('selected', opt.dataset.seg === e.target.value);
+        });
+        // Show/hide city dropdown
+        const cityRow = document.getElementById('citySegmentRow');
+        cityRow.style.display = e.target.value === 'city' ? 'block' : 'none';
+        refreshRecipientBar();
+      });
 
       async function loadCities() {
         try {
           const rows = await _admin.apiFetch('/admin/models?limit=200&fields=city');
           const cities = [...new Set((rows || []).map(r => r.city).filter(Boolean))].sort();
-          const optgroup = document.getElementById('cityOptgroup');
-          optgroup.innerHTML = cities
-            .map(c => `<option value="city_${c}">🏙 ${_admin.escapeHtml(c)}</option>`)
-            .join('');
-        } catch (e) {
-          // silently fail — city options just won't show
+          const sel = document.getElementById('citySelect');
+          cities.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = '🏙 ' + c;
+            sel.appendChild(opt);
+          });
+        } catch {
+          /* silently skip */
         }
       }
 
-      function switchTab(tab) {
+      /* ────────────────────────────────────────────────────────────
+         Telegram Preview Modal
+      ──────────────────────────────────────────────────────────── */
+      function openPreview() {
+        const text = document.getElementById('broadcastText').value.trim();
+        const photo = document.getElementById('broadcastPhoto').value.trim();
+        const seg = getSelectedSegment();
+        const countEl = document.getElementById('recipientCount');
+        const count = countEl ? countEl.textContent : '?';
+
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+
+        // Photo area
+        const photoWrap = document.getElementById('previewPhotoWrap');
+        photoWrap.innerHTML = '';
+        if (photo) {
+          if (photo.startsWith('http://') || photo.startsWith('https://')) {
+            const img = document.createElement('img');
+            img.src = photo;
+            img.className = 'tg-photo-preview';
+            img.onerror = () => {
+              photoWrap.innerHTML = '<div class="tg-photo-placeholder">🖼 Фото (ошибка загрузки)</div>';
+            };
+            photoWrap.appendChild(img);
+          } else {
+            photoWrap.innerHTML = '<div class="tg-photo-placeholder">🖼 Фото (Telegram file_id)</div>';
+          }
+        }
+
+        // Text — preserve line breaks, basic escape
+        const textNode = document.getElementById('previewTextNode');
+        textNode.textContent = text || '(текст не введён)';
+        if (!text) textNode.style.color = 'rgba(255,255,255,0.3)';
+        else textNode.style.color = '#fff';
+
+        document.getElementById('previewTime').textContent = hh + ':' + mm;
+
+        // Recipient count info
+        const segLbl = segmentLabel(seg);
+        const countInfo = document.getElementById('previewCountInfo');
+        countInfo.innerHTML = `Сегмент: <strong>${_admin.escapeHtml(segLbl)}</strong> · Получателей: <strong>${_admin.escapeHtml(count)}</strong>`;
+
+        document.getElementById('previewModal').classList.add('open');
+      }
+
+      function closePreview() {
+        document.getElementById('previewModal').classList.remove('open');
+      }
+
+      function closePreviewOnBg(e) {
+        if (e.target === document.getElementById('previewModal')) closePreview();
+      }
+
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closePreview();
+      });
+
+      /* ────────────────────────────────────────────────────────────
+         Create Broadcast
+      ──────────────────────────────────────────────────────────── */
+      async function createBroadcast() {
+        const text = document.getElementById('broadcastText').value.trim();
+        const seg = getSelectedSegment();
+        const scheduledRaw = document.getElementById('broadcastScheduled').value;
+        const photoVal = document.getElementById('broadcastPhoto').value.trim();
+        const statusEl = document.getElementById('createStatus');
+        const btn = document.getElementById('createBtn');
+
+        if (!text) {
+          _admin.toast('Введите текст рассылки', 'error');
+          return;
+        }
+        if (seg === 'city' || seg === '') {
+          _admin.toast('Выберите город', 'error');
+          return;
+        }
+
+        const body = { text, segment: seg };
+        if (scheduledRaw) body.scheduled_at = new Date(scheduledRaw).toISOString();
+        if (photoVal) body.photo_url = photoVal;
+
+        btn.disabled = true;
+        statusEl.textContent = 'Создаётся…';
+        try {
+          const result = await _admin.apiFetch('/admin/broadcasts', { method: 'POST', body: JSON.stringify(body) });
+          const isScheduled = !!scheduledRaw;
+          _admin.toast(isScheduled ? 'Рассылка запланирована!' : 'Рассылка поставлена в очередь!', 'success');
+
+          // Clear form
+          document.getElementById('broadcastText').value = '';
+          document.getElementById('broadcastScheduled').value = '';
+          document.getElementById('broadcastPhoto').value = '';
+          updateCharCount();
+          statusEl.textContent = '';
+
+          // Start progress polling if not scheduled
+          if (!isScheduled && result && result.id) {
+            startProgressPolling(result.id);
+          }
+
+          loadBroadcasts();
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+          statusEl.textContent = '';
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      /* ────────────────────────────────────────────────────────────
+         Progress bar polling
+      ──────────────────────────────────────────────────────────── */
+      function startProgressPolling(id) {
+        _pollingId = id;
+        stopProgressPolling();
+        showProgress(0, 0, 0);
+        _pollingTimer = setInterval(() => pollProgress(id), 2000);
+      }
+
+      function stopProgressPolling() {
+        if (_pollingTimer) {
+          clearInterval(_pollingTimer);
+          _pollingTimer = null;
+        }
+      }
+
+      function showProgress(delivered, total, pct) {
+        const wrap = document.getElementById('progressWrap');
+        wrap.style.display = 'block';
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('progressPct').textContent = pct + '%';
+        document.getElementById('progressText').textContent =
+          total > 0 ? `Отправляется… ${delivered} / ${total}` : 'Отправляется…';
+      }
+
+      function hideProgress() {
+        document.getElementById('progressWrap').style.display = 'none';
+        stopProgressPolling();
+      }
+
+      async function pollProgress(id) {
+        try {
+          const rows = await _admin.apiFetch('/admin/broadcasts?limit=100');
+          const row = (rows || []).find(r => r.id === id && r.source === 'scheduled');
+          if (!row) return;
+
+          const delivered = row.delivered || 0;
+          const failed = row.failed || 0;
+          const total = row.total_recipients || delivered + failed;
+          const pct = total > 0 ? Math.round((delivered / total) * 100) : 0;
+
+          if (row.status === 'sent' || row.status === 'done' || row.status === 'cancelled') {
+            showProgress(delivered, total, 100);
+            document.getElementById('progressText').textContent =
+              row.status === 'cancelled'
+                ? 'Отменено'
+                : `Готово! Доставлено: ${delivered}${failed > 0 ? ', ошибок: ' + failed : ''}`;
+            loadBroadcasts();
+            setTimeout(hideProgress, 4000);
+            stopProgressPolling();
+          } else if (row.status === 'sending') {
+            showProgress(delivered, total, pct);
+            _allBroadcasts = rows;
+            renderBroadcasts(_allBroadcasts);
+          }
+        } catch {
+          /* silently continue polling */
+        }
+      }
+
+      /* ────────────────────────────────────────────────────────────
+         Cancel Broadcast
+      ──────────────────────────────────────────────────────────── */
+      async function cancelBroadcast(id) {
+        if (!confirm('Отменить рассылку?')) return;
+        try {
+          await _admin.apiFetch(`/admin/broadcasts/${id}`, { method: 'DELETE' });
+          _admin.toast('Рассылка отменена', 'success');
+          if (_pollingId === id) hideProgress();
+          loadBroadcasts();
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
+
+      /* ────────────────────────────────────────────────────────────
+         History tabs
+      ──────────────────────────────────────────────────────────── */
+      function switchTab(btn, tab) {
         _currentTab = tab;
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        event.target.classList.add('active');
+        btn.classList.add('active');
         renderBroadcasts(_allBroadcasts);
       }
 
+      /* ────────────────────────────────────────────────────────────
+         Render history table
+      ──────────────────────────────────────────────────────────── */
       function renderBroadcasts(rows) {
         const cont = document.getElementById('broadcastList');
         let filtered = rows;
         if (_currentTab === 'scheduled') filtered = rows.filter(r => r.status === 'pending' || r.status === 'sending');
-        else if (_currentTab === 'sent') filtered = rows.filter(r => r.status === 'sent');
+        else if (_currentTab === 'sent') filtered = rows.filter(r => r.status === 'sent' || r.status === 'done');
         else if (_currentTab === 'cancelled') filtered = rows.filter(r => r.status === 'cancelled');
 
         if (!filtered.length) {
@@ -387,58 +1038,72 @@
           return;
         }
 
-        cont.innerHTML = filtered
+        const rows_html = filtered
           .map(r => {
             const dp = deliveryPct(r);
             const deliveredVal = r.delivered != null ? r.delivered : r.sent_count;
             const failedVal = r.failed != null ? r.failed : r.error_count;
             const dateStr = (r.started_at || r.scheduled_at || r.created_at || '').slice(0, 16).replace('T', ' ');
-            const finishedStr = r.finished_at
-              ? r.finished_at.slice(0, 16).replace('T', ' ')
-              : r.sent_at
-                ? r.sent_at.slice(0, 16).replace('T', ' ')
-                : null;
             const sentBy = r.sent_by || r.created_by || '—';
-            const sourceBadge =
+            const source =
               r.source === 'bot'
-                ? `<span style="font-size:0.7rem;background:rgba(0,123,255,0.12);color:#5aacff;border:1px solid rgba(0,123,255,0.25);border-radius:20px;padding:2px 8px">🤖 Бот</span>`
-                : `<span style="font-size:0.7rem;background:rgba(100,100,100,0.1);color:var(--text-dim);border:1px solid var(--border);border-radius:20px;padding:2px 8px">⏰ Планировщик</span>`;
+                ? `<span style="font-size:0.7rem;background:rgba(0,123,255,0.12);color:#5aacff;border:1px solid rgba(0,123,255,0.25);border-radius:20px;padding:2px 7px">🤖 Бот</span>`
+                : `<span style="font-size:0.7rem;background:rgba(100,100,100,0.1);color:var(--text-dim);border:1px solid var(--border);border-radius:20px;padding:2px 7px">⏰ Планировщик</span>`;
+
+            const preview80 = (r.text || '').slice(0, 80) + ((r.text || '').length > 80 ? '…' : '');
+
+            const statsCell = dp
+              ? `<span class="stat-chip ok">✅ ${deliveredVal}</span>
+               ${failedVal > 0 ? `<span class="stat-chip err" style="margin-left:6px">❌ ${failedVal}</span>` : ''}
+               <span class="stat-chip pct" style="margin-left:6px">${dp.pct}%</span>`
+              : `<span style="color:var(--text-dim)">—</span>`;
+
+            const cancelBtn =
+              r.status === 'pending' && r.source !== 'bot'
+                ? `<button class="hist-cancel-btn" onclick="cancelBroadcast(${r.id})">Отменить</button>`
+                : '';
+
             return `
-      <div class="broadcast-card">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
-          <div class="broadcast-text">${_admin.escapeHtml(r.text || '')}</div>
-          ${
-            r.status === 'pending' && r.source !== 'bot'
-              ? `<button onclick="cancelBroadcast(${r.id})" class="btn btn-sm" style="color:#e05555;border-color:rgba(200,50,50,0.3);white-space:nowrap;flex-shrink:0">❌ Отменить</button>`
-              : ''
-          }
-        </div>
-        <div class="broadcast-meta">
-          <span class="badge-status ${r.status || 'pending'}">${STATUS_LABELS[r.status] || r.status}</span>
-          ${sourceBadge}
-          <span class="broadcast-segment">${_admin.escapeHtml(segmentLabel(r.segment))}</span>
-          <span style="color:var(--text-dim)">📅 ${dateStr}</span>
-          ${finishedStr ? `<span style="color:var(--text-dim)">✓ ${finishedStr}</span>` : ''}
-          <span style="color:var(--text-dim)">👤 ${_admin.escapeHtml(sentBy)}</span>
-          ${r.photo_url ? `<span style="color:var(--text-dim)">🖼 С фото</span>` : ''}
-          ${r.total_recipients ? `<span style="color:var(--text-dim)">👥 ${r.total_recipients} получ.</span>` : ''}
-        </div>
-        ${
-          deliveredVal != null || failedVal != null
-            ? `
-        <div class="stats-row" style="margin-top:8px">
-          ${deliveredVal != null ? `<span class="stat-chip ok">✅ Доставлено: ${deliveredVal}</span>` : ''}
-          ${failedVal != null && failedVal > 0 ? `<span class="stat-chip err">❌ Ошибок: ${failedVal}</span>` : ''}
-          ${dp ? `<span class="stat-chip pct">${dp.sent} / ${dp.total} (${dp.pct}%)</span>` : ''}
-        </div>`
-            : ''
-        }
-      </div>
-    `;
+            <tr>
+              <td style="white-space:nowrap;color:var(--text-dim)">${_admin.escapeHtml(dateStr)}</td>
+              <td>
+                <div class="hist-text" title="${_admin.escapeHtml(r.text || '')}">${_admin.escapeHtml(preview80)}</div>
+                ${r.photo_url ? `<div style="font-size:0.72rem;color:var(--text-dim);margin-top:2px">🖼 С фото</div>` : ''}
+              </td>
+              <td><span class="broadcast-segment">${_admin.escapeHtml(segmentLabel(r.segment))}</span></td>
+              <td>${statsCell}</td>
+              <td>
+                <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">
+                  <span class="badge-status ${r.status || 'pending'}">${STATUS_LABELS[r.status] || r.status}</span>
+                  ${source}
+                </div>
+              </td>
+              <td style="white-space:nowrap">${cancelBtn}</td>
+            </tr>`;
           })
           .join('');
+
+        cont.innerHTML = `
+          <div style="overflow-x:auto">
+            <table class="hist-table">
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Текст</th>
+                  <th>Сегмент</th>
+                  <th>Доставлено / Ошибок</th>
+                  <th>Статус</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>${rows_html}</tbody>
+            </table>
+          </div>`;
       }
 
+      /* ────────────────────────────────────────────────────────────
+         Load broadcasts list
+      ──────────────────────────────────────────────────────────── */
       async function loadBroadcasts() {
         const cont = document.getElementById('broadcastList');
         cont.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Загрузка…</div>';
@@ -451,82 +1116,12 @@
         }
       }
 
-      async function createBroadcast() {
-        const text = document.getElementById('broadcastText').value.trim();
-        const segment = document.getElementById('broadcastSegment').value;
-        const scheduledRaw = document.getElementById('broadcastScheduled').value;
-        const photoVal = document.getElementById('broadcastPhoto').value.trim();
-        const statusEl = document.getElementById('createStatus');
-        const btn = document.getElementById('createBtn');
-
-        if (!text) {
-          _admin.toast('Введите текст рассылки', 'error');
-          return;
-        }
-
-        const body = { text, segment };
-        if (scheduledRaw) body.scheduled_at = new Date(scheduledRaw).toISOString();
-        if (photoVal) {
-          // If it looks like a URL, use photo_url; otherwise treat as Telegram file_id
-          if (photoVal.startsWith('http://') || photoVal.startsWith('https://')) {
-            body.photo_url = photoVal;
-          } else {
-            body.photo_url = photoVal; // API stores as photo_url; bot uses it as file_id fallback
-          }
-        }
-
-        btn.disabled = true;
-        statusEl.textContent = 'Создаётся…';
-        try {
-          await _admin.apiFetch('/admin/broadcasts', { method: 'POST', body: JSON.stringify(body) });
-          _admin.toast(scheduledRaw ? 'Рассылка запланирована!' : 'Рассылка поставлена в очередь!', 'success');
-          document.getElementById('broadcastText').value = '';
-          document.getElementById('broadcastScheduled').value = '';
-          document.getElementById('broadcastPhoto').value = '';
-          statusEl.textContent = '';
-          loadBroadcasts();
-        } catch (e) {
-          _admin.toast('Ошибка: ' + e.message, 'error');
-          statusEl.textContent = '';
-        } finally {
-          btn.disabled = false;
-        }
-      }
-
-      async function cancelBroadcast(id) {
-        if (!confirm('Отменить рассылку?')) return;
-        try {
-          await _admin.apiFetch(`/admin/broadcasts/${id}`, { method: 'DELETE' });
-          _admin.toast('Рассылка отменена', 'success');
-          loadBroadcasts();
-        } catch (e) {
-          _admin.toast('Ошибка: ' + e.message, 'error');
-        }
-      }
-
-      async function loadRecipientCount(segment) {
-        const el = document.getElementById('recipientCount');
-        const note = document.getElementById('recipientNote');
-        if (!el) return;
-        el.textContent = '…';
-        if (note) note.textContent = '';
-        try {
-          const data = await _admin.apiFetch(`/admin/broadcasts/count?segment=${encodeURIComponent(segment)}`);
-          el.textContent = data.count ?? '?';
-          if (note) note.textContent = data.count === 0 ? '(нет получателей с Telegram)' : '';
-        } catch {
-          el.textContent = '?';
-        }
-      }
-
-      // Listen for segment change to update recipient preview count
-      document.getElementById('broadcastSegment').addEventListener('change', function () {
-        loadRecipientCount(this.value);
-      });
-
+      /* ────────────────────────────────────────────────────────────
+         Init
+      ──────────────────────────────────────────────────────────── */
       loadCities();
       loadBroadcasts();
-      loadRecipientCount('all');
+      loadAllCounts();
     </script>
   </body>
 </html>

@@ -77,6 +77,38 @@
         min-width: 0;
         padding-left: 24px;
       }
+      @media (max-width: 860px) {
+        .settings-layout {
+          flex-direction: column;
+          gap: 12px;
+        }
+        .settings-sidebar {
+          width: 100%;
+          position: static;
+          max-height: none;
+          display: flex;
+          flex-wrap: wrap;
+          padding: 4px;
+        }
+        .settings-sidebar-label {
+          display: none;
+        }
+        .tab-btn {
+          width: auto;
+          border-left: none;
+          border-bottom: 2px solid transparent;
+          padding: 8px 12px;
+          font-size: 0.78rem;
+          border-radius: 4px;
+        }
+        .tab-btn.active {
+          border-left-color: transparent;
+          border-bottom-color: var(--gold);
+        }
+        .settings-content-wrap {
+          padding-left: 0;
+        }
+      }
 
       /* ─── Tab panes ───────────────────────────────────── */
       .tab-pane {
