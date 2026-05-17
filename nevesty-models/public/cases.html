@@ -1052,17 +1052,129 @@
     <script src="/js/darkmode.js"></script>
     <script src="/js/analytics.js"></script>
     <script>
+      // ── Filter with staggered animation ────────────────────────────────────
       function filterCases(cat, btn) {
         document.querySelectorAll('.cat-tab').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
+        let delay = 0;
         document.querySelectorAll('.case-card').forEach(card => {
           const show = cat === 'all' || card.dataset.cat === cat;
-          card.style.display = show ? '' : 'none';
           if (show) {
-            card.style.animation = 'fadeIn 0.3s ease-out';
+            card.classList.remove('hidden');
+            card.classList.remove('animating');
+            void card.offsetWidth;
+            card.style.animationDelay = delay + 'ms';
+            card.classList.add('animating');
+            delay += 45;
+          } else {
+            card.classList.add('hidden');
+            card.classList.remove('animating');
+            card.style.animationDelay = '0ms';
           }
         });
       }
+
+      // ── Lightbox ──────────────────────────────────────────────────────────────
+      const CASES_DATA = [
+        {
+          cat: 'Fashion',
+          emoji: '🎭',
+          title: 'Moscow Fashion Week 2025',
+          desc: 'Предоставили 12 моделей для показа молодого российского дизайнера. Подготовка к показу заняла 3 дня — кастинг, примерки, репетиции. Шоу прошло в Центральном Доме Художника при полном зале.',
+          meta: ['📍 Москва', '👥 12 моделей', '⏱ 2 дня'],
+        },
+        {
+          cat: 'Коммерческая съёмка',
+          emoji: '📸',
+          title: 'Рекламная кампания LIMÉ',
+          desc: 'Комплексная съёмка лукбука для крупного российского бренда одежды. 3 дня съёмок, 5 моделей, 200+ образов для каталога. Работали с топовым фотографом и командой стилистов.',
+          meta: ['📍 Санкт-Петербург', '👥 5 моделей', '⏱ 3 дня'],
+        },
+        {
+          cat: 'Корпоратив',
+          emoji: '🎉',
+          title: 'Юбилей Сбербанка — 500 гостей',
+          desc: 'Хостес и промо-модели на торжественном вечере крупного банка. Встреча гостей, навигация по площадке, сопровождение VIP-персон. Мероприятие прошло в московском «Экспоцентре».',
+          meta: ['📍 Москва', '👥 8 хостес', '⏱ 1 вечер'],
+        },
+        {
+          cat: 'Фотосессия',
+          emoji: '💐',
+          title: 'Свадебный лукбук для салона',
+          desc: 'Съёмка коллекции свадебных платьев для московского свадебного салона. Студийная и уличная локации, 3 образа на каждой модели. Результат использован в рекламных кампаниях и на сайте клиента.',
+          meta: ['📍 Москва', '👥 3 модели', '⏱ 1 день'],
+        },
+        {
+          cat: 'Fashion',
+          emoji: '🛍',
+          title: 'Показ в ЦУМ — новая коллекция',
+          desc: 'Еженедельные показы новых коллекций международных брендов в флагманском универмаге Москвы. Постоянное партнёрство — 6 моделей каждую неделю на протяжении всего сезона.',
+          meta: ['📍 Москва', '👥 6 моделей', '⏱ Регулярно'],
+        },
+        {
+          cat: 'Видеопроизводство',
+          emoji: '🎬',
+          title: 'ТВ-ролик для фармацевтики',
+          desc: 'Актриса-модель для рекламного ролика крупного фармацевтического бренда. Кастинг из 40 кандидатов — финальную модель выбрал директор по маркетингу лично. Съёмка заняла 1 день.',
+          meta: ['📍 Москва', '👥 1 модель', '⏱ 1 день'],
+        },
+        {
+          cat: 'Промо',
+          emoji: '🏬',
+          title: 'Промо-акция Samsung в ТРЦ',
+          desc: 'Промоутеры и модели для презентации новой линейки телефонов Galaxy. 10 точек по Москве, 15 промоутеров, 2 недели активного промо. Охват — более 50 000 посетителей торговых центров.',
+          meta: ['📍 Москва', '👥 15 промоутеров', '⏱ 2 недели'],
+        },
+        {
+          cat: 'Фотосессия',
+          emoji: '✨',
+          title: 'Портфолио для beauty-бренда',
+          desc: 'Имиджевая фотосессия для отечественного бренда декоративной косметики. Минималистичный стиль, акцент на продукт и детали. Серия из 50 финальных кадров для сайта и соцсетей.',
+          meta: ['📍 Екатеринбург', '👥 2 модели', '⏱ 1 день'],
+        },
+        {
+          cat: 'B2B Мероприятие',
+          emoji: '📊',
+          title: 'Стенд на выставке INTERCHARM',
+          desc: 'Хостес и демонстраторы продукции на крупнейшей beauty-выставке России. Профессиональное знание продукта, работа с иностранными гостями на русском и английском языках.',
+          meta: ['📍 Москва, Крокус', '👥 4 хостес', '⏱ 3 дня'],
+        },
+      ];
+
+      function openLightbox(idx) {
+        const d = CASES_DATA[idx];
+        if (!d) return;
+        document.getElementById('lightboxImg').textContent = d.emoji;
+        document.getElementById('lightboxCat').textContent = d.cat;
+        document.getElementById('lightboxTitle').textContent = d.title;
+        document.getElementById('lightboxDesc').textContent = d.desc;
+        document.getElementById('lightboxMeta').innerHTML = d.meta.map(m => '<span>' + m + '</span>').join('');
+        const lb = document.getElementById('caseLightbox');
+        lb.classList.add('open');
+        lb.setAttribute('tabindex', '-1');
+        lb.focus();
+        document.body.style.overflow = 'hidden';
+      }
+      function closeLightbox() {
+        document.getElementById('caseLightbox').classList.remove('open');
+        document.body.style.overflow = '';
+      }
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeLightbox();
+      });
+      document.getElementById('caseLightbox').addEventListener('click', function (e) {
+        if (e.target === e.currentTarget) closeLightbox();
+      });
+      // keyboard for case cards (Enter/Space)
+      document.querySelectorAll('.case-card').forEach(function (card) {
+        card.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            var idx = card.dataset.idx;
+            if (idx !== undefined) openLightbox(parseInt(idx, 10));
+          }
+        });
+      });
 
       document.getElementById('burgerBtn').addEventListener('click', () => {
         document.getElementById('mobileMenu').classList.toggle('open');
