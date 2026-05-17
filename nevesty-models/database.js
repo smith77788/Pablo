@@ -781,6 +781,18 @@ async function initDatabase() {
     ).catch(() => {});
   }
 
+  // v26 — client_otp cleanup index + order_status_history notes column
+  const v26 = await get(`SELECT version FROM schema_versions WHERE version=26`).catch(() => null);
+  if (!v26) {
+    // Remove expired/used OTP codes periodically via index (cleanup trigger in scheduler)
+    await run(`CREATE INDEX IF NOT EXISTS idx_client_otp_expires ON client_otp(expires_at, used)`).catch(() => {});
+    // Clean up expired OTP codes that may have accumulated
+    await run(`DELETE FROM client_otp WHERE expires_at < datetime('now', '-1 hour')`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(26, 'client_otp cleanup index, expired OTP purge')`
+    ).catch(() => {});
+  }
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
