@@ -793,6 +793,16 @@ async function initDatabase() {
     ).catch(() => {});
   }
 
+  // Schema v27 — admins last_login, active columns for admin users management
+  const v27 = await get(`SELECT version FROM schema_versions WHERE version=27`).catch(() => null);
+  if (!v27) {
+    await run(`ALTER TABLE admins ADD COLUMN last_login DATETIME DEFAULT NULL`).catch(() => {});
+    await run(`ALTER TABLE admins ADD COLUMN active INTEGER DEFAULT 1`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(27, 'admins last_login, active columns for user management')`
+    ).catch(() => {});
+  }
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {

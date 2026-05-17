@@ -59,7 +59,91 @@
     <link rel="dns-prefetch" href="https://api.telegram.org" />
     <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
     <link rel="preload" href="/css/main.css" as="style" />
+    <link rel="preload" href="/js/main.js" as="script" />
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap"
+    />
     <link rel="stylesheet" href="/css/main.css" />
+    <!-- Critical CSS: above-the-fold variables, nav and hero to prevent FOUC -->
+    <style>
+      :root {
+        --gold: #c9a96e;
+        --gold-light: #e8d5b0;
+        --gold-dark: #a07840;
+        --bg: #080808;
+        --bg2: #111111;
+        --bg3: #1a1a1a;
+        --border: #2a2a2a;
+        --text: #f0ede8;
+        --text-muted: #999;
+        --white: #ffffff;
+        --radius: 4px;
+        --transition: 0.3s ease;
+      }
+      body {
+        font-family: 'Inter', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        margin: 0;
+        overflow-x: hidden;
+      }
+      .navbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        padding: 20px 0;
+      }
+      .nav-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+      .nav-logo {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.5rem;
+        letter-spacing: 2px;
+        color: var(--gold);
+        text-decoration: none;
+      }
+      .hero {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        overflow: hidden;
+        background: linear-gradient(135deg, #080808 0%, #0f0a06 50%, #080808 100%);
+      }
+      .hero-content {
+        position: relative;
+        z-index: 1;
+        text-align: center;
+        padding: 0 24px;
+      }
+      .hero h1 {
+        font-family: 'Playfair Display', serif;
+        font-size: clamp(3rem, 8vw, 7rem);
+        color: var(--white);
+        line-height: 0.95;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+      .hero h1 em {
+        color: var(--gold);
+        font-style: italic;
+      }
+    </style>
     <script>
       tailwind.config = {
         darkMode: 'class',
@@ -1544,7 +1628,7 @@
     <script src="/js/main.js" defer></script>
     <script src="/js/telegram-webapp.js" defer></script>
     <script src="/js/animations.js" defer></script>
-    <script src="/js/darkmode.js"></script>
+    <script src="/js/darkmode.js" defer></script>
     <script>
       // Загрузить контакты из настроек бота
       fetch('/api/settings')

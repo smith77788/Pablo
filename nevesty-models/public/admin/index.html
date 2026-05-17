@@ -2099,10 +2099,7 @@
 
       async function markAllNotifRead() {
         try {
-          await _admin.apiFetch('/admin/notifications/read', {
-            method: 'POST',
-            body: JSON.stringify({ ids: _notifData.map(n => n.id) }),
-          });
+          await _admin.apiFetch('/admin/notifications/read-all', { method: 'PATCH' });
           _notifData.forEach(n => (n.read = true));
           loadNotifications();
         } catch {

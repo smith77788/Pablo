@@ -1,16 +1,17 @@
-version: '3.8'
+version: '3.9'
 
 services:
   app:
     build: .
     container_name: nevesty-app
-    restart: always
+    restart: unless-stopped
     expose:
       - "3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
       - DB_PATH=/app/data/nevesty.db
+      - REDIS_URL=redis://redis:6379
     env_file:
       - .env
     volumes:
@@ -28,15 +29,38 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - nevesty-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: nevesty-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nevesty-net
+    deploy:
+      resources:
+        limits:
+          memory: 128m
 
   factory:
     build:
       context: ../
       dockerfile: factory/Dockerfile
     container_name: nevesty-factory
-    restart: always
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -66,7 +90,7 @@ services:
   nginx:
     image: nginx:1.25-alpine
     container_name: nevesty-nginx
-    restart: always
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
@@ -106,5 +130,6 @@ volumes:
   backups_data:
   logs_data:
   factory_data:
+  redis_data:
   certbot_data:
   certbot_www:

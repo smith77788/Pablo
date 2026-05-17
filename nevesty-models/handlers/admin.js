@@ -31,7 +31,7 @@ async function showAdminStats(chatId) {
       total,
       todayOrders,
       weekOrders,
-      monthOrders,
+      _monthOrders,
       calMonthOrders,
       statusNew,
       statusConfirmed,
@@ -39,13 +39,13 @@ async function showAdminStats(chatId) {
       done,
       canc,
       newClientsMonth,
-      totalNew,
+      _totalNew,
       confirmedCount,
-      totalClients,
+      _totalClients,
       // Models counts
       totalModels,
       activeModels,
-      featuredModels,
+      _featuredModels,
     ] = await Promise.all([
       get('SELECT COUNT(*) as n FROM orders'),
       get("SELECT COUNT(*) as n FROM orders WHERE date(created_at,'localtime') = date('now','localtime')"),
@@ -85,13 +85,13 @@ async function showAdminStats(chatId) {
     // Active orders = new + confirmed + in_progress
     const activeCount = (statusNew?.n || 0) + (statusConfirmed?.n || 0) + (statusInProgress?.n || 0);
 
-    // Conversion: confirmed / (confirmed+completed+cancelled) — meaningful funnel
+    // Conversion: new→confirmed — confirmed / (confirmed + cancelled) reflects actual funnel
     const funnelTotal = (confirmedCount?.n || 0) + (canc?.n || 0);
     const conversion =
       funnelTotal > 0
         ? Math.round(((confirmedCount?.n || 0) / funnelTotal) * 100)
-        : (totalNew.n || 0) > 0
-          ? Math.round(((confirmedCount?.n || 0) / totalNew.n) * 100)
+        : total?.n > 0
+          ? Math.round(((confirmedCount?.n || 0) / total.n) * 100)
           : 0;
 
     // Revenue: sum of budgets for confirmed+completed orders
@@ -138,7 +138,7 @@ async function showAdminStats(chatId) {
       );
     } catch {}
 
-    // Top-2 cities by order count (via model city)
+    // Top-3 cities by order count (via model city)
     let topCities = [];
     try {
       topCities = await query(
@@ -148,7 +148,7 @@ async function showAdminStats(chatId) {
          WHERE m.city IS NOT NULL AND m.city != ''
          GROUP BY m.city
          ORDER BY cnt DESC
-         LIMIT 2`
+         LIMIT 3`
       );
     } catch {}
 
@@ -187,67 +187,63 @@ async function showAdminStats(chatId) {
     text += `_Обновлено: ${esc(now.toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}_\n\n`;
 
     // ── Заявки section ──────────────────────────────
-    text += `📋 *Заявки*\n`;
-    text += `├ Сегодня: *${esc(String(todayOrders.n))}*\n`;
-    text += `├ За 7 дней: ${esc(String(weekOrders.n))}\n`;
-    text += `├ ${esc(currentMonthLabel)} \\(текущий месяц\\): *${esc(String(calMonthOrders.n))}*\n`;
-    text += `├ За 30 дней: ${esc(String(monthOrders.n))}\n`;
-    text += `└ Всего: ${esc(String(total.n))}\n`;
-
-    // ── Status breakdown ────────────────────────────
-    text += `\n🔄 *Статус заявок*\n`;
-    text += `├ 🔵 Новые: *${esc(String(statusNew?.n || 0))}*\n`;
-    text += `├ ✅ Подтверждённые: ${esc(String(statusConfirmed?.n || 0))}\n`;
-    text += `├ 🔧 В работе: ${esc(String(statusInProgress?.n || 0))}\n`;
-    text += `├ 🏁 Завершённые: ${esc(String(done?.n || 0))}\n`;
-    text += `├ ❌ Отменённые: ${esc(String(canc?.n || 0))}\n`;
-    text += `├ 🟠 Активных всего: *${esc(String(activeCount))}*\n`;
-    text += `└ 📈 Конверсия new→confirmed: *${esc(String(conversion))}%*\n`;
+    text += `📋 *Заявки:*\n`;
+    text += `• Сегодня: *${esc(String(todayOrders.n))}*\n`;
+    text += `• Неделя: ${esc(String(weekOrders.n))}\n`;
+    text += `• Месяц \\(${esc(currentMonthLabel)}\\): *${esc(String(calMonthOrders.n))}*\n`;
+    text += `• Всего: ${esc(String(total.n))}\n`;
 
     // ── Revenue section ──────────────────────────────
-    text += `\n💰 *Выручка* _\\(confirmed \\+ completed\\)_\n`;
-    text += `├ Сегодня/неделя: ${fmt(revenue.week)} руб\\.\n`;
-    text += `├ ${esc(currentMonthLabel)} \\(тек\\. месяц\\): *${fmt(revenue.calMonth)} руб\\.*\n`;
-    text += `├ За 30 дней: ${fmt(revenue.month)} руб\\.\n`;
-    text += `├ За всё время: ${fmt(revenue.total)} руб\\.\n`;
+    text += `\n💰 *Финансы:*\n`;
+    text += `• Выручка за месяц: *${fmt(revenue.calMonth)} ₽*\n`;
     if (avgCheck) {
-      text += `└ Средний чек: *${fmt(avgCheck)} руб\\.*\n`;
+      text += `• Средний чек: *${fmt(avgCheck)} ₽*\n`;
     } else {
-      text += `└ Средний чек: —\n`;
+      text += `• Средний чек: —\n`;
     }
+    text += `• Конверсия: *${esc(String(conversion))}%*\n`;
 
     // ── Top-3 models ─────────────────────────────────
     if (topModels.length) {
-      text += `\n👑 *Топ\\-3 модели по заявкам*\n`;
+      text += `\n🏆 *Топ модели:*\n`;
       const medals = ['🥇', '🥈', '🥉'];
       topModels.forEach((m, i) => {
-        const isLast = i === topModels.length - 1;
-        text += `${isLast ? '└' : '├'} ${medals[i] || `${i + 1}\\.`} ${esc(m.name)} — ${esc(String(m.cnt))} зак\\.\n`;
+        text += `${esc(String(i + 1))}\\. ${medals[i] || ''} ${esc(m.name)} — ${esc(String(m.cnt))} заявок\n`;
       });
     }
 
-    // ── Models section ───────────────────────────────
-    text += `\n💃 *Модели*\n`;
-    text += `├ Всего активных: ${esc(String(totalModels?.n || 0))}\n`;
-    text += `├ Доступных: *${esc(String(activeModels?.n || 0))}*\n`;
-    text += `└ Топовых \\(featured\\): ${esc(String(featuredModels?.n || 0))}\n`;
+    // ── Top-3 cities ─────────────────────────────────
+    if (topCities.length) {
+      text += `\n🏙 *Топ города:*\n`;
+      topCities.forEach((c, i) => {
+        text += `${esc(String(i + 1))}\\. ${esc(c.city)} — ${esc(String(c.cnt))}\n`;
+      });
+    }
 
-    // ── Clients section ──────────────────────────────
-    text += `\n👥 *Клиенты*\n`;
-    text += `├ Всего уникальных: ${esc(String(totalClients?.n || 0))}\n`;
-    text += `├ Новых в ${esc(currentMonthLabel)}: *${esc(String(newClientsMonth?.n || 0))}*\n`;
-    text += `└ Повторных \\(>1 заявки\\): ${esc(String(repeatClients))}\n`;
+    // ── Clients + Active ─────────────────────────────
+    text += `\n👥 Новых клиентов за месяц: *${esc(String(newClientsMonth?.n || 0))}*\n`;
+    text += `📌 Активных заявок: *${esc(String(activeCount))}*\n`;
+
+    // ── Status breakdown ────────────────────────────
+    text += `\n🔄 *Статус заявок:*\n`;
+    text += `• 🔵 Новые: *${esc(String(statusNew?.n || 0))}*\n`;
+    text += `• ✅ Подтверждённые: ${esc(String(statusConfirmed?.n || 0))}\n`;
+    text += `• 🔧 В работе: ${esc(String(statusInProgress?.n || 0))}\n`;
+    text += `• 🏁 Завершённые: ${esc(String(done?.n || 0))}\n`;
+    text += `• ❌ Отменённые: ${esc(String(canc?.n || 0))}\n`;
+
+    // ── Models section ───────────────────────────────
+    text += `\n💃 *Модели:*\n`;
+    text += `• Всего активных: ${esc(String(totalModels?.n || 0))}\n`;
+    text += `• Доступных: *${esc(String(activeModels?.n || 0))}*\n`;
+    text += `• Повторных клиентов: ${esc(String(repeatClients))}\n`;
 
     // ── Additional metrics ───────────────────────────
-    if (avgCycleDays !== null || topCities.length) {
-      text += `\n📌 *Дополнительно*\n`;
+    if (avgCycleDays !== null || revenue.total > 0) {
+      text += `\n📈 *Итого:*\n`;
+      text += `• Выручка за всё время: ${fmt(revenue.total)} ₽\n`;
       if (avgCycleDays !== null) {
-        text += `${topCities.length ? '├' : '└'} ⏱ Средний цикл сделки: ${esc(String(avgCycleDays))} дн\\.\n`;
-      }
-      if (topCities.length) {
-        text += `└ 🏙️ Топ города: `;
-        text += topCities.map(c => `${esc(c.city)} \\(${esc(String(c.cnt))}\\)`).join(', ');
-        text += `\n`;
+        text += `• ⏱ Средний цикл сделки: ${esc(String(avgCycleDays))} дн\\.\n`;
       }
     }
 

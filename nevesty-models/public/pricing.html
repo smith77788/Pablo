@@ -706,6 +706,17 @@
             <a href="/booking.html?package=premium" class="btn-gold pricing-cta">Выбрать</a>
           </div>
         </div>
+
+        <!-- Selected package CTA -->
+        <div class="pkg-book-wrap" id="pkgBookWrap">
+          <div class="pkg-book-hint" id="pkgBookHint">Выбран пакет: <strong id="pkgBookName"></strong></div>
+          <a id="pkgBookBtn" href="/booking.html" class="btn-gold" style="display: inline-block; padding: 12px 36px;">
+            Оформить заказ
+          </a>
+          <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 8px;">
+            Параметры из калькулятора будут переданы в форму заявки
+          </div>
+        </div>
       </section>
 
       <!-- Comparison table -->
@@ -1079,6 +1090,9 @@
             <div class="result-note" id="resultNote">Стартовая цена. Точная стоимость — после консультации.</div>
             <div class="result-breakdown" id="breakdown">
               <div class="result-item"><span>Базовая ставка</span><strong id="bBase">8 000 ₽</strong></div>
+              <div class="result-item" id="rowCity" style="display: none">
+                <span>Выезд в другой город</span><strong id="bCity">5 000 ₽</strong>
+              </div>
               <div class="result-item" id="rowExtra" style="display: none">
                 <span>Доп. опции</span><strong id="bExtra">0 ₽</strong>
               </div>
@@ -1352,23 +1366,55 @@
       };
       const CAT_MULT = { standard: 1, premium: 1.4, top: 2 };
 
-      let params = { event: 'photo', hours: 2, category: 'standard', count: 1 };
+      let params = { event: 'photo', hours: 2, category: 'standard', count: 1, city: 'msk' };
 
       function fmt(n) {
         return n.toLocaleString('ru-RU') + ' ₽';
       }
 
+      function getBasePrice() {
+        // Interpolate price for any hour count 1-12 using table anchors
+        const table = BASE[params.event] || BASE.photo;
+        const anchors = [1, 2, 4, 6, 8, 12];
+        const prices = {
+          1: Math.round(table[2] * 0.6),
+          2: table[2],
+          4: table[4],
+          6: table[6],
+          8: table[8],
+          12: Math.round(table[8] * 1.35),
+        };
+        const h = params.hours;
+        if (prices[h]) return prices[h];
+        // linear interpolation
+        let lo = 1, hi = 2;
+        for (let i = 0; i < anchors.length - 1; i++) {
+          if (h > anchors[i] && h <= anchors[i + 1]) { lo = anchors[i]; hi = anchors[i + 1]; break; }
+        }
+        const t = (h - lo) / (hi - lo);
+        return Math.round(prices[lo] + (prices[hi] - prices[lo]) * t);
+      }
+
       function calc() {
-        const base = (BASE[params.event]?.[params.hours] || 8000) * CAT_MULT[params.category] * params.count;
+        const base = getBasePrice() * CAT_MULT[params.category] * params.count;
+        let cityExtra = 0;
+        if (params.city === 'other') cityExtra = 5000;
         let extra = 0;
         if (document.getElementById('chkMakeup').checked) extra += 3000 * params.count;
         if (document.getElementById('chkTravel').checked) extra += 5000;
         let urgent = 0;
-        if (document.getElementById('chkUrgent').checked) urgent = Math.round((base + extra) * 0.2);
-        const total = Math.round(base + extra + urgent);
+        if (document.getElementById('chkUrgent').checked) urgent = Math.round((base + extra + cityExtra) * 0.2);
+        const total = Math.round(base + extra + cityExtra + urgent);
 
         document.getElementById('resultPrice').textContent = fmt(total);
         document.getElementById('bBase').textContent = fmt(Math.round(base));
+
+        if (cityExtra > 0) {
+          document.getElementById('rowCity').style.display = '';
+          document.getElementById('bCity').textContent = fmt(cityExtra);
+        } else {
+          document.getElementById('rowCity').style.display = 'none';
+        }
 
         if (extra > 0) {
           document.getElementById('rowExtra').style.display = '';
@@ -1383,18 +1429,24 @@
           document.getElementById('rowUrgent').style.display = 'none';
         }
 
-        const budgetRaw = Math.round(base + extra + urgent);
-        const shareUrl = buildShareUrl(budgetRaw);
+        const budgetRaw = Math.round(base + extra + cityExtra + urgent);
         const budgetParam = `&budget=${encodeURIComponent(String(budgetRaw))}`;
         document.getElementById('calcBookBtn').href = `/booking.html?event_type=${params.event}${budgetParam}`;
+
+        // update selected package booking link too
+        const pkgBtn = document.getElementById('pkgBookBtn');
+        if (pkgBtn && pkgBtn.dataset.pkg) {
+          pkgBtn.href = `/booking.html?package=${pkgBtn.dataset.pkg}&event_type=${params.event}${budgetParam}`;
+        }
       }
 
-      function buildShareUrl(total) {
+      function buildShareUrl() {
         const u = new URL(window.location.href.split('?')[0]);
         u.searchParams.set('event', params.event);
         u.searchParams.set('hours', params.hours);
         u.searchParams.set('category', params.category);
         u.searchParams.set('count', params.count);
+        if (params.city) u.searchParams.set('city', params.city);
         if (document.getElementById('chkMakeup').checked) u.searchParams.set('makeup', '1');
         if (document.getElementById('chkTravel').checked) u.searchParams.set('travel', '1');
         if (document.getElementById('chkUrgent').checked) u.searchParams.set('urgent', '1');
@@ -1466,7 +1518,8 @@
         const hoursVal = p.get('hours');
         const catVal = p.get('category');
         const cntVal = p.get('count');
-        if (!evtVal && !hoursVal && !catVal && !cntVal) return;
+        const cityVal = p.get('city');
+        if (!evtVal && !hoursVal && !catVal && !cntVal && !cityVal) return;
 
         function setGroup(key, val) {
           const btns = document.querySelectorAll(`.option-btn[data-key="${key}"]`);
@@ -1479,17 +1532,26 @@
           params.event = evtVal;
           setGroup('event', evtVal);
         }
-        if (hoursVal && [2, 4, 6, 8].includes(parseInt(hoursVal))) {
-          params.hours = parseInt(hoursVal);
-          setGroup('hours', hoursVal);
+        if (hoursVal) {
+          const h = Math.min(12, Math.max(1, parseInt(hoursVal) || 2));
+          params.hours = h;
+          const slider = document.getElementById('hoursSlider');
+          if (slider) { slider.value = h; updateHoursLabel(h); }
         }
         if (catVal && ['standard', 'premium', 'top'].includes(catVal)) {
           params.category = catVal;
           setGroup('category', catVal);
         }
-        if (cntVal && [1, 2, 3, 5].includes(parseInt(cntVal))) {
-          params.count = parseInt(cntVal);
-          setGroup('count', cntVal);
+        if (cntVal) {
+          const cnt = Math.min(5, Math.max(1, parseInt(cntVal) || 1));
+          params.count = cnt;
+          const slider = document.getElementById('countSlider');
+          if (slider) { slider.value = cnt; updateCountLabel(cnt); }
+        }
+        if (cityVal) {
+          params.city = cityVal;
+          const sel = document.getElementById('citySelect');
+          if (sel) sel.value = cityVal;
         }
         if (p.get('makeup') === '1') document.getElementById('chkMakeup').checked = true;
         if (p.get('travel') === '1') document.getElementById('chkTravel').checked = true;
@@ -1497,16 +1559,60 @@
         calc();
       }
 
-      // Option buttons
+      // ─── Slider helpers ───────────────────────────────────────────────────────
+      function updateHoursLabel(h) {
+        const el = document.getElementById('hoursSliderVal');
+        if (el) el.textContent = h + (h === 1 ? ' час' : h < 5 ? ' часа' : ' часов');
+      }
+      function updateCountLabel(n) {
+        const el = document.getElementById('countSliderVal');
+        if (el) el.textContent = n + (n === 1 ? ' мод.' : n < 5 ? ' мод.' : ' мод.');
+      }
+
+      // Hours slider
+      (function () {
+        const slider = document.getElementById('hoursSlider');
+        if (!slider) return;
+        updateHoursLabel(parseInt(slider.value));
+        slider.addEventListener('input', () => {
+          const h = parseInt(slider.value);
+          params.hours = h;
+          updateHoursLabel(h);
+          calc();
+        });
+      })();
+
+      // Count slider
+      (function () {
+        const slider = document.getElementById('countSlider');
+        if (!slider) return;
+        updateCountLabel(parseInt(slider.value));
+        slider.addEventListener('input', () => {
+          const n = parseInt(slider.value);
+          params.count = n;
+          updateCountLabel(n);
+          calc();
+        });
+      })();
+
+      // City select
+      (function () {
+        const sel = document.getElementById('citySelect');
+        if (!sel) return;
+        sel.addEventListener('change', () => {
+          params.city = sel.value;
+          calc();
+        });
+      })();
+
+      // Option buttons (event type + category remain as buttons)
       document.querySelectorAll('.option-btn[data-key]').forEach(btn => {
         btn.addEventListener('click', () => {
           const key = btn.dataset.key;
           const val = btn.dataset.val;
           document.querySelectorAll(`.option-btn[data-key="${key}"]`).forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          if (key === 'hours') params.hours = parseInt(val);
-          else if (key === 'count') params.count = parseInt(val);
-          else params[key] = val;
+          params[key] = val;
           calc();
         });
       });
@@ -1514,6 +1620,78 @@
       document.getElementById('chkMakeup').addEventListener('change', calc);
       document.getElementById('chkTravel').addEventListener('change', calc);
       document.getElementById('chkUrgent').addEventListener('change', calc);
+
+      // ─── Package card selection ───────────────────────────────────────────────
+      const PACKAGE_PRESETS = {
+        start:   { event: 'photo', hours: 2, category: 'standard', count: 1 },
+        event:   { event: 'event', hours: 4, category: 'standard', count: 2 },
+        premium: { event: 'runway', hours: 6, category: 'top',      count: 1 },
+      };
+
+      function applyPackagePreset(pkg) {
+        const preset = PACKAGE_PRESETS[pkg];
+        if (!preset) return;
+        // Update event buttons
+        document.querySelectorAll('.option-btn[data-key="event"]').forEach(b => {
+          b.classList.toggle('active', b.dataset.val === preset.event);
+        });
+        // Update category buttons
+        document.querySelectorAll('.option-btn[data-key="category"]').forEach(b => {
+          b.classList.toggle('active', b.dataset.val === preset.category);
+        });
+        // Update sliders
+        params.event = preset.event;
+        params.hours = preset.hours;
+        params.category = preset.category;
+        params.count = preset.count;
+        const hSlider = document.getElementById('hoursSlider');
+        if (hSlider) { hSlider.value = preset.hours; updateHoursLabel(preset.hours); }
+        const cSlider = document.getElementById('countSlider');
+        if (cSlider) { cSlider.value = preset.count; updateCountLabel(preset.count); }
+        calc();
+      }
+
+      function selectPackageCard(card) {
+        // Deselect all
+        document.querySelectorAll('.pricing-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        // Read the package from the CTA link
+        const cta = card.querySelector('.pricing-cta');
+        const pkgMatch = cta ? cta.getAttribute('href').match(/package=([^&]+)/) : null;
+        const pkg = pkgMatch ? pkgMatch[1] : null;
+        const pkgName = card.querySelector('.pricing-name')?.textContent || '';
+
+        const wrap = document.getElementById('pkgBookWrap');
+        const nameEl = document.getElementById('pkgBookName');
+        const btn = document.getElementById('pkgBookBtn');
+
+        if (wrap) wrap.classList.add('visible');
+        if (nameEl) nameEl.textContent = pkgName;
+        if (btn && pkg) {
+          btn.dataset.pkg = pkg;
+          const budgetRaw = parseInt(document.getElementById('resultPrice').textContent.replace(/\D/g, ''), 10) || 0;
+          btn.href = `/booking.html?package=${pkg}&event_type=${params.event}&budget=${budgetRaw}`;
+        }
+
+        // Apply calculator preset for this package
+        if (pkg) applyPackagePreset(pkg);
+
+        // Scroll to calculator
+        const calcSection = document.querySelector('.calc-section');
+        if (calcSection) {
+          setTimeout(() => calcSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+        }
+      }
+
+      document.querySelectorAll('.pricing-card').forEach(card => {
+        // Make the whole card clickable, but keep CTA links working
+        card.addEventListener('click', e => {
+          // If user clicked a link directly — let it navigate (don't intercept)
+          if (e.target.tagName === 'A') return;
+          e.preventDefault();
+          selectPackageCard(card);
+        });
+      });
 
       // ─── Billing toggle ──────────────────────────────────────────────────────
       let _billingYearly = false;

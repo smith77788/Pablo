@@ -28,17 +28,21 @@ if (LOG_JSON) {
     const start = Date.now();
     res.on('finish', () => {
       if (req.path === '/api/health' || req.path === '/health' || req.path === '/api/metrics') return; // Skip health/metrics checks
+      const ms = Date.now() - start;
       const log = {
         ts: new Date().toISOString(),
         method: req.method,
         path: req.path,
         status: res.statusCode,
-        ms: Date.now() - start,
+        ms,
         ip: req.ip || req.connection.remoteAddress,
         ua: req.get('user-agent')?.slice(0, 80),
       };
-      if (res.statusCode >= 400) {
+      if (res.statusCode >= 500) {
+        log.level = 'error';
+      } else if (res.statusCode >= 400 || ms > 1000) {
         log.level = 'warn';
+        if (ms > 1000) log.slow = true;
       } else {
         log.level = 'info';
       }
@@ -47,11 +51,25 @@ if (LOG_JSON) {
     next();
   });
 } else {
-  // Development: use morgan
+  // Development: use morgan if available, with slow-request fallback
   try {
     const morgan = require('morgan');
     app.use(morgan('dev'));
   } catch {}
+
+  // Slow request + error logger for development (supplements or replaces morgan)
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      if (req.path.startsWith('/health') || req.path.startsWith('/api/health') || req.path.startsWith('/api/metrics')) return;
+      const ms = Date.now() - start;
+      if (ms > 1000 || res.statusCode >= 400) {
+        const flag = ms > 1000 ? '🐢 SLOW' : res.statusCode >= 500 ? '🔴 ERROR' : '⚠️  WARN';
+        console.warn(`[HTTP] ${flag} ${req.method} ${req.path} → ${res.statusCode} (${ms}ms)`);
+      }
+    });
+    next();
+  });
 }
 
 // ─── Security headers ─────────────────────────────────────────────────────────

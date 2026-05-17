@@ -1,7 +1,9 @@
 #!/bin/bash
 # =============================================================================
 # Nevesty Models — Production Setup & Deploy Script
-# Usage: ./deploy.sh
+# Usage:
+#   ./deploy.sh            — bare-metal deploy via PM2 (default)
+#   ./deploy.sh --docker   — Docker Compose deploy
 # =============================================================================
 set -euo pipefail
 
@@ -10,14 +12,104 @@ set -euo pipefail
 # --------------------------------------------------------------------------
 trap 'echo ""; echo "❌ Deploy failed at line $LINENO. Check the output above for details." >&2; exit 1' ERR
 
+# --------------------------------------------------------------------------
+# Parse flags
+# --------------------------------------------------------------------------
+DEPLOY_MODE="pm2"
+for arg in "$@"; do
+  case "$arg" in
+    --docker) DEPLOY_MODE="docker" ;;
+    --help|-h)
+      echo "Usage: ./deploy.sh [--docker]"
+      echo "  (no flag)  — bare-metal PM2 deploy"
+      echo "  --docker   — Docker Compose deploy"
+      exit 0
+      ;;
+  esac
+done
+
 # Resolve the directory where this script lives
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "============================================="
 echo "  Nevesty Models — Production Deploy"
+echo "  Mode: ${DEPLOY_MODE}"
 echo "============================================="
 echo ""
+
+# --------------------------------------------------------------------------
+# DOCKER MODE
+# --------------------------------------------------------------------------
+if [ "$DEPLOY_MODE" = "docker" ]; then
+  echo "[ 1/5 ] Pulling latest changes..."
+  CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+  git fetch origin
+  git pull origin "$CURRENT_BRANCH"
+  echo "   ✔ Repository up to date ($(git rev-parse --short HEAD))"
+  echo ""
+
+  echo "[ 2/5 ] Checking .env file..."
+  if [ ! -f ".env" ]; then
+    echo "⚠️  WARNING: .env file not found!"
+    echo "   cp .env.example .env && nano .env"
+    echo ""
+  else
+    echo "   ✔ .env found"
+  fi
+
+  echo "[ 3/5 ] Building Docker images (no cache)..."
+  docker-compose build --no-cache app
+  echo "   ✔ Build complete"
+  echo ""
+
+  echo "[ 4/5 ] Restarting containers..."
+  docker-compose down --remove-orphans
+  docker-compose up -d
+  echo "   ✔ Containers started"
+  echo ""
+
+  echo "[ 5/5 ] Verifying health..."
+  APP_PORT=3000
+  if [ -f ".env" ]; then
+    PARSED_PORT="$(grep -E '^PORT=' .env | head -1 | cut -d'=' -f2 | tr -d '[:space:]')" || true
+    if [ -n "${PARSED_PORT:-}" ]; then APP_PORT="$PARSED_PORT"; fi
+  fi
+  HEALTH_URL="http://localhost:${APP_PORT}/api/health"
+  ATTEMPTS=0; MAX_ATTEMPTS=20
+  until curl -sf "$HEALTH_URL" > /dev/null 2>&1; do
+    ATTEMPTS=$((ATTEMPTS + 1))
+    if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
+      echo "   ❌ Health check failed after ${MAX_ATTEMPTS} attempts: ${HEALTH_URL}"
+      echo "   Check logs: docker-compose logs app"
+      exit 1
+    fi
+    echo -n "."; sleep 3
+  done
+  echo ""
+  echo "   ✔ Health check passed"
+  echo ""
+
+  echo "============================================="
+  echo "  ✅  Docker deploy complete!"
+  echo "============================================="
+  echo ""
+  docker-compose ps
+  echo ""
+  echo "  Useful Docker commands:"
+  echo "    docker-compose ps                     — container status"
+  echo "    docker-compose logs -f app            — live app logs"
+  echo "    docker-compose logs -f redis          — live redis logs"
+  echo "    docker-compose exec app sh            — shell in app container"
+  echo "    docker-compose down                   — stop all"
+  echo "    docker-compose up -d                  — start all (detached)"
+  echo ""
+  exit 0
+fi
+
+# --------------------------------------------------------------------------
+# PM2 MODE (original deploy logic follows below)
+# --------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------
 # 0. Git — pull latest changes from the current branch

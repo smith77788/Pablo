@@ -391,6 +391,7 @@ router.post('/admin/login', authLimiter, async (req, res, next) => {
     }
 
     // No 2FA — issue full token pair
+    await run(`UPDATE admins SET last_login=CURRENT_TIMESTAMP WHERE id=?`, [admin.id]).catch(() => {});
     const { token, refresh_token } = await issueTokenPair(admin);
     res.json({ token, refresh_token, admin: { id: admin.id, username: admin.username, role: admin.role } });
   } catch (e) {
@@ -447,6 +448,7 @@ router.post('/auth/verify-totp', authLimiter, async (req, res, next) => {
 
     // Valid — delete temp token and issue full JWT pair
     await run('DELETE FROM totp_temp_tokens WHERE id=?', [stored.id]);
+    await run(`UPDATE admins SET last_login=CURRENT_TIMESTAMP WHERE id=?`, [admin.id]).catch(() => {});
     const { token, refresh_token } = await issueTokenPair(admin);
     res.json({ token, refresh_token, admin: { id: admin.id, username: admin.username, role: admin.role } });
   } catch (e) {
@@ -6382,7 +6384,11 @@ router.get('/admin/analytics/deal-cycle', auth, async (req, res) => {
       FROM orders
       WHERE status = 'completed' AND completed_at IS NOT NULL
     `);
-    res.json(row || { avg_days: 0, min_days: 0, max_days: 0 });
+    res.json({
+      avg_days: row?.avg_days ?? 0,
+      min_days: row?.min_days ?? 0,
+      max_days: row?.max_days ?? 0,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -7900,16 +7906,21 @@ router.get('/admin/analytics/conversion', auth, async (req, res, next) => {
         SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled_count
       FROM orders
     `);
-    const conversionRate = stats.total > 0 ? Math.round((stats.completed_count / stats.total) * 100) : 0;
+    const total = stats?.total || 0;
+    const newCount = stats?.new_count ?? 0;
+    const confirmedCount = stats?.confirmed_count ?? 0;
+    const completedCount = stats?.completed_count ?? 0;
+    const cancelledCount = stats?.cancelled_count ?? 0;
+    const conversionRate = total > 0 ? Math.round((completedCount / total) * 100) : 0;
     res.json({
       ok: true,
-      total: stats.total,
+      total,
       conversion_rate: conversionRate,
       funnel: {
-        new: stats.new_count,
-        confirmed: stats.confirmed_count,
-        completed: stats.completed_count,
-        cancelled: stats.cancelled_count,
+        new: newCount,
+        confirmed: confirmedCount,
+        completed: completedCount,
+        cancelled: cancelledCount,
       },
     });
   } catch (e) {
@@ -8188,6 +8199,85 @@ router.post('/cabinet/orders/:id/repeat', requireClientAuth, bookingLimiter, asy
     res.status(201).json({ ok: true, id: result.id, order_number: orderNumber });
   } catch (e) {
     if (e.status === 409) return res.status(409).json({ ok: false, error: e.message });
+    next(e);
+  }
+});
+
+// ─── System info endpoint for admin panel ─────────────────────────────────────
+// GET /api/admin/system — server & process stats (requires auth)
+router.get('/admin/system', auth, async (req, res, next) => {
+  try {
+    const os = require('os');
+
+    // Memory
+    const mem = process.memoryUsage();
+    const memory_mb = {
+      rss: Math.round((mem.rss / 1024 / 1024) * 10) / 10,
+      heap_used: Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10,
+      heap_total: Math.round((mem.heapTotal / 1024 / 1024) * 10) / 10,
+    };
+
+    // CPU (ratio of cpu time to wall time since process start as a %)
+    const cpuUsage = process.cpuUsage();
+    const uptimeMicros = process.uptime() * 1e6;
+    const cpuPercent = uptimeMicros > 0
+      ? Math.round(((cpuUsage.user + cpuUsage.system) / uptimeMicros) * 1000) / 10
+      : 0;
+
+    // DB size
+    let db_size_mb = null;
+    try {
+      const dbSizeRow = await get('SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()');
+      db_size_mb = dbSizeRow?.size != null
+        ? Math.round((dbSizeRow.size / 1024 / 1024) * 100) / 100
+        : null;
+    } catch (_) {}
+
+    // Uploads count
+    let uploads_count = 0;
+    try {
+      const uploadsDir = path.resolve(__dirname, '../uploads');
+      if (fs.existsSync(uploadsDir)) {
+        uploads_count = fs.readdirSync(uploadsDir).filter(f => !f.startsWith('.')).length;
+      }
+    } catch (_) {}
+
+    // Active sessions (Telegram sessions touched in last 24 hours)
+    let active_sessions = 0;
+    try {
+      const sessionRow = await get(
+        "SELECT COUNT(*) as n FROM telegram_sessions WHERE updated_at >= datetime('now', '-24 hours')"
+      );
+      active_sessions = sessionRow?.n || 0;
+    } catch (_) {}
+
+    // Scheduled jobs — count from scheduler module
+    let scheduled_jobs = 0;
+    try {
+      const scheduledBcastRow = await get(
+        "SELECT COUNT(*) as n FROM scheduled_broadcasts WHERE status='pending' AND scheduled_at > datetime('now')"
+      );
+      scheduled_jobs = scheduledBcastRow?.n || 0;
+    } catch (_) {}
+
+    res.json({
+      node_version: process.version,
+      uptime_seconds: Math.floor(process.uptime()),
+      memory_mb,
+      cpu_usage: cpuPercent,
+      db_size_mb,
+      uploads_count,
+      active_sessions,
+      scheduled_jobs,
+      platform: process.platform,
+      arch: process.arch,
+      pid: process.pid,
+      env: process.env.NODE_ENV || 'development',
+      load_avg: os.loadavg().map(v => Math.round(v * 100) / 100),
+      os_free_mem_mb: Math.round(os.freemem() / 1024 / 1024),
+      os_total_mem_mb: Math.round(os.totalmem() / 1024 / 1024),
+    });
+  } catch (e) {
     next(e);
   }
 });
