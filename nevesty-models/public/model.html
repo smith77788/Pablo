@@ -2373,9 +2373,9 @@
           const favs = getFavs();
           const inFav = favs.some(f => (typeof f === 'object' ? f.id === id : f === id));
           if (inFav) {
-            btn.innerHTML = '<span aria-hidden="true">💔</span> В избранном';
-            btn.style.color = '#e07070';
-            btn.style.borderColor = '#e07070';
+            btn.innerHTML = '<span aria-hidden="true">💛</span> В избранном';
+            btn.style.color = 'var(--gold)';
+            btn.style.borderColor = 'var(--gold)';
           } else {
             btn.innerHTML = '<span aria-hidden="true">❤️</span> В избранное';
             btn.style.color = '';

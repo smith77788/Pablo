@@ -716,15 +716,15 @@
         const card = document.getElementById(`review-${id}`);
         if (card) card.style.opacity = '0.5';
         try {
-          await _admin.api(`/admin/reviews/${id}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ approved: 1 }),
-          });
+          await _admin.api(`/admin/reviews/${id}/approve`, { method: 'PATCH' });
           await Promise.all([loadReviews(), loadStats()]);
         } catch (e) {
-          // Fallback to legacy PUT endpoint
+          // Fallback to generic PATCH endpoint
           try {
-            await _admin.api(`/admin/reviews/${id}/approve`, { method: 'PUT' });
+            await _admin.api(`/admin/reviews/${id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ status: 'approved' }),
+            });
             await Promise.all([loadReviews(), loadStats()]);
           } catch (e2) {
             if (card) card.style.opacity = '1';
@@ -737,9 +737,30 @@
         const card = document.getElementById(`review-${id}`);
         if (card) card.style.opacity = '0.5';
         try {
+          await _admin.api(`/admin/reviews/${id}/reject`, { method: 'PATCH' });
+          await Promise.all([loadReviews(), loadStats()]);
+        } catch (e) {
+          // Fallback
+          try {
+            await _admin.api(`/admin/reviews/${id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ status: 'rejected' }),
+            });
+            await Promise.all([loadReviews(), loadStats()]);
+          } catch (e2) {
+            if (card) card.style.opacity = '1';
+            alert('Ошибка: ' + (e2.message || 'Попробуйте ещё раз'));
+          }
+        }
+      }
+
+      async function pendingReview(id) {
+        const card = document.getElementById(`review-${id}`);
+        if (card) card.style.opacity = '0.5';
+        try {
           await _admin.api(`/admin/reviews/${id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ approved: 0 }),
+            body: JSON.stringify({ status: 'pending' }),
           });
           await Promise.all([loadReviews(), loadStats()]);
         } catch (e) {
