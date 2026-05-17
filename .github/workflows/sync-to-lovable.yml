@@ -8,19 +8,27 @@ on:
       - 'src/**'
       - 'supabase/**'
       - 'LOVABLE_PROMPT.md'
-  workflow_dispatch:   # ручной запуск из GitHub Actions UI
+  workflow_dispatch:
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Pablo (source)
+      - name: Checkout Pablo source branch
         uses: actions/checkout@v4
         with:
+          ref: claude/modeling-agency-website-jp2Qd
           path: pablo-source
           fetch-depth: 1
 
-      - name: Checkout pablo-760fe3a5 (Lovable target)
+      - name: Debug — list source files
+        run: |
+          echo "=== Source src/ ==="
+          find pablo-source/src -type f | sort
+          echo "=== Source supabase/ ==="
+          find pablo-source/supabase -type f | sort
+
+      - name: Checkout pablo-760fe3a5 (Lovable)
         uses: actions/checkout@v4
         with:
           repository: smith77788/pablo-760fe3a5
@@ -28,44 +36,41 @@ jobs:
           path: lovable-target
           fetch-depth: 1
 
-      - name: Sync files
+      - name: Sync all src/ and supabase/
         run: |
           cd lovable-target
 
-          # src/components — React компоненты
-          mkdir -p src/components
-          cp -r ../pablo-source/src/components/. src/components/
+          # Sync entire src/ from Pablo
+          rsync -av --delete \
+            ../pablo-source/src/ \
+            src/
 
-          # src/hooks — React hooks
-          mkdir -p src/hooks
-          cp -r ../pablo-source/src/hooks/. src/hooks/
-
-          # src/types — TypeScript типы
-          mkdir -p src/types
-          cp ../pablo-source/src/types/index.ts src/types/index.ts
-
-          # src/lib — Supabase client
-          mkdir -p src/lib
-          cp ../pablo-source/src/lib/supabase.ts src/lib/supabase.ts
-
-          # supabase/migrations — только наша миграция
+          # Sync our migration (don't delete other migrations)
           mkdir -p supabase/migrations
           cp ../pablo-source/supabase/migrations/003_nevesty_missing_features.sql \
-             supabase/migrations/003_nevesty_missing_features.sql
+             supabase/migrations/003_nevesty_missing_features.sql 2>/dev/null || true
 
-          # supabase/functions — Edge Functions
+          # Sync Edge Functions
           for fn in telegram-webhook send-sms send-email payment-webhook broadcast; do
-            mkdir -p supabase/functions/$fn
-            if [ -f "../pablo-source/supabase/functions/$fn/index.ts" ]; then
+            if [ -d "../pablo-source/supabase/functions/$fn" ]; then
+              mkdir -p supabase/functions/$fn
               cp ../pablo-source/supabase/functions/$fn/index.ts \
                  supabase/functions/$fn/index.ts
+              echo "✓ synced function: $fn"
             fi
           done
 
-          # LOVABLE_PROMPT.md
+          # Sync LOVABLE_PROMPT.md
           cp ../pablo-source/LOVABLE_PROMPT.md LOVABLE_PROMPT.md
 
-      - name: Commit and push to Lovable repo
+          # Sync bridge file if exists
+          [ -f ../pablo-source/CLAUDE_TO_LOVABLE.md ] && \
+            cp ../pablo-source/CLAUDE_TO_LOVABLE.md CLAUDE_TO_LOVABLE.md || true
+
+          echo "=== Files to commit ==="
+          git status --short
+
+      - name: Commit and push
         run: |
           cd lovable-target
           git config user.name "Claude Code Sync"
@@ -73,10 +78,11 @@ jobs:
           git add -A
 
           if git diff --staged --quiet; then
-            echo "Nothing changed, skipping commit"
+            echo "✅ Nothing changed — already up to date"
           else
-            COMMIT_MSG="sync: from Pablo $(cd ../pablo-source && git log -1 --format='%h %s')"
-            git commit -m "$COMMIT_MSG"
-            git push origin main
+            COMMIT_SHA=$(cd ../pablo-source && git log -1 --format='%h')
+            COMMIT_MSG=$(cd ../pablo-source && git log -1 --format='%s')
+            git commit -m "sync: ${COMMIT_SHA} ${COMMIT_MSG}"
+            git push origin HEAD
             echo "✅ Pushed to pablo-760fe3a5"
           fi
