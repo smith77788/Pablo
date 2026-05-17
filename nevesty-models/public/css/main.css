@@ -2401,39 +2401,7 @@ textarea:focus-visible {
   pointer-events: none;
 }
 
-/* ─── HAMBURGER MENU ANIMATION ───────────────────── */
-.nav-burger.is-open span:nth-child(1) {
-  transform: translateY(6px) rotate(45deg);
-}
-.nav-burger.is-open span:nth-child(2) {
-  opacity: 0;
-  transform: scaleX(0);
-}
-.nav-burger.is-open span:nth-child(3) {
-  transform: translateY(-6px) rotate(-45deg);
-}
-.nav-burger span {
-  transition:
-    transform 0.3s ease,
-    opacity 0.3s ease;
-  transform-origin: center;
-}
-
-/* Mobile menu: slide-down open animation */
-.nav-mobile {
-  opacity: 0;
-  transform: translateY(-16px);
-  transition:
-    opacity 0.3s ease,
-    transform 0.3s ease;
-  pointer-events: none;
-}
-.nav-mobile.open {
-  display: flex;
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: all;
-}
+/* ─── HAMBURGER MENU ANIMATION (consolidated above) ── */
 
 /* ─── MOBILE — 480px BREAKPOINT ──────────────────── */
 @media (max-width: 480px) {
@@ -2713,6 +2681,7 @@ textarea:focus-visible {
   }
   :root:not(.dark) .navbar.scrolled {
     background: rgba(248, 245, 240, 0.97);
+    border-bottom-color: var(--gold-dark);
   }
   :root:not(.dark) .nav-mobile {
     background: var(--bg);
@@ -2824,6 +2793,7 @@ html.light .navbar {
 }
 html.light .navbar.scrolled {
   background: rgba(248, 245, 240, 0.97);
+  border-bottom-color: var(--gold-dark);
 }
 html.light .nav-mobile {
   background: var(--bg);
@@ -2895,6 +2865,7 @@ html.light .services {
 }
 [data-theme='light'] .navbar.scrolled {
   background: rgba(248, 246, 242, 0.97);
+  border-bottom-color: var(--gold-dark);
 }
 [data-theme='light'] .nav-mobile {
   background: var(--bg);
