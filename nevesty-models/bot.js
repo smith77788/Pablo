@@ -1570,7 +1570,7 @@ async function showContacts(chatId) {
 function stepHeader(step, title) {
   const filled = '●'.repeat(step);
   const empty = '○'.repeat(4 - step);
-  const bar = `[${filled}${empty}]`;
+  const bar = `\\[${filled}${empty}\\]`;
   return `📝 *Бронирование · Шаг ${step}/4: ${title}*\n${bar}\n\n`;
 }
 
