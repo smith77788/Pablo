@@ -10,20 +10,24 @@
 
 :root {
   --gold: #c9a96e;
-  --gold-light: #e8d5b0;
-  --gold-dark: #a07840;
+  --gold-light: #f0d5a0;
+  --gold-dark: #b8943c;
   --bg: #080808;
-  --bg2: #111111;
-  --bg3: #1a1a1a;
-  --border: #2a2a2a;
-  --text: #f0ede8;
-  --text-muted: #999;
-  --text-dim: #6e6e6e;
+  --bg2: #0e0e0e;
+  --bg3: #141414;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-gold: rgba(201, 169, 110, 0.2);
+  --text: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.6);
+  --text-dim: rgba(255, 255, 255, 0.35);
   --white: #ffffff;
-  --radius: 4px;
-  --transition: 0.3s ease;
-  --skeleton-base: #2a2a2a;
-  --skeleton-highlight: #3a3a3a;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --transition: 0.2s ease;
+  --skeleton-base: rgba(255, 255, 255, 0.06);
+  --skeleton-highlight: rgba(255, 255, 255, 0.1);
 }
 
 /* ─── LIGHT THEME VARIABLES ──────────────────────── */
@@ -34,10 +38,11 @@
   --bg: #f8f6f2;
   --bg2: #f0ece4;
   --bg3: #e8e2d8;
-  --border: #d4c9b0;
+  --border: rgba(0, 0, 0, 0.1);
+  --border-gold: rgba(184, 134, 11, 0.25);
   --text: #1a1a1a;
-  --text-muted: #555;
-  --text-dim: #888;
+  --text-muted: rgba(0, 0, 0, 0.55);
+  --text-dim: rgba(0, 0, 0, 0.38);
   --skeleton-base: #e0d9ce;
   --skeleton-highlight: #ede6db;
 }
@@ -2943,12 +2948,13 @@ textarea:focus-visible {
 /* Forced dark via html.dark class (manual toggle) */
 html.dark {
   --bg: #080808;
-  --bg2: #111111;
-  --bg3: #1a1a1a;
-  --border: #2a2a2a;
-  --text: #f0ede8;
-  --text-muted: #999;
-  --text-dim: #6e6e6e;
+  --bg2: #0e0e0e;
+  --bg3: #141414;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-gold: rgba(201, 169, 110, 0.2);
+  --text: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.6);
+  --text-dim: rgba(255, 255, 255, 0.35);
   --white: #ffffff;
 }
 

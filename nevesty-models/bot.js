@@ -272,9 +272,9 @@ function setSessionReminder(chatId) {
 
 // ─── Booking progress helper ──────────────────────────────────────────────────
 function bookingProgress(step, total = 4) {
-  const filled = '▓'.repeat(step);
-  const empty = '░'.repeat(total - step);
-  return `${filled}${empty} Шаг ${step}/${total}`;
+  const filled = '●'.repeat(step);
+  const empty = '○'.repeat(total - step);
+  return `[${filled}${empty}] Шаг ${step}/${total}`;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1568,8 +1568,10 @@ async function showContacts(chatId) {
 // Step 4: Confirm & submit
 
 function stepHeader(step, title) {
-  const dots = ['●', '●', '●', '●'].map((d, i) => (i < step ? '●' : '○')).join(' ');
-  return `📝 *Бронирование · Шаг ${step}/4*\n${dots}\n\n*${title}*\n\n`;
+  const filled = '●'.repeat(step);
+  const empty = '○'.repeat(4 - step);
+  const bar = `[${filled}${empty}]`;
+  return `📝 *Бронирование · Шаг ${step}/4: ${title}*\n${bar}\n\n`;
 }
 
 // STEP 1 — model selection (пропускается если модель уже выбрана)
@@ -3347,7 +3349,7 @@ async function addToCompare(chatId, modelId) {
   if (!_compareLists.has(key)) _compareLists.set(key, new Set());
   const list = _compareLists.get(key);
   if (list.has(modelId)) {
-    return safeSend(chatId, '⚖️ Эта модель уже в списке сравнения\.', {
+    return safeSend(chatId, '⚖️ Эта модель уже в списке сравнения\\.', {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
@@ -3358,7 +3360,7 @@ async function addToCompare(chatId, modelId) {
     });
   }
   if (list.size >= 3) {
-    return safeSend(chatId, '⚖️ Можно сравнивать не более 3 моделей\.', {
+    return safeSend(chatId, '⚖️ Можно сравнивать не более 3 моделей\\.', {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
@@ -6400,7 +6402,6 @@ function initBot(app) {
       }
       if (data.startsWith('my_order_')) {
         const id = parseInt(data.replace('my_order_', ''));
-        await bot.answerCallbackQuery(q.id).catch(() => {});
         return showClientOrder(chatId, id);
       }
 
@@ -6765,7 +6766,6 @@ function initBot(app) {
 
       // ── Booking: cancel (show confirmation first)
       if (data === 'bk_cancel') {
-        await bot.answerCallbackQuery(q.id);
         return safeSend(chatId, '⚠️ *Отменить бронирование?*\nВесь прогресс будет потерян\\.', {
           parse_mode: 'MarkdownV2',
           reply_markup: {
@@ -6829,7 +6829,7 @@ function initBot(app) {
       // ── Session: keepalive (triggered from warning message before timeout)
       if (data === 'session_keepalive') {
         resetSessionTimer(chatId);
-        await bot.answerCallbackQuery(q.id, { text: '✅ Время продлено!' });
+        // Note: answerCallbackQuery already called at the top of this handler
         return safeSend(chatId, '✅ Хорошо\\! Время сессии продлено\\. Продолжайте заполнение\\.', {
           parse_mode: 'MarkdownV2',
         });
@@ -9481,24 +9481,94 @@ function initBot(app) {
       // ── AI подбор моделей
       if (data === 'ai_match') return startAiMatch(chatId);
 
-      // Height filter: srch_h_{min}_{max}
-      if (data.startsWith('srch_h_')) {
-        const parts = data.replace('srch_h_', '').split('_');
-        const min = parseInt(parts[0]) || 0;
-        const max = parseInt(parts[1]) || 999;
+      // ── БЛОК 2.4: Расширенный поиск — unified callbacks ──
+
+      // Age filter: srch_age_18-22, srch_age_23-27, srch_age_28-32, srch_age_33plus
+      if (data.startsWith('srch_age_')) {
+        const ageKey = data.replace('srch_age_', '');
+        const ageMap = { '18-22': [18, 22], '23-27': [23, 27], '28-32': [28, 32], '33plus': [33, 99] };
+        const range = ageMap[ageKey];
         const f = getSearchFilters(chatId);
-        if (f.height_min === min && f.height_max === max) {
-          // toggle off
-          delete f.height_min;
-          delete f.height_max;
-        } else {
-          f.height_min = min;
-          f.height_max = max;
+        if (range) {
+          if (f.age_min === range[0] && f.age_max === range[1]) {
+            delete f.age_min;
+            delete f.age_max;
+          } else {
+            f.age_min = range[0];
+            f.age_max = range[1];
+          }
         }
         return showSearchMenu(chatId);
       }
 
-      // Age filter: srch_a_{min}_{max}
+      // Height filter: srch_h_160-165, srch_h_166-170, srch_h_171-175, srch_h_176-180, srch_h_181plus
+      // Also handles legacy srch_h_160 (numeric key only) format
+      if (data.startsWith('srch_h_')) {
+        const hKey = data.replace('srch_h_', '');
+        const heightMap = {
+          '160-165': [160, 165],
+          '166-170': [166, 170],
+          '171-175': [171, 175],
+          '176-180': [176, 180],
+          '181plus': [181, 220],
+          160: [160, 165],
+          166: [166, 170],
+          171: [171, 175],
+          176: [176, 180],
+          181: [181, 220],
+        };
+        const range = heightMap[hKey];
+        const f = getSearchFilters(chatId);
+        if (range) {
+          if (f.height_min === range[0] && f.height_max === range[1]) {
+            delete f.height_min;
+            delete f.height_max;
+          } else {
+            f.height_min = range[0];
+            f.height_max = range[1];
+          }
+        } else {
+          const parts = hKey.split('_');
+          const min = parseInt(parts[0]) || 0;
+          const max = parseInt(parts[1]) || 999;
+          if (f.height_min === min && f.height_max === max) {
+            delete f.height_min;
+            delete f.height_max;
+          } else {
+            f.height_min = min;
+            f.height_max = max;
+          }
+        }
+        return showSearchMenu(chatId);
+      }
+
+      // Category filter: srch_cat_fashion, srch_cat_commercial, srch_cat_events
+      if (data.startsWith('srch_cat_')) {
+        const cat = data.replace('srch_cat_', '');
+        const f = getSearchFilters(chatId);
+        f.category = f.category === cat ? null : cat;
+        return showSearchMenu(chatId);
+      }
+
+      // City shortcuts + generic: srch_city_moscow, srch_city_spb, srch_city_nsk, srch_city_{name}
+      if (data.startsWith('srch_city_')) {
+        const cityKey = data.replace('srch_city_', '');
+        const cityAliases = { moscow: 'Москва', spb: 'Санкт-Петербург', nsk: 'Новосибирск' };
+        const city = cityAliases[cityKey] || decodeURIComponent(cityKey);
+        const f = getSearchFilters(chatId);
+        f.city = f.city === city ? null : city;
+        return showSearchMenu(chatId);
+      }
+
+      // Legacy category filter: srch_c_{category}
+      if (data.startsWith('srch_c_')) {
+        const cat = data.replace('srch_c_', '');
+        const f = getSearchFilters(chatId);
+        f.category = f.category === cat ? null : cat;
+        return showSearchMenu(chatId);
+      }
+
+      // Legacy age filter: srch_a_{min}_{max}
       if (data.startsWith('srch_a_')) {
         const parts = data.replace('srch_a_', '').split('_');
         const min = parseInt(parts[0]) || 0;
@@ -9514,48 +9584,30 @@ function initBot(app) {
         return showSearchMenu(chatId);
       }
 
-      // Category filter: srch_c_{category}
-      if (data.startsWith('srch_c_')) {
-        const cat = data.replace('srch_c_', '');
-        const f = getSearchFilters(chatId);
-        f.category = f.category === cat ? null : cat;
-        return showSearchMenu(chatId);
-      }
-
-      // City filter: srch_city_{city}
-      if (data.startsWith('srch_city_')) {
-        const city = data.replace('srch_city_', '');
-        const f = getSearchFilters(chatId);
-        f.city = f.city === city ? null : city;
-        return showSearchMenu(chatId);
-      }
-
-      // Reset filters
+      // Reset all filters
       if (data === 'srch_reset') {
         searchFilters.set(String(chatId), {});
         return showSearchMenu(chatId);
       }
 
-      // Run search
+      // Run search — use showSearchResultsV2 (reads from searchFilters Map)
       if (data === 'srch_go') {
-        const f = getSearchFilters(chatId);
-        return showSearchResults(chatId, f, 0);
+        return showSearchResultsV2(chatId, 0);
       }
 
       // Pagination: srch_page_{n}
       if (data.startsWith('srch_page_')) {
         const page = parseInt(data.replace('srch_page_', '')) || 0;
-        const f = getSearchFilters(chatId);
-        return showSearchResults(chatId, f, page);
+        return showSearchResultsV2(chatId, page);
       }
 
-      // No-op button (page indicator x/N) — already answered above, just return
+      // No-op button (page indicator x/N)
       if (data === 'srch_noop') return;
 
       // View model from search results
       if (data.startsWith('srch_view_')) {
         const modelId = parseInt(data.replace('srch_view_', ''));
-        return showModel(chatId, modelId, { text: '← Назад к поиску', callback_data: 'search_go' });
+        return showModel(chatId, modelId, { text: '← Назад к поиску', callback_data: 'cat_search' });
       }
 
       // Legacy cat_search_* callbacks (keep for backward compatibility)
@@ -12739,83 +12791,92 @@ async function showSearchMenu(chatId) {
   try {
     const f = getSearchFilters(chatId);
 
-    // Height ranges definition (task spec: 160-165, 166-170, 171-175, 176-180, 181+)
+    // Height ranges — БЛОК 2.4 spec callbacks: srch_h_160-165, etc.
     const heightRanges = [
-      { key: '160', label: '🔹 160–165', min: 160, max: 165, cb: 'search_h_160' },
-      { key: '166', label: '🔹 166–170', min: 166, max: 170, cb: 'search_h_166' },
-      { key: '171', label: '🔹 171–175', min: 171, max: 175, cb: 'search_h_171' },
-      { key: '176', label: '🔹 176–180', min: 176, max: 180, cb: 'search_h_176' },
-      { key: '181', label: '🔹 181+', min: 181, max: 220, cb: 'search_h_181' },
+      { label: '160–165', min: 160, max: 165, cb: 'srch_h_160-165' },
+      { label: '166–170', min: 166, max: 170, cb: 'srch_h_166-170' },
+      { label: '171–175', min: 171, max: 175, cb: 'srch_h_171-175' },
+      { label: '176–180', min: 176, max: 180, cb: 'srch_h_176-180' },
+      { label: '181+', min: 181, max: 220, cb: 'srch_h_181plus' },
     ];
+
+    // Age ranges — БЛОК 2.4 spec callbacks: srch_age_18-22, etc.
     const ageRanges = [
-      { key: '18', label: '🔸 18–22', min: 18, max: 22, cb: 'search_a_18' },
-      { key: '23', label: '🔸 23–27', min: 23, max: 27, cb: 'search_a_23' },
-      { key: '28', label: '🔸 28–32', min: 28, max: 32, cb: 'search_a_28' },
-      { key: '33', label: '🔸 33+', min: 33, max: 99, cb: 'search_a_33' },
+      { label: '18–22', min: 18, max: 22, cb: 'srch_age_18-22' },
+      { label: '23–27', min: 23, max: 27, cb: 'srch_age_23-27' },
+      { label: '28–32', min: 28, max: 32, cb: 'srch_age_28-32' },
+      { label: '33+', min: 33, max: 99, cb: 'srch_age_33plus' },
     ];
 
-    // Height buttons (2 per row)
-    const heightBtns = [];
-    for (let i = 0; i < heightRanges.length; i += 2) {
-      const row = heightRanges.slice(i, i + 2).map(r => {
-        const active = f.height_min === r.min && f.height_max === r.max;
-        return { text: (active ? '✅ ' : '') + r.label, callback_data: r.cb };
-      });
-      heightBtns.push(row);
-    }
-
-    // Age buttons (2 per row)
-    const ageBtns = [];
-    for (let i = 0; i < ageRanges.length; i += 2) {
-      const row = ageRanges.slice(i, i + 2).map(r => {
-        const active = f.age_min === r.min && f.age_max === r.max;
-        return { text: (active ? '✅ ' : '') + r.label, callback_data: r.cb };
-      });
-      ageBtns.push(row);
-    }
-
-    // Category buttons
+    // Category definitions
     const catDefs = [
-      { key: 'fashion', label: '👗 Fashion', cb: 'search_cat_fashion' },
-      { key: 'commercial', label: '📸 Commercial', cb: 'search_cat_commercial' },
-      { key: 'events', label: '🎭 Events', cb: 'search_cat_events' },
+      { key: 'fashion', label: '👗 Fashion', cb: 'srch_cat_fashion' },
+      { key: 'commercial', label: '📸 Commercial', cb: 'srch_cat_commercial' },
+      { key: 'events', label: '🎉 Events', cb: 'srch_cat_events' },
     ];
-    const catBtns = catDefs.map(c => {
+
+    // Build age buttons row (all 4 in one row)
+    const ageRow = ageRanges.map(r => {
+      const active = f.age_min === r.min && f.age_max === r.max;
+      return { text: (active ? '✅ ' : '') + r.label, callback_data: r.cb };
+    });
+
+    // Build height buttons (5 options, split 3+2)
+    const heightRow1 = heightRanges.slice(0, 3).map(r => {
+      const active = f.height_min === r.min && f.height_max === r.max;
+      return { text: (active ? '✅ ' : '') + r.label, callback_data: r.cb };
+    });
+    const heightRow2 = heightRanges.slice(3).map(r => {
+      const active = f.height_min === r.min && f.height_max === r.max;
+      return { text: (active ? '✅ ' : '') + r.label, callback_data: r.cb };
+    });
+
+    // Category buttons (all 3 in one row)
+    const catRow = catDefs.map(c => {
       const active = f.category === c.key;
       return { text: (active ? '✅ ' : '') + c.label, callback_data: c.cb };
     });
 
-    // City buttons — query DISTINCT cities from available models, fallback to getSetting('cities_list')
-    let cities = [];
+    // City buttons — fixed shortcuts + dynamic from DB
+    const fixedCities = [
+      { name: 'Москва', cb: 'srch_city_moscow' },
+      { name: 'Санкт-Петербург', cb: 'srch_city_spb' },
+      { name: 'Новосибирск', cb: 'srch_city_nsk' },
+    ];
+    let extraCities = [];
     try {
       const cityRows = await query(
-        "SELECT DISTINCT city FROM models WHERE available=1 AND city IS NOT NULL AND city != '' ORDER BY city"
+        "SELECT DISTINCT city FROM models WHERE available=1 AND COALESCE(archived,0)=0 AND city IS NOT NULL AND city != '' ORDER BY city LIMIT 8"
       );
-      cities = cityRows
+      const fixedNames = fixedCities.map(c => c.name);
+      extraCities = cityRows
         .map(r => r.city)
         .filter(Boolean)
-        .slice(0, 8);
-      if (!cities.length) {
-        const citiesSetting = await getSetting('cities_list').catch(() => '');
-        const fallback = (citiesSetting || 'Москва,Санкт-Петербург,Екатеринбург')
-          .split(',')
-          .map(c => c.trim())
-          .filter(Boolean);
-        cities = fallback.slice(0, 8);
-      }
+        .filter(c => !fixedNames.includes(c))
+        .slice(0, 5);
     } catch (e) {
       console.error('[Bot] showSearchMenu cities:', e.message);
     }
 
-    const cityBtns = cities.map(city => {
-      const active = f.city === city;
-      return { text: (active ? '✅ ' : '🏙 ') + city, callback_data: 'search_city_' + city };
-    });
+    const allCityBtns = [
+      ...fixedCities.map(c => ({
+        text: (f.city === c.name ? '✅ ' : '🏙 ') + c.name,
+        callback_data: c.cb,
+      })),
+      ...extraCities.map(city => ({
+        text: (f.city === city ? '✅ ' : '🏙 ') + city,
+        callback_data: 'srch_city_' + encodeURIComponent(city),
+      })),
+    ];
+    const cityRows = [];
+    for (let i = 0; i < allCityBtns.length; i += 3) {
+      cityRows.push(allCityBtns.slice(i, i + 3));
+    }
 
-    // Count matching models for the current filters
+    // Count matching models for current filters
     let matchCount = 0;
     try {
-      const conditions = ['available=1'];
+      const conditions = ['available=1', 'COALESCE(archived,0)=0'];
       const params = [];
       if (f.height_min != null) {
         conditions.push('height >= ?');
@@ -12838,8 +12899,8 @@ async function showSearchMenu(chatId) {
         params.push(f.category);
       }
       if (f.city) {
-        conditions.push('city = ?');
-        params.push(f.city);
+        conditions.push('LOWER(city) LIKE LOWER(?)');
+        params.push('%' + f.city + '%');
       }
       const countRow = await get(`SELECT COUNT(*) as cnt FROM models WHERE ${conditions.join(' AND ')}`, params);
       matchCount = countRow?.cnt || 0;
@@ -12851,44 +12912,36 @@ async function showSearchMenu(chatId) {
     const activeParts = [];
     if (f.height_min != null) {
       const r = heightRanges.find(r => r.min === f.height_min);
-      if (r) activeParts.push(`📏 ${r.label}`);
-      else activeParts.push(`📏 ${f.height_min}–${f.height_max} см`);
+      activeParts.push(r ? '📏 ' + r.label : '📏 ' + f.height_min + '–' + f.height_max + ' см');
     }
     if (f.age_min != null) {
       const r = ageRanges.find(r => r.min === f.age_min);
-      if (r) activeParts.push(`🎂 ${r.label}`);
-      else activeParts.push(`🎂 ${f.age_min}–${f.age_max} лет`);
+      activeParts.push(r ? '🎂 ' + r.label : '🎂 ' + f.age_min + '–' + f.age_max + ' лет');
     }
-    if (f.category) activeParts.push(`🏷 ${f.category}`);
-    if (f.city) activeParts.push(`🏙 ${f.city}`);
+    if (f.category) activeParts.push('🏷 ' + f.category);
+    if (f.city) activeParts.push('🏙 ' + f.city);
 
     const hasFilters = activeParts.length > 0;
     const summaryLine = hasFilters
-      ? `\n\n_Выбрано: ${esc(activeParts.join(', '))}_`
-      : `\n\n_Выберите фильтры для поиска_`;
+      ? '\n\n_Выбрано: ' + esc(activeParts.join(', ')) + '_'
+      : '\n\n_Выберите фильтры для поиска_';
 
-    // Find button label: show count only when filters selected
-    const findLabel = hasFilters ? `🔍 Найти (${matchCount})` : `🔍 Найти всех (${matchCount})`;
-
-    // City input button — shows active city or prompt to type
-    const cityInputLabel = f.city ? `✅ 🏙 ${f.city}` : '✏️ Ввести город';
-    const cityInputBtn = { text: cityInputLabel, callback_data: 'search_city_input' };
+    const findLabel = hasFilters ? '🔍 Найти (' + matchCount + ')' : '🔍 Найти всех (' + matchCount + ')';
 
     const keyboard = [
-      ...heightBtns,
-      ...ageBtns,
-      [catBtns[0], catBtns[1], catBtns[2]],
-      ...(cityBtns.length ? [cityBtns.slice(0, 4)] : []),
-      ...(cityBtns.length > 4 ? [cityBtns.slice(4)] : []),
-      [cityInputBtn],
+      ageRow,
+      heightRow1,
+      heightRow2,
+      catRow,
+      ...cityRows,
       [
-        ...(hasFilters ? [{ text: '✖️ Сбросить фильтры', callback_data: 'search_reset' }] : []),
-        { text: findLabel, callback_data: 'search_go' },
+        ...(hasFilters ? [{ text: '🔄 Сбросить', callback_data: 'srch_reset' }] : []),
+        { text: findLabel, callback_data: 'srch_go' },
       ],
       [{ text: '← Назад', callback_data: 'cat_cat__0' }],
     ];
 
-    return safeSend(chatId, `_🏠 Главная › 🔍 Поиск_\n\n🔍 *Поиск моделей*${summaryLine}`, {
+    return safeSend(chatId, '_🏠 Главная › 🔍 Поиск_\n\n🔍 *Поиск моделей*' + summaryLine, {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: keyboard },
     });
@@ -14166,7 +14219,7 @@ function _registerNewFeatures() {
       }
       if (data === 'compare_clear') {
         _compareLists.delete(String(chatId));
-        return safeSend(chatId, '🗑 Список сравнения очищен\.', {
+        return safeSend(chatId, '🗑 Список сравнения очищен\\.', {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [[{ text: '💃 Каталог', callback_data: 'cat_cat__0' }]] },
         });
@@ -14180,14 +14233,14 @@ function _registerNewFeatures() {
         const d = sessionData(session);
         const bio = d?.ai_bio;
         if (!bio) {
-          return safeSend(chatId, '❌ Описание не найдено\. Сгенерируйте заново\.', {
+          return safeSend(chatId, '❌ Описание не найдено\\. Сгенерируйте заново\\.', {
             parse_mode: 'MarkdownV2',
             reply_markup: { inline_keyboard: [[{ text: '🤖 Сгенерировать', callback_data: `adm_ai_bio_${modelId}` }]] },
           });
         }
         await run('UPDATE models SET bio=? WHERE id=?', [bio, modelId]).catch(() => {});
         await clearSession(chatId);
-        return safeSend(chatId, '✅ Описание сохранено\!', {
+        return safeSend(chatId, '✅ Описание сохранено\\!', {
           parse_mode: 'MarkdownV2',
           reply_markup: {
             inline_keyboard: [
@@ -14487,5 +14540,3 @@ module.exports = {
   notifyPaymentSuccess,
   _registerNewFeatures,
 };
-
-// Age ranges — БЛОК 2.4 spec callbacks: srch_age_18-22, etc.

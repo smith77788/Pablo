@@ -1385,23 +1385,10 @@ router.get('/models/:id', async (req, res, next) => {
   }
 });
 
-// ─── Models PATCH (quick availability toggle, public auth via JWT) ────────────
-router.patch('/api/models/:id', auth, async (req, res, next) => {
-  try {
-    const id = parseInt(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
-    const { available } = req.body;
-    if (available === undefined) return res.status(400).json({ error: 'Поле available обязательно' });
-    const val = available ? 1 : 0;
-    const m = await get('SELECT id FROM models WHERE id = ?', [id]);
-    if (!m) return res.status(404).json({ error: 'Модель не найдена' });
-    await run('UPDATE models SET available = ? WHERE id = ?', [val, id]);
-    res.json({ ok: true, available: val });
-  } catch (e) {
-    next(e);
-  }
-});
-
+// ─── Models PATCH (quick availability toggle) ─────────────────────────────────
+// NOTE: The path '/api/models/:id' was removed — it was a dead route because this
+// router is already mounted at /api, making the effective path /api/api/models/:id.
+// The correct path is '/models/:id' (below), which resolves to /api/models/:id.
 router.patch('/models/:id', auth, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
@@ -3532,9 +3519,10 @@ router.delete('/admin/managers/:id', auth, async (req, res, next) => {
   }
 });
 
-router.get('/admin/managers/:id/stats', auth, async (req, res) => {
+router.get('/admin/managers/:id/stats', auth, async (req, res, next) => {
   if (req.admin.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
   const managerId = parseInt(req.params.id);
+  if (!Number.isInteger(managerId) || managerId <= 0) return res.status(400).json({ error: 'Invalid ID' });
   try {
     const [assignedTotal, assignedCompleted, assignedActive] = await Promise.all([
       get('SELECT COUNT(*) as n FROM orders WHERE manager_id=?', [managerId]),
@@ -3561,8 +3549,7 @@ router.get('/admin/managers/:id/stats', auth, async (req, res) => {
       },
     });
   } catch (e) {
-    console.error('[Admin] Manager stats error:', e.message);
-    res.json({ ok: false, error: 'Internal error' });
+    next(e);
   }
 });
 
@@ -5861,10 +5848,19 @@ router.post('/webhooks/crm/:provider', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid provider' });
     }
     // Shared-secret check: if CRM_WEBHOOK_SECRET is set, validate X-Webhook-Secret header
+    // Uses timing-safe comparison to prevent secret-oracle timing attacks.
     const webhookSecret = process.env.CRM_WEBHOOK_SECRET;
     if (webhookSecret) {
       const incomingSecret = req.headers['x-webhook-secret'] || req.headers['x-hub-signature-256'] || '';
-      if (incomingSecret !== webhookSecret) {
+      let secretValid = false;
+      try {
+        const a = Buffer.from(incomingSecret);
+        const b = Buffer.from(webhookSecret);
+        if (a.length === b.length) {
+          secretValid = crypto.timingSafeEqual(a, b);
+        }
+      } catch (_) {}
+      if (!secretValid) {
         console.warn(`[CRM Webhook] Unauthorized request from ${req.ip} — invalid secret`);
         return res.status(401).json({ error: 'Unauthorized' });
       }
@@ -6286,7 +6282,7 @@ router.get('/admin/analytics/extended', auth, async (req, res, next) => {
 });
 
 // ─── Analytics: Revenue by month ─────────────────────────────────────────────
-router.get('/admin/analytics/revenue', auth, async (req, res) => {
+router.get('/admin/analytics/revenue', auth, async (req, res, next) => {
   try {
     const months = Math.min(24, Math.max(1, parseInt(req.query.months) || 6));
     const rows = await query(
@@ -6307,13 +6303,12 @@ router.get('/admin/analytics/revenue', auth, async (req, res) => {
     );
     res.json({ ok: true, months: rows.reverse(), data: rows });
   } catch (e) {
-    console.error('[Admin] Analytics revenue-months error:', e.message);
-    res.json({ ok: false, error: 'Internal error' });
+    next(e);
   }
 });
 
 // ─── Analytics: Repeat vs new clients ────────────────────────────────────────
-router.get('/admin/analytics/repeat-clients', auth, async (req, res) => {
+router.get('/admin/analytics/repeat-clients', auth, async (req, res, next) => {
   try {
     const [total, repeat] = await Promise.all([
       get(`SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE client_chat_id IS NOT NULL`),
@@ -6324,8 +6319,7 @@ router.get('/admin/analytics/repeat-clients', auth, async (req, res) => {
     const newClients = (total?.n || 0) - (repeat?.n || 0);
     res.json({ ok: true, data: { total: total?.n || 0, repeat: repeat?.n || 0, new: newClients } });
   } catch (e) {
-    console.error('[Admin] Analytics repeat-clients error:', e.message);
-    res.json({ ok: false, error: 'Internal error' });
+    next(e);
   }
 });
 

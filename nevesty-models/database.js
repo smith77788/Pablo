@@ -788,10 +788,14 @@ async function initDatabase() {
     await run(`CREATE INDEX IF NOT EXISTS idx_client_otp_expires ON client_otp(expires_at, used)`).catch(() => {});
     // Clean up expired OTP codes that may have accumulated
     await run(`DELETE FROM client_otp WHERE expires_at < datetime('now', '-1 hour')`).catch(() => {});
+    // Add notes column to order_status_history (used by payment webhooks and status logging)
+    await run(`ALTER TABLE order_status_history ADD COLUMN notes TEXT DEFAULT NULL`).catch(() => {});
     await run(
-      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(26, 'client_otp cleanup index, expired OTP purge')`
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(26, 'client_otp cleanup index, expired OTP purge, order_status_history.notes')`
     ).catch(() => {});
   }
+  // Ensure notes column exists even on databases that skipped v26 (idempotent)
+  await run(`ALTER TABLE order_status_history ADD COLUMN notes TEXT DEFAULT NULL`).catch(() => {});
 
   // Schema v27 — admins last_login, active columns for admin users management
   const v27 = await get(`SELECT version FROM schema_versions WHERE version=27`).catch(() => null);
@@ -971,35 +975,27 @@ function scheduleBackups() {
       const backupPath = pathMod.join(BACKUP_DIR, `nevesty_${stamp}.db`);
 
       // Use SQLite backup command via node sqlite3
+      // VACUUM INTO writes directly to backupPath; do NOT open a separate dst DB
+      // on the same path first (that would create an empty file locking the target).
       const src = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READONLY, err => {
         if (err) {
           console.error('[Backup] Failed to open source DB:', err.message);
           return;
         }
-        const dst = new sqlite3.Database(backupPath, err2 => {
-          if (err2) {
-            console.error('[Backup] Failed to create backup DB:', err2.message);
-            src.close();
-            return;
-          }
-          // Copy via VACUUM INTO (SQLite 3.27+)
-          src.run(`VACUUM INTO '${backupPath}'`, vacErr => {
-            if (vacErr) {
-              // Fallback: file copy
-              dst.close(() => {
-                try {
-                  fs.copyFileSync(DB_PATH, backupPath);
-                  console.log(`[Backup] Created (file copy): ${backupPath}`);
-                } catch (copyErr) {
-                  console.error('[Backup] File copy failed:', copyErr.message);
-                }
-              });
-            } else {
-              dst.close(() => {});
-              console.log(`[Backup] Created (VACUUM INTO): ${backupPath}`);
+        // Copy via VACUUM INTO (SQLite 3.27+)
+        src.run(`VACUUM INTO '${backupPath}'`, vacErr => {
+          src.close();
+          if (vacErr) {
+            // Fallback: file copy
+            try {
+              fs.copyFileSync(DB_PATH, backupPath);
+              console.log(`[Backup] Created (file copy): ${backupPath}`);
+            } catch (copyErr) {
+              console.error('[Backup] File copy failed:', copyErr.message);
             }
-            src.close();
-          });
+          } else {
+            console.log(`[Backup] Created (VACUUM INTO): ${backupPath}`);
+          }
         });
       });
     } catch (e) {
