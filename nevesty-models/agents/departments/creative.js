@@ -474,11 +474,79 @@ class StorytellingAgent extends Agent {
   }
 }
 
-// ─── Run all three agents when invoked directly ───────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// 4. VisualConceptor
+// ═════════════════════════════════════════════════════════════════════════════
+class VisualConceptor extends Agent {
+  constructor() {
+    super({
+      id: 'cre-04',
+      name: 'VisualConceptor',
+      organ: 'Creative Department',
+      emoji: '📸',
+      focus: 'Audit model photo coverage and flag content gaps',
+    });
+  }
+
+  async analyze() {
+    let stats;
+    try {
+      stats = await dbAll(
+        `SELECT
+           m.id,
+           COUNT(p.id) as photo_cnt
+         FROM models m
+         LEFT JOIN model_photos p ON p.model_id = m.id
+         WHERE m.archived = 0 OR m.archived IS NULL
+         GROUP BY m.id`
+      );
+    } catch {
+      this.addFinding('HIGH', 'VisualConceptor: ошибка запроса model_photos');
+      return;
+    }
+
+    if (!stats.length) {
+      this.addFinding('OK', 'VisualConceptor: моделей в каталоге нет');
+      return;
+    }
+
+    const total = stats.length;
+    const noPhoto = stats.filter(r => r.photo_cnt === 0).length;
+    const fewPhoto = stats.filter(r => r.photo_cnt > 0 && r.photo_cnt < 3).length;
+    const goodPhoto = stats.filter(r => r.photo_cnt >= 3).length;
+
+    if (noPhoto / total > 0.2) {
+      this.addFinding(
+        'HIGH',
+        `📸 ${noPhoto} из ${total} моделей (${Math.round((noPhoto / total) * 100)}%) без фотографий — требуется срочное добавление контента`
+      );
+    } else if (noPhoto > 0) {
+      this.addFinding('MEDIUM', `📸 ${noPhoto} моделей без фотографий`);
+    }
+
+    if (fewPhoto / total > 0.4) {
+      this.addFinding(
+        'MEDIUM',
+        `📸 ${fewPhoto} из ${total} моделей (${Math.round((fewPhoto / total) * 100)}%) имеют < 3 фото — рекомендуется расширить портфолио`
+      );
+    }
+
+    if (goodPhoto === total) {
+      this.addFinding('OK', `📸 Все ${total} моделей имеют достаточное портфолио (≥3 фото)`);
+    } else {
+      this.addFinding(
+        'INFO',
+        `📸 Фото-охват: ${goodPhoto}/${total} моделей с полным портфолио, ${noPhoto} без фото, ${fewPhoto} с неполным`
+      );
+    }
+  }
+}
+
+// ─── Run all four agents when invoked directly ────────────────────────────────
 async function runCreativeDepartment() {
   console.log('🎨 Creative Department — запуск...\n');
 
-  const agents = [new CopywriterAI(), new BrandVoiceKeeper(), new StorytellingAgent()];
+  const agents = [new CopywriterAI(), new BrandVoiceKeeper(), new StorytellingAgent(), new VisualConceptor()];
 
   for (const agent of agents) {
     console.log(`\n${agent.emoji} ${agent.name}`);
@@ -496,4 +564,4 @@ async function runCreativeDepartment() {
 
 if (require.main === module) runCreativeDepartment().then(() => process.exit(0));
 
-module.exports = { CopywriterAI, BrandVoiceKeeper, StorytellingAgent };
+module.exports = { CopywriterAI, BrandVoiceKeeper, StorytellingAgent, VisualConceptor };

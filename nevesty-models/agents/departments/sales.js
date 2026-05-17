@@ -13,24 +13,35 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 const { Agent, dbRun, dbAll, logAgent } = require('../lib/base');
 
 // ─── Shared Claude API helper ─────────────────────────────────────────────────
+const CLAUDE_API_TIMEOUT_MS = 30_000; // 30s — prevents indefinite hang in orchestrator batches
+
 async function callClaude({ systemPrompt, userPrompt, maxTokens = 600 }) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CLAUDE_API_TIMEOUT_MS);
+
+  let response;
+  try {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!response.ok) {
     const err = await response.text();

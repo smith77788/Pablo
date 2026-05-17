@@ -3,7 +3,7 @@ const { logAgent, tgSend, tgSendGetId, tgEditMessage, progressBar, _dbAll, _dbRu
 
 // Department agents (AI Factory)
 const { LeadQualifier, ProposalWriter, FollowUpSpecialist, PricingNegotiator } = require('./departments/sales');
-const { CopywriterAI, BrandVoiceKeeper, StorytellingAgent } = require('./departments/creative');
+const { CopywriterAI, BrandVoiceKeeper, StorytellingAgent, VisualConceptor } = require('./departments/creative');
 const { RevenueForecaster, CostOptimizer, PricingStrategist, BudgetPlanner } = require('./departments/finance');
 const { MarketResearcher, CompetitorAnalyst, TrendSpotter, InsightSynthesizer } = require('./departments/research');
 const {
@@ -52,6 +52,7 @@ const agents = [
   CopywriterAI,
   BrandVoiceKeeper,
   StorytellingAgent,
+  VisualConceptor,
   // Finance Department
   RevenueForecaster,
   CostOptimizer,

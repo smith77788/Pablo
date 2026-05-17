@@ -3350,7 +3350,7 @@ router.get('/admin/orders/export', auth, async (req, res, next) => {
     const SEP = ';';
     const csvCell2 = v => {
       let s = v == null ? '' : String(v);
-      if (/^[=+\-@]/.test(s)) s = "'" + s;
+      if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // prevent CSV injection (tab/CR also trigger formula execution)
       return '"' + s.replace(/"/g, '""') + '"';
     };
     const csvRow2 = cols => cols.map(csvCell2).join(SEP);
