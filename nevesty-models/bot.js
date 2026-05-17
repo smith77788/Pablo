@@ -10826,10 +10826,10 @@ function initBot(app) {
 
     // ── Edit profile email
     if (state === 'profile_edit_email') {
-      if (!text || !text.trim().includes('@')) {
+      if (!text || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(text.trim())) {
         return safeSend(chatId, STRINGS.errorInvalidEmail);
       }
-      const newEmail = text.trim().slice(0, 200);
+      const newEmail = text.trim().toLowerCase().slice(0, 200);
       await run(
         `INSERT INTO client_prefs (chat_id, email) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET email=excluded.email, updated_at=CURRENT_TIMESTAMP`,
         [chatId, newEmail]
@@ -11313,30 +11313,39 @@ async function showUserProfile(chatId, firstName) {
     const displayPhone = prefs?.phone || lastOrderFull?.client_phone || null;
     const displayEmail = prefs?.email || lastOrderFull?.client_email || null;
 
+    // Profile edit buttons — one action per row for clarity
     const profileEditButtons = [
-      [
-        { text: '✏️ Изменить имя', callback_data: 'profile_edit_name' },
-        { text: '📱 Изменить телефон', callback_data: 'profile_edit_phone' },
-      ],
+      [{ text: '✏️ Изменить имя', callback_data: 'profile_edit_name' }],
+      [{ text: '📱 Изменить телефон', callback_data: 'profile_edit_phone' }],
       [{ text: '📧 Изменить email', callback_data: 'profile_edit_email' }],
-      [{ text: '🔔 Уведомления', callback_data: 'client_notif_settings' }],
-      [{ text: '⚙️ Настройки', callback_data: 'client_settings' }],
+      [
+        { text: '🔔 Уведомления', callback_data: 'client_notif_settings' },
+        { text: '⚙️ Настройки', callback_data: 'client_settings' },
+      ],
     ];
 
+    // Helper: build contact info header block
+    const buildContactBlock = (name, phone, email) => {
+      let t = `_🏠 Главная › 👤 Профиль_\n\n`;
+      t += `👤 *Мой профиль*\n\n`;
+      t += `👤 Имя: *${esc(name)}*\n`;
+      t += `📱 Телефон: ${phone ? `*${esc(phone)}*` : '_\\(не указан\\)_'}\n`;
+      t += `📧 Email: ${email ? `*${esc(email)}*` : '_\\(не указан\\)_'}\n`;
+      return t;
+    };
+
     if (!orders.length) {
-      let emptyText = `_🏠 Главная › 👤 Профиль_\n\n`;
-      emptyText += `👤 *Мой профиль*\n\n`;
-      emptyText += `Имя: *${esc(displayName)}*\n`;
-      emptyText += `📱 Телефон: ${displayPhone ? esc(displayPhone) : '_\\(не указан\\)_'}\n`;
-      emptyText += `📧 Email: ${displayEmail ? esc(displayEmail) : '_\\(не указан\\)_'}\n`;
-      emptyText += `\nУ вас пока нет заявок\\. Оформите первую прямо сейчас\\!`;
+      let emptyText = buildContactBlock(displayName, displayPhone, displayEmail);
+      emptyText += `\n📊 *Статистика заявок:*\n`;
+      emptyText += `Всего: *0*\n`;
+      emptyText += `\n_У вас пока нет заявок\\. Оформите первую прямо сейчас\\!_`;
       return safeSend(chatId, emptyText, {
         parse_mode: 'MarkdownV2',
         reply_markup: {
           inline_keyboard: [
             ...profileEditButtons,
             [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }],
-            [{ text: '← Назад', callback_data: 'main_menu' }],
+            [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
           ],
         },
       });
@@ -11355,10 +11364,9 @@ async function showUserProfile(chatId, firstName) {
     const cancelledOrders = counts['cancelled'] || 0;
     const totalOrders = orders.length;
 
-    const firstDate = orders[orders.length - 1]?.created_at
+    const memberSinceDate = orders[orders.length - 1]?.created_at
       ? new Date(orders[orders.length - 1].created_at).toLocaleDateString('ru')
-      : 'неизвестно';
-    const lastDate = orders[0]?.created_at ? new Date(orders[0].created_at).toLocaleDateString('ru') : 'неизвестно';
+      : null;
 
     const [loyalty, earnedAchs] = await Promise.all([
       get(`SELECT * FROM loyalty_points WHERE chat_id=?`, [chatId]).catch(() => null),
@@ -11383,31 +11391,30 @@ async function showUserProfile(chatId, firstName) {
       currentPoints < 500 ? 500 : currentPoints < 2000 ? 2000 : currentPoints < 5000 ? 5000 : null;
     const pointsBalance = loyalty?.points || 0;
 
-    let text = `_🏠 Главная › 👤 Профиль_\n\n`;
-    text += `👤 *Мой профиль*\n\n`;
-    text += `Имя: *${esc(displayName)}*\n`;
-    text += `📱 Телефон: ${displayPhone ? esc(displayPhone) : '_\\(не указан\\)_'}\n`;
-    text += `📧 Email: ${displayEmail ? esc(displayEmail) : '_\\(не указан\\)_'}\n`;
+    let text = buildContactBlock(displayName, displayPhone, displayEmail);
+    if (memberSinceDate) text += `📅 Клиент с: ${esc(memberSinceDate)}\n`;
     text += `💫 Уровень: *${esc(level)}*\n`;
     if (loyalty) {
       if (nextLevelThreshold) {
         const toNext = nextLevelThreshold - currentPoints;
-        text += `💎 Баллы: *${pointsBalance}* \\(до следующей награды: ${toNext}\\)\n`;
+        text += `💎 Баллы: *${pointsBalance}* \\(до следующего уровня: ${toNext}\\)\n`;
       } else {
         text += `💎 Баллы: *${pointsBalance}* \\(максимальный уровень\\)\n`;
       }
     }
+
+    // Stats block — total first, then active/completed/cancelled
     text += `\n📊 *Статистика заявок:*\n`;
+    text += `Всего: *${totalOrders}*\n`;
     text += `Активных: ${activeOrders}\n`;
     text += `Завершённых: ${completedOrders}\n`;
     if (cancelledOrders) text += `Отменённых: ${cancelledOrders}\n`;
-    text += `Всего: ${totalOrders}\n`;
-    text += `Первая: ${esc(firstDate)}\n`;
-    text += `Последняя: ${esc(lastDate)}\n\n`;
 
     const statusOrder = ['new', 'reviewing', 'confirmed', 'in_progress', 'completed', 'cancelled'];
-    for (const st of statusOrder) {
-      if (counts[st]) {
+    const statusDetails = statusOrder.filter(st => counts[st]);
+    if (statusDetails.length) {
+      text += `\n`;
+      for (const st of statusDetails) {
         const label = STATUS_LABELS[st] || st;
         text += `  ${esc(label)}: ${counts[st]}\n`;
       }
@@ -11451,15 +11458,17 @@ async function showUserProfile(chatId, firstName) {
       reply_markup: {
         inline_keyboard: [
           ...recentBtns,
-          [{ text: '📋 Все заявки', callback_data: 'my_orders' }],
+          [
+            { text: '📋 Мои заявки', callback_data: 'my_orders' },
+            { text: '📝 Новая заявка', callback_data: 'bk_start' },
+          ],
           [
             { text: '🏆 Достижения', callback_data: 'my_achievements' },
             { text: '💫 Баллы', callback_data: 'loyalty' },
           ],
           ...profileReferralBtn,
           ...profileEditButtons,
-          [{ text: '📝 Новая заявка', callback_data: 'bk_start' }],
-          [{ text: '← Назад', callback_data: 'main_menu' }],
+          [{ text: '🏠 Главное меню', callback_data: 'main_menu' }],
         ],
       },
     });
@@ -13288,8 +13297,9 @@ async function startEditProfile(chatId) {
       parse_mode: 'MarkdownV2',
       reply_markup: {
         inline_keyboard: [
-          [{ text: "👤 Змінити ім'я", callback_data: 'profile_edit_name' }],
-          [{ text: '📞 Изменить телефон', callback_data: 'profile_edit_phone' }],
+          [{ text: '✏️ Изменить имя', callback_data: 'profile_edit_name' }],
+          [{ text: '📱 Изменить телефон', callback_data: 'profile_edit_phone' }],
+          [{ text: '📧 Изменить email', callback_data: 'profile_edit_email' }],
           [{ text: '← Профиль', callback_data: 'profile' }],
         ],
       },
