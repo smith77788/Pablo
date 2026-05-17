@@ -105,7 +105,14 @@ function toast(msg, type = 'info') {
   const t = document.createElement('div');
   t.className = `toast ${type}`;
   const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : type === 'warning' ? '⚠' : 'ℹ';
-  t.innerHTML = `<span style="font-weight:700">${icon}</span> <span>${msg}</span>`;
+  const iconSpan = document.createElement('span');
+  iconSpan.style.fontWeight = '700';
+  iconSpan.textContent = icon;
+  const msgSpan = document.createElement('span');
+  msgSpan.textContent = msg;
+  t.appendChild(iconSpan);
+  t.appendChild(document.createTextNode(' '));
+  t.appendChild(msgSpan);
   container.appendChild(t);
   setTimeout(() => {
     t.style.transition = 'opacity 0.4s';
@@ -676,7 +683,13 @@ const api = apiFetch;
     const t = document.createElement('div');
     t.className = `toast ${type}`;
     t.style.setProperty('--toast-duration', duration + 'ms');
-    t.innerHTML = `<span class="toast-icon">${iconMap[type] || 'ℹ'}</span><span>${msg}</span>`;
+    const iconSpanV2 = document.createElement('span');
+    iconSpanV2.className = 'toast-icon';
+    iconSpanV2.textContent = iconMap[type] || 'ℹ';
+    const msgSpanV2 = document.createElement('span');
+    msgSpanV2.textContent = msg;
+    t.appendChild(iconSpanV2);
+    t.appendChild(msgSpanV2);
     container.appendChild(t);
 
     function hide() {
