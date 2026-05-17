@@ -146,15 +146,46 @@
         padding: 64px 0 100px;
       }
 
+      /* ─── CATEGORY FILTERS ─────────────────────────────────── */
+      .faq-categories {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: 800px;
+        margin: 0 auto 32px;
+      }
+      .faq-cat-btn {
+        padding: 7px 18px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.78rem;
+        letter-spacing: 1px;
+        cursor: pointer;
+        border-radius: 2px;
+        transition: all 0.22s;
+      }
+      .faq-cat-btn:hover {
+        border-color: rgba(201, 169, 110, 0.5);
+        color: var(--gold);
+      }
+      .faq-cat-btn.active {
+        background: rgba(201, 169, 110, 0.1);
+        border-color: var(--gold);
+        color: var(--gold);
+        font-weight: 600;
+      }
+
       /* ─── SEARCH BAR ───────────────────────────────────────── */
       .faq-search-wrap {
         max-width: 560px;
-        margin: 0 auto 48px;
+        margin: 0 auto 32px;
         position: relative;
       }
       .faq-search {
         width: 100%;
-        padding: 14px 20px 14px 48px;
+        padding: 14px 44px 14px 48px;
         background: var(--bg2);
         border: 1px solid var(--border);
         color: var(--text);
@@ -178,6 +209,24 @@
         color: var(--text-dim);
         font-size: 1rem;
         pointer-events: none;
+      }
+      .faq-search-clear {
+        position: absolute;
+        right: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 1.1rem;
+        line-height: 1;
+        padding: 4px;
+        display: none;
+        transition: color 0.2s;
+      }
+      .faq-search-clear:hover {
+        color: var(--gold);
       }
 
       /* ─── ACCORDION ────────────────────────────────────────── */
@@ -527,6 +576,11 @@
     <!-- MAIN FAQ CONTENT -->
     <section class="faq-main" aria-label="Часто задаваемые вопросы">
       <div class="container">
+        <!-- Category filters -->
+        <div class="faq-categories" id="faqCategories" aria-label="Фильтр по категориям">
+          <button class="faq-cat-btn active" data-cat="" onclick="setCatFilter(this, '')">Все вопросы</button>
+        </div>
+
         <!-- Search -->
         <div class="faq-search-wrap" role="search">
           <span class="faq-search-icon" aria-hidden="true">🔍</span>
@@ -537,8 +591,11 @@
             placeholder="Поиск по вопросам..."
             aria-label="Поиск по FAQ"
             autocomplete="off"
-            oninput="filterFaq(this.value)"
+            oninput="onFaqSearchInput(this.value)"
           />
+          <button class="faq-search-clear" id="faqSearchClear" aria-label="Очистить поиск" onclick="clearFaqSearch()">
+            ✕
+          </button>
         </div>
 
         <!-- Accordion container -->
@@ -691,6 +748,7 @@
     <script>
       // ─── FAQ state ─────────────────────────────────────────────────────────────
       let faqItems = [];
+      let _activeCat = '';
 
       // ─── Escape HTML ───────────────────────────────────────────────────────────
       function escHtml(s) {
@@ -783,17 +841,70 @@
           .join('');
       }
 
+      // ─── Category filter ───────────────────────────────────────────────────────
+      function buildCategoryButtons(items) {
+        var cats = {};
+        items.forEach(function (item) {
+          if (item.category) cats[item.category] = (cats[item.category] || 0) + 1;
+        });
+        var keys = Object.keys(cats);
+        if (keys.length < 2) return; // no point showing 0 or 1 category
+        var wrap = document.getElementById('faqCategories');
+        if (!wrap) return;
+        keys.forEach(function (cat) {
+          var btn = document.createElement('button');
+          btn.className = 'faq-cat-btn';
+          btn.dataset.cat = cat;
+          btn.textContent = cat + ' (' + cats[cat] + ')';
+          btn.setAttribute('onclick', "setCatFilter(this, '" + cat.replace(/'/g, "\\'") + "')");
+          wrap.appendChild(btn);
+        });
+      }
+
+      function setCatFilter(btn, cat) {
+        _activeCat = cat;
+        document.querySelectorAll('.faq-cat-btn').forEach(function (b) {
+          b.classList.toggle('active', b.dataset.cat === cat);
+        });
+        var query = document.getElementById('faqSearch').value;
+        filterFaq(query);
+      }
+
+      // ─── Search input handler ──────────────────────────────────────────────────
+      function onFaqSearchInput(value) {
+        var clearBtn = document.getElementById('faqSearchClear');
+        if (clearBtn) clearBtn.style.display = value.length ? 'block' : 'none';
+        filterFaq(value);
+      }
+
+      function clearFaqSearch() {
+        var input = document.getElementById('faqSearch');
+        var clearBtn = document.getElementById('faqSearchClear');
+        if (input) {
+          input.value = '';
+          input.focus();
+        }
+        if (clearBtn) clearBtn.style.display = 'none';
+        filterFaq('');
+      }
+
       // ─── Filter FAQ by search query ────────────────────────────────────────────
       function filterFaq(query) {
         var q = query.trim().toLowerCase();
         var accordion = document.getElementById('faqAccordion');
         var emptyEl = document.getElementById('faqEmpty');
 
-        var filtered = q
+        var pool = _activeCat
           ? faqItems.filter(function (item) {
-              return item.q.toLowerCase().indexOf(q) !== -1 || item.a.toLowerCase().indexOf(q) !== -1;
+              return item.category === _activeCat;
             })
           : faqItems;
+
+        var filtered = q
+          ? pool.filter(function (item) {
+              return item.q.toLowerCase().indexOf(q) !== -1 || item.a.toLowerCase().indexOf(q) !== -1;
+            })
+          : pool;
 
         accordion.innerHTML = buildAccordion(filtered, q ? query.trim() : '');
 
@@ -839,6 +950,9 @@
 
             // Inject Schema.org FAQPage
             injectFaqSchema(faqItems);
+
+            // Build category filter buttons
+            buildCategoryButtons(faqItems);
 
             // Render accordion
             accordion.innerHTML = buildAccordion(faqItems, '');
