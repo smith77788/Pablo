@@ -271,7 +271,7 @@ function setSessionReminder(chatId) {
 }
 
 // ─── Booking progress helper ──────────────────────────────────────────────────
-function bookingProgress(step, total = 4) {
+function _bookingProgress(step, total = 4) {
   const filled = '●'.repeat(step);
   const empty = '○'.repeat(total - step);
   return `[${filled}${empty}] Шаг ${step}/${total}`;
@@ -1731,7 +1731,7 @@ async function bkStep3Name(chatId, data) {
   resetSessionTimer(chatId);
   return safeSend(
     chatId,
-    stepHeader(3, STRINGS.bookingStepContacts) + `_${esc(bookingProgress(1, 4))}_\n\n${STRINGS.bookingAskName}`,
+    stepHeader(3, STRINGS.bookingStepContacts) + `_Контакт 1/4 — Имя_\n\n${STRINGS.bookingAskName}`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: {
@@ -1750,7 +1750,7 @@ async function bkStep3Phone(chatId, data) {
   resetSessionTimer(chatId);
   return safeSend(
     chatId,
-    stepHeader(3, STRINGS.bookingStepContacts) + `_${esc(bookingProgress(2, 4))}_\n\n${STRINGS.bookingAskPhone}`,
+    stepHeader(3, STRINGS.bookingStepContacts) + `_Контакт 2/4 — Телефон_\n\n${STRINGS.bookingAskPhone}`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: {
@@ -1776,7 +1776,7 @@ async function bkStep3Email(chatId, data) {
   const hint = requireEmail === '1' ? '\n_Email обязателен для подтверждения заявки\\._' : '';
   return safeSend(
     chatId,
-    stepHeader(3, STRINGS.bookingStepContacts) + `_${esc(bookingProgress(3, 4))}_\n\n${STRINGS.bookingAskEmail}${hint}`,
+    stepHeader(3, STRINGS.bookingStepContacts) + `_Контакт 3/4 — Email_\n\n${STRINGS.bookingAskEmail}${hint}`,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: { inline_keyboard: buttons },
@@ -1791,10 +1791,7 @@ async function bkStep3Telegram(chatId, data, tgUsername) {
   const hint = tgUsername ? `_Ваш username в Telegram: @${esc(tgUsername)}_\n\n` : '';
   return safeSend(
     chatId,
-    stepHeader(3, STRINGS.bookingStepContacts) +
-      `_${esc(bookingProgress(4, 4))}_\n\n` +
-      hint +
-      STRINGS.bookingAskTelegram,
+    stepHeader(3, STRINGS.bookingStepContacts) + `_Контакт 4/4 — Telegram_\n\n` + hint + STRINGS.bookingAskTelegram,
     {
       parse_mode: 'MarkdownV2',
       reply_markup: {
