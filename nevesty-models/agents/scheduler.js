@@ -662,6 +662,91 @@ async function taskRemindStaleOrders() {
   }
 }
 
+// Таск 8 (БЛОК 33): Понедельник 09:00 — Еженедельный отчёт по заявкам
+async function taskWeeklyReport() {
+  try {
+    const budgetExpr = `CAST(REPLACE(REPLACE(REPLACE(REPLACE(budget,'₽',''),'руб',''),' ',''),',','.') AS REAL)`;
+    const [orders, revenue, newClients, topModel, done, canc] = await Promise.all([
+      dbGet("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-7 days')"),
+      dbGet(
+        `SELECT SUM(${budgetExpr}) as s FROM orders WHERE status='completed' AND created_at >= datetime('now','-7 days') AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`
+      ),
+      dbGet(
+        "SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE created_at >= datetime('now','-7 days') AND client_chat_id IS NOT NULL AND CAST(client_chat_id AS INTEGER) > 0"
+      ),
+      dbGet(
+        "SELECT m.name, COUNT(*) as cnt FROM orders o JOIN models m ON m.id=o.model_id WHERE o.model_id IS NOT NULL AND o.created_at >= datetime('now','-7 days') GROUP BY o.model_id ORDER BY cnt DESC LIMIT 1"
+      ),
+      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='completed' AND created_at >= datetime('now','-7 days')"),
+      dbGet("SELECT COUNT(*) as n FROM orders WHERE status='cancelled' AND created_at >= datetime('now','-7 days')"),
+    ]);
+
+    const revenueVal = Math.round(revenue?.s || 0);
+    const now2 = new Date();
+    const weekLabel = now2.toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    let msg = `📊 Еженедельный отчёт (по ${weekLabel})\n\n`;
+    msg += `Новых заявок: ${orders?.n || 0}\n`;
+    msg += `Завершено: ${done?.n || 0}\n`;
+    msg += `Отменено: ${canc?.n || 0}\n`;
+    msg += `Выручка: ${revenueVal.toLocaleString('ru')} руб.\n`;
+    msg += `Новых клиентов: ${newClients?.n || 0}`;
+    if (topModel?.name) msg += `\nТоп модель: ${topModel.name} (${topModel.cnt} заявок)`;
+
+    notify(msg);
+
+    // Also send rich message via bot to admins (with buttons)
+    const bot = getBot();
+    if (bot) {
+      const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      // Also check DB admins
+      const dbAdmins = await dbAll(
+        "SELECT telegram_id FROM admins WHERE telegram_id IS NOT NULL AND telegram_id != ''"
+      ).catch(() => []);
+      const allAdmins = [...new Set([...adminIds, ...dbAdmins.map(r => r.telegram_id)])];
+
+      function esc(s) {
+        return String(s || '').replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
+      }
+
+      let text = `📊 *Еженедельный отчёт* \\(по ${esc(weekLabel)}\\)\n\n`;
+      text += `📋 Новых заявок: *${esc(String(orders?.n || 0))}*\n`;
+      text += `✅ Завершено: *${esc(String(done?.n || 0))}*\n`;
+      text += `❌ Отменено: *${esc(String(canc?.n || 0))}*\n`;
+      text += `💰 Выручка: *${esc(revenueVal.toLocaleString('ru'))} ₽*\n`;
+      text += `👥 Новых клиентов: *${esc(String(newClients?.n || 0))}*`;
+      if (topModel?.name) {
+        text += `\n\n🏆 Топ модель: *${esc(topModel.name)}* \\(${esc(String(topModel.cnt))} заявок\\)`;
+      }
+      text += `\n\n_Автоматический отчёт каждый понедельник в 09:00_`;
+
+      for (const adminId of allAdmins) {
+        bot
+          .sendMessage(adminId, text, {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '📊 Статистика', callback_data: 'adm_stats' },
+                  { text: '📅 По периоду', callback_data: 'adm_report_period' },
+                ],
+                [{ text: '📥 Выгрузить CSV', callback_data: 'adm_report_week_csv' }],
+              ],
+            },
+          })
+          .catch(() => {});
+      }
+    }
+
+    console.log('[Scheduler] Weekly report sent');
+  } catch (e) {
+    console.error('[Scheduler] weeklyReport error:', e.message);
+  }
+}
+
 // ─── Планировщик дополнительных задач (тик каждые 60 сек) ───────────────────
 
 // Каждые 6 часов — Factory health (с момента старта)
@@ -678,6 +763,12 @@ setInterval(() => {
   if (shouldRun('vacuum', h, m, dow, 3, 0, 0)) {
     console.log('[Scheduler] Running weekly VACUUM...');
     taskWeeklyVacuum();
+  }
+
+  // Понедельник 09:00 — Еженедельный отчёт (БЛОК 33)
+  if (shouldRun('weeklyreport', h, m, dow, 9, 0, 1)) {
+    console.log('[Scheduler] Sending weekly report...');
+    taskWeeklyReport();
   }
 
   // Понедельник 10:00 — Re-engagement

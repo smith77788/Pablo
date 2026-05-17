@@ -2644,6 +2644,7 @@ async function showAdminModel(chatId, modelId) {
           { text: '📊 Статистика модели', callback_data: `adm_model_stats_${m.id}` },
           { text: '📅 Расписание', callback_data: `adm_model_cal_${m.id}` },
         ],
+        [{ text: '📋 Отчёт по модели', callback_data: `adm_model_report_${m.id}` }],
         [linkBtn, archiveBtn],
         [{ text: '← К моделям', callback_data: 'adm_models_p_0_name_0' }],
       ],

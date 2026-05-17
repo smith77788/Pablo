@@ -410,6 +410,10 @@ async function showAdminStats(chatId, period = '30') {
             { text: '📥 Новые заявки', callback_data: 'adm_ord_filter_new' },
             { text: '🏁 Завершённые', callback_data: 'adm_ord_filter_completed' },
           ],
+          [
+            { text: '📅 Отчёт по периоду', callback_data: 'adm_report_period' },
+            { text: '📡 По источникам', callback_data: 'adm_report_sources' },
+          ],
           [{ text: '📊 Аналитика (сайт)', url: 'https://nevesty-models.ru/admin/analytics.html' }],
         ],
       },
