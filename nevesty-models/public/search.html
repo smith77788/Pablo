@@ -889,10 +889,13 @@
       (function () {
         const CATEGORY_LABELS = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
         const PAGE_SIZE = 12;
+        const RECENT_KEY = 'nm_recent_searches';
+        const MAX_RECENT = 6;
         let _currentPage = 0;
         let _totalResults = 0;
         let _currentSort = 'default';
         let _lastModels = [];
+        let _liveCounterTimer = null;
 
         // ── Filter state ──────────────────────────────────────────────────────────
         function getFilterState() {
@@ -909,6 +912,11 @@
           };
         }
 
+        function isDefaultFilters() {
+          const f = getFilterState();
+          return !f.min_height && !f.max_height && !f.min_age && !f.max_age && !f.category && !f.city;
+        }
+
         // ── Toggle button groups ──────────────────────────────────────────────────
         ['heightFilters', 'ageFilters', 'categoryFilters'].forEach(id => {
           const group = document.getElementById(id);
@@ -917,9 +925,234 @@
             btn.addEventListener('click', () => {
               group.querySelectorAll('.search-btn-opt').forEach(b => b.classList.remove('active'));
               btn.classList.add('active');
+              scheduleLiveCount();
+              updatePopularTagsVisibility();
             });
           });
         });
+
+        const citySelectEl = document.getElementById('citySelect');
+        if (citySelectEl) {
+          citySelectEl.addEventListener('change', () => {
+            scheduleLiveCount();
+            updatePopularTagsVisibility();
+          });
+        }
+
+        // ── Live counter ──────────────────────────────────────────────────────────
+        function scheduleLiveCount() {
+          clearTimeout(_liveCounterTimer);
+          _liveCounterTimer = setTimeout(fetchLiveCount, 350);
+        }
+
+        async function fetchLiveCount() {
+          const counterEl = document.getElementById('liveCounter');
+          const counterText = document.getElementById('liveCounterText');
+          if (!counterEl || !counterText) return;
+          if (isDefaultFilters()) {
+            counterEl.style.display = 'none';
+            return;
+          }
+          counterEl.style.display = 'inline-flex';
+          counterText.textContent = 'считаю...';
+          try {
+            const f = getFilterState();
+            const params = new URLSearchParams();
+            if (f.min_height) params.set('min_height', f.min_height);
+            if (f.max_height) params.set('max_height', f.max_height);
+            if (f.min_age) params.set('min_age', f.min_age);
+            if (f.max_age) params.set('max_age', f.max_age);
+            if (f.category) params.set('category', f.category);
+            if (f.city) params.set('city', f.city);
+            params.set('limit', 1);
+            const resp = await fetch('/api/models/search?' + params);
+            const data = await resp.json();
+            const n = data.total || 0;
+            counterText.textContent = n + ' ' + pluralModels(n) + ' найдено';
+          } catch (e) {
+            counterEl.style.display = 'none';
+          }
+        }
+
+        // ── Popular tags visibility ───────────────────────────────────────────────
+        function updatePopularTagsVisibility() {
+          const sec = document.getElementById('popularTagsSection');
+          if (sec) sec.style.display = isDefaultFilters() ? 'block' : 'none';
+        }
+
+        window.applyPopularTag = function (category, minHeight, maxHeight) {
+          const catGroup = document.getElementById('categoryFilters');
+          if (catGroup) {
+            catGroup.querySelectorAll('.search-btn-opt').forEach(b => {
+              b.classList.toggle('active', b.dataset.value === category);
+            });
+          }
+          if (minHeight) {
+            const hGroup = document.getElementById('heightFilters');
+            if (hGroup) {
+              hGroup.querySelectorAll('.search-btn-opt').forEach(b => {
+                b.classList.toggle('active', b.dataset.min === minHeight && b.dataset.max === (maxHeight || ''));
+              });
+            }
+          }
+          scheduleLiveCount();
+          updatePopularTagsVisibility();
+          doSearch(0);
+        };
+
+        window.applyPopularCity = function (city) {
+          const sel = document.getElementById('citySelect');
+          if (sel) {
+            for (let i = 0; i < sel.options.length; i++) {
+              if (sel.options[i].value === city) {
+                sel.value = city;
+                break;
+              }
+            }
+          }
+          scheduleLiveCount();
+          updatePopularTagsVisibility();
+          doSearch(0);
+        };
+
+        window.applyPopularAge = function (minAge, maxAge) {
+          const aGroup = document.getElementById('ageFilters');
+          if (aGroup) {
+            aGroup.querySelectorAll('.search-btn-opt').forEach(b => {
+              b.classList.toggle('active', b.dataset.min === minAge && b.dataset.max === maxAge);
+            });
+          }
+          scheduleLiveCount();
+          updatePopularTagsVisibility();
+          doSearch(0);
+        };
+
+        // ── Recent searches ───────────────────────────────────────────────────────
+        function getRecentSearches() {
+          try {
+            return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+          } catch (e) {
+            return [];
+          }
+        }
+
+        function saveRecentSearch(label) {
+          if (!label || label.length < 2) return;
+          try {
+            let recents = getRecentSearches().filter(r => r !== label);
+            recents.unshift(label);
+            recents = recents.slice(0, MAX_RECENT);
+            localStorage.setItem(RECENT_KEY, JSON.stringify(recents));
+          } catch (e) {}
+        }
+
+        function buildRecentLabel() {
+          const f = getFilterState();
+          const parts = [];
+          if (f.category) parts.push(CATEGORY_LABELS[f.category] || f.category);
+          if (f.min_height || f.max_height) {
+            parts.push(
+              f.min_height && f.max_height
+                ? f.min_height + '–' + f.max_height + ' см'
+                : f.min_height
+                  ? 'от ' + f.min_height + ' см'
+                  : 'до ' + f.max_height + ' см'
+            );
+          }
+          if (f.min_age || f.max_age) {
+            parts.push(
+              f.min_age && f.max_age
+                ? f.min_age + '–' + f.max_age + ' лет'
+                : f.min_age
+                  ? 'от ' + f.min_age + ' лет'
+                  : 'до ' + f.max_age + ' лет'
+            );
+          }
+          if (f.city) parts.push(f.city);
+          return parts.join(', ');
+        }
+
+        function renderRecentSearches() {
+          const block = document.getElementById('recentSearchesBlock');
+          const wrap = document.getElementById('recentTagsWrap');
+          if (!block || !wrap) return;
+          const recents = getRecentSearches();
+          if (!recents.length) {
+            block.style.display = 'none';
+            return;
+          }
+          block.style.display = 'block';
+          wrap.innerHTML = recents
+            .map(
+              r =>
+                '<button class="recent-tag" onclick="applyRecentSearch(' +
+                JSON.stringify(r) +
+                ')" title="' +
+                escHtml(r) +
+                '">' +
+                '<span class="recent-tag-icon">🕓</span>' +
+                escHtml(r) +
+                '</button>'
+            )
+            .join('');
+        }
+
+        window.applyRecentSearch = function (label) {
+          const parts = label.split(', ');
+          ['heightFilters', 'ageFilters', 'categoryFilters'].forEach(id => {
+            const g = document.getElementById(id);
+            if (g) g.querySelectorAll('.search-btn-opt').forEach((b, i) => b.classList.toggle('active', i === 0));
+          });
+          const cityEl = document.getElementById('citySelect');
+          if (cityEl) cityEl.value = '';
+
+          parts.forEach(part => {
+            const catMatch = Object.entries(CATEGORY_LABELS).find(([k, v]) => v === part || k === part.toLowerCase());
+            if (catMatch) {
+              const g = document.getElementById('categoryFilters');
+              if (g)
+                g.querySelectorAll('.search-btn-opt').forEach(b =>
+                  b.classList.toggle('active', b.dataset.value === catMatch[0])
+                );
+              return;
+            }
+            const hM = part.match(/^(\d+)[–-](\d+)\s*см$/);
+            if (hM) {
+              const g = document.getElementById('heightFilters');
+              if (g)
+                g.querySelectorAll('.search-btn-opt').forEach(b =>
+                  b.classList.toggle('active', b.dataset.min === hM[1] && b.dataset.max === hM[2])
+                );
+              return;
+            }
+            const aM = part.match(/^(\d+)[–-](\d+)\s*лет$/);
+            if (aM) {
+              const g = document.getElementById('ageFilters');
+              if (g)
+                g.querySelectorAll('.search-btn-opt').forEach(b =>
+                  b.classList.toggle('active', b.dataset.min === aM[1] && b.dataset.max === aM[2])
+                );
+              return;
+            }
+            const sel = document.getElementById('citySelect');
+            if (sel) {
+              for (let i = 0; i < sel.options.length; i++) {
+                if (sel.options[i].value === part) {
+                  sel.value = part;
+                  break;
+                }
+              }
+            }
+          });
+          doSearch(0);
+        };
+
+        window.clearRecentSearches = function () {
+          try {
+            localStorage.removeItem(RECENT_KEY);
+          } catch (e) {}
+          renderRecentSearches();
+        };
 
         // ── Load cities ───────────────────────────────────────────────────────────
         async function loadCities() {
@@ -952,16 +1185,23 @@
           params.set('page', _currentPage);
           params.set('limit', PAGE_SIZE);
 
+          if (!isDefaultFilters()) {
+            const label = buildRecentLabel();
+            if (label) {
+              saveRecentSearch(label);
+              renderRecentSearches();
+            }
+          }
+
           const btn = document.getElementById('searchBtn');
           const skeleton = document.getElementById('searchSkeleton');
           if (btn) btn.textContent = 'Поиск...';
-          // Show skeleton, hide results
           if (skeleton) skeleton.style.display = 'block';
           document.getElementById('resultsSection').style.display = 'none';
           document.getElementById('noResults').style.display = 'none';
 
           try {
-            const resp = await fetch(`/api/models/search?${params}`);
+            const resp = await fetch('/api/models/search?' + params);
             const data = await resp.json();
             _totalResults = data.total || 0;
             _lastModels = data.models || [];
@@ -1015,38 +1255,46 @@
           noRes.style.display = 'none';
           resSection.style.display = 'block';
 
-          countEl.textContent = `Найдено: ${total} ${pluralModels(total)}`;
+          countEl.textContent = 'Найдено: ' + total + ' ' + pluralModels(total);
 
-          // Collect active text-like filters for highlight
           const cityVal = (document.getElementById('citySelect')?.value || '').toLowerCase();
 
           grid.innerHTML = models
-            .map(
-              m => `
-        <a href="/model.html?id=${m.id}" class="model-card" role="listitem" style="text-decoration:none;display:block">
-          <div class="model-card-img">
-            ${
-              m.photo_main
-                ? `<img src="${m.photo_main}" alt="${escHtml(m.name)}" loading="lazy">`
-                : `<div class="model-card-placeholder">✦</div>`
-            }
-            <div class="model-card-overlay">
-              <span style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold)">Подробнее</span>
-            </div>
-          </div>
-          <div class="model-card-info">
-            <div class="model-card-name">${escHtml(m.name)}</div>
-            <div class="model-card-meta">
-              ${[m.age ? m.age + ' лет' : '', m.height ? m.height + ' см' : '', cityVal && m.city ? hlText(m.city, cityVal) : m.city || ''].filter(Boolean).join(' · ')}
-            </div>
-            <div class="model-card-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-              ${m.category ? `<span class="model-card-tag">${CATEGORY_LABELS[m.category] || m.category}</span>` : ''}
-              <span style="font-size:0.7rem;padding:2px 8px;border-radius:4px;${m.available ? 'background:rgba(76,175,80,0.12);color:#4caf50' : 'background:rgba(244,67,54,0.12);color:#f44336'}">${m.available ? 'Свободна' : 'Занята'}</span>
-            </div>
-          </div>
-        </a>
-      `
-            )
+            .map(m => {
+              const cityHtml = cityVal && m.city ? hlText(m.city, cityVal) : m.city ? escHtml(m.city) : '';
+              return (
+                '<a href="/model.html?id=' +
+                m.id +
+                '" class="model-card" role="listitem" style="text-decoration:none;display:block">' +
+                '<div class="model-card-img">' +
+                (m.photo_main
+                  ? '<img src="' + m.photo_main + '" alt="' + escHtml(m.name) + '" loading="lazy">'
+                  : '<div class="model-card-placeholder">✦</div>') +
+                '<div class="model-card-overlay"><span style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold)">Подробнее</span></div>' +
+                '</div>' +
+                '<div class="model-card-info">' +
+                '<div class="model-card-name">' +
+                escHtml(m.name) +
+                '</div>' +
+                '<div class="model-card-meta">' +
+                [m.age ? m.age + ' лет' : '', m.height ? m.height + ' см' : '', cityHtml].filter(Boolean).join(' · ') +
+                '</div>' +
+                '<div class="model-card-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' +
+                (m.category
+                  ? '<span class="model-card-tag">' + (CATEGORY_LABELS[m.category] || m.category) + '</span>'
+                  : '') +
+                '<span style="font-size:0.7rem;padding:2px 8px;border-radius:4px;' +
+                (m.available
+                  ? 'background:rgba(76,175,80,0.12);color:#4caf50'
+                  : 'background:rgba(244,67,54,0.12);color:#f44336') +
+                '">' +
+                (m.available ? 'Свободна' : 'Занята') +
+                '</span>' +
+                '</div>' +
+                '</div>' +
+                '</a>'
+              );
+            })
             .join('');
 
           // Pagination
@@ -1056,10 +1304,11 @@
             return;
           }
           let pages = '';
-          if (page > 0) pages += `<button class="page-btn" onclick="doSearch(${page - 1})">← Назад</button>`;
-          pages += `<span style="color:var(--text-dim);font-size:0.8rem">Стр. ${page + 1} из ${totalPages}</span>`;
+          if (page > 0) pages += '<button class="page-btn" onclick="doSearch(' + (page - 1) + ')">← Назад</button>';
+          pages +=
+            '<span style="color:var(--text-dim);font-size:0.8rem">Стр. ' + (page + 1) + ' из ' + totalPages + '</span>';
           if (page < totalPages - 1)
-            pages += `<button class="page-btn" onclick="doSearch(${page + 1})">Вперёд →</button>`;
+            pages += '<button class="page-btn" onclick="doSearch(' + (page + 1) + ')">Вперёд →</button>';
           pagination.innerHTML = pages;
         }
 
@@ -1076,6 +1325,9 @@
           if (city) city.value = '';
           document.getElementById('resultsSection').style.display = 'none';
           document.getElementById('noResults').style.display = 'none';
+          const counterEl = document.getElementById('liveCounter');
+          if (counterEl) counterEl.style.display = 'none';
+          updatePopularTagsVisibility();
         };
 
         // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1103,6 +1355,8 @@
         // ── Init ──────────────────────────────────────────────────────────────────
         document.addEventListener('DOMContentLoaded', function () {
           loadCities();
+          renderRecentSearches();
+          updatePopularTagsVisibility();
           // Load WhatsApp
           fetch('/api/settings/public')
             .then(r => r.json())
@@ -1113,7 +1367,7 @@
                 const floatEl = document.getElementById('float-whatsapp');
                 const floatLink = document.getElementById('float-wa-link');
                 if (floatEl && floatLink) {
-                  floatLink.href = `https://wa.me/${waNum}`;
+                  floatLink.href = 'https://wa.me/' + waNum;
                   floatEl.style.display = 'block';
                 }
               }
