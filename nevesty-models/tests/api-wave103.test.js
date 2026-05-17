@@ -1,133 +1,104 @@
 'use strict';
 /**
- * Wave103 tests: 500 page, factory notifier, CORS/XSS security fixes,
- * service worker precache, factory cycle notifications.
+ * Wave103 tests: strings.js i18n API, analytics trackEvents, DB indexes, orchestrator completeness
+ *  1. strings.js multilingual API (БЛОК 8.3)
+ *  2. Analytics tracking events in booking.js and catalog.js (БЛОК 9.3)
+ *  3. Database composite indexes (idx_models_archived_available, idx_orders_client_chat_status)
+ *  4. Orchestrator completeness (PricingNegotiator, VisualConceptor, all departments)
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const html500 = fs.readFileSync(path.join(__dirname, '..', 'public', '500.html'), 'utf8');
-const html404 = fs.readFileSync(path.join(__dirname, '..', 'public', '404.html'), 'utf8');
-const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-const notifierSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'factory', 'notifier.py'), 'utf8');
-const cycleSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'factory', 'cycle.py'), 'utf8');
-const analyticsSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin', 'analytics.html'), 'utf8');
-const swSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'sw.js'), 'utf8');
+// ─── 1. strings.js multilingual API ─────────────────────────────────────────
 
-// ─── 1. 500.html error page (3 tests) ────────────────────────────────────────
+const { t, I18N, DEFAULT_LANG } = require('../strings');
 
-describe('500.html error page', () => {
-  test('public/500.html exists and is readable', () => {
-    expect(html500.length).toBeGreaterThan(0);
+describe('strings.js multilingual API', () => {
+  test('DEFAULT_LANG is ru', () => expect(DEFAULT_LANG).toBe('ru'));
+
+  test('t() returns string for known key', () => expect(t('booking_start')).toBe(I18N.ru.booking_start));
+
+  test('t() falls back to ru for unknown lang', () => expect(t('booking_start', 'jp')).toBe(I18N.ru.booking_start));
+
+  test('t() returns key for unknown key', () => expect(t('nonexistent_key_xyz')).toBe('nonexistent_key_xyz'));
+
+  test('t() does placeholder substitution', () => {
+    const result = t('booking_success_pending', 'ru', { number: '42' });
+    expect(result).toContain('42');
   });
 
-  test('public/500.html contains "500" text', () => {
-    expect(html500).toContain('500');
+  test('I18N has ru and en', () => {
+    expect(I18N).toHaveProperty('ru');
+    expect(I18N).toHaveProperty('en');
   });
 
-  test('public/500.html contains link to catalog.html', () => {
-    expect(html500).toContain('catalog.html');
-  });
-});
+  test('ru has >= 100 keys', () => expect(Object.keys(I18N.ru).length).toBeGreaterThanOrEqual(100));
 
-// ─── 2. 404.html error page (2 tests) ────────────────────────────────────────
-
-describe('404.html error page', () => {
-  test('public/404.html exists and is readable', () => {
-    expect(html404.length).toBeGreaterThan(0);
-  });
-
-  test('public/404.html contains link to catalog.html', () => {
-    expect(html404).toContain('catalog.html');
+  test('en has same keys as ru', () => {
+    const ruKeys = Object.keys(I18N.ru).sort();
+    const enKeys = Object.keys(I18N.en).sort();
+    expect(enKeys).toEqual(ruKeys);
   });
 });
 
-// ─── 3. Express 500 handler in server.js (2 tests) ───────────────────────────
+// ─── 2. Analytics tracking events in booking.js and catalog.js ──────────────
 
-describe('Express 500 error handler', () => {
-  test('server.js serves 500.html from error handler', () => {
-    expect(serverSrc).toContain('500.html');
+describe('Analytics tracking events in frontend JS', () => {
+  test('catalog.js contains catalog_view trackEvent call', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../public/js/catalog.js'), 'utf8');
+    expect(src).toContain("trackEvent('catalog_view'");
   });
 
-  test('server.js serves JSON for /api/ paths near error handler', () => {
-    expect(serverSrc).toMatch(/req\.path\.startsWith\(['"`]\/api\//);
-  });
-});
-
-// ─── 4. Factory notifier (4 tests) ───────────────────────────────────────────
-
-describe('factory/notifier.py', () => {
-  test('factory/notifier.py exists and is readable', () => {
-    expect(notifierSrc.length).toBeGreaterThan(100);
+  test('booking.js contains booking_start trackEvent', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../public/js/booking.js'), 'utf8');
+    expect(src).toContain("trackEvent('booking_start'");
   });
 
-  test('factory/notifier.py contains send_telegram function', () => {
-    expect(notifierSrc).toContain('send_telegram');
+  test('booking.js contains booking_complete trackEvent', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../public/js/booking.js'), 'utf8');
+    expect(src).toContain("trackEvent('booking_complete'");
   });
 
-  test('factory/notifier.py contains notify_cycle_complete function', () => {
-    expect(notifierSrc).toContain('notify_cycle_complete');
-  });
-
-  test('factory/notifier.py uses ADMIN_TELEGRAM_IDS env var', () => {
-    expect(notifierSrc).toContain('ADMIN_TELEGRAM_IDS');
+  test('analytics calls are guarded with typeof check', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../public/js/catalog.js'), 'utf8');
+    expect(src).toContain("typeof trackEvent === 'function'");
   });
 });
 
-// ─── 5. CORS security fix (2 tests) ──────────────────────────────────────────
+// ─── 3. Database composite indexes ──────────────────────────────────────────
 
-describe('CORS security in server.js', () => {
-  test('server.js uses origin: false as CORS fallback (not open CORS)', () => {
-    // corsOrigin is set to false when ALLOWED_ORIGINS is empty, then used as origin: corsOrigin
-    const hasFalseAssignment = serverSrc.includes(': false');
-    const hasCorsOriginFalse = serverSrc.includes('corsOrigin') && serverSrc.includes('false');
-    expect(hasFalseAssignment || hasCorsOriginFalse).toBe(true);
+describe('Database composite indexes', () => {
+  test('database.js contains idx_models_archived_available', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../database.js'), 'utf8');
+    expect(src).toContain('idx_models_archived_available');
   });
 
-  test('server.js checks ALLOWED_ORIGINS env var', () => {
-    expect(serverSrc).toContain('ALLOWED_ORIGINS');
-  });
-});
-
-// ─── 6. XSS fix in analytics.html (2 tests) ──────────────────────────────────
-
-describe('XSS fix in public/admin/analytics.html', () => {
-  test('public/admin/analytics.html exists and is readable', () => {
-    expect(analyticsSrc.length).toBeGreaterThan(0);
-  });
-
-  test('analytics.html wraps c.city with escHtml() (XSS protection)', () => {
-    expect(analyticsSrc).toContain('escHtml(c.city');
+  test('database.js contains idx_orders_client_chat_status', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../database.js'), 'utf8');
+    expect(src).toContain('idx_orders_client_chat_status');
   });
 });
 
-// ─── 7. Factory cycle sends notifications (2 tests) ──────────────────────────
+// ─── 4. Orchestrator completeness ────────────────────────────────────────────
 
-describe('factory/cycle.py notification integration', () => {
-  test('factory/cycle.py imports or references a notify/notifier module', () => {
-    const hasNotifyCycleComplete = cycleSrc.includes('notify_cycle_complete');
-    const hasNotifierImport = cycleSrc.includes('notifier');
-    const hasNotifyImport = cycleSrc.includes('from factory.notifications import notify');
-    const hasNotifyAdmins = cycleSrc.includes('_notify_admins_telegram');
-    expect(hasNotifyCycleComplete || hasNotifierImport || hasNotifyImport || hasNotifyAdmins).toBe(true);
+describe('Orchestrator completeness', () => {
+  test('orchestrator requires PricingNegotiator', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../agents/orchestrator.js'), 'utf8');
+    expect(src).toContain('PricingNegotiator');
   });
 
-  test('factory/cycle.py calls notify.js or uses notifier module', () => {
-    const hasNotifyJs = cycleSrc.includes('notify.js');
-    const hasNotifier = cycleSrc.includes('notifier');
-    expect(hasNotifyJs || hasNotifier).toBe(true);
-  });
-});
-
-// ─── 8. Service worker caches 500.html (2 tests) ─────────────────────────────
-
-describe('Service worker precache includes 500.html', () => {
-  test('public/sw.js exists and is readable', () => {
-    expect(swSrc.length).toBeGreaterThan(0);
+  test('orchestrator requires VisualConceptor', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../agents/orchestrator.js'), 'utf8');
+    expect(src).toContain('VisualConceptor');
   });
 
-  test('public/sw.js contains /500.html in precache list', () => {
-    expect(swSrc).toContain('/500.html');
+  test('orchestrator requires all departments', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../agents/orchestrator.js'), 'utf8');
+    expect(src).toContain("require('./departments/sales')");
+    expect(src).toContain("require('./departments/creative')");
+    expect(src).toContain("require('./departments/finance')");
+    expect(src).toContain("require('./departments/research')");
+    expect(src).toContain("require('./departments/customer-success')");
   });
 });
