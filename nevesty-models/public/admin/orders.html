@@ -286,6 +286,66 @@
         flex-shrink: 0;
       }
 
+      /* ─── Days-age badge ────────────────────────────── */
+      .age-badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      .age-green {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+      .age-yellow {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+      }
+      .age-red {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+      }
+
+      /* ─── Inline spinner ─────────────────────────────── */
+      .status-spinner {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid var(--border);
+        border-top-color: var(--gold);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        vertical-align: middle;
+        margin-left: 4px;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* ─── Inline manager assign ──────────────────────── */
+      .inline-manager-select {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 0.7rem;
+        padding: 3px 6px;
+        border-radius: 3px;
+        cursor: pointer;
+        outline: none;
+        max-width: 130px;
+        transition: border-color 0.2s;
+      }
+      .inline-manager-select:focus {
+        border-color: var(--gold);
+      }
+
       /* ─── Status filter buttons ─────────────────────── */
       .status-filter-bar {
         display: flex;
@@ -347,6 +407,17 @@
         background: rgba(239, 68, 68, 0.15);
         color: #ef4444;
         border-color: rgba(239, 68, 68, 0.4);
+      }
+      .sfilter-count {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        padding: 0 5px;
+        font-size: 0.7rem;
+        min-width: 18px;
+        text-align: center;
+        margin-left: 2px;
+        line-height: 1.5;
       }
 
       /* ─── Inline status select ──────────────────────── */
@@ -547,22 +618,26 @@
 
             <!-- Status filter buttons row -->
             <div class="status-filter-bar" id="statusFilterBar">
-              <button class="sfilter-btn active-all" data-status="" onclick="setStatusFilter('')">Все</button>
-              <button class="sfilter-btn" data-status="new" onclick="setStatusFilter('new')">🆕 Новые</button>
+              <button class="sfilter-btn active-all" data-status="" onclick="setStatusFilter('')">
+                Все <span class="sfilter-count" id="sfc-all"></span>
+              </button>
+              <button class="sfilter-btn" data-status="new" onclick="setStatusFilter('new')">
+                🆕 Новые <span class="sfilter-count" id="sfc-new"></span>
+              </button>
               <button class="sfilter-btn" data-status="reviewing" onclick="setStatusFilter('reviewing')">
-                🔍 На рассмотрении
+                🔍 На рассмотрении <span class="sfilter-count" id="sfc-reviewing"></span>
               </button>
               <button class="sfilter-btn" data-status="confirmed" onclick="setStatusFilter('confirmed')">
-                ✅ Подтверждённые
+                ✅ Подтверждённые <span class="sfilter-count" id="sfc-confirmed"></span>
               </button>
               <button class="sfilter-btn" data-status="in_progress" onclick="setStatusFilter('in_progress')">
-                ▶️ В работе
+                ▶️ В работе <span class="sfilter-count" id="sfc-in_progress"></span>
               </button>
               <button class="sfilter-btn" data-status="completed" onclick="setStatusFilter('completed')">
-                🏁 Завершённые
+                🏁 Завершённые <span class="sfilter-count" id="sfc-completed"></span>
               </button>
               <button class="sfilter-btn" data-status="cancelled" onclick="setStatusFilter('cancelled')">
-                ❌ Отменённые
+                ❌ Отменённые <span class="sfilter-count" id="sfc-cancelled"></span>
               </button>
             </div>
 
@@ -613,12 +688,18 @@
               <button
                 class="btn btn-sm btn-ghost"
                 onclick="exportCSVCurrentFilters()"
-                title="Экспорт с текущими фильтрами в CSV"
+                title="Скачает CSV со всеми заявками по текущим фильтрам (статус, дата, модель, поиск)"
                 style="border-color: var(--gold); color: var(--gold)"
               >
                 📊 Экспорт CSV
               </button>
-              <button class="btn-export" onclick="toggleExportPanel()" title="Расширенный экспорт">📥 CSV ▾</button>
+              <button
+                class="btn-export"
+                onclick="toggleExportPanel()"
+                title="Расширенный экспорт — выбрать статус и диапазон дат вручную"
+              >
+                📥 CSV ▾
+              </button>
             </div>
 
             <!-- Export panel (hidden by default) -->
@@ -779,14 +860,16 @@
                     <th>Дата</th>
                     <th>Статус</th>
                     <th>Оплата</th>
+                    <th title="Дней с момента подачи заявки">Дней</th>
                     <th>Изменить статус</th>
+                    <th>Менеджер</th>
                     <th>Создана</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody id="ordersBody">
                   <tr>
-                    <td colspan="11" style="text-align: center; padding: 40px; color: var(--text-dim)">Загрузка...</td>
+                    <td colspan="13" style="text-align: center; padding: 40px; color: var(--text-dim)">Загрузка...</td>
                   </tr>
                 </tbody>
               </table>
@@ -1151,6 +1234,7 @@
           renderPagination();
           updateCountSummary(orders.length, totalOrders);
           syncBulkBar();
+          loadStatusCounts();
         } catch (e) {
           _admin.toast('Ошибка загрузки: ' + e.message, 'error');
         }
@@ -1176,6 +1260,17 @@
           el.textContent = `Всего заявок: ${total}`;
           el.style.display = 'block';
         }
+      }
+
+      /* ─── Days-since-creation badge ────────────────────────── */
+      function getDaysAgeBadge(createdAt) {
+        if (!createdAt) return '<span style="color:var(--text-dim)">—</span>';
+        const days = Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000);
+        let cls = 'age-green';
+        if (days > 3) cls = 'age-red';
+        else if (days >= 2) cls = 'age-yellow';
+        const label = days === 0 ? 'сегодня' : days === 1 ? '1 д.' : `${days} д.`;
+        return `<span class="age-badge ${cls}" title="${days} дн. с момента подачи заявки">${label}</span>`;
       }
 
       /* ─── Inline status color map ────────────────────────── */
@@ -1206,7 +1301,7 @@
         const tbody = document.getElementById('ordersBody');
         if (!orders.length) {
           tbody.innerHTML =
-            '<tr><td colspan="11"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
+            '<tr><td colspan="13"><div class="empty-state"><div class="empty-state-icon">📭</div><p>Заявок не найдено</p></div></td></tr>';
           return;
         }
 
@@ -1218,6 +1313,8 @@
           return bS - aS;
         });
 
+        const managers = managersCache || [];
+
         tbody.innerHTML = orders
           .map(o => {
             const checked = selectedIds.has(o.id) ? 'checked' : '';
@@ -1227,6 +1324,20 @@
             const statusOpts = Object.entries(_admin.STATUS_LABELS)
               .map(([v, l]) => `<option value="${v}"${v === o.status ? ' selected' : ''}>${l}</option>`)
               .join('');
+
+            // Days since creation badge
+            const ageBadge = getDaysAgeBadge(o.created_at);
+
+            // Inline manager dropdown
+            const managerOpts =
+              '<option value="">— нет —</option>' +
+              managers
+                .map(
+                  m =>
+                    `<option value="${m.id}"${m.id === o.manager_id ? ' selected' : ''}>${_admin.escapeHtml(m.username)}${m.role === 'superadmin' ? ' ★' : ''}</option>`
+                )
+                .join('');
+
             return `
     <tr data-id="${o.id}" style="cursor:pointer${starred ? ';background:rgba(255,215,0,0.04)' : ''}" onclick="openOrderModal(${o.id})">
       <td class="cb-cell" onclick="event.stopPropagation()">
@@ -1244,11 +1355,21 @@
       <td>${o.event_date ? _admin.formatDate(o.event_date) : '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${colorBadge(o.status)}</td>
       <td>${paymentBadge(o)}</td>
-      <td onclick="event.stopPropagation()">
-        <select class="inline-status-select" data-order-id="${o.id}" data-prev="${o.status}"
+      <td style="white-space:nowrap">${ageBadge}</td>
+      <td onclick="event.stopPropagation()" style="position:relative">
+        <select class="inline-status-select" id="isel-${o.id}" data-order-id="${o.id}" data-prev="${o.status}"
           onchange="quickStatusChange(${o.id}, this.value, this)">
           ${statusOpts}
         </select>
+        <span class="status-spinner" id="isel-spin-${o.id}" style="display:none"></span>
+      </td>
+      <td onclick="event.stopPropagation()">
+        <select class="inline-manager-select" id="imgr-${o.id}" data-order-id="${o.id}"
+          onchange="quickManagerChange(${o.id}, this.value, this)"
+          title="Назначить менеджера">
+          ${managerOpts}
+        </select>
+        <span class="status-spinner" id="imgr-spin-${o.id}" style="display:none"></span>
       </td>
       <td>${_admin.formatDateTime(o.created_at)}</td>
       <td><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openDetail(${o.id})">Открыть →</button></td>
@@ -1481,6 +1602,44 @@
           document.getElementById('exportPanel').style.display = 'none';
         }
         _admin.toast('Экспорт начат...', 'info');
+      }
+
+      /* ═══════════════════════════════════════════════════════
+   STATUS COUNTS — load from /admin/stats
+═══════════════════════════════════════════════════════ */
+      async function loadStatusCounts() {
+        try {
+          const stats = await _admin.apiFetch('/admin/stats');
+          // stats may have orders_by_status or order_counts
+          const byStatus = stats.orders_by_status || stats.order_counts || {};
+          const total = Object.values(byStatus).reduce((s, v) => s + (v || 0), 0);
+
+          const map = {
+            'sfc-all': total,
+            'sfc-new': byStatus.new || 0,
+            'sfc-reviewing': byStatus.reviewing || 0,
+            'sfc-confirmed': byStatus.confirmed || 0,
+            'sfc-in_progress': byStatus.in_progress || 0,
+            'sfc-completed': byStatus.completed || 0,
+            'sfc-cancelled': byStatus.cancelled || 0,
+          };
+
+          Object.entries(map).forEach(([id, count]) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = count > 0 ? count : '';
+          });
+
+          // Also update nav badge
+          const navBadge = document.getElementById('newOrdersBadge');
+          if (navBadge && byStatus.new > 0) {
+            navBadge.textContent = byStatus.new;
+            navBadge.style.display = 'inline-block';
+          } else if (navBadge) {
+            navBadge.style.display = 'none';
+          }
+        } catch {
+          /* stats endpoint optional — counts stay hidden */
+        }
       }
 
       /* ═══════════════════════════════════════════════════════
@@ -2037,20 +2196,17 @@
       }
 
       /* ═══════════════════════════════════════════════════════
-   QUICK INLINE STATUS CHANGE
+   QUICK INLINE STATUS CHANGE (with spinner)
 ═══════════════════════════════════════════════════════ */
       async function quickStatusChange(orderId, newStatus, selectEl) {
-        const prevStatus = selectEl.getAttribute('data-prev') || selectEl.dataset.prev;
+        const prevStatus = selectEl.dataset.prev || newStatus;
         const newLabel = _admin.STATUS_LABELS[newStatus] || newStatus;
-        // Store previous value for rollback
-        if (!selectEl.dataset.prev) selectEl.dataset.prev = prevStatus || newStatus;
 
-        const ok = confirm(`Изменить статус заявки на «${newLabel}»?`);
-        if (!ok) {
-          // Revert select to previous value
-          selectEl.value = prevStatus || newStatus;
-          return;
-        }
+        // Show spinner, disable select
+        const spinner = document.getElementById(`isel-spin-${orderId}`);
+        selectEl.disabled = true;
+        if (spinner) spinner.style.display = 'inline-block';
+
         // Update stored previous
         selectEl.dataset.prev = newStatus;
 
@@ -2069,11 +2225,39 @@
               badgeCell.textContent = newLabel;
             }
           }
+          // Refresh status counts
+          loadStatusCounts();
         } catch (e) {
           _admin.toast('Ошибка: ' + e.message, 'error');
           // Revert select to previous value
-          selectEl.value = prevStatus || newStatus;
-          selectEl.dataset.prev = prevStatus || newStatus;
+          selectEl.value = prevStatus;
+          selectEl.dataset.prev = prevStatus;
+        } finally {
+          selectEl.disabled = false;
+          if (spinner) spinner.style.display = 'none';
+        }
+      }
+
+      /* ═══════════════════════════════════════════════════════
+   QUICK INLINE MANAGER ASSIGN (with spinner)
+═══════════════════════════════════════════════════════ */
+      async function quickManagerChange(orderId, managerId, selectEl) {
+        const spinner = document.getElementById(`imgr-spin-${orderId}`);
+        selectEl.disabled = true;
+        if (spinner) spinner.style.display = 'inline-block';
+
+        try {
+          await _admin.apiFetch(`/admin/orders/${orderId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ manager_id: managerId ? +managerId : null }),
+          });
+          const managerName = selectEl.options[selectEl.selectedIndex].text;
+          _admin.toast(managerId ? `Менеджер назначен: ${managerName}` : 'Менеджер снят', 'success');
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        } finally {
+          selectEl.disabled = false;
+          if (spinner) spinner.style.display = 'none';
         }
       }
 
@@ -2436,7 +2620,7 @@
         const tbody = document.getElementById('ordersBody');
         if (!ids.length) {
           tbody.innerHTML =
-            '<tr><td colspan="11"><div class="empty-state"><div class="empty-state-icon">⭐</div><p>Нет отмеченных заявок</p></div></td></tr>';
+            '<tr><td colspan="13"><div class="empty-state"><div class="empty-state-icon">⭐</div><p>Нет отмеченных заявок</p></div></td></tr>';
           document.getElementById('paginationInfo').textContent = '';
           document.getElementById('pagination').innerHTML = '';
           document.getElementById('orderCountSummary').textContent = 'Нет отмеченных заявок';
@@ -2575,8 +2759,9 @@
         const urlTo = params.get('date_to') || params.get('to');
         const urlSearch = params.get('search');
 
-        // Load model filter options early
-        await loadModelFilterOptions();
+        // Load model filter options and managers early (parallel)
+        await Promise.all([loadModelFilterOptions(), loadManagers()]);
+        loadStatusCounts();
 
         // Restore filter state from URL
         if (urlModelId) document.getElementById('modelFilter').value = urlModelId;

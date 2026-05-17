@@ -400,6 +400,143 @@
         padding: 0 2px;
         font-style: normal;
       }
+
+      /* ─── LIVE COUNTER BADGE ──────────────────────────────────── */
+      .live-counter {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        background: rgba(201, 169, 110, 0.08);
+        border: 1px solid rgba(201, 169, 110, 0.25);
+        border-radius: 30px;
+        font-size: 0.82rem;
+        color: var(--gold);
+        margin-top: 16px;
+        transition: opacity 0.3s;
+      }
+      .live-counter-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--gold);
+        flex-shrink: 0;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .live-counter-dot {
+          animation: liveDotPulse 1.2s ease-in-out infinite;
+        }
+        @keyframes liveDotPulse {
+          0%,
+          100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.4;
+            transform: scale(0.7);
+          }
+        }
+      }
+
+      /* ─── POPULAR TAGS ────────────────────────────────────────── */
+      .popular-tags-section {
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid var(--border);
+      }
+      .popular-tags-label {
+        font-size: 0.65rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        margin-bottom: 12px;
+      }
+      .popular-tags-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .popular-tag {
+        padding: 7px 16px;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.78rem;
+        border-radius: 20px;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .popular-tag:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+        background: rgba(201, 169, 110, 0.06);
+      }
+      .popular-tag-icon {
+        font-size: 0.9rem;
+        opacity: 0.7;
+      }
+
+      /* ─── RECENT SEARCHES ─────────────────────────────────────── */
+      .recent-searches {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+      .recent-searches-label {
+        font-size: 0.65rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .recent-clear-btn {
+        font-size: 0.7rem;
+        color: var(--text-dim);
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0;
+        letter-spacing: 0;
+        text-transform: none;
+        transition: color 0.2s;
+      }
+      .recent-clear-btn:hover {
+        color: #f44336;
+      }
+      .recent-tags-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .recent-tag {
+        padding: 5px 13px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.76rem;
+        border-radius: 20px;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .recent-tag:hover {
+        border-color: rgba(201, 169, 110, 0.4);
+        color: var(--text);
+      }
+      .recent-tag-icon {
+        opacity: 0.5;
+        font-size: 0.8rem;
+      }
     </style>
   </head>
   <body>
@@ -536,6 +673,51 @@
           <div class="search-actions">
             <button class="btn-search" id="searchBtn" onclick="doSearch(0)">Найти</button>
             <button class="btn-reset-search" onclick="resetSearch()">Сбросить</button>
+            <!-- Live counter badge (updated as filters change) -->
+            <div class="live-counter" id="liveCounter" style="display: none" aria-live="polite" aria-atomic="true">
+              <span class="live-counter-dot" aria-hidden="true"></span>
+              <span id="liveCounterText">...</span>
+            </div>
+          </div>
+
+          <!-- Recent searches -->
+          <div class="recent-searches" id="recentSearchesBlock" style="display: none">
+            <div class="recent-searches-label">
+              <span>Недавние поиски</span>
+              <button class="recent-clear-btn" onclick="clearRecentSearches()" aria-label="Очистить недавние поиски">
+                Очистить
+              </button>
+            </div>
+            <div class="recent-tags-wrap" id="recentTagsWrap"></div>
+          </div>
+
+          <!-- Popular tags (shown when no filters selected) -->
+          <div class="popular-tags-section" id="popularTagsSection">
+            <div class="popular-tags-label">Популярные запросы</div>
+            <div class="popular-tags-wrap">
+              <button class="popular-tag" onclick="applyPopularTag('fashion')" aria-label="Fashion модели">
+                <span class="popular-tag-icon">👗</span> Fashion
+              </button>
+              <button class="popular-tag" onclick="applyPopularTag('commercial')" aria-label="Commercial модели">
+                <span class="popular-tag-icon">📷</span> Commercial
+              </button>
+              <button class="popular-tag" onclick="applyPopularTag('events')" aria-label="Events модели">
+                <span class="popular-tag-icon">🎉</span> Events
+              </button>
+              <button class="popular-tag" onclick="applyPopularCity('Москва')" aria-label="Модели в Москве">
+                <span class="popular-tag-icon">🏙️</span> Москва
+              </button>
+              <button
+                class="popular-tag"
+                onclick="applyPopularTag('fashion', '175', '')"
+                aria-label="Fashion модели 175+"
+              >
+                <span class="popular-tag-icon">✦</span> Fashion 175+
+              </button>
+              <button class="popular-tag" onclick="applyPopularAge('18', '22')" aria-label="Модели 18–22 лет">
+                <span class="popular-tag-icon">⭐</span> 18–22 года
+              </button>
+            </div>
           </div>
         </div>
 

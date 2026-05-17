@@ -3338,8 +3338,8 @@ async function getBroadcastRecipients(seg, { limit } = {}) {
 // GET /api/admin/broadcasts/count?segment= — count recipients for a segment (for preview)
 router.get('/admin/broadcasts/count', auth, async (req, res, next) => {
   try {
-    const seg = req.query.segment || 'all';
-    if (!isValidBroadcastSegment(seg)) return res.status(400).json({ error: 'Неверный сегмент' });
+    const rawSeg = req.query.segment || 'all';
+    const seg = isValidBroadcastSegment(rawSeg) ? rawSeg : 'all';
     const { count } = await getBroadcastRecipients(seg);
     res.json({ count });
   } catch (e) {

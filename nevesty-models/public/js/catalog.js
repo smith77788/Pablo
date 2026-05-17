@@ -644,7 +644,7 @@
               <span class="model-status-badge ${statusClass}">${statusText}</span>
               ${
                 m.order_count > 0
-                  ? `<span class="model-orders-count">📋 ${m.order_count} ${(n => {
+                  ? `<span class="order-badge">📋 ${m.order_count} ${(n => {
                       const r = n % 100;
                       const r10 = n % 10;
                       if (r >= 11 && r <= 14) return 'заказов';
