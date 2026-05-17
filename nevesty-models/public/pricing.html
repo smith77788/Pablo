@@ -441,14 +441,19 @@
         color: var(--text-muted);
         font-size: 0.85rem;
         line-height: 1.7;
-        padding: 0 0 16px;
-        display: none;
+        overflow: hidden;
+        max-height: 0;
+        transition:
+          max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+          padding 0.25s;
+        padding-bottom: 0;
       }
       .faq-mini-item.open .icon {
         transform: rotate(45deg);
       }
       .faq-mini-item.open .faq-mini-a {
-        display: block;
+        max-height: 400px;
+        padding-bottom: 16px;
       }
 
       @media (max-width: 640px) {
@@ -588,7 +593,8 @@
           <div class="pricing-card featured">
             <div class="pricing-badge">Популярное</div>
             <div class="pricing-name">Мероприятие</div>
-            <div class="pricing-price">от 15 000 <span>₽</span></div>
+            <div class="pricing-price-original" data-full="15000">от 15 000 ₽</div>
+            <div class="pricing-price" data-base="15000">от 15 000 <span>₽</span></div>
             <div class="pricing-duration">за 4 часа</div>
             <div class="pricing-divider"></div>
             <div class="pricing-feature">Корпоратив, показ или презентация</div>
@@ -601,7 +607,8 @@
 
           <div class="pricing-card">
             <div class="pricing-name">Премиум</div>
-            <div class="pricing-price">от 30 000 <span>₽</span></div>
+            <div class="pricing-price-original" data-full="30000">от 30 000 ₽</div>
+            <div class="pricing-price" data-base="30000">от 30 000 <span>₽</span></div>
             <div class="pricing-duration">от 6 часов</div>
             <div class="pricing-divider"></div>
             <div class="pricing-feature">Подиум, реклама, VIP-событие</div>
@@ -1149,6 +1156,39 @@
       document.getElementById('chkMakeup').addEventListener('change', calc);
       document.getElementById('chkTravel').addEventListener('change', calc);
       document.getElementById('chkUrgent').addEventListener('change', calc);
+
+      // ─── Billing toggle ──────────────────────────────────────────────────────
+      let _billingYearly = false;
+      const DISCOUNT = 0.8; // 20% off
+
+      function applyBillingPrices() {
+        const grid = document.getElementById('pricing-grid');
+        if (!grid) return;
+        grid.classList.toggle('billing-yearly', _billingYearly);
+        grid.querySelectorAll('.pricing-price[data-base]').forEach(el => {
+          const base = parseInt(el.dataset.base, 10);
+          const discounted = Math.round(base * DISCOUNT);
+          const numEl = el.querySelector('span');
+          if (_billingYearly) {
+            el.innerHTML = 'от ' + discounted.toLocaleString('ru-RU') + ' <span>₽</span>';
+          } else {
+            el.innerHTML = 'от ' + base.toLocaleString('ru-RU') + ' <span>₽</span>';
+          }
+          el.dataset.base = base; // preserve
+        });
+      }
+
+      function setBilling(type) {
+        _billingYearly = type === 'year';
+        document.getElementById('billingSwitchBtn').classList.toggle('yearly', _billingYearly);
+        document.getElementById('lblMonth').classList.toggle('active', !_billingYearly);
+        document.getElementById('lblYear').classList.toggle('active', _billingYearly);
+        applyBillingPrices();
+      }
+
+      function toggleBilling() {
+        setBilling(_billingYearly ? 'month' : 'year');
+      }
 
       // ─── FAQ mini ─────────────────────────────────────────────────────────────
       function toggleFaq(btn) {
