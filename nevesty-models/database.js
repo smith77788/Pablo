@@ -953,6 +953,33 @@ async function initDatabase() {
     created_at TEXT DEFAULT (datetime('now'))
   )`).catch(() => {});
 
+  // Schema v36 — webhook_logs table for incoming webhook auditing (БЛОК 19)
+  const v36 = await get(`SELECT version FROM schema_versions WHERE version=36`).catch(() => null);
+  if (!v36) {
+    await run(`CREATE TABLE IF NOT EXISTS webhook_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      endpoint TEXT NOT NULL,
+      payload TEXT,
+      status INTEGER,
+      ip TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_webhook_logs_created ON webhook_logs(created_at DESC)`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_webhook_logs_endpoint ON webhook_logs(endpoint)`).catch(() => {});
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(36, 'webhook_logs table for incoming webhook auditing (БЛОК 19)')`
+    ).catch(() => {});
+  }
+  // Idempotent — ensure webhook_logs exists even on DBs that skipped v36
+  await run(`CREATE TABLE IF NOT EXISTS webhook_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint TEXT NOT NULL,
+    payload TEXT,
+    status INTEGER,
+    ip TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`).catch(() => {});
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {

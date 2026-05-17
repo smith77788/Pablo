@@ -686,7 +686,7 @@
       function buildProfile(model, name) {
         const initials = getInitials(model?.name || name);
         const photoHtml = model?.photo_main
-          ? `<img src="${esc(model.photo_main)}" alt="${esc(model.name || name)}" />`
+          ? `<img src="${esc(model.photo_main)}" alt="${esc(model.name || name)}" loading="lazy" decoding="async" />`
           : initials;
         const statusCls = model?.available ? 'free' : 'busy';
         const statusTxt = model?.available ? 'Свободна' : 'Занята';

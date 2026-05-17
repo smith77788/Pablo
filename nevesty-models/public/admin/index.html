@@ -1087,6 +1087,173 @@
           display: none;
         }
       }
+
+      /* ─── БЛОК 15: System status bar ────────────────────── */
+      .sys-status-bar {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        padding: 8px 16px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-size: 0.78rem;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+      .sys-status-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 0 10px;
+      }
+      .sys-status-sep {
+        color: var(--border);
+        font-size: 0.9rem;
+        line-height: 1;
+      }
+      .sys-dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--text-dim);
+        flex-shrink: 0;
+        transition: background 0.3s;
+      }
+      .sys-dot.ok {
+        background: #10b981;
+        box-shadow: 0 0 5px rgba(16, 185, 129, 0.5);
+        animation: livePulse 2.5s infinite;
+      }
+      .sys-dot.warn {
+        background: #f59e0b;
+      }
+      .sys-dot.error {
+        background: #ef4444;
+      }
+      .sys-status-spacer {
+        flex: 1;
+      }
+
+      /* ─── БЛОК 15: KPI Grid with sparklines ─────────────── */
+      .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .kpi-grid-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 18px 20px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        position: relative;
+        overflow: hidden;
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s,
+          border-color 0.2s;
+        cursor: default;
+      }
+      .kpi-grid-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        border-color: rgba(201, 169, 110, 0.35);
+      }
+      .kgc-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 6px;
+      }
+      .kgc-icon {
+        font-size: 1.3rem;
+        line-height: 1;
+        opacity: 0.85;
+      }
+      .kgc-trend {
+        font-size: 0.7rem;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 12px;
+        white-space: nowrap;
+      }
+      .kgc-trend.up {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+      .kgc-trend.down {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+      }
+      .kgc-trend.neutral {
+        background: rgba(107, 114, 128, 0.15);
+        color: #9ca3af;
+        border: 1px solid rgba(107, 114, 128, 0.25);
+      }
+      .kgc-value {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--text);
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+      .kgc-value.gold {
+        color: var(--gold);
+      }
+      .kgc-label {
+        font-size: 0.7rem;
+        letter-spacing: 1.2px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-top: 2px;
+        margin-bottom: 10px;
+      }
+      .kgc-sparkline {
+        width: 100%;
+        height: 40px;
+        margin-top: auto;
+      }
+      .kgc-sparkline svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+        overflow: visible;
+      }
+      @keyframes kgcHighlight {
+        0% {
+          background: rgba(201, 169, 110, 0.14);
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .kpi-grid-card.updated {
+        animation: kgcHighlight 1.2s ease-out forwards;
+      }
+      @media (max-width: 900px) {
+        .kpi-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 500px) {
+        .kpi-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+        .kgc-value {
+          font-size: 1.5rem;
+        }
+        .sys-status-bar {
+          display: none;
+        }
+      }
     </style>
   </head>
   <body>
