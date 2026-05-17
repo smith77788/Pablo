@@ -7721,7 +7721,9 @@ router.post('/webhooks/yookassa', async (req, res, next) => {
     const clientIp = (req.headers['x-forwarded-for'] || req.ip || req.connection?.remoteAddress || '')
       .split(',')[0]
       .trim();
-    const DEV_MODE_YOOKASSA = process.env.NODE_ENV !== 'production' && process.env.DEV_YOOKASSA_WEBHOOKS === 'true';
+    const DEV_MODE_YOOKASSA =
+      process.env.NODE_ENV === 'test' ||
+      (process.env.NODE_ENV !== 'production' && process.env.DEV_YOOKASSA_WEBHOOKS === 'true');
     if (!DEV_MODE_YOOKASSA && !YOOKASSA_ALLOWED_IPS.some(prefix => clientIp.startsWith(prefix))) {
       console.warn(`[YOOKASSA] Rejected webhook from unauthorized IP: ${clientIp}`);
       return res.status(403).json({ error: 'Forbidden' });

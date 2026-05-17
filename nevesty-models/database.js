@@ -35,6 +35,11 @@ function get(sql, params = []) {
 }
 
 async function initDatabase() {
+  // Close previous connection if reinitializing (e.g., in test runs)
+  if (db) {
+    await new Promise(resolve => db.close(resolve));
+    db = null;
+  }
   db = new sqlite3.Database(process.env.DB_PATH || DB_PATH);
 
   // Performance pragmas — set before any table operations

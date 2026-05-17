@@ -15,7 +15,7 @@
     "lint:all": "eslint .",
     "lint:legacy": "eslint bot.js server.js routes/api.js",
     "check": "node --check bot.js && node --check server.js && node --check routes/api.js",
-    "test": "jest --forceExit --runInBand",
+    "test": "jest --forceExit --maxWorkers=4",
     "test:e2e": "jest tests/e2e*.test.js --forceExit",
     "test:coverage": "jest --coverage --coverageDirectory=coverage --forceExit",
     "test:watch": "jest --watch --forceExit",
