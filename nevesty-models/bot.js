@@ -13442,10 +13442,19 @@ async function bkQuickPhone(chatId, data) {
 async function bkQuickSubmit(chatId, data) {
   try {
     const orderNum = generateOrderNumber();
+    const autoConfirmForInsert = await getSetting('booking_auto_confirm').catch(() => '0');
+    const initialStatus = autoConfirmForInsert === '1' ? 'confirmed' : 'new';
     await run(
       `INSERT INTO orders (order_number,client_name,client_phone,event_type,comments,client_chat_id,status)
-       VALUES (?,?,?,'other',?,?,'new')`,
-      [orderNum, data.quick_name, data.quick_phone, 'Быстрая заявка — менеджер уточнит детали', String(chatId)]
+       VALUES (?,?,?,'quick',?,?,?)`,
+      [
+        orderNum,
+        data.quick_name,
+        data.quick_phone,
+        'Быстрая заявка — менеджер уточнит детали',
+        String(chatId),
+        initialStatus,
+      ]
     );
     const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
     await clearSession(chatId);

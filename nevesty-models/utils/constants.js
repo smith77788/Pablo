@@ -19,6 +19,7 @@ const EVENT_TYPES = {
   event:        'Корпоратив / Мероприятие',
   commercial:   'Коммерческая съёмка',
   runway:       'Подиум',
+  quick:        '⚡ Быстрая заявка',
   other:        'Другое',
 };
 
