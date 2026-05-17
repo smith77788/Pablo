@@ -118,11 +118,199 @@
       .dark .kpi-label {
         color: #9ca3af;
       }
+      .kpi-sparkline {
+        margin-top: 10px;
+        opacity: 0.8;
+        display: flex;
+        justify-content: center;
+      }
 
       /* Bar chart improvements */
       #kpi-bar-wrap {
         position: relative;
         height: 180px;
+      }
+
+      /* SVG Bar Chart */
+      .svg-bar-chart-wrap {
+        width: 100%;
+        overflow: visible;
+      }
+      .svg-bar-chart-wrap .bar-day-label {
+        font-size: 10px;
+        fill: #9ca3af;
+      }
+      .dark .svg-bar-chart-wrap .bar-day-label {
+        fill: #6b7280;
+      }
+
+      /* Inline funnel bars */
+      .funnel-bar-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .funnel-bar-label {
+        width: 110px;
+        font-size: 0.8rem;
+        color: #374151;
+        font-weight: 500;
+        flex-shrink: 0;
+        text-align: right;
+      }
+      .dark .funnel-bar-label {
+        color: #d1d5db;
+      }
+      .funnel-bar-track {
+        flex: 1;
+        height: 22px;
+        background: #f3f4f6;
+        border-radius: 6px;
+        overflow: hidden;
+        position: relative;
+      }
+      .dark .funnel-bar-track {
+        background: #374151;
+      }
+      .funnel-bar-fill {
+        height: 100%;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        padding-left: 8px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #fff;
+        transition: width 0.7s ease;
+        white-space: nowrap;
+      }
+      .funnel-bar-count {
+        width: 56px;
+        text-align: right;
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: #374151;
+        flex-shrink: 0;
+      }
+      .dark .funnel-bar-count {
+        color: #e5e7eb;
+      }
+      .funnel-bar-pct {
+        width: 40px;
+        text-align: right;
+        font-size: 0.75rem;
+        color: #9ca3af;
+        flex-shrink: 0;
+      }
+
+      /* Top 5 models SVG bars */
+      .top-models-svg-wrap {
+        margin-top: 8px;
+      }
+      .top-model-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .top-model-rank {
+        width: 18px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: #9ca3af;
+        text-align: center;
+        flex-shrink: 0;
+      }
+      .top-model-name {
+        width: 110px;
+        font-size: 0.78rem;
+        font-weight: 500;
+        color: #374151;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex-shrink: 0;
+      }
+      .dark .top-model-name {
+        color: #e5e7eb;
+      }
+      .top-model-track {
+        flex: 1;
+        height: 18px;
+        background: #f3f4f6;
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      .dark .top-model-track {
+        background: #374151;
+      }
+      .top-model-fill {
+        height: 100%;
+        border-radius: 5px;
+        background: linear-gradient(90deg, #ec4899, #f97316);
+        transition: width 0.6s ease;
+      }
+      .top-model-count {
+        width: 28px;
+        text-align: right;
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: #ec4899;
+        flex-shrink: 0;
+      }
+
+      /* City bars enhanced */
+      .city-bar-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .city-bar-num {
+        width: 16px;
+        font-size: 0.72rem;
+        color: #9ca3af;
+        font-weight: 600;
+        flex-shrink: 0;
+        text-align: center;
+      }
+      .city-bar-name {
+        width: 100px;
+        font-size: 0.78rem;
+        font-weight: 500;
+        color: #374151;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex-shrink: 0;
+      }
+      .dark .city-bar-name {
+        color: #e5e7eb;
+      }
+      .city-bar-track {
+        flex: 1;
+        height: 16px;
+        background: #f3f4f6;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .dark .city-bar-track {
+        background: #374151;
+      }
+      .city-bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        background: linear-gradient(90deg, #8b5cf6, #06b6d4);
+        transition: width 0.6s ease;
+      }
+      .city-bar-count {
+        width: 36px;
+        text-align: right;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #8b5cf6;
+        flex-shrink: 0;
       }
     </style>
   </head>
