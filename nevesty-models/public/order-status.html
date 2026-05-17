@@ -1405,6 +1405,22 @@
         document.getElementById('resStatusText').textContent =
           (STATUS_ICONS_WS[newStatus] || '') + ' ' + (STATUS_LABELS_WS[newStatus] || newStatus);
 
+        // Update big status display
+        const STATUS_BIG_SUB_WS = {
+          new: 'Ваша заявка получена и ожидает рассмотрения',
+          reviewing: 'Менеджер изучает детали вашей заявки',
+          confirmed: 'Заявка одобрена — всё готово к работе!',
+          in_progress: 'Команда активно работает над вашим мероприятием',
+          completed: 'Мероприятие успешно завершено. Спасибо за выбор Nevesty Models!',
+          cancelled: 'К сожалению, заявка была отменена',
+        };
+        const bigIcon = document.getElementById('bigStatusIcon');
+        const bigLabel = document.getElementById('bigStatusLabel');
+        const bigSub = document.getElementById('bigStatusSub');
+        if (bigIcon) bigIcon.textContent = STATUS_ICONS_WS[newStatus] || '📋';
+        if (bigLabel) bigLabel.textContent = STATUS_LABELS_WS[newStatus] || newStatus;
+        if (bigSub) bigSub.textContent = STATUS_BIG_SUB_WS[newStatus] || '';
+
         // Update progress bar
         const isCancelled = newStatus === 'cancelled';
         const stepsEl = document.getElementById('progressSteps');
