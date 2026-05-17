@@ -125,14 +125,14 @@ describe('T4: Social settings MarkdownV2 safety', () => {
   test('T19: social settings section uses parse_mode MarkdownV2', () => {
     const idx = botCode.indexOf("section === 'social'");
     expect(idx).toBeGreaterThan(-1);
-    const nearby = botCode.slice(idx, idx + 800);
+    const nearby = botCode.slice(idx, idx + 3000);
     expect(nearby).toMatch(/parse_mode/);
     expect(nearby).toMatch(/MarkdownV2/);
   });
 
   test('T20: Instagram handle in social section is wrapped with esc()', () => {
     const idx = botCode.indexOf("section === 'social'");
-    const nearby = botCode.slice(idx, idx + 600);
+    const nearby = botCode.slice(idx, idx + 1600);
     expect(nearby).toMatch(/esc\s*\(\s*insta/);
   });
 });

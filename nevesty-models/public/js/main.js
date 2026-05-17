@@ -340,15 +340,30 @@ window.switchModalPhoto = switchModalPhoto;
 
 /* ─── Navbar scroll ────────────────────────────────── */
 const navbar = document.getElementById('navbar');
-if (navbar && !navbar.classList.contains('scrolled')) {
+if (navbar) {
   window.addEventListener(
     'scroll',
     () => {
-      navbar.classList.toggle('scrolled', window.scrollY > 60);
+      navbar.classList.toggle('scrolled', window.scrollY > 80);
     },
     { passive: true }
   );
+  // Apply immediately in case page loads mid-scroll
+  navbar.classList.toggle('scrolled', window.scrollY > 80);
 }
+
+/* ─── Active nav link highlight ────────────────────── */
+(function highlightActiveNav() {
+  const current = location.pathname.split('/').pop() || 'index.html';
+  document.querySelectorAll('.nav-links a, .nav-mobile a').forEach(a => {
+    const href = a.getAttribute('href');
+    if (!href) return;
+    const hrefPage = href.split('/').pop();
+    if (hrefPage === current || (href === '/' && (current === 'index.html' || current === ''))) {
+      a.classList.add('active');
+    }
+  });
+})();
 
 /* ─── Smooth scroll for anchor links ──────────────── */
 document.querySelectorAll('a[href^="#"]').forEach(link => {
@@ -360,7 +375,7 @@ document.querySelectorAll('a[href^="#"]').forEach(link => {
     e.preventDefault();
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     // Close mobile menu if open
-    document.getElementById('mobileMenu')?.classList.remove('open');
+    closeMobileMenu();
   });
 });
 
@@ -368,12 +383,33 @@ document.querySelectorAll('a[href^="#"]').forEach(link => {
 const burgerBtn = document.getElementById('burgerBtn');
 const mobileMenu = document.getElementById('mobileMenu');
 const mobileClose = document.getElementById('mobileClose');
+const navOverlay = document.getElementById('navOverlay');
+
+function openMobileMenu() {
+  mobileMenu?.classList.add('open');
+  navOverlay?.classList.add('open');
+  burgerBtn?.classList.add('is-open');
+  burgerBtn?.setAttribute('aria-expanded', 'true');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeMobileMenu() {
+  mobileMenu?.classList.remove('open');
+  navOverlay?.classList.remove('open');
+  burgerBtn?.classList.remove('is-open');
+  burgerBtn?.setAttribute('aria-expanded', 'false');
+  document.body.style.overflow = '';
+}
+
 if (burgerBtn) {
-  burgerBtn.addEventListener('click', () => mobileMenu.classList.add('open'));
-  mobileClose?.addEventListener('click', () => mobileMenu.classList.remove('open'));
-  mobileMenu
-    ?.querySelectorAll('a')
-    .forEach(a => a.addEventListener('click', () => mobileMenu.classList.remove('open')));
+  burgerBtn.addEventListener('click', openMobileMenu);
+  mobileClose?.addEventListener('click', closeMobileMenu);
+  navOverlay?.addEventListener('click', closeMobileMenu);
+  mobileMenu?.querySelectorAll('a').forEach(a => a.addEventListener('click', closeMobileMenu));
+  // Close on Escape
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && mobileMenu?.classList.contains('open')) closeMobileMenu();
+  });
 }
 
 /* ─── Modal close ──────────────────────────────────── */

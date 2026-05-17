@@ -184,6 +184,35 @@
       if (!phoneEl.value.trim()) phoneEl.value = '+7 (';
     });
 
+    // Inline real-time phone hint
+    const phoneHint = document.createElement('div');
+    phoneHint.className = 'field-inline-hint phone-realtime-hint';
+    phoneHint.style.cssText = 'font-size:0.72rem;margin-top:5px;line-height:1.5;transition:color 0.2s;';
+    phoneEl.parentNode.appendChild(phoneHint);
+
+    function updatePhoneHint() {
+      const digits = countDigits(phoneEl.value);
+      if (!phoneEl.value || phoneEl.value === '+7 (') {
+        phoneHint.textContent = '';
+        phoneEl.classList.remove('field-valid', 'field-invalid');
+        updateFillProgress();
+        return;
+      }
+      if (digits >= 11) {
+        phoneHint.style.color = 'var(--gold)';
+        phoneHint.textContent = '✓ Номер введён';
+        phoneEl.classList.add('field-valid');
+        phoneEl.classList.remove('field-invalid');
+      } else {
+        const remaining = 11 - digits;
+        phoneHint.style.color = 'var(--text-dim)';
+        phoneHint.textContent =
+          'Ещё ' + remaining + ' ' + (remaining === 1 ? 'цифра' : remaining < 5 ? 'цифры' : 'цифр');
+        phoneEl.classList.remove('field-valid', 'field-invalid');
+      }
+      updateFillProgress();
+    }
+
     phoneEl.addEventListener('input', () => {
       const selStart = phoneEl.selectionStart;
       const oldVal = phoneEl.value;
@@ -194,17 +223,23 @@
         phoneEl.setSelectionRange(selStart + diff, selStart + diff);
       } catch (_) {}
       clearFieldError('client_phone');
+      updatePhoneHint();
     });
 
     phoneEl.addEventListener('keydown', e => {
       if (e.key === 'Backspace' && phoneEl.value.length <= 4) {
         phoneEl.value = '';
         e.preventDefault();
+        updatePhoneHint();
       }
     });
 
     phoneEl.addEventListener('blur', () => {
-      if (phoneEl.value === '+7 (' || phoneEl.value === '+7') phoneEl.value = '';
+      if (phoneEl.value === '+7 (' || phoneEl.value === '+7') {
+        phoneEl.value = '';
+        phoneHint.textContent = '';
+        phoneEl.classList.remove('field-valid', 'field-invalid');
+      }
       validatePhoneField();
     });
   }
@@ -361,6 +396,7 @@
             (document.getElementById('client_telegram')?.value.trim() || '').replace(/^@/, '') || state.client_telegram;
         }
         saveDraft();
+        updateFillProgress();
       }, 600);
     }
     [...step3Fields, ...step4Fields].forEach(id => {
@@ -481,6 +517,7 @@
     renderModelChips();
     updateStep2Badge();
     saveDraft();
+    updateFillProgress();
 
     // Clear prefilled card if user manually deselects a pre-filled model
     if (state.selected_models.length === 0) {
@@ -1038,6 +1075,73 @@
     return (str.match(/\d/g) || []).length;
   }
 
+  /* ─── Field-fill progress bar (0–100%) ────────────── */
+  // Tracks how many key fields are filled across the whole form
+  (function initFillProgress() {
+    const bar = document.createElement('div');
+    bar.id = 'fieldFillBar';
+    bar.setAttribute('aria-label', 'Заполнение формы');
+    bar.setAttribute('role', 'progressbar');
+    bar.setAttribute('aria-valuemin', '0');
+    bar.setAttribute('aria-valuemax', '100');
+    bar.style.cssText = [
+      'position:fixed',
+      'bottom:0',
+      'left:0',
+      'right:0',
+      'height:3px',
+      'background:rgba(201,169,110,0.12)',
+      'z-index:9999',
+      'pointer-events:none',
+      'transition:opacity 0.4s',
+    ].join(';');
+    const fill = document.createElement('div');
+    fill.id = 'fieldFillBarInner';
+    fill.style.cssText =
+      'height:100%;width:0%;background:linear-gradient(90deg,#8b6914,var(--gold,#c9a96e));transition:width 0.4s ease;';
+    bar.appendChild(fill);
+    document.body.appendChild(bar);
+  })();
+
+  function updateFillProgress() {
+    const fill = document.getElementById('fieldFillBarInner');
+    const bar = document.getElementById('fieldFillBar');
+    if (!fill || !bar) return;
+
+    // Fields weighted by importance
+    const checks = [
+      () => !!state.event_type, // step 1
+      () => state.selected_models.length > 0, // step 2
+      () => !!state.event_date || !!document.getElementById('event_date')?.value, // step 3
+      () => !!state.location || !!document.getElementById('location')?.value,
+      () => {
+        const n = document.getElementById('client_name')?.value.trim() || state.client_name;
+        return n.length >= 2;
+      },
+      () => {
+        const p = document.getElementById('client_phone')?.value || state.client_phone;
+        return countDigits(p) >= 11;
+      },
+      () => {
+        const e = document.getElementById('client_email')?.value.trim() || state.client_email;
+        return !!e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+      },
+    ];
+
+    const filled = checks.filter(fn => {
+      try {
+        return fn();
+      } catch {
+        return false;
+      }
+    }).length;
+    const pct = Math.round((filled / checks.length) * 100);
+    fill.style.width = pct + '%';
+    bar.setAttribute('aria-valuenow', pct);
+    // Hide bar on the success screen
+    bar.style.opacity = state.step >= 6 ? '0' : '1';
+  }
+
   /* ─── Next / Prev step ───────────────────────────── */
   function nextStep() {
     clearErrors();
@@ -1239,6 +1343,7 @@
     });
     state.event_type = value;
     saveDraft();
+    updateFillProgress();
     document.querySelectorAll('#serviceOptions .field-error-msg').forEach(n => n.remove());
 
     // Auto-advance to step 2 after a short visual pause (600ms)
@@ -1560,6 +1665,12 @@
       document.getElementById(`step${state.step}`)?.classList.remove('active');
       document.getElementById('step6')?.classList.add('active');
       window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      // ─── Success animations ───────────────────────────
+      playSuccessDing();
+      launchConfetti();
+      animateSuccessBox();
+      updateFillProgress();
 
       // Auto-redirect to homepage after 10 seconds (extended from 5 to give time to interact)
       const countdownEl = document.getElementById('redirectCountdown');

@@ -271,19 +271,21 @@ img {
 
 /* ─── MOBILE MENU OVERLAY ────────────────────────── */
 .nav-overlay {
-  display: none;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
   z-index: 998;
   opacity: 0;
-  transition: opacity 0.35s ease;
+  visibility: hidden;
+  transition:
+    opacity 0.35s ease,
+    visibility 0.35s ease;
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
 .nav-overlay.open {
-  display: block;
   opacity: 1;
+  visibility: visible;
 }
 
 .nav-mobile {
