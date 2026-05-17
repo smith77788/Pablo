@@ -9225,6 +9225,24 @@ function initBot(app) {
       }
       if (data === 'adm_factory_run') {
         if (!isAdmin(chatId)) return;
+        // Show confirmation before launching cycle
+        return safeSend(
+          chatId,
+          '⚠️ Запустить цикл AI Factory?\n\nЦикл займёт 1-2 минуты. Результат придёт уведомлением.',
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '▶️ Да, запустить', callback_data: 'adm_factory_run_confirm' },
+                  { text: '❌ Отмена', callback_data: 'adm_factory' },
+                ],
+              ],
+            },
+          }
+        );
+      }
+      if (data === 'adm_factory_run_confirm') {
+        if (!isAdmin(chatId)) return;
         await safeSend(chatId, '🔄 Запускаю цикл AI Factory...\n\nРезультат придёт через 1-2 минуты.', {
           reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] },
         });
@@ -9242,7 +9260,129 @@ function initBot(app) {
         proc.unref();
         return;
       }
-
+      // ── Factory: detailed cycle report
+      if (data === 'adm_factory_report') {
+        if (!isAdmin(chatId)) return;
+        try {
+          const [lastCycle, topActions] = await Promise.all([
+            factoryDbGet('SELECT * FROM cycles ORDER BY started_at DESC LIMIT 1'),
+            factoryDbAll(
+              "SELECT action_type, channel, priority, action FROM growth_actions WHERE status='pending' ORDER BY priority DESC, created_at DESC LIMIT 10"
+            ),
+          ]);
+          if (!lastCycle) {
+            return safeSend(chatId, '📊 Нет данных о последнем цикле.\n\nЗапустите цикл Factory.', {
+              reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] },
+            });
+          }
+          const cycleTime = lastCycle.finished_at
+            ? new Date(lastCycle.finished_at).toLocaleString('ru-RU', {
+                timeZone: 'Europe/Moscow',
+                hour: '2-digit',
+                minute: '2-digit',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+              })
+            : '—';
+          const score = lastCycle.health_score ?? '—';
+          const scoreIcon = score >= 70 ? '🟢' : score >= 50 ? '🟡' : '🔴';
+          let report = '📊 Подробный отчёт AI Factory\n\n';
+          report += scoreIcon + ' Health Score: ' + score + '%\n';
+          report += '🕐 Завершён: ' + cycleTime + ' МСК\n';
+          report += '⏱ Длительность: ' + (lastCycle.duration_s || '?') + 'с\n';
+          if (lastCycle.summary) {
+            report += '\n📝 Резюме:\n' + lastCycle.summary.slice(0, 600);
+          }
+          if (topActions && topActions.length) {
+            const chIcon = { telegram: '📱', instagram: '📸', tiktok: '🎵', seo: '🔍', email: '📧', direct: '📞' };
+            report += '\n\n💡 Growth Actions (топ-' + topActions.length + '):\n';
+            report += topActions
+              .map(
+                (a, i) =>
+                  i +
+                  1 +
+                  '. ' +
+                  (chIcon[a.channel] || '•') +
+                  ' [' +
+                  a.channel +
+                  '/' +
+                  a.action_type +
+                  '] p' +
+                  a.priority +
+                  '\n   ' +
+                  (a.action || '').slice(0, 80)
+              )
+              .join('\n');
+          }
+          return safeSend(chatId, report, {
+            reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] },
+          });
+        } catch (e) {
+          console.error('[Factory] adm_factory_report:', e.message);
+          return safeSend(chatId, '❌ Ошибка получения отчёта.', {
+            reply_markup: { inline_keyboard: [[{ text: '← Factory', callback_data: 'adm_factory' }]] },
+          });
+        }
+      }
+      // ── Factory: accept top-3 growth actions from cycle notification
+      if (data === 'adm_factory_ga_accept') {
+        if (!isAdmin(chatId)) return;
+        await new Promise(resolve => {
+          const sqlite3 = require('sqlite3').verbose();
+          const fdb = new sqlite3.Database(FACTORY_DB_PATH, sqlite3.OPEN_READWRITE, err => {
+            if (err) return resolve();
+            fdb.all(
+              "SELECT id FROM growth_actions WHERE status='pending' ORDER BY priority DESC, created_at DESC LIMIT 3",
+              [],
+              (e, rows) => {
+                if (e || !rows || !rows.length) {
+                  fdb.close();
+                  return resolve();
+                }
+                const ids = rows.map(r => r.id);
+                const placeholders = ids.map(() => '?').join(',');
+                fdb.run(
+                  "UPDATE growth_actions SET status='accepted', updated_at=datetime('now') WHERE id IN (" +
+                    placeholders +
+                    ')',
+                  ids,
+                  () => {
+                    fdb.close();
+                    resolve();
+                  }
+                );
+              }
+            );
+          });
+        });
+        await bot.answerCallbackQuery(q.id, { text: '✅ Рекомендации приняты!' }).catch(() => {});
+        return safeSend(chatId, '✅ Топ-3 Growth Actions приняты в работу.', {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' },
+                { text: '← Factory', callback_data: 'adm_factory' },
+              ],
+            ],
+          },
+        });
+      }
+      // ── Factory: postpone growth actions from cycle notification
+      if (data === 'adm_factory_ga_skip') {
+        if (!isAdmin(chatId)) return;
+        await bot.answerCallbackQuery(q.id, { text: 'Отложено' }).catch(() => {});
+        return safeSend(chatId, '⏸ Рекомендации отложены. Можно вернуться в Growth Actions.', {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' },
+                { text: '← Factory', callback_data: 'adm_factory' },
+              ],
+            ],
+          },
+        });
+      }
       // ── Factory content (AI posts)
       if (data === 'adm_factory_content') {
         if (!isAdmin(chatId)) return;
@@ -11949,26 +12089,29 @@ async function showFactoryPanel(chatId) {
 
     const keyboard = [
       [
-        { text: '🔄 Запустить цикл', callback_data: 'adm_factory_run' },
+        { text: '▶️ Запустить цикл', callback_data: 'adm_factory_run' },
+        { text: '📊 Подробный отчёт', callback_data: 'adm_factory_report' },
+      ],
+      [
         { text: '💡 Growth Actions', callback_data: 'adm_factory_growth' },
+        { text: '🎯 AI Задачи', callback_data: 'adm_factory_tasks' },
       ],
       [
         { text: '🧪 Эксперименты', callback_data: 'adm_factory_exp' },
         { text: '📋 Решения CEO', callback_data: 'adm_factory_decisions' },
       ],
       [
-        { text: '🎯 AI Задачи', callback_data: 'adm_factory_tasks' },
-        { text: '🧪 A/B Тесты', callback_data: 'adm_experiments' },
-      ],
-      [
         { text: '📋 Growth Actions', callback_data: 'adm_factory_actions' },
         { text: '📢 Контент в канал', callback_data: 'adm_factory_content' },
       ],
-      [{ text: '← Меню', callback_data: 'admin_menu' }],
+      [
+        { text: '🧪 A/B Тесты', callback_data: 'adm_experiments' },
+        { text: '← Меню', callback_data: 'admin_menu' },
+      ],
     ];
     // Add detail link only for HTTPS sites (web_app requires HTTPS)
     if (SITE_URL && SITE_URL.startsWith('https://')) {
-      keyboard.splice(keyboard.length - 1, 0, [{ text: '📊 Детали', web_app: { url: adminUrl } }]);
+      keyboard.splice(keyboard.length - 1, 0, [{ text: '🌐 Открыть в браузере', web_app: { url: adminUrl } }]);
     }
 
     return safeSend(chatId, text, { reply_markup: { inline_keyboard: keyboard } });
@@ -12865,7 +13008,7 @@ async function showSearchResultsV2(chatId, page) {
     const perPage = 5;
     const filters = getSearchFilters(chatId);
 
-    const conditions = ['available=1'];
+    const conditions = ['available=1', 'COALESCE(archived,0)=0'];
     const params = [];
     if (filters.height_min != null && filters.height_max != null) {
       conditions.push('height BETWEEN ? AND ?');
@@ -12881,7 +13024,7 @@ async function showSearchResultsV2(chatId, page) {
     }
     if (filters.city) {
       conditions.push('LOWER(city) LIKE LOWER(?)');
-      params.push(filters.city);
+      params.push('%' + filters.city + '%');
     }
 
     const where = conditions.join(' AND ');
@@ -12892,12 +13035,12 @@ async function showSearchResultsV2(chatId, page) {
     if (!total) {
       return safeSend(
         chatId,
-        '🔍 *Поиск моделей*\n\nПо вашим критериям моделей не найдено\\. Попробуйте расширить фильтры\\.',
+        '🔍 *Поиск моделей*\n\nПо вашим критериям моделей не найдено\\. Попробуйте изменить фильтры\\.',
         {
           parse_mode: 'MarkdownV2',
           reply_markup: {
             inline_keyboard: [
-              [{ text: '✖️ Сбросить фильтры', callback_data: 'search_reset' }],
+              [{ text: '🔄 Сбросить фильтры', callback_data: 'srch_reset' }],
               [{ text: '← Изменить поиск', callback_data: 'cat_search' }],
               [{ text: '🏠 Меню', callback_data: 'main_menu' }],
             ],
@@ -12932,9 +13075,9 @@ async function showSearchResultsV2(chatId, page) {
     });
 
     const nav = [];
-    if (page > 0) nav.push({ text: '◀️ Пред', callback_data: 'search_page_' + (page - 1) });
+    if (page > 0) nav.push({ text: '◀️ Пред', callback_data: 'srch_page_' + (page - 1) });
     nav.push({ text: page + 1 + '/' + totalPages, callback_data: 'srch_noop' });
-    if ((page + 1) * perPage < total) nav.push({ text: 'След ▶️', callback_data: 'search_page_' + (page + 1) });
+    if ((page + 1) * perPage < total) nav.push({ text: 'След ▶️', callback_data: 'srch_page_' + (page + 1) });
 
     return safeSend(chatId, text, {
       parse_mode: 'MarkdownV2',
@@ -12944,7 +13087,7 @@ async function showSearchResultsV2(chatId, page) {
           ...(totalPages > 1 ? [nav] : []),
           [
             { text: '← Изменить поиск', callback_data: 'cat_search' },
-            { text: '✖️ Сбросить', callback_data: 'search_reset' },
+            { text: '🔄 Сбросить', callback_data: 'srch_reset' },
           ],
           [{ text: '🏠 Меню', callback_data: 'main_menu' }],
         ],
@@ -14344,3 +14487,5 @@ module.exports = {
   notifyPaymentSuccess,
   _registerNewFeatures,
 };
+
+// Age ranges — БЛОК 2.4 spec callbacks: srch_age_18-22, etc.

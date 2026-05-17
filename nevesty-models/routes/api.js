@@ -5783,8 +5783,30 @@ router.post('/admin/factory/cycle-complete', async (req, res, next) => {
     // Note: relative URLs are invalid in Telegram MarkdownV2 links — omit the link
     msg += `\n\n_Подробнее в панели: /admin/factory_`;
 
+    // Inline buttons for quick actions on the cycle notification
+    const cycleReplyMarkup = {
+      inline_keyboard: [
+        [
+          { text: '📊 Подробнее', callback_data: 'adm_factory_report' },
+          { text: '✅ Принять рекомендации', callback_data: 'adm_factory_ga_accept' },
+          { text: '❌ Отложить', callback_data: 'adm_factory_ga_skip' },
+        ],
+      ],
+    };
+
     if (botInstance?.notifyAdmin) {
-      await botInstance.notifyAdmin(msg, { parse_mode: 'MarkdownV2' });
+      await botInstance.notifyAdmin(msg, { parse_mode: 'MarkdownV2', reply_markup: cycleReplyMarkup });
+    }
+
+    // Save top-3 growth actions from this cycle to notifications table for visibility in admin panel
+    if (Array.isArray(actions) && actions.length > 0) {
+      const top3 = actions.slice(0, 3);
+      for (const action of top3) {
+        await run(
+          `INSERT INTO notifications (type, payload, status, created_at) VALUES (?, ?, 'pending', datetime('now'))`,
+          ['factory_growth', JSON.stringify({ title: 'Growth Action', message: String(action) })]
+        ).catch(() => {});
+      }
     }
 
     res.json({ ok: true, notified: !!botInstance?.notifyAdmin });
