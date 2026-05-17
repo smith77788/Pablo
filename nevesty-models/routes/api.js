@@ -607,6 +607,7 @@ router.put('/admin/me', auth, async (req, res, next) => {
     const admin = await get('SELECT * FROM admins WHERE id = ?', [req.admin.id]);
     if (new_password) {
       if (new_password.length < 6) return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+      if (!current_password) return res.status(400).json({ error: 'Укажите текущий пароль' });
       const ok = await bcrypt.compare(current_password, admin.password_hash);
       if (!ok) return res.status(400).json({ error: 'Неверный текущий пароль' });
       const hash = await bcrypt.hash(new_password, 10);

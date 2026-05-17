@@ -834,6 +834,199 @@
         font-size: 0.85rem;
       }
 
+
+      /* ─── Server health corner badge ────────────────────── */
+      .server-health-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.72rem;
+        padding: 3px 10px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        cursor: default;
+        transition: all 0.3s;
+      }
+      .server-health-badge.ok {
+        border-color: rgba(16, 185, 129, 0.4);
+        color: #10b981;
+        background: rgba(16, 185, 129, 0.08);
+      }
+      .server-health-badge.error {
+        border-color: rgba(239, 68, 68, 0.4);
+        color: #ef4444;
+        background: rgba(239, 68, 68, 0.08);
+      }
+      .server-health-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .server-health-badge.ok .server-health-dot {
+        animation: livePulse 2s infinite;
+      }
+
+      /* ─── Pending reviews alert banner ──────────────────── */
+      .pending-reviews-alert {
+        display: none;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 20px;
+        background: rgba(245, 158, 11, 0.08);
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        border-radius: 4px;
+        margin-bottom: 24px;
+        font-size: 0.84rem;
+      }
+      .pending-reviews-alert.visible {
+        display: flex;
+      }
+      .pending-reviews-alert-icon {
+        font-size: 1.3rem;
+        flex-shrink: 0;
+      }
+      .pending-reviews-alert-text {
+        flex: 1;
+        color: var(--text);
+      }
+      .pending-reviews-alert-text strong {
+        color: #f59e0b;
+      }
+      .pending-reviews-alert-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        background: rgba(245, 158, 11, 0.15);
+        border: 1px solid rgba(245, 158, 11, 0.4);
+        color: #f59e0b;
+        border-radius: 3px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: all 0.2s;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .pending-reviews-alert-btn:hover {
+        background: rgba(245, 158, 11, 0.25);
+        border-color: #f59e0b;
+      }
+
+      /* ─── Mini calendar / upcoming events ───────────────── */
+      .upcoming-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 24px;
+      }
+      .upcoming-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .upcoming-empty {
+        padding: 20px;
+        text-align: center;
+        color: var(--text-dim);
+        font-size: 0.82rem;
+      }
+      .upcoming-event-item {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 11px 20px;
+        border-top: 1px solid var(--border);
+        text-decoration: none;
+        color: var(--text);
+        transition: background 0.15s;
+        font-size: 0.82rem;
+      }
+      .upcoming-event-item:first-child {
+        border-top: none;
+      }
+      .upcoming-event-item:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .upcoming-date-badge {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 42px;
+        height: 42px;
+        border-radius: 4px;
+        background: rgba(201, 169, 110, 0.1);
+        border: 1px solid rgba(201, 169, 110, 0.25);
+        flex-shrink: 0;
+      }
+      .upcoming-date-badge.today {
+        background: rgba(201, 169, 110, 0.22);
+        border-color: rgba(201, 169, 110, 0.5);
+      }
+      .upcoming-date-day {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1;
+      }
+      .upcoming-date-mon {
+        font-size: 0.55rem;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .upcoming-event-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .upcoming-event-num {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+      }
+      .upcoming-event-client {
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .upcoming-event-type {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+      }
+      .upcoming-event-days {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .upcoming-event-days.soon {
+        color: #f59e0b;
+        font-weight: 600;
+      }
+      .upcoming-event-days.today-label {
+        color: var(--gold);
+        font-weight: 700;
+      }
+
+      /* ─── Top model month card ───────────────────────────── */
+      .kpi-card-sub {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       /* ─── Chart.js stats charts ─────────────────────────── */
       .chartjs-row {
         display: grid;
@@ -861,6 +1054,14 @@
           grid-template-columns: 1fr;
         }
       }
+      @media (max-width: 900px) {
+        .kpi-row2 {
+          grid-template-columns: repeat(2, 1fr) !important;
+        }
+        .quick-actions {
+          grid-template-columns: repeat(4, 1fr) !important;
+        }
+      }
       @media (max-width: 600px) {
         .today-stats {
           grid-template-columns: repeat(2, 1fr);
@@ -875,10 +1076,16 @@
           border-top: 1px solid var(--border);
         }
         .kpi-row2 {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, 1fr) !important;
         }
         .kpi-card-value {
           font-size: 1.5rem;
+        }
+        .quick-actions {
+          grid-template-columns: repeat(2, 1fr) !important;
+        }
+        .server-health-badge {
+          display: none;
         }
       }
     </style>
@@ -957,6 +1164,11 @@
                 <div id="notifList"><div class="notif-empty">Загрузка...</div></div>
               </div>
             </div>
+            <!-- 🌐 Server health badge -->
+            <span class="server-health-badge" id="serverHealthBadge" title="Статус сервера">
+              <span class="server-health-dot"></span>
+              <span id="serverHealthText">...</span>
+            </span>
             <button class="topbar-btn" id="refreshBtn" onclick="loadDashboard()">↺ Обновить</button>
             <a href="/admin/orders.html#new" class="topbar-btn primary">+ Заявка</a>
           </div>
@@ -973,23 +1185,51 @@
           </div>
 
           <!-- ══════════════════ QUICK ACTIONS ══════════════════ -->
-          <div class="quick-actions">
+          <div class="quick-actions" style="grid-template-columns: repeat(4, 1fr)">
             <a href="/admin/orders.html?status=new" class="qa-btn qa-btn-new">
               <span class="qa-icon">🆕</span>
               <span class="qa-count" id="qa-new-count">0</span>
               <span class="qa-label">Новые заявки</span>
             </a>
             <a href="/admin/models.html#add" class="qa-btn">
-              <span class="qa-icon">💃</span>
-              <span class="qa-label">Добавить модель</span>
+              <span class="qa-icon">➕</span>
+              <span class="qa-label">Новая модель</span>
             </a>
             <a href="/admin/broadcasts.html" class="qa-btn">
               <span class="qa-icon">📢</span>
               <span class="qa-label">Рассылка</span>
             </a>
+            <a href="/admin/clients.html" class="qa-btn">
+              <span class="qa-icon">👥</span>
+              <span class="qa-label">Клиенты</span>
+            </a>
+            <a href="/admin/analytics.html" class="qa-btn">
+              <span class="qa-icon">📊</span>
+              <span class="qa-label">Аналитика</span>
+            </a>
+            <a href="/admin/reviews.html?approved=0" class="qa-btn" id="qa-reviews-btn">
+              <span class="qa-icon">⭐</span>
+              <span class="qa-count" id="qa-reviews-count">0</span>
+              <span class="qa-label">Отзывы</span>
+            </a>
+            <a href="/admin/orders.html" class="qa-btn">
+              <span class="qa-icon">📋</span>
+              <span class="qa-label">Все заявки</span>
+            </a>
             <a href="/admin/factory.html" class="qa-btn">
               <span class="qa-icon">🤖</span>
               <span class="qa-label">AI Factory</span>
+            </a>
+          </div>
+
+          <!-- ══════════════════ PENDING REVIEWS ALERT ══════════════════ -->
+          <div class="pending-reviews-alert" id="pendingReviewsAlert">
+            <span class="pending-reviews-alert-icon">⭐</span>
+            <div class="pending-reviews-alert-text">
+              Ожидают проверки: <strong><span id="pendingReviewsAlertCount">0</span> отзывов</strong> — они не видны клиентам до одобрения
+            </div>
+            <a href="/admin/reviews.html?approved=0" class="pending-reviews-alert-btn">
+              Одобрить отзывы (<span id="pendingReviewsAlertCount2">0</span>) →
             </a>
           </div>
 
@@ -1021,7 +1261,7 @@
           </div>
 
           <!-- ══════════════════ STAT CARDS ROW 2 (Today / Active / Completed / New Clients) ══════════════════ -->
-          <div class="kpi-row2" id="kpiRow2">
+          <div class="kpi-row2" id="kpiRow2" style="grid-template-columns: repeat(3, 1fr)">
             <div class="kpi-card">
               <div class="kpi-card-label">Заявок сегодня</div>
               <div class="kpi-card-value gold" id="k_today">—</div>
@@ -1052,6 +1292,12 @@
               <div class="kpi-card-value" id="k_pending_reviews" style="color: var(--gold)">—</div>
               <div class="kpi-card-icon">⭐</div>
             </a>
+            <div class="kpi-card" title="Топ модель текущего месяца">
+              <div class="kpi-card-label">🏆 Топ модель месяца</div>
+              <div class="kpi-card-value" id="k_top_model_name" style="font-size: 1.1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">—</div>
+              <div class="kpi-card-sub" id="k_top_model_orders"></div>
+              <div class="kpi-card-icon">🏆</div>
+            </div>
           </div>
 
           <!-- ══════════════════ KPI CARDS ══════════════════ -->
@@ -1257,6 +1503,17 @@
                 <div class="chart30-tooltip" id="chart30Tooltip"></div>
               </div>
               <div class="chart30-x-labels" id="chart30XLabels"></div>
+            </div>
+          </div>
+
+          <!-- ══════════════════ MINI CALENDAR: UPCOMING EVENTS ══════════════════ -->
+          <div class="upcoming-card" id="upcomingCard">
+            <div class="upcoming-card-header">
+              <span>📅 Мероприятия — сегодня и следующие 7 дней</span>
+              <button class="btn btn-sm btn-ghost" onclick="loadUpcomingEvents()" style="font-size: 0.7rem">↺</button>
+            </div>
+            <div id="upcomingEventsList">
+              <div class="upcoming-empty">Загрузка...</div>
             </div>
           </div>
 
@@ -1487,13 +1744,36 @@
         el.classList.add('updated');
       }
 
-      /* ─── Smooth number update ───────────────────────────── */
+      /* ─── Animated number counter ───────────────────────── */
+      function animateCounter(el, from, to, duration) {
+        if (from === to) return;
+        const start = performance.now();
+        const diff = to - from;
+        function step(now) {
+          const elapsed = now - start;
+          const progress = Math.min(elapsed / duration, 1);
+          const ease = 1 - Math.pow(1 - progress, 3);
+          el.textContent = Math.round(from + diff * ease);
+          if (progress < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+      }
+
+      /* ─── Smooth number update with animated counter ────── */
       function setVal(id, val) {
         const el = document.getElementById(id);
         if (!el) return;
-        if (el.textContent !== String(val)) {
-          el.textContent = val;
-          highlight(el);
+        const current = el.textContent;
+        if (current !== String(val)) {
+          const oldNum = parseInt(current, 10);
+          const newNum = parseInt(val, 10);
+          if (!isNaN(oldNum) && !isNaN(newNum) && String(oldNum) === current && String(newNum) === String(val)) {
+            highlight(el);
+            animateCounter(el, oldNum, newNum, 600);
+          } else {
+            el.textContent = val;
+            highlight(el);
+          }
         }
       }
 
@@ -1915,8 +2195,79 @@
             const pb = document.getElementById('pendingBadge');
             if (pb) pb.textContent = cnt;
           }
+          // Pending reviews alert banner + qa button badge
+          const alertEl = document.getElementById('pendingReviewsAlert');
+          const alertCnt = document.getElementById('pendingReviewsAlertCount');
+          const alertCnt2 = document.getElementById('pendingReviewsAlertCount2');
+          const qaReviewsCount = document.getElementById('qa-reviews-count');
+          if (alertEl) {
+            if (cnt > 0) {
+              alertEl.classList.add('visible');
+              if (alertCnt) alertCnt.textContent = cnt;
+              if (alertCnt2) alertCnt2.textContent = cnt;
+              if (qaReviewsCount) { qaReviewsCount.textContent = cnt; qaReviewsCount.classList.add('visible'); }
+            } else {
+              alertEl.classList.remove('visible');
+              if (qaReviewsCount) qaReviewsCount.classList.remove('visible');
+            }
+          }
         } catch {
           /* silently skip */
+        }
+      }
+
+      /* ─── Upcoming events / mini calendar ───────────────── */
+      async function loadUpcomingEvents() {
+        const el = document.getElementById('upcomingEventsList');
+        try {
+          const data = await _admin.apiFetch('/admin/upcoming-events');
+          const events = data.events || [];
+          const topModel = data.top_model_month;
+
+          // Update top model of month KPI card
+          if (topModel) {
+            const nameEl = document.getElementById('k_top_model_name');
+            const ordersEl = document.getElementById('k_top_model_orders');
+            if (nameEl) nameEl.textContent = topModel.name || '—';
+            if (ordersEl) ordersEl.textContent = topModel.order_count + ' заявок в этом месяце';
+          }
+
+          if (!events.length) {
+            el.innerHTML = '<div class="upcoming-empty">Нет мероприятий на ближайшие 7 дней</div>';
+            return;
+          }
+
+          const today = new Date().toISOString().slice(0, 10);
+          const MONTHS_SHORT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+          const EVENT_LABELS = _admin.EVENT_LABELS || {};
+
+          el.innerHTML = events.map(ev => {
+            const evDateStr = ev.event_date ? ev.event_date.slice(0, 10) : '';
+            const evDate = new Date(evDateStr + 'T00:00:00');
+            const isToday = evDateStr === today;
+            const dayNum = evDate.getDate();
+            const monStr = MONTHS_SHORT[evDate.getMonth()] || '';
+            const nowMs = new Date().setHours(0, 0, 0, 0);
+            const evMs = evDate.getTime();
+            const diffDays = Math.round((evMs - nowMs) / 86400000);
+            const daysLabel = isToday ? 'Сегодня!' : diffDays === 1 ? 'Завтра' : ('Через ' + diffDays + ' дн.');
+            const daysClass = isToday ? 'upcoming-event-days today-label' : diffDays <= 2 ? 'upcoming-event-days soon' : 'upcoming-event-days';
+            const evTypeName = EVENT_LABELS[ev.event_type] || ev.event_type || '';
+            return '<a href="/admin/orders.html?id=' + ev.id + '" class="upcoming-event-item">' +
+              '<div class="upcoming-date-badge' + (isToday ? ' today' : '') + '">' +
+                '<div class="upcoming-date-day">' + dayNum + '</div>' +
+                '<div class="upcoming-date-mon">' + monStr + '</div>' +
+              '</div>' +
+              '<div class="upcoming-event-info">' +
+                '<div class="upcoming-event-num">' + _admin.escapeHtml(ev.order_number || '') + '</div>' +
+                '<div class="upcoming-event-client">' + _admin.escapeHtml(ev.client_name || '—') + '</div>' +
+                '<div class="upcoming-event-type">' + _admin.escapeHtml(evTypeName) + '</div>' +
+              '</div>' +
+              '<div class="' + daysClass + '">' + daysLabel + '</div>' +
+            '</a>';
+          }).join('');
+        } catch {
+          if (el) el.innerHTML = '<div class="upcoming-empty">Нет данных</div>';
         }
       }
 
@@ -2154,6 +2505,8 @@
         const dot = document.getElementById('botStatusDot');
         const label = document.getElementById('botStatusLabel');
         const uptime = document.getElementById('botStatusUptime');
+        const healthBadge = document.getElementById('serverHealthBadge');
+        const healthText = document.getElementById('serverHealthText');
         try {
           const data = await fetch('/api/health').then(r => r.json());
           const status = data.status;
@@ -2167,14 +2520,20 @@
             dot.className = 'bot-status-dot online';
             label.className = 'bot-status-label online';
             label.textContent = '✅ Бот онлайн';
+            if (healthBadge) healthBadge.className = 'server-health-badge ok';
+            if (healthText) healthText.textContent = 'Сервер OK';
           } else if (status === 'degraded') {
             dot.className = 'bot-status-dot warn';
             label.className = 'bot-status-label warn';
             label.textContent = '⚠️ Проблемы';
+            if (healthBadge) healthBadge.className = 'server-health-badge';
+            if (healthText) healthText.textContent = '⚠ Деградация';
           } else {
             dot.className = 'bot-status-dot offline';
             label.className = 'bot-status-label offline';
             label.textContent = '❌ Офлайн';
+            if (healthBadge) healthBadge.className = 'server-health-badge error';
+            if (healthText) healthText.textContent = 'Офлайн';
           }
           if (uptime) uptime.textContent = uptimeStr;
         } catch {
@@ -2183,6 +2542,8 @@
             label.className = 'bot-status-label offline';
             label.textContent = '❌ Офлайн';
           }
+          if (healthBadge) healthBadge.className = 'server-health-badge error';
+          if (healthText) healthText.textContent = 'Недоступен';
         }
       }
 
@@ -2482,6 +2843,7 @@
       loadRevenueSparkline();
       loadRecentMessages();
       loadFactoryStatus();
+      loadUpcomingEvents();
 
       // Auto-refresh every 30 seconds
       setInterval(loadDashboard, 30000);
@@ -2497,6 +2859,8 @@
       setInterval(loadBotStatus, 60000);
       setInterval(loadTodayActivity, 120000);
       setInterval(loadRecentMessages, 120000);
+      // Refresh upcoming events every 5 minutes
+      setInterval(loadUpcomingEvents, 300000);
       // Refresh Factory status every 5 minutes
       setInterval(loadFactoryStatus, 300000);
     </script>
