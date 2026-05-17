@@ -2021,14 +2021,14 @@ const TEMPLATE_CATEGORIES = {
   reminder: '⏰ Напоминания',
 };
 
-function _renderTemplate(text, vars) {
+function renderTemplate(text, vars) {
   return text
     .replace(/\{\{client_name\}\}/g, vars.client_name || '')
     .replace(/\{\{order_number\}\}/g, vars.order_number || '')
     .replace(/\{\{event_date\}\}/g, vars.event_date || '');
 }
 
-async function _showAdminTemplates(chatId) {
+async function showAdminTemplates(chatId) {
   if (!isAdmin(chatId)) return;
   const count = await get('SELECT COUNT(*) as n FROM message_templates').catch(() => ({ n: 0 }));
   const text = `📋 *Шаблоны сообщений*\n\nСохранённых шаблонов: *${count.n}*\n\nШаблоны позволяют быстро отправлять типовые сообщения клиентам с автоматической подстановкой данных заявки\\.`;
@@ -2047,7 +2047,7 @@ async function _showAdminTemplates(chatId) {
   });
 }
 
-async function _showAdminTemplateList(chatId, category = null) {
+async function showAdminTemplateList(chatId, category = null) {
   if (!isAdmin(chatId)) return;
   let templates;
   if (category) {
@@ -2103,7 +2103,7 @@ async function _showAdminTemplateList(chatId, category = null) {
   });
 }
 
-async function _showAdminTemplateCategories(chatId) {
+async function showAdminTemplateCategories(chatId) {
   if (!isAdmin(chatId)) return;
   const keyboard = Object.entries(TEMPLATE_CATEGORIES).map(([key, label]) => [
     { text: label, callback_data: `adm_tpl_cat_${key}` },
@@ -2116,7 +2116,7 @@ async function _showAdminTemplateCategories(chatId) {
 }
 
 // Show template picker for sending from a specific order card
-async function _showTemplatePicker(chatId, orderId) {
+async function showTemplatePicker(chatId, orderId) {
   if (!isAdmin(chatId)) return;
   const order = await get('SELECT * FROM orders WHERE id=?', [orderId]).catch(() => null);
   if (!order) return safeSend(chatId, RU.ORDER_NOT_FOUND);
@@ -7900,6 +7900,159 @@ function initBot(app) {
       if (data === 'adm_broadcast_history') {
         if (!isAdmin(chatId)) return;
         return showBroadcastHistory(chatId);
+      }
+
+      // ── Message Templates (БЛОК 3.7) ──────────────────────────────────────
+      if (data === 'adm_templates') {
+        if (!isAdmin(chatId)) return;
+        return showAdminTemplates(chatId);
+      }
+      if (data === 'adm_tpl_list') {
+        if (!isAdmin(chatId)) return;
+        return showAdminTemplateList(chatId);
+      }
+      if (data === 'adm_tpl_categories') {
+        if (!isAdmin(chatId)) return;
+        return showAdminTemplateCategories(chatId);
+      }
+      if (data.startsWith('adm_tpl_cat_')) {
+        if (!isAdmin(chatId)) return;
+        const tplCategory = data.replace('adm_tpl_cat_', '');
+        return showAdminTemplateList(chatId, tplCategory);
+      }
+      if (data === 'adm_tpl_create') {
+        if (!isAdmin(chatId)) return;
+        await setSession(chatId, 'template_name', {});
+        return safeSend(
+          chatId,
+          `📋 *Новый шаблон — шаг 1/3*\n\nВведите название шаблона\\.\n_Например: «Подтверждение брони»_`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_templates' }]] },
+          }
+        );
+      }
+      if (data.startsWith('adm_tpl_edit_')) {
+        if (!isAdmin(chatId)) return;
+        const tplEditId = parseInt(data.replace('adm_tpl_edit_', ''));
+        const tplEdit = await get('SELECT * FROM message_templates WHERE id=?', [tplEditId]).catch(() => null);
+        if (!tplEdit) return safeSend(chatId, '❌ Шаблон не найден\\.', { parse_mode: 'MarkdownV2' });
+        await setSession(chatId, 'template_name', { editId: tplEditId });
+        return safeSend(
+          chatId,
+          `✏️ *Редактирование шаблона*\n\nТекущее название: *${esc(tplEdit.name)}*\n\nВведите новое название:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_tpl_list' }]] },
+          }
+        );
+      }
+      if (data.startsWith('adm_tpl_del_confirm_')) {
+        if (!isAdmin(chatId)) return;
+        const tplDelId = parseInt(data.replace('adm_tpl_del_confirm_', ''));
+        await run('DELETE FROM message_templates WHERE id=?', [tplDelId]).catch(() => {});
+        await bot.answerCallbackQuery(q.id, { text: '🗑 Шаблон удалён' }).catch(() => {});
+        return showAdminTemplateList(chatId);
+      }
+      if (data.startsWith('adm_tpl_del_')) {
+        if (!isAdmin(chatId)) return;
+        const tplDelCfId = parseInt(data.replace('adm_tpl_del_', ''));
+        const tplDel = await get('SELECT * FROM message_templates WHERE id=?', [tplDelCfId]).catch(() => null);
+        if (!tplDel) return safeSend(chatId, '❌ Шаблон не найден\\.', { parse_mode: 'MarkdownV2' });
+        return safeSend(chatId, `🗑 *Удалить шаблон?*\n\n*${esc(tplDel.name)}*\n\n_Это действие нельзя отменить\\._`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '✅ Да, удалить', callback_data: `adm_tpl_del_confirm_${tplDelCfId}` },
+                { text: '❌ Отмена', callback_data: 'adm_tpl_list' },
+              ],
+            ],
+          },
+        });
+      }
+      if (data.startsWith('adm_tpl_order_send_')) {
+        if (!isAdmin(chatId)) return;
+        const afterPrefix = data.replace('adm_tpl_order_send_', '');
+        const lastUs = afterPrefix.lastIndexOf('_');
+        const tplOrderId = parseInt(afterPrefix.slice(0, lastUs));
+        const tplSendId = parseInt(afterPrefix.slice(lastUs + 1));
+        const [tplOrder, tplToSend] = await Promise.all([
+          get('SELECT * FROM orders WHERE id=?', [tplOrderId]).catch(() => null),
+          get('SELECT * FROM message_templates WHERE id=?', [tplSendId]).catch(() => null),
+        ]);
+        if (!tplOrder) return safeSend(chatId, RU.ORDER_NOT_FOUND);
+        if (!tplToSend) return safeSend(chatId, '❌ Шаблон не найден\\.', { parse_mode: 'MarkdownV2' });
+        if (!tplOrder.client_chat_id) {
+          return safeSend(chatId, '❌ У клиента нет Telegram ID — невозможно отправить\\.', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${tplOrderId}` }]] },
+          });
+        }
+        const renderedTpl = renderTemplate(tplToSend.text, {
+          client_name: tplOrder.client_name || '',
+          order_number: tplOrder.order_number || '',
+          event_date: tplOrder.event_date || '',
+        });
+        try {
+          await bot.sendMessage(tplOrder.client_chat_id, `📨 *Сообщение от агентства:*\n\n${esc(renderedTpl)}`, {
+            parse_mode: 'MarkdownV2',
+          });
+          await run('UPDATE message_templates SET use_count = use_count + 1 WHERE id=?', [tplSendId]).catch(() => {});
+          await run('INSERT INTO messages (order_id, sender_type, sender_name, content) VALUES (?,?,?,?)', [
+            tplOrderId,
+            'admin',
+            `Шаблон: ${tplToSend.name}`,
+            renderedTpl,
+          ]).catch(() => {});
+          await bot.answerCallbackQuery(q.id, { text: '✅ Шаблон отправлен клиенту' }).catch(() => {});
+          return safeSend(
+            chatId,
+            `✅ *Шаблон «${esc(tplToSend.name)}» отправлен клиенту ${esc(tplOrder.client_name)}*`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '← К заявке', callback_data: `adm_order_${tplOrderId}` }],
+                  [{ text: '📋 Шаблоны', callback_data: 'adm_templates' }],
+                ],
+              },
+            }
+          );
+        } catch {
+          return safeSend(chatId, `❌ Не удалось отправить \\(клиент мог заблокировать бота\\)\\.`, {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '← К заявке', callback_data: `adm_order_${tplOrderId}` }]] },
+          });
+        }
+      }
+      if (data.startsWith('adm_tpl_send_')) {
+        if (!isAdmin(chatId)) return;
+        const tplViewId = parseInt(data.replace('adm_tpl_send_', ''));
+        const tplView = await get('SELECT * FROM message_templates WHERE id=?', [tplViewId]).catch(() => null);
+        if (!tplView) return safeSend(chatId, '❌ Шаблон не найден\\.', { parse_mode: 'MarkdownV2' });
+        const tplCatLabel = TEMPLATE_CATEGORIES[tplView.category] || tplView.category;
+        return safeSend(
+          chatId,
+          `📤 *${esc(tplView.name)}*\n🏷 ${esc(tplCatLabel)}\n\n${esc(tplView.text)}\n\n_Чтобы отправить клиенту — откройте заявку и нажмите «📤 Написать шаблоном»\\._`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '✏️ Редактировать', callback_data: `adm_tpl_edit_${tplViewId}` },
+                  { text: '🗑 Удалить', callback_data: `adm_tpl_del_${tplViewId}` },
+                ],
+                [{ text: '← К списку', callback_data: 'adm_tpl_list' }],
+              ],
+            },
+          }
+        );
+      }
+      if (data.startsWith('adm_tpl_pick_')) {
+        if (!isAdmin(chatId)) return;
+        const pickOrderId = parseInt(data.replace('adm_tpl_pick_', ''));
+        return showTemplatePicker(chatId, pickOrderId);
       }
 
       // ── Scheduled broadcasts
