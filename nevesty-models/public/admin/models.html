@@ -1,322 +1,523 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Модели — Admin Nevesty Models</title>
-  <meta name="robots" content="noindex, nofollow">
-  <script>tailwind.config = { darkMode: 'class' }</script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-</head>
-<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
-  <!-- Topbar -->
-  <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
-    <div class="flex items-center gap-4">
-      <a href="/admin/" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-        <i class="fas fa-arrow-left"></i>
-      </a>
-      <h1 class="text-xl font-bold text-gray-900 dark:text-white">💃 Управление моделями</h1>
-      <span id="models-count" class="text-sm text-gray-500 dark:text-gray-400"></span>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <label title="Импорт моделей из CSV или JSON" style="cursor:pointer;padding:8px 12px;background:#1f2937;color:#9ca3af;border-radius:6px;font-size:0.8rem;font-weight:500;display:flex;align-items:center;gap:6px">
-        <i class="fas fa-file-import"></i> 📥 Импорт CSV
-        <input type="file" accept=".csv,.json" style="display:none" onchange="importCSV(this)">
-      </label>
-      <button onclick="exportCSV()" title="Экспорт всех активных моделей в CSV"
-        style="padding:8px 12px;background:#1f2937;color:#9ca3af;border:none;border-radius:6px;font-size:0.8rem;font-weight:500;display:flex;align-items:center;gap:6px;cursor:pointer">
-        📤 Экспорт CSV
-      </button>
-      <button onclick="openAddModal()"
-        class="flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg text-sm font-medium">
-        <i class="fas fa-plus"></i>
-        Добавить модель
-      </button>
-    </div>
-  </div>
-
-  <!-- Filters & Search -->
-  <div class="max-w-7xl mx-auto px-6 py-4">
-    <div class="flex flex-wrap gap-3 mb-4 items-center">
-      <!-- Status filter -->
-      <div class="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
-        <button onclick="setFilter('active')" id="filter-active"
-          class="px-4 py-2 text-sm font-medium bg-pink-600 text-white">Активные</button>
-        <button onclick="setFilter('archived')" id="filter-archived"
-          class="px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300">Архив</button>
-        <button onclick="setFilter('all')" id="filter-all"
-          class="px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300">Все</button>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Модели — Admin Nevesty Models</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <script>
+      tailwind.config = { darkMode: 'class' };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  </head>
+  <body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+    <!-- Topbar -->
+    <div
+      class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between sticky top-0 z-10"
+    >
+      <div class="flex items-center gap-4">
+        <a href="/admin/" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+          <i class="fas fa-arrow-left"></i>
+        </a>
+        <h1 class="text-xl font-bold text-gray-900 dark:text-white">💃 Управление моделями</h1>
+        <span id="models-count" class="text-sm text-gray-500 dark:text-gray-400"></span>
       </div>
-
-      <!-- Search -->
-      <div class="relative flex-1 min-w-48">
-        <input type="text" id="search-input" placeholder="Поиск по имени..." oninput="debounceSearch()"
-          class="w-full px-4 py-2 pr-9 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:bg-gray-800 dark:text-white">
-        <button id="search-clear-btn" onclick="clearSearch()" title="Очистить поиск"
-          class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none">×</button>
-      </div>
-
-      <!-- Sort -->
-      <select id="sort-select" onchange="loadModels()"
-        class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:bg-gray-800 dark:text-white">
-        <option value="created">По дате добавления</option>
-        <option value="name">По алфавиту</option>
-        <option value="order_count">По заказам</option>
-        <option value="reviews_count">По отзывам</option>
-        <option value="avg_rating">По рейтингу</option>
-        <option value="views">По просмотрам</option>
-      </select>
-    </div>
-
-    <!-- Bulk action bar -->
-    <div id="bulk-bar" class="hidden mb-3 flex items-center gap-3 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg flex-wrap">
-      <span id="bulk-count" class="text-sm font-semibold text-yellow-800 dark:text-yellow-300">0 выбрано</span>
-      <button onclick="bulkAction('feature')"
-        class="px-3 py-1.5 text-sm bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium flex items-center gap-1">
-        ⭐ В топ
-      </button>
-      <button onclick="bulkAction('unfeature')"
-        class="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium flex items-center gap-1">
-        ❌ Убрать из топа
-      </button>
-      <button onclick="bulkAction('enable')"
-        class="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center gap-1">
-        ✅ Включить
-      </button>
-      <button onclick="bulkAction('disable')"
-        class="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium flex items-center gap-1">
-        🚫 Отключить
-      </button>
-      <button onclick="bulkAction('archive')"
-        class="px-3 py-1.5 text-sm bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium flex items-center gap-1">
-        📦 Архив
-      </button>
-      <button onclick="clearModelSelection()"
-        class="ml-auto text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400">✕ Снять выбор</button>
-    </div>
-
-    <!-- Models Table -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
-      <table class="w-full">
-        <thead>
-          <tr class="border-b border-gray-100 dark:border-gray-700">
-            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase" style="width:44px">
-              <input type="checkbox" id="check-all-models" title="Выбрать все" class="w-4 h-4 accent-pink-600 cursor-pointer">
-            </th>
-            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Модель</th>
-            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden md:table-cell">Параметры</th>
-            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden lg:table-cell">Город</th>
-            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Статус</th>
-            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden sm:table-cell">Заказы&nbsp;|&nbsp;Рейтинг</th>
-            <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Действия</th>
-          </tr>
-        </thead>
-        <tbody id="models-tbody">
-          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Загрузка...</td></tr>
-        </tbody>
-      </table>
-
-      <!-- Pagination -->
-      <div class="px-4 py-3 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
-        <span id="pagination-info" class="text-sm text-gray-500"></span>
-        <div class="flex gap-2">
-          <button id="prev-btn" onclick="changePage(-1)" disabled
-            class="px-3 py-1 text-sm border border-gray-200 dark:border-gray-700 rounded disabled:opacity-40">← Назад</button>
-          <button id="next-btn" onclick="changePage(1)"
-            class="px-3 py-1 text-sm border border-gray-200 dark:border-gray-700 rounded disabled:opacity-40">Вперёд →</button>
-        </div>
+      <div style="display: flex; gap: 8px; align-items: center">
+        <label
+          title="Импорт моделей из CSV или JSON"
+          style="
+            cursor: pointer;
+            padding: 8px 12px;
+            background: #1f2937;
+            color: #9ca3af;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          "
+        >
+          <i class="fas fa-file-import"></i> 📥 Импорт CSV
+          <input type="file" accept=".csv,.json" style="display: none" onchange="importCSV(this)" />
+        </label>
+        <button
+          onclick="exportCSV()"
+          title="Экспорт всех активных моделей в CSV"
+          style="
+            padding: 8px 12px;
+            background: #1f2937;
+            color: #9ca3af;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+          "
+        >
+          📤 Экспорт CSV
+        </button>
+        <button
+          onclick="openAddModal()"
+          class="flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg text-sm font-medium"
+        >
+          <i class="fas fa-plus"></i>
+          Добавить модель
+        </button>
       </div>
     </div>
-  </div>
 
-  <!-- Add/Edit Modal -->
-  <div id="model-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
-    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-screen overflow-y-auto">
-      <div class="p-6 border-b border-gray-100 dark:border-gray-700">
-        <div class="flex items-center justify-between mb-2">
-          <h2 id="modal-title" class="text-lg font-bold text-gray-900 dark:text-white">Добавить модель</h2>
-          <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
-        </div>
-        <!-- Stats chips (shown only when editing an existing model) -->
-        <div id="modal-stats-chips" class="hidden flex flex-wrap gap-2 mt-2"></div>
-      </div>
-      <form id="model-form" onsubmit="saveModel(event)" class="p-6 space-y-4">
-        <input type="hidden" id="model-id">
-        <div class="grid grid-cols-2 gap-4">
-          <div class="col-span-2">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Имя *</label>
-            <input type="text" id="f-name" required placeholder="Полное имя модели"
-              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Возраст</label>
-            <input type="number" id="f-age" min="18" max="60" placeholder="25"
-              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Рост (см)</label>
-            <input type="number" id="f-height" min="150" max="200" placeholder="170"
-              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Категория</label>
-            <select id="f-category" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
-              <option value="">Не выбрана</option>
-              <option value="fashion">Fashion</option>
-              <option value="commercial">Commercial</option>
-              <option value="events">Events</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Город</label>
-            <input type="text" id="f-city" placeholder="Москва"
-              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Instagram</label>
-            <input type="text" id="f-instagram" placeholder="username (без @)"
-              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Телефон</label>
-            <input type="text" id="f-phone" placeholder="+7 999 123 45 67"
-              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
-          </div>
-          <div class="col-span-2">
-            <div class="flex items-center justify-between mb-1">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Описание (bio)</label>
-              <button type="button" id="genBioBtn" onclick="generateBio()"
-                class="text-xs px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                🤖 AI
-              </button>
-            </div>
-            <textarea id="f-bio" rows="3" placeholder="Профессиональное описание модели..."
-              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white resize-none"></textarea>
-          </div>
-          <div class="col-span-2 flex gap-4">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" id="f-available" class="rounded">
-              <span class="text-sm text-gray-700 dark:text-gray-300">Доступна для заказа</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" id="f-featured" class="rounded">
-              <span class="text-sm text-gray-700 dark:text-gray-300">В топе (⭐)</span>
-            </label>
-          </div>
-          <!-- Busy dates calendar (only shown when editing an existing model) -->
-          <div class="col-span-2" id="busyDatesGroup" style="display:none">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">📅 Зайняті дати</label>
-            <div id="busyDatesList" class="text-sm text-gray-500 dark:text-gray-400 mb-2 flex flex-wrap gap-1"></div>
-            <div class="flex gap-2">
-              <input type="date" id="newBusyDate"
-                class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white text-sm" />
-              <button type="button" onclick="addBusyDate()"
-                class="px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">
-                + Додати
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="flex gap-3 justify-end pt-4 border-t border-gray-100 dark:border-gray-700">
-          <button type="button" onclick="closeModal()"
-            class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50">Отмена</button>
-          <button type="submit"
-            class="px-6 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium">
-            Сохранить
+    <!-- Filters & Search -->
+    <div class="max-w-7xl mx-auto px-6 py-4">
+      <div class="flex flex-wrap gap-3 mb-4 items-center">
+        <!-- Status filter -->
+        <div class="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+          <button
+            onclick="setFilter('active')"
+            id="filter-active"
+            class="px-4 py-2 text-sm font-medium bg-pink-600 text-white"
+          >
+            Активные
+          </button>
+          <button
+            onclick="setFilter('top')"
+            id="filter-top"
+            class="px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+          >
+            ⭐ Топ
+          </button>
+          <button
+            onclick="setFilter('archived')"
+            id="filter-archived"
+            class="px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+          >
+            Архив
+          </button>
+          <button
+            onclick="setFilter('all')"
+            id="filter-all"
+            class="px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+          >
+            Все
           </button>
         </div>
-      </form>
+
+        <!-- Search -->
+        <div class="relative flex-1 min-w-48">
+          <input
+            type="text"
+            id="search-input"
+            placeholder="Поиск по имени..."
+            oninput="debounceSearch()"
+            class="w-full px-4 py-2 pr-9 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:bg-gray-800 dark:text-white"
+          />
+          <button
+            id="search-clear-btn"
+            onclick="clearSearch()"
+            title="Очистить поиск"
+            class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        <!-- Sort -->
+        <select
+          id="sort-select"
+          onchange="loadModels()"
+          class="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:bg-gray-800 dark:text-white"
+        >
+          <option value="created">По дате добавления</option>
+          <option value="name">По алфавиту</option>
+          <option value="order_count">По заказам</option>
+          <option value="reviews_count">По отзывам</option>
+          <option value="avg_rating">По рейтингу</option>
+          <option value="views">По просмотрам</option>
+        </select>
+      </div>
+
+      <!-- Bulk action bar -->
+      <div
+        id="bulk-bar"
+        class="hidden mb-3 flex items-center gap-3 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg flex-wrap"
+      >
+        <span id="bulk-count" class="text-sm font-semibold text-yellow-800 dark:text-yellow-300">0 выбрано</span>
+        <button
+          onclick="bulkAction('feature')"
+          class="px-3 py-1.5 text-sm bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium flex items-center gap-1"
+        >
+          ⭐ В топ
+        </button>
+        <button
+          onclick="bulkAction('unfeature')"
+          class="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium flex items-center gap-1"
+        >
+          ❌ Убрать из топа
+        </button>
+        <button
+          onclick="bulkAction('enable')"
+          class="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center gap-1"
+        >
+          ✅ Включить
+        </button>
+        <button
+          onclick="bulkAction('disable')"
+          class="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium flex items-center gap-1"
+        >
+          🚫 Отключить
+        </button>
+        <button
+          onclick="bulkAction('archive')"
+          class="px-3 py-1.5 text-sm bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium flex items-center gap-1"
+        >
+          📦 Архив
+        </button>
+        <button
+          onclick="clearModelSelection()"
+          class="ml-auto text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
+        >
+          ✕ Снять выбор
+        </button>
+      </div>
+
+      <!-- Models Table -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b border-gray-100 dark:border-gray-700">
+              <th
+                class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase"
+                style="width: 44px"
+              >
+                <input
+                  type="checkbox"
+                  id="check-all-models"
+                  title="Выбрать все"
+                  class="w-4 h-4 accent-pink-600 cursor-pointer"
+                />
+              </th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
+                Модель
+              </th>
+              <th
+                class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden md:table-cell"
+              >
+                Параметры
+              </th>
+              <th
+                class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden lg:table-cell"
+              >
+                Город
+              </th>
+              <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
+                Статус
+              </th>
+              <th
+                class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hidden sm:table-cell"
+              >
+                Заказы&nbsp;|&nbsp;Рейтинг
+              </th>
+              <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
+                Действия
+              </th>
+            </tr>
+          </thead>
+          <tbody id="models-tbody">
+            <tr>
+              <td colspan="7" class="px-4 py-8 text-center text-gray-400">Загрузка...</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Pagination -->
+        <div class="px-4 py-3 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+          <span id="pagination-info" class="text-sm text-gray-500"></span>
+          <div class="flex gap-2">
+            <button
+              id="prev-btn"
+              onclick="changePage(-1)"
+              disabled
+              class="px-3 py-1 text-sm border border-gray-200 dark:border-gray-700 rounded disabled:opacity-40"
+            >
+              ← Назад
+            </button>
+            <button
+              id="next-btn"
+              onclick="changePage(1)"
+              class="px-3 py-1 text-sm border border-gray-200 dark:border-gray-700 rounded disabled:opacity-40"
+            >
+              Вперёд →
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
 
-<script>
-const token = localStorage.getItem('admin_token');
-if (!token) window.location.href = '/admin/login.html';
-const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+    <!-- Add/Edit Modal -->
+    <div id="model-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-screen overflow-y-auto">
+        <div class="p-6 border-b border-gray-100 dark:border-gray-700">
+          <div class="flex items-center justify-between mb-2">
+            <h2 id="modal-title" class="text-lg font-bold text-gray-900 dark:text-white">Добавить модель</h2>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+          </div>
+          <!-- Stats chips (shown only when editing an existing model) -->
+          <div id="modal-stats-chips" class="hidden flex flex-wrap gap-2 mt-2"></div>
+        </div>
+        <form id="model-form" onsubmit="saveModel(event)" class="p-6 space-y-4">
+          <input type="hidden" id="model-id" />
+          <div class="grid grid-cols-2 gap-4">
+            <div class="col-span-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Имя *</label>
+              <input
+                type="text"
+                id="f-name"
+                required
+                placeholder="Полное имя модели"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Возраст</label>
+              <input
+                type="number"
+                id="f-age"
+                min="18"
+                max="60"
+                placeholder="25"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Рост (см)</label>
+              <input
+                type="number"
+                id="f-height"
+                min="150"
+                max="200"
+                placeholder="170"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Категория</label>
+              <select
+                id="f-category"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+              >
+                <option value="">Не выбрана</option>
+                <option value="fashion">Fashion</option>
+                <option value="commercial">Commercial</option>
+                <option value="events">Events</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Город</label>
+              <input
+                type="text"
+                id="f-city"
+                placeholder="Москва"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Instagram</label>
+              <input
+                type="text"
+                id="f-instagram"
+                placeholder="username (без @)"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Телефон</label>
+              <input
+                type="text"
+                id="f-phone"
+                placeholder="+7 999 123 45 67"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+            <div class="col-span-2">
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Описание (bio)</label>
+                <button
+                  type="button"
+                  id="genBioBtn"
+                  onclick="generateBio()"
+                  class="text-xs px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  🤖 AI
+                </button>
+              </div>
+              <textarea
+                id="f-bio"
+                rows="3"
+                placeholder="Профессиональное описание модели..."
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white resize-none"
+              ></textarea>
+            </div>
+            <div class="col-span-2 flex gap-4">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="f-available" class="rounded" />
+                <span class="text-sm text-gray-700 dark:text-gray-300">Доступна для заказа</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="f-featured" class="rounded" />
+                <span class="text-sm text-gray-700 dark:text-gray-300">В топе (⭐)</span>
+              </label>
+            </div>
+            <!-- Busy dates calendar (only shown when editing an existing model) -->
+            <div class="col-span-2" id="busyDatesGroup" style="display: none">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">📅 Зайняті дати</label>
+              <div id="busyDatesList" class="text-sm text-gray-500 dark:text-gray-400 mb-2 flex flex-wrap gap-1"></div>
+              <div class="flex gap-2">
+                <input
+                  type="date"
+                  id="newBusyDate"
+                  class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white text-sm"
+                />
+                <button
+                  type="button"
+                  onclick="addBusyDate()"
+                  class="px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-sm"
+                >
+                  + Додати
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="flex gap-3 justify-end pt-4 border-t border-gray-100 dark:border-gray-700">
+            <button
+              type="button"
+              onclick="closeModal()"
+              class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Отмена
+            </button>
+            <button type="submit" class="px-6 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium">
+              Сохранить
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-let currentPage = 0, currentFilter = 'active', currentSort = 'name', searchQuery = '';
-let searchTimeout;
-let selectedModelIds = new Set();
+    <script>
+      const token = localStorage.getItem('admin_token');
+      if (!token) window.location.href = '/admin/login.html';
+      const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
-function debounceSearch() {
-  clearTimeout(searchTimeout);
-  searchQuery = document.getElementById('search-input').value;
-  const clearBtn = document.getElementById('search-clear-btn');
-  if (clearBtn) {
-    if (searchQuery) clearBtn.classList.remove('hidden');
-    else clearBtn.classList.add('hidden');
-  }
-  searchTimeout = setTimeout(() => { currentPage = 0; loadModels(); }, 300);
-}
+      let currentPage = 0,
+        currentFilter = 'active',
+        currentSort = 'name',
+        searchQuery = '';
+      let searchTimeout;
+      let selectedModelIds = new Set();
 
-function clearSearch() {
-  const input = document.getElementById('search-input');
-  const clearBtn = document.getElementById('search-clear-btn');
-  input.value = '';
-  searchQuery = '';
-  if (clearBtn) clearBtn.classList.add('hidden');
-  currentPage = 0;
-  loadModels();
-  input.focus();
-}
+      function debounceSearch() {
+        clearTimeout(searchTimeout);
+        searchQuery = document.getElementById('search-input').value;
+        const clearBtn = document.getElementById('search-clear-btn');
+        if (clearBtn) {
+          if (searchQuery) clearBtn.classList.remove('hidden');
+          else clearBtn.classList.add('hidden');
+        }
+        searchTimeout = setTimeout(() => {
+          currentPage = 0;
+          loadModels();
+        }, 300);
+      }
 
-function setFilter(f) {
-  currentFilter = f;
-  currentPage = 0;
-  ['active','archived','all'].forEach(id => {
-    const btn = document.getElementById('filter-'+id);
-    if (id === f) {
-      btn.className = 'px-4 py-2 text-sm font-medium bg-pink-600 text-white';
-    } else {
-      btn.className = 'px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300';
-    }
-  });
-  loadModels();
-}
+      function clearSearch() {
+        const input = document.getElementById('search-input');
+        const clearBtn = document.getElementById('search-clear-btn');
+        input.value = '';
+        searchQuery = '';
+        if (clearBtn) clearBtn.classList.add('hidden');
+        currentPage = 0;
+        loadModels();
+        input.focus();
+      }
 
-function changePage(dir) {
-  currentPage += dir;
-  loadModels();
-}
+      function setFilter(f) {
+        currentFilter = f;
+        currentPage = 0;
+        ['active', 'top', 'archived', 'all'].forEach(id => {
+          const btn = document.getElementById('filter-' + id);
+          if (!btn) return;
+          if (id === f) {
+            btn.className = 'px-4 py-2 text-sm font-medium bg-pink-600 text-white';
+          } else {
+            btn.className = 'px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300';
+          }
+        });
+        loadModels();
+      }
 
-async function loadModels() {
-  currentSort = document.getElementById('sort-select').value;
-  const archived = currentFilter === 'archived' ? 1 : currentFilter === 'all' ? undefined : 0;
-  let url = `/api/admin/models?page=${currentPage}&sort=${currentSort}&limit=15`;
-  if (archived !== undefined) url += `&archived=${archived}`;
-  if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
+      function changePage(dir) {
+        currentPage += dir;
+        loadModels();
+      }
 
-  try {
-    const resp = await fetch(url, { headers });
-    const { models = [], total = 0 } = await resp.json();
+      async function loadModels() {
+        currentSort = document.getElementById('sort-select').value;
+        // Determine archived/featured filter params
+        let archived,
+          featuredOnly = false;
+        if (currentFilter === 'archived') {
+          archived = 1;
+        } else if (currentFilter === 'all') {
+          archived = undefined;
+        } else if (currentFilter === 'top') {
+          archived = 0;
+          featuredOnly = true;
+        } else {
+          archived = 0;
+        } // 'active'
+        let url = `/api/admin/models?page=${currentPage}&sort=${currentSort}&limit=15`;
+        if (archived !== undefined) url += `&archived=${archived}`;
+        if (featuredOnly) url += '&featured=1';
+        if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
 
-    document.getElementById('models-count').textContent = `(${total} моделей)`;
-    document.getElementById('pagination-info').textContent = `${currentPage*15+1}–${Math.min((currentPage+1)*15, total)} из ${total}`;
-    document.getElementById('prev-btn').disabled = currentPage === 0;
-    document.getElementById('next-btn').disabled = (currentPage+1)*15 >= total;
+        try {
+          const resp = await fetch(url, { headers });
+          const { models = [], total = 0 } = await resp.json();
 
-    const tbody = document.getElementById('models-tbody');
-    if (!models.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Нет моделей</td></tr>';
-      return;
-    }
+          document.getElementById('models-count').textContent = `(${total} моделей)`;
+          document.getElementById('pagination-info').textContent =
+            `${currentPage * 15 + 1}–${Math.min((currentPage + 1) * 15, total)} из ${total}`;
+          document.getElementById('prev-btn').disabled = currentPage === 0;
+          document.getElementById('next-btn').disabled = (currentPage + 1) * 15 >= total;
 
-    tbody.innerHTML = models.map(m => {
-      const photos = tryParseJSON(m.photos, []);
-      const photo = m.photo_main || photos[0] || '';
-      const checked = selectedModelIds.has(m.id) ? 'checked' : '';
-      // Combined stats cell: orders | rating
-      const ordersLabel = (m.order_count || 0) > 0
-        ? `<span class="font-semibold text-yellow-600 dark:text-yellow-400">${m.order_count}</span>`
-        : `<span class="text-gray-400">0</span>`;
-      const ratingLabel = m.reviews_count > 0
-        ? `<span class="text-gray-700 dark:text-gray-300">${Number(m.avg_rating||0).toFixed(1)}⭐</span><span class="text-gray-400 text-xs">(${m.reviews_count})</span>`
-        : `<span class="text-gray-400 text-xs">—</span>`;
-      const archivedBadge = m.archived
-        ? `<span class="ml-1 text-xs px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded font-medium">📦 архив</span>`
-        : '';
-      return `
+          const tbody = document.getElementById('models-tbody');
+          if (!models.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Нет моделей</td></tr>';
+            return;
+          }
+
+          tbody.innerHTML = models
+            .map(m => {
+              const photos = tryParseJSON(m.photos, []);
+              const photo = m.photo_main || photos[0] || '';
+              const checked = selectedModelIds.has(m.id) ? 'checked' : '';
+              // Combined stats cell: orders | rating
+              const ordersLabel =
+                (m.order_count || 0) > 0
+                  ? `<span class="font-semibold text-yellow-600 dark:text-yellow-400">${m.order_count}</span>`
+                  : `<span class="text-gray-400">0</span>`;
+              const ratingLabel =
+                m.reviews_count > 0
+                  ? `<span class="text-gray-700 dark:text-gray-300">${Number(m.avg_rating || 0).toFixed(1)}⭐</span><span class="text-gray-400 text-xs">(${m.reviews_count})</span>`
+                  : `<span class="text-gray-400 text-xs">—</span>`;
+              const archivedBadge = m.archived
+                ? `<span class="ml-1 text-xs px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded font-medium">📦 архив</span>`
+                : '';
+              return `
         <tr class="border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30${m.archived ? ' opacity-70' : ''}">
           <td class="px-4 py-3">
             <input type="checkbox" class="model-check w-4 h-4 accent-pink-600 cursor-pointer" data-id="${m.id}"
@@ -324,8 +525,11 @@ async function loadModels() {
           </td>
           <td class="px-4 py-3">
             <div class="flex items-center gap-3">
-              ${photo ? `<img src="${photo}" alt="${escHtml(m.name)}" class="w-10 h-10 rounded-lg object-cover bg-gray-100" loading="lazy">`
-                      : `<div class="w-10 h-10 rounded-lg bg-pink-100 dark:bg-pink-900 flex items-center justify-center text-pink-500 font-bold">${(m.name||'?')[0]}</div>`}
+              ${
+                photo
+                  ? `<img src="${photo}" alt="${escHtml(m.name)}" class="w-10 h-10 rounded-lg object-cover bg-gray-100" loading="lazy">`
+                  : `<div class="w-10 h-10 rounded-lg bg-pink-100 dark:bg-pink-900 flex items-center justify-center text-pink-500 font-bold">${(m.name || '?')[0]}</div>`
+              }
               <div>
                 <div class="font-medium text-gray-900 dark:text-white flex items-center gap-1">${m.featured ? '⭐ ' : ''}${escHtml(m.name)}${archivedBadge}</div>
                 <div class="text-xs text-gray-400">${m.category || '—'}</div>
@@ -333,7 +537,7 @@ async function loadModels() {
             </div>
           </td>
           <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 hidden md:table-cell">
-            ${[m.age ? m.age+'л' : null, m.height ? m.height+'см' : null].filter(Boolean).join(' / ') || '—'}
+            ${[m.age ? m.age + 'л' : null, m.height ? m.height + 'см' : null].filter(Boolean).join(' / ') || '—'}
           </td>
           <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 hidden lg:table-cell">${m.city || '—'}</td>
           <td class="px-4 py-3 text-center">
@@ -344,7 +548,7 @@ async function loadModels() {
             <div class="flex flex-col items-center gap-0.5 text-sm">
               <div class="flex items-center gap-1">${ordersLabel}<span class="text-gray-300 dark:text-gray-600 text-xs">заявок</span></div>
               <div class="flex items-center gap-1">${ratingLabel}</div>
-              ${(m.view_count||0) > 0 ? `<div class="flex items-center gap-1 text-xs text-cyan-500 opacity-80" title="Просмотров"><span>👁</span><span>${(m.view_count||0).toLocaleString('ru')}</span></div>` : ''}
+              ${(m.view_count || 0) > 0 ? `<div class="flex items-center gap-1 text-xs text-cyan-500 opacity-80" title="Просмотров"><span>👁</span><span>${(m.view_count || 0).toLocaleString('ru')}</span></div>` : ''}
             </div>
           </td>
           <td class="px-4 py-3 text-right">
@@ -365,10 +569,14 @@ async function loadModels() {
                 class="${m.archived ? 'text-teal-500 hover:text-teal-700' : 'text-gray-400 hover:text-gray-600'} text-sm px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700">
                 <i class="fas fa-${m.archived ? 'undo' : 'archive'}"></i>
               </button>
-              ${m.archived ? `<button onclick="deleteModelPermanent(${m.id})" title="Удалить навсегда"
+              ${
+                m.archived
+                  ? `<button onclick="deleteModelPermanent(${m.id})" title="Удалить навсегда"
                 class="text-red-400 hover:text-red-600 text-sm px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
                 <i class="fas fa-trash"></i>
-              </button>` : ''}
+              </button>`
+                  : ''
+              }
               <button onclick="showModelStats(${m.id})" title="Статистика"
                 class="text-purple-500 hover:text-purple-700 text-sm px-2 py-1 rounded hover:bg-purple-50 dark:hover:bg-purple-900/20">
                 📊
@@ -380,385 +588,450 @@ async function loadModels() {
             </div>
           </td>
         </tr>`;
-    }).join('');
+            })
+            .join('');
 
-    syncModelBulkBar();
-    syncCheckAllModels();
-  } catch(e) {
-    console.error(e);
-  }
-}
+          syncModelBulkBar();
+          syncCheckAllModels();
+        } catch (e) {
+          console.error(e);
+        }
+      }
 
-function tryParseJSON(str, def) { try { return JSON.parse(str||'[]'); } catch { return def; } }
-function escHtml(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+      function tryParseJSON(str, def) {
+        try {
+          return JSON.parse(str || '[]');
+        } catch {
+          return def;
+        }
+      }
+      function escHtml(s) {
+        return String(s || '').replace(
+          /[&<>"']/g,
+          c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+        );
+      }
 
-async function toggleAvailable(id, current) {
-  await fetch(`/api/admin/models/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ available: current ? 0 : 1 }) });
-  loadModels();
-}
-async function toggleFeatured(id, current) {
-  await fetch(`/api/admin/models/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ featured: current ? 0 : 1 }) });
-  loadModels();
-}
-async function archiveModel(id, archived) {
-  const msg = archived
-    ? 'Восстановить модель из архива?'
-    : 'Архивировать модель? Она будет скрыта из каталога и сохранена в архиве.';
-  if (!confirm(msg)) return;
-  const endpoint = archived ? `/api/admin/models/${id}/restore` : `/api/admin/models/${id}/archive`;
-  await fetch(endpoint, { method: 'PATCH', headers });
-  loadModels();
-}
+      async function toggleAvailable(id, current) {
+        await fetch(`/api/admin/models/${id}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ available: current ? 0 : 1 }),
+        });
+        loadModels();
+      }
+      async function toggleFeatured(id, current) {
+        await fetch(`/api/admin/models/${id}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ featured: current ? 0 : 1 }),
+        });
+        loadModels();
+      }
+      async function archiveModel(id, archived) {
+        const msg = archived
+          ? 'Восстановить модель из архива?'
+          : 'Архивировать модель? Она будет скрыта из каталога и сохранена в архиве.';
+        if (!confirm(msg)) return;
+        const endpoint = archived ? `/api/admin/models/${id}/restore` : `/api/admin/models/${id}/archive`;
+        await fetch(endpoint, { method: 'PATCH', headers });
+        loadModels();
+      }
 
-async function deleteModelPermanent(id) {
-  if (!confirm('Удалить модель навсегда? Это действие нельзя отменить.')) return;
-  if (!confirm('Подтвердите: все фото и данные модели будут удалены безвозвратно.')) return;
-  await fetch(`/api/admin/models/${id}`, { method: 'DELETE', headers });
-  loadModels();
-}
+      async function deleteModelPermanent(id) {
+        if (!confirm('Удалить модель навсегда? Это действие нельзя отменить.')) return;
+        if (!confirm('Подтвердите: все фото и данные модели будут удалены безвозвратно.')) return;
+        await fetch(`/api/admin/models/${id}`, { method: 'DELETE', headers });
+        loadModels();
+      }
 
-async function duplicateModel(id) {
-  if (!confirm('Создать копию этой модели?')) return;
-  try {
-    const resp = await fetch(`/api/admin/models/${id}/duplicate`, { method: 'POST', headers });
-    const data = await resp.json();
-    if (data.ok && data.id) {
-      const msg = `Модель скопирована (ID: ${data.id}) с суффиксом " (копия)".`;
-      if (window._admin?.toast) _admin.toast(msg, 'success');
-      else alert(msg);
-      loadModels();
-    } else {
-      const err = 'Ошибка дублирования: ' + (data.error || 'unknown');
-      if (window._admin?.toast) _admin.toast(err, 'error');
-      else alert(err);
-    }
-  } catch(e) {
-    const err = 'Ошибка: ' + e.message;
-    if (window._admin?.toast) _admin.toast(err, 'error');
-    else alert(err);
-  }
-}
+      async function duplicateModel(id) {
+        if (!confirm('Создать копию этой модели?')) return;
+        try {
+          const resp = await fetch(`/api/admin/models/${id}/duplicate`, { method: 'POST', headers });
+          const data = await resp.json();
+          if (data.ok && data.id) {
+            const msg = `Модель скопирована (ID: ${data.id}) с суффиксом " (копия)".`;
+            if (window._admin?.toast) _admin.toast(msg, 'success');
+            else alert(msg);
+            loadModels();
+          } else {
+            const err = 'Ошибка дублирования: ' + (data.error || 'unknown');
+            if (window._admin?.toast) _admin.toast(err, 'error');
+            else alert(err);
+          }
+        } catch (e) {
+          const err = 'Ошибка: ' + e.message;
+          if (window._admin?.toast) _admin.toast(err, 'error');
+          else alert(err);
+        }
+      }
 
-/* ─── Bulk selection ─────────────────────────────────── */
-function toggleModelRow(id, checked) {
-  if (checked) selectedModelIds.add(id);
-  else selectedModelIds.delete(id);
-  syncModelBulkBar();
-  syncCheckAllModels();
-}
+      /* ─── Bulk selection ─────────────────────────────────── */
+      function toggleModelRow(id, checked) {
+        if (checked) selectedModelIds.add(id);
+        else selectedModelIds.delete(id);
+        syncModelBulkBar();
+        syncCheckAllModels();
+      }
 
-function syncModelBulkBar() {
-  const n = selectedModelIds.size;
-  const bar = document.getElementById('bulk-bar');
-  if (n > 0) bar.classList.remove('hidden');
-  else bar.classList.add('hidden');
-  document.getElementById('bulk-count').textContent = `${n} выбрано`;
-}
+      function syncModelBulkBar() {
+        const n = selectedModelIds.size;
+        const bar = document.getElementById('bulk-bar');
+        if (n > 0) bar.classList.remove('hidden');
+        else bar.classList.add('hidden');
+        document.getElementById('bulk-count').textContent = `${n} выбрано`;
+      }
 
-function syncCheckAllModels() {
-  const boxes = document.querySelectorAll('.model-check');
-  const allCheck = document.getElementById('check-all-models');
-  if (!boxes.length) { allCheck.checked = false; allCheck.indeterminate = false; return; }
-  const visibleIds = [...boxes].map(b => +b.dataset.id);
-  const checkedCnt = visibleIds.filter(id => selectedModelIds.has(id)).length;
-  allCheck.indeterminate = checkedCnt > 0 && checkedCnt < visibleIds.length;
-  allCheck.checked = checkedCnt === visibleIds.length;
-}
+      function syncCheckAllModels() {
+        const boxes = document.querySelectorAll('.model-check');
+        const allCheck = document.getElementById('check-all-models');
+        if (!boxes.length) {
+          allCheck.checked = false;
+          allCheck.indeterminate = false;
+          return;
+        }
+        const visibleIds = [...boxes].map(b => +b.dataset.id);
+        const checkedCnt = visibleIds.filter(id => selectedModelIds.has(id)).length;
+        allCheck.indeterminate = checkedCnt > 0 && checkedCnt < visibleIds.length;
+        allCheck.checked = checkedCnt === visibleIds.length;
+      }
 
-function clearModelSelection() {
-  selectedModelIds.clear();
-  document.querySelectorAll('.model-check').forEach(b => b.checked = false);
-  const allCheck = document.getElementById('check-all-models');
-  allCheck.checked = false;
-  allCheck.indeterminate = false;
-  syncModelBulkBar();
-}
+      function clearModelSelection() {
+        selectedModelIds.clear();
+        document.querySelectorAll('.model-check').forEach(b => (b.checked = false));
+        const allCheck = document.getElementById('check-all-models');
+        allCheck.checked = false;
+        allCheck.indeterminate = false;
+        syncModelBulkBar();
+      }
 
-async function bulkSetFeatured(featured) {
-  return bulkAction(featured ? 'feature' : 'unfeature');
-}
+      async function bulkSetFeatured(featured) {
+        return bulkAction(featured ? 'feature' : 'unfeature');
+      }
 
-const BULK_ACTION_LABELS = {
-  'feature':   n => `Сделать ${n} моделей(и) в топ (⭐)?`,
-  'unfeature': n => `Убрать ${n} моделей(и) из топа?`,
-  'enable':    n => `Включить (активировать) ${n} моделей(и)?`,
-  'disable':   n => `Отключить ${n} моделей(и)?`,
-  'archive':   n => `Архивировать ${n} моделей(и)?`,
-  'restore':   n => `Восстановить ${n} моделей(и) из архива?`,
-};
+      const BULK_ACTION_LABELS = {
+        feature: n => `Сделать ${n} моделей(и) в топ (⭐)?`,
+        unfeature: n => `Убрать ${n} моделей(и) из топа?`,
+        enable: n => `Включить (активировать) ${n} моделей(и)?`,
+        disable: n => `Отключить ${n} моделей(и)?`,
+        archive: n => `Архивировать ${n} моделей(и)?`,
+        restore: n => `Восстановить ${n} моделей(и) из архива?`,
+      };
 
-async function bulkAction(action) {
-  const ids = [...selectedModelIds];
-  if (!ids.length) return;
-  const label = BULK_ACTION_LABELS[action];
-  const msg = label ? label(ids.length) : `Выполнить "${action}" для ${ids.length} моделей(и)?`;
-  if (!confirm(msg)) return;
-  try {
-    const resp = await fetch('/api/admin/models/bulk', {
-      method: 'PATCH', headers,
-      body: JSON.stringify({ ids, action })
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      const toast = `Готово: ${data.updated} моделей(и) обновлено`;
-      if (window._admin?.toast) _admin.toast(toast, 'success');
-      clearModelSelection();
-      loadModels();
-    } else {
-      alert('Ошибка: ' + (data.error || 'unknown'));
-    }
-  } catch(e) {
-    alert('Ошибка: ' + e.message);
-  }
-}
+      async function bulkAction(action) {
+        const ids = [...selectedModelIds];
+        if (!ids.length) return;
+        const label = BULK_ACTION_LABELS[action];
+        const msg = label ? label(ids.length) : `Выполнить "${action}" для ${ids.length} моделей(и)?`;
+        if (!confirm(msg)) return;
+        try {
+          const resp = await fetch('/api/admin/models/bulk', {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ ids, action }),
+          });
+          const data = await resp.json();
+          if (data.ok) {
+            const toast = `Готово: ${data.updated} моделей(и) обновлено`;
+            if (window._admin?.toast) _admin.toast(toast, 'success');
+            clearModelSelection();
+            loadModels();
+          } else {
+            alert('Ошибка: ' + (data.error || 'unknown'));
+          }
+        } catch (e) {
+          alert('Ошибка: ' + e.message);
+        }
+      }
 
-document.getElementById('check-all-models').addEventListener('change', function() {
-  const boxes = document.querySelectorAll('.model-check');
-  boxes.forEach(b => {
-    const id = +b.dataset.id;
-    if (this.checked) selectedModelIds.add(id);
-    else selectedModelIds.delete(id);
-    b.checked = this.checked;
-  });
-  syncModelBulkBar();
-});
+      document.getElementById('check-all-models').addEventListener('change', function () {
+        const boxes = document.querySelectorAll('.model-check');
+        boxes.forEach(b => {
+          const id = +b.dataset.id;
+          if (this.checked) selectedModelIds.add(id);
+          else selectedModelIds.delete(id);
+          b.checked = this.checked;
+        });
+        syncModelBulkBar();
+      });
 
-let _currentModelId = null;
+      let _currentModelId = null;
 
-async function editModel(id) {
-  const resp = await fetch(`/api/models/${id}`, { headers });
-  const m = await resp.json();
-  document.getElementById('modal-title').textContent = 'Редактировать модель';
-  document.getElementById('model-id').value = m.id;
-  document.getElementById('f-name').value = m.name || '';
-  document.getElementById('f-age').value = m.age || '';
-  document.getElementById('f-height').value = m.height || '';
-  document.getElementById('f-category').value = m.category || '';
-  document.getElementById('f-city').value = m.city || '';
-  document.getElementById('f-instagram').value = m.instagram || '';
-  document.getElementById('f-phone').value = m.phone || '';
-  document.getElementById('f-bio').value = m.bio || '';
-  document.getElementById('f-available').checked = !!m.available;
-  document.getElementById('f-featured').checked = !!m.featured;
-  // Show busy dates section for existing models
-  document.getElementById('busyDatesGroup').style.display = 'block';
-  loadBusyDates(m.id);
-  openModal();
-  // Load and display stats chips in modal header
-  loadModalStatsChips(m.id);
-}
+      async function editModel(id) {
+        const resp = await fetch(`/api/models/${id}`, { headers });
+        const m = await resp.json();
+        document.getElementById('modal-title').textContent = 'Редактировать модель';
+        document.getElementById('model-id').value = m.id;
+        document.getElementById('f-name').value = m.name || '';
+        document.getElementById('f-age').value = m.age || '';
+        document.getElementById('f-height').value = m.height || '';
+        document.getElementById('f-category').value = m.category || '';
+        document.getElementById('f-city').value = m.city || '';
+        document.getElementById('f-instagram').value = m.instagram || '';
+        document.getElementById('f-phone').value = m.phone || '';
+        document.getElementById('f-bio').value = m.bio || '';
+        document.getElementById('f-available').checked = !!m.available;
+        document.getElementById('f-featured').checked = !!m.featured;
+        // Show busy dates section for existing models
+        document.getElementById('busyDatesGroup').style.display = 'block';
+        loadBusyDates(m.id);
+        openModal();
+        // Load and display stats chips in modal header
+        loadModalStatsChips(m.id);
+      }
 
-async function loadModalStatsChips(modelId) {
-  const chipsEl = document.getElementById('modal-stats-chips');
-  if (!chipsEl) return;
-  chipsEl.classList.remove('hidden');
-  chipsEl.innerHTML = '<span class="text-xs text-gray-400 animate-pulse">Загрузка статистики…</span>';
-  try {
-    const resp = await fetch(`/api/admin/models/${modelId}/stats`, { headers });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const s = await resp.json();
-    const chips = [
-      { icon: '📋', label: 'Заказов', value: s.total_orders || 0, color: '#6366f1' },
-      { icon: '✅', label: 'Выполнено', value: s.completed_orders || 0, color: '#22c55e' },
-      { icon: '⭐', label: 'Рейтинг', value: s.avg_rating ? Number(s.avg_rating).toFixed(1) : '—', color: '#f59e0b' },
-      { icon: '👁', label: 'Просмотров', value: (s.view_count || 0).toLocaleString('ru'), color: '#06b6d4' },
-      { icon: '💰', label: 'Выручка', value: s.revenue_total > 0 ? Math.round(s.revenue_total).toLocaleString('ru') + ' ₽' : '—', color: '#ec4899' },
-    ];
-    chipsEl.innerHTML = chips.map(c =>
-      `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:99px;background:${c.color}20;border:1px solid ${c.color}50;font-size:0.72rem;color:${c.color};font-weight:600" title="${c.label}">
+      async function loadModalStatsChips(modelId) {
+        const chipsEl = document.getElementById('modal-stats-chips');
+        if (!chipsEl) return;
+        chipsEl.classList.remove('hidden');
+        chipsEl.innerHTML = '<span class="text-xs text-gray-400 animate-pulse">Загрузка статистики…</span>';
+        try {
+          const resp = await fetch(`/api/admin/models/${modelId}/stats`, { headers });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const s = await resp.json();
+          const chips = [
+            { icon: '📋', label: 'Заказов', value: s.total_orders || 0, color: '#6366f1' },
+            { icon: '✅', label: 'Выполнено', value: s.completed_orders || 0, color: '#22c55e' },
+            {
+              icon: '⭐',
+              label: 'Рейтинг',
+              value: s.avg_rating ? Number(s.avg_rating).toFixed(1) : '—',
+              color: '#f59e0b',
+            },
+            { icon: '👁', label: 'Просмотров', value: (s.view_count || 0).toLocaleString('ru'), color: '#06b6d4' },
+            {
+              icon: '💰',
+              label: 'Выручка',
+              value: s.revenue_total > 0 ? Math.round(s.revenue_total).toLocaleString('ru') + ' ₽' : '—',
+              color: '#ec4899',
+            },
+          ];
+          chipsEl.innerHTML = chips
+            .map(
+              c =>
+                `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:99px;background:${c.color}20;border:1px solid ${c.color}50;font-size:0.72rem;color:${c.color};font-weight:600" title="${c.label}">
         ${c.icon} ${c.value}
         <span style="font-weight:400;opacity:0.7;font-size:0.68rem">${c.label}</span>
       </span>`
-    ).join('');
-  } catch(e) {
-    chipsEl.innerHTML = '<span class="text-xs text-red-400">Ошибка загрузки статистики</span>';
-  }
-}
+            )
+            .join('');
+        } catch (e) {
+          chipsEl.innerHTML = '<span class="text-xs text-red-400">Ошибка загрузки статистики</span>';
+        }
+      }
 
-async function loadBusyDates(modelId) {
-  _currentModelId = modelId;
-  try {
-    const resp = await fetch(`/api/admin/models/${modelId}/busy-dates`, { headers });
-    const dates = await resp.json();
-    const list = document.getElementById('busyDatesList');
-    if (!list) return;
-    list.innerHTML = dates.length
-      ? dates.map(d =>
-          `<span style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;padding:2px 8px;border-radius:4px;font-size:0.75rem">` +
-          `${d.busy_date}` +
-          `<button type="button" onclick="removeBusyDate('${d.busy_date}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:0.7rem;padding:0 2px">✕</button>` +
-          `</span>`
-        ).join('')
-      : '<span style="font-size:0.8rem">Немає</span>';
-  } catch (e) { console.error('loadBusyDates', e); }
-}
+      async function loadBusyDates(modelId) {
+        _currentModelId = modelId;
+        try {
+          const resp = await fetch(`/api/admin/models/${modelId}/busy-dates`, { headers });
+          const dates = await resp.json();
+          const list = document.getElementById('busyDatesList');
+          if (!list) return;
+          list.innerHTML = dates.length
+            ? dates
+                .map(
+                  d =>
+                    `<span style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;padding:2px 8px;border-radius:4px;font-size:0.75rem">` +
+                    `${d.busy_date}` +
+                    `<button type="button" onclick="removeBusyDate('${d.busy_date}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:0.7rem;padding:0 2px">✕</button>` +
+                    `</span>`
+                )
+                .join('')
+            : '<span style="font-size:0.8rem">Немає</span>';
+        } catch (e) {
+          console.error('loadBusyDates', e);
+        }
+      }
 
-async function addBusyDate() {
-  const date = document.getElementById('newBusyDate').value;
-  if (!date || !_currentModelId) return;
-  try {
-    await fetch(`/api/admin/models/${_currentModelId}/busy-dates`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ busy_date: date }),
-    });
-    document.getElementById('newBusyDate').value = '';
-    loadBusyDates(_currentModelId);
-  } catch (e) { alert('Помилка: ' + e.message); }
-}
+      async function addBusyDate() {
+        const date = document.getElementById('newBusyDate').value;
+        if (!date || !_currentModelId) return;
+        try {
+          await fetch(`/api/admin/models/${_currentModelId}/busy-dates`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ busy_date: date }),
+          });
+          document.getElementById('newBusyDate').value = '';
+          loadBusyDates(_currentModelId);
+        } catch (e) {
+          alert('Помилка: ' + e.message);
+        }
+      }
 
-async function removeBusyDate(date) {
-  if (!_currentModelId) return;
-  try {
-    await fetch(`/api/admin/models/${_currentModelId}/busy-dates/${date}`, { method: 'DELETE', headers });
-    loadBusyDates(_currentModelId);
-  } catch (e) { console.error('removeBusyDate', e); }
-}
+      async function removeBusyDate(date) {
+        if (!_currentModelId) return;
+        try {
+          await fetch(`/api/admin/models/${_currentModelId}/busy-dates/${date}`, { method: 'DELETE', headers });
+          loadBusyDates(_currentModelId);
+        } catch (e) {
+          console.error('removeBusyDate', e);
+        }
+      }
 
-async function importCSV(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const formData = new FormData();
-  formData.append('file', file);
-  input.value = '';
-  try {
-    const token = localStorage.getItem('admin_token');
-    // Use new unified import endpoint (supports CSV and JSON)
-    const r = await fetch('/api/admin/models/import', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: formData
-    });
-    const data = await r.json();
-    if (!r.ok) { alert('Ошибка импорта: ' + (data.error || r.status)); return; }
-    const msg = `Импортировано: ${data.imported} моделей, ошибок: ${data.errors ? data.errors.length : 0}` +
-      (data.errors && data.errors.length ? `\n⚠️ Ошибки:\n${data.errors.slice(0,5).join('\n')}` : '');
-    if (window._admin?.toast) _admin.toast('✅ ' + msg, 'success');
-    else alert('✅ ' + msg);
-    loadModels();
-  } catch (e) { alert('Ошибка соединения: ' + e.message); }
-}
+      async function importCSV(input) {
+        const file = input.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('file', file);
+        input.value = '';
+        try {
+          const token = localStorage.getItem('admin_token');
+          // Use new unified import endpoint (supports CSV and JSON)
+          const r = await fetch('/api/admin/models/import', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          });
+          const data = await r.json();
+          if (!r.ok) {
+            alert('Ошибка импорта: ' + (data.error || r.status));
+            return;
+          }
+          const msg =
+            `Импортировано: ${data.imported} моделей, ошибок: ${data.errors ? data.errors.length : 0}` +
+            (data.errors && data.errors.length ? `\n⚠️ Ошибки:\n${data.errors.slice(0, 5).join('\n')}` : '');
+          if (window._admin?.toast) _admin.toast('✅ ' + msg, 'success');
+          else alert('✅ ' + msg);
+          loadModels();
+        } catch (e) {
+          alert('Ошибка соединения: ' + e.message);
+        }
+      }
 
-async function exportCSV() {
-  try {
-    const token = localStorage.getItem('admin_token');
-    const resp = await fetch('/api/admin/models/export', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!resp.ok) { alert('Ошибка экспорта: HTTP ' + resp.status); return; }
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'models.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch (e) { alert('Ошибка: ' + e.message); }
-}
+      async function exportCSV() {
+        try {
+          const token = localStorage.getItem('admin_token');
+          const resp = await fetch('/api/admin/models/export', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!resp.ok) {
+            alert('Ошибка экспорта: HTTP ' + resp.status);
+            return;
+          }
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'models.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          alert('Ошибка: ' + e.message);
+        }
+      }
 
-function openAddModal() {
-  document.getElementById('modal-title').textContent = 'Добавить модель';
-  document.getElementById('model-form').reset();
-  document.getElementById('model-id').value = '';
-  // Hide stats chips for new model
-  const chipsEl = document.getElementById('modal-stats-chips');
-  if (chipsEl) { chipsEl.classList.add('hidden'); chipsEl.innerHTML = ''; }
-  document.getElementById('busyDatesGroup').style.display = 'none';
-  openModal();
-}
-function openModal() { document.getElementById('model-modal').classList.replace('hidden','flex'); }
-function closeModal() { document.getElementById('model-modal').classList.replace('flex','hidden'); }
+      function openAddModal() {
+        document.getElementById('modal-title').textContent = 'Добавить модель';
+        document.getElementById('model-form').reset();
+        document.getElementById('model-id').value = '';
+        // Hide stats chips for new model
+        const chipsEl = document.getElementById('modal-stats-chips');
+        if (chipsEl) {
+          chipsEl.classList.add('hidden');
+          chipsEl.innerHTML = '';
+        }
+        document.getElementById('busyDatesGroup').style.display = 'none';
+        openModal();
+      }
+      function openModal() {
+        document.getElementById('model-modal').classList.replace('hidden', 'flex');
+      }
+      function closeModal() {
+        document.getElementById('model-modal').classList.replace('flex', 'hidden');
+      }
 
-async function saveModel(e) {
-  e.preventDefault();
-  const id = document.getElementById('model-id').value;
-  const body = {
-    name: document.getElementById('f-name').value,
-    age: parseInt(document.getElementById('f-age').value) || null,
-    height: parseInt(document.getElementById('f-height').value) || null,
-    category: document.getElementById('f-category').value,
-    city: document.getElementById('f-city').value,
-    instagram: document.getElementById('f-instagram').value,
-    phone: document.getElementById('f-phone').value,
-    bio: document.getElementById('f-bio').value,
-    available: document.getElementById('f-available').checked ? 1 : 0,
-    featured: document.getElementById('f-featured').checked ? 1 : 0
-  };
+      async function saveModel(e) {
+        e.preventDefault();
+        const id = document.getElementById('model-id').value;
+        const body = {
+          name: document.getElementById('f-name').value,
+          age: parseInt(document.getElementById('f-age').value) || null,
+          height: parseInt(document.getElementById('f-height').value) || null,
+          category: document.getElementById('f-category').value,
+          city: document.getElementById('f-city').value,
+          instagram: document.getElementById('f-instagram').value,
+          phone: document.getElementById('f-phone').value,
+          bio: document.getElementById('f-bio').value,
+          available: document.getElementById('f-available').checked ? 1 : 0,
+          featured: document.getElementById('f-featured').checked ? 1 : 0,
+        };
 
-  try {
-    const url = id ? `/api/admin/models/${id}/json` : '/api/admin/models/json';
-    const method = id ? 'PUT' : 'POST';
-    const resp = await fetch(url, { method, headers, body: JSON.stringify(body) });
-    if (!resp.ok) throw new Error('Save failed');
-    closeModal();
-    loadModels();
-  } catch {
-    alert('Ошибка сохранения');
-  }
-}
+        try {
+          const url = id ? `/api/admin/models/${id}/json` : '/api/admin/models/json';
+          const method = id ? 'PUT' : 'POST';
+          const resp = await fetch(url, { method, headers, body: JSON.stringify(body) });
+          if (!resp.ok) throw new Error('Save failed');
+          closeModal();
+          loadModels();
+        } catch {
+          alert('Ошибка сохранения');
+        }
+      }
 
-loadModels();
+      loadModels();
 
-/* ─── AI Bio Generator ──────────────────────────────── */
-async function generateBio() {
-  const modelId = document.getElementById('model-id').value;
-  if (!modelId) {
-    if (window._admin?.toast) _admin.toast('Сначала сохраните модель, чтобы сгенерировать описание', 'error');
-    else alert('Сначала сохраните модель, чтобы сгенерировать описание');
-    return;
-  }
-  const btn = document.getElementById('genBioBtn');
-  btn.disabled = true;
-  btn.textContent = '⏳ Генерирую…';
-  try {
-    const resp = await fetch(`/api/admin/models/${modelId}/generate-description`, {
-      method: 'POST',
-      headers,
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${resp.status}`);
-    }
-    const result = await resp.json();
-    if (result.description) {
-      document.getElementById('f-bio').value = result.description;
-      if (window._admin?.toast) _admin.toast('✅ Описание сгенерировано!', 'success');
-    }
-  } catch (e) {
-    if (window._admin?.toast) _admin.toast('Ошибка: ' + e.message, 'error');
-    else alert('Ошибка: ' + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🤖 AI';
-  }
-}
+      /* ─── AI Bio Generator ──────────────────────────────── */
+      async function generateBio() {
+        const modelId = document.getElementById('model-id').value;
+        if (!modelId) {
+          if (window._admin?.toast) _admin.toast('Сначала сохраните модель, чтобы сгенерировать описание', 'error');
+          else alert('Сначала сохраните модель, чтобы сгенерировать описание');
+          return;
+        }
+        const btn = document.getElementById('genBioBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Генерирую…';
+        try {
+          const resp = await fetch(`/api/admin/models/${modelId}/generate-description`, {
+            method: 'POST',
+            headers,
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${resp.status}`);
+          }
+          const result = await resp.json();
+          if (result.description) {
+            document.getElementById('f-bio').value = result.description;
+            if (window._admin?.toast) _admin.toast('✅ Описание сгенерировано!', 'success');
+          }
+        } catch (e) {
+          if (window._admin?.toast) _admin.toast('Ошибка: ' + e.message, 'error');
+          else alert('Ошибка: ' + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '🤖 AI';
+        }
+      }
 
-/* ─── Model Stats Modal ─────────────────────────────── */
-async function showModelStats(id) {
-  const overlay = document.getElementById('modelStatsModal');
-  const content = document.getElementById('statsModalContent');
-  const title   = document.getElementById('statsModalTitle');
-  overlay.classList.add('open');
-  content.innerHTML = '<div style="text-align:center;padding:32px;color:#9ca3af">Загрузка...</div>';
-  title.textContent = 'Статистика модели';
+      /* ─── Model Stats Modal ─────────────────────────────── */
+      async function showModelStats(id) {
+        const overlay = document.getElementById('modelStatsModal');
+        const content = document.getElementById('statsModalContent');
+        const title = document.getElementById('statsModalTitle');
+        overlay.classList.add('open');
+        content.innerHTML = '<div style="text-align:center;padding:32px;color:#9ca3af">Загрузка...</div>';
+        title.textContent = 'Статистика модели';
 
-  try {
-    const resp = await fetch(`/api/admin/analytics/model-stats/${id}`, { headers });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    const m = data.model || {};
-    const ord = data.orders || {};
-    const rev = data.reviews || {};
-    const monthly = data.monthly_orders || [];
+        try {
+          const resp = await fetch(`/api/admin/analytics/model-stats/${id}`, { headers });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const data = await resp.json();
+          const m = data.model || {};
+          const ord = data.orders || {};
+          const rev = data.reviews || {};
+          const monthly = data.monthly_orders || [];
 
-    title.textContent = `Статистика: ${escHtml(m.name || '—')}`;
+          title.textContent = `Статистика: ${escHtml(m.name || '—')}`;
 
-    // KPI cards
-    const avgBudget = ord.avg_budget ? Math.round(ord.avg_budget).toLocaleString('ru') + ' ₽' : '—';
-    const avgRating = rev.avg_rating ? Number(rev.avg_rating).toFixed(1) + ' ⭐' : '—';
-    const kpiCards = `
+          // KPI cards
+          const avgBudget = ord.avg_budget ? Math.round(ord.avg_budget).toLocaleString('ru') + ' ₽' : '—';
+          const avgRating = rev.avg_rating ? Number(rev.avg_rating).toFixed(1) + ' ⭐' : '—';
+          const kpiCards = `
       <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px">
         ${kpiCard('Всего заявок', ord.total || 0, '#6366f1')}
         ${kpiCard('Выполнено', ord.completed || 0, '#22c55e')}
@@ -766,334 +1039,483 @@ async function showModelStats(id) {
         ${kpiCard('Рейтинг', avgRating, '#ec4899')}
       </div>`;
 
-    // Monthly trend bar chart (pure CSS)
-    let trendHtml = '';
-    if (monthly.length) {
-      const maxVal = Math.max(...monthly.map(r => r.count || 0), 1);
-      trendHtml = `
+          // Monthly trend bar chart (pure CSS)
+          let trendHtml = '';
+          if (monthly.length) {
+            const maxVal = Math.max(...monthly.map(r => r.count || 0), 1);
+            trendHtml = `
         <div style="margin-bottom:20px">
           <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#9ca3af;margin-bottom:10px;letter-spacing:.05em">Тренд заявок (по месяцам)</div>
           <div style="display:flex;align-items:flex-end;gap:4px;height:80px;padding:0 2px">
-            ${monthly.map(r => {
-              const pct = Math.round(((r.count || 0) / maxVal) * 100);
-              const label = (r.month || '').slice(0, 7);
-              return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px" title="${label}: ${r.count}">
-                <div style="width:100%;background:#6366f1;border-radius:3px 3px 0 0;height:${pct}%;min-height:${r.count?3:0}px;transition:height .3s"></div>
+            ${monthly
+              .map(r => {
+                const pct = Math.round(((r.count || 0) / maxVal) * 100);
+                const label = (r.month || '').slice(0, 7);
+                return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px" title="${label}: ${r.count}">
+                <div style="width:100%;background:#6366f1;border-radius:3px 3px 0 0;height:${pct}%;min-height:${r.count ? 3 : 0}px;transition:height .3s"></div>
                 <div style="font-size:0.55rem;color:#6b7280;writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg)">${label.slice(5)}</div>
               </div>`;
-            }).join('')}
+              })
+              .join('')}
           </div>
         </div>`;
-    }
+          }
 
-    // Reviews distribution
-    let distHtml = '';
-    const dist = rev.distribution || {};
-    if (rev.total > 0) {
-      const maxDist = Math.max(...[1,2,3,4,5].map(s => dist[s] || 0), 1);
-      distHtml = `
+          // Reviews distribution
+          let distHtml = '';
+          const dist = rev.distribution || {};
+          if (rev.total > 0) {
+            const maxDist = Math.max(...[1, 2, 3, 4, 5].map(s => dist[s] || 0), 1);
+            distHtml = `
         <div style="margin-bottom:20px">
           <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#9ca3af;margin-bottom:10px;letter-spacing:.05em">Распределение отзывов (${rev.total} шт.)</div>
-          ${[5,4,3,2,1].map(star => {
-            const cnt = dist[star] || 0;
-            const pct = Math.round((cnt / maxDist) * 100);
-            return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          ${[5, 4, 3, 2, 1]
+            .map(star => {
+              const cnt = dist[star] || 0;
+              const pct = Math.round((cnt / maxDist) * 100);
+              return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
               <span style="font-size:0.75rem;color:#9ca3af;width:20px;text-align:right">${star}★</span>
               <div style="flex:1;background:#1f2937;border-radius:4px;height:12px;overflow:hidden">
                 <div style="width:${pct}%;height:100%;background:#f59e0b;border-radius:4px;transition:width .3s"></div>
               </div>
               <span style="font-size:0.75rem;color:#9ca3af;width:20px">${cnt}</span>
             </div>`;
-          }).join('')}
+            })
+            .join('')}
         </div>`;
-    }
+          }
 
-    // Link to orders
-    const linkBtn = `<a href="/admin/orders.html?model_id=${id}"
+          // Link to orders
+          const linkBtn = `<a href="/admin/orders.html?model_id=${id}"
       style="display:inline-block;padding:8px 16px;background:#ec4899;color:#fff;border-radius:6px;text-decoration:none;font-size:0.85rem;font-weight:500">
       Перейти к заявкам этой модели →
     </a>`;
 
-    content.innerHTML = kpiCards + trendHtml + distHtml + `<div style="text-align:right">${linkBtn}</div>`;
-  } catch(e) {
-    content.innerHTML = `<div style="color:#ef4444;padding:16px">Ошибка загрузки статистики: ${escHtml(e.message)}</div>`;
-  }
-}
+          content.innerHTML = kpiCards + trendHtml + distHtml + `<div style="text-align:right">${linkBtn}</div>`;
+        } catch (e) {
+          content.innerHTML = `<div style="color:#ef4444;padding:16px">Ошибка загрузки статистики: ${escHtml(e.message)}</div>`;
+        }
+      }
 
-function kpiCard(label, value, color) {
-  return `<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:16px;text-align:center">
+      function kpiCard(label, value, color) {
+        return `<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:16px;text-align:center">
     <div style="font-size:1.5rem;font-weight:700;color:${color}">${value}</div>
     <div style="font-size:0.75rem;color:#9ca3af;margin-top:4px">${label}</div>
   </div>`;
-}
+      }
 
-function closeStatsModal() {
-  document.getElementById('modelStatsModal').classList.remove('open');
-}
+      function closeStatsModal() {
+        document.getElementById('modelStatsModal').classList.remove('open');
+      }
 
-// Close on outside click
-document.addEventListener('click', function(e) {
-  const overlay = document.getElementById('modelStatsModal');
-  if (e.target === overlay) closeStatsModal();
-  const bdOverlay = document.getElementById('busyDatesModal');
-  if (e.target === bdOverlay) closeBusyDatesModal();
-});
+      // Close on outside click
+      document.addEventListener('click', function (e) {
+        const overlay = document.getElementById('modelStatsModal');
+        if (e.target === overlay) closeStatsModal();
+        const bdOverlay = document.getElementById('busyDatesModal');
+        if (e.target === bdOverlay) closeBusyDatesModal();
+      });
 
-// Close on Escape
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') {
-    closeStatsModal();
-    closeBusyDatesModal();
-  }
-});
+      // Close on Escape
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          closeStatsModal();
+          closeBusyDatesModal();
+        }
+      });
 
-/* ─── Busy Dates Modal (calendar view) ──────────────────────────────────────── */
-let _bdModalModelId = null;
-let _bdCalYear = null;
-let _bdCalMonth = null; // 0-based
-let _bdBusyDatesSet = new Set(); // YYYY-MM-DD strings for current calendar view
+      /* ─── Busy Dates Modal (calendar view) ──────────────────────────────────────── */
+      let _bdModalModelId = null;
+      let _bdCalYear = null;
+      let _bdCalMonth = null; // 0-based
+      let _bdBusyDatesSet = new Set(); // YYYY-MM-DD strings for current calendar view
 
-async function openBusyDatesModal(modelId, modelName) {
-  _bdModalModelId = modelId;
-  document.getElementById('busyDatesModalTitle').textContent = `📅 Занятость: ${modelName}`;
-  document.getElementById('busyDatesModal').classList.add('open');
-  document.getElementById('bdModalDate').value = '';
-  document.getElementById('bdModalReason').value = '';
-  const now = new Date();
-  _bdCalYear = now.getFullYear();
-  _bdCalMonth = now.getMonth();
-  await refreshBusyDatesModalCalendar();
-}
+      async function openBusyDatesModal(modelId, modelName) {
+        _bdModalModelId = modelId;
+        document.getElementById('busyDatesModalTitle').textContent = `📅 Занятость: ${modelName}`;
+        document.getElementById('busyDatesModal').classList.add('open');
+        document.getElementById('bdModalDate').value = '';
+        document.getElementById('bdModalReason').value = '';
+        const now = new Date();
+        _bdCalYear = now.getFullYear();
+        _bdCalMonth = now.getMonth();
+        await refreshBusyDatesModalCalendar();
+      }
 
-function closeBusyDatesModal() {
-  document.getElementById('busyDatesModal').classList.remove('open');
-  _bdModalModelId = null;
-}
+      function closeBusyDatesModal() {
+        document.getElementById('busyDatesModal').classList.remove('open');
+        _bdModalModelId = null;
+      }
 
-function calMonthStr(year, month0) {
-  return `${year}-${String(month0 + 1).padStart(2, '0')}`;
-}
+      function calMonthStr(year, month0) {
+        return `${year}-${String(month0 + 1).padStart(2, '0')}`;
+      }
 
-async function refreshBusyDatesModalCalendar() {
-  const calEl = document.getElementById('busyDatesCalendar');
-  calEl.innerHTML = '<div style="color:#9ca3af;font-size:0.85rem;text-align:center;padding:16px">Загрузка…</div>';
-  const monthStr = calMonthStr(_bdCalYear, _bdCalMonth);
-  try {
-    const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability?month=${monthStr}`, { headers });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    _bdBusyDatesSet = new Set(data.busy_dates || []);
-    renderBusyDatesCalendar(_bdCalYear, _bdCalMonth, _bdBusyDatesSet);
-    // Update month nav label
-    const label = new Date(_bdCalYear, _bdCalMonth, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
-    document.getElementById('bdCalMonthLabel').textContent = label.charAt(0).toUpperCase() + label.slice(1);
-  } catch (e) {
-    calEl.innerHTML = `<div style="color:#ef4444;font-size:0.85rem">Ошибка: ${escHtml(e.message)}</div>`;
-  }
-}
+      async function refreshBusyDatesModalCalendar() {
+        const calEl = document.getElementById('busyDatesCalendar');
+        calEl.innerHTML = '<div style="color:#9ca3af;font-size:0.85rem;text-align:center;padding:16px">Загрузка…</div>';
+        const monthStr = calMonthStr(_bdCalYear, _bdCalMonth);
+        try {
+          const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability?month=${monthStr}`, { headers });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const data = await resp.json();
+          _bdBusyDatesSet = new Set(data.busy_dates || []);
+          renderBusyDatesCalendar(_bdCalYear, _bdCalMonth, _bdBusyDatesSet);
+          // Update month nav label
+          const label = new Date(_bdCalYear, _bdCalMonth, 1).toLocaleDateString('ru-RU', {
+            month: 'long',
+            year: 'numeric',
+          });
+          document.getElementById('bdCalMonthLabel').textContent = label.charAt(0).toUpperCase() + label.slice(1);
+        } catch (e) {
+          calEl.innerHTML = `<div style="color:#ef4444;font-size:0.85rem">Ошибка: ${escHtml(e.message)}</div>`;
+        }
+      }
 
-function renderBusyDatesCalendar(year, month0, busySet) {
-  const calEl = document.getElementById('busyDatesCalendar');
-  const today = new Date().toISOString().slice(0, 10);
-  const firstDay = new Date(year, month0, 1);
-  const lastDate = new Date(year, month0 + 1, 0).getDate();
-  // Day of week for first day (0=Sun, make Monday first: shift)
-  let startDow = firstDay.getDay(); // 0=Sun..6=Sat
-  startDow = (startDow + 6) % 7; // Monday=0
+      function renderBusyDatesCalendar(year, month0, busySet) {
+        const calEl = document.getElementById('busyDatesCalendar');
+        const today = new Date().toISOString().slice(0, 10);
+        const firstDay = new Date(year, month0, 1);
+        const lastDate = new Date(year, month0 + 1, 0).getDate();
+        // Day of week for first day (0=Sun, make Monday first: shift)
+        let startDow = firstDay.getDay(); // 0=Sun..6=Sat
+        startDow = (startDow + 6) % 7; // Monday=0
 
-  const days = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
-  let html = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px">`;
-  for (const d of days) {
-    html += `<div style="text-align:center;font-size:0.68rem;color:#6b7280;font-weight:600;padding:3px 0">${d}</div>`;
-  }
-  html += '</div>';
-  html += `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">`;
-  // Empty cells before first day
-  for (let i = 0; i < startDow; i++) {
-    html += `<div></div>`;
-  }
-  for (let day = 1; day <= lastDate; day++) {
-    const dateStr = `${year}-${String(month0 + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const isBusy = busySet.has(dateStr);
-    const isPast = dateStr < today;
-    const isToday = dateStr === today;
-    let bg = isBusy ? (isPast ? '#7f1d1d' : '#ef4444') : (isPast ? '#111827' : '#1f2937');
-    let color = isBusy ? '#fff' : (isPast ? '#4b5563' : '#e5e7eb');
-    let border = isToday ? '1px solid #f59e0b' : '1px solid transparent';
-    let cursor = isPast ? 'default' : 'pointer';
-    let title = isBusy ? 'Нажмите — снять занятость' : 'Нажмите — отметить занятой';
-    if (isPast) title = '';
-    html += `<div onclick="${isPast ? '' : `toggleBusyDay('${dateStr}')`}"
+        const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+        let html = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px">`;
+        for (const d of days) {
+          html += `<div style="text-align:center;font-size:0.68rem;color:#6b7280;font-weight:600;padding:3px 0">${d}</div>`;
+        }
+        html += '</div>';
+        html += `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">`;
+        // Empty cells before first day
+        for (let i = 0; i < startDow; i++) {
+          html += `<div></div>`;
+        }
+        for (let day = 1; day <= lastDate; day++) {
+          const dateStr = `${year}-${String(month0 + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const isBusy = busySet.has(dateStr);
+          const isPast = dateStr < today;
+          const isToday = dateStr === today;
+          let bg = isBusy ? (isPast ? '#7f1d1d' : '#ef4444') : isPast ? '#111827' : '#1f2937';
+          let color = isBusy ? '#fff' : isPast ? '#4b5563' : '#e5e7eb';
+          let border = isToday ? '1px solid #f59e0b' : '1px solid transparent';
+          let cursor = isPast ? 'default' : 'pointer';
+          let title = isBusy ? 'Нажмите — снять занятость' : 'Нажмите — отметить занятой';
+          if (isPast) title = '';
+          html += `<div onclick="${isPast ? '' : `toggleBusyDay('${dateStr}')`}"
       style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:6px;background:${bg};color:${color};font-size:0.8rem;cursor:${cursor};border:${border};transition:background .15s;user-select:none"
       title="${title}">${day}</div>`;
-  }
-  html += '</div>';
-  // Legend
-  html += `<div style="display:flex;gap:12px;margin-top:10px;font-size:0.72rem;color:#9ca3af">
+        }
+        html += '</div>';
+        // Legend
+        html += `<div style="display:flex;gap:12px;margin-top:10px;font-size:0.72rem;color:#9ca3af">
     <span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:12px;height:12px;background:#ef4444;border-radius:3px"></span>Занята</span>
     <span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:12px;height:12px;background:#1f2937;border-radius:3px;border:1px solid #374151"></span>Свободна</span>
   </div>`;
-  calEl.innerHTML = html;
-}
+        calEl.innerHTML = html;
+      }
 
-async function toggleBusyDay(dateStr) {
-  if (!_bdModalModelId) return;
-  try {
-    if (_bdBusyDatesSet.has(dateStr)) {
-      // Remove busy
-      const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability/${dateStr}`, { method: 'DELETE', headers });
-      if (!resp.ok) { const e = await resp.json().catch(() => ({})); alert('Ошибка: ' + (e.error || resp.status)); return; }
-    } else {
-      // Mark busy
-      const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability`, {
-        method: 'POST', headers,
-        body: JSON.stringify({ date: dateStr, note: null }),
-      });
-      if (!resp.ok) { const e = await resp.json().catch(() => ({})); alert('Ошибка: ' + (e.error || resp.status)); return; }
-    }
-    await refreshBusyDatesModalCalendar();
-    // Refresh inline list in edit modal if open
-    if (_currentModelId === _bdModalModelId) loadBusyDates(_currentModelId);
-  } catch (e) { alert('Ошибка: ' + e.message); }
-}
+      async function toggleBusyDay(dateStr) {
+        if (!_bdModalModelId) return;
+        try {
+          if (_bdBusyDatesSet.has(dateStr)) {
+            // Remove busy
+            const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability/${dateStr}`, {
+              method: 'DELETE',
+              headers,
+            });
+            if (!resp.ok) {
+              const e = await resp.json().catch(() => ({}));
+              alert('Ошибка: ' + (e.error || resp.status));
+              return;
+            }
+          } else {
+            // Mark busy
+            const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ date: dateStr, note: null }),
+            });
+            if (!resp.ok) {
+              const e = await resp.json().catch(() => ({}));
+              alert('Ошибка: ' + (e.error || resp.status));
+              return;
+            }
+          }
+          await refreshBusyDatesModalCalendar();
+          // Refresh inline list in edit modal if open
+          if (_currentModelId === _bdModalModelId) loadBusyDates(_currentModelId);
+        } catch (e) {
+          alert('Ошибка: ' + e.message);
+        }
+      }
 
-async function prevCalMonth() {
-  _bdCalMonth--;
-  if (_bdCalMonth < 0) { _bdCalMonth = 11; _bdCalYear--; }
-  await refreshBusyDatesModalCalendar();
-}
+      async function prevCalMonth() {
+        _bdCalMonth--;
+        if (_bdCalMonth < 0) {
+          _bdCalMonth = 11;
+          _bdCalYear--;
+        }
+        await refreshBusyDatesModalCalendar();
+      }
 
-async function nextCalMonth() {
-  _bdCalMonth++;
-  if (_bdCalMonth > 11) { _bdCalMonth = 0; _bdCalYear++; }
-  await refreshBusyDatesModalCalendar();
-}
+      async function nextCalMonth() {
+        _bdCalMonth++;
+        if (_bdCalMonth > 11) {
+          _bdCalMonth = 0;
+          _bdCalYear++;
+        }
+        await refreshBusyDatesModalCalendar();
+      }
 
-function formatBusyDate(dateStr) {
-  if (!dateStr) return '—';
-  try {
-    const d = new Date(dateStr + 'T00:00:00');
-    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-  } catch { return dateStr; }
-}
+      function formatBusyDate(dateStr) {
+        if (!dateStr) return '—';
+        try {
+          const d = new Date(dateStr + 'T00:00:00');
+          return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+        } catch {
+          return dateStr;
+        }
+      }
 
-async function addBusyDateFromModal() {
-  const date = document.getElementById('bdModalDate').value;
-  const reason = document.getElementById('bdModalReason').value.trim();
-  if (!date || !_bdModalModelId) {
-    alert('Укажите дату');
-    return;
-  }
-  try {
-    const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ date, note: reason || null }),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      alert('Ошибка: ' + (err.error || resp.status));
-      return;
-    }
-    document.getElementById('bdModalDate').value = '';
-    document.getElementById('bdModalReason').value = '';
-    // Navigate calendar to the month of the added date
-    const [yr, mo] = date.split('-').map(Number);
-    _bdCalYear = yr; _bdCalMonth = mo - 1;
-    await refreshBusyDatesModalCalendar();
-    if (_currentModelId === _bdModalModelId) loadBusyDates(_currentModelId);
-  } catch (e) { alert('Ошибка: ' + e.message); }
-}
+      async function addBusyDateFromModal() {
+        const date = document.getElementById('bdModalDate').value;
+        const reason = document.getElementById('bdModalReason').value.trim();
+        if (!date || !_bdModalModelId) {
+          alert('Укажите дату');
+          return;
+        }
+        try {
+          const resp = await fetch(`/api/admin/models/${_bdModalModelId}/availability`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ date, note: reason || null }),
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            alert('Ошибка: ' + (err.error || resp.status));
+            return;
+          }
+          document.getElementById('bdModalDate').value = '';
+          document.getElementById('bdModalReason').value = '';
+          // Navigate calendar to the month of the added date
+          const [yr, mo] = date.split('-').map(Number);
+          _bdCalYear = yr;
+          _bdCalMonth = mo - 1;
+          await refreshBusyDatesModalCalendar();
+          if (_currentModelId === _bdModalModelId) loadBusyDates(_currentModelId);
+        } catch (e) {
+          alert('Ошибка: ' + e.message);
+        }
+      }
 
-// Legacy support — kept for inline edit modal busy dates list
-async function refreshBusyDatesModalList() {
-  await refreshBusyDatesModalCalendar();
-}
-async function deleteBusyDateFromModal(date) {
-  if (!_bdModalModelId) return;
-  try {
-    await fetch(`/api/admin/models/${_bdModalModelId}/availability/${date}`, { method: 'DELETE', headers });
-    await refreshBusyDatesModalCalendar();
-    if (_currentModelId === _bdModalModelId) loadBusyDates(_currentModelId);
-  } catch (e) { alert('Ошибка: ' + e.message); }
-}
-</script>
+      // Legacy support — kept for inline edit modal busy dates list
+      async function refreshBusyDatesModalList() {
+        await refreshBusyDatesModalCalendar();
+      }
+      async function deleteBusyDateFromModal(date) {
+        if (!_bdModalModelId) return;
+        try {
+          await fetch(`/api/admin/models/${_bdModalModelId}/availability/${date}`, { method: 'DELETE', headers });
+          await refreshBusyDatesModalCalendar();
+          if (_currentModelId === _bdModalModelId) loadBusyDates(_currentModelId);
+        } catch (e) {
+          alert('Ошибка: ' + e.message);
+        }
+      }
+    </script>
 
-<!-- Busy Dates Modal (calendar) -->
-<div id="busyDatesModal" class="stats-modal-overlay">
-  <div class="stats-modal-box">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #1f2937">
-      <div id="busyDatesModalTitle" style="font-size:1.1rem;font-weight:700;color:#f9fafb">📅 Занятость модели</div>
-      <button onclick="closeBusyDatesModal()" style="background:none;border:none;color:#9ca3af;font-size:1.2rem;cursor:pointer;padding:4px 8px;border-radius:4px" onmouseover="this.style.color='#f9fafb'" onmouseout="this.style.color='#9ca3af'">✕</button>
-    </div>
-    <!-- Month navigation -->
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <button onclick="prevCalMonth()" style="background:#1f2937;border:1px solid #374151;color:#d1d5db;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:0.9rem">←</button>
-      <span id="bdCalMonthLabel" style="color:#f9fafb;font-weight:600;font-size:0.95rem">…</span>
-      <button onclick="nextCalMonth()" style="background:#1f2937;border:1px solid #374151;color:#d1d5db;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:0.9rem">→</button>
-    </div>
-    <!-- Calendar grid -->
-    <div id="busyDatesCalendar" style="margin-bottom:16px;min-height:160px"></div>
-    <!-- Hint -->
-    <p style="font-size:0.72rem;color:#6b7280;margin-bottom:14px">Нажмите на день чтобы отметить/снять занятость. Прошедшие даты недоступны.</p>
-    <!-- Add new date by typing -->
-    <div style="border-top:1px solid #1f2937;padding-top:14px">
-      <div style="font-size:0.82rem;font-weight:600;color:#d1d5db;margin-bottom:10px">Добавить дату вручную</div>
-      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <label style="font-size:0.72rem;color:#9ca3af">Дата *</label>
-          <input type="date" id="bdModalDate"
-            style="padding:8px 10px;border:1px solid #374151;border-radius:6px;background:#111827;color:#f9fafb;font-size:0.85rem;min-width:150px">
+    <!-- Busy Dates Modal (calendar) -->
+    <div id="busyDatesModal" class="stats-modal-overlay">
+      <div class="stats-modal-box">
+        <div
+          style="
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #1f2937;
+          "
+        >
+          <div id="busyDatesModalTitle" style="font-size: 1.1rem; font-weight: 700; color: #f9fafb">
+            📅 Занятость модели
+          </div>
+          <button
+            onclick="closeBusyDatesModal()"
+            style="
+              background: none;
+              border: none;
+              color: #9ca3af;
+              font-size: 1.2rem;
+              cursor: pointer;
+              padding: 4px 8px;
+              border-radius: 4px;
+            "
+            onmouseover="this.style.color = '#f9fafb'"
+            onmouseout="this.style.color = '#9ca3af'"
+          >
+            ✕
+          </button>
         </div>
-        <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:150px">
-          <label style="font-size:0.72rem;color:#9ca3af">Причина (необязательно)</label>
-          <input type="text" id="bdModalReason" placeholder="Корпоратив, съёмка…"
-            style="padding:8px 10px;border:1px solid #374151;border-radius:6px;background:#111827;color:#f9fafb;font-size:0.85rem;width:100%">
+        <!-- Month navigation -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px">
+          <button
+            onclick="prevCalMonth()"
+            style="
+              background: #1f2937;
+              border: 1px solid #374151;
+              color: #d1d5db;
+              padding: 5px 12px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 0.9rem;
+            "
+          >
+            ←
+          </button>
+          <span id="bdCalMonthLabel" style="color: #f9fafb; font-weight: 600; font-size: 0.95rem">…</span>
+          <button
+            onclick="nextCalMonth()"
+            style="
+              background: #1f2937;
+              border: 1px solid #374151;
+              color: #d1d5db;
+              padding: 5px 12px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 0.9rem;
+            "
+          >
+            →
+          </button>
         </div>
-        <button onclick="addBusyDateFromModal()"
-          style="padding:8px 16px;background:#0d9488;color:#fff;border:none;border-radius:6px;font-size:0.85rem;cursor:pointer;white-space:nowrap;font-weight:500">
-          + Добавить
-        </button>
+        <!-- Calendar grid -->
+        <div id="busyDatesCalendar" style="margin-bottom: 16px; min-height: 160px"></div>
+        <!-- Hint -->
+        <p style="font-size: 0.72rem; color: #6b7280; margin-bottom: 14px">
+          Нажмите на день чтобы отметить/снять занятость. Прошедшие даты недоступны.
+        </p>
+        <!-- Add new date by typing -->
+        <div style="border-top: 1px solid #1f2937; padding-top: 14px">
+          <div style="font-size: 0.82rem; font-weight: 600; color: #d1d5db; margin-bottom: 10px">
+            Добавить дату вручную
+          </div>
+          <div style="display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <label style="font-size: 0.72rem; color: #9ca3af">Дата *</label>
+              <input
+                type="date"
+                id="bdModalDate"
+                style="
+                  padding: 8px 10px;
+                  border: 1px solid #374151;
+                  border-radius: 6px;
+                  background: #111827;
+                  color: #f9fafb;
+                  font-size: 0.85rem;
+                  min-width: 150px;
+                "
+              />
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 150px">
+              <label style="font-size: 0.72rem; color: #9ca3af">Причина (необязательно)</label>
+              <input
+                type="text"
+                id="bdModalReason"
+                placeholder="Корпоратив, съёмка…"
+                style="
+                  padding: 8px 10px;
+                  border: 1px solid #374151;
+                  border-radius: 6px;
+                  background: #111827;
+                  color: #f9fafb;
+                  font-size: 0.85rem;
+                  width: 100%;
+                "
+              />
+            </div>
+            <button
+              onclick="addBusyDateFromModal()"
+              style="
+                padding: 8px 16px;
+                background: #0d9488;
+                color: #fff;
+                border: none;
+                border-radius: 6px;
+                font-size: 0.85rem;
+                cursor: pointer;
+                white-space: nowrap;
+                font-weight: 500;
+              "
+            >
+              + Добавить
+            </button>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-</div>
 
-<!-- Model Stats Modal -->
-<div id="modelStatsModal" class="stats-modal-overlay">
-  <div class="stats-modal-box">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #1f2937">
-      <div id="statsModalTitle" style="font-size:1.1rem;font-weight:700;color:#f9fafb">Статистика модели</div>
-      <button onclick="closeStatsModal()" style="background:none;border:none;color:#9ca3af;font-size:1.2rem;cursor:pointer;padding:4px 8px;border-radius:4px" onmouseover="this.style.color='#f9fafb'" onmouseout="this.style.color='#9ca3af'">✕</button>
+    <!-- Model Stats Modal -->
+    <div id="modelStatsModal" class="stats-modal-overlay">
+      <div class="stats-modal-box">
+        <div
+          style="
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #1f2937;
+          "
+        >
+          <div id="statsModalTitle" style="font-size: 1.1rem; font-weight: 700; color: #f9fafb">Статистика модели</div>
+          <button
+            onclick="closeStatsModal()"
+            style="
+              background: none;
+              border: none;
+              color: #9ca3af;
+              font-size: 1.2rem;
+              cursor: pointer;
+              padding: 4px 8px;
+              border-radius: 4px;
+            "
+            onmouseover="this.style.color = '#f9fafb'"
+            onmouseout="this.style.color = '#9ca3af'"
+          >
+            ✕
+          </button>
+        </div>
+        <div id="statsModalContent">Загрузка...</div>
+      </div>
     </div>
-    <div id="statsModalContent">Загрузка...</div>
-  </div>
-</div>
 
-<style>
-.stats-modal-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.75);
-  z-index: 1000;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-}
-.stats-modal-overlay.open {
-  display: flex;
-}
-.stats-modal-box {
-  background: #030712;
-  border: 1px solid #1f2937;
-  border-radius: 12px;
-  padding: 28px;
-  width: 100%;
-  max-width: 600px;
-  max-height: 90vh;
-  overflow-y: auto;
-}
-</style>
-</body>
+    <style>
+      .stats-modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+      }
+      .stats-modal-overlay.open {
+        display: flex;
+      }
+      .stats-modal-box {
+        background: #030712;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        padding: 28px;
+        width: 100%;
+        max-width: 600px;
+        max-height: 90vh;
+        overflow-y: auto;
+      }
+    </style>
+  </body>
 </html>

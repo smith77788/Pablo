@@ -1,574 +1,643 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Factory — Nevesty Models Admin</title>
-  <meta name="robots" content="noindex, nofollow">
-  <link rel="stylesheet" href="/css/admin.css" />
-  <style>
-    /* ── Factory-specific additions ──────────────────────────── */
-    .factory-health-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      gap: 12px;
-      margin-bottom: 24px;
-    }
-    .factory-health-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .factory-health-card .fhc-label {
-      font-size: 0.72rem;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .factory-health-card .fhc-value {
-      font-size: 1.35rem;
-      font-weight: 700;
-      color: var(--text);
-      line-height: 1.2;
-    }
-    .factory-health-card .fhc-sub {
-      font-size: 0.72rem;
-      color: var(--text-muted);
-    }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Factory — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      /* ── Factory-specific additions ──────────────────────────── */
+      .factory-health-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      .factory-health-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .factory-health-card .fhc-label {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .factory-health-card .fhc-value {
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: var(--text);
+        line-height: 1.2;
+      }
+      .factory-health-card .fhc-sub {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+      }
 
-    /* Badge styles */
-    .badge {
-      display: inline-block;
-      font-size: 0.7rem;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 20px;
-      white-space: nowrap;
-    }
-    .badge-green  { background: rgba(16,185,129,0.15); color: #10b981; }
-    .badge-yellow { background: rgba(245,158,11,0.15); color: #f59e0b; }
-    .badge-red    { background: rgba(239,68,68,0.15);  color: #ef4444; }
-    .badge-blue   { background: rgba(96,165,250,0.15); color: #60a5fa; }
-    .badge-gold   { background: rgba(201,169,110,0.15); color: var(--gold); }
-    .badge-gray   { background: rgba(120,120,120,0.15); color: var(--text-muted); }
+      /* Badge styles */
+      .badge {
+        display: inline-block;
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 20px;
+        white-space: nowrap;
+      }
+      .badge-green {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+      }
+      .badge-yellow {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+      }
+      .badge-red {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+      }
+      .badge-blue {
+        background: rgba(96, 165, 250, 0.15);
+        color: #60a5fa;
+      }
+      .badge-gold {
+        background: rgba(201, 169, 110, 0.15);
+        color: var(--gold);
+      }
+      .badge-gray {
+        background: rgba(120, 120, 120, 0.15);
+        color: var(--text-muted);
+      }
 
-    /* CEO decisions */
-    .ceo-decision-item {
-      border-bottom: 1px solid var(--border);
-      padding: 14px 20px;
-    }
-    .ceo-decision-item:last-child { border-bottom: none; }
-    .ceo-decision-meta {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 8px;
-      flex-wrap: wrap;
-    }
-    .ceo-decision-rationale {
-      font-size: 0.86rem;
-      color: var(--text-muted);
-      line-height: 1.6;
-    }
-    .ceo-decision-full {
-      display: none;
-      margin-top: 8px;
-      font-size: 0.84rem;
-      color: var(--text-muted);
-      line-height: 1.7;
-      background: rgba(201,169,110,0.05);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px 14px;
-      white-space: pre-wrap;
-    }
-    .ceo-decision-toggle {
-      background: none;
-      border: none;
-      color: var(--gold);
-      cursor: pointer;
-      font-size: 0.78rem;
-      padding: 0;
-      margin-top: 4px;
-    }
+      /* CEO decisions */
+      .ceo-decision-item {
+        border-bottom: 1px solid var(--border);
+        padding: 14px 20px;
+      }
+      .ceo-decision-item:last-child {
+        border-bottom: none;
+      }
+      .ceo-decision-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+        flex-wrap: wrap;
+      }
+      .ceo-decision-rationale {
+        font-size: 0.86rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+      }
+      .ceo-decision-full {
+        display: none;
+        margin-top: 8px;
+        font-size: 0.84rem;
+        color: var(--text-muted);
+        line-height: 1.7;
+        background: rgba(201, 169, 110, 0.05);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 14px;
+        white-space: pre-wrap;
+      }
+      .ceo-decision-toggle {
+        background: none;
+        border: none;
+        color: var(--gold);
+        cursor: pointer;
+        font-size: 0.78rem;
+        padding: 0;
+        margin-top: 4px;
+      }
 
-    /* Experiments */
-    .exp-card {
-      border-bottom: 1px solid var(--border);
-      padding: 16px 20px;
-    }
-    .exp-card:last-child { border-bottom: none; }
-    .exp-title {
-      font-size: 0.92rem;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 6px;
-    }
-    .exp-hypothesis {
-      font-size: 0.82rem;
-      color: var(--text-muted);
-      line-height: 1.5;
-      margin-bottom: 10px;
-    }
-    .exp-metrics {
-      display: flex;
-      gap: 16px;
-      margin-bottom: 10px;
-      flex-wrap: wrap;
-    }
-    .exp-metric {
-      font-size: 0.8rem;
-      color: var(--text-dim);
-    }
-    .exp-metric strong { color: var(--text); }
-    .exp-progress-wrap {
-      margin-bottom: 10px;
-    }
-    .exp-progress-label {
-      font-size: 0.72rem;
-      color: var(--text-dim);
-      margin-bottom: 4px;
-    }
-    .exp-progress-bar {
-      height: 4px;
-      background: var(--border);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    .exp-progress-fill {
-      height: 100%;
-      background: var(--gold);
-      border-radius: 2px;
-      transition: width 0.4s;
-    }
-    .exp-variants {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-    .exp-variant {
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 8px 10px;
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      line-height: 1.4;
-    }
-    .exp-variant-label {
-      font-size: 0.7rem;
-      font-weight: 700;
-      color: var(--gold);
-      display: block;
-      margin-bottom: 3px;
-    }
+      /* Experiments */
+      .exp-card {
+        border-bottom: 1px solid var(--border);
+        padding: 16px 20px;
+      }
+      .exp-card:last-child {
+        border-bottom: none;
+      }
+      .exp-title {
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 6px;
+      }
+      .exp-hypothesis {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        line-height: 1.5;
+        margin-bottom: 10px;
+      }
+      .exp-metrics {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+      }
+      .exp-metric {
+        font-size: 0.8rem;
+        color: var(--text-dim);
+      }
+      .exp-metric strong {
+        color: var(--text);
+      }
+      .exp-progress-wrap {
+        margin-bottom: 10px;
+      }
+      .exp-progress-label {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+        margin-bottom: 4px;
+      }
+      .exp-progress-bar {
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .exp-progress-fill {
+        height: 100%;
+        background: var(--gold);
+        border-radius: 2px;
+        transition: width 0.4s;
+      }
+      .exp-variants {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .exp-variant {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        line-height: 1.4;
+      }
+      .exp-variant-label {
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: var(--gold);
+        display: block;
+        margin-bottom: 3px;
+      }
 
-    /* Content feed */
-    .content-item {
-      border-bottom: 1px solid var(--border);
-      padding: 14px 20px;
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-    }
-    .content-item:last-child { border-bottom: none; }
-    .content-body { flex: 1; min-width: 0; }
-    .content-meta {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 8px;
-      flex-wrap: wrap;
-    }
-    .content-text {
-      font-size: 0.86rem;
-      color: var(--text-muted);
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .content-actions {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      flex-shrink: 0;
-    }
-    .content-btn {
-      background: none;
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      padding: 5px 10px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 0.78rem;
-      white-space: nowrap;
-      transition: border-color 0.2s, color 0.2s;
-    }
-    .content-btn:hover { border-color: var(--gold); color: var(--gold); }
-    .content-btn.publish-btn {
-      border-color: rgba(201,169,110,0.4);
-      color: var(--gold);
-    }
-    .content-btn.published {
-      border-color: var(--success);
-      color: var(--success);
-      cursor: default;
-    }
+      /* Content feed */
+      .content-item {
+        border-bottom: 1px solid var(--border);
+        padding: 14px 20px;
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+      }
+      .content-item:last-child {
+        border-bottom: none;
+      }
+      .content-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .content-meta {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+        flex-wrap: wrap;
+      }
+      .content-text {
+        font-size: 0.86rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .content-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .content-btn {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 5px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.78rem;
+        white-space: nowrap;
+        transition:
+          border-color 0.2s,
+          color 0.2s;
+      }
+      .content-btn:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .content-btn.publish-btn {
+        border-color: rgba(201, 169, 110, 0.4);
+        color: var(--gold);
+      }
+      .content-btn.published {
+        border-color: var(--success);
+        color: var(--success);
+        cursor: default;
+      }
 
-    /* Toast overlay spinner */
-    .cycle-spinner {
-      display: none;
-      align-items: center;
-      gap: 10px;
-      font-size: 0.88rem;
-      color: var(--text-muted);
-      padding: 8px 0;
-    }
-    .cycle-spinner.active { display: flex; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner-icon {
-      width: 18px; height: 18px;
-      border: 2px solid var(--border);
-      border-top-color: var(--gold);
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      flex-shrink: 0;
-    }
+      /* Toast overlay spinner */
+      .cycle-spinner {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.88rem;
+        color: var(--text-muted);
+        padding: 8px 0;
+      }
+      .cycle-spinner.active {
+        display: flex;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .spinner-icon {
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--border);
+        border-top-color: var(--gold);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        flex-shrink: 0;
+      }
 
-    /* Section header action area */
-    .section-header-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-  </style>
-</head>
-<body>
-<div class="admin-layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-text">Nevesty Models</div>
-      <div class="sidebar-logo-sub">Панель управления</div>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Главная</div>
-      <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
-      <div class="nav-section-label">Бизнес</div>
-      <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки</a>
-      <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
-      <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
-      <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
-      <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
-      <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
-      <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
-      <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
-      <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
-      <div class="nav-section-label">AI</div>
-      <a href="/admin/factory.html" class="active"><span class="nav-icon">🤖</span> AI Factory</a>
-      <div class="nav-section-label">Настройки</div>
-      <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
-      <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
-      <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
-    </nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-user">
-        <div class="sidebar-avatar sidebar-user-letter">A</div>
-        <div class="sidebar-user-info">
-          <strong class="sidebar-user-name">—</strong>
-          <span class="sidebar-user-role">—</span>
+      /* Section header action area */
+      .section-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-text">Nevesty Models</div>
+          <div class="sidebar-logo-sub">Панель управления</div>
         </div>
-      </div>
-      <button class="btn-logout" data-action="logout">Выйти</button>
-    </div>
-  </aside>
+        <nav class="sidebar-nav">
+          <div class="nav-section-label">Главная</div>
+          <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+          <div class="nav-section-label">Бизнес</div>
+          <a href="/admin/orders.html"><span class="nav-icon">📋</span> Заявки</a>
+          <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+          <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+          <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+          <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+          <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+          <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
+          <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+          <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+          <div class="nav-section-label">AI</div>
+          <a href="/admin/factory.html" class="active"><span class="nav-icon">🤖</span> AI Factory</a>
+          <div class="nav-section-label">Настройки</div>
+          <a href="/admin/users.html"><span class="nav-icon">🔐</span> Администраторы</a>
+          <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+          <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+          <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <div class="sidebar-avatar sidebar-user-letter">A</div>
+            <div class="sidebar-user-info">
+              <strong class="sidebar-user-name">—</strong>
+              <span class="sidebar-user-role">—</span>
+            </div>
+          </div>
+          <button class="btn-logout" data-action="logout">Выйти</button>
+        </div>
+      </aside>
 
-  <div class="main-content">
-    <header class="topbar">
-      <div class="topbar-title">🤖 AI Factory Dashboard</div>
-      <div class="topbar-right">
-        <button onclick="loadAll()" class="topbar-btn">↺ Обновить</button>
-        <button id="run-cycle-btn" onclick="runCycle()" class="topbar-btn primary">▶ Запустить цикл</button>
-      </div>
-    </header>
+      <div class="main-content">
+        <header class="topbar">
+          <div class="topbar-title">🤖 AI Factory Dashboard</div>
+          <div class="topbar-right">
+            <button onclick="loadAll()" class="topbar-btn">↺ Обновить</button>
+            <button id="run-cycle-btn" onclick="runCycle()" class="topbar-btn primary">▶ Запустить цикл</button>
+          </div>
+        </header>
 
-    <div class="page-content">
+        <div class="page-content">
+          <!-- ── Factory Health Metrics ──────────────────────────────── -->
+          <div class="factory-health-grid" id="health-metrics-grid">
+            <div class="factory-health-card">
+              <div class="fhc-label">Последний цикл</div>
+              <div class="fhc-value" id="hm-last-cycle" style="font-size: 1rem">—</div>
+              <div class="fhc-sub" id="hm-last-cycle-sub"></div>
+            </div>
+            <div class="factory-health-card">
+              <div class="fhc-label">Всего циклов</div>
+              <div class="fhc-value gold" id="hm-total-cycles">—</div>
+              <div class="fhc-sub">запущено</div>
+            </div>
+            <div class="factory-health-card">
+              <div class="fhc-label">Активных экспериментов</div>
+              <div class="fhc-value" id="hm-active-exp">—</div>
+              <div class="fhc-sub">A/B тестов</div>
+            </div>
+            <div class="factory-health-card">
+              <div class="fhc-label">Growth actions в очереди</div>
+              <div class="fhc-value" id="hm-pending-actions">—</div>
+              <div class="fhc-sub">pending</div>
+            </div>
+            <div class="factory-health-card">
+              <div class="fhc-label">CEO Health Score</div>
+              <div class="fhc-value" id="hm-health-score">—</div>
+              <div class="fhc-sub">последний цикл</div>
+            </div>
+          </div>
 
-      <!-- ── Factory Health Metrics ──────────────────────────────── -->
-      <div class="factory-health-grid" id="health-metrics-grid">
-        <div class="factory-health-card">
-          <div class="fhc-label">Последний цикл</div>
-          <div class="fhc-value" id="hm-last-cycle" style="font-size:1rem">—</div>
-          <div class="fhc-sub" id="hm-last-cycle-sub"></div>
-        </div>
-        <div class="factory-health-card">
-          <div class="fhc-label">Всего циклов</div>
-          <div class="fhc-value gold" id="hm-total-cycles">—</div>
-          <div class="fhc-sub">запущено</div>
-        </div>
-        <div class="factory-health-card">
-          <div class="fhc-label">Активных экспериментов</div>
-          <div class="fhc-value" id="hm-active-exp">—</div>
-          <div class="fhc-sub">A/B тестов</div>
-        </div>
-        <div class="factory-health-card">
-          <div class="fhc-label">Growth actions в очереди</div>
-          <div class="fhc-value" id="hm-pending-actions">—</div>
-          <div class="fhc-sub">pending</div>
-        </div>
-        <div class="factory-health-card">
-          <div class="fhc-label">CEO Health Score</div>
-          <div class="fhc-value" id="hm-health-score">—</div>
-          <div class="fhc-sub">последний цикл</div>
-        </div>
-      </div>
+          <!-- ── Cycle spinner ──────────────────────────────────────── -->
+          <div class="cycle-spinner" id="cycle-spinner">
+            <div class="spinner-icon"></div>
+            <span>Запускаю Factory... Это займёт 1-2 минуты</span>
+          </div>
 
-      <!-- ── Cycle spinner ──────────────────────────────────────── -->
-      <div class="cycle-spinner" id="cycle-spinner">
-        <div class="spinner-icon"></div>
-        <span>Запускаю Factory... Это займёт 1-2 минуты</span>
-      </div>
+          <!-- ── CEO Weekly Memo ─────────────────────────────────────── -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header">
+              <div class="section-card-title">📊 CEO Weekly Memo</div>
+            </div>
+            <div class="section-card-body padded">
+              <div
+                id="ceo-memo"
+                style="color: var(--text-muted); white-space: pre-wrap; font-size: 0.88rem; line-height: 1.7"
+              >
+                Загрузка...
+              </div>
+            </div>
+          </div>
 
-      <!-- ── CEO Weekly Memo ─────────────────────────────────────── -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header">
-          <div class="section-card-title">📊 CEO Weekly Memo</div>
-        </div>
-        <div class="section-card-body padded">
-          <div id="ceo-memo" style="color:var(--text-muted);white-space:pre-wrap;font-size:0.88rem;line-height:1.7">
-            Загрузка...
+          <!-- ── CEO Strategic Decisions ───────────────────────────── -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header" style="display: flex; align-items: center; justify-content: space-between">
+              <div class="section-card-title">🧠 CEO Стратегические решения</div>
+              <button class="topbar-btn" onclick="loadCeoDecisions()">↺ Обновить</button>
+            </div>
+            <div id="ceo-decisions-body">
+              <div style="padding: 24px; color: var(--text-dim)">Загрузка...</div>
+            </div>
+          </div>
+
+          <!-- ── Active Experiments ─────────────────────────────────── -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header" style="display: flex; align-items: center; justify-content: space-between">
+              <div class="section-card-title">🧪 Активные A/B эксперименты</div>
+              <button class="topbar-btn" onclick="loadExperiments()">↺ Обновить</button>
+            </div>
+            <div id="experiments-body">
+              <div style="padding: 24px; color: var(--text-dim)">Загрузка...</div>
+            </div>
+          </div>
+
+          <!-- ── Generated Content Feed ─────────────────────────────── -->
+          <div class="section-card" style="margin-bottom: 24px">
+            <div class="section-card-header" style="display: flex; align-items: center; justify-content: space-between">
+              <div class="section-card-title">📝 Сгенерированный контент</div>
+              <button class="topbar-btn" onclick="loadContent()">↺ Обновить</button>
+            </div>
+            <div id="content-posts-body">
+              <div style="padding: 24px; color: var(--text-dim)">Загрузка...</div>
+            </div>
+          </div>
+
+          <!-- ── Experiment Proposal ────────────────────────────────── -->
+          <div class="section-card" style="margin-bottom: 24px" id="experiment-proposal-card" style="display: none">
+            <div class="section-card-header">
+              <div class="section-card-title">💡 Предложение А/Б эксперимента</div>
+            </div>
+            <div
+              class="section-card-body padded"
+              id="experiment-content"
+              style="font-size: 0.88rem; line-height: 1.7; color: var(--text-muted)"
+            >
+              Данные загружаются...
+            </div>
+          </div>
+
+          <!-- ── Monthly CEO Report ────────────────────────────────── -->
+          <div class="section-card" style="margin-bottom: 24px" id="monthly-report-card">
+            <div class="section-card-header">
+              <div class="section-card-title">📅 Ежемесячный отчёт CEO</div>
+            </div>
+            <div class="section-card-body padded" id="monthly-report-container">
+              <div style="color: var(--text-dim)">Загрузка...</div>
+            </div>
+          </div>
+
+          <!-- ── Factory Tasks ──────────────────────────────────────── -->
+          <div class="section-card">
+            <div
+              class="section-card-header"
+              style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px"
+            >
+              <div class="section-card-title">🎯 AI Growth Tasks</div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                <select
+                  id="filter-status"
+                  onchange="renderTasks()"
+                  class="admin-input"
+                  style="padding: 4px 10px; font-size: 0.8rem; height: auto; width: auto"
+                >
+                  <option value="">Все статусы</option>
+                  <option value="pending">Ожидают</option>
+                  <option value="done">Выполнены</option>
+                  <option value="skipped">Пропущены</option>
+                </select>
+                <select
+                  id="filter-dept"
+                  onchange="renderTasks()"
+                  class="admin-input"
+                  style="padding: 4px 10px; font-size: 0.8rem; height: auto; width: auto"
+                >
+                  <option value="">Все отделы</option>
+                  <option value="marketing">Marketing</option>
+                  <option value="product">Product</option>
+                  <option value="sales">Sales</option>
+                  <option value="customer_success">Customer Success</option>
+                  <option value="analytics">Analytics</option>
+                  <option value="operations">Operations</option>
+                </select>
+                <select
+                  id="filter-priority"
+                  onchange="renderTasks()"
+                  class="admin-input"
+                  style="padding: 4px 10px; font-size: 0.8rem; height: auto; width: auto"
+                >
+                  <option value="">Все приоритеты</option>
+                  <option value="high">Высокий</option>
+                  <option value="medium">Средний</option>
+                  <option value="low">Низкий</option>
+                </select>
+              </div>
+            </div>
+            <div id="tasks-list" class="section-card-body">
+              <div style="padding: 24px; color: var(--text-dim)">Загрузка...</div>
+            </div>
           </div>
         </div>
       </div>
-
-      <!-- ── CEO Strategic Decisions ───────────────────────────── -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between">
-          <div class="section-card-title">🧠 CEO Стратегические решения</div>
-          <button class="topbar-btn" onclick="loadCeoDecisions()">↺ Обновить</button>
-        </div>
-        <div id="ceo-decisions-body">
-          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
-        </div>
-      </div>
-
-      <!-- ── Active Experiments ─────────────────────────────────── -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between">
-          <div class="section-card-title">🧪 Активные A/B эксперименты</div>
-          <button class="topbar-btn" onclick="loadExperiments()">↺ Обновить</button>
-        </div>
-        <div id="experiments-body">
-          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
-        </div>
-      </div>
-
-      <!-- ── Generated Content Feed ─────────────────────────────── -->
-      <div class="section-card" style="margin-bottom:24px">
-        <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between">
-          <div class="section-card-title">📝 Сгенерированный контент</div>
-          <button class="topbar-btn" onclick="loadContent()">↺ Обновить</button>
-        </div>
-        <div id="content-posts-body">
-          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
-        </div>
-      </div>
-
-      <!-- ── Experiment Proposal ────────────────────────────────── -->
-      <div class="section-card" style="margin-bottom:24px" id="experiment-proposal-card" style="display:none">
-        <div class="section-card-header">
-          <div class="section-card-title">💡 Предложение А/Б эксперимента</div>
-        </div>
-        <div class="section-card-body padded" id="experiment-content" style="font-size:0.88rem;line-height:1.7;color:var(--text-muted)">
-          Данные загружаются...
-        </div>
-      </div>
-
-      <!-- ── Monthly CEO Report ────────────────────────────────── -->
-      <div class="section-card" style="margin-bottom:24px" id="monthly-report-card">
-        <div class="section-card-header">
-          <div class="section-card-title">📅 Ежемесячный отчёт CEO</div>
-        </div>
-        <div class="section-card-body padded" id="monthly-report-container">
-          <div style="color:var(--text-dim)">Загрузка...</div>
-        </div>
-      </div>
-
-      <!-- ── Factory Tasks ──────────────────────────────────────── -->
-      <div class="section-card">
-        <div class="section-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div class="section-card-title">🎯 AI Growth Tasks</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <select id="filter-status" onchange="renderTasks()" class="admin-input" style="padding:4px 10px;font-size:0.8rem;height:auto;width:auto">
-              <option value="">Все статусы</option>
-              <option value="pending">Ожидают</option>
-              <option value="done">Выполнены</option>
-              <option value="skipped">Пропущены</option>
-            </select>
-            <select id="filter-dept" onchange="renderTasks()" class="admin-input" style="padding:4px 10px;font-size:0.8rem;height:auto;width:auto">
-              <option value="">Все отделы</option>
-              <option value="marketing">Marketing</option>
-              <option value="product">Product</option>
-              <option value="sales">Sales</option>
-              <option value="customer_success">Customer Success</option>
-              <option value="analytics">Analytics</option>
-              <option value="operations">Operations</option>
-            </select>
-            <select id="filter-priority" onchange="renderTasks()" class="admin-input" style="padding:4px 10px;font-size:0.8rem;height:auto;width:auto">
-              <option value="">Все приоритеты</option>
-              <option value="high">Высокий</option>
-              <option value="medium">Средний</option>
-              <option value="low">Низкий</option>
-            </select>
-          </div>
-        </div>
-        <div id="tasks-list" class="section-card-body">
-          <div style="padding:24px;color:var(--text-dim)">Загрузка...</div>
-        </div>
-      </div>
-
     </div>
-  </div>
-</div>
 
-<div class="toast-container" id="toastContainer"></div>
-<script src="/js/admin.js"></script>
-<script>
-/* ── State ──────────────────────────────────────────────── */
-let _allTasks = [];
-let _contentPosts = [];
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/admin.js"></script>
+    <script>
+      /* ── State ──────────────────────────────────────────────── */
+      let _allTasks = [];
+      let _contentPosts = [];
 
-/* ── Helpers ────────────────────────────────────────────── */
-function timeAgo(isoStr) {
-  if (!isoStr) return '—';
-  const diff = Date.now() - new Date(isoStr).getTime();
-  if (isNaN(diff)) return isoStr;
-  const h = Math.floor(diff / 3600000);
-  const m = Math.floor((diff % 3600000) / 60000);
-  if (h > 48) return Math.floor(h / 24) + ' дн. назад';
-  if (h > 0) return h + ' ч. назад';
-  if (m > 0) return m + ' мин. назад';
-  return 'только что';
-}
+      /* ── Helpers ────────────────────────────────────────────── */
+      function timeAgo(isoStr) {
+        if (!isoStr) return '—';
+        const diff = Date.now() - new Date(isoStr).getTime();
+        if (isNaN(diff)) return isoStr;
+        const h = Math.floor(diff / 3600000);
+        const m = Math.floor((diff % 3600000) / 60000);
+        if (h > 48) return Math.floor(h / 24) + ' дн. назад';
+        if (h > 0) return h + ' ч. назад';
+        if (m > 0) return m + ' мин. назад';
+        return 'только что';
+      }
 
-function formatDate(isoStr) {
-  if (!isoStr) return '—';
-  return isoStr.slice(0, 16).replace('T', ' ');
-}
+      function formatDate(isoStr) {
+        if (!isoStr) return '—';
+        return isoStr.slice(0, 16).replace('T', ' ');
+      }
 
-function healthBadge(score) {
-  if (score == null) return '<span class="badge badge-gray">—</span>';
-  const n = parseInt(score);
-  if (n >= 70) return `<span class="badge badge-green">${n}%</span>`;
-  if (n >= 50) return `<span class="badge badge-yellow">${n}%</span>`;
-  return `<span class="badge badge-red">${n}%</span>`;
-}
+      function healthBadge(score) {
+        if (score == null) return '<span class="badge badge-gray">—</span>';
+        const n = parseInt(score);
+        if (n >= 70) return `<span class="badge badge-green">${n}%</span>`;
+        if (n >= 50) return `<span class="badge badge-yellow">${n}%</span>`;
+        return `<span class="badge badge-red">${n}%</span>`;
+      }
 
-function statusBadge(status) {
-  const map = {
-    running:    ['badge-blue',   '🔄 Идёт'],
-    completed:  ['badge-green',  '✅ Успех'],
-    success:    ['badge-green',  '✅ Успех'],
-    stopped:    ['badge-red',    '❌ Остановлен'],
-    failed:     ['badge-red',    '❌ Провал'],
-    scaling:    ['badge-gold',   '⚡ Масштабируется'],
-    pending:    ['badge-yellow', '⏳ Ожидание'],
-    done:       ['badge-green',  '✅ Выполнено'],
-    skipped:    ['badge-gray',   '⏭️ Пропущено'],
-  };
-  const [cls, label] = map[status] || ['badge-gray', status || '—'];
-  return `<span class="badge ${cls}">${label}</span>`;
-}
+      function statusBadge(status) {
+        const map = {
+          running: ['badge-blue', '🔄 Идёт'],
+          completed: ['badge-green', '✅ Успех'],
+          success: ['badge-green', '✅ Успех'],
+          stopped: ['badge-red', '❌ Остановлен'],
+          failed: ['badge-red', '❌ Провал'],
+          scaling: ['badge-gold', '⚡ Масштабируется'],
+          pending: ['badge-yellow', '⏳ Ожидание'],
+          done: ['badge-green', '✅ Выполнено'],
+          skipped: ['badge-gray', '⏭️ Пропущено'],
+        };
+        const [cls, label] = map[status] || ['badge-gray', status || '—'];
+        return `<span class="badge ${cls}">${label}</span>`;
+      }
 
-function channelBadge(channel, actionType) {
-  const ch = (channel || actionType || '').toLowerCase();
-  if (ch.includes('instagram')) return '<span class="badge badge-blue">Instagram</span>';
-  if (ch.includes('telegram'))  return '<span class="badge badge-gold">Telegram</span>';
-  if (ch.includes('model') || ch.includes('description')) return '<span class="badge badge-gray">Описание модели</span>';
-  return `<span class="badge badge-gray">${_admin.escapeHtml(ch || 'контент')}</span>`;
-}
+      function channelBadge(channel, actionType) {
+        const ch = (channel || actionType || '').toLowerCase();
+        if (ch.includes('instagram')) return '<span class="badge badge-blue">Instagram</span>';
+        if (ch.includes('telegram')) return '<span class="badge badge-gold">Telegram</span>';
+        if (ch.includes('model') || ch.includes('description'))
+          return '<span class="badge badge-gray">Описание модели</span>';
+        return `<span class="badge badge-gray">${_admin.escapeHtml(ch || 'контент')}</span>`;
+      }
 
-/* ── Health Metrics ─────────────────────────────────────── */
-async function loadHealthMetrics() {
-  try {
-    const d = await _admin.apiFetch('/admin/factory-health');
-    const lastEl = document.getElementById('hm-last-cycle');
-    const lastSubEl = document.getElementById('hm-last-cycle-sub');
-    if (d.last_cycle_at) {
-      lastEl.textContent = timeAgo(d.last_cycle_at);
-      lastSubEl.textContent = formatDate(d.last_cycle_at);
-    }
-    document.getElementById('hm-total-cycles').textContent = d.total_cycles ?? '—';
-    document.getElementById('hm-active-exp').textContent = d.active_experiments ?? '—';
-    document.getElementById('hm-pending-actions').textContent = d.pending_actions ?? '—';
-    const hsEl = document.getElementById('hm-health-score');
-    if (d.health_score != null) {
-      const n = parseInt(d.health_score);
-      hsEl.textContent = n + '%';
-      hsEl.style.color = n >= 70 ? 'var(--success)' : n >= 50 ? '#f59e0b' : 'var(--error)';
-    }
-  } catch (_) {}
-}
+      /* ── Health Metrics ─────────────────────────────────────── */
+      async function loadHealthMetrics() {
+        try {
+          const d = await _admin.apiFetch('/admin/factory-health');
+          const lastEl = document.getElementById('hm-last-cycle');
+          const lastSubEl = document.getElementById('hm-last-cycle-sub');
+          if (d.last_cycle_at) {
+            lastEl.textContent = timeAgo(d.last_cycle_at);
+            lastSubEl.textContent = formatDate(d.last_cycle_at);
+          }
+          document.getElementById('hm-total-cycles').textContent = d.total_cycles ?? '—';
+          document.getElementById('hm-active-exp').textContent = d.active_experiments ?? '—';
+          document.getElementById('hm-pending-actions').textContent = d.pending_actions ?? '—';
+          const hsEl = document.getElementById('hm-health-score');
+          if (d.health_score != null) {
+            const n = parseInt(d.health_score);
+            hsEl.textContent = n + '%';
+            hsEl.style.color = n >= 70 ? 'var(--success)' : n >= 50 ? '#f59e0b' : 'var(--error)';
+          }
+        } catch (_) {}
+      }
 
-/* ── CEO Memo & Settings ────────────────────────────────── */
-async function loadMemo() {
-  try {
-    const settingsResp = await _admin.apiFetch('/admin/settings');
-    const getVal = (key) => {
-      if (Array.isArray(settingsResp)) return settingsResp.find(s => s.key === key)?.value || '';
-      return settingsResp?.[key] || '';
-    };
-    let memo = 'CEO memo пока не доступен. Запустите цикл Factory.';
-    const memoVal = getVal('ceo_memo');
-    if (memoVal) memo = memoVal;
+      /* ── CEO Memo & Settings ────────────────────────────────── */
+      async function loadMemo() {
+        try {
+          const settingsResp = await _admin.apiFetch('/admin/settings');
+          const getVal = key => {
+            if (Array.isArray(settingsResp)) return settingsResp.find(s => s.key === key)?.value || '';
+            return settingsResp?.[key] || '';
+          };
+          let memo = 'CEO memo пока не доступен. Запустите цикл Factory.';
+          const memoVal = getVal('ceo_memo');
+          if (memoVal) memo = memoVal;
 
-    const deptFocus = getVal('ceo_department_focus');
-    document.getElementById('ceo-memo').textContent = memo + (deptFocus ? `\n\n🏢 Фокус следующего цикла: ${deptFocus}` : '');
+          const deptFocus = getVal('ceo_department_focus');
+          document.getElementById('ceo-memo').textContent =
+            memo + (deptFocus ? `\n\n🏢 Фокус следующего цикла: ${deptFocus}` : '');
 
-    const expVal = getVal('ceo_experiment');
-    if (expVal) {
-      try {
-        const experiment = JSON.parse(expVal);
-        const card = document.getElementById('experiment-proposal-card');
-        const content = document.getElementById('experiment-content');
-        if (card && content && experiment) {
-          card.style.display = 'block';
-          content.innerHTML = `
+          const expVal = getVal('ceo_experiment');
+          if (expVal) {
+            try {
+              const experiment = JSON.parse(expVal);
+              const card = document.getElementById('experiment-proposal-card');
+              const content = document.getElementById('experiment-content');
+              if (card && content && experiment) {
+                card.style.display = 'block';
+                content.innerHTML = `
             <div style="margin-bottom:8px"><strong style="color:var(--gold)">Гипотеза:</strong> ${_admin.escapeHtml(experiment.hypothesis || experiment.description || '')}</div>
             <div><strong style="color:var(--gold)">Метрика успеха:</strong> ${_admin.escapeHtml(experiment.success_metric || experiment.metric || '')}</div>`;
+              }
+            } catch {}
+          }
+        } catch (e) {
+          document.getElementById('ceo-memo').textContent = 'CEO memo недоступен.';
         }
-      } catch {}
-    }
-  } catch (e) {
-    document.getElementById('ceo-memo').textContent = 'CEO memo недоступен.';
-  }
-}
+      }
 
-/* ── CEO Decisions ──────────────────────────────────────── */
-async function loadCeoDecisions() {
-  const body = document.getElementById('ceo-decisions-body');
-  try {
-    const rows = await _admin.apiFetch('/admin/factory-ceo-decisions');
-    if (!rows || !rows.length) {
-      body.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет решений CEO. Запустите цикл Factory для генерации стратегии.</div>';
-      return;
-    }
-    const typeLabel = {
-      grow: '📈 Рост',
-      experiment: '🧪 Эксперимент',
-      pivot: '🔄 Пивот',
-      kill: '❌ Закрыть',
-      optimize: '⚡ Оптимизация',
-    };
-    body.innerHTML = rows.map((d, idx) => {
-      const short = (d.rationale || '').slice(0, 200);
-      const full  = d.rationale || '';
-      const hasMore = full.length > 200;
-      return `
+      /* ── CEO Decisions ──────────────────────────────────────── */
+      async function loadCeoDecisions() {
+        const body = document.getElementById('ceo-decisions-body');
+        try {
+          const rows = await _admin.apiFetch('/admin/factory-ceo-decisions');
+          if (!rows || !rows.length) {
+            body.innerHTML =
+              '<div style="padding:24px;color:var(--text-dim)">Нет решений CEO. Запустите цикл Factory для генерации стратегии.</div>';
+            return;
+          }
+          const typeLabel = {
+            grow: '📈 Рост',
+            experiment: '🧪 Эксперимент',
+            pivot: '🔄 Пивот',
+            kill: '❌ Закрыть',
+            optimize: '⚡ Оптимизация',
+          };
+          body.innerHTML = rows
+            .map((d, idx) => {
+              const short = (d.rationale || '').slice(0, 200);
+              const full = d.rationale || '';
+              const hasMore = full.length > 200;
+              return `
         <div class="ceo-decision-item">
           <div class="ceo-decision-meta">
             <span class="badge badge-gold">${_admin.escapeHtml(typeLabel[d.decision_type] || d.decision_type || '—')}</span>
@@ -577,53 +646,62 @@ async function loadCeoDecisions() {
             ${d.executed ? '<span class="badge badge-green">Исполнено</span>' : '<span class="badge badge-gray">Ожидает</span>'}
           </div>
           <div class="ceo-decision-rationale" id="dec-short-${idx}">${_admin.escapeHtml(short)}${hasMore ? '…' : ''}</div>
-          ${hasMore ? `
+          ${
+            hasMore
+              ? `
             <div class="ceo-decision-full" id="dec-full-${idx}">${_admin.escapeHtml(full)}</div>
             <button class="ceo-decision-toggle" onclick="toggleDecision(${idx})">Подробнее ▾</button>
-          ` : ''}
+          `
+              : ''
+          }
         </div>`;
-    }).join('');
-  } catch (e) {
-    body.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
-  }
-}
+            })
+            .join('');
+        } catch (e) {
+          body.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
+        }
+      }
 
-function toggleDecision(idx) {
-  const full = document.getElementById(`dec-full-${idx}`);
-  const short = document.getElementById(`dec-short-${idx}`);
-  const btn = full?.parentElement?.querySelector('.ceo-decision-toggle');
-  if (!full) return;
-  const isVisible = full.style.display === 'block';
-  full.style.display = isVisible ? 'none' : 'block';
-  if (short) short.style.display = isVisible ? '' : 'none';
-  if (btn) btn.textContent = isVisible ? 'Подробнее ▾' : 'Свернуть ▴';
-}
+      function toggleDecision(idx) {
+        const full = document.getElementById(`dec-full-${idx}`);
+        const short = document.getElementById(`dec-short-${idx}`);
+        const btn = full?.parentElement?.querySelector('.ceo-decision-toggle');
+        if (!full) return;
+        const isVisible = full.style.display === 'block';
+        full.style.display = isVisible ? 'none' : 'block';
+        if (short) short.style.display = isVisible ? '' : 'none';
+        if (btn) btn.textContent = isVisible ? 'Подробнее ▾' : 'Свернуть ▴';
+      }
 
-/* ── Experiments ────────────────────────────────────────── */
-async function loadExperiments() {
-  const body = document.getElementById('experiments-body');
-  try {
-    const rows = await _admin.apiFetch('/admin/factory-experiments');
-    if (!rows || !rows.length) {
-      body.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет экспериментов. Запустите цикл Factory для генерации A/B тестов.</div>';
-      return;
-    }
+      /* ── Experiments ────────────────────────────────────────── */
+      async function loadExperiments() {
+        const body = document.getElementById('experiments-body');
+        try {
+          const rows = await _admin.apiFetch('/admin/factory-experiments');
+          if (!rows || !rows.length) {
+            body.innerHTML =
+              '<div style="padding:24px;color:var(--text-dim)">Нет экспериментов. Запустите цикл Factory для генерации A/B тестов.</div>';
+            return;
+          }
 
-    body.innerHTML = rows.map(exp => {
-      // Days running vs 14-day limit
-      const startDate = exp.started_at ? new Date(exp.started_at) : null;
-      const daysRunning = startDate ? Math.max(0, Math.floor((Date.now() - startDate.getTime()) / 86400000)) : 0;
-      const daysCap = 14;
-      const progress = Math.min(100, Math.round((daysRunning / daysCap) * 100));
+          body.innerHTML = rows
+            .map(exp => {
+              // Days running vs 14-day limit
+              const startDate = exp.started_at ? new Date(exp.started_at) : null;
+              const daysRunning = startDate
+                ? Math.max(0, Math.floor((Date.now() - startDate.getTime()) / 86400000))
+                : 0;
+              const daysCap = 14;
+              const progress = Math.min(100, Math.round((daysRunning / daysCap) * 100));
 
-      // Conversion display
-      const convA = exp.conversion_a != null ? (parseFloat(exp.conversion_a) * 100).toFixed(1) + '%' : '—';
-      const convB = exp.conversion_b != null ? (parseFloat(exp.conversion_b) * 100).toFixed(1) + '%' : '—';
+              // Conversion display
+              const convA = exp.conversion_a != null ? (parseFloat(exp.conversion_a) * 100).toFixed(1) + '%' : '—';
+              const convB = exp.conversion_b != null ? (parseFloat(exp.conversion_b) * 100).toFixed(1) + '%' : '—';
 
-      const isSuccess = exp.status === 'completed' || exp.status === 'success';
-      const canScale = isSuccess && exp.status !== 'scaling';
+              const isSuccess = exp.status === 'completed' || exp.status === 'success';
+              const canScale = isSuccess && exp.status !== 'scaling';
 
-      return `
+              return `
         <div class="exp-card">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px;flex-wrap:wrap">
             <div class="exp-title">${_admin.escapeHtml(exp.name || '—')}</div>
@@ -646,51 +724,59 @@ async function loadExperiments() {
               <div class="exp-progress-fill" style="width:${progress}%"></div>
             </div>
           </div>
-          ${(exp.variant_a || exp.variant_b) ? `
+          ${
+            exp.variant_a || exp.variant_b
+              ? `
           <div class="exp-variants">
             ${exp.variant_a ? `<div class="exp-variant"><span class="exp-variant-label">Вариант A</span>${_admin.escapeHtml(exp.variant_a.slice(0, 150))}${exp.variant_a.length > 150 ? '…' : ''}</div>` : ''}
             ${exp.variant_b ? `<div class="exp-variant"><span class="exp-variant-label">Вариант B</span>${_admin.escapeHtml(exp.variant_b.slice(0, 150))}${exp.variant_b.length > 150 ? '…' : ''}</div>` : ''}
-          </div>` : ''}
+          </div>`
+              : ''
+          }
           ${exp.result ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px"><strong style="color:var(--gold)">Результат:</strong> ${_admin.escapeHtml(exp.result)}</div>` : ''}
         </div>`;
-    }).join('');
-  } catch (e) {
-    body.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
-  }
-}
+            })
+            .join('');
+        } catch (e) {
+          body.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
+        }
+      }
 
-async function scaleExperiment(id, btn) {
-  if (!confirm('Масштабировать этот эксперимент? Он будет помечен как "scaling".')) return;
-  try {
-    btn.disabled = true;
-    btn.textContent = '⏳…';
-    await _admin.apiFetch(`/admin/factory-experiments/${id}/scale`, { method: 'POST' });
-    _admin.toast('Эксперимент отправлен на масштабирование!', 'success');
-    loadExperiments();
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-    btn.disabled = false;
-    btn.textContent = '⚡ Масштабировать';
-  }
-}
+      async function scaleExperiment(id, btn) {
+        if (!confirm('Масштабировать этот эксперимент? Он будет помечен как "scaling".')) return;
+        try {
+          btn.disabled = true;
+          btn.textContent = '⏳…';
+          await _admin.apiFetch(`/admin/factory-experiments/${id}/scale`, { method: 'POST' });
+          _admin.toast('Эксперимент отправлен на масштабирование!', 'success');
+          loadExperiments();
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+          btn.disabled = false;
+          btn.textContent = '⚡ Масштабировать';
+        }
+      }
 
-/* ── Generated Content Feed ─────────────────────────────── */
-async function loadContent() {
-  const body = document.getElementById('content-posts-body');
-  try {
-    const rows = await _admin.apiFetch('/admin/factory-content');
-    _contentPosts = rows || [];
+      /* ── Generated Content Feed ─────────────────────────────── */
+      async function loadContent() {
+        const body = document.getElementById('content-posts-body');
+        try {
+          const rows = await _admin.apiFetch('/admin/factory-content');
+          _contentPosts = rows || [];
 
-    if (!rows || !rows.length) {
-      body.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет сгенерированного контента. Запустите цикл Factory.</div>';
-      return;
-    }
+          if (!rows || !rows.length) {
+            body.innerHTML =
+              '<div style="padding:24px;color:var(--text-dim)">Нет сгенерированного контента. Запустите цикл Factory.</div>';
+            return;
+          }
 
-    body.innerHTML = rows.slice(0, 10).map(r => {
-      const isPublished = r.status === 'done' || r.status === 'published';
-      const contentText = (r.content || r.action || '').slice(0, 500);
-      const contentFull = (r.content || r.action || '');
-      return `
+          body.innerHTML = rows
+            .slice(0, 10)
+            .map(r => {
+              const isPublished = r.status === 'done' || r.status === 'published';
+              const contentText = (r.content || r.action || '').slice(0, 500);
+              const contentFull = r.content || r.action || '';
+              return `
         <div class="content-item">
           <div class="content-body">
             <div class="content-meta">
@@ -702,99 +788,114 @@ async function loadContent() {
           </div>
           <div class="content-actions">
             <button class="content-btn" onclick="copyContent(${r.id})" title="Скопировать в буфер">📋 Скопировать</button>
-            ${isPublished
-              ? `<button class="content-btn published" disabled>✅ Опубликовано</button>`
-              : `<button class="content-btn publish-btn" onclick="publishContent(${r.id}, this)" title="Опубликовать в Telegram-канал">✅ Опубликовать</button>`
+            ${
+              isPublished
+                ? `<button class="content-btn published" disabled>✅ Опубликовано</button>`
+                : `<button class="content-btn publish-btn" onclick="publishContent(${r.id}, this)" title="Опубликовать в Telegram-канал">✅ Опубликовать</button>`
             }
           </div>
         </div>`;
-    }).join('');
-  } catch (e) {
-    body.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
-  }
-}
+            })
+            .join('');
+        } catch (e) {
+          body.innerHTML = `<div style="padding:24px;color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
+        }
+      }
 
-function copyContent(id) {
-  const post = _contentPosts.find(p => p.id === id);
-  if (post) {
-    _admin.copyToClipboard(post.content || post.action || '');
-    _admin.toast('Скопировано в буфер обмена', 'success');
-  }
-}
+      function copyContent(id) {
+        const post = _contentPosts.find(p => p.id === id);
+        if (post) {
+          _admin.copyToClipboard(post.content || post.action || '');
+          _admin.toast('Скопировано в буфер обмена', 'success');
+        }
+      }
 
-async function publishContent(id, btn) {
-  try {
-    btn.disabled = true;
-    btn.textContent = '⏳…';
-    await _admin.apiFetch(`/admin/factory-content/${id}/publish`, { method: 'POST' });
-    _admin.toast('Пост опубликован в Telegram-канале!', 'success');
-    // Update button state inline
-    btn.className = 'content-btn published';
-    btn.textContent = '✅ Опубликовано';
-  } catch (e) {
-    _admin.toast('Ошибка публикации: ' + e.message, 'error');
-    btn.disabled = false;
-    btn.textContent = '✅ Опубликовать';
-  }
-}
+      async function publishContent(id, btn) {
+        try {
+          btn.disabled = true;
+          btn.textContent = '⏳…';
+          await _admin.apiFetch(`/admin/factory-content/${id}/publish`, { method: 'POST' });
+          _admin.toast('Пост опубликован в Telegram-канале!', 'success');
+          // Update button state inline
+          btn.className = 'content-btn published';
+          btn.textContent = '✅ Опубликовано';
+        } catch (e) {
+          _admin.toast('Ошибка публикации: ' + e.message, 'error');
+          btn.disabled = false;
+          btn.textContent = '✅ Опубликовать';
+        }
+      }
 
-/* ── Factory Tasks ──────────────────────────────────────── */
-async function loadTasks() {
-  try {
-    const { tasks = [], stats = {} } = await _admin.apiFetch('/admin/factory-tasks');
-    _allTasks = tasks;
+      /* ── Factory Tasks ──────────────────────────────────────── */
+      async function loadTasks() {
+        try {
+          const { tasks = [], stats = {} } = await _admin.apiFetch('/admin/factory-tasks');
+          _allTasks = tasks;
 
-    const pending = stats.pending != null ? stats.pending : tasks.filter(t => t.status === 'pending').length;
-    const done    = stats.done    != null ? stats.done    : tasks.filter(t => t.status === 'done').length;
-    const highPri = tasks.filter(t => t.priority === 'high' && t.status === 'pending').length;
+          const pending = stats.pending != null ? stats.pending : tasks.filter(t => t.status === 'pending').length;
+          const done = stats.done != null ? stats.done : tasks.filter(t => t.status === 'done').length;
+          const highPri = tasks.filter(t => t.priority === 'high' && t.status === 'pending').length;
 
-    // Update legacy KPI elements if present
-    const tc = document.getElementById('tasks-count');
-    const dc = document.getElementById('done-count');
-    const hc = document.getElementById('high-count');
-    const lc = document.getElementById('last-cycle');
-    if (tc) tc.textContent = pending;
-    if (dc) dc.textContent = done;
-    if (hc) hc.textContent = highPri;
-    if (lc && stats.last_cycle) {
-      const dt = new Date(stats.last_cycle);
-      lc.textContent = isNaN(dt) ? stats.last_cycle
-        : dt.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-    }
+          // Update legacy KPI elements if present
+          const tc = document.getElementById('tasks-count');
+          const dc = document.getElementById('done-count');
+          const hc = document.getElementById('high-count');
+          const lc = document.getElementById('last-cycle');
+          if (tc) tc.textContent = pending;
+          if (dc) dc.textContent = done;
+          if (hc) hc.textContent = highPri;
+          if (lc && stats.last_cycle) {
+            const dt = new Date(stats.last_cycle);
+            lc.textContent = isNaN(dt)
+              ? stats.last_cycle
+              : dt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+          }
 
-    renderTasks();
-  } catch (e) {
-    document.getElementById('tasks-list').innerHTML =
-      '<div style="padding:24px;color:var(--error)">Ошибка загрузки задач: ' + _admin.escapeHtml(e.message) + '</div>';
-  }
-}
+          renderTasks();
+        } catch (e) {
+          document.getElementById('tasks-list').innerHTML =
+            '<div style="padding:24px;color:var(--error)">Ошибка загрузки задач: ' +
+            _admin.escapeHtml(e.message) +
+            '</div>';
+        }
+      }
 
-function renderTasks() {
-  const filterStatus   = document.getElementById('filter-status')?.value || '';
-  const filterDept     = document.getElementById('filter-dept')?.value   || '';
-  const filterPriority = document.getElementById('filter-priority')?.value || '';
+      function renderTasks() {
+        const filterStatus = document.getElementById('filter-status')?.value || '';
+        const filterDept = document.getElementById('filter-dept')?.value || '';
+        const filterPriority = document.getElementById('filter-priority')?.value || '';
 
-  const filtered = _allTasks.filter(t => {
-    if (filterStatus   && t.status     !== filterStatus)   return false;
-    if (filterDept     && t.department !== filterDept)     return false;
-    if (filterPriority && t.priority   !== filterPriority) return false;
-    return true;
-  });
+        const filtered = _allTasks.filter(t => {
+          if (filterStatus && t.status !== filterStatus) return false;
+          if (filterDept && t.department !== filterDept) return false;
+          if (filterPriority && t.priority !== filterPriority) return false;
+          return true;
+        });
 
-  const container = document.getElementById('tasks-list');
-  if (!filtered.length) {
-    container.innerHTML = '<div style="padding:24px;color:var(--text-dim)">Нет задач по выбранным фильтрам. ' +
-      (_allTasks.length ? '' : 'Запустите цикл Factory.') + '</div>';
-    return;
-  }
+        const container = document.getElementById('tasks-list');
+        if (!filtered.length) {
+          container.innerHTML =
+            '<div style="padding:24px;color:var(--text-dim)">Нет задач по выбранным фильтрам. ' +
+            (_allTasks.length ? '' : 'Запустите цикл Factory.') +
+            '</div>';
+          return;
+        }
 
-  const priorityColor = { high: 'var(--error)', medium: '#f59e0b', low: 'var(--success)' };
-  const priorityLabel = { high: '🔴 Высокий', medium: '🟡 Средний', low: '🟢 Низкий' };
-  const statusLabel   = { done: '✅ Выполнено', skipped: '⏭️ Пропущено', pending: '⏳ Ожидает' };
-  const deptLabel = { marketing: 'Marketing', product: 'Product', sales: 'Sales',
-    customer_success: 'CX', analytics: 'Analytics', operations: 'Ops', tech: 'Tech', hr: 'HR' };
+        const priorityColor = { high: 'var(--error)', medium: '#f59e0b', low: 'var(--success)' };
+        const priorityLabel = { high: '🔴 Высокий', medium: '🟡 Средний', low: '🟢 Низкий' };
+        const statusLabel = { done: '✅ Выполнено', skipped: '⏭️ Пропущено', pending: '⏳ Ожидает' };
+        const deptLabel = {
+          marketing: 'Marketing',
+          product: 'Product',
+          sales: 'Sales',
+          customer_success: 'CX',
+          analytics: 'Analytics',
+          operations: 'Ops',
+          tech: 'Tech',
+          hr: 'HR',
+        };
 
-  container.innerHTML = `<table class="data-table">
+        container.innerHTML = `<table class="data-table">
     <thead>
       <tr>
         <th>Приоритет</th>
@@ -806,7 +907,9 @@ function renderTasks() {
       </tr>
     </thead>
     <tbody>
-      ${filtered.map(task => `
+      ${filtered
+        .map(
+          task => `
         <tr>
           <td>
             <span style="font-size:0.75rem;font-weight:600;color:${priorityColor[task.priority] || 'var(--text-muted)'}">
@@ -818,62 +921,79 @@ function renderTasks() {
           <td style="font-size:0.8rem;color:var(--text-dim)">${_admin.escapeHtml(deptLabel[task.department] || task.department || '—')}</td>
           <td style="font-size:0.8rem">${statusLabel[task.status] || task.status}</td>
           <td>
-            ${task.status === 'pending' ? `
+            ${
+              task.status === 'pending'
+                ? `
               <button onclick="markTaskDone(${task.id})"
                 class="btn btn-sm btn-ghost" style="border-color:var(--success);color:var(--success)">
                 Выполнено
-              </button>` : ''}
+              </button>`
+                : ''
+            }
           </td>
-        </tr>`).join('')}
+        </tr>`
+        )
+        .join('')}
     </tbody>
   </table>`;
-}
+      }
 
-async function markTaskDone(taskId) {
-  try {
-    await _admin.apiFetch(`/admin/factory-tasks/${taskId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'done' })
-    });
-    _admin.toast('Задача отмечена как выполненная', 'success');
-    loadTasks();
-  } catch (e) {
-    _admin.toast('Ошибка: ' + e.message, 'error');
-  }
-}
+      async function markTaskDone(taskId) {
+        try {
+          await _admin.apiFetch(`/admin/factory-tasks/${taskId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'done' }),
+          });
+          _admin.toast('Задача отмечена как выполненная', 'success');
+          loadTasks();
+        } catch (e) {
+          _admin.toast('Ошибка: ' + e.message, 'error');
+        }
+      }
 
-/* ── Monthly Report ─────────────────────────────────────── */
-async function loadMonthlyReport() {
-  const el = document.getElementById('monthly-report-container');
-  try {
-    const data = await _admin.apiFetch('/admin/factory-monthly');
-    if (!data || !data.report_json) {
-      el.innerHTML = '<p style="color:var(--text-muted)">Отчёт за текущий месяц ещё не сгенерирован. Запустите цикл Factory в первые 3 дня месяца.</p>';
-      return;
-    }
-    const d = typeof data.data === 'string' ? JSON.parse(data.data) : (data.data || {});
-    const report = d.report || 'нет данных';
-    const orders = d.orders || {};
-    const topModels = d.top_models || [];
-    const trend = d.revenue_trend || [];
+      /* ── Monthly Report ─────────────────────────────────────── */
+      async function loadMonthlyReport() {
+        const el = document.getElementById('monthly-report-container');
+        try {
+          const data = await _admin.apiFetch('/admin/factory-monthly');
+          if (!data || !data.report_json) {
+            el.innerHTML =
+              '<p style="color:var(--text-muted)">Отчёт за текущий месяц ещё не сгенерирован. Запустите цикл Factory в первые 3 дня месяца.</p>';
+            return;
+          }
+          const d = typeof data.data === 'string' ? JSON.parse(data.data) : data.data || {};
+          const report = d.report || 'нет данных';
+          const orders = d.orders || {};
+          const topModels = d.top_models || [];
+          const trend = d.revenue_trend || [];
 
-    const topModelsHtml = topModels.length
-      ? topModels.map((m, i) => `<span style="margin-right:12px">${i+1}. <strong>${_admin.escapeHtml(m.name||'')}</strong> (${m.order_count} заявок)</span>`).join('')
-      : '<span style="color:var(--text-dim)">нет данных</span>';
+          const topModelsHtml = topModels.length
+            ? topModels
+                .map(
+                  (m, i) =>
+                    `<span style="margin-right:12px">${i + 1}. <strong>${_admin.escapeHtml(m.name || '')}</strong> (${m.order_count} заявок)</span>`
+                )
+                .join('')
+            : '<span style="color:var(--text-dim)">нет данных</span>';
 
-    const trendHtml = trend.length
-      ? trend.map(t => `<span style="margin-right:12px">${_admin.escapeHtml(t.month||'')}: <strong>${t.cnt}</strong></span>`).join('')
-      : '<span style="color:var(--text-dim)">нет данных</span>';
+          const trendHtml = trend.length
+            ? trend
+                .map(
+                  t =>
+                    `<span style="margin-right:12px">${_admin.escapeHtml(t.month || '')}: <strong>${t.cnt}</strong></span>`
+                )
+                .join('')
+            : '<span style="color:var(--text-dim)">нет данных</span>';
 
-    el.innerHTML = `
+          el.innerHTML = `
       <div style="margin-bottom:12px">
-        <strong style="color:var(--gold)">Месяц: ${_admin.escapeHtml(data.month||'')}</strong>
+        <strong style="color:var(--gold)">Месяц: ${_admin.escapeHtml(data.month || '')}</strong>
         <span style="font-size:0.78rem;color:var(--text-dim);margin-left:12px">Сгенерирован: ${formatDate(data.created_at)}</span>
       </div>
       <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
-        <div><span style="color:var(--text-muted);font-size:0.82rem">Заявок за месяц:</span> <strong>${orders.total||0}</strong></div>
-        <div><span style="color:var(--text-muted);font-size:0.82rem">Выполнено:</span> <strong>${orders.completed||0}</strong></div>
-        <div><span style="color:var(--text-muted);font-size:0.82rem">Новых:</span> <strong>${orders.new_orders||0}</strong></div>
+        <div><span style="color:var(--text-muted);font-size:0.82rem">Заявок за месяц:</span> <strong>${orders.total || 0}</strong></div>
+        <div><span style="color:var(--text-muted);font-size:0.82rem">Выполнено:</span> <strong>${orders.completed || 0}</strong></div>
+        <div><span style="color:var(--text-muted);font-size:0.82rem">Новых:</span> <strong>${orders.new_orders || 0}</strong></div>
       </div>
       <div style="margin-bottom:8px;font-size:0.82rem"><span style="color:var(--text-muted)">Топ-моделей:</span> ${topModelsHtml}</div>
       <div style="margin-bottom:16px;font-size:0.82rem"><span style="color:var(--text-muted)">Тренд (3 мес.):</span> ${trendHtml}</div>
@@ -881,52 +1001,52 @@ async function loadMonthlyReport() {
         <div style="font-size:0.82rem;font-weight:600;color:var(--gold);margin-bottom:8px">CEO Отчёт:</div>
         <pre style="white-space:pre-wrap;font-size:0.84rem;color:var(--text-muted);line-height:1.7;margin:0;font-family:inherit">${_admin.escapeHtml(report)}</pre>
       </div>`;
-  } catch (e) {
-    el.innerHTML = `<div style="color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
-  }
-}
+        } catch (e) {
+          el.innerHTML = `<div style="color:var(--text-dim)">Ошибка загрузки: ${_admin.escapeHtml(e.message)}</div>`;
+        }
+      }
 
-/* ── Run Cycle ──────────────────────────────────────────── */
-async function runCycle() {
-  const btn = document.getElementById('run-cycle-btn');
-  const spinner = document.getElementById('cycle-spinner');
-  btn.disabled = true;
-  btn.textContent = '⏳ Запуск...';
-  spinner.classList.add('active');
+      /* ── Run Cycle ──────────────────────────────────────────── */
+      async function runCycle() {
+        const btn = document.getElementById('run-cycle-btn');
+        const spinner = document.getElementById('cycle-spinner');
+        btn.disabled = true;
+        btn.textContent = '⏳ Запуск...';
+        spinner.classList.add('active');
 
-  try {
-    const data = await _admin.apiFetch('/admin/factory/run', { method: 'POST' });
-    const summary = data.message || 'Цикл запущен в фоне';
-    _admin.toast(summary, 'success');
-    // Auto-refresh all sections after a delay to let the cycle run
-    setTimeout(() => {
+        try {
+          const data = await _admin.apiFetch('/admin/factory/run', { method: 'POST' });
+          const summary = data.message || 'Цикл запущен в фоне';
+          _admin.toast(summary, 'success');
+          // Auto-refresh all sections after a delay to let the cycle run
+          setTimeout(() => {
+            loadAll();
+            _admin.toast('Данные обновлены', 'success');
+          }, 5000);
+        } catch (e) {
+          _admin.toast('Ошибка запуска цикла: ' + e.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '▶ Запустить цикл';
+          spinner.classList.remove('active');
+        }
+      }
+
+      /* ── Load All ───────────────────────────────────────────── */
+      function loadAll() {
+        loadHealthMetrics();
+        loadMemo();
+        loadCeoDecisions();
+        loadExperiments();
+        loadContent();
+        loadTasks();
+        loadMonthlyReport();
+      }
+
+      /* ── Init ───────────────────────────────────────────────── */
       loadAll();
-      _admin.toast('Данные обновлены', 'success');
-    }, 5000);
-  } catch (e) {
-    _admin.toast('Ошибка запуска цикла: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '▶ Запустить цикл';
-    spinner.classList.remove('active');
-  }
-}
-
-/* ── Load All ───────────────────────────────────────────── */
-function loadAll() {
-  loadHealthMetrics();
-  loadMemo();
-  loadCeoDecisions();
-  loadExperiments();
-  loadContent();
-  loadTasks();
-  loadMonthlyReport();
-}
-
-/* ── Init ───────────────────────────────────────────────── */
-loadAll();
-setInterval(loadHealthMetrics, 30000);
-setInterval(loadAll, 60000);
-</script>
-</body>
+      setInterval(loadHealthMetrics, 30000);
+      setInterval(loadAll, 60000);
+    </script>
+  </body>
 </html>

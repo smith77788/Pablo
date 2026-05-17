@@ -1596,6 +1596,7 @@
           var icon = input.parentElement && input.parentElement.querySelector('.field-validation-icon');
           if (valid === null) {
             input.classList.remove('field-valid', 'field-invalid');
+            input.removeAttribute('aria-invalid');
             if (icon) {
               icon.classList.remove('visible', 'icon-valid', 'icon-invalid');
             }
@@ -1604,6 +1605,7 @@
           if (valid) {
             input.classList.add('field-valid');
             input.classList.remove('field-invalid');
+            input.setAttribute('aria-invalid', 'false');
             if (icon) {
               icon.textContent = '✓';
               icon.classList.add('visible', 'icon-valid');
@@ -1612,6 +1614,7 @@
           } else {
             input.classList.add('field-invalid');
             input.classList.remove('field-valid');
+            input.setAttribute('aria-invalid', 'true');
             if (icon) {
               icon.textContent = '✗';
               icon.classList.add('visible', 'icon-invalid');

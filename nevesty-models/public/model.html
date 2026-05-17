@@ -847,6 +847,101 @@
         }
       }
 
+      /* ─── TABS ───────────────────────────────────────── */
+      .model-tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 32px;
+      }
+      .model-tab {
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        padding: 12px 24px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        cursor: pointer;
+        transition:
+          color 0.2s,
+          border-color 0.2s;
+        margin-bottom: -1px;
+        position: relative;
+      }
+      .model-tab:hover {
+        color: var(--text-muted);
+      }
+      .model-tab.active {
+        color: var(--gold);
+        border-bottom-color: var(--gold);
+      }
+      .model-tab-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        background: rgba(201, 169, 110, 0.2);
+        border-radius: 20px;
+        font-size: 0.6rem;
+        font-weight: 700;
+        color: var(--gold);
+        margin-left: 6px;
+        vertical-align: middle;
+      }
+      .model-tab-panel {
+        display: none;
+      }
+      .model-tab-panel.active {
+        display: block;
+      }
+
+      /* ─── PARAMS TABLE ────────────────────────────────── */
+      .model-params-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 24px;
+      }
+      .model-params-table tr {
+        border-bottom: 1px solid var(--border);
+        transition: background 0.15s;
+      }
+      .model-params-table tr:last-child {
+        border-bottom: none;
+      }
+      .model-params-table tr:hover {
+        background: rgba(201, 169, 110, 0.04);
+      }
+      .model-params-table td {
+        padding: 12px 8px;
+        vertical-align: middle;
+      }
+      .model-params-table .pt-icon {
+        width: 36px;
+        text-align: center;
+        font-size: 1.1rem;
+        color: var(--gold);
+        opacity: 0.7;
+      }
+      .model-params-table .pt-label {
+        font-size: 0.72rem;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        width: 40%;
+      }
+      .model-params-table .pt-value {
+        font-size: 0.9rem;
+        color: var(--white);
+        font-weight: 600;
+        text-align: right;
+        padding-right: 4px;
+      }
+
       /* ─── ENHANCED LIGHTBOX ───────────────────────────── */
       #lightbox {
         opacity: 0;

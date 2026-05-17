@@ -573,6 +573,8 @@
               id="qf-name"
               placeholder="Ваше имя"
               aria-label="Ваше имя"
+              aria-required="true"
+              autocomplete="name"
               style="
                 flex: 1;
                 min-width: 150px;
@@ -588,6 +590,8 @@
               id="qf-phone"
               placeholder="+7 (999) 123-45-67"
               aria-label="Номер телефона"
+              aria-required="true"
+              autocomplete="tel"
               style="
                 flex: 1;
                 min-width: 150px;
@@ -866,6 +870,9 @@
             container = document.createElement('div');
             container.id = 'nm-toast-container';
             container.className = 'nm-toast';
+            container.setAttribute('role', 'alert');
+            container.setAttribute('aria-live', 'assertive');
+            container.setAttribute('aria-atomic', 'true');
             document.body.appendChild(container);
           }
           const item = document.createElement('div');
@@ -1462,6 +1469,7 @@
             <a href="/pricing.html">Цены</a>
             <a href="/faq.html">FAQ</a>
             <a href="/privacy.html">Конфиденциальность</a>
+            <a href="/terms.html">Пользовательское соглашение</a>
           </div>
 
           <!-- Каталог column -->

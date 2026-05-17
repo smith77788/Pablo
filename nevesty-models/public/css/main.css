@@ -1950,7 +1950,8 @@ select.form-control option {
 /* ─── FOCUS VISIBLE ──────────────────────────────── */
 :focus-visible {
   outline: 2px solid var(--gold);
-  outline-offset: 2px;
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 button:focus-visible,
 a:focus-visible,
@@ -1958,7 +1959,8 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--gold);
-  outline-offset: 2px;
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 :focus:not(:focus-visible) {
   outline: none;
@@ -4594,4 +4596,155 @@ img[data-zoom]:hover {
   border: 1px solid rgba(201, 169, 110, 0.2);
   display: inline-block;
   vertical-align: middle;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   MICRO-INTERACTIONS EXTENSION — ripple · modal-in · input-glow ·
+   btn-gold · card-tilt · reduced-motion guard
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── btn-gold base styles ───────────────────────────────────────── */
+.btn-gold,
+.btn-gold.pricing-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 32px;
+  background: var(--gold, #c9a96e);
+  color: #000;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  text-decoration: none;
+  border: none;
+  border-radius: var(--radius, 2px);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    background 0.3s ease,
+    opacity 0.3s ease;
+  will-change: transform, box-shadow;
+}
+.btn-gold:hover {
+  background: var(--gold-light, #d9ba80);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(201, 169, 110, 0.35);
+}
+.btn-gold:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* ─── Ripple on .btn-gold, .booking-btn, generic [class*="btn-"] ── */
+.btn-gold,
+.booking-btn,
+[class*='btn-']:not(.btn-primary):not(.btn-outline):not(.btn-nav):not(.btn-back):not(.btn-next):not(
+    .btn-filter-reset
+  ):not(.btn-telegram):not(.btn-shimmer) {
+  position: relative;
+  overflow: hidden;
+}
+.btn-gold::after,
+.booking-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.25) 0%, transparent 65%);
+  transform: scale(0);
+  opacity: 0;
+  transition:
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.5s ease;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.btn-gold:active::after,
+.booking-btn:active::after {
+  transform: scale(2.5);
+  opacity: 1;
+  transition:
+    transform 0s,
+    opacity 0s;
+}
+
+/* ─── Modal entry animation ──────────────────────────────────────── */
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.modal-overlay.open .modal-inner,
+.modal-overlay.open .qb-modal-box,
+.modal-overlay.open .modal-box {
+  animation: modalIn 0.25s cubic-bezier(0.34, 1.2, 0.64, 1) both;
+}
+
+/* ─── Global input / textarea / select focus glow ────────────────── */
+/* Applies to bare inputs outside .form-group (e.g. admin pages) */
+input:not([class]),
+textarea:not([class]),
+select:not([class]) {
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+input:not([class]):focus,
+textarea:not([class]):focus,
+select:not([class]):focus {
+  box-shadow: 0 0 0 3px rgba(201, 169, 110, 0.15);
+  outline: none;
+}
+
+/* ─── prefers-reduced-motion: disable heavy animations ───────────── */
+@media (prefers-reduced-motion: reduce) {
+  /* Page fade-in */
+  .catalog-page,
+  .page-content,
+  .catalog-grid .model-card,
+  main,
+  body > section:first-of-type {
+    animation: none !important;
+  }
+
+  /* Shimmer skeleton */
+  .skeleton,
+  .skeleton-card,
+  .skeleton-text,
+  .model-card-skeleton {
+    animation: none !important;
+    background: var(--bg3, #1a1a1a) !important;
+  }
+
+  /* Modal entry */
+  .modal-overlay.open .modal-inner,
+  .modal-overlay.open .qb-modal-box,
+  .modal-overlay.open .modal-box,
+  .modal-overlay.open .modal {
+    animation: none !important;
+  }
+
+  /* Scroll-reveal transitions */
+  [data-animate],
+  .reveal,
+  .section-hidden {
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  /* Pulse badge */
+  .badge-pulse {
+    animation: none !important;
+  }
 }

@@ -123,23 +123,41 @@ app.use('/admin', (req, res, next) => {
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 try {
   const rateLimit = require('express-rate-limit');
+  const jwt = require('jsonwebtoken');
+
+  // Verify that the Authorization header carries a valid JWT before skipping
+  // the global limiter. Checking header presence alone would let an attacker
+  // bypass the limit by sending a fake/empty Bearer token.
+  const hasValidAdminJwt = req => {
+    const header = req.headers.authorization || '';
+    if (!header.startsWith('Bearer ')) return false;
+    try {
+      const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET, { algorithms: ['HS256'] });
+      return decoded && (decoded.role === 'admin' || decoded.role === 'superadmin');
+    } catch {
+      return false;
+    }
+  };
 
   // Global API rate limit: 100 requests/minute per IP
-  // Skip authenticated admin requests to avoid blocking legitimate admin activity
+  // Skip health probes and requests that carry a verified admin JWT so that
+  // legitimate admin dashboards are never accidentally throttled.
   const globalApiLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later.' },
-    skip: req =>
-      req.path.startsWith('/api/health') || (req.path.startsWith('/api/admin/') && !!req.headers.authorization),
+    skip: req => req.path.startsWith('/api/health') || (req.path.startsWith('/api/admin/') && hasValidAdminJwt(req)),
   });
 
-  // Auth endpoints — strict (5 per 15 minutes per IP)
+  // Auth endpoints — strict (5 failed attempts per 15 minutes per IP)
+  // skipSuccessfulRequests: true — successful logins don't count toward the
+  // limit so a legitimate user's successful login never costs them an attempt.
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 5,
+    skipSuccessfulRequests: true,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many auth attempts, please try again in 15 minutes.' },
@@ -166,6 +184,7 @@ try {
   app.use('/api/', globalApiLimiter);
   app.use('/api/auth', authLimiter);
   app.use('/api/admin/login', authLimiter);
+  app.use('/api/cabinet/login', authLimiter); // client cabinet brute-force protection
   app.use('/api/orders', ordersLimiter);
   app.use('/api/quick-booking', ordersLimiter);
   app.use('/api/admin/models', uploadLimiter); // photo uploads

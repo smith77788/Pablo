@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Администраторы — Nevesty Models Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      /* ─── Role badges ─────────────────────────────────── */
+      .role-badge {
+        display: inline-block;
+        padding: 2px 9px;
+        border-radius: 20px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+      }
+      .role-superadmin {
+        background: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+      }
+      .role-admin {
+        background: rgba(201, 169, 110, 0.15);
+        color: var(--gold);
+        border: 1px solid rgba(201, 169, 110, 0.3);
+      }
+      .role-manager {
+        background: rgba(59, 130, 246, 0.15);
+        color: #60a5fa;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+      }
+      .role-viewer {
+        background: rgba(107, 114, 128, 0.15);
+        color: #9ca3af;
+        border: 1px solid rgba(107, 114, 128, 0.3);
+      }
+
+      /* ─── Status badges ───────────────────────────────── */
+      .status-active {
+        background: rgba(16, 185, 129, 0.12);
+        color: #34d399;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        border-radius: 20px;
+        padding: 2px 9px;
+        font-size: 0.72rem;
+        font-weight: 600;
+      }
+      .status-inactive {
+        background: rgba(239, 68, 68, 0.12);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 20px;
+        padding: 2px 9px;
+        font-size: 0.72rem;
+        font-weight: 600;
+      }
+
+      /* ─── 2FA badge ───────────────────────────────────── */
+      .tfa-on {
+        background: rgba(16, 185, 129, 0.12);
+        color: #34d399;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        border-radius: 20px;
+        padding: 2px 9px;
+        font-size: 0.72rem;
+        font-weight: 600;
+      }
+      .tfa-off {
+        background: rgba(107, 114, 128, 0.12);
+        color: #9ca3af;
+        border: 1px solid rgba(107, 114, 128, 0.3);
+        border-radius: 20px;
+        padding: 2px 9px;
+        font-size: 0.72rem;
+        font-weight: 600;
+      }
+
+      /* ─── Inline role select ──────────────────────────── */
+      .role-select {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 0.78rem;
+        cursor: pointer;
+      }
+      .role-select:focus {
+        outline: none;
+        border-color: var(--gold);
+      }
+
+      /* ─── Password reveal box ─────────────────────────── */
+      .pwd-reveal-box {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(201, 169, 110, 0.08);
+        border: 1px solid rgba(201, 169, 110, 0.3);
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 0.85rem;
+      }
+      .pwd-reveal-box code {
+        font-family: monospace;
+        color: var(--gold);
+        font-size: 1rem;
+        letter-spacing: 1px;
+      }
+
+      /* ─── Modal ───────────────────────────────────────── */
+      .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.65);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal-overlay.open {
+        display: flex;
+      }
+      .modal-box {
+        background: var(--bg-card, #1a1a1a);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 28px 32px;
+        width: 420px;
+        max-width: calc(100vw - 32px);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      }
+      .modal-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 20px;
+      }
+      .modal-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-top: 20px;
+      }
+
+      /* ─── Table action buttons ────────────────────────── */
+      .action-group {
+        display: flex;
+        gap: 4px;
+        flex-wrap: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-text">Nevesty Models</div>
+          <div class="sidebar-logo-sub">Панель управления</div>
+        </div>
+        <nav class="sidebar-nav">
+          <div class="nav-section-label">Главная</div>
+          <a href="/admin/"><span class="nav-icon">📊</span> Dashboard</a>
+          <div class="nav-section-label">Бизнес</div>
+          <a href="/admin/orders.html"
+            ><span class="nav-icon">📋</span> Заявки
+            <span class="nav-badge" id="newOrdersBadge" style="display: none">0</span></a
+          >
+          <a href="/admin/models.html"><span class="nav-icon">💃</span> Модели</a>
+          <a href="/admin/reviews.html"><span class="nav-icon">⭐</span> Отзывы</a>
+          <a href="/admin/faq.html"><span class="nav-icon">❓</span> FAQ</a>
+          <a href="/admin/broadcasts.html"><span class="nav-icon">📢</span> Рассылки</a>
+          <a href="/admin/messages.html"><span class="nav-icon">💬</span> Сообщения</a>
+          <a href="/admin/notifications.html"><span class="nav-icon">🔔</span> Уведомления</a>
+          <div class="nav-section-label">AI</div>
+          <a href="/admin/social.html"><span class="nav-icon">📱</span> Соцсети</a>
+          <a href="/admin/factory.html"><span class="nav-icon">🤖</span> AI Factory</a>
+          <div class="nav-section-label">Настройки</div>
+          <a href="/admin/users.html" class="active"><span class="nav-icon">🔐</span> Администраторы</a>
+          <a href="/admin/managers.html"><span class="nav-icon">👥</span> Менеджеры</a>
+          <a href="/admin/settings.html"><span class="nav-icon">⚙️</span> Настройки</a>
+          <a href="/admin/audit.html"><span class="nav-icon">📜</span> Аудит</a>
+          <a href="/admin/analytics.html"><span class="nav-icon">📈</span> Аналитика</a>
+          <a href="/admin/db.html"><span class="nav-icon">🗄️</span> База данных</a>
+          <a href="/" target="_blank"><span class="nav-icon">🌐</span> Сайт</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <div class="sidebar-avatar sidebar-user-letter">A</div>
+            <div class="sidebar-user-info">
+              <strong class="sidebar-user-name">—</strong><span class="sidebar-user-role">—</span>
+            </div>
+          </div>
+          <button class="btn-logout" data-action="logout">Выйти</button>
+        </div>
+      </aside>
+
+      <div class="main-content">
+        <header class="topbar">
+          <div class="topbar-title">Администраторы</div>
+          <div class="topbar-right">
+            <button class="topbar-btn primary" id="btnCreate">+ Создать администратора</button>
+          </div>
+        </header>
+
+        <div class="page-content">
+          <!-- Stats row -->
+          <div
+            id="statsRow"
+            style="
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+              gap: 16px;
+              margin-bottom: 24px;
+            "
+          ></div>
+
+          <!-- Access notice for non-superadmins -->
+          <div id="accessNotice" class="section-card" style="display: none; margin-bottom: 20px">
+            <div class="section-card-body padded" style="color: var(--text-muted); font-size: 0.88rem">
+              ⚠️ Управление администраторами доступно только суперадминам.
+            </div>
+          </div>
+
+          <!-- Users table -->
+          <div class="section-card">
+            <div class="section-card-header">
+              <div class="section-card-title">Список администраторов</div>
+              <div style="display: flex; gap: 8px; align-items: center">
+                <input
+                  class="admin-input"
+                  type="search"
+                  id="searchInput"
+                  placeholder="Поиск по логину…"
+                  style="width: 200px; padding: 6px 12px; font-size: 0.82rem"
+                />
+              </div>
+            </div>
+            <div class="section-card-body" style="overflow-x: auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Логин</th>
+                    <th>Email</th>
+                    <th>Роль</th>
+                    <th>2FA</th>
+                    <th>Последний вход</th>
+                    <th>Статус</th>
+                    <th>Создан</th>
+                    <th style="width: 200px"></th>
+                  </tr>
+                </thead>
+                <tbody id="usersBody">
+                  <tr>
+                    <td colspan="8" style="text-align: center; padding: 40px; color: var(--text-dim)">Загрузка…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Create Admin Modal ─────────────────────────────────────── -->
+    <div class="modal-overlay" id="createModal">
+      <div class="modal-box">
+        <div class="modal-title">Создать администратора</div>
+        <div class="admin-form-group">
+          <label>Логин *</label>
+          <input class="admin-input" type="text" id="c_username" placeholder="admin2" autocomplete="off" />
+        </div>
+        <div class="admin-form-group" style="margin-top: 12px">
+          <label>Пароль *</label>
+          <input
+            class="admin-input"
+            type="password"
+            id="c_password"
+            placeholder="Минимум 6 символов"
+            autocomplete="new-password"
+          />
+        </div>
+        <div class="admin-form-group" style="margin-top: 12px">
+          <label>Роль</label>
+          <select class="admin-input" id="c_role">
+            <option value="viewer">Viewer — только просмотр</option>
+            <option value="manager" selected>Manager — менеджер заявок</option>
+            <option value="admin">Admin — полный доступ</option>
+            <option value="superadmin">Superadmin — управление пользователями</option>
+          </select>
+        </div>
+        <div class="admin-form-group" style="margin-top: 12px">
+          <label>Email <span style="color: var(--text-dim)">(необязательно)</span></label>
+          <input class="admin-input" type="email" id="c_email" placeholder="user@agency.ru" />
+        </div>
+        <div class="admin-form-group" style="margin-top: 12px">
+          <label>Telegram ID <span style="color: var(--text-dim)">(необязательно)</span></label>
+          <input class="admin-input" type="text" id="c_telegram_id" placeholder="123456789" />
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-md btn-ghost" id="createCancelBtn">Отмена</button>
+          <button class="btn btn-md btn-gold" id="createSubmitBtn">Создать</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── New Password Modal ─────────────────────────────────────── -->
+    <div class="modal-overlay" id="pwdModal">
+      <div class="modal-box">
+        <div class="modal-title">Новый пароль сгенерирован</div>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px">
+          Скопируйте и передайте пользователю. После закрытия увидеть снова будет невозможно.
+        </p>
+        <div class="pwd-reveal-box" style="justify-content: space-between; width: 100%">
+          <code id="pwdValue">—</code>
+          <button class="btn btn-sm btn-ghost" id="copyPwdBtn" title="Копировать">📋 Копировать</button>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-md btn-gold" id="pwdCloseBtn">Закрыть</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/js/admin.js"></script>
+    <script>
+      let allUsers = [];
+      let currentUser = null;
+
+      // ─── Role labels / helpers ─────────────────────────────────────
+      const ROLE_LABEL = {
+        superadmin: 'Superadmin',
+        admin: 'Admin',
+        manager: 'Manager',
+        viewer: 'Viewer',
+      };
+      const ROLE_CLASS = {
+        superadmin: 'role-superadmin',
+        admin: 'role-admin',
+        manager: 'role-manager',
+        viewer: 'role-viewer',
+      };
+
+      function roleBadge(role) {
+        const cls = ROLE_CLASS[role] || 'role-viewer';
+        return `<span class="role-badge ${cls}">${ROLE_LABEL[role] || role}</span>`;
+      }
+
+      // ─── Load users ────────────────────────────────────────────────
+      async function loadUsers() {
+        try {
+          const me = JSON.parse(localStorage.getItem('admin_user') || '{}');
+          currentUser = me;
+          if (me.role !== 'superadmin') {
+            document.getElementById('accessNotice').style.display = '';
+            document.getElementById('btnCreate').style.display = 'none';
+            document.getElementById('usersBody').innerHTML =
+              '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-dim)">Доступ только для суперадминов</td></tr>';
+            return;
+          }
+
+          const users = await _admin.apiFetch('/admin/users');
+          allUsers = users;
+          renderStats(users);
+          renderTable(users, me);
+        } catch (e) {
+          _admin.toast('Ошибка загрузки: ' + e.message, 'error');
+          document.getElementById('usersBody').innerHTML =
+            '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--danger)">Ошибка загрузки</td></tr>';
+        }
+      }
+
+      // ─── Stats ─────────────────────────────────────────────────────
+      function renderStats(users) {
+        const total = users.length;
+        const active = users.filter(u => u.active !== 0).length;
+        const superadmins = users.filter(u => u.role === 'superadmin').length;
+        const with2fa = users.filter(u => u.totp_enabled).length;
+
+        document.getElementById('statsRow').innerHTML = [
+          { icon: '👤', label: 'Всего', value: total },
+          { icon: '✅', label: 'Активных', value: active },
+          { icon: '🛡️', label: 'Суперадминов', value: superadmins },
+          { icon: '🔑', label: '2FA включена', value: with2fa },
+        ]
+          .map(
+            s => `
+          <div class="section-card" style="padding:16px;text-align:center">
+            <div style="font-size:1.5rem">${s.icon}</div>
+            <div style="font-size:1.4rem;font-weight:700;color:var(--gold);margin:4px 0">${s.value}</div>
+            <div style="font-size:0.78rem;color:var(--text-muted)">${s.label}</div>
+          </div>`
+          )
+          .join('');
+      }
+
+      // ─── Table render ──────────────────────────────────────────────
+      function renderTable(users, me) {
+        const tbody = document.getElementById('usersBody');
+        const q = (document.getElementById('searchInput').value || '').toLowerCase();
+        const filtered = q
+          ? users.filter(u => u.username.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q))
+          : users;
+
+        if (!filtered.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-dim)">Нет администраторов</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = filtered
+          .map(u => {
+            const isMe = u.id === me.id || u.username === me.username;
+            const active = u.active !== 0;
+            const tfa = u.totp_enabled ? 1 : 0;
+
+            // Role select (inline)
+            const roleSelect = `<select class="role-select" data-action="change-role" data-id="${u.id}" ${isMe ? 'disabled title="Нельзя менять свою роль"' : ''}>
+            ${['viewer', 'manager', 'admin', 'superadmin']
+              .map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`)
+              .join('')}
+          </select>`;
+
+            // Action buttons
+            const toggleBtn = !isMe
+              ? `<button class="btn btn-sm btn-ghost" data-action="toggle-active" data-id="${u.id}" data-active="${active ? 1 : 0}"
+                title="${active ? 'Деактивировать' : 'Активировать'}">${active ? '🚫' : '✅'}</button>`
+              : '';
+
+            const resetPwdBtn = `<button class="btn btn-sm btn-ghost" data-action="reset-pwd" data-id="${u.id}" data-name="${_admin.escapeHtml(u.username)}" title="Сбросить пароль">🔑</button>`;
+
+            const reset2faBtn = tfa
+              ? `<button class="btn btn-sm btn-ghost" data-action="reset-2fa" data-id="${u.id}" data-name="${_admin.escapeHtml(u.username)}" title="Сбросить 2FA">📵</button>`
+              : '';
+
+            const deleteBtn = !isMe
+              ? `<button class="btn btn-sm btn-danger" data-action="del-user" data-id="${u.id}" data-name="${_admin.escapeHtml(u.username)}" title="Удалить">🗑</button>`
+              : `<span style="color:var(--text-dim);font-size:0.72rem">это вы</span>`;
+
+            return `<tr style="${active ? '' : 'opacity:0.55'}">
+            <td><strong>${_admin.escapeHtml(u.username)}</strong>${isMe ? ' <span style="color:var(--text-dim);font-size:0.7rem">(вы)</span>' : ''}</td>
+            <td style="color:var(--text-muted)">${u.email ? _admin.escapeHtml(u.email) : '—'}</td>
+            <td>${roleSelect}</td>
+            <td>${tfa ? '<span class="tfa-on">🔐 Вкл</span>' : '<span class="tfa-off">Выкл</span>'}</td>
+            <td style="color:var(--text-muted);font-size:0.8rem">${u.last_login ? _admin.formatDate(u.last_login) : '<span style="color:var(--text-dim)">Никогда</span>'}</td>
+            <td>${active ? '<span class="status-active">Активен</span>' : '<span class="status-inactive">Неактивен</span>'}</td>
+            <td style="color:var(--text-muted);font-size:0.8rem">${_admin.formatDate(u.created_at)}</td>
+            <td>
+              <div class="action-group">
+                ${resetPwdBtn}${reset2faBtn}${toggleBtn}${deleteBtn}
+              </div>
+            </td>
+          </tr>`;
+          })
+          .join('');
+      }
+
+      // ─── Delegated event handlers ──────────────────────────────────
+      document.getElementById('usersBody').addEventListener('change', async e => {
+        const sel = e.target.closest('[data-action="change-role"]');
+        if (!sel) return;
+        const id = +sel.dataset.id;
+        const role = sel.value;
+        try {
+          await _admin.apiFetch(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ role }) });
+          _admin.toast('Роль обновлена', 'success');
+          loadUsers();
+        } catch (err) {
+          _admin.toast('Ошибка: ' + err.message, 'error');
+          loadUsers(); // revert UI
+        }
+      });
+
+      document.getElementById('usersBody').addEventListener('click', async e => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const action = btn.dataset.action;
+        const id = +btn.dataset.id;
+        const name = btn.dataset.name;
+
+        if (action === 'toggle-active') {
+          const isActive = btn.dataset.active === '1';
+          _admin.adminConfirm(
+            isActive ? 'Деактивировать пользователя?' : 'Активировать пользователя?',
+            `"${name}" ${isActive ? 'потеряет доступ' : 'получит доступ'} к панели управления.`,
+            async () => {
+              try {
+                await _admin.apiFetch(`/admin/users/${id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({ active: isActive ? 0 : 1 }),
+                });
+                _admin.toast(isActive ? 'Пользователь деактивирован' : 'Пользователь активирован', 'success');
+                loadUsers();
+              } catch (err) {
+                _admin.toast('Ошибка: ' + err.message, 'error');
+              }
+            }
+          );
+        }
+
+        if (action === 'reset-pwd') {
+          _admin.adminConfirm(
+            'Сбросить пароль?',
+            `Будет сгенерирован новый пароль для "${name}". Старый перестанет работать.`,
+            async () => {
+              try {
+                const res = await _admin.apiFetch(`/admin/users/${id}/reset-password`, { method: 'POST' });
+                document.getElementById('pwdValue').textContent = res.new_password;
+                document.getElementById('pwdModal').classList.add('open');
+              } catch (err) {
+                _admin.toast('Ошибка: ' + err.message, 'error');
+              }
+            }
+          );
+        }
+
+        if (action === 'reset-2fa') {
+          _admin.adminConfirm(
+            'Сбросить 2FA?',
+            `Пользователь "${name}" сможет войти без кода аутентификатора. Рекомендуется заново настроить 2FA.`,
+            async () => {
+              try {
+                await _admin.apiFetch(`/admin/users/${id}/reset-2fa`, { method: 'POST' });
+                _admin.toast('2FA сброшена', 'success');
+                loadUsers();
+              } catch (err) {
+                _admin.toast('Ошибка: ' + err.message, 'error');
+              }
+            }
+          );
+        }
+
+        if (action === 'del-user') {
+          _admin.adminConfirm(
+            'Удалить администратора?',
+            `"${name}" будет удалён без возможности восстановления.`,
+            async () => {
+              try {
+                await _admin.apiFetch(`/admin/users/${id}`, { method: 'DELETE' });
+                _admin.toast('Пользователь удалён', 'success');
+                loadUsers();
+              } catch (err) {
+                _admin.toast('Ошибка: ' + err.message, 'error');
+              }
+            }
+          );
+        }
+      });
+
+      // ─── Search ────────────────────────────────────────────────────
+      document.getElementById('searchInput').addEventListener('input', () => {
+        const me = JSON.parse(localStorage.getItem('admin_user') || '{}');
+        renderTable(allUsers, me);
+      });
+
+      // ─── Create modal ──────────────────────────────────────────────
+      document.getElementById('btnCreate').addEventListener('click', () => {
+        document.getElementById('createModal').classList.add('open');
+      });
+      document.getElementById('createCancelBtn').addEventListener('click', () => {
+        document.getElementById('createModal').classList.remove('open');
+      });
+      document.getElementById('createModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('createModal'))
+          document.getElementById('createModal').classList.remove('open');
+      });
+
+      document.getElementById('createSubmitBtn').addEventListener('click', async () => {
+        const username = document.getElementById('c_username').value.trim();
+        const password = document.getElementById('c_password').value;
+        const role = document.getElementById('c_role').value;
+        const email = document.getElementById('c_email').value.trim();
+        const telegram_id = document.getElementById('c_telegram_id').value.trim();
+
+        if (!username) return _admin.toast('Укажите логин', 'error');
+        if (!password || password.length < 6) return _admin.toast('Пароль минимум 6 символов', 'error');
+
+        try {
+          document.getElementById('createSubmitBtn').disabled = true;
+          await _admin.apiFetch('/admin/users', {
+            method: 'POST',
+            body: JSON.stringify({
+              username,
+              password,
+              role,
+              email: email || undefined,
+              telegram_id: telegram_id || undefined,
+            }),
+          });
+          _admin.toast('Администратор создан!', 'success');
+          document.getElementById('createModal').classList.remove('open');
+          // Reset form
+          ['c_username', 'c_password', 'c_email', 'c_telegram_id'].forEach(id => {
+            document.getElementById(id).value = '';
+          });
+          document.getElementById('c_role').value = 'manager';
+          loadUsers();
+        } catch (err) {
+          _admin.toast('Ошибка: ' + err.message, 'error');
+        } finally {
+          document.getElementById('createSubmitBtn').disabled = false;
+        }
+      });
+
+      // ─── Password reveal modal ─────────────────────────────────────
+      document.getElementById('pwdCloseBtn').addEventListener('click', () => {
+        document.getElementById('pwdModal').classList.remove('open');
+      });
+      document.getElementById('copyPwdBtn').addEventListener('click', async () => {
+        const pwd = document.getElementById('pwdValue').textContent;
+        try {
+          await navigator.clipboard.writeText(pwd);
+          _admin.toast('Скопировано!', 'success');
+        } catch {
+          _admin.toast('Нажмите Ctrl+C для копирования', 'info');
+        }
+      });
+
+      loadUsers();
+    </script>
+  </body>
+</html>
