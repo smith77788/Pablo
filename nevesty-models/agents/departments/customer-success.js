@@ -69,7 +69,7 @@ class OnboardingSpecialist extends Agent {
         `SELECT id, order_number, client_chat_id, client_name, client_phone, event_type, created_at
          FROM orders
          WHERE status = 'new'
-           AND created_at > datetime('now', '-7 days')
+           AND created_at > datetime('now', '-30 days')
            AND created_at < datetime('now', '-1 day')
          ORDER BY created_at ASC
          LIMIT 30`
@@ -80,7 +80,7 @@ class OnboardingSpecialist extends Agent {
     }
 
     if (!orders.length) {
-      this.addFinding('OK', 'Нет зависших новых заявок за последние 7 дней');
+      this.addFinding('OK', 'Нет зависших новых заявок за последние 30 дней');
       return;
     }
 
@@ -144,7 +144,8 @@ class RetentionAnalyst extends Agent {
          FROM orders
          WHERE status = 'completed'
          GROUP BY client_chat_id
-         HAVING last < datetime('now', '-60 days')
+         HAVING cnt > 2
+           AND last < datetime('now', '-60 days')
          LIMIT 20`
       );
     } catch (e) {
@@ -230,6 +231,29 @@ class FeedbackCollector extends Agent {
       return;
     }
 
+    // Check overall review approval ratio
+    let reviewStats;
+    try {
+      reviewStats = await dbAll(
+        `SELECT
+           COUNT(*) as total,
+           SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) as approved_count
+         FROM reviews`
+      );
+    } catch {
+      reviewStats = [];
+    }
+
+    if (reviewStats.length && reviewStats[0].total > 0) {
+      const { total, approved_count } = reviewStats[0];
+      const ratio = Math.round((approved_count / total) * 100);
+      const sev = ratio < 50 ? 'MEDIUM' : 'LOW';
+      this.addFinding(sev, `⭐ Отзывы: ${approved_count}/${total} одобрено (${ratio}%)`);
+      await factoryLog(this.name, `Review ratio: ${approved_count}/${total} approved (${ratio}%)`);
+    } else {
+      this.addFinding('LOW', '⭐ Отзывов в базе пока нет');
+    }
+
     if (!candidates.length) {
       this.addFinding('OK', 'Нет клиентов, ожидающих приглашения оставить отзыв');
       return;
@@ -264,7 +288,45 @@ class UpsellAdvisor extends Agent {
   }
 
   async analyze() {
-    // Top-3 models by order count
+    // Find clients with completed orders who have not been offered an upsell yet
+    let upsellCandidates;
+    try {
+      upsellCandidates = await dbAll(
+        `SELECT o.client_chat_id, o.client_name, COUNT(o.id) as order_count,
+                MAX(o.created_at) as last_order
+         FROM orders o
+         WHERE o.status = 'completed'
+           AND o.client_chat_id IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM agent_discussions ad
+             WHERE ad.topic = 'upsell'
+               AND ad.message LIKE '%' || o.client_chat_id || '%'
+           )
+         GROUP BY o.client_chat_id
+         ORDER BY order_count DESC
+         LIMIT 20`
+      );
+    } catch (e) {
+      this.addFinding('HIGH', `UpsellAdvisor: ошибка поиска кандидатов: ${e.message}`);
+      return;
+    }
+
+    if (!upsellCandidates.length) {
+      this.addFinding('OK', 'Нет клиентов для апселла — все уже охвачены или нет завершённых заявок');
+      return;
+    }
+
+    const candidateList = upsellCandidates
+      .slice(0, 5)
+      .map(c => `${c.client_name || c.client_chat_id} (${c.order_count} заказов)`)
+      .join(', ');
+
+    this.addFinding(
+      'MEDIUM',
+      `📈 ${upsellCandidates.length} клиентов с завершёнными заявками, которым не предлагали апселл: ${candidateList}`
+    );
+
+    // Top-3 models by order count for upsell ideas
     let topModels;
     try {
       topModels = await dbAll(
@@ -278,19 +340,21 @@ class UpsellAdvisor extends Agent {
          ORDER BY order_count DESC
          LIMIT 3`
       );
-    } catch (e) {
-      this.addFinding('HIGH', `UpsellAdvisor: ошибка загрузки моделей: ${e.message}`);
-      return;
-    }
-
-    if (!topModels.length) {
-      this.addFinding('OK', 'Недостаточно данных для анализа апселлинга');
-      return;
+    } catch {
+      topModels = [];
     }
 
     if (!process.env.ANTHROPIC_API_KEY) {
       const names = topModels.map(m => `${m.name} (${m.order_count} заказов)`).join(', ');
-      this.addFinding('LOW', `📈 Топ модели: ${names}. ANTHROPIC_API_KEY не задан — идеи апселла не генерируются.`);
+      this.addFinding(
+        'LOW',
+        `📈 Топ модели: ${names || 'нет данных'}. ANTHROPIC_API_KEY не задан — идеи не генерируются.`
+      );
+      return;
+    }
+
+    if (!topModels.length) {
+      this.addFinding('LOW', 'Недостаточно данных о моделях для генерации идей апселла');
       return;
     }
 
@@ -309,12 +373,12 @@ class UpsellAdvisor extends Agent {
           'Примеры: добавить вторую модель к пакету, предложить видеосъёмку к фото, пакет "свадьба + репетиция".',
           'Краткий формат: одна идея — одна строка. Без вступлений.',
         ].join(' '),
-        userPrompt: `Топ-3 модели по заказам:\n${modelList}`,
+        userPrompt: `Топ-3 модели по заказам:\n${modelList}\n\nКлиентов для апселла: ${upsellCandidates.length}`,
         maxTokens: 200,
       });
 
-      this.addFinding('LOW', `📈 Идеи апселлинга на основе топ-моделей: ${ideas.slice(0, 300)}`);
-      await factoryLog(this.name, `Upsell ideas generated for top ${topModels.length} models`);
+      this.addFinding('LOW', `📈 Идеи апселлинга: ${ideas.slice(0, 300)}`);
+      await factoryLog(this.name, `Upsell ideas generated; ${upsellCandidates.length} candidates identified`);
     } catch (e) {
       this.addFinding('LOW', `UpsellAdvisor: не удалось сгенерировать идеи: ${e.message}`);
     }

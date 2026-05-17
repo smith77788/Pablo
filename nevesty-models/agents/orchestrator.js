@@ -1,6 +1,18 @@
 /** 🧠 Orchestrator — Prefrontal Cortex | Главный мозг: агрегирует, решает, подтверждает */
 const { logAgent, tgSend, tgSendGetId, tgEditMessage, progressBar, _dbAll, _dbRun } = require('./lib/base');
 
+// Department agents (AI Factory)
+const { LeadQualifier, ProposalWriter, FollowUpSpecialist, PricingNegotiator } = require('./departments/sales');
+const { CopywriterAI, BrandVoiceKeeper, StorytellingAgent } = require('./departments/creative');
+const { RevenueForecaster, CostOptimizer, PricingStrategist, BudgetPlanner } = require('./departments/finance');
+const { MarketResearcher, CompetitorAnalyst, TrendSpotter, InsightSynthesizer } = require('./departments/research');
+const {
+  OnboardingSpecialist,
+  RetentionAnalyst,
+  FeedbackCollector,
+  UpsellAdvisor,
+} = require('./departments/customer-success');
+
 const agents = [
   require('./01-ux-architect'),
   require('./02-booking-completeness'),
@@ -31,6 +43,30 @@ const agents = [
   require('./27-content-manager'),
   require('./28-activity-logger'),
   require('./29-content-generator'),
+  // Sales Department
+  LeadQualifier,
+  ProposalWriter,
+  FollowUpSpecialist,
+  PricingNegotiator,
+  // Creative Department
+  CopywriterAI,
+  BrandVoiceKeeper,
+  StorytellingAgent,
+  // Finance Department
+  RevenueForecaster,
+  CostOptimizer,
+  PricingStrategist,
+  BudgetPlanner,
+  // Research Department
+  MarketResearcher,
+  CompetitorAnalyst,
+  TrendSpotter,
+  InsightSynthesizer,
+  // Customer Success Department
+  OnboardingSpecialist,
+  RetentionAnalyst,
+  FeedbackCollector,
+  UpsellAdvisor,
 ];
 
 const SEV_EMO = { CRITICAL: '🔴', HIGH: '🟠', MEDIUM: '🟡', LOW: '🟢', INFO: '⚪', OK: '✅' };
