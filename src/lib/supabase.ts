@@ -9,4 +9,3 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
-// last sync: 2026-05-17T20:46:55Z

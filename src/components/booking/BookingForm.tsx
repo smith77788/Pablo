@@ -1,161 +1,202 @@
-import React, { useState } from 'react';
-import { useCreateOrder } from '../../hooks/useOrders';
-import { OrderInsert, EventType, Model } from '../../types';
+import { useState } from "react";
+import { supabase } from "@/lib/supabase";
 
-interface BookingFormProps {
-  model?: Model;
-  onSuccess?: (orderNumber: string) => void;
-  onCancel?: () => void;
-}
-
-type Step = 'event' | 'date' | 'contact' | 'confirm';
-
-const EVENT_TYPES: { value: EventType; label: string }[] = [
-  { value: 'photo', label: '📷 Фотосессия' },
-  { value: 'video', label: '🎬 Видеосъёмка' },
-  { value: 'event', label: '🎉 Мероприятие' },
-  { value: 'promo', label: '📢 Промоакция' },
-  { value: 'fashion', label: '👗 Показ мод' },
-  { value: 'commercial', label: '📺 Реклама' },
-  { value: 'other', label: '📋 Другое' },
+const EVENT_TYPES = [
+  { value: "photo", label: "📷 Фотосессия" },
+  { value: "video", label: "🎬 Видеосъёмка" },
+  { value: "event", label: "🎉 Мероприятие" },
+  { value: "promo", label: "📢 Промоакция" },
+  { value: "fashion", label: "👗 Показ мод" },
+  { value: "commercial", label: "📺 Реклама" },
+  { value: "other", label: "📋 Другое" },
 ];
 
-export const BookingForm: React.FC<BookingFormProps> = ({ model, onSuccess, onCancel }) => {
-  const [step, setStep] = useState<Step>('event');
-  const [form, setForm] = useState<Partial<OrderInsert>>({
-    model_id: model?.id,
-    event_duration: 4,
+const STEPS = ["Тип события", "Дата и детали", "Контакты", "Подтверждение"];
+
+interface Props {
+  modelId?: number;
+  modelName?: string;
+  onSuccess?: () => void;
+}
+
+export function BookingForm({ modelId, modelName, onSuccess }: Props) {
+  const [step, setStep] = useState(0);
+  const [done, setDone] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({
+    event_type: "",
+    event_date: "",
+    event_location: "",
+    budget: "",
+    client_name: "",
+    client_phone: "",
+    client_email: "",
+    comment: "",
+    promo_code: "",
   });
-  const createOrder = useCreateOrder();
 
-  const steps: Step[] = ['event', 'date', 'contact', 'confirm'];
-  const stepIndex = steps.indexOf(step);
+  function set(k: string, v: string) {
+    setForm((f) => ({ ...f, [k]: v }));
+  }
 
-  const update = (key: keyof OrderInsert, value: unknown) =>
-    setForm(f => ({ ...f, [key]: value }));
+  async function submit() {
+    setLoading(true);
+    await supabase.from("bookings").insert({
+      model_id: modelId ?? null,
+      event_type: form.event_type || "other",
+      event_date: form.event_date || null,
+      event_location: form.event_location || null,
+      budget: form.budget ? Number(form.budget) : null,
+      client_name: form.client_name,
+      client_phone: form.client_phone,
+      client_email: form.client_email || null,
+      comment: form.comment || null,
+      status: "new",
+    });
+    setLoading(false);
+    setDone(true);
+    onSuccess?.();
+  }
 
-  const handleSubmit = async () => {
-    if (!form.client_name || !form.client_phone || !form.event_type) return;
-    try {
-      const order = await createOrder.mutateAsync(form as OrderInsert);
-      onSuccess?.(order.order_number);
-    } catch (err) {
-      console.error('Booking error:', err);
-    }
-  };
+  if (done) {
+    return (
+      <div className="p-8 text-center">
+        <div className="text-5xl mb-4">✅</div>
+        <h3 className="font-playfair text-2xl text-white mb-2">Заявка отправлена!</h3>
+        <p className="text-white/50">Мы свяжемся с вами в ближайшее время.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="booking-form">
-      <div className="booking-progress">
-        {steps.map((s, i) => (
-          <div key={s} className={`progress-step ${i <= stepIndex ? 'active' : ''}`}>
-            {i + 1}
+    <div className="p-6">
+      {/* Progress */}
+      <div className="flex items-center gap-2 mb-8">
+        {STEPS.map((s, i) => (
+          <div key={s} className="flex items-center gap-2 flex-1">
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${i < step ? "bg-[#c9a96e] text-black" : i === step ? "bg-[#c9a96e] text-black" : "bg-white/10 text-white/30"}`}>
+              {i < step ? "✓" : i + 1}
+            </div>
+            <span className={`text-xs hidden sm:block ${i === step ? "text-[#c9a96e]" : "text-white/30"}`}>{s}</span>
+            {i < STEPS.length - 1 && <div className={`flex-1 h-px ${i < step ? "bg-[#c9a96e]" : "bg-white/10"}`} />}
           </div>
         ))}
       </div>
 
-      {step === 'event' && (
-        <div className="booking-step">
-          <h2>Тип мероприятия</h2>
-          {model && <p>Модель: <strong>{model.name}</strong></p>}
-          <div className="event-types">
-            {EVENT_TYPES.map(et => (
+      {modelName && (
+        <div className="bg-[#c9a96e]/10 border border-[#c9a96e]/20 rounded-xl px-4 py-2 text-[#c9a96e] text-sm mb-6">
+          Модель: <strong>{modelName}</strong>
+        </div>
+      )}
+
+      {/* Step 0 — Event type */}
+      {step === 0 && (
+        <div>
+          <h3 className="text-white text-lg font-semibold mb-4">Тип события</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {EVENT_TYPES.map((t) => (
               <button
-                key={et.value}
-                className={`event-type-btn ${form.event_type === et.value ? 'selected' : ''}`}
-                onClick={() => update('event_type', et.value)}
+                key={t.value}
+                onClick={() => { set("event_type", t.value); setStep(1); }}
+                className={`py-3 px-4 rounded-xl border text-sm text-left transition-colors ${form.event_type === t.value ? "border-[#c9a96e] bg-[#c9a96e]/10 text-[#c9a96e]" : "border-white/10 text-white/60 hover:border-[#c9a96e]/40"}`}
               >
-                {et.label}
+                {t.label}
               </button>
             ))}
           </div>
-          <button
-            className="btn btn-primary"
-            disabled={!form.event_type}
-            onClick={() => setStep('date')}
-          >
-            Далее →
-          </button>
         </div>
       )}
 
-      {step === 'date' && (
-        <div className="booking-step">
-          <h2>Дата и место</h2>
-          <input
-            type="date"
-            value={form.event_date || ''}
-            onChange={e => update('event_date', e.target.value)}
-            className="form-input"
-            min={new Date().toISOString().split('T')[0]}
-          />
-          <select
-            value={form.event_duration || 4}
-            onChange={e => update('event_duration', Number(e.target.value))}
-            className="form-select"
-          >
-            {[2,4,6,8,12].map(h => <option key={h} value={h}>{h} часов</option>)}
-          </select>
-          <input
-            type="text"
-            placeholder="Место проведения"
-            value={form.location || ''}
-            onChange={e => update('location', e.target.value)}
-            className="form-input"
-          />
-          <input
-            type="text"
-            placeholder="Бюджет (опционально)"
-            value={form.budget || ''}
-            onChange={e => update('budget', e.target.value)}
-            className="form-input"
-          />
-          <div className="step-actions">
-            <button className="btn btn-secondary" onClick={() => setStep('event')}>← Назад</button>
-            <button className="btn btn-primary" onClick={() => setStep('contact')}>Далее →</button>
+      {/* Step 1 — Date & details */}
+      {step === 1 && (
+        <div className="space-y-4">
+          <h3 className="text-white text-lg font-semibold mb-4">Дата и детали</h3>
+          <div>
+            <label className="text-white/40 text-xs mb-1 block">Дата события</label>
+            <input
+              type="date"
+              value={form.event_date}
+              onChange={(e) => set("event_date", e.target.value)}
+              className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#c9a96e]"
+            />
+          </div>
+          <div>
+            <label className="text-white/40 text-xs mb-1 block">Место проведения</label>
+            <input
+              type="text"
+              placeholder="Город, адрес или онлайн"
+              value={form.event_location}
+              onChange={(e) => set("event_location", e.target.value)}
+              className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#c9a96e]"
+            />
+          </div>
+          <div>
+            <label className="text-white/40 text-xs mb-1 block">Бюджет (₽)</label>
+            <input
+              type="number"
+              placeholder="Укажите ваш бюджет"
+              value={form.budget}
+              onChange={(e) => set("budget", e.target.value)}
+              className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#c9a96e]"
+            />
+          </div>
+          <div>
+            <label className="text-white/40 text-xs mb-1 block">Комментарий</label>
+            <textarea
+              placeholder="Детали, пожелания, ТЗ..."
+              value={form.comment}
+              onChange={(e) => set("comment", e.target.value)}
+              rows={3}
+              className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#c9a96e] resize-none"
+            />
+          </div>
+          <div className="flex gap-3">
+            <button onClick={() => setStep(0)} className="border border-white/10 text-white/50 px-6 py-3 rounded-xl hover:text-white transition-colors">← Назад</button>
+            <button onClick={() => setStep(2)} className="flex-1 bg-[#c9a96e] hover:bg-[#b8943c] text-black font-semibold py-3 rounded-xl transition-colors">Далее →</button>
           </div>
         </div>
       )}
 
-      {step === 'contact' && (
-        <div className="booking-step">
-          <h2>Ваши контакты</h2>
-          <input
-            type="text"
-            placeholder="Ваше имя *"
-            value={form.client_name || ''}
-            onChange={e => update('client_name', e.target.value)}
-            className="form-input"
-            required
-          />
-          <input
-            type="tel"
-            placeholder="+7 (___) ___-__-__ *"
-            value={form.client_phone || ''}
-            onChange={e => update('client_phone', e.target.value)}
-            className="form-input"
-            required
-          />
-          <input
-            type="email"
-            placeholder="Email (опционально)"
-            value={form.client_email || ''}
-            onChange={e => update('client_email', e.target.value)}
-            className="form-input"
-          />
-          <textarea
-            placeholder="Комментарии к заявке"
-            value={form.comments || ''}
-            onChange={e => update('comments', e.target.value)}
-            className="form-textarea"
-            rows={3}
-          />
-          <div className="step-actions">
-            <button className="btn btn-secondary" onClick={() => setStep('date')}>← Назад</button>
+      {/* Step 2 — Contacts */}
+      {step === 2 && (
+        <div className="space-y-4">
+          <h3 className="text-white text-lg font-semibold mb-4">Контактные данные</h3>
+          <div>
+            <label className="text-white/40 text-xs mb-1 block">Имя *</label>
+            <input
+              type="text"
+              placeholder="Ваше имя"
+              value={form.client_name}
+              onChange={(e) => set("client_name", e.target.value)}
+              className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#c9a96e]"
+            />
+          </div>
+          <div>
+            <label className="text-white/40 text-xs mb-1 block">Телефон *</label>
+            <input
+              type="tel"
+              placeholder="+7 (___) ___-__-__"
+              value={form.client_phone}
+              onChange={(e) => set("client_phone", e.target.value)}
+              className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#c9a96e]"
+            />
+          </div>
+          <div>
+            <label className="text-white/40 text-xs mb-1 block">Email</label>
+            <input
+              type="email"
+              placeholder="email@example.com"
+              value={form.client_email}
+              onChange={(e) => set("client_email", e.target.value)}
+              className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#c9a96e]"
+            />
+          </div>
+          <div className="flex gap-3">
+            <button onClick={() => setStep(1)} className="border border-white/10 text-white/50 px-6 py-3 rounded-xl hover:text-white transition-colors">← Назад</button>
             <button
-              className="btn btn-primary"
               disabled={!form.client_name || !form.client_phone}
-              onClick={() => setStep('confirm')}
+              onClick={() => setStep(3)}
+              className="flex-1 bg-[#c9a96e] hover:bg-[#b8943c] disabled:opacity-40 text-black font-semibold py-3 rounded-xl transition-colors"
             >
               Далее →
             </button>
@@ -163,41 +204,38 @@ export const BookingForm: React.FC<BookingFormProps> = ({ model, onSuccess, onCa
         </div>
       )}
 
-      {step === 'confirm' && (
-        <div className="booking-step">
-          <h2>Подтверждение заявки</h2>
-          <div className="booking-summary">
-            {model && <p><strong>Модель:</strong> {model.name}</p>}
-            <p><strong>Тип:</strong> {EVENT_TYPES.find(e => e.value === form.event_type)?.label}</p>
-            {form.event_date && <p><strong>Дата:</strong> {new Date(form.event_date).toLocaleDateString('ru-RU')}</p>}
-            {form.event_duration && <p><strong>Длительность:</strong> {form.event_duration} часов</p>}
-            {form.location && <p><strong>Место:</strong> {form.location}</p>}
-            {form.budget && <p><strong>Бюджет:</strong> {form.budget}</p>}
-            <hr />
-            <p><strong>Имя:</strong> {form.client_name}</p>
-            <p><strong>Телефон:</strong> {form.client_phone}</p>
-            {form.client_email && <p><strong>Email:</strong> {form.client_email}</p>}
-            {form.comments && <p><strong>Комментарии:</strong> {form.comments}</p>}
+      {/* Step 3 — Confirm */}
+      {step === 3 && (
+        <div>
+          <h3 className="text-white text-lg font-semibold mb-4">Подтверждение</h3>
+          <div className="bg-[#141414] rounded-xl p-4 space-y-2 mb-6 text-sm">
+            {[
+              ["Тип события", EVENT_TYPES.find(t => t.value === form.event_type)?.label],
+              ["Дата", form.event_date],
+              ["Место", form.event_location],
+              ["Бюджет", form.budget ? `${form.budget} ₽` : null],
+              ["Имя", form.client_name],
+              ["Телефон", form.client_phone],
+              ["Email", form.client_email],
+            ].filter(([, v]) => v).map(([k, v]) => (
+              <div key={String(k)} className="flex justify-between">
+                <span className="text-white/40">{k}</span>
+                <span className="text-white">{v}</span>
+              </div>
+            ))}
           </div>
-          <div className="step-actions">
-            <button className="btn btn-secondary" onClick={() => setStep('contact')}>← Назад</button>
+          <div className="flex gap-3">
+            <button onClick={() => setStep(2)} className="border border-white/10 text-white/50 px-6 py-3 rounded-xl hover:text-white transition-colors">← Назад</button>
             <button
-              className="btn btn-success"
-              onClick={handleSubmit}
-              disabled={createOrder.isPending}
+              onClick={submit}
+              disabled={loading}
+              className="flex-1 bg-[#c9a96e] hover:bg-[#b8943c] disabled:opacity-40 text-black font-semibold py-4 rounded-xl transition-colors text-lg"
             >
-              {createOrder.isPending ? 'Отправка...' : '✅ Отправить заявку'}
+              {loading ? "Отправляю..." : "Отправить заявку ✓"}
             </button>
           </div>
-          {createOrder.isError && (
-            <div className="form-error">Ошибка при отправке. Попробуйте снова.</div>
-          )}
         </div>
-      )}
-
-      {onCancel && (
-        <button className="btn-cancel" onClick={onCancel}>Отмена</button>
       )}
     </div>
   );
-};
+}
