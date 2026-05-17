@@ -110,6 +110,14 @@
   function initCounters() {
     var counters = document.querySelectorAll('[data-counter]');
     if (!counters.length) return;
+    // If reduced motion: show final values immediately, skip animation
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      counters.forEach(function (el) {
+        var target = parseFloat(el.getAttribute('data-counter'));
+        if (!isNaN(target)) el.textContent = target + (el.getAttribute('data-counter-suffix') || '');
+      });
+      return;
+    }
 
     function easeOutCubic(t) {
       return 1 - Math.pow(1 - t, 3);
@@ -168,6 +176,14 @@
   function initTyping() {
     var typingEls = document.querySelectorAll('[data-typing]');
     if (!typingEls.length) return;
+    // If reduced motion: show text immediately without typing animation
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      typingEls.forEach(function (el) {
+        var text = el.getAttribute('data-typing') || el.textContent.trim();
+        el.textContent = text;
+      });
+      return;
+    }
 
     typingEls.forEach(function (el) {
       var text = el.getAttribute('data-typing') || el.textContent.trim();
@@ -224,6 +240,8 @@
   function initParallax() {
     // Only on desktop
     if (window.innerWidth < 1024) return;
+    // Respect prefers-reduced-motion
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     var slowEls = document.querySelectorAll('.parallax-slow');
     var fastEls = document.querySelectorAll('.parallax-fast');
@@ -314,7 +332,8 @@
     }
 
     var toast = document.createElement('div');
-    toast.className = 'toast ' + type;
+    // Use 'toast-<type>' class to match the enhanced CSS variant system
+    toast.className = 'toast toast-' + type;
     toast.innerHTML =
       '<span class="toast-icon">' +
       (icons[type] || icons.info) +

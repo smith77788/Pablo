@@ -1757,45 +1757,7 @@ select.form-control option {
 }
 
 /* ─── NOTIFICATIONS ──────────────────────────────── */
-.toast-container {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.toast {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--gold);
-  padding: 14px 20px;
-  min-width: 280px;
-  max-width: 360px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  animation: slideIn 0.3s ease;
-  font-size: 0.85rem;
-  color: var(--text);
-}
-.toast.error {
-  border-left-color: #f44336;
-}
-.toast.success {
-  border-left-color: #4caf50;
-}
-@keyframes slideIn {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
+/* Toast styles moved to section 4 (line ~3432) — enhanced system with backdrop-filter */
 
 /* ─── RESPONSIVE ─────────────────────────────────── */
 @media (max-width: 900px) {
@@ -4289,6 +4251,35 @@ img[data-zoom]:hover {
 }
 .img-zoom-hover:hover img {
   transform: scale(1.06);
+}
+
+/* ─── GLOBAL prefers-reduced-motion OVERRIDES ────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  /* Disable toast slide animations */
+  .toast {
+    animation: none !important;
+  }
+  .toast.removing,
+  .toast.toast-hide {
+    animation: none !important;
+    opacity: 0;
+  }
+  /* Disable whatsapp pulse */
+  .whatsapp-float {
+    animation: none !important;
+  }
+  /* Disable all CSS transitions for elements that use transform */
+  .model-card,
+  .service-card,
+  .pricing-card {
+    transition:
+      box-shadow 0.2s ease,
+      border-color 0.2s ease !important;
+  }
+  .model-card:hover,
+  .service-card:hover {
+    transform: none !important;
+  }
 }
 
 /* ─── END OF NEW UI COMPONENTS ───────────────────────────────────── */
