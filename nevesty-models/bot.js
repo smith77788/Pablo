@@ -6536,7 +6536,7 @@ function initBot(app) {
           };
           // Validate evType against whitelist to prevent unvalidated data in output/callback_data
           const VALID_SHARE_EVENT_TYPES = Object.keys(calcEventLabels);
-          if (!VALID_SHARE_EVENT_TYPES.includes(evType)) return bot.answerCallbackQuery(q.id);
+          if (!VALID_SHARE_EVENT_TYPES.includes(evType)) return; // pre-answer already handled at top of handler
           const rates = await getCalcRates();
           const typeMult = rates.type_multipliers[evType] ?? 1.0;
           const modelCost = rates.base_per_hour * calcModels * calcHours * typeMult;
@@ -6556,7 +6556,7 @@ function initBot(app) {
             `💵 Ориентировочная стоимость: от ${minPrice} до ${maxPrice} ₽\n` +
             `\n` +
             `📋 Заявку можно оформить через бот или сайт nevesty-models.ru`;
-          await bot.answerCallbackQuery(q.id);
+          // pre-answer already handled at top of handler
           return safeSend(chatId, shareText, {
             reply_markup: {
               inline_keyboard: [
@@ -6935,7 +6935,7 @@ function initBot(app) {
         const orderId = parseInt(data.replace('adm_ord_note_', ''));
         if (!orderId || orderId <= 0) return;
         const order = await get('SELECT * FROM orders WHERE id=?', [orderId]);
-        if (!order) return bot.answerCallbackQuery(q.id, { text: STRINGS.errorOrderNotFound });
+        if (!order) return safeSend(chatId, STRINGS.errorOrderNotFound);
         await setSession(chatId, 'adm_note_order_id', { orderId });
         return safeSend(
           chatId,
@@ -6973,7 +6973,7 @@ function initBot(app) {
         if (!isAdmin(chatId)) return;
         const orderId = parseInt(data.replace('adm_order_note_', ''));
         const order = await get('SELECT * FROM orders WHERE id=?', [orderId]);
-        if (!order) return bot.answerCallbackQuery(q.id, { text: STRINGS.errorOrderNotFound });
+        if (!order) return safeSend(chatId, STRINGS.errorOrderNotFound);
         await setSession(chatId, 'adm_note_order_id', { orderId });
         return safeSend(
           chatId,
@@ -8218,17 +8218,16 @@ function initBot(app) {
         const model = await get('SELECT id, name FROM models WHERE telegram_chat_id=? AND archived=0', [
           String(chatId),
         ]).catch(() => null);
-        if (!model) return bot.answerCallbackQuery(q.id, { text: '❌ Профиль не найден' }).catch(() => {});
+        if (!model) return safeSend(chatId, '❌ Профиль модели не найден\\.');
         const order = await get(
           `SELECT * FROM orders WHERE id=? AND (model_id=? OR (model_ids IS NOT NULL AND model_ids LIKE ?))`,
           [orderId, model.id, `%${model.id}%`]
         ).catch(() => null);
-        if (!order)
-          return bot.answerCallbackQuery(q.id, { text: '❌ Заявка не найдена или не назначена вам' }).catch(() => {});
+        if (!order) return safeSend(chatId, '❌ Заявка не найдена или не назначена вам\\.');
         if (order.status !== 'new') {
-          return bot
-            .answerCallbackQuery(q.id, { text: `Статус уже: ${STATUS_LABELS[order.status] || order.status}` })
-            .catch(() => {});
+          return safeSend(chatId, `ℹ️ Статус заявки уже: *${esc(STATUS_LABELS[order.status] || order.status)}*`, {
+            parse_mode: 'MarkdownV2',
+          });
         }
         await run(`UPDATE orders SET status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [orderId]).catch(
           () => {}
@@ -8258,12 +8257,12 @@ function initBot(app) {
         const model = await get('SELECT id, name FROM models WHERE telegram_chat_id=? AND archived=0', [
           String(chatId),
         ]).catch(() => null);
-        if (!model) return bot.answerCallbackQuery(q.id, { text: '❌ Профиль не найден' }).catch(() => {});
+        if (!model) return safeSend(chatId, '❌ Профиль модели не найден\\.');
         const order = await get(
           `SELECT * FROM orders WHERE id=? AND (model_id=? OR (model_ids IS NOT NULL AND model_ids LIKE ?))`,
           [orderId, model.id, `%${model.id}%`]
         ).catch(() => null);
-        if (!order) return bot.answerCallbackQuery(q.id, { text: '❌ Заявка не найдена' }).catch(() => {});
+        if (!order) return safeSend(chatId, '❌ Заявка не найдена\\.');
         // Ask for decline reason
         await setSession(chatId, `model_decline_reason_${orderId}`, {
           modelId: model.id,
@@ -8423,8 +8422,8 @@ function initBot(app) {
       if (data.startsWith('rev_delete_')) {
         if (!isAdmin(chatId)) return;
         const id = parseInt(data.replace('rev_delete_', ''));
-        if (!id || isNaN(id)) return bot.answerCallbackQuery(q.id, { text: '⚠️ Ошибка ID' }).catch(() => {});
-        await bot.answerCallbackQuery(q.id).catch(() => {});
+        if (!id || isNaN(id)) return safeSend(chatId, '⚠️ Ошибка ID отзыва\\.');
+        // pre-answer handled at top of handler
         const rev = await get('SELECT id, client_name, rating FROM reviews WHERE id=?', [id]).catch(() => null);
         const label = rev
           ? esc(`#${rev.id} (${rev.client_name || '—'}, ${'⭐'.repeat(Math.min(5, rev.rating || 1))})`)
@@ -8445,10 +8444,10 @@ function initBot(app) {
         if (!isAdmin(chatId)) return;
         const id = parseInt(data.replace('rev_reply_', ''));
         if (!id)
-          return bot
-            .answerCallbackQuery(q.id, { text: '⚠️ Не удалось загрузить отзыв. Попробуйте ещё раз.' })
-            .catch(() => {});
-        await bot.answerCallbackQuery(q.id).catch(() => {});
+          return safeSend(chatId, '⚠️ Не удалось загрузить отзыв\\. Попробуйте ещё раз\\.', {
+            parse_mode: 'MarkdownV2',
+          });
+        // pre-answer handled at top of handler
         // Fetch review text for context
         const rev = await get(
           'SELECT r.*, m.name as model_name FROM reviews r LEFT JOIN models m ON r.model_id = m.id WHERE r.id=?',
@@ -8607,16 +8606,14 @@ function initBot(app) {
                AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`),
           ]);
           const revenue = monthBudget?.total ? Math.round(monthBudget.total).toLocaleString('ru') : '—';
-          await bot
-            .answerCallbackQuery(q.id, {
-              text: `📊 Сегодня: ${todayR.n} | Активных: ${activeR.n} | Выручка/мес: ${revenue} руб.`,
-              show_alert: true,
-            })
-            .catch(() => {});
+          return safeSend(
+            chatId,
+            `📊 *Быстрая статистика*\n\nСегодня: *${todayR.n}* заявок\nАктивных: *${activeR.n}*\nВыручка/мес: *${esc(revenue)} руб\\.*`,
+            { parse_mode: 'MarkdownV2' }
+          );
         } catch {
-          await bot.answerCallbackQuery(q.id, { text: '❌ Ошибка загрузки статистики' }).catch(() => {});
+          return safeSend(chatId, '❌ Ошибка загрузки статистики\\. Попробуйте позже\\.', { parse_mode: 'MarkdownV2' });
         }
-        return;
       }
 
       // ── Telegram channel
@@ -8665,22 +8662,44 @@ function initBot(app) {
       }
 
       // ── Assign manager: show list
-      if (data.startsWith('adm_assign_mgr_') && !data.match(/adm_assign_mgr_\d+_\d+/)) {
+      if (
+        data.startsWith('adm_assign_mgr_') &&
+        !data.match(/adm_assign_mgr_\d+_\d+/) &&
+        !data.startsWith('adm_assign_mgr_unassign_')
+      ) {
         if (!isAdmin(chatId)) return;
         const orderId = parseInt(data.replace('adm_assign_mgr_', ''));
-        const admins = await query('SELECT id, username, role FROM admins ORDER BY id').catch(() => []);
-        if (!admins.length) return safeSend(chatId, '❌ Нет администраторов в базе.');
-        const btns = admins.map(a => [
+        const managers = await query(
+          `SELECT id, username, role FROM admins WHERE role IN ('manager','admin','superadmin') ORDER BY role DESC, username`
+        ).catch(() => []);
+        if (!managers.length) return safeSend(chatId, '❌ Нет менеджеров в базе\\.', { parse_mode: 'MarkdownV2' });
+        const roleIcon = r => (r === 'superadmin' ? '👑' : r === 'admin' ? '🔧' : '👤');
+        const btns = managers.map(a => [
           {
-            text: `${a.username} (${a.role})`,
+            text: `${roleIcon(a.role)} ${a.username}`,
             callback_data: `adm_assign_mgr_${orderId}_${a.id}`,
           },
         ]);
+        btns.push([{ text: '❌ Снять назначение', callback_data: `adm_assign_mgr_unassign_${orderId}` }]);
         btns.push([{ text: '← Назад', callback_data: `adm_order_${orderId}` }]);
-        return safeSend(chatId, `👤 *Выберите менеджера для заявки*:`, {
+        return safeSend(chatId, `👤 *Выберите менеджера для заявки:*`, {
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: btns },
         });
+      }
+
+      // ── Unassign manager
+      if (data.startsWith('adm_assign_mgr_unassign_')) {
+        if (!isAdmin(chatId)) return;
+        const orderId = parseInt(data.replace('adm_assign_mgr_unassign_', ''));
+        await run('UPDATE orders SET manager_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?', [orderId]);
+        await safeSend(chatId, `✅ Назначение менеджера снято\\.`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [[{ text: STRINGS.btnBackToOrder, callback_data: `adm_order_${orderId}` }]],
+          },
+        });
+        return;
       }
 
       // ── Assign manager: set
@@ -8692,13 +8711,16 @@ function initBot(app) {
         await run('UPDATE orders SET manager_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [adminId, orderId]);
         const [admin, order] = await Promise.all([
           get('SELECT username, telegram_id FROM admins WHERE id=?', [adminId]).catch(() => null),
-          get('SELECT order_number, client_name, event_type FROM orders WHERE id=?', [orderId]).catch(() => null),
+          get('SELECT order_number, client_name, event_type, event_date FROM orders WHERE id=?', [orderId]).catch(
+            () => null
+          ),
         ]);
         // Notify assigned manager if they have a telegram_id
         if (admin?.telegram_id && String(admin.telegram_id) !== String(chatId)) {
+          const dateLine = order?.event_date ? `\nДата: ${esc(order.event_date)}` : '';
           safeSend(
             admin.telegram_id,
-            `📋 *Вам назначена заявка \\#${esc(order?.order_number || String(orderId))}*\n\nКлиент: ${esc(order?.client_name || '—')}\nТип: ${esc(EVENT_TYPES[order?.event_type] || order?.event_type || '—')}\n\nОткройте панель управления для просмотра деталей\\.`,
+            `📋 *Вам назначена заявка \\#${esc(order?.order_number || String(orderId))}*\n\nКлиент: ${esc(order?.client_name || '—')}\nТип: ${esc(EVENT_TYPES[order?.event_type] || order?.event_type || '—')}${dateLine}\n\nОткройте панель управления для просмотра деталей\\.`,
             {
               parse_mode: 'MarkdownV2',
               reply_markup: {
@@ -10021,11 +10043,10 @@ function initBot(app) {
 
       // ── FAQ: "Was this helpful?" feedback callbacks
       if (data.startsWith('faq_helpful_')) {
-        await bot.answerCallbackQuery(q.id, { text: '👍 Спасибо за отзыв!' });
-        return;
+        return safeSend(chatId, '👍 Спасибо за отзыв\\! Рады помочь\\.', { parse_mode: 'MarkdownV2' });
       }
       if (data.startsWith('faq_nothelpful_')) {
-        await bot.answerCallbackQuery(q.id);
+        // pre-answer handled at top of handler
         return safeSend(chatId, '📞 Хотите спросить менеджера?', {
           reply_markup: {
             inline_keyboard: [
@@ -14026,9 +14047,6 @@ function _registerNewFeatures() {
 
       // Wishlist clear — confirmed
       if (data === 'fav_clear_yes') {
-        try {
-          await bot.answerCallbackQuery(q.id, { text: '🗑 Список очищен' });
-        } catch {}
         await run('DELETE FROM wishlists WHERE chat_id=?', [String(chatId)]).catch(() => {});
         await run('DELETE FROM favorites WHERE chat_id=?', [String(chatId)]).catch(() => {});
         return safeSend(chatId, '🗑 *Список избранного очищен\\.*\n\nВы можете добавить новые модели из каталога\\.', {
@@ -14048,15 +14066,10 @@ function _registerNewFeatures() {
         if (!favModelId || favModelId <= 0) return;
         const favModel = await get('SELECT id, name FROM models WHERE id=?', [favModelId]).catch(() => null);
         if (!favModel) {
-          try {
-            await bot.answerCallbackQuery(q.id, { text: '❌ Модель не найдена', show_alert: true });
-          } catch {}
-          return;
+          return safeSend(chatId, '❌ Модель не найдена\\.');
         }
         await addToWishlist(chatId, favModelId);
-        try {
-          await bot.answerCallbackQuery(q.id, { text: STRINGS.wishlistAdded });
-        } catch {}
+        // toast already pre-answered; keyboard update provides visual feedback
         try {
           const favKb = (q.message.reply_markup?.inline_keyboard || []).map(row =>
             row.map(btn =>
@@ -14075,9 +14088,7 @@ function _registerNewFeatures() {
         const remModelId = parseInt(data.replace('fav_remove_', ''));
         if (!remModelId || remModelId <= 0) return;
         await removeFromWishlist(chatId, remModelId);
-        try {
-          await bot.answerCallbackQuery(q.id, { text: STRINGS.wishlistRemoved });
-        } catch {}
+        // toast already pre-answered; keyboard update provides visual feedback
         try {
           const remKb = q.message.reply_markup?.inline_keyboard || [];
           if (remKb.some(row => row.some(btn => btn.callback_data === `fav_view_${remModelId}`))) {
