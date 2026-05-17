@@ -3406,6 +3406,87 @@
       setInterval(loadKpiGrid15, 30000);
       setInterval(loadSysStatusBar, 30000);
       setInterval(loadLiveRecentOrders, 30000);
+
+      // ─── SSE: Real-time notifications (БЛОК 26) ──────────────────────────────
+      let _sseSource = null;
+      let _sseReconnectTimer = null;
+      let _sseToastQueue = [];
+      let _sseToastActive = false;
+
+      function showToast(msg) {
+        _sseToastQueue.push(msg);
+        _drainToastQueue();
+      }
+
+      function _drainToastQueue() {
+        if (_sseToastActive || _sseToastQueue.length === 0) return;
+        _sseToastActive = true;
+        const msg = _sseToastQueue.shift();
+        const el = document.createElement('div');
+        el.className = 'admin-toast';
+        el.textContent = msg;
+        document.body.appendChild(el);
+        setTimeout(() => {
+          el.remove();
+          _sseToastActive = false;
+          _drainToastQueue();
+        }, 4200);
+      }
+
+      function connectSSE() {
+        if (_sseReconnectTimer) {
+          clearTimeout(_sseReconnectTimer);
+          _sseReconnectTimer = null;
+        }
+        if (_sseSource) {
+          try {
+            _sseSource.close();
+          } catch (_) {}
+          _sseSource = null;
+        }
+
+        const token = localStorage.getItem('nm_admin_token');
+        if (!token) return; // not logged in
+
+        const src = new EventSource('/api/admin/events?token=' + encodeURIComponent(token));
+        _sseSource = src;
+
+        src.addEventListener('connected', () => {
+          console.log('[SSE] Connected to admin event stream');
+        });
+
+        src.addEventListener('new_order', e => {
+          try {
+            const order = JSON.parse(e.data);
+            showToast('🔔 Новая заявка от ' + (order.client_name || 'клиента') + '!');
+            loadLiveRecentOrders();
+            loadKpiCards();
+            loadActivityFeed();
+          } catch (_) {}
+        });
+
+        src.addEventListener('order_status', e => {
+          try {
+            const data = JSON.parse(e.data);
+            showToast(
+              '📋 Заявка #' + (data.order_number || data.id) + ': статус изменён на «' + (data.status || '') + '»'
+            );
+            loadLiveRecentOrders();
+          } catch (_) {}
+        });
+
+        src.onerror = () => {
+          try {
+            src.close();
+          } catch (_) {}
+          _sseSource = null;
+          // Reconnect after 5 seconds
+          _sseReconnectTimer = setTimeout(connectSSE, 5000);
+        };
+      }
+
+      // Start SSE connection after page init
+      connectSSE();
     </script>
   </body>
 </html>

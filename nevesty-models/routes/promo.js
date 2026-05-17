@@ -144,6 +144,23 @@ router.patch('/admin/promo/:id', auth, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
+
+    const existing = await get('SELECT * FROM promo_codes WHERE id=?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Промокод не найден' });
+
+    // Validate discount_value against effective discount_type (existing or being updated)
+    const effectiveType = req.body.discount_type !== undefined ? req.body.discount_type : existing.discount_type;
+    if (req.body.discount_value !== undefined && req.body.discount_value !== '') {
+      const val = parseFloat(req.body.discount_value);
+      if (!val || val <= 0) return res.status(400).json({ error: 'discount_value должен быть > 0' });
+      if (effectiveType === 'percent' && val > 100) {
+        return res.status(400).json({ error: 'Процент скидки не может превышать 100' });
+      }
+    }
+    if (req.body.discount_type !== undefined && !['percent', 'fixed'].includes(req.body.discount_type)) {
+      return res.status(400).json({ error: 'discount_type должен быть percent или fixed' });
+    }
+
     const fields = [];
     const params = [];
     const allowed = ['is_active', 'max_uses', 'valid_from', 'valid_until', 'discount_value', 'discount_type'];

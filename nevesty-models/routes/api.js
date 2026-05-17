@@ -2149,6 +2149,8 @@ router.post('/admin/models/:id/availability', auth, async (req, res, next) => {
   try {
     const modelId = parseInt(req.params.id);
     if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    const modelExists = await get('SELECT id FROM models WHERE id=?', [modelId]);
+    if (!modelExists) return res.status(404).json({ error: 'Model not found' });
     const { date, note } = req.body;
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
@@ -2171,6 +2173,8 @@ router.delete('/admin/models/:id/availability/:date', auth, async (req, res, nex
   try {
     const modelId = parseInt(req.params.id);
     if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    const modelExists = await get('SELECT id FROM models WHERE id=?', [modelId]);
+    if (!modelExists) return res.status(404).json({ error: 'Model not found' });
     const { date } = req.params;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
@@ -2742,9 +2746,16 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
       ]
     );
 
-    // Increment promo used_count (non-blocking, best-effort)
+    // Increment promo used_count atomically.
+    // The WHERE clause enforces max_uses even under concurrent requests — if
+    // max_uses was already reached between our earlier check and this UPDATE,
+    // changes will be 0 (SQLite serializes writes). This is the lightest
+    // race-safe approach without a full transaction wrapper.
     if (promoCodeId) {
-      run('UPDATE promo_codes SET used_count = used_count + 1 WHERE id=?', [promoCodeId]).catch(() => {});
+      run(
+        'UPDATE promo_codes SET used_count = used_count + 1 WHERE id=? AND (max_uses IS NULL OR used_count < max_uses)',
+        [promoCodeId]
+      ).catch(() => {});
     }
 
     if (botInstance) {
@@ -9507,6 +9518,298 @@ router.get('/admin/events', (req, res) => {
 // ─── Promo Codes (БЛОК 21) ────────────────────────────────────────────────────
 const promoRouter = require('./promo');
 router.use('/', promoRouter);
+
+// ─── БЛОК 24: CSV Export — orders / clients / models ─────────────────────────
+// Shared helpers for CSV building (no external deps)
+function _csvCell24(v) {
+  let s = v == null ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // prevent CSV injection
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+function _buildCsv24(headers, rows) {
+  const lines = [headers, ...rows].map(r => r.map(_csvCell24).join(','));
+  return '\xEF\xBB\xBF' + lines.join('\n'); // UTF-8 BOM for Excel
+}
+
+// GET /api/admin/export/orders.csv?status=&from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get('/admin/export/orders.csv', auth, async (req, res, next) => {
+  try {
+    const { status, from, to } = req.query;
+    const conditions = ['1=1'];
+    const params = [];
+
+    if (status && ALLOWED_STATUSES.includes(status)) {
+      conditions.push('o.status = ?');
+      params.push(status);
+    }
+    if (from && validateDate(from)) {
+      conditions.push('date(o.created_at) >= date(?)');
+      params.push(from);
+    }
+    if (to && validateDate(to)) {
+      conditions.push('date(o.created_at) <= date(?)');
+      params.push(to);
+    }
+
+    const orders = await query(
+      `SELECT o.order_number, o.client_name, o.client_phone, o.client_email,
+              o.client_telegram, o.event_type, o.event_date, o.event_duration,
+              o.location, o.status, o.budget, o.comments, o.internal_note,
+              o.paid_at, o.created_at, m.name AS model_name
+       FROM orders o LEFT JOIN models m ON o.model_id = m.id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY o.created_at DESC LIMIT 10000`,
+      params
+    );
+
+    const STATUS_RU24 = {
+      new: 'Новая',
+      reviewing: 'На рассмотрении',
+      confirmed: 'Подтверждена',
+      in_progress: 'В процессе',
+      completed: 'Завершена',
+      cancelled: 'Отменена',
+    };
+    const EVENT_RU24 = {
+      fashion_show: 'Показ мод',
+      photo_shoot: 'Фотосессия',
+      event: 'Мероприятие',
+      commercial: 'Коммерческая',
+      runway: 'Подиум',
+      other: 'Другое',
+    };
+
+    const hdrs = [
+      'Номер',
+      'Клиент',
+      'Телефон',
+      'Email',
+      'Telegram',
+      'Тип события',
+      'Дата события',
+      'Длительность',
+      'Место',
+      'Статус',
+      'Бюджет',
+      'Комментарий',
+      'Заметка',
+      'Оплачено',
+      'Создано',
+      'Модель',
+    ];
+    const rws = orders.map(o => [
+      o.order_number,
+      o.client_name,
+      o.client_phone,
+      o.client_email || '',
+      o.client_telegram || '',
+      EVENT_RU24[o.event_type] || o.event_type || '',
+      o.event_date || '',
+      o.event_duration || '',
+      o.location || '',
+      STATUS_RU24[o.status] || o.status,
+      o.budget || '',
+      o.comments || '',
+      o.internal_note || '',
+      o.paid_at || '',
+      o.created_at,
+      o.model_name || '',
+    ]);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="orders_${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(_buildCsv24(hdrs, rws));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/export/clients.csv?filter=vip&from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get('/admin/export/clients.csv', auth, async (req, res, next) => {
+  try {
+    const { filter, from, to } = req.query;
+    const conds = ['1=1'];
+    const params = [];
+
+    if (from && validateDate(from)) {
+      conds.push('date(o.created_at) >= date(?)');
+      params.push(from);
+    }
+    if (to && validateDate(to)) {
+      conds.push('date(o.created_at) <= date(?)');
+      params.push(to);
+    }
+
+    let having = '1=1';
+    if (filter === 'active') having = "MAX(o.created_at) >= datetime('now', '-30 days')";
+    else if (filter === 'vip') having = 'COUNT(o.id) >= 3';
+    else if (filter === 'new') having = "MIN(o.created_at) >= datetime('now', '-7 days')";
+
+    const clients = await query(
+      `SELECT o.client_name, o.client_phone, o.client_telegram, o.client_email,
+              COUNT(o.id) AS total_orders,
+              SUM(CASE WHEN o.status='completed' THEN 1 ELSE 0 END) AS done_orders,
+              SUM(CAST(o.budget AS REAL)) AS total_budget,
+              MAX(o.created_at) AS last_activity,
+              MIN(o.created_at) AS registered_at
+       FROM orders o WHERE ${conds.join(' AND ')}
+       GROUP BY o.client_phone HAVING ${having}
+       ORDER BY last_activity DESC LIMIT 10000`,
+      params
+    );
+
+    const hdrs = [
+      'Имя',
+      'Телефон',
+      'Telegram',
+      'Email',
+      'Заявок всего',
+      'Завершено',
+      'Сумма (руб)',
+      'Последняя активность',
+      'Дата регистрации',
+    ];
+    const rws = clients.map(c => [
+      c.client_name,
+      c.client_phone,
+      c.client_telegram || '',
+      c.client_email || '',
+      c.total_orders || 0,
+      c.done_orders || 0,
+      Math.round(c.total_budget || 0),
+      c.last_activity || '',
+      c.registered_at || '',
+    ]);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="clients_${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(_buildCsv24(hdrs, rws));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/export/models.csv?category=&city=&available=1
+router.get('/admin/export/models.csv', auth, async (req, res, next) => {
+  try {
+    const { category, city, available } = req.query;
+    const conds = ['archived = 0'];
+    const params = [];
+
+    if (category && ALLOWED_CATEGORIES.includes(category)) {
+      conds.push('category = ?');
+      params.push(category);
+    }
+    if (city) {
+      conds.push('city LIKE ?');
+      params.push(`%${city.slice(0, 100)}%`);
+    }
+    if (available === '1' || available === '0') {
+      conds.push('available = ?');
+      params.push(Number(available));
+    }
+
+    const models = await query(
+      `SELECT name, age, height, weight, bust, waist, hips, shoe_size,
+              hair_color, eye_color, category, city, instagram,
+              available, featured, bio, created_at
+       FROM models WHERE ${conds.join(' AND ')} ORDER BY name LIMIT 10000`,
+      params
+    );
+
+    const hdrs = [
+      'Имя',
+      'Возраст',
+      'Рост',
+      'Вес',
+      'Грудь',
+      'Талия',
+      'Бёдра',
+      'Обувь',
+      'Цвет волос',
+      'Цвет глаз',
+      'Категория',
+      'Город',
+      'Instagram',
+      'Доступна',
+      'Топ',
+      'Описание',
+      'Добавлена',
+    ];
+    const rws = models.map(m => [
+      m.name,
+      m.age || '',
+      m.height || '',
+      m.weight || '',
+      m.bust || '',
+      m.waist || '',
+      m.hips || '',
+      m.shoe_size || '',
+      m.hair_color || '',
+      m.eye_color || '',
+      m.category || '',
+      m.city || '',
+      m.instagram || '',
+      m.available ? 'Да' : 'Нет',
+      m.featured ? 'Да' : 'Нет',
+      (m.bio || '').replace(/\r?\n/g, ' '),
+      m.created_at || '',
+    ]);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="models_${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(_buildCsv24(hdrs, rws));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── Document generation — БЛОК 28 ───────────────────────────────────────────
+const { generateContractHTML, generateInvoiceHTML } = require('../utils/documents');
+
+// GET /api/admin/orders/:id/contract.html — HTML contract for printing / PDF
+router.get('/admin/orders/:id/contract.html', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).send('Неверный ID');
+    const order = await get(
+      `SELECT o.*, m.name as model_name
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE o.id = ?`,
+      [id]
+    );
+    if (!order) return res.status(404).send('Заявка не найдена');
+    const html = generateContractHTML(order);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="contract-${order.order_number}.html"`);
+    res.send(html);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/orders/:id/invoice.html — HTML invoice for printing / PDF
+router.get('/admin/orders/:id/invoice.html', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).send('Неверный ID');
+    const order = await get(
+      `SELECT o.*, m.name as model_name
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE o.id = ?`,
+      [id]
+    );
+    if (!order) return res.status(404).send('Заявка не найдена');
+    const html = generateInvoiceHTML(order);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="invoice-${order.order_number}.html"`);
+    res.send(html);
+  } catch (e) {
+    next(e);
+  }
+});
 
 module.exports = router;
 module.exports.setBot = setBot;

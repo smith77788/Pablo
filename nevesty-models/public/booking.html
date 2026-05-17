@@ -719,6 +719,73 @@
         min-height: 1.2em;
         word-break: break-all;
       }
+
+      /* ── Promo code field ── */
+      .promo-field {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 6px;
+      }
+      .promo-field input {
+        flex: 1;
+      }
+      .promo-field button {
+        flex-shrink: 0;
+        padding: 0 18px;
+        height: 48px;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.78rem;
+        letter-spacing: 0.5px;
+        cursor: pointer;
+        transition: all var(--transition);
+        white-space: nowrap;
+      }
+      .promo-field button:hover {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .promo-field button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #promoStatus {
+        font-size: 0.78rem;
+        margin-top: 6px;
+        min-height: 1.2em;
+        display: block;
+        transition: color 0.2s;
+      }
+      #promoStatus.promo-ok {
+        color: #4caf82;
+      }
+      #promoStatus.promo-err {
+        color: #e05c5c;
+      }
+
+      /* ── CSS confetti-fall animation ── */
+      @keyframes confetti-fall {
+        0% {
+          transform: translateY(-30px) rotate(0deg);
+          opacity: 1;
+        }
+        to {
+          transform: translateY(100vh) rotate(720deg);
+          opacity: 0;
+        }
+      }
+      .confetti-piece {
+        position: fixed;
+        top: 0;
+        pointer-events: none;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        animation: confetti-fall linear forwards;
+        z-index: 99998;
+      }
     </style>
     <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <!-- Google Analytics 4 (loads only if consent given) -->
@@ -1291,6 +1358,35 @@
               </div>
             </div>
 
+            <!-- Promo code -->
+            <div class="form-group" style="margin-top: 8px">
+              <label for="promoInput">
+                Промокод
+                <span style="color: var(--text-dim); font-size: 0.65rem; text-transform: none; letter-spacing: 0"
+                  >(необязательно)</span
+                >
+              </label>
+              <div class="promo-field">
+                <input
+                  type="text"
+                  class="form-control"
+                  id="promoInput"
+                  placeholder="Промокод (необязательно)"
+                  autocomplete="off"
+                  style="text-transform: uppercase"
+                  oninput="this.value = this.value.toUpperCase()"
+                  onkeydown="
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      checkPromo();
+                    }
+                  "
+                />
+                <button type="button" id="promoBtn" onclick="checkPromo()">Применить</button>
+              </div>
+              <span id="promoStatus" aria-live="polite"></span>
+            </div>
+
             <div class="booking-nav">
               <button class="btn-back" onclick="window._booking.prevStep()">← Назад</button>
               <button class="btn-next" onclick="window._booking.nextStep()">Далее →</button>
@@ -1817,5 +1913,144 @@
     </script>
     <script src="/js/cookie-consent.js" defer></script>
     <script src="/js/chat-widget.js" defer></script>
+
+    <!-- ── Promo code check & CSS confetti launcher ── -->
+    <script>
+      /* ── Promo code state ── */
+      window._promoState = { code: null, discount_type: null, discount_value: null, discount_amount: null };
+
+      /* ── checkPromo: POST /api/promo/check → show result ── */
+      async function checkPromo() {
+        var input = document.getElementById('promoInput');
+        var btn = document.getElementById('promoBtn');
+        var status = document.getElementById('promoStatus');
+        if (!input || !status) return;
+
+        var code = (input.value || '').trim().toUpperCase();
+        if (!code) {
+          status.textContent = 'Введите промокод';
+          status.className = 'promo-err';
+          return;
+        }
+
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = '…';
+        }
+        status.textContent = '';
+        status.className = '';
+
+        try {
+          var resp = await fetch('/api/promo/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: code }),
+          });
+          var data = await resp.json();
+
+          if (data.valid) {
+            window._promoState = {
+              code: code,
+              discount_type: data.discount_type,
+              discount_value: data.discount_value,
+              discount_amount: data.discount_amount || null,
+            };
+            var discountText =
+              data.discount_type === 'percent' ? data.discount_value + '%' : data.discount_value + ' ₽';
+            status.textContent = '✓ Промокод применён — скидка ' + discountText;
+            status.className = 'promo-ok';
+            input.classList.add('field-valid');
+            input.classList.remove('field-invalid');
+          } else {
+            window._promoState = { code: null, discount_type: null, discount_value: null, discount_amount: null };
+            var reasons = {
+              not_found: 'Промокод не найден',
+              expired: 'Срок действия промокода истёк',
+              not_started: 'Промокод ещё не активен',
+              limit_reached: 'Промокод исчерпан',
+              usage_limit: 'Промокод исчерпан',
+              inactive: 'Промокод неактивен',
+            };
+            status.textContent = '✕ ' + (reasons[data.reason] || 'Промокод недействителен');
+            status.className = 'promo-err';
+            input.classList.add('field-invalid');
+            input.classList.remove('field-valid');
+          }
+        } catch (e) {
+          status.textContent = '✕ Ошибка проверки промокода';
+          status.className = 'promo-err';
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Применить';
+          }
+        }
+      }
+
+      /* ── CSS confetti: 20 div pieces launched on success ── */
+      function launchCSSConfetti() {
+        var colors = [
+          '#c9a96e',
+          '#e8c97a',
+          '#f4d98c',
+          '#db2777',
+          '#ec4899',
+          '#a78bfa',
+          '#60a5fa',
+          '#34d399',
+          '#fff8e1',
+          '#a07840',
+        ];
+        var pieces = [];
+        for (var i = 0; i < 20; i++) {
+          var piece = document.createElement('div');
+          piece.className = 'confetti-piece';
+          var left = (Math.random() * 100).toFixed(1);
+          var delay = (Math.random() * 0.6).toFixed(2);
+          var duration = (1.5 + Math.random() * 1.2).toFixed(2);
+          var color = colors[Math.floor(Math.random() * colors.length)];
+          var size = Math.round(8 + Math.random() * 12);
+          var borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+          piece.style.cssText = [
+            'left:' + left + '%',
+            'width:' + size + 'px',
+            'height:' + size + 'px',
+            'background:' + color,
+            'border-radius:' + borderRadius,
+            'animation-duration:' + duration + 's',
+            'animation-delay:' + delay + 's',
+          ].join(';');
+          document.body.appendChild(piece);
+          pieces.push(piece);
+        }
+        /* Remove pieces after animation completes */
+        setTimeout(function () {
+          pieces.forEach(function (p) {
+            p.style.transition = 'opacity 0.4s';
+            p.style.opacity = '0';
+            setTimeout(function () {
+              if (p.parentNode) p.parentNode.removeChild(p);
+            }, 500);
+          });
+        }, 3200);
+      }
+
+      /* ── Hook into booking.js success to fire CSS confetti ── */
+      /* Observe step6 gaining the 'active' class → launch CSS confetti */
+      document.addEventListener('DOMContentLoaded', function () {
+        var step6 = document.getElementById('step6');
+        if (!step6) return;
+        var confettiFired = false;
+        var observer = new MutationObserver(function (mutations) {
+          mutations.forEach(function (m) {
+            if (m.attributeName === 'class' && step6.classList.contains('active') && !confettiFired) {
+              confettiFired = true;
+              setTimeout(launchCSSConfetti, 300);
+            }
+          });
+        });
+        observer.observe(step6, { attributes: true, attributeFilter: ['class'] });
+      });
+    </script>
   </body>
 </html>

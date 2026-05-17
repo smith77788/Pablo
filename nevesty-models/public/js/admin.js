@@ -572,16 +572,23 @@ document.addEventListener('keydown', e => {
 });
 
 // ─── Export helper ────────────────────────────────────
-function downloadCSV(url) {
-  const a = document.createElement('a');
-  a.href = API + url + `&_auth=${encodeURIComponent(_adminToken)}`;
-  // Use fetch with auth header and create blob URL
+function downloadCSV(url, filename) {
+  // Use fetch with auth header and create blob URL for download
   fetch(API + url, { headers: { Authorization: `Bearer ${_adminToken}` } })
-    .then(r => r.blob())
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      // Try to read filename from Content-Disposition header if not provided
+      if (!filename) {
+        const cd = r.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^";\s]+)"?/);
+        filename = m ? m[1] : `export_${Date.now()}.csv`;
+      }
+      return r.blob();
+    })
     .then(blob => {
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `orders_${Date.now()}.csv`;
+      link.download = filename || `export_${Date.now()}.csv`;
       link.click();
       URL.revokeObjectURL(link.href);
     })

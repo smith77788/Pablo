@@ -944,7 +944,8 @@
       async function exportCSV() {
         try {
           const token = localStorage.getItem('admin_token');
-          const resp = await fetch('/api/admin/models/export', {
+          // Use new canonical CSV export endpoint
+          const resp = await fetch('/api/admin/export/models.csv', {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (!resp.ok) {
@@ -955,7 +956,7 @@
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = 'models.csv';
+          a.download = `models_${new Date().toISOString().slice(0, 10)}.csv`;
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);

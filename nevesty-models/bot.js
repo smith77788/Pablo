@@ -512,10 +512,11 @@ async function buildClientKeyboard() {
   if (quickBookingEnabled !== '0') bookingRow.push({ text: '⚡ Быстрая заявка', callback_data: 'bk_quick' });
   rows.push(bookingRow);
 
-  // Row 3: orders + profile + wishlist (wishlist gated)
+  // Row 3: orders + profile + loyalty points + wishlist (wishlist gated)
   const accountRow = [
     { text: STRINGS.btnMyOrders, callback_data: 'my_orders' },
     { text: '👤 Мой профиль', callback_data: 'profile' },
+    { text: '⭐ Мои баллы', callback_data: 'client_points' },
   ];
   if (wishlistEnabled !== '0') accountRow.push({ text: '❤️ Избранное', callback_data: 'fav_list_0' });
   rows.push(accountRow);
@@ -2452,6 +2453,11 @@ async function showAdminOrder(chatId, orderId) {
       { text: '🕐 История статусов', callback_data: `adm_order_history_${orderId}` },
     ]);
     keyboard.push([{ text: '📝 Заметка', callback_data: `adm_order_note_${orderId}` }]);
+    // Documents: contract and invoice HTML (БЛОК 28)
+    keyboard.push([
+      { text: '📄 Договор', callback_data: `adm_order_contract_${orderId}` },
+      { text: '🧾 Счёт', callback_data: `adm_order_invoice_${orderId}` },
+    ]);
     // Template message button — shown when order has a client chat ID
     if (o.client_chat_id) {
       keyboard.push([{ text: '📤 Написать шаблоном', callback_data: `adm_tpl_pick_${orderId}` }]);
@@ -5618,6 +5624,66 @@ async function showLoyaltyProfile(chatId) {
   });
 }
 
+// ─── Client Points (БЛОК 27) — balance + history ─────────────────────────────
+
+async function showClientPointsHistory(chatId) {
+  try {
+    const lp = await get(`SELECT points, total_earned FROM loyalty_points WHERE chat_id=?`, [chatId]).catch(() => null);
+    const balance = lp?.points || 0;
+
+    const transactions = await query(
+      `SELECT lt.points, lt.type, lt.description, lt.order_id, lt.created_at
+       FROM loyalty_transactions lt
+       WHERE lt.chat_id=?
+       ORDER BY lt.created_at DESC LIMIT 5`,
+      [chatId]
+    ).catch(() => []);
+
+    const formatDate = iso => {
+      try {
+        return new Date(iso).toLocaleDateString('ru', { day: 'numeric', month: 'long' });
+      } catch {
+        return '';
+      }
+    };
+
+    const txLines = transactions.map(t => {
+      const sign = t.points > 0 ? `\+${t.points}` : String(t.points);
+      const dateStr = t.created_at ? ` \(${esc(formatDate(t.created_at))}\)` : '';
+      const desc = t.description ? esc(t.description) : esc(t.type);
+      return `${sign} — ${desc}${dateStr}`;
+    });
+
+    let text = `⭐ *Ваши бонусные баллы: ${balance}*
+`;
+    text += `_Можно списать при следующем заказе_
+`;
+    if (txLines.length) {
+      text += `
+📋 *История \(последние ${txLines.length}\):*
+`;
+      text += txLines.join('\n');
+    } else {
+      text += `
+_Операций пока нет\. Оформите первую заявку и получите баллы\!_`;
+    }
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💫 Подробнее о лояльности', callback_data: 'loyalty' }],
+          [{ text: '📝 Оформить заявку', callback_data: 'bk_start' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
+        ],
+      },
+    });
+  } catch (e) {
+    console.error('[Bot] showClientPointsHistory:', e.message);
+    return safeSend(chatId, '❌ Не удалось загрузить баллы\. Попробуйте позже\.', { parse_mode: 'MarkdownV2' });
+  }
+}
+
 // ─── Referral Program ─────────────────────────────────────────────────────────
 
 async function showReferralProgram(chatId) {
@@ -6077,7 +6143,23 @@ async function adminChangeStatus(chatId, orderId, newStatus) {
 
     // Award loyalty points on order completion
     if (newStatus === 'completed' && order?.client_chat_id) {
-      await addLoyaltyPoints(order.client_chat_id, 100, 'order_complete', 'Завершена заявка #' + orderId, orderId);
+      const pointsPerOrder = parseInt(process.env.LOYALTY_POINTS_PER_ORDER) || 100;
+      await addLoyaltyPoints(
+        order.client_chat_id,
+        pointsPerOrder,
+        'order_complete',
+        'Завершена заявка #' + orderId,
+        orderId
+      );
+      // Notify client about earned points
+      safeSend(
+        order.client_chat_id,
+        `⭐ Вам начислено *${pointsPerOrder} бонусных баллов* за заказ \\#${esc(order.order_number || String(orderId))}\\!\nМожно списать при следующем заказе\\.`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '⭐ Мои баллы', callback_data: 'client_points' }]] },
+        }
+      ).catch(() => {});
 
       // Referral first-order bonus: if this client was referred, give 300 extra points to referrer
       const refRow = await get(`SELECT referrer_chat_id FROM referrals WHERE referred_chat_id=?`, [
@@ -6175,6 +6257,7 @@ function initBot(app) {
       { command: 'booking', description: '📋 Оформить заявку' },
       { command: 'orders', description: '📂 Мои заявки' },
       { command: 'profile', description: '👤 Мой профиль' },
+      { command: 'points', description: '⭐ Мои бонусные баллы' },
       { command: 'wishlist', description: '❤️ Избранные модели' },
       { command: 'calculator', description: '🧮 Калькулятор стоимости' },
       { command: 'reviews', description: '⭐ Отзывы' },
@@ -6383,6 +6466,7 @@ function initBot(app) {
         `/booking — создать заявку на модель\n` +
         `/orders — мои заявки\n` +
         `/profile — мой профиль и баланс\n` +
+        `/points — мои бонусные баллы\n` +
         `/wishlist — избранные модели\n` +
         `/status — проверить статус заявки\n` +
         `/faq — часто задаваемые вопросы\n` +
@@ -6412,6 +6496,11 @@ function initBot(app) {
     const chatId = msg.chat.id;
     const firstName = msg.from.first_name;
     return showUserProfile(chatId, firstName);
+  });
+
+  // ── /points — show loyalty points balance (БЛОК 27) ──────────────────────
+  bot.onText(/^\/points$/, async msg => {
+    return showClientPointsHistory(msg.chat.id);
   });
 
   // ── /catalog ───────────────────────────────────────────────────────────────
@@ -6578,6 +6667,39 @@ function initBot(app) {
     return safeSend(chatId, `⚠️ Сообщение сохранено, но клиент ещё не подключил бот.`);
   });
 
+  // ── /reply_{clientChatId}_{messageId} Текст ответа (БЛОК 25) ─────────────
+  bot.onText(/^\/reply_(\d+)_(\d+)(?:\s+([\s\S]*))?$/, async (msg, match) => {
+    const adminChatId = msg.chat.id;
+    if (!isAdmin(adminChatId)) return;
+    const clientChatId = match[1];
+    const messageId = parseInt(match[2]);
+    const replyText = (match[3] || '').trim();
+    if (!replyText) {
+      return safeSend(adminChatId, `✍️ Использование: /reply\\_${clientChatId}\\_${messageId} Текст ответа`, {
+        parse_mode: 'MarkdownV2',
+      });
+    }
+    // Deliver reply to client
+    const delivered = await safeSend(clientChatId, `💬 *Ответ от поддержки:*\n\n${esc(replyText)}`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💬 Написать ещё', callback_data: 'support_chat' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
+        ],
+      },
+    }).catch(() => null);
+    // Save admin reply to support_messages
+    await run(
+      `INSERT INTO support_messages (from_chat_id, to_chat_id, message, direction) VALUES (?, ?, ?, 'admin_to_client')`,
+      [adminChatId, clientChatId, replyText]
+    ).catch(() => {});
+    // Mark original client message as read
+    if (messageId) await run(`UPDATE support_messages SET is_read=1 WHERE id=?`, [messageId]).catch(() => {});
+    if (delivered) return safeSend(adminChatId, '✅ Ответ отправлен клиенту.');
+    return safeSend(adminChatId, '⚠️ Не удалось доставить ответ — клиент заблокировал бота или неверный ID.');
+  });
+
   // ── Callback query router ──────────────────────────────────────────────────
   bot.on('callback_query', async q => {
     try {
@@ -6657,6 +6779,7 @@ function initBot(app) {
       }
       if (data === 'profile') return showUserProfile(chatId, q.from.first_name);
       if (data === 'loyalty') return showLoyaltyProfile(chatId);
+      if (data === 'client_points') return showClientPointsHistory(chatId);
       if (data === 'my_achievements') return showAchievements(chatId);
       if (data === 'loyalty_leaderboard') return showLoyaltyLeaderboard(chatId);
       if (data === 'referral') return showReferralProgram(chatId);
@@ -6841,6 +6964,16 @@ function initBot(app) {
       if (data.startsWith('cat_top_')) {
         const page = parseInt(data.replace('cat_top_', '')) || 0;
         return showTopModels(chatId, page);
+      }
+      // ── Поддержка (БЛОК 25)
+      if (data === 'support_chat') {
+        await setSession(chatId, 'support_message', {});
+        return safeSend(chatId, '💬 *Поддержка*\n\nНапишите ваш вопрос и мы ответим в течение 15 минут\\.', {
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'main_menu' }]],
+          },
+        });
       }
 
       // ── Написать менеджеру
@@ -7348,6 +7481,48 @@ function initBot(app) {
             parse_mode: 'MarkdownV2',
             reply_markup: {
               inline_keyboard: [[{ text: '🗑 Удалить заметку', callback_data: `adm_order_note_del_${orderId}` }]],
+            },
+          }
+        );
+      }
+
+      // ── Documents: HTML contract / invoice links (БЛОК 28)
+      if (data.startsWith('adm_order_contract_')) {
+        if (!isAdmin(chatId)) return;
+        const orderId = parseInt(data.replace('adm_order_contract_', ''));
+        const order = await get('SELECT id, order_number FROM orders WHERE id=?', [orderId]).catch(() => null);
+        if (!order) return safeSend(chatId, '❌ Заявка не найдена');
+        const contractUrl = `${SITE_URL.replace(/\/$/, '')}/api/admin/orders/${orderId}/contract.html`;
+        return safeSend(
+          chatId,
+          `📄 *Договор для заявки \\#${esc(order.order_number || String(orderId))}*\n\nОткройте ссылку в браузере и распечатайте \\(или сохраните как PDF\\):\n${esc(contractUrl)}`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '📄 Открыть договор', url: contractUrl }],
+                [{ text: '← К заявке', callback_data: `adm_order_${orderId}` }],
+              ],
+            },
+          }
+        );
+      }
+      if (data.startsWith('adm_order_invoice_')) {
+        if (!isAdmin(chatId)) return;
+        const orderId = parseInt(data.replace('adm_order_invoice_', ''));
+        const order = await get('SELECT id, order_number FROM orders WHERE id=?', [orderId]).catch(() => null);
+        if (!order) return safeSend(chatId, '❌ Заявка не найдена');
+        const invoiceUrl = `${SITE_URL.replace(/\/$/, '')}/api/admin/orders/${orderId}/invoice.html`;
+        return safeSend(
+          chatId,
+          `🧾 *Счёт для заявки \\#${esc(order.order_number || String(orderId))}*\n\nОткройте ссылку в браузере и распечатайте \\(или сохраните как PDF\\):\n${esc(invoiceUrl)}`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🧾 Открыть счёт', url: invoiceUrl }],
+                [{ text: '← К заявке', callback_data: `adm_order_${orderId}` }],
+              ],
             },
           }
         );
@@ -10111,6 +10286,12 @@ function initBot(app) {
         return showAgentDiscussions(chatId, period, page);
       }
 
+      // ── Support history (БЛОК 25)
+      if (data === 'adm_support_history') {
+        if (!isAdmin(chatId)) return;
+        return safeSend(chatId, '📋 История чата поддержки временно недоступна.');
+      }
+
       // ── Категории каталога (быстрые фильтры)
       if (data === 'cat_filter_all')
         return showCatalog(chatId, '', 0, { city: catalogCityPrefs.get(String(chatId)) || '' });
@@ -12122,14 +12303,16 @@ function initBot(app) {
         const promoCode = text.trim().toUpperCase();
         const { resolvePromo } = require('./routes/promo');
         const promoResult = await resolvePromo(promoCode, null).catch(() => null);
+        const userLangPromo = await getUserLang(chatId);
         if (!promoResult?.valid) {
+          const invalidText = t(userLangPromo, 'promo_invalid');
           const reasonMap = {
             not_found: 'Промокод не найден',
             expired: 'Промокод истёк',
             limit_reached: 'Лимит использований исчерпан',
             not_started: 'Промокод ещё не активен',
           };
-          const reason = reasonMap[promoResult?.reason] || 'Промокод недействителен';
+          const reason = reasonMap[promoResult?.reason] || invalidText;
           await safeSend(chatId, `❌ *${esc(reason)}*\n\nПопробуйте другой код или пропустите этот шаг\\.`, {
             parse_mode: 'MarkdownV2',
             reply_markup: {
@@ -12146,11 +12329,12 @@ function initBot(app) {
         d.discount_amount = promoResult.discount_amount || null;
         d.discount_type = promoResult.discount_type;
         d.discount_value = promoResult.discount_value;
-        await safeSend(
-          chatId,
-          `✅ *Промокод применён\\!*\n\nКод: *${esc(promoCode)}*\nТип скидки: ${promoResult.discount_type === 'percent' ? `${promoResult.discount_value}%` : `${promoResult.discount_value} ₽`}`,
-          { parse_mode: 'MarkdownV2' }
-        );
+        const discountLabel =
+          promoResult.discount_type === 'percent'
+            ? `${promoResult.discount_value}%`
+            : `${promoResult.discount_value} ₽`;
+        const promoValidText = t(userLangPromo, 'promo_valid', { discount: discountLabel });
+        await safeSend(chatId, `*${esc(promoValidText)}*\n\nКод: *${esc(promoCode)}*`, { parse_mode: 'MarkdownV2' });
         return bkStep3Name(chatId, d);
       }
 
@@ -12221,6 +12405,39 @@ function initBot(app) {
       // Check "talkative" achievement after sending
       await checkAndGrantAchievements(chatId).catch(() => {});
       return safeSend(chatId, '✅ Вопрос отправлен менеджеру\\. Мы ответим в ближайшее время\\!', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
+      });
+    }
+
+    // ── Сообщение в поддержку (БЛОК 25)
+    if (state === 'support_message') {
+      const clientName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || 'Клиент';
+      const username = msg.from.username ? `@${msg.from.username}` : '';
+      // Save to support_messages
+      const msgRow = await run(
+        `INSERT INTO support_messages (from_chat_id, message, direction) VALUES (?, ?, 'client_to_admin')`,
+        [chatId, text]
+      ).catch(() => null);
+      const msgId = msgRow?.id || 0;
+      // Forward to all admins
+      const adminIds = await getAdminChatIds();
+      await Promise.allSettled(
+        adminIds.map(id =>
+          safeSend(
+            id,
+            `💬 *Новое сообщение от клиента:*\n${esc(clientName)} ${esc(username)}\nID: \`${chatId}\`\n\n${esc(text)}\n\nОтветить: /reply\\_${chatId}\\_${msgId}`,
+            {
+              parse_mode: 'MarkdownV2',
+              reply_markup: {
+                inline_keyboard: [[{ text: '📜 История переписки', callback_data: 'adm_support_history' }]],
+              },
+            }
+          )
+        )
+      );
+      await clearSession(chatId);
+      return safeSend(chatId, '✅ Сообщение отправлено\\! Ответим скоро\\.', {
         parse_mode: 'MarkdownV2',
         reply_markup: { inline_keyboard: [[{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }]] },
       });
@@ -12352,12 +12569,16 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus, clientPh
     // Client opted out of status notifications
     return;
   }
+  const lang = await getUserLang(clientChatId);
+  const confirmedMsg = t(lang, 'order_confirmed', { number: orderNumber });
+  const cancelledMsg = t(lang, 'order_cancelled', { number: orderNumber });
+  const myOrdersLabel = t(lang, 'my_orders_btn');
   const msgs = {
-    confirmed: `✅ *Заявка ${esc(orderNumber)} подтверждена\\!*\n\nМенеджер свяжется с вами для уточнения деталей\\.`,
+    confirmed: `*${esc(confirmedMsg)}*\n\nМенеджер свяжется с вами для уточнения деталей\\.`,
     reviewing: `🔍 *Заявка ${esc(orderNumber)} принята в работу\\.*\n\nМы изучаем ваш запрос\\.`,
     in_progress: `▶️ *Заявка ${esc(orderNumber)} выполняется\\.*`,
     completed: `🏁 *Заявка ${esc(orderNumber)} завершена\\!*\n\nСпасибо, что выбрали Nevesty Models\\! 💎`,
-    cancelled: `❌ *Заявка ${esc(orderNumber)} отклонена\\.*\n\nЕсли есть вопросы — свяжитесь с нами\\.`,
+    cancelled: `*${esc(cancelledMsg)}*\n\nЕсли есть вопросы — свяжитесь с нами\\.`,
   };
   const text = msgs[newStatus];
   if (!text) return;
@@ -12367,7 +12588,7 @@ async function notifyStatusChange(clientChatId, orderNumber, newStatus, clientPh
     inline_keyboard: [
       [
         { text: '💬 Написать менеджеру', callback_data: 'contact_mgr' },
-        { text: STRINGS.btnMyOrders, callback_data: 'my_orders' },
+        { text: myOrdersLabel, callback_data: 'my_orders' },
       ],
       [{ text: '📝 Повторить заявку', callback_data: 'bk_start' }],
     ],

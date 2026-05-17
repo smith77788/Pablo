@@ -931,50 +931,24 @@
         btn.disabled = true;
 
         try {
-          // Fetch all records (limit=1000 should cover most cases)
-          const params = new URLSearchParams({
-            search: state.search,
-            filter: state.filter,
-            page: 1,
-            limit: 1000,
+          // Use the dedicated CSV export endpoint (server-side, no pagination limit)
+          const params = new URLSearchParams();
+          if (state.filter && state.filter !== 'all') params.set('filter', state.filter);
+
+          const token = localStorage.getItem('admin_token');
+          const res = await fetch('/api/admin/export/clients.csv?' + params, {
+            headers: { Authorization: 'Bearer ' + token },
           });
-          const res = await fetch('/api/admin/clients?' + params, {
-            headers: { Authorization: 'Bearer ' + localStorage.getItem('admin_token') },
-          });
-          const data = await res.json();
-          const clients = data.clients || [];
+          if (!res.ok) throw new Error('HTTP ' + res.status);
 
-          const header = [
-            'Имя',
-            'Телефон',
-            'Telegram',
-            'Заявок всего',
-            'Завершено',
-            'Сумма (руб)',
-            'Последняя активность',
-            'Дата регистрации',
-          ];
-          const rows = clients.map(c => [
-            c.client_name,
-            c.client_phone,
-            c.client_telegram || '',
-            c.total_orders || 0,
-            c.done_orders || 0,
-            Math.round(c.total_budget || 0),
-            c.last_activity ? new Date(c.last_activity).toISOString() : '',
-            c.registered_at ? new Date(c.registered_at).toISOString() : '',
-          ]);
-
-          const csvContent = [header, ...rows]
-            .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
-            .join('\n');
-
-          const blob = new Blob(['﻿' + csvContent], { type: 'text/csv;charset=utf-8;' });
+          const blob = await res.blob();
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
           a.download = `clients_${new Date().toISOString().slice(0, 10)}.csv`;
+          document.body.appendChild(a);
           a.click();
+          document.body.removeChild(a);
           URL.revokeObjectURL(url);
         } catch (e) {
           alert('Ошибка экспорта: ' + e.message);

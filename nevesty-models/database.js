@@ -308,6 +308,7 @@ async function initDatabase() {
   await run(`ALTER TABLE client_prefs ADD COLUMN name TEXT DEFAULT NULL`).catch(() => {});
   await run(`ALTER TABLE client_prefs ADD COLUMN phone TEXT DEFAULT NULL`).catch(() => {});
   await run(`ALTER TABLE client_prefs ADD COLUMN email TEXT DEFAULT NULL`).catch(() => {});
+  await run(`ALTER TABLE client_prefs ADD COLUMN language TEXT DEFAULT 'ru'`).catch(() => {});
 
   // Default settings
   const defaults = [
@@ -1495,6 +1496,17 @@ function invalidateSettingsCache(key) {
   }
 }
 
+/**
+ * Get current loyalty points balance for a client (БЛОК 27).
+ * Uses the loyalty_points table keyed by chat_id.
+ * @param {number|string} chatId — Telegram chat ID of the client
+ * @returns {Promise<number>} current spendable balance (0 if no record)
+ */
+async function getClientPoints(chatId) {
+  const row = await get('SELECT COALESCE(points, 0) as total FROM loyalty_points WHERE chat_id=?', [chatId]);
+  return row?.total || 0;
+}
+
 module.exports = {
   initDatabase,
   initDB: initDatabase,
@@ -1507,4 +1519,5 @@ module.exports = {
   setSetting,
   invalidateSettingsCache,
   scheduleBackups,
+  getClientPoints,
 };

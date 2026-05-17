@@ -1470,6 +1470,14 @@
       const modelIdForApi = state.selected_models.length > 0 ? state.selected_models[0].id : state.model_id || null;
       const modelIdsForApi = state.model_ids.length > 1 ? state.model_ids : null;
 
+      // Read promo code from DOM or global promo state
+      const promoCode =
+        (window._promoState && window._promoState.code) ||
+        (document.getElementById('promoInput')
+          ? document.getElementById('promoInput').value.trim().toUpperCase()
+          : null) ||
+        null;
+
       const body = {
         client_name: state.client_name,
         client_phone: state.client_phone,
@@ -1483,6 +1491,7 @@
         location: state.location || null,
         budget: state.budget || null,
         comments: state.comments || null,
+        promo_code: promoCode || null,
       };
 
       // Attach UTM parameters if available

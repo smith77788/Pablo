@@ -1579,7 +1579,12 @@
         if (model_id) params.set('model_id', model_id);
         if (event_type) params.set('event_type', event_type);
         if (search) params.set('search', search);
-        _admin.downloadCSV('/admin/orders/export?' + params);
+        // Use the new canonical CSV route (simpler filters: status, from, to)
+        const csvParams = new URLSearchParams();
+        if (status) csvParams.set('status', status);
+        if (from) csvParams.set('from', from);
+        if (to) csvParams.set('to', to);
+        _admin.downloadCSV('/admin/export/orders.csv?' + csvParams);
         document.getElementById('exportPanel').style.display = 'none';
         _admin.toast('Экспорт начат...', 'info');
       }
@@ -1591,6 +1596,7 @@
         const model_id = document.getElementById('modelFilter').value;
         const event_type = document.getElementById('eventTypeFilter').value;
         const search = document.getElementById('searchInput').value.trim();
+        // Use the extended route when model/event/search filters are needed
         const params = new URLSearchParams();
         if (status) params.set('status', status);
         if (from) params.set('date_from', from);
@@ -1598,7 +1604,17 @@
         if (model_id) params.set('model_id', model_id);
         if (event_type) params.set('event_type', event_type);
         if (search) params.set('search', search);
-        _admin.downloadCSV('/admin/orders/export?' + params);
+        const hasExtended = model_id || event_type || search;
+        if (hasExtended) {
+          _admin.downloadCSV('/admin/orders/export?' + params);
+        } else {
+          // Use canonical .csv route for simple status/date filters
+          const csvParams = new URLSearchParams();
+          if (status) csvParams.set('status', status);
+          if (from) csvParams.set('from', from);
+          if (to) csvParams.set('to', to);
+          _admin.downloadCSV('/admin/export/orders.csv?' + csvParams);
+        }
         if (document.getElementById('exportPanel').style.display !== 'none') {
           document.getElementById('exportPanel').style.display = 'none';
         }
