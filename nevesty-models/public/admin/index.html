@@ -1555,7 +1555,7 @@
 
       // Map order to event type icon
       function activityIcon(o, isNew) {
-        if (isNew && o.status === 'new') return '📋';  // new booking
+        if (isNew && o.status === 'new') return '📋'; // new booking
         const STATUS_ICON = {
           new: '📋',
           reviewing: '🔄',
@@ -1572,7 +1572,7 @@
         const now = Date.now();
         const today = new Date().setHours(0, 0, 0, 0);
         const yesterday = today - 86400000;
-        const groups = { 'Сейчас': [], 'Сегодня': [], 'Вчера': [], 'Ранее': [] };
+        const groups = { Сейчас: [], Сегодня: [], Вчера: [], Ранее: [] };
         items.forEach(item => {
           const d = new Date(item.created_at || item.updated_at).getTime();
           if (now - d < 3600000) groups['Сейчас'].push(item);

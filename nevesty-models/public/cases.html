@@ -58,7 +58,8 @@
       .page-hero {
         padding: 100px 20px 64px;
         text-align: center;
-        background: linear-gradient(160deg, rgba(201, 169, 110, 0.06) 0%, rgba(8, 8, 8, 0) 55%),
+        background:
+          linear-gradient(160deg, rgba(201, 169, 110, 0.06) 0%, rgba(8, 8, 8, 0) 55%),
           linear-gradient(0deg, rgba(201, 169, 110, 0.04) 0%, transparent 100%);
         border-bottom: 1px solid rgba(201, 169, 110, 0.12);
         position: relative;
@@ -138,7 +139,9 @@
         letter-spacing: 1.5px;
         text-transform: uppercase;
         text-decoration: none;
-        transition: background 0.25s, transform 0.2s;
+        transition:
+          background 0.25s,
+          transform 0.2s;
       }
       .btn-hero-discuss:hover {
         background: var(--gold-light);
@@ -154,8 +157,13 @@
         animation: shimmer 1.5s ease-in-out infinite;
       }
       @keyframes shimmer {
-        0%, 100% { background: rgba(201, 169, 110, 0.06); }
-        50% { background: rgba(201, 169, 110, 0.13); }
+        0%,
+        100% {
+          background: rgba(201, 169, 110, 0.06);
+        }
+        50% {
+          background: rgba(201, 169, 110, 0.13);
+        }
       }
       /* Category pill badge on image */
       .case-cat-badge {
@@ -618,7 +626,9 @@
           <div class="cat-tabs" role="tablist">
             <button class="cat-tab active" data-cat="all" onclick="filterCases('all', this)">Все</button>
             <button class="cat-tab" data-cat="fashion" onclick="filterCases('fashion', this)">Fashion</button>
-            <button class="cat-tab" data-cat="commercial" onclick="filterCases('commercial', this)">Коммерческие</button>
+            <button class="cat-tab" data-cat="commercial" onclick="filterCases('commercial', this)">
+              Коммерческие
+            </button>
             <button class="cat-tab" data-cat="events" onclick="filterCases('events', this)">Мероприятия</button>
             <button class="cat-tab" data-cat="photo" onclick="filterCases('photo', this)">Фотосессии</button>
           </div>
@@ -1312,14 +1322,17 @@
 
       // ── Lazy reveal for case card images ───────────────────────────────────
       (function () {
-        var lazyObserver = new IntersectionObserver(function (entries) {
-          entries.forEach(function (entry) {
-            if (entry.isIntersecting) {
-              entry.target.removeAttribute('data-lazy-pending');
-              lazyObserver.unobserve(entry.target);
-            }
-          });
-        }, { rootMargin: '100px 0px', threshold: 0 });
+        var lazyObserver = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.removeAttribute('data-lazy-pending');
+                lazyObserver.unobserve(entry.target);
+              }
+            });
+          },
+          { rootMargin: '100px 0px', threshold: 0 }
+        );
         document.querySelectorAll('.case-img-wrap[data-lazy-pending]').forEach(function (el) {
           lazyObserver.observe(el);
         });

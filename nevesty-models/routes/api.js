@@ -3877,16 +3877,27 @@ router.put('/settings', auth, async (req, res, next) => {
   try {
     const body = req.body;
     if (typeof body !== 'object' || !body) return res.status(400).json({ error: 'Invalid body' });
-    for (const [key, value] of Object.entries(body)) {
-      if (!ALLOWED_KEYS.includes(key)) continue;
-      const v = String(value ?? '')
-        .trim()
-        .slice(0, 2000);
-      await run('INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', [
-        key,
-        v,
-      ]);
-      cache.del(`setting:${key}`); // invalidate individual setting cache entry
+    const entries = Object.entries(body).filter(([key]) => ALLOWED_KEYS.includes(key));
+    // Wrap all writes in a transaction so settings are saved atomically
+    await run('BEGIN');
+    try {
+      for (const [key, value] of entries) {
+        const v = String(value ?? '')
+          .trim()
+          .slice(0, 2000);
+        await run('INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', [
+          key,
+          v,
+        ]);
+      }
+      await run('COMMIT');
+    } catch (txErr) {
+      await run('ROLLBACK').catch(() => {});
+      throw txErr;
+    }
+    // Invalidate cache after successful commit
+    for (const [key] of entries) {
+      cache.del(`setting:${key}`);
     }
     cache.del('settings:public'); // invalidate public settings bundle
     res.json({ ok: true });
@@ -6281,10 +6292,20 @@ router.post('/client/verify', clientOtpLimiter, async (req, res, next) => {
     );
     if (!otp) return res.status(401).json({ error: 'Код не найден или истёк. Запросите новый.' });
 
-    // Increment attempts
-    await run('UPDATE client_otp SET attempts=attempts+1 WHERE id=?', [otp.id]);
-    if (otp.attempts >= 5) {
-      await run('UPDATE client_otp SET used=1 WHERE id=?', [otp.id]);
+    // Atomic attempt increment — only succeeds when attempts < 5, preventing race condition
+    // where two concurrent requests both read attempts=4 and both bypass the limit check.
+    const incr = await run(
+      'UPDATE client_otp SET attempts=attempts+1 WHERE id=? AND attempts < 5 AND used=0',
+      [otp.id]
+    );
+    if (!incr.changes) {
+      // Either already at limit or concurrently used — invalidate and reject
+      await run('UPDATE client_otp SET used=1 WHERE id=?', [otp.id]).catch(() => {});
+      return res.status(429).json({ error: 'Превышено число попыток. Запросите новый код.' });
+    }
+    // Re-read fresh attempts count after atomic increment
+    if (otp.attempts + 1 > 5) {
+      await run('UPDATE client_otp SET used=1 WHERE id=?', [otp.id]).catch(() => {});
       return res.status(429).json({ error: 'Превышено число попыток. Запросите новый код.' });
     }
 
@@ -6293,8 +6314,12 @@ router.post('/client/verify', clientOtpLimiter, async (req, res, next) => {
       otp.code.length === code.length && crypto.timingSafeEqual(Buffer.from(otp.code), Buffer.from(code));
     if (!codeMatch) return res.status(401).json({ error: 'Неверный код' });
 
-    // Mark used
-    await run('UPDATE client_otp SET used=1 WHERE id=?', [otp.id]);
+    // Mark used atomically — only succeed if still not used (handles concurrent valid requests)
+    const markUsed = await run('UPDATE client_otp SET used=1 WHERE id=? AND used=0', [otp.id]);
+    if (!markUsed.changes) {
+      // Another concurrent request already consumed this OTP
+      return res.status(401).json({ error: 'Код уже был использован. Запросите новый.' });
+    }
 
     // Issue short-lived client JWT (1 hour)
     const clientJwtSecret = process.env.JWT_SECRET;
