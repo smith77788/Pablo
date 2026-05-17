@@ -490,6 +490,7 @@
               "
             />
             <button
+              id="qf-submit-btn"
               onclick="quickSubmitForm()"
               style="
                 padding: 12px 24px;
@@ -774,8 +775,14 @@
             showToast('Пожалуйста, заполните имя и телефон', 'error');
             return;
           }
+          const btn = document.querySelector('#qbForm .qb-btn');
+          const origText = btn ? btn.textContent : '';
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Отправка...';
+          }
           try {
-            await fetch('/api/orders', {
+            const r = await fetch('/api/orders', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -786,11 +793,17 @@
                 quick_booking: true,
               }),
             });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.error || 'Ошибка отправки');
             document.getElementById('qbForm').style.display = 'none';
             document.getElementById('qbSuccess').style.display = 'block';
             setTimeout(closeQbModal, 3000);
           } catch (e) {
-            showToast('Ошибка отправки. Попробуйте позже.', 'error');
+            showToast('Ошибка: ' + (e.message || 'Попробуйте позже'), 'error');
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = origText;
+            }
           }
         }
       </script>
@@ -952,6 +965,12 @@
             err.style.display = 'block';
             return;
           }
+          const btn = document.querySelector('#qbm2Form .btn-primary');
+          const origText = btn ? btn.textContent : '';
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Отправка...';
+          }
           try {
             let csrfToken = '';
             try {
@@ -968,6 +987,10 @@
             if (!r.ok) {
               err.textContent = d.error || 'Ошибка. Попробуйте позже.';
               err.style.display = 'block';
+              if (btn) {
+                btn.disabled = false;
+                btn.textContent = origText;
+              }
               return;
             }
             document.getElementById('qbm2Form').style.display = 'none';
@@ -976,6 +999,10 @@
           } catch (e) {
             err.textContent = 'Ошибка сети. Попробуйте позже.';
             err.style.display = 'block';
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = origText;
+            }
           }
         }
         document.addEventListener('keydown', function (e) {
@@ -1545,18 +1572,29 @@
           showToast('Введіть коректний номер телефону', 'error');
           return;
         }
+        const btn = document.getElementById('qf-submit-btn');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Відправка...';
+        }
         try {
           const r = await fetch('/api/contact', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, phone, message: 'Швидка заявка з головної сторінки' }),
           });
-          if (!r.ok) throw new Error();
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || 'Помилка відправки');
           showToast("✅ Дякуємо! Менеджер зв'яжеться найближчим часом.", 'success');
           document.getElementById('qf-name').value = '';
           document.getElementById('qf-phone').value = '';
-        } catch {
-          showToast('Помилка. Спробуйте пізніше або напишіть нам напряму.', 'error');
+        } catch (ex) {
+          showToast('Помилка: ' + (ex.message || 'Спробуйте пізніше'), 'error');
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Залишити заявку';
+          }
         }
       }
       // Load about text and pricing from public settings
