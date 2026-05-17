@@ -838,6 +838,22 @@ router.get('/admin/orders-chart', auth, async (req, res, next) => {
 // GET  /api/admin/notifications          → list (new orders, pending reviews, unread messages)
 // POST /api/admin/notifications/read     → mark items as read (stores in-memory per session)
 const _notifReadSet = new Set(); // lightweight: reset on restart
+// Prevent unbounded growth: cap the set at 10k entries (oldest entries evicted)
+const _NOTIF_READ_MAX = 10000;
+function _notifReadAdd(id) {
+  if (_notifReadSet.size >= _NOTIF_READ_MAX) {
+    // Evict half the entries (Set preserves insertion order — first inserted = oldest)
+    let count = 0;
+    const half = Math.floor(_NOTIF_READ_MAX / 2);
+    for (const entry of _notifReadSet) {
+      _notifReadSet.delete(entry);
+      if (++count >= half) break;
+    }
+  }
+  _notifReadSet.add(id);
+}
+// Alias for use in route handlers
+const _nr = _notifReadAdd;
 
 router.get('/admin/notifications', auth, async (req, res, next) => {
   try {
@@ -918,8 +934,8 @@ router.get('/admin/notifications', auth, async (req, res, next) => {
 router.post('/admin/notifications/read', auth, async (req, res, next) => {
   try {
     const { ids } = req.body;
-    if (Array.isArray(ids)) ids.forEach(id => _notifReadSet.add(id));
-    else _notifReadSet.add('__all__');
+    if (Array.isArray(ids)) ids.forEach(id => _nr(id));
+    else _nr('__all__');
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -932,7 +948,7 @@ router.post('/admin/notifications/read', auth, async (req, res, next) => {
 router.patch('/admin/notifications/read-all', auth, async (req, res, next) => {
   try {
     // Fetch current notifications to get all IDs, then mark them all
-    _notifReadSet.add('__all__');
+    _nr('__all__');
     const [newOrders, pendingReviews, unreadOrders] = await Promise.all([
       query(`SELECT id FROM orders WHERE status='new' ORDER BY created_at DESC LIMIT 10`),
       query(`SELECT id FROM reviews WHERE approved=0 ORDER BY created_at DESC LIMIT 5`),
@@ -947,9 +963,9 @@ router.patch('/admin/notifications/read-all', auth, async (req, res, next) => {
          ) ORDER BY o.created_at DESC LIMIT 5`
       ),
     ]);
-    newOrders.forEach(o => _notifReadSet.add(`order_new_${o.id}`));
-    pendingReviews.forEach(r => _notifReadSet.add(`review_${r.id}`));
-    unreadOrders.forEach(o => _notifReadSet.add(`msg_${o.id}`));
+    newOrders.forEach(o => _nr(`order_new_${o.id}`));
+    pendingReviews.forEach(r => _nr(`review_${r.id}`));
+    unreadOrders.forEach(o => _nr(`msg_${o.id}`));
     const count = newOrders.length + pendingReviews.length + unreadOrders.length;
     res.json({ success: true, count });
   } catch (e) {
@@ -966,7 +982,7 @@ router.patch('/admin/notifications/:id/read', auth, async (req, res, next) => {
     if (!id || !/^(order_new_|review_|msg_)\d+$/.test(id)) {
       return res.status(400).json({ error: 'Invalid notification id' });
     }
-    _notifReadSet.add(id);
+    _nr(id);
     res.json({ success: true });
   } catch (e) {
     next(e);
@@ -3225,23 +3241,30 @@ router.get('/admin/bot-broadcasts', auth, async (req, res, next) => {
   }
 });
 
+// ─── Broadcast segment helpers ────────────────────────────────────────────────
+const BROADCAST_SEGMENTS = ['all', 'completed', 'active', 'new'];
+function isValidBroadcastSegment(seg) {
+  return BROADCAST_SEGMENTS.includes(seg) || /^city_[a-zA-Zа-яА-ЯёЁ0-9\s\-]+$/.test(seg);
+}
+
 // POST /api/admin/broadcasts — create a new scheduled (or immediate) broadcast
 router.post('/admin/broadcasts', auth, async (req, res, next) => {
   try {
     const text = sanitize(req.body.text, 4096);
     if (!text) return res.status(400).json({ error: 'Текст не может быть пустым' });
+    if (text.length > 4096) return res.status(400).json({ error: 'Текст превышает 4096 символов' });
 
     const rawSegment = req.body.segment || 'all';
-    const segment =
-      ['all', 'completed', 'active', 'new'].includes(rawSegment) || /^city_[a-zA-Zа-яА-ЯёЁ0-9\s\-]+$/.test(rawSegment)
-        ? rawSegment
-        : 'all';
+    if (!isValidBroadcastSegment(rawSegment))
+      return res.status(400).json({ error: 'Неверный сегмент. Допустимые: all, completed, active, new, city_<город>' });
+    const segment = rawSegment;
+
     const photoUrl = req.body.photo_url ? sanitize(String(req.body.photo_url), 500) : null;
 
     let scheduledAt;
     if (req.body.scheduled_at) {
       const d = new Date(req.body.scheduled_at);
-      if (isNaN(d.getTime()) || d < new Date())
+      if (isNaN(d.getTime()) || d <= new Date())
         return res.status(400).json({ error: 'Неверная дата или дата в прошлом' });
       scheduledAt = d.toISOString();
     } else {
@@ -3259,35 +3282,84 @@ router.post('/admin/broadcasts', auth, async (req, res, next) => {
   }
 });
 
+async function getBroadcastRecipients(seg, { limit } = {}) {
+  const CHAT_ID_FILTER = "client_chat_id IS NOT NULL AND client_chat_id != ''";
+  let countRows, sampleRows;
+  if (seg === 'completed') {
+    countRows = await query(
+      `SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE ${CHAT_ID_FILTER} AND status='completed'`
+    );
+    if (limit)
+      sampleRows = await query(
+        `SELECT DISTINCT client_chat_id, client_name FROM orders WHERE ${CHAT_ID_FILTER} AND status='completed' LIMIT ?`,
+        [limit]
+      );
+  } else if (seg === 'active') {
+    countRows = await query(
+      `SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE ${CHAT_ID_FILTER} AND created_at >= datetime('now', '-30 days')`
+    );
+    if (limit)
+      sampleRows = await query(
+        `SELECT DISTINCT client_chat_id, client_name FROM orders WHERE ${CHAT_ID_FILTER} AND created_at >= datetime('now', '-30 days') LIMIT ?`,
+        [limit]
+      );
+  } else if (seg === 'new') {
+    countRows = await query(
+      `SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE ${CHAT_ID_FILTER} AND client_chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE status IN ('confirmed','in_progress','completed') AND ${CHAT_ID_FILTER})`
+    );
+    if (limit)
+      sampleRows = await query(
+        `SELECT DISTINCT client_chat_id, client_name FROM orders WHERE ${CHAT_ID_FILTER} AND client_chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE status IN ('confirmed','in_progress','completed') AND ${CHAT_ID_FILTER}) LIMIT ?`,
+        [limit]
+      );
+  } else if (/^city_/.test(seg)) {
+    const city = seg.slice(5);
+    countRows = await query(
+      `SELECT COUNT(DISTINCT o.client_chat_id) as cnt FROM orders o JOIN models m ON o.model_id=m.id WHERE o.${CHAT_ID_FILTER} AND m.city=?`,
+      [city]
+    );
+    if (limit)
+      sampleRows = await query(
+        `SELECT DISTINCT o.client_chat_id, o.client_name FROM orders o JOIN models m ON o.model_id=m.id WHERE o.${CHAT_ID_FILTER} AND m.city=? LIMIT ?`,
+        [city, limit]
+      );
+  } else {
+    // 'all' and any unknown fallback
+    countRows = await query(`SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE ${CHAT_ID_FILTER}`);
+    if (limit)
+      sampleRows = await query(
+        `SELECT DISTINCT client_chat_id, client_name FROM orders WHERE ${CHAT_ID_FILTER} LIMIT ?`,
+        [limit]
+      );
+  }
+  return { count: countRows[0]?.cnt || 0, sample: sampleRows || [] };
+}
+
 // GET /api/admin/broadcasts/count?segment= — count recipients for a segment (for preview)
 router.get('/admin/broadcasts/count', auth, async (req, res, next) => {
   try {
     const seg = req.query.segment || 'all';
-    let rows = [];
-    if (seg === 'completed') {
-      rows = await query(
-        "SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND status='completed'"
-      );
-    } else if (seg === 'active') {
-      rows = await query(
-        "SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND created_at >= datetime('now', '-30 days')"
-      );
-    } else if (seg === 'new') {
-      rows = await query(
-        "SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != '' AND client_chat_id NOT IN (SELECT DISTINCT client_chat_id FROM orders WHERE status IN ('confirmed','in_progress','completed') AND client_chat_id IS NOT NULL AND client_chat_id != '')"
-      );
-    } else if (/^city_/.test(seg)) {
-      const city = seg.slice(5);
-      rows = await query(
-        `SELECT COUNT(DISTINCT o.client_chat_id) as cnt FROM orders o JOIN models m ON o.model_id=m.id WHERE o.client_chat_id IS NOT NULL AND o.client_chat_id != '' AND m.city=?`,
-        [city]
-      );
-    } else {
-      rows = await query(
-        "SELECT COUNT(DISTINCT client_chat_id) as cnt FROM orders WHERE client_chat_id IS NOT NULL AND client_chat_id != ''"
-      );
-    }
-    res.json({ count: rows[0]?.cnt || 0 });
+    if (!isValidBroadcastSegment(seg)) return res.status(400).json({ error: 'Неверный сегмент' });
+    const { count } = await getBroadcastRecipients(seg);
+    res.json({ count });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/admin/broadcasts/preview — simulate broadcast without sending
+router.post('/admin/broadcasts/preview', auth, async (req, res, next) => {
+  try {
+    const text = sanitize(req.body.text, 4096);
+    if (!text) return res.status(400).json({ error: 'Текст не может быть пустым' });
+    if (text.length > 4096) return res.status(400).json({ error: 'Текст превышает 4096 символов' });
+
+    const seg = req.body.segment || 'all';
+    if (!isValidBroadcastSegment(seg)) return res.status(400).json({ error: 'Неверный сегмент' });
+
+    const { count, sample } = await getBroadcastRecipients(seg, { limit: 3 });
+    const sample_users = sample.map(r => ({ name: r.client_name || 'Без имени', chat_id: r.client_chat_id }));
+    res.json({ recipient_count: count, sample_users });
   } catch (e) {
     next(e);
   }
