@@ -1693,29 +1693,68 @@
             imgContainer.appendChild(glowBadge);
           }
 
+          // Check current fav state so overlay button shows correct initial emoji
+          var _overlayIsFav = false;
+          try {
+            var _oFavs = JSON.parse(localStorage.getItem('nm_favorites') || '[]');
+            _overlayIsFav = _oFavs.some(function (f) {
+              return typeof f === 'object' ? String(f.id) === String(modelId) : String(f) === String(modelId);
+            });
+          } catch (_e) {}
+
           var overlay = document.createElement('div');
           overlay.className = 'model-card-hover-overlay';
           overlay.setAttribute('aria-hidden', 'true');
-          overlay.innerHTML =
-            '<div class="hover-overlay-name">' +
-            _escHtml(modelName) +
-            '</div>' +
-            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-            '<a href="/model.html?id=' +
-            parseInt(modelId || 0) +
-            '" class="hover-overlay-btn" tabindex="-1" onclick="event.stopPropagation()">Подробнее</a>' +
-            '<button class="hover-overlay-fav" tabindex="-1" onclick="event.stopPropagation();(function(btn,id){' +
-            "var favs=[];try{favs=JSON.parse(localStorage.getItem('nm_favorites')||'[]');}catch(e){}" +
-            "var idx=favs.findIndex(function(f){return typeof f==='object'?f.id==id:f==id;});" +
-            "if(idx===-1){favs.push(id);btn.textContent='❤️';btn.title='В избранном';}" +
-            "else{favs.splice(idx,1);btn.textContent='🤍';btn.title='В избранное';}" +
-            "try{localStorage.setItem('nm_favorites',JSON.stringify(favs));}catch(e){}" +
-            '})(this,' +
-            parseInt(modelId || 0) +
-            ')" ' +
-            'title="В избранное" style="width:34px;height:34px;border:none;background:rgba(0,0,0,0.5);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;flex-shrink:0;">' +
-            '🤍</button>' +
-            '</div>';
+
+          var overlayName = document.createElement('div');
+          overlayName.className = 'hover-overlay-name';
+          overlayName.textContent = modelName;
+
+          var overlayActions = document.createElement('div');
+          overlayActions.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+
+          var profileLink = document.createElement('a');
+          profileLink.href = '/model.html?id=' + parseInt(modelId || 0);
+          profileLink.className = 'hover-overlay-btn';
+          profileLink.tabIndex = -1;
+          profileLink.textContent = 'Подробнее';
+          profileLink.addEventListener('click', function (e) {
+            e.stopPropagation();
+          });
+
+          var favOverlayBtn = document.createElement('button');
+          favOverlayBtn.className = 'hover-overlay-fav';
+          favOverlayBtn.tabIndex = -1;
+          favOverlayBtn.textContent = _overlayIsFav ? '❤️' : '🤍';
+          favOverlayBtn.title = _overlayIsFav ? 'В избранном' : 'В избранное';
+          favOverlayBtn.style.cssText =
+            'width:34px;height:34px;border:none;background:rgba(0,0,0,0.5);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;flex-shrink:0;';
+          favOverlayBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            e.preventDefault();
+            // Delegate to card's existing fav button built by catalog.js
+            var cardFavBtn = card.querySelector('button[aria-label*="избранн"]');
+            if (cardFavBtn) {
+              cardFavBtn.click();
+              // Sync overlay button state after catalog.js updates localStorage
+              setTimeout(function () {
+                var updFavs = [];
+                try {
+                  updFavs = JSON.parse(localStorage.getItem('nm_favorites') || '[]');
+                } catch (_ex) {}
+                var nowFav = updFavs.some(function (f) {
+                  return typeof f === 'object' ? String(f.id) === String(modelId) : String(f) === String(modelId);
+                });
+                favOverlayBtn.textContent = nowFav ? '❤️' : '🤍';
+                favOverlayBtn.title = nowFav ? 'В избранном' : 'В избранное';
+              }, 60);
+            }
+          });
+
+          overlayActions.appendChild(profileLink);
+          overlayActions.appendChild(favOverlayBtn);
+          overlay.appendChild(overlayName);
+          overlay.appendChild(overlayActions);
           imgContainer.appendChild(overlay);
         }
 
