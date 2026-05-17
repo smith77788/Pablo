@@ -7639,7 +7639,7 @@ async function getPaymentProvider() {
 
 // POST /api/orders/:id/pay — create payment for an order
 // Auth: admin JWT  OR  client phone token
-router.post('/orders/:id/pay', async (req, res, next) => {
+router.post('/orders/:id/pay', strictLimiter, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid order ID' });
@@ -7709,8 +7709,18 @@ router.post('/orders/:id/pay', async (req, res, next) => {
 });
 
 // POST /api/webhooks/yookassa
+// Security: only accept requests from official YooKassa IP ranges (2024).
+// This prevents forged payment.succeeded events from marking orders as paid.
+const YOOKASSA_ALLOWED_IPS = ['185.71.76.', '185.71.77.', '77.75.153.', '77.75.156.11', '77.75.156.35'];
 router.post('/webhooks/yookassa', async (req, res, next) => {
   try {
+    const clientIp = (req.headers['x-forwarded-for'] || req.ip || req.connection?.remoteAddress || '').split(',')[0].trim();
+    const DEV_MODE_YOOKASSA = process.env.NODE_ENV !== 'production' && process.env.DEV_YOOKASSA_WEBHOOKS === 'true';
+    if (!DEV_MODE_YOOKASSA && !YOOKASSA_ALLOWED_IPS.some(prefix => clientIp.startsWith(prefix))) {
+      console.warn(`[YOOKASSA] Rejected webhook from unauthorized IP: ${clientIp}`);
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
     const body = req.body;
     const event = Buffer.isBuffer(body) ? JSON.parse(body.toString('utf8')) : body;
 
@@ -8282,7 +8292,7 @@ router.get('/faq/categories', publicSettingsLimiter, async (req, res, next) => {
 // GET /api/faq — returns active FAQ items from the faq table (managed via admin CRUD)
 // Response shape: [{id, q, a, category}] — maps question/answer to q/a for faq.html compatibility
 // Optional ?category= filter
-router.get('/faq', async (req, res) => {
+router.get('/faq', publicSettingsLimiter, async (req, res) => {
   try {
     const { category } = req.query;
     let sql = `SELECT id, question AS q, answer AS a, COALESCE(category, 'general') AS category
