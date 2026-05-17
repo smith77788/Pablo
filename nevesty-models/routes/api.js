@@ -383,6 +383,10 @@ router.post('/admin/login', authLimiter, async (req, res, next) => {
     if (!username || !password) return res.status(400).json({ error: 'Укажите логин и пароль' });
     const admin = await get('SELECT * FROM admins WHERE username = ?', [username]);
     if (!admin) {
+      // Perform a dummy bcrypt compare to prevent user-enumeration via timing side-channel.
+      // Without this, missing-user responses return ~0ms while wrong-password responses
+      // take ~100ms (bcrypt work factor), leaking whether a username exists.
+      await bcrypt.compare(password, '$2b$10$invalidhashpadding000000000000000000000000000000000000000');
       console.warn(
         `[AUTH] Failed login attempt for user "${username}" from IP ${req.ip} at ${new Date().toISOString()} (user not found)`
       );
@@ -7714,7 +7718,9 @@ router.post('/orders/:id/pay', strictLimiter, async (req, res, next) => {
 const YOOKASSA_ALLOWED_IPS = ['185.71.76.', '185.71.77.', '77.75.153.', '77.75.156.11', '77.75.156.35'];
 router.post('/webhooks/yookassa', async (req, res, next) => {
   try {
-    const clientIp = (req.headers['x-forwarded-for'] || req.ip || req.connection?.remoteAddress || '').split(',')[0].trim();
+    const clientIp = (req.headers['x-forwarded-for'] || req.ip || req.connection?.remoteAddress || '')
+      .split(',')[0]
+      .trim();
     const DEV_MODE_YOOKASSA = process.env.NODE_ENV !== 'production' && process.env.DEV_YOOKASSA_WEBHOOKS === 'true';
     if (!DEV_MODE_YOOKASSA && !YOOKASSA_ALLOWED_IPS.some(prefix => clientIp.startsWith(prefix))) {
       console.warn(`[YOOKASSA] Rejected webhook from unauthorized IP: ${clientIp}`);
