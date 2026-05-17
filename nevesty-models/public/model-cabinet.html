@@ -557,6 +557,232 @@
         --order-accent: #ab47bc;
       }
 
+      /* ── progress bar ── */
+      .order-progress {
+        display: flex;
+        align-items: center;
+        margin: 14px 0 4px;
+        gap: 0;
+      }
+      .order-progress-step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        flex: 1;
+        position: relative;
+      }
+      .order-progress-step:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        top: 9px;
+        left: 50%;
+        width: 100%;
+        height: 2px;
+        background: var(--border);
+        z-index: 0;
+      }
+      .order-progress-step.done:not(:last-child)::after {
+        background: var(--gold);
+      }
+      .order-progress-dot {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 2px solid var(--border);
+        background: var(--bg3, #111);
+        position: relative;
+        z-index: 1;
+        flex-shrink: 0;
+        transition:
+          border-color 0.2s,
+          background 0.2s;
+      }
+      .order-progress-step.done .order-progress-dot {
+        background: var(--gold);
+        border-color: var(--gold);
+      }
+      .order-progress-step.active .order-progress-dot {
+        border-color: var(--gold);
+        box-shadow: 0 0 0 3px rgba(201, 169, 110, 0.25);
+      }
+      .order-progress-label {
+        font-size: 0.58rem;
+        letter-spacing: 0.5px;
+        color: var(--text-dim);
+        text-align: center;
+        white-space: nowrap;
+        line-height: 1.2;
+      }
+      .order-progress-step.done .order-progress-label,
+      .order-progress-step.active .order-progress-label {
+        color: var(--gold);
+      }
+
+      /* ── contract button ── */
+      .btn-contract {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.75rem;
+        color: var(--gold);
+        border: 1px solid rgba(201, 169, 110, 0.35);
+        border-radius: 8px;
+        padding: 5px 12px;
+        text-decoration: none;
+        margin-top: 12px;
+        transition:
+          background 0.2s,
+          border-color 0.2s;
+      }
+      .btn-contract:hover {
+        background: rgba(201, 169, 110, 0.1);
+        border-color: var(--gold);
+      }
+
+      /* ── avatar upload ── */
+      .cabinet-avatar-upload {
+        position: relative;
+        flex-shrink: 0;
+      }
+      .avatar-upload-label {
+        position: absolute;
+        bottom: -2px;
+        right: -2px;
+        background: var(--gold);
+        color: #080808;
+        border-radius: 50%;
+        width: 22px;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        cursor: pointer;
+        z-index: 2;
+        transition: transform 0.15s;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      }
+      .avatar-upload-label:hover {
+        transform: scale(1.15);
+      }
+      #avatarInput {
+        display: none;
+      }
+
+      /* ── loyalty section ── */
+      .cabinet-loyalty {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 28px;
+      }
+      .cabinet-loyalty-title {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.05rem;
+        color: var(--white);
+        margin-bottom: 16px;
+      }
+      .loyalty-balance {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .loyalty-balance-value {
+        font-family: 'Playfair Display', serif;
+        font-size: 2.4rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1;
+      }
+      .loyalty-balance-label {
+        font-size: 0.9rem;
+        color: var(--text-dim);
+      }
+      .loyalty-history-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        font-size: 0.82rem;
+      }
+      .loyalty-history-item:last-child {
+        border-bottom: none;
+      }
+      .loyalty-history-desc {
+        color: var(--text-dim);
+        flex: 1;
+        margin-right: 12px;
+      }
+      .loyalty-history-pts {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .loyalty-history-pts.plus {
+        color: #66bb6a;
+      }
+      .loyalty-history-pts.minus {
+        color: #ef9a9a;
+      }
+      .loyalty-empty {
+        color: var(--text-dim);
+        font-size: 0.82rem;
+        text-align: center;
+        padding: 8px 0;
+      }
+
+      /* ── reviews section ── */
+      .cabinet-reviews {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 28px;
+      }
+      .cabinet-reviews-title {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.05rem;
+        color: var(--white);
+        margin-bottom: 16px;
+      }
+      .review-card {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        padding: 12px 0;
+      }
+      .review-card:last-child {
+        border-bottom: none;
+      }
+      .review-card-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .review-stars {
+        color: var(--gold);
+        font-size: 0.9rem;
+        letter-spacing: 1px;
+      }
+      .review-date {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+      }
+      .review-text {
+        font-size: 0.83rem;
+        color: var(--text-muted, #aaa);
+        line-height: 1.5;
+      }
+      .review-author {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+        margin-top: 4px;
+      }
+
       /* ── empty / loading ── */
       .cabinet-empty {
         text-align: center;
@@ -685,9 +911,12 @@
       /* ─── Profile header ─── */
       function buildProfile(model, name) {
         const initials = getInitials(model?.name || name);
+        const avatarSrc = model?.id ? `/uploads/avatars/${model.id}.jpg` : null;
         const photoHtml = model?.photo_main
           ? `<img src="${esc(model.photo_main)}" alt="${esc(model.name || name)}" loading="lazy" decoding="async" />`
-          : initials;
+          : avatarSrc
+            ? `<img src="${esc(avatarSrc)}" alt="${esc(model?.name || name)}" loading="lazy" decoding="async" onerror="this.outerHTML=\`${initials}\`" />`
+            : initials;
         const statusCls = model?.available ? 'free' : 'busy';
         const statusTxt = model?.available ? 'Свободна' : 'Занята';
         const metaParts = [];
@@ -696,11 +925,24 @@
           const cats = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
           metaParts.push(cats[model.category] || esc(model.category));
         }
+        const uploadWidget = model?.id
+          ? `
+          <div class="cabinet-avatar-upload">
+            <div class="cabinet-avatar" id="profileAvatar">
+              <div class="cabinet-avatar-inner" id="profileAvatarInner">${photoHtml}</div>
+            </div>
+            <label class="avatar-upload-label" title="Изменить фото" aria-label="Изменить фото профиля">
+              ✏️
+              <input type="file" id="avatarInput" accept="image/*" onchange="uploadAvatar(this, ${model.id})" />
+            </label>
+          </div>`
+          : `
+          <div class="cabinet-avatar">
+            <div class="cabinet-avatar-inner">${photoHtml}</div>
+          </div>`;
         return `
           <div class="cabinet-profile">
-            <div class="cabinet-avatar">
-              <div class="cabinet-avatar-inner">${photoHtml}</div>
-            </div>
+            ${uploadWidget}
             <div class="cabinet-profile-info">
               <div class="cabinet-profile-name">${esc(model?.name || name)}</div>
               ${metaParts.length ? `<div class="cabinet-profile-meta">${metaParts.join(' · ')}</div>` : ''}
@@ -807,6 +1049,31 @@
           </div>`;
       }
 
+      /* ─── Order progress bar ─── */
+      const PROGRESS_STEPS = [
+        { key: 'new', label: 'Получена' },
+        { key: 'confirmed', label: 'Подтверждена' },
+        { key: 'in_progress', label: 'В работе' },
+        { key: 'completed', label: 'Завершена' },
+      ];
+      const PROGRESS_ORDER = { new: 0, reviewing: 0, confirmed: 1, in_progress: 2, completed: 3 };
+
+      function buildProgressBar(status) {
+        if (status === 'cancelled') return '';
+        const currentIdx = PROGRESS_ORDER[status] ?? -1;
+        const steps = PROGRESS_STEPS.map((step, i) => {
+          const isDone = i < currentIdx;
+          const isActive = i === currentIdx;
+          const cls = isDone ? 'done' : isActive ? 'active' : '';
+          return `
+            <div class="order-progress-step ${cls}" aria-label="${step.label}${isDone ? ' — выполнено' : isActive ? ' — текущий' : ''}">
+              <div class="order-progress-dot"></div>
+              <div class="order-progress-label">${step.label}</div>
+            </div>`;
+        }).join('');
+        return `<div class="order-progress" role="progressbar" aria-label="Прогресс заявки">${steps}</div>`;
+      }
+
       /* ─── Order card ─── */
       function buildOrderCard(o) {
         const statusLabel = STATUS_LABELS[o.status] || esc(o.status);
@@ -815,6 +1082,11 @@
         const dateStr = o.event_date
           ? new Date(o.event_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
           : null;
+        const progressHtml = buildProgressBar(o.status);
+        const contractHtml =
+          ['confirmed', 'completed'].includes(o.status) && o.id
+            ? `<a href="/api/admin/orders/${esc(o.id)}/contract.html" target="_blank" rel="noopener noreferrer" class="btn-contract">📄 Посмотреть договор</a>`
+            : '';
         return `
           <div class="order-card" style="--order-accent:${accent}">
             <div class="order-card-top">
@@ -826,7 +1098,109 @@
               ${dateStr ? `<span class="order-meta-item">📅 ${esc(dateStr)}</span>` : ''}
               ${o.client_name ? `<span class="order-meta-item">👤 ${esc(o.client_name)}</span>` : ''}
             </div>
+            ${progressHtml}
+            ${contractHtml}
           </div>`;
+      }
+
+      /* ─── Build loyalty section ─── */
+      function buildLoyalty(loyaltyData, orders) {
+        // Try to get balance from loyalty data, fallback to orders count
+        const balance = loyaltyData?.balance ?? orders.filter(o => o.status === 'completed').length * 50;
+        const history = loyaltyData?.history || [];
+        const historyHtml = history.length
+          ? history
+              .slice(0, 5)
+              .map(h => {
+                const pts =
+                  h.points > 0
+                    ? `<span class="loyalty-history-pts plus">+${h.points}</span>`
+                    : `<span class="loyalty-history-pts minus">${h.points}</span>`;
+                const dateStr = h.created_at
+                  ? new Date(h.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+                  : '';
+                return `
+                <div class="loyalty-history-item">
+                  <span class="loyalty-history-desc">${esc(h.description || 'Операция')}</span>
+                  <span style="font-size:0.72rem;color:var(--text-dim);margin-right:10px">${esc(dateStr)}</span>
+                  ${pts}
+                </div>`;
+              })
+              .join('')
+          : `<div class="loyalty-empty">История операций пуста</div>`;
+        return `
+          <section class="cabinet-loyalty" id="loyalty-section" aria-label="Бонусные баллы">
+            <div class="cabinet-loyalty-title">⭐ Бонусные баллы</div>
+            <div class="loyalty-balance">
+              <span class="loyalty-balance-value" id="loyaltyBalance">${balance}</span>
+              <span class="loyalty-balance-label">баллов</span>
+            </div>
+            <div id="loyaltyHistory">${historyHtml}</div>
+          </section>`;
+      }
+
+      /* ─── Build reviews section ─── */
+      function buildReviews(reviews) {
+        const title = `<div class="cabinet-reviews-title">💬 Мои отзывы</div>`;
+        if (!reviews || !reviews.length) {
+          return `
+            <section class="cabinet-reviews" id="reviews-section" aria-label="Мои отзывы">
+              ${title}
+              <div class="loyalty-empty">Отзывов пока нет</div>
+            </section>`;
+        }
+        const stars = n =>
+          '★'.repeat(Math.max(0, Math.min(5, n || 0))) + '☆'.repeat(5 - Math.max(0, Math.min(5, n || 0)));
+        const reviewsHtml = reviews
+          .slice(0, 10)
+          .map(r => {
+            const dateStr = r.created_at
+              ? new Date(r.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+              : '';
+            return `
+            <div class="review-card">
+              <div class="review-card-top">
+                <span class="review-stars" aria-label="${r.rating || 0} из 5 звёзд">${stars(r.rating)}</span>
+                <span class="review-date">${esc(dateStr)}</span>
+              </div>
+              ${r.text ? `<div class="review-text">${esc(r.text)}</div>` : ''}
+              ${r.client_name ? `<div class="review-author">— ${esc(r.client_name)}</div>` : ''}
+            </div>`;
+          })
+          .join('');
+        return `
+          <section class="cabinet-reviews" id="reviews-section" aria-label="Мои отзывы">
+            ${title}
+            ${reviewsHtml}
+          </section>`;
+      }
+
+      /* ─── Avatar upload ─── */
+      async function uploadAvatar(input, modelId) {
+        if (!input.files || !input.files[0]) return;
+        const file = input.files[0];
+        if (file.size > 5 * 1024 * 1024) {
+          alert('Файл слишком большой (макс. 5 МБ)');
+          return;
+        }
+        const formData = new FormData();
+        formData.append('avatar', file);
+        formData.append('model_id', modelId);
+        try {
+          const r = await fetch('/api/client/avatar', { method: 'POST', body: formData });
+          if (r.ok) {
+            const d = await r.json();
+            const inner = document.getElementById('profileAvatarInner');
+            if (inner) {
+              const url = d.url || URL.createObjectURL(file);
+              inner.innerHTML = `<img src="${esc(url)}" alt="Аватар" style="width:100%;height:100%;object-fit:cover;border-radius:50%" />`;
+            }
+          } else {
+            alert('Ошибка загрузки фото. Попробуйте позже.');
+          }
+        } catch {
+          alert('Ошибка сети. Попробуйте позже.');
+        }
       }
 
       /* ─── Main search ─── */
@@ -855,42 +1229,69 @@
             return;
           }
 
-          // Load availability for calendar
+          // Load availability, loyalty, reviews in parallel
           const modelId = d.model?.id;
           let busyDates = [];
+          let loyaltyData = null;
+          let reviewsData = [];
+
+          const parallelFetches = [];
+
           if (modelId) {
-            try {
-              const today = new Date();
-              const todayStr = today.toISOString().slice(0, 10);
-              const nowMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-              const nextDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-              const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
-              const [r1, r2] = await Promise.all([
+            const today = new Date();
+            const todayStr = today.toISOString().slice(0, 10);
+            const nowMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+            const nextDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+            const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+
+            parallelFetches.push(
+              Promise.all([
                 fetch(`/api/models/${modelId}/availability?month=${nowMonth}`).then(x => x.json()),
                 fetch(`/api/models/${modelId}/availability?month=${nextMonth}`).then(x => x.json()),
-              ]);
-              busyDates = [...(r1.busy_dates || []), ...(r2.busy_dates || [])].filter(dt => dt >= todayStr);
-            } catch {
-              /* ignore */
-            }
+              ])
+                .then(([r1, r2]) => {
+                  busyDates = [...(r1.busy_dates || []), ...(r2.busy_dates || [])].filter(dt => dt >= todayStr);
+                })
+                .catch(() => {}),
+
+              fetch(`/api/client/loyalty?name=${encodeURIComponent(name)}`)
+                .then(x => (x.ok ? x.json() : null))
+                .then(ld => {
+                  loyaltyData = ld;
+                })
+                .catch(() => {}),
+
+              fetch(`/api/client/reviews?name=${encodeURIComponent(name)}`)
+                .then(x => (x.ok ? x.json() : null))
+                .then(rd => {
+                  reviewsData = rd?.reviews || [];
+                })
+                .catch(() => {})
+            );
           }
+
+          await Promise.all(parallelFetches);
 
           const notifHtml = buildNotifBar(d.orders);
           const profileHtml = buildProfile(d.model, name);
           const statsHtml = buildStats(d.orders);
           const calHtml = buildCalendar(busyDates);
+          const loyaltyHtml = buildLoyalty(loyaltyData, d.orders);
+          const reviewsHtml = buildReviews(reviewsData);
           const ordersHtml = d.orders.map(buildOrderCard).join('');
 
           res.innerHTML = `
             ${profileHtml}
             ${notifHtml}
             ${statsHtml}
+            ${loyaltyHtml}
             ${calHtml}
             <div class="cabinet-orders-title">
               Мои заявки
               <span class="cabinet-orders-count">${esc(d.total)}</span>
             </div>
-            ${ordersHtml}`;
+            ${ordersHtml}
+            ${reviewsHtml}`;
         } catch {
           res.innerHTML = `
             <div class="cabinet-empty" role="alert">

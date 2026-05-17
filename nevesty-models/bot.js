@@ -2458,6 +2458,8 @@ async function showAdminOrder(chatId, orderId) {
       { text: '📄 Договор', callback_data: `adm_order_contract_${orderId}` },
       { text: '🧾 Счёт', callback_data: `adm_order_invoice_${orderId}` },
     ]);
+    // iCal export (БЛОК 31)
+    keyboard.push([{ text: '📅 iCal', callback_data: `adm_order_ical_${orderId}` }]);
     // Template message button — shown when order has a client chat ID
     if (o.client_chat_id) {
       keyboard.push([{ text: '📤 Написать шаблоном', callback_data: `adm_tpl_pick_${orderId}` }]);
@@ -13697,6 +13699,42 @@ async function showTopModels(chatId, page = 0) {
     );
   } catch (e) {
     console.error('[Bot] showTopModels:', e.message);
+  }
+}
+
+// ─── Support history for admin (БЛОК 25) ─────────────────────────────────────
+
+async function _showSupportHistory(chatId) {
+  const LIMIT = 10;
+  try {
+    const tickets = await query(
+      `SELECT id, from_chat_id, to_chat_id, message, direction, is_read, created_at
+       FROM support_messages
+       ORDER BY created_at DESC
+       LIMIT ?`,
+      [LIMIT]
+    );
+    if (!tickets.length) {
+      return safeSend(chatId, '📭 Обращений в поддержку пока нет\\.', {
+        parse_mode: 'MarkdownV2',
+        reply_markup: { inline_keyboard: [[{ text: '◀️ Назад', callback_data: 'admin_menu' }]] },
+      });
+    }
+    const lines = tickets.map(t => {
+      const dir = t.direction === 'client_to_admin' ? '👤→🛡' : '🛡→👤';
+      const read = t.is_read ? '✅' : '🔵';
+      const from = t.direction === 'client_to_admin' ? `ID ${t.from_chat_id}` : `Менеджер→${t.to_chat_id}`;
+      const preview = t.message.length > 60 ? t.message.slice(0, 60) + '…' : t.message;
+      const date = t.created_at ? t.created_at.slice(0, 16) : '';
+      return `${read} ${dir} ${esc(from)}\n_${esc(date)}_\n${esc(preview)}`;
+    });
+    return safeSend(chatId, `📜 *История поддержки* \\(последние ${tickets.length}\\):\n\n${lines.join('\n\n')}`, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '◀️ Назад', callback_data: 'admin_menu' }]] },
+    });
+  } catch (e) {
+    console.error('[Bot] showSupportHistory:', e.message);
+    return safeSend(chatId, '❌ Ошибка при загрузке истории поддержки.');
   }
 }
 

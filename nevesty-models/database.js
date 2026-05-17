@@ -310,6 +310,9 @@ async function initDatabase() {
   await run(`ALTER TABLE client_prefs ADD COLUMN email TEXT DEFAULT NULL`).catch(() => {});
   await run(`ALTER TABLE client_prefs ADD COLUMN language TEXT DEFAULT 'ru'`).catch(() => {});
 
+  // Migration — add avatar_url to client_prefs (БЛОК 32)
+  await run(`ALTER TABLE client_prefs ADD COLUMN avatar_url TEXT DEFAULT NULL`).catch(() => {});
+
   // Default settings
   const defaults = [
     ['greeting', 'Добро пожаловать в Nevesty Models — агентство профессиональных моделей!'],

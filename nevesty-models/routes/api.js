@@ -3377,6 +3377,120 @@ router.get('/admin/orders/export', auth, async (req, res, next) => {
   }
 });
 
+// ─── iCal helpers ─────────────────────────────────────────────────────────────
+function formatIcal(dt) {
+  return dt.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+}
+function formatIcalDate(dateStr) {
+  // dateStr is YYYY-MM-DD; default start time 09:00 UTC
+  return dateStr.replace(/-/g, '') + 'T090000Z';
+}
+function escIcalText(str) {
+  if (!str) return '';
+  return String(str).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+}
+
+// ─── GET /api/admin/orders/:id/calendar.ics — single order iCal ───────────────
+router.get('/admin/orders/:id/calendar.ics', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).send('Invalid ID');
+    const order = await get('SELECT * FROM orders WHERE id=?', [id]);
+    if (!order) return res.status(404).send('Not found');
+
+    const siteHost = (process.env.SITE_URL || 'https://nevesty-models.ru')
+      .replace(/^https?:\/\//, '')
+      .replace(/\/$/, '');
+    const uid = `order-${order.id}@${siteHost}`;
+    const now = formatIcal(new Date());
+    const start = order.event_date ? formatIcalDate(order.event_date) : now;
+    const description = [
+      `Клиент: ${order.client_name || ''}`,
+      `Телефон: ${order.client_phone || ''}`,
+      `Тип: ${order.event_type || ''}`,
+    ].join('\\n');
+
+    const ical = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Nevesty Models//RU',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${now}`,
+      `DTSTART:${start}`,
+      `DTEND:${start}`,
+      `SUMMARY:${escIcalText(`Съёмка #${order.order_number}`)}`,
+      `DESCRIPTION:${description}`,
+      `LOCATION:${escIcalText(order.location || '')}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="order-${order.order_number}.ics"`);
+    res.send(ical);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── GET /api/admin/calendar/export.ics — all upcoming confirmed/in_progress ──
+router.get('/admin/calendar/export.ics', auth, async (req, res, next) => {
+  try {
+    const orders = await query(
+      `SELECT * FROM orders
+       WHERE status IN ('confirmed','in_progress')
+         AND event_date >= date('now')
+       ORDER BY event_date ASC
+       LIMIT 500`
+    );
+
+    const siteHost = (process.env.SITE_URL || 'https://nevesty-models.ru')
+      .replace(/^https?:\/\//, '')
+      .replace(/\/$/, '');
+    const now = formatIcal(new Date());
+
+    const events = orders.map(order => {
+      const uid = `order-${order.id}@${siteHost}`;
+      const start = order.event_date ? formatIcalDate(order.event_date) : now;
+      const description = [
+        `Клиент: ${order.client_name || ''}`,
+        `Телефон: ${order.client_phone || ''}`,
+        `Тип: ${order.event_type || ''}`,
+      ].join('\\n');
+      return [
+        'BEGIN:VEVENT',
+        `UID:${uid}`,
+        `DTSTAMP:${now}`,
+        `DTSTART:${start}`,
+        `DTEND:${start}`,
+        `SUMMARY:${escIcalText(`Съёмка #${order.order_number}`)}`,
+        `DESCRIPTION:${description}`,
+        `LOCATION:${escIcalText(order.location || '')}`,
+        'END:VEVENT',
+      ].join('\r\n');
+    });
+
+    const ical = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Nevesty Models//RU',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      ...events,
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="calendar-export.ics"`);
+    res.send(ical);
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/admin/orders/:id', auth, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
@@ -9806,6 +9920,36 @@ router.get('/admin/orders/:id/invoice.html', auth, async (req, res, next) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Content-Disposition', `inline; filename="invoice-${order.order_number}.html"`);
     res.send(html);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── Support messages API (БЛОК 25) ──────────────────────────────────────────
+// GET /api/admin/support/messages — list support messages with optional ?from_chat_id= filter
+router.get('/admin/support/messages', auth, async (req, res, next) => {
+  try {
+    const fromChatId = req.query.from_chat_id ? parseInt(req.query.from_chat_id) : null;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+
+    const conditions = [];
+    const params = [];
+    if (fromChatId) {
+      conditions.push('(from_chat_id = ? OR to_chat_id = ?)');
+      params.push(fromChatId, fromChatId);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = await query(
+      `SELECT id, from_chat_id, to_chat_id, message, direction, is_read, created_at
+       FROM support_messages
+       ${where}
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    const countRow = await get(`SELECT COUNT(*) as n FROM support_messages ${where}`, params);
+    res.json({ messages: rows, total: countRow?.n || 0, limit, offset });
   } catch (e) {
     next(e);
   }
