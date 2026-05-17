@@ -303,6 +303,53 @@ async function pollNewOrders() {
 pollNewOrders();
 setInterval(pollNewOrders, 20000);
 
+// ─── Notifications badge polling ──────────────────────
+async function pollNotifications() {
+  try {
+    const data = await apiFetch('/admin/notifications?limit=1&unread=1');
+    const count = data.unread_count ?? (data.notifications || []).filter(n => !n.read).length;
+    document.querySelectorAll('#notifNavBadge').forEach(el => {
+      el.textContent = count > 9 ? '9+' : count;
+      el.style.display = count > 0 ? '' : 'none';
+    });
+    // Update page title with unread badge (like Gmail)
+    const totalBadge = (parseInt(document.getElementById('newOrdersBadge')?.textContent) || 0) + count;
+    if (totalBadge > 0) {
+      const base = document.title.replace(/^\(\d+\)\s*/, '');
+      document.title = `(${totalBadge}) ${base}`;
+    } else {
+      document.title = document.title.replace(/^\(\d+\)\s*/, '');
+    }
+  } catch {}
+}
+pollNotifications();
+setInterval(pollNotifications, 30000);
+
+// ─── Keyboard shortcuts ───────────────────────────────
+document.addEventListener('keydown', e => {
+  // Escape: close any open modal
+  if (e.key === 'Escape') {
+    document
+      .querySelectorAll('.modal.active, .modal[style*="display: flex"], .modal[style*="display:flex"]')
+      .forEach(m => {
+        const closeBtn = m.querySelector('[data-action="close-modal"], .modal-close, .btn-modal-close');
+        if (closeBtn) closeBtn.click();
+        else m.style.display = 'none';
+      });
+  }
+  // Ctrl/Cmd + K: focus search input if present
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    const searchInput = document.querySelector(
+      '.filter-input[type="search"], input[placeholder*="поиск"], input[placeholder*="Поиск"]'
+    );
+    if (searchInput) {
+      e.preventDefault();
+      searchInput.focus();
+      searchInput.select();
+    }
+  }
+});
+
 // ─── Export helper ────────────────────────────────────
 function downloadCSV(url) {
   const a = document.createElement('a');
