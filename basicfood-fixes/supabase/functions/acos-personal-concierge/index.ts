@@ -288,6 +288,7 @@ Deno.serve(async (req) => {
     const customers = await buildCustomers(sb);
     let processed = 0, delivered = 0, skipped = 0;
     const channelStats: Record<string, number> = {};
+    const logRows: object[] = [];
 
     for (const ctx of customers) {
       processed++;
@@ -320,7 +321,7 @@ Deno.serve(async (req) => {
         skipped++;
       }
 
-      await sb.from("personal_concierge_log").insert({
+      logRows.push({
         user_id: ctx.user_id,
         channel,
         message_text: text,
@@ -334,6 +335,11 @@ Deno.serve(async (req) => {
         delivered: deliveredOk,
         delivery_error: deliveredOk ? null : deliverError,
       });
+    }
+
+    // Single batch insert instead of per-customer sequential inserts.
+    if (logRows.length > 0) {
+      await sb.from("personal_concierge_log").insert(logRows).catch(() => {});
     }
 
     return new Response(

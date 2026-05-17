@@ -169,6 +169,8 @@ Deno.serve(async (req) => {
     const results: Array<Record<string, unknown>> = [];
     let measuredCount = 0;
     let notableCount = 0;
+    const actionUpdateOps: Array<{ id: string; payload: Record<string, unknown> }> = [];
+    const insightRows: object[] = [];
 
     for (const act of (actions ?? []) as ActionRow[]) {
       const params = act.parameters ?? {};
@@ -227,9 +229,9 @@ Deno.serve(async (req) => {
 
       const delta = baseline > 0 ? (current - baseline) / baseline : (current > 0 ? 1 : 0);
 
-      await sb
-        .from("ai_actions")
-        .update({
+      actionUpdateOps.push({
+        id: act.id,
+        payload: {
           status: "measured",
           measured_at: new Date().toISOString(),
           actual_result: {
@@ -241,8 +243,8 @@ Deno.serve(async (req) => {
             measured_by: "acos-roi-tracker",
             measured_at: new Date().toISOString(),
           },
-        })
-        .eq("id", act.id);
+        },
+      });
 
       measuredCount++;
       results.push({ id: act.id, scope, baseline, current, delta });
@@ -250,7 +252,7 @@ Deno.serve(async (req) => {
       if (Math.abs(delta) >= NOTABLE_DELTA) {
         notableCount++;
         const sign = delta > 0 ? "+" : "";
-        await sb.from("ai_insights").insert({
+        insightRows.push({
           insight_type: "roi_measured",
           affected_layer: "learning",
           risk_level: delta < 0 ? "medium" : "low",
@@ -269,6 +271,14 @@ Deno.serve(async (req) => {
           status: "new",
         });
       }
+    }
+
+    // Batch parallel writes instead of sequential per-action writes
+    await Promise.all(actionUpdateOps.map(u =>
+      sb.from("ai_actions").update(u.payload).eq("id", u.id)
+    ));
+    if (insightRows.length > 0) {
+      await sb.from("ai_insights").insert(insightRows).catch(() => {});
     }
 
     return new Response(

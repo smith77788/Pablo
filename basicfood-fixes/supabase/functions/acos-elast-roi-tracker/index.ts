@@ -151,6 +151,8 @@ Deno.serve(async (req) => {
       verdict: "winner" | "flop" | "inconclusive";
       age_days: number;
     }> = [];
+    const insightUpdateOps: Array<{ id: string; payload: Record<string, unknown> }> = [];
+    const flopPromoIds: string[] = [];
 
     for (const ins of candidates) {
       const m = ins.metrics!;
@@ -205,11 +207,11 @@ Deno.serve(async (req) => {
         age_days: ageDays,
       });
 
-      // Update tracking insight status when we have a verdict (winner/flop).
+      // Collect update ops — applied in batch after the loop.
       if (verdict !== "inconclusive") {
-        await supabase
-          .from("ai_insights")
-          .update({
+        insightUpdateOps.push({
+          id: ins.id,
+          payload: {
             status: verdict === "winner" ? "validated" : "rejected",
             metrics: {
               ...m,
@@ -220,18 +222,28 @@ Deno.serve(async (req) => {
               roi_realized_lift_pct: realizedLift,
               roi_verdict: verdict,
             },
-          })
-          .eq("id", ins.id);
+          },
+        });
 
-        // Auto-deactivate flop promos to stop wasting impressions
+        // Collect flop promo IDs for batch deactivation.
         if (verdict === "flop" && promoRow && promoRow.is_active) {
-          await supabase
-            .from("promo_codes")
-            .update({ is_active: false })
-            .eq("id", promoRow.id);
+          flopPromoIds.push(promoRow.id);
         }
       }
     }
+
+    // Batch parallel writes instead of sequential per-insight writes.
+    const writeBatch: Promise<unknown>[] = [
+      ...insightUpdateOps.map(u =>
+        supabase.from("ai_insights").update(u.payload).eq("id", u.id)
+      ),
+    ];
+    if (flopPromoIds.length > 0) {
+      writeBatch.push(
+        supabase.from("promo_codes").update({ is_active: false }).in("id", flopPromoIds),
+      );
+    }
+    if (writeBatch.length > 0) await Promise.all(writeBatch);
 
     // 5. Emit roll-up summary insight only if there are decided verdicts.
     const winners = results.filter((r) => r.verdict === "winner");
