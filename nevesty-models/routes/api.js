@@ -2183,6 +2183,54 @@ router.delete('/admin/models/:id/availability/:date', auth, async (req, res, nex
   }
 });
 
+// PATCH /api/admin/models/:id/availability — upsert a date in model_availability_schedule (БЛОК 22)
+// Body: { date: 'YYYY-MM-DD', is_available: 0|1, reason: 'vacation' }
+router.patch('/admin/models/:id/availability', auth, async (req, res, next) => {
+  try {
+    const modelId = parseInt(req.params.id);
+    if (!Number.isInteger(modelId) || modelId <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+
+    const modelExists = await get('SELECT id FROM models WHERE id=?', [modelId]);
+    if (!modelExists) return res.status(404).json({ error: 'Model not found' });
+
+    const { date, is_available, reason } = req.body;
+    if (!date || !/^d{4}-d{2}-d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
+    }
+    if (is_available === undefined || is_available === null) {
+      return res.status(400).json({ error: 'is_available required (0 or 1)' });
+    }
+    const avail = is_available ? 1 : 0;
+    const cleanReason = sanitize(reason, 200);
+
+    await run(
+      `INSERT INTO model_availability_schedule (model_id, date, is_available, reason)
+       VALUES (?,?,?,?)
+       ON CONFLICT(model_id, date) DO UPDATE SET is_available=excluded.is_available, reason=excluded.reason`,
+      [modelId, date, avail, cleanReason]
+    );
+
+    // Mirror to model_busy_dates for backward compat
+    if (avail === 0) {
+      await run('INSERT OR IGNORE INTO model_busy_dates (model_id, busy_date, reason) VALUES (?,?,?)', [
+        modelId,
+        date,
+        cleanReason,
+      ]).catch(() => {});
+    } else {
+      await run('DELETE FROM model_busy_dates WHERE model_id=? AND busy_date=?', [modelId, date]).catch(() => {});
+    }
+
+    await logAudit(req, avail ? 'unmark_busy' : 'mark_busy', 'model_availability_schedule', modelId, {
+      date,
+      reason: cleanReason,
+    });
+    res.json({ success: true, date, is_available: avail });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── Model busy dates (calendar) — legacy endpoints kept for backwards compat ──
 router.get('/admin/models/:id/busy-dates', auth, async (req, res, next) => {
   try {
@@ -5136,6 +5184,26 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
           mailer.sendManagerNotification(email, { ...order, id }).catch(() => {});
         }
       } catch {}
+    }
+    // ─── Auto-block model date when order confirmed (БЛОК 22) ────────────────
+    if (status === 'confirmed' && status !== order.prev_status && order.model_id && order.event_date) {
+      try {
+        await run(
+          `INSERT INTO model_availability_schedule (model_id, date, is_available, reason, order_id)
+           VALUES (?,?,0,'booking',?)
+           ON CONFLICT(model_id, date) DO UPDATE SET is_available=0, reason='booking', order_id=excluded.order_id`,
+          [order.model_id, order.event_date, id]
+        );
+        // Mirror to model_busy_dates for backward compat
+        await run('INSERT OR IGNORE INTO model_busy_dates (model_id, busy_date, reason, order_id) VALUES (?,?,?,?)', [
+          order.model_id,
+          order.event_date,
+          'booking',
+          id,
+        ]).catch(() => {});
+      } catch (e) {
+        console.error('[availability] auto-block error:', e.message);
+      }
     }
     res.json({ success: true });
   } catch (e) {
