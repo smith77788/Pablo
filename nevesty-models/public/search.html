@@ -240,6 +240,159 @@
         opacity: 0.3;
         margin-bottom: 16px;
       }
+
+      /* ─── SKELETON LOADING ────────────────────────────────────── */
+      .search-skeleton-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 20px;
+      }
+      .search-skeleton-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .search-skeleton-img {
+        width: 100%;
+        aspect-ratio: 3/4;
+        background: var(--border);
+      }
+      .search-skeleton-body {
+        padding: 16px;
+      }
+      .search-skel-line {
+        height: 13px;
+        border-radius: 3px;
+        background: var(--border);
+        margin-bottom: 10px;
+      }
+      .search-skel-line.short {
+        width: 55%;
+      }
+      .search-skel-line.medium {
+        width: 75%;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .search-skeleton-card {
+          animation: searchSkelPulse 1.5s ease-in-out infinite;
+        }
+        @keyframes searchSkelPulse {
+          0%,
+          100% {
+            opacity: 0.45;
+          }
+          50% {
+            opacity: 0.9;
+          }
+        }
+        .search-skeleton-card:nth-child(2) {
+          animation-delay: 0.15s;
+        }
+        .search-skeleton-card:nth-child(3) {
+          animation-delay: 0.3s;
+        }
+        .search-skeleton-card:nth-child(4) {
+          animation-delay: 0.45s;
+        }
+        .search-skeleton-card:nth-child(5) {
+          animation-delay: 0.6s;
+        }
+        .search-skeleton-card:nth-child(6) {
+          animation-delay: 0.75s;
+        }
+      }
+
+      /* ─── ANIMATED EMPTY STATE ────────────────────────────────── */
+      .no-results {
+        text-align: center;
+        padding: 72px 24px;
+        color: var(--text-muted);
+      }
+      .no-results-lupe {
+        width: 80px;
+        height: 80px;
+        margin: 0 auto 20px;
+        position: relative;
+      }
+      .no-results-lupe svg {
+        width: 80px;
+        height: 80px;
+        color: var(--gold);
+        opacity: 0.35;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .no-results-lupe svg {
+          animation: lupeWiggle 2.4s ease-in-out infinite;
+        }
+        @keyframes lupeWiggle {
+          0%,
+          100% {
+            transform: rotate(-8deg) scale(1);
+          }
+          25% {
+            transform: rotate(8deg) scale(1.06);
+          }
+          50% {
+            transform: rotate(-5deg) scale(1);
+          }
+          75% {
+            transform: rotate(6deg) scale(1.03);
+          }
+        }
+      }
+      .no-results h3 {
+        font-size: 1.2rem;
+        color: var(--text);
+        margin-bottom: 8px;
+      }
+      .no-results p {
+        font-size: 0.88rem;
+        max-width: 340px;
+        margin: 0 auto 20px;
+      }
+
+      /* ─── SORT CONTROLS ───────────────────────────────────────── */
+      .search-sort-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .search-sort-label {
+        font-size: 0.72rem;
+        letter-spacing: 1px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+      }
+      .sort-btn {
+        padding: 6px 14px;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.2s;
+      }
+      .sort-btn:hover {
+        border-color: rgba(201, 169, 110, 0.5);
+        color: var(--gold);
+      }
+      .sort-btn.active {
+        border-color: var(--gold);
+        color: var(--gold);
+        background: rgba(201, 169, 110, 0.08);
+      }
+
+      /* ─── HIGHLIGHT SEARCH MATCH ──────────────────────────────── */
+      mark.srch-hl {
+        background: rgba(201, 169, 110, 0.22);
+        color: var(--gold);
+        border-radius: 2px;
+        padding: 0 2px;
+        font-style: normal;
+      }
     </style>
   </head>
   <body>
