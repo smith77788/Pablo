@@ -32,6 +32,150 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="/css/main.css" />
+    <style>
+      /* ── Favorites enhanced UX ── */
+
+      /* Heart empty state */
+      @keyframes heartbeat {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        15% {
+          transform: scale(1.18);
+        }
+        30% {
+          transform: scale(0.96);
+        }
+        45% {
+          transform: scale(1.1);
+        }
+        60% {
+          transform: scale(1);
+        }
+      }
+      .fav-empty-heart {
+        font-size: 5rem;
+        margin-bottom: 28px;
+        display: block;
+        animation: heartbeat 2.8s ease-in-out infinite;
+        filter: drop-shadow(0 0 18px rgba(201, 169, 110, 0.25));
+      }
+      #emptyState {
+        background: rgba(201, 169, 110, 0.03);
+        border: 1px dashed rgba(201, 169, 110, 0.2);
+        border-radius: 4px;
+        margin: 0 auto;
+        max-width: 480px;
+      }
+
+      /* Model card overlay enhanced — remove-from-favorites X button */
+      .fav-remove-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 34px;
+        height: 34px;
+        border: none;
+        background: rgba(0, 0, 0, 0.55);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 10;
+        transition:
+          background 0.22s,
+          transform 0.18s;
+        font-size: 0.9rem;
+        color: #fff;
+        line-height: 1;
+      }
+      .fav-remove-btn:hover {
+        background: rgba(220, 38, 38, 0.82);
+        transform: scale(1.12);
+      }
+      .fav-remove-btn:focus {
+        outline: 2px solid rgba(220, 38, 38, 0.6);
+        outline-offset: 2px;
+      }
+
+      /* Compare checkbox on card */
+      .fav-cmp-check {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        width: 34px;
+        height: 34px;
+        border: none;
+        background: rgba(0, 0, 0, 0.55);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 10;
+        transition:
+          background 0.22s,
+          transform 0.18s;
+        font-size: 0.85rem;
+        color: #fff;
+        line-height: 1;
+      }
+      .fav-cmp-check.active {
+        background: rgba(201, 169, 110, 0.85);
+      }
+      .fav-cmp-check:hover {
+        background: rgba(201, 169, 110, 0.5);
+        transform: scale(1.1);
+      }
+
+      /* Card removal animation */
+      .model-card.fav-removing {
+        opacity: 0;
+        transform: scale(0.92) translateY(-6px);
+        transition:
+          opacity 0.26s ease,
+          transform 0.26s ease;
+      }
+
+      /* Grid fade-in for cards */
+      @keyframes cardFadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(14px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      #favGrid .model-card {
+        animation: cardFadeIn 0.38s ease both;
+      }
+
+      /* Sticky compare bar enhancements */
+      #favCompareBar {
+        box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.6);
+      }
+
+      /* Hover: show model actions on card */
+      .model-card .fav-hover-overlay {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(0deg, rgba(8, 8, 8, 0.82) 0%, rgba(8, 8, 8, 0) 55%);
+        opacity: 0;
+        transition: opacity 0.25s;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        padding: 16px;
+        pointer-events: none;
+      }
+      .model-card:hover .fav-hover-overlay {
+        opacity: 1;
+      }
+    </style>
     <!-- Yandex.Metrica (loads only if consent given) -->
     <script>
       fetch('/api/settings/public')
@@ -281,23 +425,61 @@
         </div>
 
         <!-- Empty state -->
-        <div id="emptyState" style="display: none; text-align: center; padding: 80px 24px">
-          <div style="font-size: 4rem; margin-bottom: 24px; opacity: 0.4">🤍</div>
-          <h2 style="font-family: 'Playfair Display', serif; font-size: 2rem; color: var(--white); margin-bottom: 12px">
-            Список пуст
+        <div id="emptyState" style="display: none; text-align: center; padding: 64px 32px">
+          <span class="fav-empty-heart" aria-hidden="true">🤍</span>
+          <h2
+            style="
+              font-family: 'Playfair Display', serif;
+              font-size: clamp(1.6rem, 4vw, 2.2rem);
+              color: var(--white);
+              margin-bottom: 14px;
+            "
+          >
+            Добавьте моделей в избранное
           </h2>
           <p
             style="
               color: var(--text-muted);
               margin-bottom: 32px;
-              max-width: 400px;
+              max-width: 380px;
               margin-left: auto;
               margin-right: auto;
+              font-size: 0.9rem;
+              line-height: 1.7;
             "
           >
-            У вас нет избранных моделей. Откройте каталог и добавьте понравившихся.
+            Откройте каталог, нажмите ❤️ на понравившихся моделях — и они появятся здесь.
           </p>
-          <a href="/catalog.html" class="btn-primary">Перейти в каталог</a>
+          <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap">
+            <a href="/catalog.html" class="btn-primary">Открыть каталог</a>
+            <a
+              href="/booking.html"
+              style="
+                display: inline-flex;
+                align-items: center;
+                padding: 12px 24px;
+                border: 1px solid var(--border);
+                color: var(--text-muted);
+                font-size: 0.8rem;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                text-decoration: none;
+                transition:
+                  border-color 0.2s,
+                  color 0.2s;
+              "
+              onmouseover="
+                this.style.borderColor = 'var(--gold)';
+                this.style.color = 'var(--gold)';
+              "
+              onmouseout="
+                this.style.borderColor = 'var(--border)';
+                this.style.color = 'var(--text-muted)';
+              "
+            >
+              Оставить заявку
+            </a>
+          </div>
         </div>
 
         <!-- Models grid -->
@@ -667,20 +849,14 @@
           </div>
         </div>`;
 
-          // ── Remove from favorites button (💔) ──────────────────────────────────
+          // ── Remove from favorites button — red X on hover ─────────────────────
           const removeBtn = document.createElement('button');
-          removeBtn.innerHTML = '❤️';
+          removeBtn.className = 'fav-remove-btn';
+          removeBtn.innerHTML = '✕';
           removeBtn.title = 'Убрать из избранного';
           removeBtn.setAttribute('aria-label', 'Убрать из избранного');
-          removeBtn.style.cssText =
-            'position:absolute;top:8px;right:8px;width:34px;height:34px;border:none;background:rgba(0,0,0,0.55);border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;';
           removeBtn.addEventListener('mouseenter', () => {
-            removeBtn.style.background = 'rgba(180,0,0,0.75)';
-            removeBtn.innerHTML = '💔';
-          });
-          removeBtn.addEventListener('mouseleave', () => {
-            removeBtn.style.background = 'rgba(0,0,0,0.55)';
-            removeBtn.innerHTML = '❤️';
+            removeBtn.innerHTML = '✕';
           });
           removeBtn.addEventListener('click', e => {
             e.stopPropagation();
@@ -692,31 +868,22 @@
             });
             saveFavs(updated);
             updateNavBadge();
-            article.style.opacity = '0';
-            article.style.transform = 'scale(0.95)';
-            article.style.transition = 'all 0.25s';
+            article.classList.add('fav-removing');
             setTimeout(() => {
               article.remove();
               onRemove(model.id);
-            }, 250);
+            }, 270);
           });
 
           // ── Compare button (⚖️) ────────────────────────────────────────────────
           const cmpIds = getCompareIds();
           const cmpActive = cmpIds.includes(String(model.id)) || cmpIds.includes(model.id);
           const cmpBtn = document.createElement('button');
-          cmpBtn.className = 'fav-cmp-btn';
+          cmpBtn.className = 'fav-cmp-btn fav-cmp-check' + (cmpActive ? ' active' : '');
           cmpBtn.setAttribute('data-active', cmpActive ? 'true' : 'false');
           cmpBtn.setAttribute('aria-label', cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению');
           cmpBtn.title = cmpActive ? 'Убрать из сравнения' : 'Добавить к сравнению';
-          cmpBtn.innerHTML = '⚖️';
-          cmpBtn.style.cssText = `position:absolute;top:8px;left:8px;width:34px;height:34px;border:none;background:${cmpActive ? 'rgba(201,169,110,0.85)' : 'rgba(0,0,0,0.55)'};border-radius:50%;font-size:0.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.2s;`;
-          cmpBtn.addEventListener('mouseenter', () => {
-            if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(201,169,110,0.4)';
-          });
-          cmpBtn.addEventListener('mouseleave', () => {
-            if (cmpBtn.getAttribute('data-active') !== 'true') cmpBtn.style.background = 'rgba(0,0,0,0.55)';
-          });
+          cmpBtn.innerHTML = cmpActive ? '✓' : '⚖️';
           cmpBtn.addEventListener('click', e => {
             e.stopPropagation();
             e.preventDefault();
@@ -730,15 +897,19 @@
               ids.push(model.id);
               saveCompareIds(ids);
               cmpBtn.setAttribute('data-active', 'true');
-              cmpBtn.style.background = 'rgba(201,169,110,0.85)';
+              cmpBtn.classList.add('active');
+              cmpBtn.innerHTML = '✓';
               cmpBtn.title = 'Убрать из сравнения';
+              cmpBtn.setAttribute('aria-label', 'Убрать из сравнения');
               showToast('Добавлено в сравнение ⚖️');
             } else {
               ids.splice(idx, 1);
               saveCompareIds(ids);
               cmpBtn.setAttribute('data-active', 'false');
-              cmpBtn.style.background = 'rgba(0,0,0,0.55)';
+              cmpBtn.classList.remove('active');
+              cmpBtn.innerHTML = '⚖️';
               cmpBtn.title = 'Добавить к сравнению';
+              cmpBtn.setAttribute('aria-label', 'Добавить к сравнению');
               showToast('Убрано из сравнения');
             }
             updateCompareBar();
