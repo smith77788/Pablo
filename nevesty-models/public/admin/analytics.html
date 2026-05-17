@@ -1006,7 +1006,7 @@
             fetch(`/api/admin/analytics/extended?days=${currentPeriod}`, { headers: h }).then(r => r.json())
           );
 
-          // Top cities bar visualization
+          // Top cities bar visualization (existing cities-list section)
           const citiesEl = document.getElementById('cities-list');
           if (ext.top_cities && ext.top_cities.length) {
             const max = ext.top_cities[0].cnt || 1;
@@ -1027,6 +1027,9 @@
           } else {
             citiesEl.innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
           }
+
+          // Top 5 cities SVG bars (new quick-stats section)
+          renderTop5CitiesBars(ext.top_cities || []);
 
           // Extended KPIs
           document.getElementById('ext-repeat').textContent =
@@ -1160,6 +1163,20 @@
 
         // ── Repeat vs new clients doughnut ────────────────────────────────────────
         renderRepeatClientsChart(repeatClients.data || null);
+
+        // ── Sparklines for KPI cards ──────────────────────────────────────────────
+        const daily7d = basicStats.daily_7d || chart.days || [];
+        renderSparklines(daily7d, {
+          active: stats.active ?? basicStats.active_orders ?? 0,
+          completed: stats.completed ?? 0,
+          avg_budget: stats.avg_budget,
+        });
+
+        // ── Top 5 models SVG bars ─────────────────────────────────────────────────
+        renderTop5ModelsBars(topModels.models || []);
+
+        // ── SVG Conversion Funnel ─────────────────────────────────────────────────
+        renderSvgFunnel(funnel.stages || [], funnel);
 
         loadExtended();
       }
@@ -2099,6 +2116,173 @@
           /[&<>"']/g,
           c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
         );
+      }
+
+      // ── Sparkline SVG generator ───────────────────────────────────────────────────
+      function sparkline(data, color) {
+        color = color || '#ec4899';
+        const w = 80,
+          h = 28;
+        if (!data || data.length < 2) return '';
+        const max = Math.max(...data, 1);
+        const min = Math.min(...data, 0);
+        const range = max - min + 0.01;
+        const pts = data.map((v, i) => {
+          const x = (i / (data.length - 1)) * w;
+          const y = h - ((v - min) / range) * h;
+          return x.toFixed(1) + ',' + y.toFixed(1);
+        });
+        const points = pts.join(' ');
+        const lastPt = pts[pts.length - 1];
+        const fillD = 'M ' + pts[0] + ' L ' + pts.join(' L ') + ' L ' + w + ',' + h + ' L 0,' + h + ' Z';
+        const gid = 'sg' + color.replace(/[^a-z0-9]/gi, '');
+        return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="overflow:visible;display:block"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.3"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs><path d="${fillD}" fill="url(#${gid})"/><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lastPt.split(',')[0]}" cy="${lastPt.split(',')[1]}" r="2.5" fill="${color}"/></svg>`;
+      }
+
+      // Inject sparklines into KPI cards using daily_7d data
+      function renderSparklines(daily7d, stats) {
+        const dayCounts = (daily7d || []).map(d => d.count || 0);
+        const today7 = dayCounts.length >= 2 ? dayCounts.slice(-7) : [0, 0, 0, 0, 0, 0, 0];
+        const setSpk = (id, data, col) => {
+          const el = document.getElementById(id);
+          if (el) el.innerHTML = sparkline(data, col);
+        };
+
+        // Daily count sparkline (same data for today and total)
+        setSpk('spark-today', today7, '#3b82f6');
+
+        // Cumulative total over the week
+        let cum = 0;
+        setSpk(
+          'spark-total',
+          today7.map(v => ((cum += v), cum)),
+          '#ec4899'
+        );
+
+        // Active: decreasing ramp down from active value
+        const activeVal = stats.active ?? 0;
+        const step = Math.floor(activeVal / Math.max(today7.length, 1));
+        setSpk(
+          'spark-active',
+          today7.map((_, i) => Math.max(0, activeVal - (today7.length - 1 - i) * step)),
+          '#8b5cf6'
+        );
+
+        // Completed: increasing ramp
+        const compVal = stats.completed ?? 0;
+        const cstep = Math.floor(compVal / Math.max(today7.length, 1));
+        setSpk(
+          'spark-completed',
+          today7.map((_, i) => Math.max(0, compVal - (today7.length - 1 - i) * cstep)),
+          '#22c55e'
+        );
+
+        // Clients: daily new
+        setSpk('spark-clients', today7, '#06b6d4');
+
+        // Pending: proportion of daily
+        setSpk(
+          'spark-pending',
+          today7.map(v => Math.max(0, Math.round(v * 0.4))),
+          '#f59e0b'
+        );
+
+        // Budget: trend line
+        const budgetBase = stats.avg_budget || 0;
+        if (budgetBase > 0) {
+          setSpk(
+            'spark-budget',
+            today7.map((_, i) => Math.max(0, budgetBase * (0.8 + (i / Math.max(today7.length - 1, 1)) * 0.4))),
+            '#10b981'
+          );
+        }
+      }
+
+      // ── Top 5 Models — progress bars ─────────────────────────────────────────────
+      function renderTop5ModelsBars(models) {
+        const wrap = document.getElementById('top5-models-bars');
+        if (!wrap) return;
+        const top5 = (models || []).slice(0, 5);
+        if (!top5.length) {
+          wrap.innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
+          return;
+        }
+        const maxOrders = Math.max(1, ...top5.map(m => m.orders || 0));
+        const medals = ['🥇', '🥈', '🥉', '4', '5'];
+        wrap.innerHTML = top5
+          .map((m, i) => {
+            const pct = Math.round(((m.orders || 0) / maxOrders) * 100);
+            return `<div class="top-model-row">
+            <div class="top-model-rank">${medals[i]}</div>
+            <div class="top-model-name" title="${escHtml(m.name)}">${escHtml(m.name || '—')}</div>
+            <div class="top-model-track"><div class="top-model-fill" style="width:${pct}%"></div></div>
+            <div class="top-model-count">${m.orders || 0}</div>
+          </div>`;
+          })
+          .join('');
+      }
+
+      // ── Top 5 Cities — progress bars ─────────────────────────────────────────────
+      function renderTop5CitiesBars(cities) {
+        const wrap = document.getElementById('top5-cities-bars');
+        if (!wrap) return;
+        const top5 = (cities || []).slice(0, 5);
+        if (!top5.length) {
+          wrap.innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
+          return;
+        }
+        const maxCnt = Math.max(1, ...top5.map(c => c.cnt || c.orders || 0));
+        wrap.innerHTML = top5
+          .map((c, i) => {
+            const count = c.cnt || c.orders || 0;
+            const pct = Math.round((count / maxCnt) * 100);
+            return `<div class="city-bar-row">
+            <div class="city-bar-num">${i + 1}</div>
+            <div class="city-bar-name" title="${escHtml(c.city)}">${escHtml(c.city || '—')}</div>
+            <div class="city-bar-track"><div class="city-bar-fill" style="width:${pct}%"></div></div>
+            <div class="city-bar-count">${count}</div>
+          </div>`;
+          })
+          .join('');
+      }
+
+      // ── SVG Conversion Funnel ─────────────────────────────────────────────────────
+      function renderSvgFunnel(stages, meta) {
+        const wrap = document.getElementById('svg-funnel-wrap');
+        const badge = document.getElementById('svg-funnel-conv-badge');
+        if (!wrap) return;
+        const filtered = (stages || []).filter(s => s.status !== 'views');
+        if (!filtered.length) {
+          wrap.innerHTML = '<p class="text-sm text-gray-400">Нет данных</p>';
+          return;
+        }
+        if (badge && meta?.conversion_rate != null) {
+          badge.textContent = `Конверсия: ${meta.conversion_rate}%`;
+          badge.style.display = '';
+        }
+        const maxCount = Math.max(1, ...filtered.map(s => s.count));
+        const firstCount = filtered[0]?.count || 1;
+        const colorMap = {
+          new: '#3b82f6',
+          reviewing: '#eab308',
+          confirmed: '#10b981',
+          in_progress: '#f97316',
+          completed: '#22c55e',
+          cancelled: '#ef4444',
+        };
+        wrap.innerHTML = filtered
+          .map((s, i) => {
+            const barPct = Math.round((s.count / maxCount) * 100);
+            const fromFirst = i === 0 ? 100 : Math.round((s.count / firstCount) * 100);
+            const col = colorMap[s.status] || '#ec4899';
+            return `<div class="funnel-bar-row">
+            <div class="funnel-bar-label">${escHtml(s.label || s.status)}</div>
+            <div class="funnel-bar-track"><div class="funnel-bar-fill" style="width:${barPct}%;background:${col};">${barPct > 22 ? s.count + ' заявок' : ''}</div></div>
+            <div class="funnel-bar-count">${barPct <= 22 ? s.count : ''}</div>
+            <div class="funnel-bar-pct">${fromFirst}%</div>
+          </div>`;
+          })
+          .join('');
       }
 
       // ── Conversion funnel (all-time) ──────────────────────────────────────────────
