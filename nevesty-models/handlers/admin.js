@@ -44,7 +44,7 @@ async function showAdminStats(chatId) {
       get("SELECT COUNT(*) as n FROM orders WHERE date(created_at) = date('now')"),
       get("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-7 days')"),
       get("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-30 days')"),
-      get("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','reviewing','confirmed','in_progress')"),
+      get("SELECT COUNT(*) as n FROM orders WHERE status IN ('new','confirmed','in_progress')"),
       get("SELECT COUNT(*) as n FROM orders WHERE status='completed'"),
       get("SELECT COUNT(*) as n FROM orders WHERE status='cancelled'"),
       // New clients: first order ever placed in last 30 days
@@ -94,20 +94,20 @@ async function showAdminStats(chatId) {
       if (avgRow?.avg) avgCheck = Math.round(avgRow.avg);
     } catch {}
 
-    // Top-5 models by completed orders
+    // Top-3 models by total order count (all non-cancelled)
     let topModels = [];
     try {
       topModels = await query(
         `SELECT m.name, COUNT(o.id) as cnt
          FROM models m
-         JOIN orders o ON o.model_id = m.id AND o.status = 'completed'
+         JOIN orders o ON o.model_id = m.id AND o.status != 'cancelled'
          GROUP BY m.id, m.name
          ORDER BY cnt DESC
-         LIMIT 5`
+         LIMIT 3`
       );
     } catch {}
 
-    // Top-3 cities by order count (via model city)
+    // Top-2 cities by order count (via model city)
     let topCities = [];
     try {
       topCities = await query(
@@ -117,7 +117,7 @@ async function showAdminStats(chatId) {
          WHERE m.city IS NOT NULL AND m.city != ''
          GROUP BY m.city
          ORDER BY cnt DESC
-         LIMIT 3`
+         LIMIT 2`
       );
     } catch {}
 
@@ -169,7 +169,7 @@ async function showAdminStats(chatId) {
     text += `• Неделя \\(7 дней\\): ${esc(String(weekOrders.n))}\n`;
     text += `• Месяц \\(30 дней\\): ${esc(String(monthOrders.n))}\n`;
     text += `• Всего: ${esc(String(total.n))}\n`;
-    text += `• Активных сейчас: *${esc(String(active.n))}*\n`;
+    text += `• Активных сейчас \\(new/confirmed/in\\_progress\\): *${esc(String(active.n))}*\n`;
     text += `• Конверсия new→confirmed: *${esc(String(conversion))}%*\n`;
 
     // ── Revenue section ──────────────────────────────
@@ -185,9 +185,9 @@ async function showAdminStats(chatId) {
     text += `• Топовых \\(featured\\): ${esc(String(featuredModels?.n || 0))}\n`;
 
     if (topModels.length) {
-      text += `\n👑 *Топ\\-5 моделей по завершённым заявкам*\n`;
+      text += `\n👑 *Топ\\-3 модели по заявкам*\n`;
       topModels.forEach((m, i) => {
-        text += `${i + 1}\\. ${esc(m.name)} — ${esc(String(m.cnt))} завершённых\n`;
+        text += `${i + 1}\\. ${esc(m.name)} — ${esc(String(m.cnt))} заявок\n`;
       });
     }
 
@@ -205,9 +205,9 @@ async function showAdminStats(chatId) {
       text += `_⏱ Средний цикл сделки: ${esc(String(avgCycleDays))} дн\\._\n`;
     }
 
-    // Top-3 cities (bonus)
+    // Top-2 cities
     if (topCities.length) {
-      text += `\n🏙️ *Топ\\-3 города*\n`;
+      text += `\n🏙️ *Топ\\-2 города*\n`;
       topCities.forEach((c, i) => {
         text += `${i + 1}\\. ${esc(c.city)} — ${esc(String(c.cnt))} заявок\n`;
       });
