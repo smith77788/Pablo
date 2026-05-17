@@ -99,7 +99,7 @@ function isActiveInputState(state) {
   if (state === 'template_name' || state === 'template_text') return true;
   if (['adm_promo_name', 'adm_promo_type', 'adm_promo_value', 'adm_promo_maxuses', 'adm_promo_until'].includes(state))
     return true;
-  if (['adm_faq_add_q', 'adm_faq_add_a', 'adm_faq_add_kw'].includes(state)) return true;
+  if (['adm_faq_add_q', 'adm_faq_add_a', 'adm_faq_add_kw', 'adm_faq_pick_cat'].includes(state)) return true;
   if (
     [
       'adm_broadcast_msg',
@@ -591,6 +591,7 @@ const KB_ADMIN_MARKETING = {
       { text: '📋 Шаблоны сообщений', callback_data: 'adm_templates' },
       { text: '🏷 Промокоды', callback_data: 'adm_promos' },
     ],
+    [{ text: '❓ Управление FAQ', callback_data: 'adm_faq' }],
     [{ text: '◀️ Главное меню', callback_data: 'admin_menu' }],
   ],
 };
@@ -5342,6 +5343,419 @@ async function exportClientsCSV(chatId) {
   }
 }
 
+// ─── БЛОК 33: Расширенные отчёты ─────────────────────────────────────────────
+
+/**
+ * generateWeeklyReport() — отправляет всем админам еженедельный отчёт.
+ * Вызывается каждый понедельник в 09:00 из scheduler.js.
+ */
+async function _generateWeeklyReport() {
+  try {
+    const budgetExpr = `CAST(REPLACE(REPLACE(REPLACE(REPLACE(budget,'₽',''),'руб',''),' ',''),',','.') AS REAL)`;
+    const [orders, revenue, newClients, topModel, topServices] = await Promise.all([
+      get("SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-7 days')"),
+      get(
+        `SELECT SUM(${budgetExpr}) as s FROM orders WHERE status='completed' AND created_at >= datetime('now','-7 days') AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`
+      ),
+      get(
+        "SELECT COUNT(DISTINCT client_chat_id) as n FROM orders WHERE created_at >= datetime('now','-7 days') AND client_chat_id IS NOT NULL AND CAST(client_chat_id AS INTEGER) > 0"
+      ),
+      get(
+        "SELECT m.name, COUNT(*) as cnt FROM orders o JOIN models m ON m.id=o.model_id WHERE o.model_id IS NOT NULL AND o.created_at >= datetime('now','-7 days') GROUP BY o.model_id ORDER BY cnt DESC LIMIT 1"
+      ),
+      query(
+        "SELECT event_type, COUNT(*) as cnt FROM orders WHERE event_type IS NOT NULL AND event_type != '' AND created_at >= datetime('now','-7 days') GROUP BY event_type ORDER BY cnt DESC LIMIT 3"
+      ),
+    ]);
+
+    const [done, canc] = await Promise.all([
+      get("SELECT COUNT(*) as n FROM orders WHERE status='completed' AND created_at >= datetime('now','-7 days')"),
+      get("SELECT COUNT(*) as n FROM orders WHERE status='cancelled' AND created_at >= datetime('now','-7 days')"),
+    ]);
+
+    const revenueVal = Math.round(revenue?.s || 0);
+    const ordersVal = orders?.n || 0;
+    const now = new Date();
+    const weekLabel = now.toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    let text = `📊 *Еженедельный отчёт* \\(по ${esc(weekLabel)}\\)\n\n`;
+    text += `📋 Новых заявок: *${esc(String(ordersVal))}*\n`;
+    text += `✅ Завершено: *${esc(String(done?.n || 0))}*\n`;
+    text += `❌ Отменено: *${esc(String(canc?.n || 0))}*\n`;
+    text += `💰 Выручка: *${esc(revenueVal.toLocaleString('ru'))} ₽*\n`;
+    text += `👥 Новых клиентов: *${esc(String(newClients?.n || 0))}*\n`;
+
+    if (topModel?.name) {
+      text += `\n🏆 Топ модель: *${esc(topModel.name)}* \\(${esc(String(topModel.cnt))} заявок\\)\n`;
+    }
+    if (topServices.length) {
+      text += `\n🎯 Топ сервисы:\n`;
+      const medals = ['🥇', '🥈', '🥉'];
+      topServices.forEach((s, i) => {
+        text += `${medals[i] || `${i + 1}\\.`} ${esc(s.event_type)} — ${esc(String(s.cnt))}\n`;
+      });
+    }
+    text += `\n_Автоматический отчёт каждый понедельник в 09:00_`;
+
+    const adminIds = await getAdminChatIds().catch(() => [...ADMIN_IDS]);
+    for (const adminId of adminIds) {
+      await safeSend(adminId, text, {
+        parse_mode: 'MarkdownV2',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '📊 Статистика', callback_data: 'adm_stats' },
+              { text: '📅 Отчёт по периоду', callback_data: 'adm_report_period' },
+            ],
+            [{ text: '📥 Выгрузить CSV', callback_data: 'adm_report_week_csv' }],
+          ],
+        },
+      }).catch(() => {});
+    }
+    console.log('[Bot] Weekly report sent to', adminIds.length, 'admins');
+  } catch (e) {
+    console.error('[Bot] generateWeeklyReport:', e.message);
+  }
+}
+
+/**
+ * showModelReport(chatId, modelId) — детальный отчёт по конкретной модели.
+ * Callback: adm_model_report_{id}
+ */
+async function showModelReport(chatId, modelId) {
+  if (!isAdmin(chatId)) return;
+  const m = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(() => null);
+  if (!m) return safeSend(chatId, '❌ Модель не найдена');
+
+  const budgetExpr = `CAST(REPLACE(REPLACE(REPLACE(REPLACE(budget,'₽',''),'руб',''),' ',''),',','.') AS REAL)`;
+  const [total, monthOrders, completed, cancelled, avgBudget] = await Promise.all([
+    get('SELECT COUNT(*) as n FROM orders WHERE model_id=?', [modelId]).catch(() => ({ n: 0 })),
+    get("SELECT COUNT(*) as n FROM orders WHERE model_id=? AND created_at >= datetime('now','-30 days')", [
+      modelId,
+    ]).catch(() => ({ n: 0 })),
+    get("SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status='completed'", [modelId]).catch(() => ({ n: 0 })),
+    get("SELECT COUNT(*) as n FROM orders WHERE model_id=? AND status='cancelled'", [modelId]).catch(() => ({ n: 0 })),
+    get(
+      `SELECT AVG(${budgetExpr}) as avg FROM orders WHERE model_id=? AND status='completed' AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`,
+      [modelId]
+    ).catch(() => ({ avg: null })),
+  ]);
+
+  const totalVal = total?.n || 0;
+  const compVal = completed?.n || 0;
+  const cancVal = cancelled?.n || 0;
+  const compPct = totalVal > 0 ? Math.round((compVal / totalVal) * 100) : 0;
+  const cancPct = totalVal > 0 ? Math.round((cancVal / totalVal) * 100) : 0;
+  const avgCheck = avgBudget?.avg ? Math.round(avgBudget.avg) : 0;
+
+  let text = `📊 *Отчёт по модели ${esc(m.name)}*\n\n`;
+  text += `📋 Заявок всего: *${esc(String(totalVal))}*\n`;
+  text += `📅 За месяц: *${esc(String(monthOrders?.n || 0))}*\n`;
+  text += `✅ Завершено: *${esc(String(compVal))}* \\(${esc(String(compPct))}%\\)\n`;
+  text += `❌ Отменено: *${esc(String(cancVal))}* \\(${esc(String(cancPct))}%\\)\n`;
+  if (avgCheck > 0) {
+    text += `💰 Средний чек: *${esc(avgCheck.toLocaleString('ru'))} ₽*\n`;
+  }
+
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📥 Выгрузить CSV', callback_data: `adm_model_report_csv_${modelId}` }],
+        [
+          { text: '📊 Подробная стат.', callback_data: `adm_model_stats_${modelId}` },
+          { text: '← Карточка', callback_data: `adm_model_${modelId}` },
+        ],
+      ],
+    },
+  });
+}
+
+/**
+ * exportModelReportCSV(chatId, modelId) — CSV с заявками по модели.
+ */
+async function exportModelReportCSV(chatId, modelId) {
+  if (!isAdmin(chatId)) return;
+  const m = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(() => null);
+  if (!m) return safeSend(chatId, '❌ Модель не найдена');
+
+  try {
+    const orders = await query(
+      `SELECT o.order_number, o.client_name, o.event_type, o.event_date, o.budget, o.status, o.created_at
+       FROM orders o WHERE o.model_id=? ORDER BY o.created_at DESC`,
+      [modelId]
+    );
+    const SEP = ';';
+    const header = ['Номер', 'Клиент', 'Тип события', 'Дата события', 'Бюджет', 'Статус', 'Создан'];
+    const rows = orders.map(o =>
+      [
+        o.order_number || '',
+        o.client_name || '',
+        o.event_type || '',
+        o.event_date || '',
+        o.budget || '',
+        o.status || '',
+        o.created_at ? new Date(o.created_at).toLocaleString('ru') : '',
+      ]
+        .map(v => `"${String(v).replace(/"/g, '""')}"`)
+        .join(SEP)
+    );
+    const csv = [header.join(SEP), ...rows].join('\n');
+    const buf = Buffer.from('\ufeff' + csv, 'utf8');
+    await bot.sendDocument(
+      chatId,
+      buf,
+      { caption: `📊 Отчёт по модели ${m.name} — ${orders.length} заявок\n${new Date().toLocaleString('ru')}` },
+      { filename: `model_${modelId}_report_${Date.now()}.csv`, contentType: 'text/csv' }
+    );
+  } catch (e) {
+    return safeSend(chatId, `❌ Ошибка экспорта: ${e.message}`);
+  }
+}
+
+/**
+ * showReportPeriod(chatId, period) — отчёт за выбранный период.
+ * Callback: adm_report_period / adm_report_period_{period}
+ */
+async function showReportPeriod(chatId, period) {
+  if (!isAdmin(chatId)) return;
+
+  const periodMap = {
+    today: { label: 'Сегодня', filter: "date(created_at,'localtime') = date('now','localtime')" },
+    week: { label: 'Неделя', filter: "created_at >= datetime('now','-7 days')" },
+    month: { label: 'Месяц', filter: "created_at >= datetime('now','-30 days')" },
+    quarter: { label: 'Квартал', filter: "created_at >= datetime('now','-90 days')" },
+  };
+
+  if (!period || !periodMap[period]) {
+    return safeSend(chatId, '📅 *Отчёт по периоду*\n\nВыберите период:', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '📅 Сегодня', callback_data: 'adm_report_period_today' },
+            { text: '📅 Неделя', callback_data: 'adm_report_period_week' },
+          ],
+          [
+            { text: '📅 Месяц', callback_data: 'adm_report_period_month' },
+            { text: '📅 Квартал', callback_data: 'adm_report_period_quarter' },
+          ],
+          [{ text: '← Статистика', callback_data: 'adm_stats' }],
+        ],
+      },
+    });
+  }
+
+  const { label, filter } = periodMap[period];
+  const budgetExpr = `CAST(REPLACE(REPLACE(REPLACE(REPLACE(budget,'₽',''),'руб',''),' ',''),',','.') AS REAL)`;
+
+  try {
+    const [newOrders, completed, cancelled, revenue, topServices] = await Promise.all([
+      get(`SELECT COUNT(*) as n FROM orders WHERE ${filter}`).catch(() => ({ n: 0 })),
+      get(`SELECT COUNT(*) as n FROM orders WHERE status='completed' AND ${filter}`).catch(() => ({ n: 0 })),
+      get(`SELECT COUNT(*) as n FROM orders WHERE status='cancelled' AND ${filter}`).catch(() => ({ n: 0 })),
+      get(
+        `SELECT SUM(${budgetExpr}) as s FROM orders WHERE status='completed' AND ${filter} AND budget IS NOT NULL AND budget != '' AND budget GLOB '[0-9]*'`
+      ).catch(() => ({ s: 0 })),
+      query(
+        `SELECT event_type, COUNT(*) as cnt FROM orders WHERE event_type IS NOT NULL AND event_type != '' AND ${filter} GROUP BY event_type ORDER BY cnt DESC LIMIT 3`
+      ).catch(() => []),
+    ]);
+
+    const revenueVal = Math.round(revenue?.s || 0);
+    const medals = ['🥇', '🥈', '🥉'];
+
+    let text = `📅 *Отчёт: ${esc(label)}*\n\n`;
+    text += `📋 Новых заявок: *${esc(String(newOrders?.n || 0))}*\n`;
+    text += `✅ Завершено: *${esc(String(completed?.n || 0))}*\n`;
+    text += `❌ Отменено: *${esc(String(cancelled?.n || 0))}*\n`;
+    text += `💰 Выручка: *${esc(revenueVal.toLocaleString('ru'))} ₽*\n`;
+
+    if (topServices.length) {
+      text += `\n🎯 *Топ\\-3 сервиса:*\n`;
+      topServices.forEach((s, i) => {
+        text += `${medals[i] || `${i + 1}\\.`} ${esc(s.event_type)} — *${esc(String(s.cnt))}*\n`;
+      });
+    }
+
+    const periodBtns = [
+      { text: period === 'today' ? '✅ Сегодня' : 'Сегодня', callback_data: 'adm_report_period_today' },
+      { text: period === 'week' ? '✅ Неделя' : 'Неделя', callback_data: 'adm_report_period_week' },
+      { text: period === 'month' ? '✅ Месяц' : 'Месяц', callback_data: 'adm_report_period_month' },
+      { text: period === 'quarter' ? '✅ Квартал' : 'Квартал', callback_data: 'adm_report_period_quarter' },
+    ];
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          periodBtns,
+          [{ text: '📥 Выгрузить CSV', callback_data: `adm_report_period_csv_${period}` }],
+          [
+            { text: '📡 Источники', callback_data: 'adm_report_sources' },
+            { text: '← Статистика', callback_data: 'adm_stats' },
+          ],
+        ],
+      },
+    });
+  } catch (e) {
+    console.error('[Bot] showReportPeriod:', e.message);
+    return safeSend(chatId, `❌ Ошибка: ${e.message}`);
+  }
+}
+
+/**
+ * exportReportPeriodCSV(chatId, period) — CSV для периодного отчёта.
+ */
+async function exportReportPeriodCSV(chatId, period) {
+  if (!isAdmin(chatId)) return;
+
+  const periodMap = {
+    today: { label: 'Сегодня', filter: "date(o.created_at,'localtime') = date('now','localtime')" },
+    week: { label: 'Неделя', filter: "o.created_at >= datetime('now','-7 days')" },
+    month: { label: 'Месяц', filter: "o.created_at >= datetime('now','-30 days')" },
+    quarter: { label: 'Квартал', filter: "o.created_at >= datetime('now','-90 days')" },
+  };
+  const { label, filter } = periodMap[period] || { label: 'Всё', filter: '1=1' };
+
+  try {
+    const orders = await query(
+      `SELECT o.order_number, o.client_name, o.event_type, o.event_date, o.budget, o.status,
+              m.name as model_name, o.created_at
+       FROM orders o
+       LEFT JOIN models m ON o.model_id = m.id
+       WHERE ${filter}
+       ORDER BY o.created_at DESC`
+    );
+    const SEP = ';';
+    const header = ['Номер', 'Клиент', 'Тип события', 'Дата события', 'Бюджет', 'Статус', 'Модель', 'Создан'];
+    const rows = orders.map(o =>
+      [
+        o.order_number || '',
+        o.client_name || '',
+        o.event_type || '',
+        o.event_date || '',
+        o.budget || '',
+        o.status || '',
+        o.model_name || '',
+        o.created_at ? new Date(o.created_at).toLocaleString('ru') : '',
+      ]
+        .map(v => `"${String(v).replace(/"/g, '""')}"`)
+        .join(SEP)
+    );
+    const csv = [header.join(SEP), ...rows].join('\n');
+    const buf = Buffer.from('\ufeff' + csv, 'utf8');
+    await bot.sendDocument(
+      chatId,
+      buf,
+      { caption: `📅 Отчёт «${label}» — ${orders.length} заявок\n${new Date().toLocaleString('ru')}` },
+      { filename: `report_${period}_${Date.now()}.csv`, contentType: 'text/csv' }
+    );
+  } catch (e) {
+    return safeSend(chatId, `❌ Ошибка экспорта: ${e.message}`);
+  }
+}
+
+/**
+ * showReportSources(chatId) — отчёт по источникам заявок (utm_source).
+ * Callback: adm_report_sources
+ */
+async function showReportSources(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const [sources, total] = await Promise.all([
+      query(
+        `SELECT COALESCE(NULLIF(utm_source,''), 'direct') as src, COUNT(*) as cnt
+         FROM orders
+         GROUP BY COALESCE(NULLIF(utm_source,''), 'direct')
+         ORDER BY cnt DESC`
+      ).catch(() => []),
+      get('SELECT COUNT(*) as n FROM orders').catch(() => ({ n: 0 })),
+    ]);
+
+    const totalVal = total?.n || 0;
+    const srcLabels = {
+      site: '🌐 Сайт',
+      bot: '🤖 Бот',
+      webhook: '🔗 Webhook',
+      whatsapp: '💬 WhatsApp',
+      direct: '📩 Прямой',
+      instagram: '📸 Instagram',
+      vk: '📣 VK',
+    };
+
+    let text = `📡 *Отчёт по источникам заявок*\n\n`;
+    text += `Всего заявок: *${esc(String(totalVal))}*\n\n`;
+
+    if (!sources.length) {
+      text += `_Нет данных об источниках_\n`;
+    } else {
+      sources.forEach(s => {
+        const pct = totalVal > 0 ? Math.round((s.cnt / totalVal) * 100) : 0;
+        const label = srcLabels[s.src] || esc(String(s.src));
+        text += `${label}: *${esc(String(s.cnt))}* \\(${esc(String(pct))}%\\)\n`;
+      });
+    }
+
+    return safeSend(chatId, text, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📥 Выгрузить CSV', callback_data: 'adm_report_sources_csv' }],
+          [
+            { text: '📅 По периодам', callback_data: 'adm_report_period' },
+            { text: '← Статистика', callback_data: 'adm_stats' },
+          ],
+        ],
+      },
+    });
+  } catch (e) {
+    console.error('[Bot] showReportSources:', e.message);
+    return safeSend(chatId, `❌ Ошибка: ${e.message}`);
+  }
+}
+
+/**
+ * exportReportSourcesCSV(chatId) — CSV для отчёта по источникам.
+ */
+async function exportReportSourcesCSV(chatId) {
+  if (!isAdmin(chatId)) return;
+  try {
+    const rows = await query(
+      `SELECT COALESCE(NULLIF(utm_source,''), 'direct') as src,
+              COALESCE(NULLIF(utm_medium,''), '') as medium,
+              COALESCE(NULLIF(utm_campaign,''), '') as campaign,
+              COUNT(*) as cnt
+       FROM orders
+       GROUP BY COALESCE(NULLIF(utm_source,''), 'direct'), medium, campaign
+       ORDER BY cnt DESC`
+    );
+    const SEP = ';';
+    const header = ['Источник (utm_source)', 'Канал (utm_medium)', 'Кампания (utm_campaign)', 'Заявок'];
+    const csvRows = rows.map(r =>
+      [r.src, r.medium, r.campaign, r.cnt].map(v => `"${String(v).replace(/"/g, '""')}"`).join(SEP)
+    );
+    const csv = [header.join(SEP), ...csvRows].join('\n');
+    const buf = Buffer.from('\ufeff' + csv, 'utf8');
+    await bot.sendDocument(
+      chatId,
+      buf,
+      { caption: `📡 Отчёт по источникам — ${rows.length} строк\n${new Date().toLocaleString('ru')}` },
+      { filename: `sources_report_${Date.now()}.csv`, contentType: 'text/csv' }
+    );
+  } catch (e) {
+    return safeSend(chatId, `❌ Ошибка экспорта: ${e.message}`);
+  }
+}
+
+/**
+ * exportWeeklyReportCSV(chatId) — CSV для еженедельного отчёта (последние 7 дней).
+ */
+async function exportWeeklyReportCSV(chatId) {
+  if (!isAdmin(chatId)) return;
+  return exportReportPeriodCSV(chatId, 'week');
+}
+
 // ─── Loyalty system ───────────────────────────────────────────────────────────
 
 const LOYALTY_LEVELS = [
@@ -8313,6 +8727,20 @@ function initBot(app) {
         await bot.answerCallbackQuery(q.id, { text: '🗑 Удалено' }).catch(() => {});
         return showAdminFaqList(chatId);
       }
+      // FAQ create wizard: skip keywords
+      if (data === 'adm_faq_kw_skip') {
+        if (!isAdmin(chatId)) return;
+        const faqSdSkip = sessionData(await getSession(chatId));
+        await setSession(chatId, 'adm_faq_pick_cat', { ...faqSdSkip, keywords: '[]' });
+        const catButtonsSkip = Object.entries(FAQ_CATEGORY_LABELS).map(([k, v]) => [
+          { text: v, callback_data: `adm_faq_cat_pick_${k}` },
+        ]);
+        catButtonsSkip.push([{ text: '❌ Отмена', callback_data: 'adm_faq' }]);
+        return safeSend(chatId, `➕ *Новый FAQ — шаг 4/4*\n\nВыберите *категорию*:`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: catButtonsSkip },
+        });
+      }
       // FAQ create wizard: choose category
       if (data.startsWith('adm_faq_cat_pick_')) {
         if (!isAdmin(chatId)) return;
@@ -9526,6 +9954,57 @@ function initBot(app) {
         if (!isAdmin(chatId)) return;
         await bot.answerCallbackQuery(q.id, { text: '⏳ Формирую CSV...' }).catch(() => {});
         return exportClientsCSV(chatId);
+      }
+
+      // ── БЛОК 33: Report callbacks
+      // adm_model_report_{id} — отчёт по конкретной модели
+      if (data.startsWith('adm_model_report_csv_')) {
+        if (!isAdmin(chatId)) return;
+        const modelId = parseInt(data.replace('adm_model_report_csv_', ''));
+        if (!isNaN(modelId)) {
+          await bot.answerCallbackQuery(q.id, { text: '⏳ Формирую CSV...' }).catch(() => {});
+          return exportModelReportCSV(chatId, modelId);
+        }
+      }
+      if (data.startsWith('adm_model_report_')) {
+        if (!isAdmin(chatId)) return;
+        const modelId = parseInt(data.replace('adm_model_report_', ''));
+        if (!isNaN(modelId)) return showModelReport(chatId, modelId);
+      }
+
+      // adm_report_period / adm_report_period_{today|week|month|quarter}
+      if (data === 'adm_report_period') {
+        if (!isAdmin(chatId)) return;
+        return showReportPeriod(chatId, null);
+      }
+      if (data.startsWith('adm_report_period_csv_')) {
+        if (!isAdmin(chatId)) return;
+        const period = data.replace('adm_report_period_csv_', '');
+        await bot.answerCallbackQuery(q.id, { text: '⏳ Формирую CSV...' }).catch(() => {});
+        return exportReportPeriodCSV(chatId, period);
+      }
+      if (data.startsWith('adm_report_period_')) {
+        if (!isAdmin(chatId)) return;
+        const period = data.replace('adm_report_period_', '');
+        return showReportPeriod(chatId, period);
+      }
+
+      // adm_report_sources / adm_report_sources_csv
+      if (data === 'adm_report_sources') {
+        if (!isAdmin(chatId)) return;
+        return showReportSources(chatId);
+      }
+      if (data === 'adm_report_sources_csv') {
+        if (!isAdmin(chatId)) return;
+        await bot.answerCallbackQuery(q.id, { text: '⏳ Формирую CSV...' }).catch(() => {});
+        return exportReportSourcesCSV(chatId);
+      }
+
+      // adm_report_week_csv — CSV за прошлую неделю (из еженедельного отчёта)
+      if (data === 'adm_report_week_csv') {
+        if (!isAdmin(chatId)) return;
+        await bot.answerCallbackQuery(q.id, { text: '⏳ Формирую CSV...' }).catch(() => {});
+        return exportWeeklyReportCSV(chatId);
       }
 
       // ── Quick stats
@@ -11597,6 +12076,71 @@ function initBot(app) {
           {
             parse_mode: 'MarkdownV2',
             reply_markup: { inline_keyboard: [[{ text: '📋 Все коды', callback_data: 'adm_promos_all' }]] },
+          }
+        );
+      }
+
+      // ── FAQ creation wizard (БЛОК 34) — step 1: question
+      if (state === 'adm_faq_add_q') {
+        const faqQ = text.trim();
+        if (!faqQ || faqQ.length < 5) {
+          return safeSend(chatId, '❌ Вопрос слишком короткий\\. Введите вопрос \\(минимум 5 символов\\):', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_faq' }]] },
+          });
+        }
+        await setSession(chatId, 'adm_faq_add_a', { question: faqQ });
+        return safeSend(chatId, `➕ *Новый FAQ — шаг 2/4*\n\nВопрос: _${esc(faqQ)}_\n\nВведите *ответ*:`, {
+          parse_mode: 'MarkdownV2',
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_faq' }]] },
+        });
+      }
+
+      // ── FAQ creation wizard — step 2: answer
+      if (state === 'adm_faq_add_a') {
+        const faqA = text.trim();
+        if (!faqA || faqA.length < 5) {
+          return safeSend(chatId, '❌ Ответ слишком короткий\\. Введите ответ \\(минимум 5 символов\\):', {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_faq' }]] },
+          });
+        }
+        const faqSd = sessionData(await getSession(chatId));
+        await setSession(chatId, 'adm_faq_add_kw', { ...faqSd, answer: faqA });
+        return safeSend(
+          chatId,
+          `➕ *Новый FAQ — шаг 3/4*\n\nВведите *ключевые слова* через запятую\\.\n_Например: цена, стоимость, сколько_\n\nИли нажмите «Пропустить»:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '⏭ Пропустить', callback_data: 'adm_faq_kw_skip' }],
+                [{ text: '❌ Отмена', callback_data: 'adm_faq' }],
+              ],
+            },
+          }
+        );
+      }
+
+      // ── FAQ creation wizard — step 3: keywords
+      if (state === 'adm_faq_add_kw') {
+        const rawKw = text
+          .split(',')
+          .map(k => k.trim())
+          .filter(k => k.length > 0);
+        const kJson = JSON.stringify(rawKw);
+        const faqSd2 = sessionData(await getSession(chatId));
+        await setSession(chatId, 'adm_faq_pick_cat', { ...faqSd2, keywords: kJson });
+        const catButtons = Object.entries(FAQ_CATEGORY_LABELS).map(([k, v]) => [
+          { text: v, callback_data: `adm_faq_cat_pick_${k}` },
+        ]);
+        catButtons.push([{ text: '❌ Отмена', callback_data: 'adm_faq' }]);
+        return safeSend(
+          chatId,
+          `➕ *Новый FAQ — шаг 4/4*\n\nКлючевые слова: _${esc(rawKw.join(', '))}_\n\nВыберите *категорию*:`,
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: catButtons },
           }
         );
       }
