@@ -214,7 +214,8 @@ async function convertToWebP(filePath) {
       .webp({ quality: 85, effort: 4 })
       .toFile(webpPath);
     const sizeAfter = fs.existsSync(webpPath) ? fs.statSync(webpPath).size : 0;
-    console.log('[sharp] converted', filePath, '→', webpPath, sizeBefore, '→', sizeAfter, 'bytes');
+    if (process.env.NODE_ENV !== 'production')
+      console.log('[sharp] converted', filePath, '→', webpPath, sizeBefore, '→', sizeAfter, 'bytes');
     fs.unlink(filePath, () => {}); // delete original after successful conversion
     return webpPath;
   } catch (e) {
@@ -253,7 +254,8 @@ async function convertToWebPWithThumb(filePath) {
         .webp({ quality: 85, effort: 4 })
         .toFile(webpPath);
       const sizeAfter = fs.existsSync(webpPath) ? fs.statSync(webpPath).size : 0;
-      console.log('[sharp] converted', filePath, '→', webpPath, sizeBefore, '→', sizeAfter, 'bytes');
+      if (process.env.NODE_ENV !== 'production')
+        console.log('[sharp] converted', filePath, '→', webpPath, sizeBefore, '→', sizeAfter, 'bytes');
       fs.unlink(filePath, () => {}); // delete original non-WebP file
       fullResult = webpPath;
     }
@@ -270,7 +272,7 @@ async function convertToWebPWithThumb(filePath) {
       .webp({ quality: 80, effort: 4 })
       .toFile(thumbPath);
     const thumbSize = fs.existsSync(thumbPath) ? fs.statSync(thumbPath).size : 0;
-    console.log('[sharp] thumbnail', thumbPath, thumbSize, 'bytes');
+    if (process.env.NODE_ENV !== 'production') console.log('[sharp] thumbnail', thumbPath, thumbSize, 'bytes');
     thumbResult = thumbPath;
   } catch (e) {
     console.error('[WebP] thumbnail error:', e.message);
@@ -6408,7 +6410,8 @@ router.post('/webhooks/crm/:provider', async (req, res, next) => {
     }
     const payload = req.body;
 
-    console.log(`[CRM Webhook] ${provider}:`, JSON.stringify(payload).substring(0, 200));
+    if (process.env.NODE_ENV !== 'production')
+      console.log(`[CRM Webhook] ${provider}:`, JSON.stringify(payload).substring(0, 200));
 
     // AmoCRM: status change payload has leads.update array
     if (provider === 'amocrm' && payload.leads) {
@@ -7296,7 +7299,7 @@ router.post('/client/request-code', clientOtpLimiter, async (req, res, next) => 
           `🔐 *Ваш код для входа в личный кабинет:*\n\n` + `*${code}*\n\n` + `Код действителен 10 минут\\.`;
         await botInstance.instance.sendMessage(chatId, tgText, { parse_mode: 'MarkdownV2' });
         sentViaTelegram = true;
-        console.log('[OTP] Sent via Telegram to chat', chatId);
+        if (process.env.NODE_ENV !== 'production') console.log('[OTP] Sent via Telegram to chat', chatId);
       } catch (e) {
         console.warn('[OTP] Telegram send failed:', e.message);
       }
@@ -7308,7 +7311,7 @@ router.post('/client/request-code', clientOtpLimiter, async (req, res, next) => 
       const phoneE164 = '+7' + phone10;
       await sms
         .sendSMS(phoneE164, `Ваш код для входа в личный кабинет Nevesty Models: ${code}. Действует 10 минут.`)
-        .catch(e => console.log('[OTP] SMS send skipped:', e.message));
+        .catch(e => console.error('[OTP] SMS send skipped:', e.message));
     }
 
     // Only expose OTP code in explicit development environment to prevent accidental production leak
