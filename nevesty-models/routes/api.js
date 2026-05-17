@@ -5829,10 +5829,12 @@ router.get('/admin/analytics/top-models', auth, async (req, res, next) => {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     const models = await query(
       `
-      SELECT m.id, m.name, m.city, m.category, m.view_count as views,
+      SELECT m.id, m.name, m.city, m.category, m.view_count as views, m.photo_main,
         COUNT(o.id) AS orders,
         SUM(CASE WHEN o.status='completed' THEN 1 ELSE 0 END) AS completed,
-        AVG(COALESCE(CAST(REPLACE(REPLACE(o.budget,'₽',''),' ','') AS INTEGER), 0)) AS avg_budget
+        AVG(COALESCE(CAST(REPLACE(REPLACE(o.budget,'₽',''),' ','') AS INTEGER), 0)) AS avg_budget,
+        SUM(COALESCE(CAST(REPLACE(REPLACE(o.budget,'₽',''),' ','') AS INTEGER), 0)) AS total_budget,
+        (SELECT ROUND(AVG(r.rating), 1) FROM reviews r WHERE r.model_id = m.id AND r.approved = 1) AS avg_rating
       FROM models m
       LEFT JOIN orders o ON m.id = o.model_id AND o.created_at >= ?
       WHERE m.archived = 0
@@ -5841,7 +5843,47 @@ router.get('/admin/analytics/top-models', auth, async (req, res, next) => {
       LIMIT ?`,
       [since, limit]
     );
-    res.json({ models: models.map(m => ({ ...m, avg_budget: Math.round(m.avg_budget || 0) })) });
+    res.json({
+      models: models.map(m => ({
+        ...m,
+        avg_budget: Math.round(m.avg_budget || 0),
+        total_budget: Math.round(m.total_budget || 0),
+        avg_rating: m.avg_rating ? Math.round(m.avg_rating * 10) / 10 : null,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── Analytics: New clients month-over-month comparison ──────────────────────
+router.get('/admin/analytics/new-clients-comparison', auth, async (req, res, next) => {
+  try {
+    const [thisMonth, lastMonth, last3Months] = await Promise.all([
+      get(`SELECT COUNT(DISTINCT client_chat_id) as n FROM orders
+           WHERE client_chat_id IS NOT NULL
+             AND created_at >= date('now','start of month')`),
+      get(`SELECT COUNT(DISTINCT client_chat_id) as n FROM orders
+           WHERE client_chat_id IS NOT NULL
+             AND created_at >= date('now','start of month','-1 month')
+             AND created_at <  date('now','start of month')`),
+      get(`SELECT COUNT(DISTINCT client_chat_id) as n FROM orders
+           WHERE client_chat_id IS NOT NULL
+             AND created_at >= date('now','-90 days')`),
+    ]);
+    const cur = thisMonth?.n || 0;
+    const prev = lastMonth?.n || 0;
+    const delta = cur - prev;
+    const pct = prev > 0 ? Math.round((delta / prev) * 100) : cur > 0 ? 100 : 0;
+    res.json({
+      ok: true,
+      this_month: cur,
+      last_month: prev,
+      delta,
+      pct,
+      last_90_days: last3Months?.n || 0,
+      trend: delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat',
+    });
   } catch (e) {
     next(e);
   }
@@ -6267,6 +6309,23 @@ router.get('/admin/analytics/top-cities', auth, async (req, res, next) => {
     res.json({ cities: rows || [] });
   } catch (e) {
     next(e);
+  }
+});
+
+// ─── Analytics: Deal cycle ────────────────────────────────────────────────────
+router.get('/admin/analytics/deal-cycle', auth, async (req, res) => {
+  try {
+    const row = await get(`
+      SELECT
+        ROUND(AVG(CAST(julianday(completed_at) - julianday(created_at) AS REAL)), 1) as avg_days,
+        MIN(CAST(julianday(completed_at) - julianday(created_at) AS INTEGER)) as min_days,
+        MAX(CAST(julianday(completed_at) - julianday(created_at) AS INTEGER)) as max_days
+      FROM orders
+      WHERE status = 'completed' AND completed_at IS NOT NULL
+    `);
+    res.json(row || { avg_days: 0, min_days: 0, max_days: 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

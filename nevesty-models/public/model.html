@@ -2661,8 +2661,11 @@
           showToast('Пожалуйста, заполните имя и телефон', 'error');
           return;
         }
+        const btn = document.querySelector('#qbForm .qb-btn');
+        const origText = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Отправка...'; }
         try {
-          await fetch('/api/orders', {
+          const r = await fetch('/api/orders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2673,11 +2676,14 @@
               quick_booking: true,
             }),
           });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || 'Ошибка отправки');
           document.getElementById('qbForm').style.display = 'none';
           document.getElementById('qbSuccess').style.display = 'block';
           setTimeout(closeQbModal, 3000);
         } catch (e) {
-          showToast('Ошибка отправки. Попробуйте позже.', 'error');
+          showToast('Ошибка: ' + (e.message || 'Попробуйте позже'), 'error');
+          if (btn) { btn.disabled = false; btn.textContent = origText; }
         }
       }
     </script>
