@@ -5362,7 +5362,8 @@ async function exportClientsCSV(chatId) {
 async function showModelReport(chatId, modelId) {
   if (!isAdmin(chatId)) return;
   const m = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(() => null);
-  if (!m) return safeSend(chatId, '❌ Модель не найдена');
+  if (!m)
+    return safeSend(chatId, '❌ Модель не найдена\\. Возможно, она была удалена\\.', { parse_mode: 'MarkdownV2' });
 
   const budgetExpr = `CAST(REPLACE(REPLACE(REPLACE(REPLACE(budget,'₽',''),'руб',''),' ',''),',','.') AS REAL)`;
   const [total, monthOrders, completed, cancelled, avgBudget] = await Promise.all([
@@ -5414,7 +5415,8 @@ async function showModelReport(chatId, modelId) {
 async function exportModelReportCSV(chatId, modelId) {
   if (!isAdmin(chatId)) return;
   const m = await get('SELECT * FROM models WHERE id=?', [modelId]).catch(() => null);
-  if (!m) return safeSend(chatId, '❌ Модель не найдена');
+  if (!m)
+    return safeSend(chatId, '❌ Модель не найдена\\. Возможно, она была удалена\\.', { parse_mode: 'MarkdownV2' });
 
   try {
     const orders = await query(
