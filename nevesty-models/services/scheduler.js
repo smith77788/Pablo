@@ -227,7 +227,12 @@ function checkWalSize() {
 }
 
 // ─── Scheduled Broadcast Processor ───────────────────────────────────────────
+// Guard flag: prevent concurrent runs if a broadcast takes longer than 1 minute
+let _broadcastRunning = false;
+
 async function processScheduledBroadcasts() {
+  if (_broadcastRunning) return; // already in progress — skip this tick
+  _broadcastRunning = true;
   try {
     const { query, run } = require('../database');
 
@@ -352,6 +357,8 @@ async function processScheduledBroadcasts() {
     }
   } catch (e) {
     console.error('[scheduler] processScheduledBroadcasts error:', e.message);
+  } finally {
+    _broadcastRunning = false;
   }
 }
 

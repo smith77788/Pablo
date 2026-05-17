@@ -7253,8 +7253,8 @@ router.post('/client/request-code', clientOtpLimiter, async (req, res, next) => 
     );
     if (!order) return res.status(404).json({ error: 'Заявки с этим номером не найдены' });
 
-    // Generate 6-digit code
-    const code = String(Math.floor(100000 + Math.random() * 900000));
+    // Generate 6-digit code using a cryptographically secure RNG
+    const code = String(require('crypto').randomInt(100000, 1000000));
     // Expire old codes for this phone
     await run('DELETE FROM client_otp WHERE phone=?', [phone10]).catch(() => {});
     await run("INSERT INTO client_otp (phone, code, expires_at) VALUES (?, ?, datetime('now', '+10 minutes'))", [
