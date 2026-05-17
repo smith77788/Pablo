@@ -206,6 +206,23 @@ img {
   border: none;
   line-height: 1;
 }
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+.theme-toggle:hover {
+  border-color: var(--gold);
+}
 
 /* ─── HERO ───────────────────────────────────────── */
 .hero {
@@ -2729,6 +2746,77 @@ html.light .toast {
 }
 html.light .stats-bar,
 html.light .services {
+  background: var(--bg2);
+}
+
+/* ─── data-theme="light" — component overrides ──────────────
+   Mirrors html.light rules for the new data-theme attribute.  */
+[data-theme='light'] body {
+  background: var(--bg);
+  color: var(--text);
+}
+[data-theme='light'] .navbar {
+  background: rgba(248, 246, 242, 0.9);
+  border-bottom: 1px solid var(--border);
+}
+[data-theme='light'] .navbar.scrolled {
+  background: rgba(248, 246, 242, 0.97);
+}
+[data-theme='light'] .nav-mobile {
+  background: var(--bg);
+}
+[data-theme='light'] .model-card,
+[data-theme='light'] .service-card,
+[data-theme='light'] .pricing-card,
+[data-theme='light'] .testimonial-card,
+[data-theme='light'] .booking-section,
+[data-theme='light'] .filters-panel {
+  background: var(--bg3);
+  border-color: var(--border);
+}
+[data-theme='light'] .form-control,
+[data-theme='light'] .filter-search,
+[data-theme='light'] .range-row input {
+  background: var(--bg2);
+  border-color: var(--border);
+  color: var(--text);
+}
+[data-theme='light'] .modal {
+  background: var(--bg2);
+}
+[data-theme='light'] .footer {
+  background: var(--bg2);
+  border-color: var(--border);
+}
+[data-theme='light'] .section-header h2,
+[data-theme='light'] .hero h1,
+[data-theme='light'] .modal-info h2 {
+  color: var(--text);
+}
+[data-theme='light'] .model-card-skeleton::after {
+  background: linear-gradient(90deg, transparent 0%, rgba(184, 134, 11, 0.15) 50%, transparent 100%);
+}
+[data-theme='light'] .model-card-skeleton {
+  background: var(--bg3);
+}
+[data-theme='light'] .skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg3) 0%,
+    var(--bg2) 40%,
+    rgba(184, 134, 11, 0.1) 50%,
+    var(--bg2) 60%,
+    var(--bg3) 100%
+  );
+  background-size: 600px 100%;
+}
+[data-theme='light'] .toast {
+  background: var(--bg2);
+  border-color: var(--border);
+  color: var(--text);
+}
+[data-theme='light'] .stats-bar,
+[data-theme='light'] .services {
   background: var(--bg2);
 }
 
