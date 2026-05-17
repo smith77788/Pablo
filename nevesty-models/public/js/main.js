@@ -778,6 +778,53 @@ initLazyImages();
   }
 })();
 
+/* ─── Page transition fade ──────────────────────────────────── */
+(function initPageTransitions() {
+  // Skip if user prefers reduced motion
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  // Fade in on every page load / back-forward cache restore
+  function fadeIn() {
+    document.body.style.cssText = 'opacity:0;transition:opacity 0.3s ease';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.body.style.opacity = '1';
+      });
+    });
+  }
+  window.addEventListener('pageshow', fadeIn);
+  // Also run immediately in case pageshow already fired
+  fadeIn();
+
+  // Fade out before navigating away
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href]');
+    if (!a) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (a.target && a.target !== '_self') return;
+    if (a.download) return;
+    if (a.getAttribute('href').startsWith('#')) return;
+
+    let href;
+    try {
+      href = new URL(a.href, location.href);
+    } catch (_) {
+      return;
+    }
+    // Only same-origin navigations
+    if (href.origin !== location.origin) return;
+    // Skip links that open modals or JS actions
+    if (a.getAttribute('href').startsWith('javascript:')) return;
+
+    e.preventDefault();
+    const dest = a.href;
+    document.body.style.cssText = 'opacity:0;transition:opacity 0.2s ease';
+    setTimeout(() => {
+      location.href = dest;
+    }, 210);
+  });
+})();
+
 /* ─── Card shine mouse tracking ─────────────────────────────── */
 document.querySelectorAll('.card-shine').forEach(card => {
   card.addEventListener('mousemove', e => {

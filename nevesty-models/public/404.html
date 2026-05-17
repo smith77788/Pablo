@@ -120,6 +120,37 @@
         pointer-events: none;
       }
 
+      /* ── Floating orbs ── */
+      .orb {
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+        animation: floatOrb var(--dur, 18s) ease-in-out infinite;
+        opacity: 0;
+      }
+      @keyframes floatOrb {
+        0% {
+          opacity: 0;
+          transform: translateY(0) scale(1);
+        }
+        15% {
+          opacity: var(--op, 0.12);
+        }
+        85% {
+          opacity: var(--op, 0.12);
+        }
+        100% {
+          opacity: 0;
+          transform: translateY(-120px) scale(1.15);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .orb {
+          animation: none;
+          opacity: 0;
+        }
+      }
+
       /* ── Huge 404 number ── */
       .err-code {
         font-family: 'Playfair Display', Georgia, serif;
@@ -360,6 +391,55 @@
         border-width: 0 1px 1px 0;
       }
 
+      /* ── Search form ── */
+      .err-search {
+        display: flex;
+        gap: 0;
+        max-width: 380px;
+        width: 100%;
+        margin: 0 auto 36px;
+        border: 1px solid rgba(201, 169, 110, 0.3);
+        border-radius: 8px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.03);
+        transition: border-color 0.2s;
+      }
+      .err-search:focus-within {
+        border-color: rgba(201, 169, 110, 0.6);
+      }
+      .err-search-input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        outline: none;
+        padding: 11px 16px;
+        font-size: 0.88rem;
+        color: var(--text);
+        font-family: inherit;
+      }
+      .err-search-input::placeholder {
+        color: var(--text-muted);
+        opacity: 0.7;
+      }
+      .err-search-btn {
+        background: rgba(201, 169, 110, 0.12);
+        border: none;
+        border-left: 1px solid rgba(201, 169, 110, 0.2);
+        padding: 11px 16px;
+        cursor: pointer;
+        color: var(--gold);
+        display: flex;
+        align-items: center;
+        transition: background 0.2s;
+      }
+      .err-search-btn:hover {
+        background: rgba(201, 169, 110, 0.22);
+      }
+      .err-search-btn svg {
+        width: 16px;
+        height: 16px;
+      }
+
       @media (max-width: 480px) {
         .err-corner {
           display: none;
@@ -433,6 +513,64 @@
     </nav>
 
     <main class="page-404" id="main-content" role="main" tabindex="-1">
+      <!-- Floating orbs background -->
+      <div
+        class="orb"
+        aria-hidden="true"
+        style="
+          width: 320px;
+          height: 320px;
+          left: -80px;
+          top: 5%;
+          background: radial-gradient(circle, rgba(201, 169, 110, 0.18) 0%, transparent 70%);
+          --dur: 22s;
+          --op: 0.18;
+          animation-delay: 0s;
+        "
+      ></div>
+      <div
+        class="orb"
+        aria-hidden="true"
+        style="
+          width: 200px;
+          height: 200px;
+          right: -40px;
+          top: 30%;
+          background: radial-gradient(circle, rgba(201, 169, 110, 0.12) 0%, transparent 70%);
+          --dur: 18s;
+          --op: 0.12;
+          animation-delay: 4s;
+        "
+      ></div>
+      <div
+        class="orb"
+        aria-hidden="true"
+        style="
+          width: 260px;
+          height: 260px;
+          left: 15%;
+          bottom: 5%;
+          background: radial-gradient(circle, rgba(201, 169, 110, 0.1) 0%, transparent 70%);
+          --dur: 26s;
+          --op: 0.1;
+          animation-delay: 9s;
+        "
+      ></div>
+      <div
+        class="orb"
+        aria-hidden="true"
+        style="
+          width: 150px;
+          height: 150px;
+          right: 20%;
+          bottom: 15%;
+          background: radial-gradient(circle, rgba(240, 222, 176, 0.15) 0%, transparent 70%);
+          --dur: 15s;
+          --op: 0.15;
+          animation-delay: 2s;
+        "
+      ></div>
+
       <div class="err-corner err-corner-tl" aria-hidden="true"></div>
       <div class="err-corner err-corner-tr" aria-hidden="true"></div>
       <div class="err-corner err-corner-bl" aria-hidden="true"></div>
@@ -476,6 +614,41 @@
         Возможно, страница была удалена или вы перешли по неверной ссылке.<br />Воспользуйтесь навигацией или вернитесь
         на главную.
       </p>
+
+      <!-- Search form -->
+      <form
+        class="err-search"
+        role="search"
+        aria-label="Поиск по сайту"
+        onsubmit="
+          event.preventDefault();
+          const q = this.querySelector('input').value.trim();
+          if (q) window.location.href = '/search.html?q=' + encodeURIComponent(q);
+        "
+      >
+        <input
+          class="err-search-input"
+          type="search"
+          name="q"
+          placeholder="Поиск по сайту…"
+          aria-label="Поисковый запрос"
+          autocomplete="off"
+        />
+        <button class="err-search-btn" type="submit" aria-label="Найти">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+        </button>
+      </form>
 
       <nav class="err-actions" aria-label="Полезные ссылки">
         <a href="/" class="btn-primary" style="padding: 13px 32px; font-size: 0.85rem">На главную</a>

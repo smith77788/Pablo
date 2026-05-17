@@ -809,9 +809,13 @@ async function initDatabase() {
     await run(`ALTER TABLE orders ADD COLUMN completed_at DATETIME DEFAULT NULL`).catch(() => {});
     await run(`ALTER TABLE orders ADD COLUMN cancelled_at DATETIME DEFAULT NULL`).catch(() => {});
     // Backfill completed_at from updated_at for already-completed orders
-    await run(`UPDATE orders SET completed_at = updated_at WHERE status = 'completed' AND completed_at IS NULL`).catch(() => {});
+    await run(`UPDATE orders SET completed_at = updated_at WHERE status = 'completed' AND completed_at IS NULL`).catch(
+      () => {}
+    );
     // Backfill cancelled_at from updated_at for already-cancelled orders
-    await run(`UPDATE orders SET cancelled_at = updated_at WHERE status = 'cancelled' AND cancelled_at IS NULL`).catch(() => {});
+    await run(`UPDATE orders SET cancelled_at = updated_at WHERE status = 'cancelled' AND cancelled_at IS NULL`).catch(
+      () => {}
+    );
     await run(`CREATE INDEX IF NOT EXISTS idx_orders_completed_at ON orders(completed_at)`).catch(() => {});
     await run(
       `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(28, 'orders.completed_at & cancelled_at for deal-cycle analytics')`

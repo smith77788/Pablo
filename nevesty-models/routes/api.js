@@ -2515,11 +2515,21 @@ router.get('/orders/status/:order_number/history', async (req, res, next) => {
 });
 
 // PATCH /api/orders/status/:order_number/cancel — public cancel (only new/confirmed)
+// Requires client_phone in body to verify ownership; prevents cancelling other clients' orders.
 router.patch('/orders/status/:order_number/cancel', async (req, res, next) => {
   try {
     const number = req.params.order_number.toUpperCase();
-    const order = await get('SELECT id, status FROM orders WHERE order_number = ?', [number]);
+    const clientPhone = (req.body?.client_phone || '').trim().replace(/\D/g, '');
+    if (!clientPhone) {
+      return res.status(400).json({ error: 'Укажите номер телефона для подтверждения отмены' });
+    }
+    const order = await get('SELECT id, status, client_phone FROM orders WHERE order_number = ?', [number]);
     if (!order) return res.status(404).json({ error: 'Заявка не найдена' });
+    // Owner check: normalise both phone numbers and compare
+    const orderPhone = (order.client_phone || '').replace(/\D/g, '');
+    if (!orderPhone || clientPhone !== orderPhone) {
+      return res.status(403).json({ error: 'Нет доступа к этой заявке' });
+    }
     if (!['new', 'confirmed'].includes(order.status)) {
       return res.status(400).json({ error: 'Отменить можно только заявки со статусом "Новая" или "Подтверждена"' });
     }
