@@ -1734,6 +1734,104 @@
     }
   }
 
+  /* ─── Success effects ────────────────────────────── */
+
+  /** Play a quiet celebratory "ding" via Web Audio API (graceful fallback) */
+  function playSuccessDing() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      // Two-tone ding: fundamental + fifth
+      [
+        [523.25, 0],
+        [783.99, 0.12],
+      ].forEach(([freq, delay]) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+        gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+        gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + delay + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.7);
+        osc.start(ctx.currentTime + delay);
+        osc.stop(ctx.currentTime + delay + 0.7);
+      });
+    } catch (_) {}
+  }
+
+  /** Animate the success box with a scale-in bounce effect */
+  function animateSuccessBox() {
+    const box = document.querySelector('#step6 .success-box');
+    if (!box) return;
+    box.style.cssText += ';animation:nmSuccessScaleIn 0.55s cubic-bezier(0.175,0.885,0.32,1.275) forwards;';
+    // Inject keyframes once
+    if (!document.getElementById('nm-success-keyframes')) {
+      const style = document.createElement('style');
+      style.id = 'nm-success-keyframes';
+      style.textContent = [
+        '@keyframes nmSuccessScaleIn{',
+        '  from{opacity:0;transform:scale(0.8) translateY(20px)}',
+        '  to{opacity:1;transform:scale(1) translateY(0)}',
+        '}',
+        '@keyframes nmConfettiFall{',
+        '  0%{transform:translateY(-20px) rotate(0deg);opacity:1}',
+        '  100%{transform:translateY(100vh) rotate(720deg);opacity:0}',
+        '}',
+      ].join('');
+      document.head.appendChild(style);
+    }
+  }
+
+  /** Launch a lightweight CSS confetti burst above the success box */
+  function launchConfetti() {
+    const colors = ['#c9a96e', '#e8c97a', '#f4d98c', '#fff8e1', '#a07840'];
+    const shapes = ['■', '●', '▲', '✦', '◆'];
+    const container = document.createElement('div');
+    container.style.cssText = [
+      'position:fixed',
+      'top:0',
+      'left:0',
+      'width:100%',
+      'height:100%',
+      'pointer-events:none',
+      'overflow:hidden',
+      'z-index:99999',
+    ].join(';');
+    document.body.appendChild(container);
+
+    const count = 54;
+    for (let i = 0; i < count; i++) {
+      const piece = document.createElement('span');
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      const shape = shapes[Math.floor(Math.random() * shapes.length)];
+      const left = Math.random() * 100;
+      const delay = Math.random() * 0.8;
+      const duration = 1.4 + Math.random() * 1.2;
+      const size = 10 + Math.random() * 14;
+      piece.textContent = shape;
+      piece.style.cssText = [
+        'position:absolute',
+        'top:-30px',
+        `left:${left}%`,
+        `color:${color}`,
+        `font-size:${size}px`,
+        `animation:nmConfettiFall ${duration}s ${delay}s ease-in forwards`,
+        'will-change:transform',
+      ].join(';');
+      container.appendChild(piece);
+    }
+
+    // Auto-remove confetti container after all pieces have fallen
+    setTimeout(() => {
+      container.style.transition = 'opacity 0.5s';
+      container.style.opacity = '0';
+      setTimeout(() => container.remove(), 600);
+    }, 2800);
+  }
+
   /* ─── Public API ─────────────────────────────────── */
   function goToStepPublic(n) {
     goToStep(n, n < state.step);
@@ -1743,6 +1841,7 @@
   // Sync ARIA progressbar and step dot classes with initial step state
   // (goToStepInstant / restoreModelFromDraft may override this for drafts)
   updateStepIndicators(state.step);
+  updateFillProgress();
 
   window._booking = {
     nextStep,
