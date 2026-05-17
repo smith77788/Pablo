@@ -305,9 +305,11 @@ img {
   transform: scaleY(0);
   opacity: 0;
   pointer-events: none;
+  visibility: hidden;
   transition:
     transform 0.4s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.35s ease;
+    opacity 0.35s ease,
+    visibility 0.4s ease;
   overflow: hidden;
   min-height: 100dvh;
 }
@@ -315,6 +317,7 @@ img {
   transform: scaleY(1);
   opacity: 1;
   pointer-events: all;
+  visibility: visible;
 }
 .nav-mobile a {
   font-size: 1.5rem;
