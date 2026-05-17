@@ -6583,7 +6583,7 @@ router.get('/admin/analytics/top-cities', auth, async (req, res, next) => {
 });
 
 // ─── Upcoming events (next 7 days) for mini calendar ─────────────────────────
-router.get('/admin/upcoming-events', auth, async (req, res) => {
+router.get('/admin/upcoming-events', auth, async (req, res, next) => {
   try {
     const rows = await query(
       `SELECT id, order_number, client_name, event_type, event_date, status, budget
@@ -6608,12 +6608,12 @@ router.get('/admin/upcoming-events', auth, async (req, res) => {
     );
     res.json({ events: rows || [], top_model_month: topModelMonth || null });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    next(e);
   }
 });
 
 // ─── Analytics: Deal cycle ────────────────────────────────────────────────────
-router.get('/admin/analytics/deal-cycle', auth, async (req, res) => {
+router.get('/admin/analytics/deal-cycle', auth, async (req, res, next) => {
   try {
     const row = await get(`
       SELECT
@@ -6629,7 +6629,7 @@ router.get('/admin/analytics/deal-cycle', auth, async (req, res) => {
       max_days: row?.max_days ?? 0,
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    next(e);
   }
 });
 

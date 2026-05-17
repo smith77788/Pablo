@@ -12,8 +12,10 @@ function auth(req, res, next) {
   const header = req.headers['authorization'] || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) return res.status(500).json({ error: 'JWT_SECRET not configured' });
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const payload = jwt.verify(token, jwtSecret);
     // Block non-admin typed tokens (e.g. client OTP tokens have type:'client')
     if (payload.type && payload.type !== 'admin') return res.status(403).json({ error: 'Forbidden' });
     req.admin = payload;
