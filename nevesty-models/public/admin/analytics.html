@@ -2383,7 +2383,7 @@
           const d = await fetch('/api/admin/analytics/forecast', { headers: h }).then(r => r.json());
           const el = document.getElementById('forecast-section');
           if (!d.ok || !d.forecast) {
-            el.innerHTML = `<p class="text-sm text-gray-400">${d.message || 'Недостаточно данных для прогноза (нужно минимум 2 месяца)'}</p>`;
+            el.innerHTML = `<p class="text-sm text-gray-400">${escHtml(d.message || 'Недостаточно данных для прогноза (нужно минимум 2 месяца)')}</p>`;
             return;
           }
           const f = d.forecast;

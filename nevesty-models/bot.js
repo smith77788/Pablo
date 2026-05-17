@@ -10079,6 +10079,27 @@ function initBot(app) {
             reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings' }]] },
           });
         }
+        // Validate numeric-only settings
+        if (key === 'catalog_per_page') {
+          const n = parseInt(text.trim(), 10);
+          if (!Number.isInteger(n) || n < 1 || n > 100) {
+            return safeSend(chatId, '❌ Введите целое число от 1 до 100:', {
+              reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings' }]] },
+            });
+          }
+        }
+        if (key === 'booking_min_budget') {
+          const trimmed = text.trim();
+          if (trimmed !== '' && (!/^\d+$/.test(trimmed) || parseInt(trimmed, 10) < 0)) {
+            return safeSend(
+              chatId,
+              '❌ Введите целое положительное число (или оставьте пустым для отключения лимита):',
+              {
+                reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'adm_settings' }]] },
+              }
+            );
+          }
+        }
         await setSetting(key, key === 'instagram_account_id' ? text.trim() : text);
         await logAdminAction(chatId, 'update_setting', 'setting', null, { key });
         await clearSession(chatId);
