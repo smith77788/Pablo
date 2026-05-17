@@ -8,6 +8,7 @@ on:
       - 'src/**'
       - 'supabase/**'
       - 'LOVABLE_PROMPT.md'
+  workflow_dispatch:   # ручной запуск из GitHub Actions UI
 
 jobs:
   sync:
