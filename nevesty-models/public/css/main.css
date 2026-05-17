@@ -4039,4 +4039,146 @@ img[data-zoom]:hover {
   }
 }
 
+/* ─── Micro-interactions ─────────────────────────────── */
+
+/* 1. Button hover effects */
+
+/* Magnetic button effect */
+.btn-magnetic {
+  transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Gold shimmer sweep on hover */
+.btn-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.btn-shimmer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  transition: left 0.5s;
+}
+.btn-shimmer:hover::before {
+  left: 150%;
+}
+
+/* Glow on primary buttons */
+.btn-primary:hover {
+  box-shadow: 0 0 20px rgba(201, 169, 110, 0.4);
+}
+
+/* 2. Card interactions */
+
+/* Card tilt effect (subtle) */
+.card-tilt {
+  transform-style: preserve-3d;
+  transition: transform 0.3s ease;
+}
+.card-tilt:hover {
+  transform: perspective(1000px) rotateX(2deg) rotateY(2deg);
+}
+
+/* Card shine overlay */
+.card-shine {
+  position: relative;
+  overflow: hidden;
+}
+.card-shine::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(201, 169, 110, 0.06),
+    transparent 60%
+  );
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+.card-shine:hover::after {
+  opacity: 1;
+}
+
+/* 3. Input focus effects */
+
+/* Float label gold */
+.input-float {
+  position: relative;
+}
+.input-float input:focus + label,
+.input-float input:not(:placeholder-shown) + label {
+  transform: translateY(-24px) scale(0.8);
+  color: var(--gold);
+}
+.input-float label {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: 0.25s ease;
+  pointer-events: none;
+  color: var(--text-muted);
+}
+
+/* 4. Link hover effects */
+
+/* Underline from center */
+.link-center {
+  position: relative;
+}
+.link-center::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  right: 50%;
+  height: 1px;
+  background: var(--gold);
+  transition: 0.3s ease;
+}
+.link-center:hover::after {
+  left: 0;
+  right: 0;
+}
+
+/* Gold dot before link */
+.link-dot::before {
+  content: '·';
+  color: var(--gold);
+  margin-right: 6px;
+  opacity: 0;
+  transition: 0.2s;
+}
+.link-dot:hover::before {
+  opacity: 1;
+}
+
+/* 5. Image hover */
+
+/* Sepia to color transition */
+.img-desaturate {
+  filter: grayscale(30%);
+  transition: filter 0.4s ease;
+}
+.img-desaturate:hover {
+  filter: grayscale(0) saturate(1.1);
+}
+
+/* Scale + shadow */
+.img-zoom-hover {
+  overflow: hidden;
+}
+.img-zoom-hover img {
+  transition: transform 0.5s ease;
+}
+.img-zoom-hover:hover img {
+  transform: scale(1.06);
+}
+
 /* ─── END OF NEW UI COMPONENTS ───────────────────────────────────── */
