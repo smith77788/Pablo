@@ -1140,6 +1140,20 @@ async function initDatabase() {
     () => {}
   );
 
+  // БЛОК 6.6 — Additional composite indexes identified by query audit
+  // idx_models_archived_available: very frequent WHERE archived=0 AND available=1 in bot.js + api.js
+  await run(`CREATE INDEX IF NOT EXISTS idx_models_archived_available ON models(archived, available)`).catch(() => {});
+
+  // idx_orders_client_chat_status: WHERE client_chat_id=? AND status=? (6+ uses in bot.js)
+  await run(`CREATE INDEX IF NOT EXISTS idx_orders_client_chat_status ON orders(client_chat_id, status)`).catch(
+    () => {}
+  );
+
+  // idx_orders_client_chat_created: WHERE client_chat_id=? ORDER BY created_at DESC (multiple uses)
+  await run(
+    `CREATE INDEX IF NOT EXISTS idx_orders_client_chat_created ON orders(client_chat_id, created_at DESC)`
+  ).catch(() => {});
+
   // Seed FAQ items if empty (БЛОК 34 — full seed with keywords + categories)
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
