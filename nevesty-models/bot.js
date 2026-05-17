@@ -14478,42 +14478,6 @@ async function showTopModels(chatId, page = 0) {
   }
 }
 
-// ─── Support history for admin (БЛОК 25) ─────────────────────────────────────
-
-async function _showSupportHistory(chatId) {
-  const LIMIT = 10;
-  try {
-    const tickets = await query(
-      `SELECT id, from_chat_id, to_chat_id, message, direction, is_read, created_at
-       FROM support_messages
-       ORDER BY created_at DESC
-       LIMIT ?`,
-      [LIMIT]
-    );
-    if (!tickets.length) {
-      return safeSend(chatId, '📭 Обращений в поддержку пока нет\\.', {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '◀️ Назад', callback_data: 'admin_menu' }]] },
-      });
-    }
-    const lines = tickets.map(t => {
-      const dir = t.direction === 'client_to_admin' ? '👤→🛡' : '🛡→👤';
-      const read = t.is_read ? '✅' : '🔵';
-      const from = t.direction === 'client_to_admin' ? `ID ${t.from_chat_id}` : `Менеджер→${t.to_chat_id}`;
-      const preview = t.message.length > 60 ? t.message.slice(0, 60) + '…' : t.message;
-      const date = t.created_at ? t.created_at.slice(0, 16) : '';
-      return `${read} ${dir} ${esc(from)}\n_${esc(date)}_\n${esc(preview)}`;
-    });
-    return safeSend(chatId, `📜 *История поддержки* \\(последние ${tickets.length}\\):\n\n${lines.join('\n\n')}`, {
-      parse_mode: 'MarkdownV2',
-      reply_markup: { inline_keyboard: [[{ text: '◀️ Назад', callback_data: 'admin_menu' }]] },
-    });
-  } catch (e) {
-    console.error('[Bot] showSupportHistory:', e.message);
-    return safeSend(chatId, '❌ Ошибка при загрузке истории поддержки.');
-  }
-}
-
 // ─── Написать менеджеру ───────────────────────────────────────────────────────
 
 async function showContactManager(chatId) {
@@ -14676,63 +14640,6 @@ _Цены ориентировочные\\. Точная стоимость со
     } catch (_) {}
   }
   return safeSend(chatId, pricingText, { parse_mode: 'MarkdownV2', reply_markup: kb });
-}
-
-// ─── Каталог по городу ────────────────────────────────────────────────────────
-
-async function _showCatalogByCity(chatId, city, page = 0) {
-  try {
-    const _rawPerPageCity = parseInt(await getSetting('catalog_per_page').catch(() => '5')) || 5;
-    const perPage = Math.min(20, Math.max(1, _rawPerPageCity));
-    const models = city
-      ? await query('SELECT * FROM models WHERE available=1 AND COALESCE(archived,0)=0 AND city=? ORDER BY id', [city])
-      : await query('SELECT * FROM models WHERE available=1 AND COALESCE(archived,0)=0 ORDER BY id');
-
-    if (!models.length) {
-      return safeSend(chatId, `📭 Моделей в городе «${esc(city)}» нет\\.`, {
-        parse_mode: 'MarkdownV2',
-        reply_markup: { inline_keyboard: [[{ text: '💃 Все модели', callback_data: 'cat_cat__0' }]] },
-      });
-    }
-
-    const total = models.length;
-    const slice = models.slice(page * perPage, page * perPage + perPage);
-    const catShortLabelsByCity = { fashion: 'Fashion', commercial: 'Commercial', events: 'Events' };
-    const modelBtns = slice.map((m, i) => {
-      const num = page * perPage + i + 1;
-      const featStar = m.featured ? '⭐' : '·';
-      const catShort = catShortLabelsByCity[m.category] || m.category || '';
-      const agePart = m.age ? ` | ${m.age} л` : '';
-      const heightPart = m.height ? ` | ${m.height} см` : '';
-      return [
-        {
-          text: `[${num}] ${featStar} ${m.name}${heightPart}${agePart}${catShort ? ` | ${catShort}` : ''}`,
-          callback_data: `cat_model_${m.id}`,
-        },
-      ];
-    });
-    const nav = [];
-    if (page > 0) nav.push({ text: '◀️', callback_data: `cat_city_${city}_${page - 1}` });
-    if ((page + 1) * perPage < total) nav.push({ text: '▶️', callback_data: `cat_city_${city}_${page + 1}` });
-
-    return safeSend(
-      chatId,
-      `_🏠 Главная › 💃 Каталог › 🏙️ ${esc(city)}_\n\n🏙 *Модели — ${esc(city)}*\n\nНайдено: ${total}`,
-      {
-        parse_mode: 'MarkdownV2',
-        reply_markup: {
-          inline_keyboard: [
-            ...modelBtns,
-            ...(nav.length ? [nav] : []),
-            [{ text: '← Каталог', callback_data: 'cat_cat__0' }],
-            [{ text: '🏠 Меню', callback_data: 'main_menu' }],
-          ],
-        },
-      }
-    );
-  } catch (e) {
-    console.error('[Bot] showCatalogByCity:', e.message);
-  }
 }
 
 // ─── Поиск модели по параметрам (БЛОК 2.4) ───────────────────────────────────

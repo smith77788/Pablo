@@ -2617,7 +2617,11 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
       client_phone,
       client_email,
       client_telegram,
-      client_chat_id,
+      // client_chat_id is intentionally NOT accepted from the booking form.
+      // Telegram chat IDs are only trusted when set by the bot's /start ORDER_NUMBER
+      // deep-link flow (bot.js). Accepting it here would allow an attacker to redirect
+      // OTP delivery to an arbitrary Telegram chat by submitting a booking with a
+      // victim's phone but their own chat_id.
       model_id,
       model_ids: rawModelIds,
       event_type,
@@ -2672,7 +2676,7 @@ router.post('/orders', bookingLimiter, async (req, res, next) => {
       client_phone: client_phone.trim().slice(0, 20),
       client_email: sanitize(client_email, 100),
       client_telegram: sanitize(client_telegram, 64),
-      client_chat_id: sanitize(client_chat_id, 32),
+      client_chat_id: null, // Only set by bot via /start ORDER_NUMBER deep-link
       model_id: primaryModelId,
       model_ids: parsedModelIds ? JSON.stringify(parsedModelIds) : null,
       event_type,
@@ -7261,7 +7265,7 @@ router.post('/client/request-code', clientOtpLimiter, async (req, res, next) => 
     let sentViaTelegram = false;
 
     // Try to send via Telegram bot (primary channel if client has chat_id)
-    if (order.client_chat_id && botInstance) {
+    if (order.client_chat_id && botInstance?.instance) {
       try {
         const chatId = order.client_chat_id;
         const tgText =

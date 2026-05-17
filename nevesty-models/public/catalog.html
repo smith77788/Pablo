@@ -207,6 +207,21 @@
         margin-top: 4px;
       }
 
+      /* ── W2: Order count badge on card image ── */
+      .model-order-count {
+        position: absolute;
+        top: 48px;
+        right: 8px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #ffffff;
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-size: 0.75rem;
+        z-index: 4;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+
       /* ── Enhanced skeleton shimmer ── */
       @keyframes catalog-shimmer {
         0% {
@@ -1744,6 +1759,21 @@
           var modelName = card.dataset.modelName || '';
           var modelId = card.dataset.modelId || '';
 
+          // W2: Add order count badge to card image if model has orders
+          var orderBadgeEl = card.querySelector('.order-badge');
+          if (orderBadgeEl && !imgContainer.querySelector('.model-order-count')) {
+            var orderText = orderBadgeEl.textContent || '';
+            var orderMatch = orderText.match(/(\d+)/);
+            var orderNum = orderMatch ? parseInt(orderMatch[1], 10) : 0;
+            if (orderNum > 0) {
+              var orderImgBadge = document.createElement('span');
+              orderImgBadge.className = 'model-order-count';
+              orderImgBadge.setAttribute('aria-label', 'Количество заявок: ' + orderNum);
+              orderImgBadge.textContent = '📋 ' + orderNum + ' заявок';
+              imgContainer.appendChild(orderImgBadge);
+            }
+          }
+
           // Replace old badge-top with glow version if featured
           var oldBadge = imgContainer.querySelector('.badge-top');
           if (oldBadge) {
@@ -2065,6 +2095,73 @@
           },
           true
         );
+      })();
+    </script>
+
+    <!-- W1: Filter state sync to URL (public interface wrapping catalog.js updateUrl) -->
+    <script>
+      // syncFiltersToUrl: push current filter state to browser URL for bookmarking/sharing.
+      // Delegates to catalog.js window.buildFilterParams / window.applyFilters when available,
+      // otherwise builds URL from current filter inputs directly.
+      function syncFiltersToUrl() {
+        if (typeof window.buildFilterParams === 'function') {
+          var params = window.buildFilterParams();
+          var qs = params.toString();
+          history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+          return;
+        }
+        // Fallback: build params from visible UI state
+        var params = new URLSearchParams();
+        var catEl = document.querySelector('#categoryFilters .filter-tag.active');
+        var currentCategory = catEl ? catEl.dataset.value || '' : '';
+        var cityEl = document.getElementById('cityFilter');
+        var currentCity = cityEl ? cityEl.value : '';
+        var searchEl = document.getElementById('searchInput');
+        var searchQuery = searchEl ? searchEl.value.trim() : '';
+        if (currentCategory) params.set('cat', currentCategory);
+        if (currentCity) params.set('city', currentCity);
+        if (searchQuery) params.set('q', searchQuery);
+        var qs = params.toString();
+        history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+      }
+
+      // W1: Read URL params on page load and apply to filter inputs / filter variables.
+      // catalog.js already does this internally; this block ensures UI elements reflect
+      // URL state even before catalog.js async init completes.
+      (function initFiltersFromUrl() {
+        var urlParams = new URLSearchParams(location.search);
+        var initCat = urlParams.get('category') || urlParams.get('cat') || '';
+        var initCity = urlParams.get('city') || '';
+        var initQ = urlParams.get('q') || '';
+
+        // Apply to search input immediately (before catalog.js loads)
+        var searchEl = document.getElementById('searchInput');
+        if (searchEl && initQ) searchEl.value = initQ;
+
+        // Apply to city select — may not have options yet; retry after load
+        function applyCitySelect() {
+          var cityEl = document.getElementById('cityFilter');
+          if (cityEl && initCity) {
+            cityEl.value = initCity;
+            // If option not yet present, wait for catalog.js to populate it
+            if (!cityEl.value && initCity) {
+              setTimeout(applyCitySelect, 300);
+            }
+          }
+        }
+        if (initCity) applyCitySelect();
+
+        // Apply category tags
+        if (initCat) {
+          document.querySelectorAll('#categoryFilters .filter-tag').forEach(function (t) {
+            var isMatch = t.dataset.value === initCat;
+            t.classList.toggle('active', isMatch);
+            t.setAttribute('aria-pressed', isMatch ? 'true' : 'false');
+          });
+        }
+
+        // Expose for external use
+        window.syncFiltersToUrl = syncFiltersToUrl;
       })();
     </script>
 
