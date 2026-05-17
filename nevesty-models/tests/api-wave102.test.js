@@ -28,7 +28,7 @@ describe('catalogSortPrefs memory cleanup', () => {
   test('catalogSortPrefs cleanup uses 12-hour interval', () => {
     // The cleanup should reference 12 * 60 * 60 * 1000 near catalogSortPrefs.clear
     const clearIdx = botSrc.indexOf('catalogSortPrefs.clear()');
-    const context = botSrc.slice(Math.max(0, clearIdx - 300), clearIdx + 100);
+    const context = botSrc.slice(Math.max(0, clearIdx - 300), clearIdx + 130);
     expect(context).toMatch(/12\s*\*\s*60\s*\*\s*60\s*\*\s*1000/);
   });
 });

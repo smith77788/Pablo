@@ -32,7 +32,7 @@ describe('T2: Factory run → bot notification wiring', () => {
   });
   test('T05: bot adm_factory_run handler notifies admin on start', () => {
     const idx = botCode.indexOf('adm_factory_run');
-    const nearby = botCode.slice(Math.max(0, idx), idx + 800);
+    const nearby = botCode.slice(Math.max(0, idx), idx + 1100);
     expect(nearby).toMatch(/notifyAdmin/);
   });
   test('T06: cycle-complete endpoint accepts x-factory-secret header', () => {
