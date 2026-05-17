@@ -107,6 +107,17 @@ async function send(to, subject, html) {
   }
 }
 
+// ─── HTML escape (prevents HTML injection in email templates) ─────────────────
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
 // ─── Shared HTML wrapper ─────────────────────────────────────────────────────
 function wrapHtml(title, bodyContent) {
   return `<!DOCTYPE html>
@@ -157,14 +168,15 @@ function wrapHtml(title, bodyContent) {
 function orderInfoBlock(orderData) {
   const rows = [];
   if (orderData.order_number)
-    rows.push(['Номер заявки', `<strong style="color:#c9a96e">${orderData.order_number}</strong>`]);
-  if (orderData.event_type) rows.push(['Мероприятие', EVENT_LABELS[orderData.event_type] || orderData.event_type]);
-  if (orderData.event_date) rows.push(['Дата', orderData.event_date]);
-  if (orderData.event_duration) rows.push(['Длительность', `${orderData.event_duration} ч.`]);
-  if (orderData.location) rows.push(['Место', orderData.location]);
-  if (orderData.budget) rows.push(['Бюджет', orderData.budget]);
-  if (orderData.model_name) rows.push(['Модель', orderData.model_name]);
-  if (orderData.comments) rows.push(['Комментарий', orderData.comments]);
+    rows.push(['Номер заявки', `<strong style="color:#c9a96e">${escapeHtml(orderData.order_number)}</strong>`]);
+  if (orderData.event_type)
+    rows.push(['Мероприятие', escapeHtml(EVENT_LABELS[orderData.event_type] || orderData.event_type)]);
+  if (orderData.event_date) rows.push(['Дата', escapeHtml(orderData.event_date)]);
+  if (orderData.event_duration) rows.push(['Длительность', `${escapeHtml(String(orderData.event_duration))} ч.`]);
+  if (orderData.location) rows.push(['Место', escapeHtml(orderData.location)]);
+  if (orderData.budget) rows.push(['Бюджет', escapeHtml(String(orderData.budget))]);
+  if (orderData.model_name) rows.push(['Модель', escapeHtml(orderData.model_name)]);
+  if (orderData.comments) rows.push(['Комментарий', escapeHtml(orderData.comments)]);
 
   const tableRows = rows
     .map(
@@ -191,13 +203,13 @@ function statusBadge(status) {
 // ─── 1. Order confirmation (to client) ───────────────────────────────────────
 async function sendOrderConfirmation(email, orderData) {
   if (!email) return;
-  const subject = `Заявка ${orderData.order_number || ''} принята — Nevesty Models`;
+  const subject = `Заявка ${escapeHtml(orderData.order_number || '')} принята — Nevesty Models`;
   const html = wrapHtml(
     'Заявка принята',
     `
     <h2 style="margin:0 0 8px;font-size:22px;color:#c9a96e;font-weight:600;">Ваша заявка принята!</h2>
     <p style="margin:0 0 20px;font-size:15px;color:#aaa;line-height:1.6;">
-      Спасибо, <strong style="color:#e0e0e0">${orderData.client_name || 'уважаемый клиент'}</strong>!<br />
+      Спасибо, <strong style="color:#e0e0e0">${escapeHtml(orderData.client_name || 'уважаемый клиент')}</strong>!<br />
       Мы получили вашу заявку и скоро свяжемся с вами для подтверждения деталей.
     </p>
 
@@ -206,7 +218,7 @@ async function sendOrderConfirmation(email, orderData) {
     <div style="margin-top:28px;padding:20px;background:#111;border-radius:8px;border-left:3px solid #c9a96e;">
       <p style="margin:0;font-size:13px;color:#aaa;line-height:1.6;">
         Вы можете отслеживать статус заявки на нашем сайте или через Telegram-бот.<br />
-        Номер заявки для отслеживания: <strong style="color:#c9a96e">${orderData.order_number || '—'}</strong>
+        Номер заявки для отслеживания: <strong style="color:#c9a96e">${escapeHtml(orderData.order_number || '—')}</strong>
       </p>
     </div>
 
@@ -221,14 +233,14 @@ async function sendOrderConfirmation(email, orderData) {
 // ─── 2. Status change (to client) ────────────────────────────────────────────
 async function sendStatusChange(email, orderData, oldStatus, newStatus) {
   if (!email) return;
-  const subject = `Статус заявки ${orderData.order_number || ''} изменён — Nevesty Models`;
+  const subject = `Статус заявки ${escapeHtml(orderData.order_number || '')} изменён — Nevesty Models`;
   const html = wrapHtml(
     'Статус заявки изменён',
     `
     <h2 style="margin:0 0 8px;font-size:22px;color:#c9a96e;font-weight:600;">Статус вашей заявки изменён</h2>
     <p style="margin:0 0 20px;font-size:15px;color:#aaa;line-height:1.6;">
-      Уважаемый(ая) <strong style="color:#e0e0e0">${orderData.client_name || 'клиент'}</strong>,<br />
-      статус вашей заявки <strong style="color:#c9a96e">${orderData.order_number || ''}</strong> был обновлён.
+      Уважаемый(ая) <strong style="color:#e0e0e0">${escapeHtml(orderData.client_name || 'клиент')}</strong>,<br />
+      статус вашей заявки <strong style="color:#c9a96e">${escapeHtml(orderData.order_number || '')}</strong> был обновлён.
     </p>
 
     <table cellpadding="0" cellspacing="0" style="margin:20px 0;">
@@ -278,7 +290,7 @@ async function sendStatusChange(email, orderData, oldStatus, newStatus) {
 // ─── 3. Manager notification (to admin) ──────────────────────────────────────
 async function sendManagerNotification(adminEmail, orderData) {
   if (!adminEmail) return;
-  const subject = `Новая заявка ${orderData.order_number || ''} — Nevesty Models`;
+  const subject = `Новая заявка ${escapeHtml(orderData.order_number || '')} — Nevesty Models`;
   const html = wrapHtml(
     'Новая заявка',
     `
@@ -290,21 +302,21 @@ async function sendManagerNotification(adminEmail, orderData) {
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border-radius:8px;overflow:hidden;border:1px solid #252525;margin-bottom:20px;">
       <tr>
         <td style="padding:10px 16px;font-size:13px;color:#888;border-bottom:1px solid #252525;">Номер заявки</td>
-        <td style="padding:10px 16px;font-size:13px;color:#c9a96e;font-weight:600;border-bottom:1px solid #252525;">${orderData.order_number || '—'}</td>
+        <td style="padding:10px 16px;font-size:13px;color:#c9a96e;font-weight:600;border-bottom:1px solid #252525;">${escapeHtml(orderData.order_number || '—')}</td>
       </tr>
       <tr>
         <td style="padding:10px 16px;font-size:13px;color:#888;border-bottom:1px solid #252525;">Клиент</td>
-        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;">${orderData.client_name || '—'}</td>
+        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;">${escapeHtml(orderData.client_name || '—')}</td>
       </tr>
       <tr>
         <td style="padding:10px 16px;font-size:13px;color:#888;border-bottom:1px solid #252525;">Телефон</td>
-        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;"><a href="tel:${orderData.client_phone || ''}" style="color:#c9a96e;text-decoration:none;">${orderData.client_phone || '—'}</a></td>
+        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;"><a href="tel:${escapeHtml(orderData.client_phone || '')}" style="color:#c9a96e;text-decoration:none;">${escapeHtml(orderData.client_phone || '—')}</a></td>
       </tr>
       ${
         orderData.client_email
           ? `<tr>
         <td style="padding:10px 16px;font-size:13px;color:#888;border-bottom:1px solid #252525;">Email</td>
-        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;"><a href="mailto:${orderData.client_email}" style="color:#c9a96e;text-decoration:none;">${orderData.client_email}</a></td>
+        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;"><a href="mailto:${escapeHtml(orderData.client_email)}" style="color:#c9a96e;text-decoration:none;">${escapeHtml(orderData.client_email)}</a></td>
       </tr>`
           : ''
       }
@@ -312,7 +324,7 @@ async function sendManagerNotification(adminEmail, orderData) {
         orderData.client_telegram
           ? `<tr>
         <td style="padding:10px 16px;font-size:13px;color:#888;border-bottom:1px solid #252525;">Telegram</td>
-        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;">${orderData.client_telegram}</td>
+        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;">${escapeHtml(orderData.client_telegram)}</td>
       </tr>`
           : ''
       }
@@ -334,7 +346,7 @@ async function sendManagerNotification(adminEmail, orderData) {
 // ─── 4. Contact form notification (to admin) ─────────────────────────────────
 async function sendContactFormEmail(adminEmail, formData) {
   if (!adminEmail) return;
-  const subject = `Сообщение с сайта от ${formData.name || 'Неизвестно'} — Nevesty Models`;
+  const subject = `Сообщение с сайта от ${escapeHtml(formData.name || 'Неизвестно')} — Nevesty Models`;
   const html = wrapHtml(
     'Сообщение с сайта',
     `
@@ -346,23 +358,23 @@ async function sendContactFormEmail(adminEmail, formData) {
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border-radius:8px;overflow:hidden;border:1px solid #252525;">
       <tr>
         <td style="padding:10px 16px;font-size:13px;color:#888;border-bottom:1px solid #252525;">Имя</td>
-        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;">${formData.name || '—'}</td>
+        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;">${escapeHtml(formData.name || '—')}</td>
       </tr>
       <tr>
         <td style="padding:10px 16px;font-size:13px;color:#888;border-bottom:1px solid #252525;">Телефон</td>
-        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;"><a href="tel:${formData.phone || ''}" style="color:#c9a96e;text-decoration:none;">${formData.phone || '—'}</a></td>
+        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;"><a href="tel:${escapeHtml(formData.phone || '')}" style="color:#c9a96e;text-decoration:none;">${escapeHtml(formData.phone || '—')}</a></td>
       </tr>
       ${
         formData.email
           ? `<tr>
         <td style="padding:10px 16px;font-size:13px;color:#888;border-bottom:1px solid #252525;">Email</td>
-        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;"><a href="mailto:${formData.email}" style="color:#c9a96e;text-decoration:none;">${formData.email}</a></td>
+        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;border-bottom:1px solid #252525;"><a href="mailto:${escapeHtml(formData.email)}" style="color:#c9a96e;text-decoration:none;">${escapeHtml(formData.email)}</a></td>
       </tr>`
           : ''
       }
       <tr>
         <td style="padding:10px 16px;font-size:13px;color:#888;vertical-align:top;">Сообщение</td>
-        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;line-height:1.6;white-space:pre-wrap;">${formData.message || '—'}</td>
+        <td style="padding:10px 16px;font-size:13px;color:#e0e0e0;line-height:1.6;white-space:pre-wrap;">${escapeHtml(formData.message || '—')}</td>
       </tr>
     </table>
 
@@ -381,14 +393,14 @@ async function sendContactFormEmail(adminEmail, formData) {
 async function sendReviewInvitation(toEmail, orderNum, clientName) {
   if (!toEmail) return;
   const siteUrl = (process.env.SITE_URL || 'https://nevesty-models.ru').replace(/\/$/, '');
-  const subject = `Оставьте отзыв о сотрудничестве — ${orderNum}`;
+  const subject = `Оставьте отзыв о сотрудничестве — ${escapeHtml(orderNum)}`;
   const html = wrapHtml(
     'Спасибо за сотрудничество!',
     `
     <h2 style="margin:0 0 8px;font-size:22px;color:#c9a96e;font-weight:600;">Спасибо за сотрудничество!</h2>
     <p style="margin:0 0 20px;font-size:15px;color:#aaa;line-height:1.6;">
-      Здравствуйте, <strong style="color:#e0e0e0">${clientName || 'уважаемый клиент'}</strong>!<br />
-      Ваша заявка <strong style="color:#c9a96e">${orderNum}</strong> успешно завершена.
+      Здравствуйте, <strong style="color:#e0e0e0">${escapeHtml(clientName || 'уважаемый клиент')}</strong>!<br />
+      Ваша заявка <strong style="color:#c9a96e">${escapeHtml(orderNum)}</strong> успешно завершена.
     </p>
 
     <div style="padding:24px;background:#111;border-radius:8px;border:1px solid #252525;text-align:center;">
