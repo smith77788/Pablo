@@ -13156,19 +13156,31 @@ async function bkRepeatSubmit(chatId, d, tgUsername) {
 
     await clearSession(chatId);
 
-    await safeSend(
-      chatId,
-      `🎉 *Заявку прийнято\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер зв'яжеться з вами протягом 1 години для підтвердження\\.`,
-      {
-        parse_mode: 'MarkdownV2',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '📋 Мої заявки', callback_data: 'my_orders' }],
-            [{ text: '🏠 Головне меню', callback_data: 'main_menu' }],
-          ],
-        },
-      }
-    );
+    // Auto-confirm if setting enabled
+    const autoConfirmRepeat = await getSetting('booking_auto_confirm').catch(() => '0');
+    if (autoConfirmRepeat === '1' && order) {
+      await run("UPDATE orders SET status='confirmed' WHERE id=?", [order.id]).catch(() => {});
+      order.status = 'confirmed';
+      notifyStatusChange(chatId, orderNum, 'confirmed').catch(() => {});
+      notifyAdmin(
+        `✅ *Автопідтвердження заявки*\n\n📋 *${esc(orderNum)}*\n👤 ${esc(order.client_name)}\n📞 ${esc(order.client_phone)}`,
+        { parse_mode: 'MarkdownV2' }
+      ).catch(() => {});
+    }
+
+    const confirmMsgRepeat =
+      autoConfirmRepeat === '1'
+        ? `🎉 *Заявку підтверджено\\!*\n\nНомер: *${esc(orderNum)}*\n\nВашу заявку автоматично підтверджено\\. Менеджер зв'яжеться з вами для уточнення деталей\\.`
+        : `🎉 *Заявку прийнято\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер зв'яжеться з вами протягом 1 години для підтвердження\\.`;
+    await safeSend(chatId, confirmMsgRepeat, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📋 Мої заявки', callback_data: 'my_orders' }],
+          [{ text: '🏠 Головне меню', callback_data: 'main_menu' }],
+        ],
+      },
+    });
 
     if (order) {
       notifyNewOrder(order);
@@ -13372,19 +13384,32 @@ async function bkQuickSubmit(chatId, data) {
     );
     const order = await get('SELECT * FROM orders WHERE order_number=?', [orderNum]);
     await clearSession(chatId);
-    await safeSend(
-      chatId,
-      `⚡ *Заявка принята\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер позвонит на *${esc(data.quick_phone)}* в ближайшее время\\.`,
-      {
-        parse_mode: 'MarkdownV2',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }],
-            [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
-          ],
-        },
-      }
-    );
+
+    // Auto-confirm quick orders if setting enabled
+    const autoConfirmQuick = await getSetting('booking_auto_confirm').catch(() => '0');
+    if (autoConfirmQuick === '1' && order) {
+      await run("UPDATE orders SET status='confirmed' WHERE id=?", [order.id]).catch(() => {});
+      order.status = 'confirmed';
+      notifyStatusChange(chatId, orderNum, 'confirmed').catch(() => {});
+      notifyAdmin(
+        `✅ *Автоподтверждение заявки*\n\n📋 *${esc(orderNum)}*\n👤 ${esc(order.client_name)}\n📞 ${esc(order.client_phone)}`,
+        { parse_mode: 'MarkdownV2' }
+      ).catch(() => {});
+    }
+
+    const quickConfirmMsg =
+      autoConfirmQuick === '1'
+        ? `⚡ *Заявка подтверждена\\!*\n\nНомер: *${esc(orderNum)}*\n\nВаша заявка автоматически подтверждена\\. Менеджер позвонит на *${esc(data.quick_phone)}* для уточнения деталей\\.`
+        : `⚡ *Заявка принята\\!*\n\nНомер: *${esc(orderNum)}*\n\nМенеджер позвонит на *${esc(data.quick_phone)}* в ближайшее время\\.`;
+    await safeSend(chatId, quickConfirmMsg, {
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: STRINGS.btnMyOrders, callback_data: 'my_orders' }],
+          [{ text: STRINGS.btnMainMenu, callback_data: 'main_menu' }],
+        ],
+      },
+    });
     if (order) notifyNewOrder(order);
   } catch (e) {
     console.error('[Bot] bkQuickSubmit:', e.message);
