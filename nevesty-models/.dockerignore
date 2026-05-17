@@ -10,6 +10,8 @@ uploads/*.png
 uploads/*.webp
 uploads/*.gif
 uploads/thumbs/
+# Runtime upload data — mounted as a volume at /app/uploads
+public/uploads/
 .git
 *.log
 *.zip
@@ -20,6 +22,9 @@ logs/
 tests/
 *.test.js
 *.spec.js
+# Test databases and coverage reports
+test-*.db
+coverage/
 nevesty-models-full.tar.gz
 public/nevesty-models-full.tar.gz
 # Deployment / ops scripts — not needed inside the container
