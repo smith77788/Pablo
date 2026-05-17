@@ -100,15 +100,19 @@ img {
   z-index: 1000;
   padding: 20px 0;
   transition:
-    background var(--transition),
-    padding var(--transition);
+    background 0.4s ease,
+    padding 0.4s ease,
+    backdrop-filter 0.4s ease,
+    border-color 0.4s ease,
+    box-shadow 0.4s ease;
 }
 .navbar.scrolled {
   background: rgba(8, 8, 8, 0.96);
-  backdrop-filter: blur(12px);
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--gold-dark);
+  box-shadow: 0 2px 24px rgba(0, 0, 0, 0.4);
 }
 .nav-inner {
   display: flex;
@@ -142,6 +146,12 @@ img {
 .nav-links a:hover {
   color: var(--gold);
 }
+.nav-links a.active {
+  color: var(--gold);
+}
+.nav-links a.active::after {
+  width: 100% !important;
+}
 .nav-links .btn-nav {
   padding: 10px 24px;
   border: 1px solid var(--gold);
@@ -154,6 +164,77 @@ img {
   background: var(--gold);
   color: var(--bg);
 }
+
+/* ─── NAV DROPDOWN ───────────────────────────────── */
+.nav-dropdown {
+  position: relative;
+}
+.nav-dropdown > a {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.nav-dropdown > a::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid currentColor;
+  transition: transform var(--transition);
+  flex-shrink: 0;
+}
+.nav-dropdown:hover > a::before,
+.nav-dropdown:focus-within > a::before {
+  transform: rotate(-180deg);
+}
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 14px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  min-width: 180px;
+  background: rgba(12, 12, 12, 0.97);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--gold-dark);
+  border-radius: var(--radius);
+  padding: 8px 0;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+  z-index: 100;
+}
+.nav-dropdown:hover .dropdown-menu,
+.nav-dropdown:focus-within .dropdown-menu {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateX(-50%) translateY(0);
+}
+.dropdown-menu a {
+  display: block;
+  padding: 10px 18px;
+  font-size: 0.75rem !important;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted) !important;
+  transition:
+    color var(--transition),
+    background var(--transition);
+  white-space: nowrap;
+}
+.dropdown-menu a:hover {
+  color: var(--gold) !important;
+  background: rgba(201, 169, 110, 0.08);
+}
+.dropdown-menu a::after {
+  display: none !important;
+}
+
 .nav-burger {
   display: none;
   flex-direction: column;
@@ -168,31 +249,84 @@ img {
   width: 24px;
   height: 1px;
   background: var(--text);
-  transition: var(--transition);
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.3s ease,
+    background 0.3s ease;
+  transform-origin: center;
 }
-.nav-mobile {
+/* Hamburger → X animation */
+.nav-burger.is-open span:nth-child(1) {
+  transform: translateY(6px) rotate(45deg);
+  background: var(--gold);
+}
+.nav-burger.is-open span:nth-child(2) {
+  opacity: 0;
+  transform: scaleX(0);
+}
+.nav-burger.is-open span:nth-child(3) {
+  transform: translateY(-6px) rotate(-45deg);
+  background: var(--gold);
+}
+
+/* ─── MOBILE MENU OVERLAY ────────────────────────── */
+.nav-overlay {
   display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 998;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.nav-overlay.open {
+  display: block;
+  opacity: 1;
+}
+
+.nav-mobile {
+  display: flex;
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  bottom: 0;
   background: var(--bg);
   z-index: 999;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 32px;
+  gap: 28px;
+  padding: 80px 24px 40px;
+  transform-origin: top center;
+  transform: scaleY(0);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.35s ease;
+  overflow: hidden;
+  min-height: 100dvh;
 }
 .nav-mobile.open {
-  display: flex;
+  transform: scaleY(1);
+  opacity: 1;
+  pointer-events: all;
 }
 .nav-mobile a {
   font-size: 1.5rem;
   font-family: 'Playfair Display', serif;
   color: var(--text-muted);
+  transition:
+    color var(--transition),
+    transform var(--transition);
 }
 .nav-mobile a:hover {
+  color: var(--gold);
+  transform: translateX(4px);
+}
+.nav-mobile a.active {
   color: var(--gold);
 }
 .nav-mobile-close {
