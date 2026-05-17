@@ -3158,6 +3158,12 @@ async function showAdminSettings(chatId, section) {
           [{ text: '🖼 Фото «Контакты»', callback_data: 'adm_set_contacts_photo' }],
           [{ text: '🎉 Текст после бронирования', callback_data: 'adm_set_booking_thanks' }],
           [{ text: '📣 Telegram канал', callback_data: 'adm_set_tg_channel' }],
+          [
+            {
+              text: `🌐 Язык бота: ${botLang === 'en' ? '🇬🇧 EN' : '🇷🇺 RU'} → переключить`,
+              callback_data: 'adm_toggle_bot_lang',
+            },
+          ],
           [{ text: '🔙 Назад', callback_data: 'adm_settings_main' }],
         ],
       },
@@ -8802,6 +8808,16 @@ function initBot(app) {
           calc: 'calc_enabled',
         };
         const featureKey = data.replace('adm_toggle_', '');
+
+        // Special case: language toggle (not 0/1 but ru/en)
+        if (featureKey === 'bot_lang') {
+          const current = await getSetting('bot_language');
+          const newLang = current === 'en' ? 'ru' : 'en';
+          await setSetting('bot_language', newLang);
+          await bot.answerCallbackQuery(q.id, { text: newLang === 'en' ? '🇬🇧 English' : '🇷🇺 Русский' }).catch(() => {});
+          return showAdminSettings(chatId, 'bot');
+        }
+
         const settingKey = TOGGLE_FEATURES[featureKey];
         if (settingKey) {
           const current = await getSetting(settingKey);
