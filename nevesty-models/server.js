@@ -102,15 +102,18 @@ try {
             "'self'",
             "'unsafe-inline'",
             'https://www.googletagmanager.com',
+            'https://www.google-analytics.com',
             'https://cdn.jsdelivr.net',
             'https://cdnjs.cloudflare.com',
+            'https://mc.yandex.ru',
           ],
           styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com'],
-          fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com'],
-          imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
-          connectSrc: ["'self'", 'ws:', 'wss:', 'https://www.google-analytics.com'],
+          fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'data:'],
+          imgSrc: ["'self'", 'data:', 'blob:', 'https:', 'https://*.telegram.org'],
+          connectSrc: ["'self'", 'ws:', 'wss:', 'https://www.google-analytics.com', 'https://mc.yandex.ru'],
           frameSrc: ["'none'"],
           objectSrc: ["'none'"],
+          ...(process.env.NODE_ENV === 'production' ? { upgradeInsecureRequests: [] } : {}),
         },
       },
       crossOriginEmbedderPolicy: false,
@@ -210,25 +213,24 @@ try {
 // ─── Input sanitization ───────────────────────────────────────────────────────
 // Strip null bytes, dangerous unicode, and XSS payloads from all incoming string fields
 app.use((req, res, next) => {
-  if (req.body && typeof req.body === 'object') {
-    const sanitize = v => {
-      if (typeof v !== 'string') return v;
-      return v
-        .replace(/\0/g, '') // null bytes
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // <script> blocks
-        .replace(/javascript\s*:/gi, '') // javascript: URIs
-        .replace(/on\w+\s*=/gi, '') // inline event handlers (onclick=, etc.)
-        .slice(0, 10000);
-    };
-    const walk = obj => {
-      if (Array.isArray(obj)) return obj.map(walk);
-      if (obj && typeof obj === 'object') {
-        return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, walk(v)]));
-      }
-      return sanitize(obj);
-    };
-    req.body = walk(req.body);
-  }
+  const sanitize = v => {
+    if (typeof v !== 'string') return v;
+    return v
+      .replace(/\0/g, '') // null bytes
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // <script> blocks
+      .replace(/javascript\s*:/gi, '') // javascript: URIs
+      .replace(/on\w+\s*=/gi, '') // inline event handlers (onclick=, etc.)
+      .slice(0, 10000);
+  };
+  const walk = obj => {
+    if (Array.isArray(obj)) return obj.map(walk);
+    if (obj && typeof obj === 'object') {
+      return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, walk(v)]));
+    }
+    return sanitize(obj);
+  };
+  if (req.body && typeof req.body === 'object') req.body = walk(req.body);
+  if (req.query && typeof req.query === 'object') req.query = walk(req.query);
   next();
 });
 

@@ -493,7 +493,7 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
   try {
     const safe = VALID_STATUSES.includes(statusFilter) ? statusFilter : null;
     page = parseInt(page) || 0;
-    const [total, orders] = await Promise.all([
+    const [total, orders, statusCounts] = await Promise.all([
       safe ? get('SELECT COUNT(*) as n FROM orders WHERE status=?', [safe]) : get('SELECT COUNT(*) as n FROM orders'),
       safe
         ? query(
@@ -504,9 +504,15 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
             'SELECT o.*,m.name as model_name, (SELECT COUNT(*) FROM order_notes WHERE order_id=o.id) as note_count FROM orders o LEFT JOIN models m ON o.model_id=m.id ORDER BY o.created_at DESC LIMIT 8 OFFSET ?',
             [page * 8]
           ),
+      query('SELECT status, COUNT(*) as cnt FROM orders GROUP BY status'),
     ]);
 
-    if (!orders.length) {
+    // Build a map: status → count
+    const cntMap = {};
+    for (const row of statusCounts || []) cntMap[row.status] = row.cnt;
+    const totalAll = Object.values(cntMap).reduce((a, b) => a + b, 0);
+
+    if (!orders.length && !totalAll) {
       return safeSend(chatId, '📭 Заявок нет.', {
         reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'admin_menu' }]] },
       });
@@ -514,7 +520,29 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
 
     const activeFilter = safe || '';
     const filterLabel = safe ? STATUS_LABELS[safe] || safe : 'Все';
-    let text = `📋 *Заявки — ${filterLabel}* \\(${total.n}\\)\n\n`;
+
+    // ── D. Header with status counters ───────────────────────────────────────
+    let text = `📋 *Заявки — ${filterLabel}* \\(${total.n}\\)\n`;
+    // Show breakdown only when viewing "all" or at least one status has orders
+    if (totalAll > 0) {
+      const cntNew = cntMap['new'] || 0;
+      const cntConfirmed = cntMap['confirmed'] || 0;
+      const cntProgress = cntMap['in_progress'] || 0;
+      const cntCompleted = cntMap['completed'] || 0;
+      const cntCancelled = cntMap['cancelled'] || 0;
+      const parts = [];
+      if (cntNew) parts.push(`🆕 ${cntNew}`);
+      if (cntConfirmed) parts.push(`✅ ${cntConfirmed}`);
+      if (cntProgress) parts.push(`▶️ ${cntProgress}`);
+      if (cntCompleted) parts.push(`🏁 ${cntCompleted}`);
+      if (cntCancelled) parts.push(`❌ ${cntCancelled}`);
+      if (parts.length) text += `_${esc(parts.join(' | '))}_\n`;
+    }
+    text += '\n';
+
+    if (!orders.length) {
+      text += '_Заявок по выбранному фильтру нет\\._\n';
+    }
 
     const btns = orders.map(o => {
       const icon = STATUS_LABELS[o.status]?.split(' ')[0] || '';
@@ -530,28 +558,25 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
     const nav = [];
     if (page > 0) nav.push({ text: '◀️', callback_data: `adm_orders_${activeFilter}_${page - 1}` });
     if ((page + 1) * 8 < total.n) nav.push({ text: '▶️', callback_data: `adm_orders_${activeFilter}_${page + 1}` });
-    // БЛОК 3.3: фильтры через adm_ord_filter_* callbacks
+
+    // ── БЛОК 3.3: фильтры с счётчиками через adm_ord_filter_* callbacks ──────
+    const _lbl = (st, icon, short) => {
+      const cnt = cntMap[st] || 0;
+      const active = activeFilter === st;
+      return `${icon} ${short}${cnt ? ` (${cnt})` : ''}${active ? ' ✓' : ''}`;
+    };
     const filterRow1 = [
-      { text: activeFilter === 'new' ? '📥 Новые ✓' : '📥 Новые', callback_data: 'adm_ord_filter_new' },
-      {
-        text: activeFilter === 'confirmed' ? '✅ Подтверж. ✓' : '✅ Подтверж.',
-        callback_data: 'adm_ord_filter_confirmed',
-      },
-      {
-        text: activeFilter === 'completed' ? '🏁 Завершённые ✓' : '🏁 Завершённые',
-        callback_data: 'adm_ord_filter_completed',
-      },
+      { text: _lbl('new', '🆕', 'Новые'), callback_data: 'adm_ord_filter_new' },
+      { text: _lbl('confirmed', '✅', 'Принятые'), callback_data: 'adm_ord_filter_confirmed' },
+      { text: _lbl('completed', '🏁', 'Завершённые'), callback_data: 'adm_ord_filter_completed' },
     ];
     const filterRow2 = [
+      { text: _lbl('in_progress', '▶️', 'В работе'), callback_data: 'adm_ord_filter_in_progress' },
+      { text: _lbl('cancelled', '❌', 'Отменённые'), callback_data: 'adm_ord_filter_cancelled' },
       {
-        text: activeFilter === 'in_progress' ? '▶️ В работе ✓' : '▶️ В работе',
-        callback_data: 'adm_ord_filter_in_progress',
+        text: `📋 Все${totalAll ? ` (${totalAll})` : ''}${activeFilter === '' ? ' ✓' : ''}`,
+        callback_data: 'adm_ord_filter_all',
       },
-      {
-        text: activeFilter === 'cancelled' ? '❌ Отменённые ✓' : '❌ Отменённые',
-        callback_data: 'adm_ord_filter_cancelled',
-      },
-      { text: activeFilter === '' ? '📋 Все заявки ✓' : '📋 Все заявки', callback_data: 'adm_ord_filter_all' },
     ];
     const filterRow3 = [
       { text: '📅 Сегодня', callback_data: 'adm_orders_today' },

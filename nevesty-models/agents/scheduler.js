@@ -802,6 +802,50 @@ setInterval(() => {
     console.log('[Scheduler] Running factory health check...');
     taskFactoryHealthCheck();
   }
+
+  // AI Factory departments — Понедельник 10:00 — Strategic CEO
+  if (shouldRun('factory-ceo', h, m, dow, 10, 0, 1)) {
+    console.log('[Scheduler] Running AI Factory: Strategic CEO...');
+    (async () => {
+      try {
+        const { StrategicCEO } = require('./departments');
+        const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_IDS || '')
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean);
+        const ceo = new StrategicCEO();
+        await ceo.run({ chatId: ADMIN_IDS[0] });
+      } catch (e) {
+        console.error('[factory-dept] CEO error:', e.message);
+      }
+    })();
+  }
+
+  // AI Factory departments — Понедельник 11:00 — All Departments
+  if (shouldRun('factory-depts', h, m, dow, 11, 0, 1)) {
+    console.log('[Scheduler] Running AI Factory: All Departments...');
+    (async () => {
+      const depts = [
+        require('./departments/sales'),
+        require('./departments/creative'),
+        require('./departments/customer-success'),
+        require('./departments/finance'),
+        require('./departments/research'),
+      ];
+      for (const DeptModule of depts) {
+        // Each module exports named classes; grab first exported value (the department runner class)
+        const DeptClass = Object.values(DeptModule)[0];
+        try {
+          if (typeof DeptClass === 'function') {
+            const d = new DeptClass();
+            await d.run({ silent: false });
+          }
+        } catch (e) {
+          console.error('[factory-dept] error:', e.message);
+        }
+      }
+    })();
+  }
 }, 60 * 1000); // каждую минуту
 
 // ─── Напоминание о незавершённых заявках (каждые 6 часов) ────────────────────

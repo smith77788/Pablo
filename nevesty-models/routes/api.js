@@ -7474,6 +7474,13 @@ router.post('/client/review', clientRateLimit, async (req, res, next) => {
 // Rate limit: 3 requests per hour per IP
 router.post('/contact', contactRateLimit, async (req, res, next) => {
   try {
+    // CSRF validation — consistent with /orders and /quick-booking
+    const csrfToken = req.headers['x-csrf-token'] || req.body._csrf;
+    const { validateToken } = require('../middleware/csrf');
+    if (!validateToken(csrfToken, req.ip || '')) {
+      return res.status(403).json({ error: 'Invalid CSRF token' });
+    }
+
     const { name, phone, message, email } = req.body;
     if (!sanitize(name, 100)) return res.status(400).json({ error: 'Укажите ваше имя' });
     if (!phone || !validatePhone(phone)) return res.status(400).json({ error: 'Укажите корректный номер телефона' });
