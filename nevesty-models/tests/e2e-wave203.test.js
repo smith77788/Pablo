@@ -259,6 +259,10 @@ describe('E2E: Reviews', () => {
     }
   });
 
+  // reviewText is stable across test cases so we can match on it in public endpoint
+  // (reviews/public does NOT return `id` field, only rating/text/client_name/model_name)
+  const reviewText = 'Отличная работа! Модели профессиональные.';
+
   it('POST /api/client/review creates pending review', async () => {
     if (!completedOrderId) {
       console.warn('[SKIP] No completed order — skipping review creation');
@@ -268,7 +272,7 @@ describe('E2E: Reviews', () => {
       order_id: completedOrderId,
       phone: reviewPhone,
       rating: 5,
-      text: 'Отличная работа! Модели профессиональные.',
+      text: reviewText,
     });
     expect([200, 201]).toContain(res.status);
     expect(res.body).toHaveProperty('ok', true);
@@ -282,10 +286,9 @@ describe('E2E: Reviews', () => {
     expect(res.body).toHaveProperty('ok', true);
     expect(Array.isArray(res.body.reviews)).toBe(true);
     // Freshly created review must NOT appear in public list (still pending)
-    if (reviewId) {
-      const found = res.body.reviews.some(r => r.id === reviewId);
-      expect(found).toBe(false);
-    }
+    // /reviews/public doesn't return `id`, match on text
+    const found = res.body.reviews.some(r => r.text === reviewText);
+    expect(found).toBe(false);
   });
 
   it('PATCH /api/admin/reviews/:id/approve approves review', async () => {
@@ -306,9 +309,10 @@ describe('E2E: Reviews', () => {
       console.warn('[SKIP] No review id — skipping visibility check');
       return;
     }
-    const res = await request(app).get('/api/reviews/public');
+    // /reviews/public doesn't return `id`; match on review text instead
+    const res = await request(app).get('/api/reviews/public?limit=20');
     expect(res.status).toBe(200);
-    const found = res.body.reviews.some(r => r.id === reviewId);
+    const found = res.body.reviews.some(r => r.text === reviewText);
     expect(found).toBe(true);
   });
 

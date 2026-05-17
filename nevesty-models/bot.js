@@ -2066,6 +2066,92 @@ function renderTemplate(text, vars) {
     .replace(/\{\{event_date\}\}/g, vars.event_date || '');
 }
 
+// ─── Admin Promo Code management (БЛОК 21) ────────────────────────────────────
+async function showAdminPromos(chatId) {
+  if (!isAdmin(chatId)) return;
+  const count = await get('SELECT COUNT(*) as n FROM promo_codes').catch(() => ({ n: 0 }));
+  const active = await get('SELECT COUNT(*) as n FROM promo_codes WHERE is_active=1').catch(() => ({ n: 0 }));
+  const text =
+    `🏷 *Промокоды*\n\nВсего: *${count.n}* · Активных: *${active.n}*\n\n` +
+    `Создавайте скидочные коды для клиентов\\. Поддерживаются скидки в процентах и фиксированной сумме\\.`;
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '➕ Создать', callback_data: 'adm_promo_create' },
+          { text: '📋 Все коды', callback_data: 'adm_promos_all' },
+        ],
+        [{ text: '📊 Статистика', callback_data: 'adm_promos_stats' }],
+        [{ text: '◀️ Маркетинг', callback_data: 'adm_menu_marketing' }],
+      ],
+    },
+  });
+}
+
+async function showAdminPromoList(chatId) {
+  if (!isAdmin(chatId)) return;
+  const promos = await query('SELECT * FROM promo_codes ORDER BY created_at DESC LIMIT 20').catch(() => []);
+  if (!promos.length) {
+    return safeSend(chatId, '🏷 Промокодов пока нет\\.', {
+      parse_mode: 'MarkdownV2',
+      reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_promos' }]] },
+    });
+  }
+  let text = `🏷 *Все промокоды* \\(${promos.length}\\):\n\n`;
+  const rows = [];
+  for (const p of promos) {
+    const status = p.is_active ? '✅' : '⏸';
+    const disc = p.discount_type === 'percent' ? `${p.discount_value}%` : `${p.discount_value} ₽`;
+    const uses = p.max_uses ? `${p.used_count}/${p.max_uses}` : `${p.used_count}/∞`;
+    const until = p.valid_until ? ` до ${p.valid_until}` : '';
+    text += `${status} *${esc(p.code)}* — ${esc(disc)} · ${esc(uses)}${esc(until)}\n`;
+    rows.push([
+      {
+        text: `${p.is_active ? '⏸' : '✅'} ${p.code}`,
+        callback_data: `adm_promo_toggle_${p.id}`,
+      },
+      { text: '🗑 Удалить', callback_data: `adm_promo_del_${p.id}` },
+    ]);
+  }
+  rows.push([{ text: '← Назад', callback_data: 'adm_promos' }]);
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: rows },
+  });
+}
+
+async function showAdminPromoStats(chatId) {
+  if (!isAdmin(chatId)) return;
+  const total = await get('SELECT COUNT(*) as n FROM promo_codes').catch(() => ({ n: 0 }));
+  const active = await get('SELECT COUNT(*) as n FROM promo_codes WHERE is_active=1').catch(() => ({ n: 0 }));
+  const usages = await get('SELECT SUM(used_count) as n FROM promo_codes').catch(() => ({ n: 0 }));
+  const discountSum = await get(
+    'SELECT ROUND(SUM(discount_amount),2) as n FROM orders WHERE discount_amount IS NOT NULL'
+  ).catch(() => ({ n: 0 }));
+  const topPromos = await query(
+    'SELECT code, discount_type, discount_value, used_count, max_uses FROM promo_codes ORDER BY used_count DESC LIMIT 5'
+  ).catch(() => []);
+  let text =
+    `📊 *Статистика промокодов*\n\n` +
+    `Всего кодов: *${total.n}*\n` +
+    `Активных: *${active.n}*\n` +
+    `Всего использований: *${usages.n || 0}*\n` +
+    `Выдано скидок: *${discountSum.n || 0} ₽*\n`;
+  if (topPromos.length) {
+    text += `\n🏆 *Топ по использованию:*\n`;
+    for (const p of topPromos) {
+      const disc = p.discount_type === 'percent' ? `${p.discount_value}%` : `${p.discount_value} ₽`;
+      const uses = p.max_uses ? `${p.used_count}/${p.max_uses}` : `${p.used_count}`;
+      text += `• *${esc(p.code)}* — ${esc(disc)} · ${esc(uses)} использ\\.\n`;
+    }
+  }
+  return safeSend(chatId, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [[{ text: '← Назад', callback_data: 'adm_promos' }]] },
+  });
+}
+
 async function showAdminTemplates(chatId) {
   if (!isAdmin(chatId)) return;
   const count = await get('SELECT COUNT(*) as n FROM message_templates').catch(() => ({ n: 0 }));
