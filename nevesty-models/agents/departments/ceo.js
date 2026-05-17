@@ -383,6 +383,185 @@ class StrategicCEO extends Agent {
     return JSON.parse(jsonMatch[0]);
   }
 
+  // ── 7. Propose A/B experiment based on conversion data ────────────────────
+  async proposeExperiment() {
+    try {
+      // Gather conversion-relevant data
+      const [orderStats, modelStats, reviewStats, lastExp] = await Promise.all([
+        dbGet(`SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+          SUM(CASE WHEN status='new' THEN 1 ELSE 0 END) as pending,
+          SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled,
+          SUM(CASE WHEN created_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) as last_week
+        FROM orders`).catch(() => ({})),
+        dbAll(`SELECT m.name, m.available, COUNT(o.id) as orders_cnt
+          FROM models m
+          LEFT JOIN orders o ON o.model_id = m.id
+          GROUP BY m.id ORDER BY orders_cnt DESC LIMIT 5`).catch(() => []),
+        dbGet(`SELECT COUNT(*) as cnt, AVG(rating) as avg_rating
+          FROM reviews WHERE approved=1`).catch(() => ({})),
+        dbGet(`SELECT value FROM bot_settings WHERE key='ceo_last_experiment'`).catch(() => null),
+      ]);
+
+      const conversionRate =
+        orderStats.total > 0 ? ((orderStats.completed / orderStats.total) * 100).toFixed(1) : 'н/д';
+
+      const summary = [
+        `Заявки всего: ${orderStats.total || 0}, выполнено: ${orderStats.completed || 0}, ожидают: ${orderStats.pending || 0}, отменено: ${orderStats.cancelled || 0}.`,
+        `Конверсия (completed/total): ${conversionRate}%.`,
+        `Заявки за последние 7 дней: ${orderStats.last_week || 0}.`,
+        `Топ модели по заявкам: ${modelStats.map(m => `${m.name} (${m.orders_cnt})`).join(', ') || 'нет данных'}.`,
+        `Отзывы: ${reviewStats.cnt || 0} одобрено, средний рейтинг: ${reviewStats.avg_rating ? Number(reviewStats.avg_rating).toFixed(1) : 'н/д'}.`,
+        lastExp?.value
+          ? `Последний эксперимент: ${lastExp.value.slice(0, 150)}`
+          : 'Предыдущих экспериментов не зафиксировано.',
+      ].join('\n');
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return;
+
+      const raw = await callClaude({
+        systemPrompt: [
+          'Ты — CEO модельного агентства. Предложи ОДИН конкретный A/B эксперимент для увеличения конверсии или среднего чека.',
+          'Формат (строго JSON):',
+          '{',
+          '  "hypothesis": "Если мы сделаем X, то Y увеличится на Z%",',
+          '  "variant_a": "Текущий вариант (контроль)",',
+          '  "variant_b": "Новый вариант (эксперимент)",',
+          '  "metric": "Что измеряем (конверсия/средний чек/возвраты/рейтинг)",',
+          '  "duration_days": 7,',
+          '  "expected_uplift": "Ожидаемый прирост"',
+          '}',
+        ].join('\n'),
+        userPrompt: `Данные агентства:\n${summary}`,
+        maxTokens: 400,
+      });
+
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        await factoryLog(this.name, `proposeExperiment: non-JSON response`);
+        return;
+      }
+      const experiment = JSON.parse(jsonMatch[0]);
+
+      // Persist experiment proposal
+      await saveSetting(
+        'ceo_last_experiment',
+        JSON.stringify({ ...experiment, proposed_at: new Date().toISOString() })
+      );
+
+      this.addFinding(
+        'INFO',
+        `🧪 A/B Эксперимент: ${experiment.hypothesis?.slice(0, 120) || 'предложен'} | Метрика: ${experiment.metric || '—'} | Длительность: ${experiment.duration_days || 7} дней`
+      );
+      await factoryLog(this.name, `Experiment proposed: ${experiment.hypothesis?.slice(0, 80)}`);
+    } catch (e) {
+      await factoryLog(this.name, `proposeExperiment error: ${e.message}`);
+    }
+  }
+
+  // ── 8. Track execution of previous CEO decisions ───────────────────────────
+  async trackPreviousDecisions() {
+    try {
+      // Read last 3 CEO decisions from agent_logs (or bot_settings fallback)
+      let pastDecisions = [];
+      try {
+        pastDecisions = await dbAll(`
+          SELECT message, created_at FROM agent_logs
+          WHERE agent_name = 'StrategicCEO'
+            AND message LIKE 'Decision saved:%'
+          ORDER BY created_at DESC LIMIT 3
+        `);
+      } catch {}
+
+      // Also pull structured decision from bot_settings
+      let lastDecisionData = null;
+      try {
+        const row = await dbGet(`SELECT value, updated_at FROM bot_settings WHERE key='ceo_last_decision'`);
+        if (row?.value) lastDecisionData = { ...JSON.parse(row.value), saved_at: row.updated_at };
+      } catch {}
+
+      if (!lastDecisionData && pastDecisions.length === 0) {
+        await factoryLog(this.name, 'trackPreviousDecisions: no past decisions to evaluate');
+        return;
+      }
+
+      // Get current metrics to compare against decision context
+      const [currentOrders, currentReviews, criticalFindings] = await Promise.all([
+        dbGet(`SELECT COUNT(*) as n FROM orders WHERE created_at >= datetime('now','-24 hours')`).catch(() => ({})),
+        dbGet(
+          `SELECT ROUND(AVG(rating),2) as avg FROM reviews WHERE approved=1 AND created_at >= datetime('now','-24 hours')`
+        ).catch(() => ({})),
+        dbGet(
+          `SELECT COUNT(*) as n FROM agent_findings WHERE severity='🔴' AND created_at >= datetime('now','-24 hours')`
+        ).catch(() => ({})),
+      ]);
+
+      const decisionsText = pastDecisions.length
+        ? pastDecisions.map(d => `[${d.created_at?.slice(0, 16)}] ${d.message}`).join('\n')
+        : 'Нет записей в agent_logs.';
+
+      const lastDecText = lastDecisionData
+        ? `Последнее решение (${lastDecisionData.created_at?.slice(0, 10)}): ${lastDecisionData.decision} | Ожидалось: ${lastDecisionData.expected_impact}`
+        : '';
+
+      const currentStatus = [
+        `Новые заявки за 24ч: ${currentOrders?.n ?? 0}.`,
+        `Средний рейтинг отзывов за 24ч: ${currentReviews?.avg ?? 'н/д'}.`,
+        `Критических проблем за 24ч: ${criticalFindings?.n ?? 0}.`,
+      ].join(' ');
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return;
+
+      const raw = await callClaude({
+        systemPrompt: [
+          'Ты — CEO модельного агентства. Оцени, выполнены ли прошлые решения и улучшились ли метрики.',
+          'Формат (строго JSON):',
+          '{',
+          '  "decisions_reviewed": 0,',
+          '  "status": "executed|partial|not_executed",',
+          '  "metrics_improved": true,',
+          '  "assessment": "Краткая оценка (2-3 предложения)",',
+          '  "next_step": "Что скорректировать или продолжить"',
+          '}',
+        ].join('\n'),
+        userPrompt: [
+          '=== ПРОШЛЫЕ РЕШЕНИЯ CEO ===',
+          decisionsText,
+          lastDecText,
+          '',
+          '=== ТЕКУЩИЕ МЕТРИКИ ===',
+          currentStatus,
+        ].join('\n'),
+        maxTokens: 400,
+      });
+
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        await factoryLog(this.name, `trackPreviousDecisions: non-JSON response`);
+        return;
+      }
+      const tracking = JSON.parse(jsonMatch[0]);
+
+      // Save tracking result
+      await saveSetting(
+        'ceo_decisions_tracking',
+        JSON.stringify({ ...tracking, checked_at: new Date().toISOString() })
+      );
+
+      const statusEmoji = tracking.status === 'executed' ? '✅' : tracking.status === 'partial' ? '🔶' : '⚠️';
+      this.addFinding(
+        'INFO',
+        `${statusEmoji} Выполнение прошлых решений: ${tracking.status || '—'} | Метрики улучшились: ${tracking.metrics_improved ? 'да' : 'нет'} | ${tracking.assessment?.slice(0, 100) || ''}`
+      );
+      await factoryLog(this.name, `Decision tracking: ${tracking.status} | improved: ${tracking.metrics_improved}`);
+    } catch (e) {
+      await factoryLog(this.name, `trackPreviousDecisions error: ${e.message}`);
+    }
+  }
+
   // ── Main analyze() lifecycle ───────────────────────────────────────────────
   async analyze() {
     // 1. Gather data in parallel
@@ -458,6 +637,12 @@ class StrategicCEO extends Agent {
         await factoryLog(this.name, `Weekly report error: ${e.message}`);
       }
     }
+
+    // 4. Track previous decisions (every cycle)
+    await this.trackPreviousDecisions();
+
+    // 5. Propose A/B experiment (every cycle)
+    await this.proposeExperiment();
   }
 }
 
