@@ -814,6 +814,116 @@ img {
   line-height: 1.8;
 }
 
+/* ─── PROCESS TIMELINE (4-step horizontal) ───────── */
+.process-timeline {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  position: relative;
+  margin-top: 56px;
+}
+.process-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+}
+/* Gold connecting line between circles */
+.process-connector {
+  position: absolute;
+  top: 40px; /* half of circle height */
+  left: 50%;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(to right, var(--gold-dark), var(--gold));
+  z-index: 0;
+  pointer-events: none;
+}
+.process-step--last .process-connector {
+  display: none;
+}
+/* Gold circle */
+.process-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 2px solid var(--gold);
+  background: radial-gradient(circle, rgba(201, 169, 110, 0.12) 0%, rgba(201, 169, 110, 0.03) 70%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+  transition:
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 6px rgba(201, 169, 110, 0.06);
+}
+.process-step:hover .process-circle {
+  border-color: var(--gold-light);
+  box-shadow:
+    0 0 0 8px rgba(201, 169, 110, 0.1),
+    0 8px 24px rgba(201, 169, 110, 0.18);
+}
+.process-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.process-step-body {
+  padding: 24px 20px 0;
+}
+.process-step-num {
+  font-family: 'Playfair Display', serif;
+  font-size: 0.65rem;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 8px;
+  opacity: 0.7;
+}
+.process-step-body h3 {
+  font-size: 1.1rem;
+  color: var(--white);
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.process-step-body p {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+/* Tablet: 2x2 grid */
+@media (max-width: 900px) {
+  .process-timeline {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 40px 0;
+  }
+  /* Hide connector on last in each row (2nd and 4th steps) */
+  .process-step:nth-child(2) .process-connector,
+  .process-step:nth-child(4) .process-connector {
+    display: none;
+  }
+}
+/* Mobile: single column */
+@media (max-width: 560px) {
+  .process-timeline {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .process-connector {
+    display: none;
+  }
+}
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .process-step:hover .process-circle {
+    box-shadow: 0 0 0 6px rgba(201, 169, 110, 0.06);
+    border-color: var(--gold);
+  }
+}
+
 /* ─── CTA SECTION ────────────────────────────────── */
 .cta-section {
   padding: 100px 0;

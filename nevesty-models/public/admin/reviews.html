@@ -166,7 +166,7 @@
 
       .stats-row {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(5, 1fr);
         gap: 12px;
         margin-bottom: 24px;
       }
@@ -277,6 +277,9 @@
         .stats-row {
           grid-template-columns: repeat(2, 1fr);
         }
+        .stats-row .stat-mini:last-child {
+          grid-column: span 2;
+        }
         .review-actions {
           flex-wrap: wrap;
         }
@@ -360,6 +363,10 @@
             <div class="stat-mini-lbl">Ожидают проверки</div>
           </div>
           <div class="stat-mini">
+            <div class="stat-mini-val" id="rejectedCount" style="color: var(--text-dim)">—</div>
+            <div class="stat-mini-lbl">Отклонённые</div>
+          </div>
+          <div class="stat-mini">
             <div class="stat-mini-val" id="avgRating">—</div>
             <div class="stars-avg" id="avgStars"></div>
             <div class="stat-mini-lbl">Средний рейтинг</div>
@@ -371,11 +378,14 @@
           <button class="filter-tab active" data-filter="all" onclick="setFilter('all', this)">
             📋 Все <span class="tab-count" id="tab-count-all">—</span>
           </button>
-          <button class="filter-tab" data-filter="0" onclick="setFilter('0', this)">
+          <button class="filter-tab" data-filter="pending" onclick="setFilter('pending', this)">
             ⏳ На проверке <span class="tab-count" id="tab-count-pending">—</span>
           </button>
-          <button class="filter-tab" data-filter="1" onclick="setFilter('1', this)">
+          <button class="filter-tab" data-filter="approved" onclick="setFilter('approved', this)">
             ✅ Одобренные <span class="tab-count" id="tab-count-approved">—</span>
+          </button>
+          <button class="filter-tab" data-filter="rejected" onclick="setFilter('rejected', this)">
+            ❌ Отклонённые <span class="tab-count" id="tab-count-rejected">—</span>
           </button>
         </div>
 
@@ -402,7 +412,7 @@
 
     <script src="/js/admin.js"></script>
     <script>
-      let currentFilter = 'all';
+      let currentFilter = 'all'; // 'all', 'pending', 'approved', 'rejected'
       let currentPage = 1;
       const PAGE_SIZE = 20;
       let selectedIds = new Set();
@@ -431,31 +441,39 @@
       }
 
       function filterToApiParam(f) {
-        if (f === '0') return '?approved=0';
-        if (f === '1') return '?approved=1';
+        if (f === 'pending') return '?filter=pending';
+        if (f === 'approved') return '?filter=approved';
+        if (f === 'rejected') return '?filter=rejected';
+        // legacy numeric filters (shouldn't be used anymore but keep for safety)
+        if (f === '0') return '?filter=pending';
+        if (f === '1') return '?filter=approved';
         return '';
       }
 
       async function loadStats() {
         try {
-          const [allData, approvedData, pendingData] = await Promise.all([
+          const [allData, approvedData, pendingData, rejectedData] = await Promise.all([
             _admin.api('/admin/reviews?limit=1'),
-            _admin.api('/admin/reviews?approved=1&limit=1'),
-            _admin.api('/admin/reviews?approved=0&limit=1'),
+            _admin.api('/admin/reviews?filter=approved&limit=1'),
+            _admin.api('/admin/reviews?filter=pending&limit=1'),
+            _admin.api('/admin/reviews?filter=rejected&limit=1'),
           ]);
 
           const totalReviews = allData.total != null ? allData.total : 0;
           const approvedCount = approvedData.total != null ? approvedData.total : 0;
           const pendingCount = pendingData.total != null ? pendingData.total : 0;
+          const rejectedCount = rejectedData.total != null ? rejectedData.total : 0;
 
           document.getElementById('totalCount').textContent = totalReviews;
           document.getElementById('approvedCount').textContent = approvedCount;
           document.getElementById('pendingCount').textContent = pendingCount;
+          document.getElementById('rejectedCount').textContent = rejectedCount;
 
           // Update tab count badges
           setTabCount('tab-count-all', totalReviews);
           setTabCount('tab-count-pending', pendingCount);
           setTabCount('tab-count-approved', approvedCount);
+          setTabCount('tab-count-rejected', rejectedCount);
 
           // Update nav badge
           const badge = document.getElementById('pendingBadge');
@@ -464,8 +482,8 @@
             badge.style.display = pendingCount > 0 ? '' : 'none';
           }
 
-          // Avg rating — re-fetch small batch for calculation if needed
-          const ratedData = await _admin.api('/admin/reviews?limit=500');
+          // Avg rating — re-fetch approved reviews for accurate avg
+          const ratedData = await _admin.api('/admin/reviews?filter=approved&limit=500');
           const allReviews = ratedData.reviews || [];
           const rated = allReviews.filter(r => r.rating > 0);
           if (rated.length > 0) {
@@ -503,13 +521,15 @@
           const reviews = data.reviews || [];
 
           if (reviews.length === 0) {
-            list.innerHTML = `<div class="empty-state"><div class="icon">💬</div>${
-              currentFilter === '0'
+            const emptyMsg =
+              currentFilter === 'pending' || currentFilter === '0'
                 ? 'Нет отзывов, ожидающих проверки'
-                : currentFilter === '1'
+                : currentFilter === 'approved' || currentFilter === '1'
                   ? 'Нет опубликованных отзывов'
-                  : 'Отзывов пока нет'
-            }</div>`;
+                  : currentFilter === 'rejected'
+                    ? 'Нет отклонённых отзывов'
+                    : 'Отзывов пока нет';
+            list.innerHTML = `<div class="empty-state"><div class="icon">💬</div>${emptyMsg}</div>`;
             renderPagination(0, 0);
             return;
           }
@@ -533,9 +553,12 @@
 
       function renderReview(r) {
         const approved = r.approved === 1;
-        const statusClass = approved ? 'approved' : 'pending';
-        const statusLabel = approved ? 'Опубликован' : 'На проверке';
-        const statusBadgeClass = approved ? 'status-approved' : 'status-pending';
+        // Determine actual status: approved=1 always approved, approved=0 may be pending or rejected
+        const status = r.status || (approved ? 'approved' : 'pending');
+        const isRejected = !approved && status === 'rejected';
+        const statusClass = approved ? 'approved' : isRejected ? 'rejected' : 'pending';
+        const statusLabel = approved ? 'Опубликован' : isRejected ? 'Отклонён' : 'На проверке';
+        const statusBadgeClass = approved ? 'status-approved' : isRejected ? 'status-rejected' : 'status-pending';
         const initial = (r.client_name || '?')[0].toUpperCase();
         const date = new Date(r.created_at).toLocaleString('ru-RU', {
           day: '2-digit',
@@ -558,13 +581,14 @@
              <button class="btn btn-sm btn-ghost" onclick="showReplyInput(${r.id}, '')">💬 Ответить</button>
            </div>`;
 
-        // Checkbox only for non-approved reviews (pending ones eligible for bulk approve)
-        const checkboxHtml = !approved
-          ? `<div class="review-checkbox">
+        // Checkbox only for pending (not rejected, not approved) — eligible for bulk approve
+        const checkboxHtml =
+          !approved && !isRejected
+            ? `<div class="review-checkbox">
              <input type="checkbox" id="cb-${r.id}" value="${r.id}"
                onchange="toggleSelect(${r.id}, this.checked)">
            </div>`
-          : '<div class="review-checkbox" style="width:20px"></div>';
+            : '<div class="review-checkbox" style="width:20px"></div>';
 
         return `
       <div class="review-card ${statusClass}" id="review-${r.id}">

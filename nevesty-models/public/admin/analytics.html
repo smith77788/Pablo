@@ -11,6 +11,12 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <style>
+      :root {
+        --gold: #c9a96e;
+        --bg: #080808;
+        --bg2: #0e0e0e;
+      }
+
       .skeleton {
         animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         background: #e5e7eb;
@@ -312,6 +318,125 @@
         color: #8b5cf6;
         flex-shrink: 0;
       }
+
+      /* ── SVG Interactive Charts ───────────────────────────── */
+      .svg-chart-container {
+        position: relative;
+        width: 100%;
+        overflow: hidden;
+      }
+      .svg-chart-container svg {
+        width: 100%;
+        display: block;
+        overflow: visible;
+      }
+      /* Tooltip */
+      .svg-tooltip {
+        position: fixed;
+        background: rgba(15, 15, 15, 0.92);
+        color: #f9fafb;
+        border: 1px solid #374151;
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 12px;
+        pointer-events: none;
+        z-index: 9999;
+        white-space: nowrap;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        display: none;
+      }
+      .svg-tooltip .tt-date {
+        color: #9ca3af;
+        font-size: 11px;
+        margin-bottom: 2px;
+      }
+      .svg-tooltip .tt-val {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      /* KPI trend arrow */
+      .kpi-trend {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        margin-top: 4px;
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      .kpi-trend.up {
+        color: #22c55e;
+        background: rgba(34, 197, 94, 0.1);
+      }
+      .kpi-trend.down {
+        color: #ef4444;
+        background: rgba(239, 68, 68, 0.1);
+      }
+      .kpi-trend.flat {
+        color: #9ca3af;
+        background: rgba(156, 163, 175, 0.1);
+      }
+      /* CSV export action bar */
+      .analytics-action-bar {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .btn-csv-export {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 16px;
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition:
+          opacity 0.15s,
+          transform 0.1s;
+        text-decoration: none;
+      }
+      .btn-csv-export:hover {
+        opacity: 0.88;
+        transform: translateY(-1px);
+      }
+      .btn-csv-export:active {
+        transform: translateY(0);
+      }
+      .btn-csv-export:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      /* Hourly heatmap grid 7×24 */
+      .hourly-heatmap-grid {
+        display: grid;
+        grid-template-columns: repeat(24, 1fr);
+        grid-template-rows: repeat(7, 1fr);
+        gap: 3px;
+        height: 120px;
+      }
+      .hourly-heatmap-cell {
+        border-radius: 3px;
+        cursor: default;
+        transition: transform 0.1s;
+      }
+      .hourly-heatmap-cell:hover {
+        transform: scale(1.3);
+        z-index: 2;
+      }
+      @media (max-width: 640px) {
+        .hourly-heatmap-grid {
+          grid-template-columns: repeat(12, 1fr);
+          grid-template-rows: repeat(14, 1fr);
+          height: 160px;
+        }
+      }
     </style>
   </head>
   <body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
@@ -346,49 +471,110 @@
       </div>
     </div>
 
+    <!-- Global SVG Tooltip -->
+    <div class="svg-tooltip" id="svg-global-tooltip">
+      <div class="tt-date" id="svg-tt-date"></div>
+      <div class="tt-val" id="svg-tt-val"></div>
+    </div>
+
     <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+      <!-- CSV Export Action Bar -->
+      <div class="analytics-action-bar">
+        <button class="btn-csv-export" id="btn-csv-export" onclick="exportCsv()">
+          <i class="fas fa-download"></i> Скачать отчёт CSV
+        </button>
+      </div>
+
+      <!-- SVG Interactive Charts Row -->
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- SVG Revenue Line Chart -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+          <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 class="text-base font-bold text-gray-900 dark:text-white">💰 Выручка за 30 дней</h2>
+            <span class="text-xs text-gray-400 dark:text-gray-500">из подтверждённых заявок</span>
+          </div>
+          <div class="svg-chart-container" id="svg-revenue-wrap" style="height: 180px">
+            <div class="skeleton h-full w-full rounded-lg" id="svg-revenue-skeleton"></div>
+            <svg
+              id="svg-revenue-chart"
+              style="display: none; height: 180px"
+              viewBox="0 0 600 180"
+              preserveAspectRatio="none"
+            ></svg>
+          </div>
+        </div>
+
+        <!-- SVG Orders Bar Chart (status breakdown) -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+          <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 class="text-base font-bold text-gray-900 dark:text-white">📊 Заявки по дням (статусы)</h2>
+            <div class="flex items-center gap-3 text-xs">
+              <span style="color: #3b82f6">■ new</span>
+              <span style="color: #10b981">■ confirmed</span>
+              <span style="color: #22c55e">■ completed</span>
+            </div>
+          </div>
+          <div class="svg-chart-container" id="svg-orders-wrap" style="height: 180px">
+            <div class="skeleton h-full w-full rounded-lg" id="svg-orders-skeleton"></div>
+            <svg
+              id="svg-orders-chart"
+              style="display: none; height: 180px"
+              viewBox="0 0 600 180"
+              preserveAspectRatio="none"
+            ></svg>
+          </div>
+        </div>
+      </div>
+
       <!-- KPI Cards -->
       <div class="kpi-grid">
         <div class="kpi-card" style="--kpi-color: #ec4899">
           <div class="kpi-icon">📋</div>
           <div class="kpi-value" id="kpi-total">—</div>
           <div class="kpi-label">Всего заявок</div>
+          <div id="kpi-trend-total"></div>
           <div class="kpi-sparkline" id="spark-total"></div>
         </div>
         <div class="kpi-card" style="--kpi-color: #3b82f6">
           <div class="kpi-icon">📅</div>
           <div class="kpi-value" id="kpi-today">—</div>
           <div class="kpi-label">Сегодня</div>
+          <div id="kpi-trend-today"></div>
           <div class="kpi-sparkline" id="spark-today"></div>
         </div>
         <div class="kpi-card" style="--kpi-color: #8b5cf6">
           <div class="kpi-icon">⏳</div>
           <div class="kpi-value" id="kpi-active">—</div>
           <div class="kpi-label">Активных</div>
+          <div id="kpi-trend-active"></div>
           <div class="kpi-sparkline" id="spark-active"></div>
         </div>
         <div class="kpi-card" style="--kpi-color: #22c55e">
           <div class="kpi-icon">✅</div>
           <div class="kpi-value" id="kpi-completed">—</div>
           <div class="kpi-label" id="kpi-conv">Завершено</div>
+          <div id="kpi-trend-completed"></div>
           <div class="kpi-sparkline" id="spark-completed"></div>
         </div>
         <div class="kpi-card" style="--kpi-color: #06b6d4">
           <div class="kpi-icon">👥</div>
           <div class="kpi-value" id="kpi-clients">—</div>
           <div class="kpi-label">Новых клиентов</div>
+          <div id="kpi-trend-clients"></div>
           <div class="kpi-sparkline" id="spark-clients"></div>
         </div>
         <div class="kpi-card" style="--kpi-color: #f59e0b">
           <div class="kpi-icon">🔍</div>
           <div class="kpi-value" id="kpi-pending">—</div>
           <div class="kpi-label">На рассмотрении</div>
+          <div id="kpi-trend-pending"></div>
           <div class="kpi-sparkline" id="spark-pending"></div>
         </div>
         <div class="kpi-card" style="--kpi-color: #10b981">
           <div class="kpi-icon">💰</div>
           <div class="kpi-value" id="kpi-avg-budget" style="font-size: 1.35rem">—</div>
           <div class="kpi-label">Середній чек</div>
+          <div id="kpi-trend-budget"></div>
           <div class="kpi-sparkline" id="spark-budget"></div>
         </div>
       </div>

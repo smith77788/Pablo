@@ -4067,17 +4067,17 @@ router.get('/admin/reviews', auth, async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
     const offset = (page - 1) * limit;
-    // Support both ?approved=0/1 and ?filter=pending/approved/all
-    let approvedVal = req.query.approved; // '0', '1', or undefined
-    if (!approvedVal && req.query.filter) {
-      if (req.query.filter === 'pending') approvedVal = '0';
-      else if (req.query.filter === 'approved') approvedVal = '1';
-    }
+    // Support ?filter=pending/approved/rejected/all and legacy ?approved=0/1
     let where = '1=1';
     const params = [];
-    if (approvedVal === '0' || approvedVal === '1') {
-      where += ' AND r.approved = ?';
-      params.push(parseInt(approvedVal));
+    const filter = req.query.filter; // 'pending', 'approved', 'rejected', 'all'
+    const approvedVal = req.query.approved; // legacy: '0', '1'
+    if (filter === 'rejected') {
+      where += " AND r.status = 'rejected'";
+    } else if (filter === 'approved' || approvedVal === '1') {
+      where += ' AND r.approved = 1';
+    } else if (filter === 'pending' || approvedVal === '0') {
+      where += " AND r.approved = 0 AND (r.status IS NULL OR r.status = 'pending')";
     }
     const [totalRow, reviews] = await Promise.all([
       get(`SELECT COUNT(*) as n FROM reviews r WHERE ${where}`, params),
@@ -4102,26 +4102,35 @@ router.put('/admin/reviews/:id/approve', auth, async (req, res, next) => {
     const review = await get('SELECT id, approved FROM reviews WHERE id = ?', [id]);
     if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
     const newApproved = review.approved ? 0 : 1;
-    await run('UPDATE reviews SET approved = ? WHERE id = ?', [newApproved, id]);
-    await logAudit(req, 'toggle_approve', 'review', id, { approved: newApproved });
-    res.json({ ok: true, approved: newApproved });
+    const newStatus = newApproved ? 'approved' : 'pending';
+    await run('UPDATE reviews SET approved = ?, status = ? WHERE id = ?', [newApproved, newStatus, id]);
+    await logAudit(req, 'toggle_approve', 'review', id, { approved: newApproved, status: newStatus });
+    res.json({ ok: true, approved: newApproved, status: newStatus });
   } catch (e) {
     next(e);
   }
 });
 
-// PATCH /admin/reviews/:id — update approved status
+// PATCH /admin/reviews/:id — update approved status and status field
 router.patch('/admin/reviews/:id', auth, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const review = await get('SELECT id FROM reviews WHERE id = ?', [id]);
     if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
-    const { approved } = req.body;
+    const { approved, status } = req.body;
+    // Support explicit status field or derive from approved
+    if (status && ['pending', 'approved', 'rejected'].includes(status)) {
+      const approvedFromStatus = status === 'approved' ? 1 : 0;
+      await run('UPDATE reviews SET approved = ?, status = ? WHERE id = ?', [approvedFromStatus, status, id]);
+      await logAudit(req, 'update_status', 'review', id, { status, approved: approvedFromStatus });
+      return res.json({ ok: true, approved: approvedFromStatus, status });
+    }
     if (approved !== 0 && approved !== 1) return res.status(400).json({ error: 'approved must be 0 or 1' });
-    await run('UPDATE reviews SET approved = ? WHERE id = ?', [approved, id]);
-    await logAudit(req, 'update_approved', 'review', id, { approved });
-    res.json({ ok: true, approved });
+    const newStatus = approved === 1 ? 'approved' : 'pending';
+    await run('UPDATE reviews SET approved = ?, status = ? WHERE id = ?', [approved, newStatus, id]);
+    await logAudit(req, 'update_approved', 'review', id, { approved, status: newStatus });
+    res.json({ ok: true, approved, status: newStatus });
   } catch (e) {
     next(e);
   }
@@ -4135,7 +4144,10 @@ router.post('/admin/reviews/bulk-approve', auth, async (req, res, next) => {
     const validIds = ids.map(Number).filter(n => Number.isInteger(n) && n > 0);
     if (!validIds.length) return res.status(400).json({ error: 'No valid IDs' });
     const phs = validIds.map(() => '?').join(',');
-    const result = await run(`UPDATE reviews SET approved=1 WHERE id IN (${phs}) AND approved=0`, validIds);
+    const result = await run(
+      `UPDATE reviews SET approved=1, status='approved' WHERE id IN (${phs}) AND approved=0`,
+      validIds
+    );
     await logAudit(req, 'bulk_approve', 'review', null, { ids: validIds, updated: result.changes });
     res.json({ ok: true, updated: result.changes });
   } catch (e) {
@@ -4150,9 +4162,9 @@ router.patch('/admin/reviews/:id/approve', auth, async (req, res, next) => {
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const review = await get('SELECT id FROM reviews WHERE id = ?', [id]);
     if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
-    await run('UPDATE reviews SET approved = 1 WHERE id = ?', [id]);
-    await logAudit(req, 'approve', 'review', id, { approved: 1 });
-    res.json({ ok: true, approved: 1 });
+    await run("UPDATE reviews SET approved = 1, status = 'approved' WHERE id = ?", [id]);
+    await logAudit(req, 'approve', 'review', id, { approved: 1, status: 'approved' });
+    res.json({ ok: true, approved: 1, status: 'approved' });
   } catch (e) {
     next(e);
   }
@@ -4165,9 +4177,9 @@ router.patch('/admin/reviews/:id/reject', auth, async (req, res, next) => {
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const review = await get('SELECT id FROM reviews WHERE id = ?', [id]);
     if (!review) return res.status(404).json({ error: 'Отзыв не найден' });
-    await run('UPDATE reviews SET approved = 0 WHERE id = ?', [id]);
-    await logAudit(req, 'reject', 'review', id, { approved: 0 });
-    res.json({ ok: true, approved: 0 });
+    await run("UPDATE reviews SET approved = 0, status = 'rejected' WHERE id = ?", [id]);
+    await logAudit(req, 'reject', 'review', id, { approved: 0, status: 'rejected' });
+    res.json({ ok: true, approved: 0, status: 'rejected' });
   } catch (e) {
     next(e);
   }

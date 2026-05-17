@@ -603,29 +603,58 @@
         </div>
       </section>
 
-      <!-- HOW IT WORKS -->
-      <section class="how-it-works reveal" data-animate>
+      <!-- HOW IT WORKS — 4-step process timeline -->
+      <section class="how-it-works reveal" data-animate id="process">
         <div class="container">
           <div class="section-header">
-            <div class="section-tag">Как это работает</div>
-            <h2>Просто и быстро</h2>
+            <div class="section-tag">Процесс работы</div>
+            <h2>Четыре шага до результата</h2>
             <div class="gold-line"></div>
           </div>
-          <div class="steps-grid reveal-stagger">
-            <div class="step">
-              <div class="step-num">01</div>
-              <h3>Выберите модель</h3>
-              <p>Просмотрите каталог и выберите подходящую модель по параметрам, типажу и стилю.</p>
+          <div class="process-timeline reveal-stagger">
+            <!-- Connecting line drawn with CSS ::before on the wrapper -->
+            <div class="process-step">
+              <div class="process-circle" aria-hidden="true">
+                <span class="process-icon">📝</span>
+              </div>
+              <div class="process-connector" aria-hidden="true"></div>
+              <div class="process-step-body">
+                <div class="process-step-num">01</div>
+                <h3>Заявка</h3>
+                <p>Оставьте заявку онлайн или свяжитесь с менеджером — расскажите о мероприятии и бюджете.</p>
+              </div>
             </div>
-            <div class="step">
-              <div class="step-num">02</div>
-              <h3>Оформите заявку</h3>
-              <p>Заполните форму бронирования, укажите дату и детали мероприятия. Это займёт 2 минуты.</p>
+            <div class="process-step">
+              <div class="process-circle" aria-hidden="true">
+                <span class="process-icon">🔍</span>
+              </div>
+              <div class="process-connector" aria-hidden="true"></div>
+              <div class="process-step-body">
+                <div class="process-step-num">02</div>
+                <h3>Подбор</h3>
+                <p>Менеджер подберёт моделей по вашим параметрам и пришлёт подборку в течение 1 часа.</p>
+              </div>
             </div>
-            <div class="step">
-              <div class="step-num">03</div>
-              <h3>Получите результат</h3>
-              <p>Наш менеджер свяжется с вами в течение часа для подтверждения и согласования деталей.</p>
+            <div class="process-step">
+              <div class="process-circle" aria-hidden="true">
+                <span class="process-icon">🤝</span>
+              </div>
+              <div class="process-connector" aria-hidden="true"></div>
+              <div class="process-step-body">
+                <div class="process-step-num">03</div>
+                <h3>Согласование</h3>
+                <p>Выберите понравившихся моделей, согласуйте детали и подпишите договор.</p>
+              </div>
+            </div>
+            <div class="process-step process-step--last">
+              <div class="process-circle" aria-hidden="true">
+                <span class="process-icon">📸</span>
+              </div>
+              <div class="process-step-body">
+                <div class="process-step-num">04</div>
+                <h3>Съёмка</h3>
+                <p>Модели прибывают в назначенное место. Вы получаете профессиональный результат.</p>
+              </div>
             </div>
           </div>
         </div>
