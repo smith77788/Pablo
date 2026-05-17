@@ -527,7 +527,12 @@
             <div class="flex items-center gap-3">
               ${
                 photo
-                  ? `<img src="${photo}" alt="${escHtml(m.name)}" class="w-10 h-10 rounded-lg object-cover bg-gray-100" loading="lazy">`
+                  ? `<div class="photo-preview-wrap" style="position:relative;display:inline-block">
+                      <img src="${photo}" alt="${escHtml(m.name)}" class="w-10 h-10 rounded-lg object-cover bg-gray-100" loading="lazy" style="cursor:pointer">
+                      <div class="photo-preview-popup" style="display:none;position:absolute;left:46px;top:50%;transform:translateY(-50%);z-index:200;background:#111827;border:1px solid #374151;border-radius:8px;padding:4px;box-shadow:0 8px 32px rgba(0,0,0,.7)">
+                        <img src="${photo}" alt="${escHtml(m.name)}" style="width:160px;height:200px;object-fit:cover;border-radius:6px;display:block">
+                      </div>
+                    </div>`
                   : `<div class="w-10 h-10 rounded-lg bg-pink-100 dark:bg-pink-900 flex items-center justify-center text-pink-500 font-bold">${(m.name || '?')[0]}</div>`
               }
               <div>
@@ -1085,13 +1090,40 @@
         </div>`;
           }
 
+          // Top clients
+          const topClients = data.top_clients || [];
+          let topClientsHtml = '';
+          if (topClients.length) {
+            const maxOrders = Math.max(...topClients.map(c => c.order_count), 1);
+            topClientsHtml = `
+        <div style="margin-bottom:20px">
+          <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#9ca3af;margin-bottom:10px;letter-spacing:.05em">Топ клиентов (по заявкам)</div>
+          ${topClients
+            .map((c, i) => {
+              const pct = Math.round((c.order_count / maxOrders) * 100);
+              const budget = c.total_budget > 0 ? Math.round(c.total_budget).toLocaleString('ru') + ' ₽' : '';
+              return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <span style="font-size:0.7rem;color:#6b7280;width:16px;text-align:right;font-weight:700">${i + 1}</span>
+              <span style="flex:1;font-size:0.82rem;color:#e5e7eb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(c.name)}">${escHtml(c.name)}</span>
+              <div style="width:80px;background:#1f2937;border-radius:4px;height:10px;overflow:hidden;flex-shrink:0">
+                <div style="width:${pct}%;height:100%;background:#6366f1;border-radius:4px"></div>
+              </div>
+              <span style="font-size:0.75rem;color:#a5b4fc;font-weight:600;width:20px;text-align:right">${c.order_count}</span>
+              ${budget ? `<span style="font-size:0.7rem;color:#9ca3af;width:80px;text-align:right">${budget}</span>` : ''}
+            </div>`;
+            })
+            .join('')}
+        </div>`;
+          }
+
           // Link to orders
           const linkBtn = `<a href="/admin/orders.html?model_id=${id}"
       style="display:inline-block;padding:8px 16px;background:#ec4899;color:#fff;border-radius:6px;text-decoration:none;font-size:0.85rem;font-weight:500">
       Перейти к заявкам этой модели →
     </a>`;
 
-          content.innerHTML = kpiCards + trendHtml + distHtml + `<div style="text-align:right">${linkBtn}</div>`;
+          content.innerHTML =
+            kpiCards + trendHtml + distHtml + topClientsHtml + `<div style="text-align:right">${linkBtn}</div>`;
         } catch (e) {
           content.innerHTML = `<div style="color:#ef4444;padding:16px">Ошибка загрузки статистики: ${escHtml(e.message)}</div>`;
         }
@@ -1515,6 +1547,10 @@
         max-width: 600px;
         max-height: 90vh;
         overflow-y: auto;
+      }
+      /* Photo hover preview */
+      .photo-preview-wrap:hover .photo-preview-popup {
+        display: block !important;
       }
     </style>
   </body>

@@ -2156,7 +2156,7 @@ router.get('/admin/analytics/model-stats/:id', auth, async (req, res, next) => {
     const m = await get('SELECT * FROM models WHERE id=?', [id]);
     if (!m) return res.status(404).json({ error: 'Модель не найдена' });
 
-    const [ordersAgg, ratingAgg, monthlyRows, ratingDist] = await Promise.all([
+    const [ordersAgg, ratingAgg, monthlyRows, ratingDist, topClients] = await Promise.all([
       get(
         `SELECT
            COUNT(*) as total,
@@ -2175,11 +2175,23 @@ router.get('/admin/analytics/model-stats/:id', auth, async (req, res, next) => {
         `SELECT strftime('%Y-%m-01', created_at) as month, COUNT(*) as count
          FROM orders WHERE model_id=?
          GROUP BY strftime('%Y-%m', created_at)
-         ORDER BY month ASC
-         LIMIT 12`,
+         ORDER BY month DESC
+         LIMIT 6`,
         [id]
       ),
       query(`SELECT rating, COUNT(*) as cnt FROM reviews WHERE model_id=? AND approved=1 GROUP BY rating`, [id]),
+      query(
+        `SELECT
+           client_name,
+           COUNT(*) as order_count,
+           ROUND(SUM(CASE WHEN budget IS NOT NULL AND budget != '' AND CAST(budget AS REAL) > 0 THEN CAST(budget AS REAL) ELSE 0 END), 0) as total_budget
+         FROM orders
+         WHERE model_id=? AND client_name IS NOT NULL AND client_name != ''
+         GROUP BY LOWER(TRIM(client_name))
+         ORDER BY order_count DESC, total_budget DESC
+         LIMIT 5`,
+        [id]
+      ),
     ]);
 
     const distribution = {};
@@ -2198,7 +2210,12 @@ router.get('/admin/analytics/model-stats/:id', auth, async (req, res, next) => {
         total: ratingAgg?.total || 0,
         distribution,
       },
-      monthly_orders: monthlyRows,
+      monthly_orders: [...monthlyRows].reverse(),
+      top_clients: topClients.map(c => ({
+        name: c.client_name,
+        order_count: c.order_count,
+        total_budget: Math.round(c.total_budget || 0),
+      })),
     });
   } catch (e) {
     next(e);
@@ -2506,7 +2523,10 @@ router.patch('/orders/status/:order_number/cancel', async (req, res, next) => {
     if (!['new', 'confirmed'].includes(order.status)) {
       return res.status(400).json({ error: 'Отменить можно только заявки со статусом "Новая" или "Подтверждена"' });
     }
-    await run(`UPDATE orders SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [order.id]);
+    await run(
+      `UPDATE orders SET status='cancelled', updated_at=CURRENT_TIMESTAMP, cancelled_at=COALESCE(cancelled_at, datetime('now')) WHERE id=?`,
+      [order.id]
+    );
     await run(`INSERT INTO order_status_history (order_id, old_status, new_status, changed_by) VALUES (?,?,?,?)`, [
       order.id,
       order.status,
@@ -4767,6 +4787,18 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
     );
     if (!order) return res.status(404).json({ error: 'Not found' });
     await run(`UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, [status, id]);
+    // Set timestamp columns when reaching terminal statuses
+    if (status !== order.prev_status) {
+      if (status === 'completed') {
+        await run(`UPDATE orders SET completed_at = datetime('now') WHERE id = ? AND completed_at IS NULL`, [id]).catch(
+          () => {}
+        );
+      } else if (status === 'cancelled') {
+        await run(`UPDATE orders SET cancelled_at = datetime('now') WHERE id = ? AND cancelled_at IS NULL`, [id]).catch(
+          () => {}
+        );
+      }
+    }
     // Log status change to history
     if (status !== order.prev_status) {
       await run('INSERT INTO order_status_history (order_id, old_status, new_status, changed_by) VALUES (?,?,?,?)', [

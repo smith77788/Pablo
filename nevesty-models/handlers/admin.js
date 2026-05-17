@@ -404,6 +404,10 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
     ];
     const filterRow2 = [
       {
+        text: activeFilter === 'in_progress' ? '▶️ В работе ✓' : '▶️ В работе',
+        callback_data: 'adm_ord_filter_in_progress',
+      },
+      {
         text: activeFilter === 'cancelled' ? '❌ Отменённые ✓' : '❌ Отменённые',
         callback_data: 'adm_ord_filter_cancelled',
       },
@@ -412,6 +416,7 @@ async function showAdminOrders(chatId, statusFilter, page = 0) {
     const filterRow3 = [
       { text: '📅 Сегодня', callback_data: 'adm_orders_today' },
       { text: '📅 Неделя', callback_data: 'adm_orders_week' },
+      ...(activeFilter ? [{ text: '🔄 Сбросить фильтры', callback_data: 'adm_ord_filter_all' }] : []),
     ];
 
     return safeSend(chatId, text, {
