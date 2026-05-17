@@ -3023,6 +3023,111 @@
         }
       }
 
+      /* ─── 14-day Revenue SVG sparkline ──────────────────── */
+      async function loadRevenueChart() {
+        try {
+          const r = await _admin.apiFetch('/admin/stats/daily?days=14');
+          const daily = r.days || r.daily || [];
+          if (!daily.length) return;
+
+          const container = document.getElementById('revenue-chart');
+          const labelsContainer = document.getElementById('chart-labels');
+          const totalEl = document.getElementById('revenue-chart-total');
+          if (!container) return;
+
+          const values = daily.map(d => d.count || d.orders || 0);
+          const labels = daily.map(d => {
+            const dt = new Date((d.day || d.date || '').replace(/-/g, '/'));
+            return dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+          });
+          const maxVal = Math.max(...values, 1);
+          const totalOrders = values.reduce((s, v) => s + v, 0);
+          if (totalEl) totalEl.textContent = totalOrders + ' заявок за 14 дн.';
+
+          // Today's vs yesterday's delta
+          const todayOrders = values[values.length - 1] || 0;
+          const yesterdayOrders = values[values.length - 2] || 0;
+          const delta = yesterdayOrders > 0 ? Math.round(((todayOrders - yesterdayOrders) / yesterdayOrders) * 100) : 0;
+          const deltaEl = document.getElementById('orders-delta');
+          if (deltaEl) {
+            if (delta > 0) deltaEl.innerHTML = `<span style="color:#4caf50">▲${delta}% vs вчера</span>`;
+            else if (delta < 0) deltaEl.innerHTML = `<span style="color:#f44336">▼${Math.abs(delta)}% vs вчера</span>`;
+            else deltaEl.innerHTML = '<span style="color:#888">— vs вчера</span>';
+          }
+
+          // SVG sparkline
+          const w = container.clientWidth || 500;
+          const h = 100;
+          const pts = values
+            .map((v, i) => {
+              const x = values.length > 1 ? (i / (values.length - 1)) * w : w / 2;
+              const y = h - (v / maxVal) * (h - 10) - 5;
+              return x.toFixed(1) + ',' + y.toFixed(1);
+            })
+            .join(' ');
+
+          container.innerHTML =
+            '<svg width="100%" height="' +
+            h +
+            '" viewBox="0 0 ' +
+            w +
+            ' ' +
+            h +
+            '" preserveAspectRatio="none">' +
+            '<defs><linearGradient id="rg14" x1="0" y1="0" x2="0" y2="1">' +
+            '<stop offset="0%" stop-color="#d4af37" stop-opacity="0.3"/>' +
+            '<stop offset="100%" stop-color="#d4af37" stop-opacity="0.05"/>' +
+            '</linearGradient></defs>' +
+            '<polygon points="' +
+            pts +
+            ' ' +
+            w +
+            ',' +
+            h +
+            ' 0,' +
+            h +
+            '" fill="url(#rg14)"/>' +
+            '<polyline points="' +
+            pts +
+            '" fill="none" stroke="#d4af37" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+            '</svg>';
+
+          if (labelsContainer) {
+            labelsContainer.innerHTML = labels
+              .filter(function (_, i) {
+                return i % 2 === 0;
+              })
+              .map(function (l) {
+                return '<span>' + l + '</span>';
+              })
+              .join('');
+          }
+        } catch (e) {
+          console.warn('loadRevenueChart error', e);
+        }
+      }
+
+      /* ─── Manual agent check trigger ─────────────────────── */
+      async function runAgentCheck() {
+        const btn = document.getElementById('run-agents-btn');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = '⏳ Запуск...';
+        }
+        try {
+          await _admin.apiFetch('/admin/run-agent-check', { method: 'POST' });
+          _admin.toast('Проверка агентов запущена', 'success');
+          setTimeout(loadAgentFeed, 5000);
+        } catch (e) {
+          _admin.toast('Ошибка запуска: ' + (e.message || ''), 'error');
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🤖 Проверка';
+          }
+        }
+      }
+
       /* ─── Recent client messages ─────────────────────────── */
       async function loadRecentMessages() {
         const el = document.getElementById('recentMessagesList');
@@ -3402,6 +3507,7 @@
       loadBotStatus();
       loadTodayActivity();
       loadRevenueSparkline();
+      loadRevenueChart();
       loadRecentMessages();
       loadFactoryStatus();
       loadUpcomingEvents();
