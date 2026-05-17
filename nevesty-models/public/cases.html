@@ -711,8 +711,35 @@
             </div>
           </article>
 
-          <article class="case-card" data-cat="fashion">
-            <div class="case-img" role="img" aria-label="Показ в универмаге">🛍</div>
+          <article
+            class="case-card"
+            data-cat="fashion"
+            data-idx="4"
+            onclick="openLightbox(4)"
+            tabindex="0"
+            role="button"
+            aria-label="Открыть кейс Показ в ЦУМ"
+          >
+            <div class="case-img-wrap">
+              <div class="case-img" role="img" aria-label="Показ в универмаге" style="height: 200px">🛍</div>
+              <div class="case-hover-overlay" aria-hidden="true">
+                <p class="case-hover-desc">
+                  Еженедельные показы коллекций международных брендов. 6 моделей каждую неделю в течение сезона.
+                </p>
+                <div class="case-hover-meta">
+                  <span>📍 Москва</span><span>👥 6 моделей</span><span>⏱ Регулярно</span>
+                </div>
+                <button
+                  class="case-hover-btn"
+                  onclick="
+                    event.stopPropagation();
+                    openLightbox(4);
+                  "
+                >
+                  Подробнее →
+                </button>
+              </div>
+            </div>
             <div class="case-body">
               <div class="case-cat">Fashion</div>
               <h3 class="case-title">Показ в ЦУМ — новая коллекция</h3>
@@ -728,8 +755,33 @@
             </div>
           </article>
 
-          <article class="case-card" data-cat="commercial">
-            <div class="case-img" role="img" aria-label="Видеореклама для телевизора">🎬</div>
+          <article
+            class="case-card"
+            data-cat="commercial"
+            data-idx="5"
+            onclick="openLightbox(5)"
+            tabindex="0"
+            role="button"
+            aria-label="Открыть кейс ТВ-ролик для фармацевтики"
+          >
+            <div class="case-img-wrap">
+              <div class="case-img" role="img" aria-label="Видеореклама для телевизора" style="height: 240px">🎬</div>
+              <div class="case-hover-overlay" aria-hidden="true">
+                <p class="case-hover-desc">
+                  Актриса-модель для рекламного ролика крупного фармацевтического бренда. Кастинг из 40 кандидатов.
+                </p>
+                <div class="case-hover-meta"><span>📍 Москва</span><span>👥 1 модель</span><span>⏱ 1 день</span></div>
+                <button
+                  class="case-hover-btn"
+                  onclick="
+                    event.stopPropagation();
+                    openLightbox(5);
+                  "
+                >
+                  Подробнее →
+                </button>
+              </div>
+            </div>
             <div class="case-body">
               <div class="case-cat">Видеопроизводство</div>
               <h3 class="case-title">ТВ-ролик для фармацевтики</h3>
@@ -745,8 +797,36 @@
             </div>
           </article>
 
-          <article class="case-card" data-cat="events">
-            <div class="case-img" role="img" aria-label="Промо-акция в торговом центре">🏬</div>
+          <article
+            class="case-card"
+            data-cat="events"
+            data-idx="6"
+            onclick="openLightbox(6)"
+            tabindex="0"
+            role="button"
+            aria-label="Открыть кейс Промо-акция Samsung"
+          >
+            <div class="case-img-wrap">
+              <div class="case-img" role="img" aria-label="Промо-акция в торговом центре" style="height: 220px">🏬</div>
+              <div class="case-hover-overlay" aria-hidden="true">
+                <p class="case-hover-desc">
+                  Промоутеры и модели для презентации новой линейки телефонов. 10 точек по Москве, 2 недели активного
+                  промо.
+                </p>
+                <div class="case-hover-meta">
+                  <span>📍 Москва</span><span>👥 15 промоутеров</span><span>⏱ 2 нед.</span>
+                </div>
+                <button
+                  class="case-hover-btn"
+                  onclick="
+                    event.stopPropagation();
+                    openLightbox(6);
+                  "
+                >
+                  Подробнее →
+                </button>
+              </div>
+            </div>
             <div class="case-body">
               <div class="case-cat">Промо</div>
               <h3 class="case-title">Промо-акция Samsung в ТРЦ</h3>
@@ -762,8 +842,36 @@
             </div>
           </article>
 
-          <article class="case-card" data-cat="photo">
-            <div class="case-img" role="img" aria-label="Модельное портфолио">✨</div>
+          <article
+            class="case-card"
+            data-cat="photo"
+            data-idx="7"
+            onclick="openLightbox(7)"
+            tabindex="0"
+            role="button"
+            aria-label="Открыть кейс портфолио beauty-бренда"
+          >
+            <div class="case-img-wrap">
+              <div class="case-img" role="img" aria-label="Модельное портфолио" style="height: 190px">✨</div>
+              <div class="case-hover-overlay" aria-hidden="true">
+                <p class="case-hover-desc">
+                  Имиджевая фотосессия для бренда косметики. Минималистичный стиль, акцент на продукт. Серия из 50
+                  кадров.
+                </p>
+                <div class="case-hover-meta">
+                  <span>📍 Екатеринбург</span><span>👥 2 модели</span><span>⏱ 1 день</span>
+                </div>
+                <button
+                  class="case-hover-btn"
+                  onclick="
+                    event.stopPropagation();
+                    openLightbox(7);
+                  "
+                >
+                  Подробнее →
+                </button>
+              </div>
+            </div>
             <div class="case-body">
               <div class="case-cat">Фотосессия</div>
               <h3 class="case-title">Портфолио для beauty-бренда</h3>
@@ -779,8 +887,33 @@
             </div>
           </article>
 
-          <article class="case-card" data-cat="events">
-            <div class="case-img" role="img" aria-label="Выставка и конференция">📊</div>
+          <article
+            class="case-card"
+            data-cat="events"
+            data-idx="8"
+            onclick="openLightbox(8)"
+            tabindex="0"
+            role="button"
+            aria-label="Открыть кейс INTERCHARM"
+          >
+            <div class="case-img-wrap">
+              <div class="case-img" role="img" aria-label="Выставка и конференция" style="height: 210px">📊</div>
+              <div class="case-hover-overlay" aria-hidden="true">
+                <p class="case-hover-desc">
+                  Хостес и демонстраторы продукции на крупнейшей beauty-выставке России. Работа с иностранными гостями.
+                </p>
+                <div class="case-hover-meta"><span>📍 Крокус</span><span>👥 4 хостес</span><span>⏱ 3 дня</span></div>
+                <button
+                  class="case-hover-btn"
+                  onclick="
+                    event.stopPropagation();
+                    openLightbox(8);
+                  "
+                >
+                  Подробнее →
+                </button>
+              </div>
+            </div>
             <div class="case-body">
               <div class="case-cat">B2B Мероприятие</div>
               <h3 class="case-title">Стенд на выставке INTERCHARM</h3>
@@ -797,6 +930,47 @@
           </article>
         </div>
       </section>
+
+      <!-- Lightbox -->
+      <div class="case-lightbox" id="caseLightbox" role="dialog" aria-modal="true" aria-labelledby="lightboxTitle">
+        <div class="lightbox-inner">
+          <button class="lightbox-close" onclick="closeLightbox()" aria-label="Закрыть">✕</button>
+          <div class="lightbox-img" id="lightboxImg" aria-hidden="true"></div>
+          <div class="lightbox-body">
+            <div class="lightbox-cat" id="lightboxCat"></div>
+            <h2 class="lightbox-title" id="lightboxTitle"></h2>
+            <p class="lightbox-desc" id="lightboxDesc"></p>
+            <div class="lightbox-meta" id="lightboxMeta"></div>
+            <div class="lightbox-cta">
+              <a href="/booking.html" class="btn-gold">Обсудить проект</a>
+              <button
+                onclick="closeLightbox()"
+                style="
+                  background: none;
+                  border: 1px solid var(--border);
+                  color: var(--text-muted);
+                  padding: 12px 24px;
+                  cursor: pointer;
+                  font-size: 0.8rem;
+                  letter-spacing: 1px;
+                  text-transform: uppercase;
+                  transition: all 0.2s;
+                "
+                onmouseover="
+                  this.style.borderColor = 'var(--gold)';
+                  this.style.color = 'var(--gold)';
+                "
+                onmouseout="
+                  this.style.borderColor = 'var(--border)';
+                  this.style.color = 'var(--text-muted)';
+                "
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- Clients logos placeholder -->
       <section style="padding: 48px 20px; text-align: center; border-top: 1px solid var(--border)">
