@@ -1,176 +1,200 @@
-# Nevesty Models — Импорт в Lovable
+# Nevesty Models → Lovable: Руководство по интеграции
 
-## Что это такое
+## ⚠️ Важно: этот export НЕ заменяет ваш проект
 
-Папка `lovable-export/` содержит всё необходимое для переноса Nevesty Models на платформу [Lovable](https://lovable.dev) (TanStack Start + React + Supabase).
+Папка `lovable-export/` содержит **дополнения** к уже существующему Lovable-проекту.
+Ваш проект уже имеет: catalog, quiz, bookings, admin, wallets, Telegram webhook.
 
-## Шаг 1: Создай проект в Lovable
+Здесь находятся **недостающие части**.
 
-1. Открой [lovable.dev](https://lovable.dev) → **New Project**
-2. Выбери шаблон **TanStack Start + Supabase**
-3. Создай проект
+---
 
-## Шаг 2: Подключи Supabase
+## Что добавляет этот export
 
-1. В Lovable → **Settings** → **Integrations** → **Supabase**
-2. Создай новый Supabase проект (или выбери существующий)
-3. Lovable автоматически подставит `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY`
+| Файл                                           | Добавляет                                                                                       |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `supabase/migrations/002_missing_features.sql` | Таблицы: reviews, promo_codes, loyalty, referrals, broadcasts, experiments, faq, price_packages |
+| `supabase/functions/telegram-webhook/`         | Telegram бот: вебхук, команды, уведомления о бронированиях                                      |
+| `supabase/functions/send-sms/`                 | SMS через SMS.ru / SMSC / Twilio                                                                |
+| `supabase/functions/send-email/`               | Email через SendGrid + HTML шаблоны                                                             |
+| `supabase/functions/payment-webhook/`          | Вебхуки YooKassa и Stripe (авто-подтверждение заявок)                                           |
+| `supabase/functions/broadcast/`                | Telegram рассылка клиентам                                                                      |
+| `src/components/promo/PromoCodeInput`          | Поле ввода промокода с валидацией в реальном времени                                            |
+| `src/components/reviews/ReviewsList`           | Список отзывов с рейтингом и ответами                                                           |
+| `src/components/analytics/AnalyticsDashboard`  | Аналитика: заявки, выручка, конверсия, топ моделей                                              |
+| `src/components/payments/PaymentButton`        | Кнопка оплаты (YooKassa/Stripe)                                                                 |
+| `src/hooks/`                                   | useModels, useOrders, useSettings, useReviews, useAuth                                          |
+| `src/types/index.ts`                           | TypeScript типы для всех 35+ таблиц                                                             |
 
-## Шаг 3: Применить миграции БД
+---
 
-В Supabase Dashboard → **SQL Editor** выполни:
+## Шаг 1: Применить миграцию БД
+
+В Supabase Dashboard → **SQL Editor**:
 
 ```sql
 -- Вставь содержимое файла:
--- lovable-export/supabase/migrations/001_initial_schema.sql
+-- lovable-export/supabase/migrations/002_missing_features.sql
 ```
 
-Или через Supabase CLI:
+> Это добавит только НОВЫЕ таблицы. Существующие `models`, `bookings`, `app_settings` не тронет.
+
+---
+
+## Шаг 2: Задеплоить Edge Functions
 
 ```bash
-supabase db push
+# Установи Supabase CLI если ещё нет:
+npm install -g supabase
+
+# Войди в проект:
+supabase link --project-ref <YOUR_PROJECT_REF>
+
+# Задеплой функции:
+supabase functions deploy telegram-webhook
+supabase functions deploy send-sms
+supabase functions deploy send-email
+supabase functions deploy payment-webhook
+supabase functions deploy broadcast
 ```
 
-## Шаг 4: Скопировать файлы в проект Lovable
+---
 
-Скопируй из `lovable-export/` в твой Lovable проект:
+## Шаг 3: Задать секреты для Edge Functions
 
-```
-lovable-export/
-  src/
-    types/index.ts         → src/types/index.ts
-    lib/supabase.ts        → src/lib/supabase.ts
-    hooks/                 → src/hooks/
-      useModels.ts
-      useOrders.ts
-      useSettings.ts
-      useReviews.ts
-      useAuth.ts
-      index.ts
-    components/
-      catalog/             → src/components/catalog/
-        ModelCard.tsx
-        CatalogPage.tsx
-        index.ts
-      booking/             → src/components/booking/
-        BookingForm.tsx
-        index.ts
-      admin/               → src/components/admin/
-        AdminDashboard.tsx
-        SettingsPanel.tsx
-        index.ts
-```
-
-## Шаг 5: Установить зависимости
-
-В терминале Lovable:
+В Supabase Dashboard → **Edge Functions** → **Manage secrets**:
 
 ```bash
-npm install @supabase/supabase-js @tanstack/react-query
+# Или через CLI:
+supabase secrets set TELEGRAM_BOT_TOKEN=your_token
+supabase secrets set TELEGRAM_WEBHOOK_SECRET=your_secret
+supabase secrets set SENDGRID_API_KEY=SG.xxxx
+supabase secrets set SMS_PROVIDER=smsru
+supabase secrets set SMS_RU_API_KEY=your_key
+supabase secrets set YOOKASSA_SECRET_KEY=your_key
+supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_xxx
 ```
 
-## Шаг 6: Настроить QueryClient
+---
 
-В `src/main.tsx` или `src/app.tsx`:
+## Шаг 4: Подключить Telegram Webhook
+
+```bash
+curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
+  -d "url=https://<PROJECT_REF>.supabase.co/functions/v1/telegram-webhook" \
+  -d "secret_token=<WEBHOOK_SECRET>"
+```
+
+---
+
+## Шаг 5: Скопировать компоненты в проект
+
+```
+lovable-export/src/
+  types/index.ts              → src/types/index.ts
+  lib/supabase.ts             → src/lib/supabase.ts (если ещё нет)
+  hooks/                      → src/hooks/
+  components/
+    promo/PromoCodeInput.tsx  → добавь в форму бронирования
+    reviews/ReviewsList.tsx   → добавь на страницу модели / каталог
+    analytics/AnalyticsDashboard.tsx → добавь в /admin/analytics
+    payments/PaymentButton.tsx → добавь в карточку заявки
+```
+
+---
+
+## Шаг 6: Добавить промокод в форму бронирования
+
+В вашем существующем компоненте формы бронирования:
 
 ```tsx
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { PromoCodeInput } from '../components/promo';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { staleTime: 1000 * 60 * 5 }, // 5 минут кэш
-  },
-});
-
-// Оберни приложение:
-<QueryClientProvider client={queryClient}>
-  <App />
-</QueryClientProvider>;
+// В форме:
+<PromoCodeInput
+  budget={parseFloat(form.budget || '0')}
+  onApply={({ code, discount_type, discount_value }) => {
+    setForm(f => ({
+      ...f,
+      promo_code: code,
+      promo_discount: discount_type === 'percent' ? (parseFloat(f.budget) * discount_value) / 100 : discount_value,
+    }));
+  }}
+/>;
 ```
 
-## Шаг 7: Добавить маршруты
+---
 
-В TanStack Start используй TanStack Router:
+## Шаг 7: Добавить отзывы на страницу модели
 
 ```tsx
-// routes/index.tsx — Главная / каталог
-import { CatalogPage } from '../components/catalog';
+import { ReviewsList } from '../components/reviews';
 
-// routes/model.$id.tsx — Страница модели
-// routes/booking.tsx — Бронирование
-// routes/admin/index.tsx — Панель администратора (защищённый маршрут)
-// routes/admin/settings.tsx — Настройки
+// На странице модели:
+<ReviewsList modelId={model.id} limit={5} />;
 ```
 
-## Шаг 8: Настроить RLS (безопасность)
+---
 
-В Supabase Dashboard → **Authentication** → **Policies**:
+## Шаг 8: Добавить аналитику в админку
 
-- Таблица `models`: публичное чтение (не архивированные)
-- Таблица `orders`: только авторизованные (admins)
-- Таблица `reviews`: публичное чтение (approved), write — все
-- Таблица `bot_settings`: только авторизованные (admins)
+```tsx
+import { AnalyticsDashboard } from '../components/analytics';
 
-Политики уже созданы миграцией в шаге 3.
+// В /admin/analytics:
+<AnalyticsDashboard />;
+```
 
-## Шаг 9: Настроить аутентификацию
+---
 
-В Supabase → **Authentication** → **Providers**:
+## Что NOT входит (остаётся на Node.js сервере)
 
-- Включи **Email** провайдер
-- Создай первого администратора через **Users** → **Invite user**
+| Компонент                       | Почему                        | Где запускать   |
+| ------------------------------- | ----------------------------- | --------------- |
+| AI Factory (Python, 49 агентов) | Требует Python + Claude API   | VPS/Railway     |
+| Полный Telegram бот (`bot.js`)  | 735KB, сложная логика         | VPS/Railway     |
+| SQLite → PostgreSQL синк        | Только если мигрируете данные | One-time script |
 
-## Структура таблиц БД
+### Рекомендуемая архитектура:
 
-| Таблица          | Описание                 |
-| ---------------- | ------------------------ |
-| `models`         | Профили моделей          |
-| `orders`         | Заявки на бронирование   |
-| `reviews`        | Отзывы клиентов          |
-| `bot_settings`   | Настройки (key-value)    |
-| `admins`         | Администраторы           |
-| `agent_logs`     | Логи AI-агентов          |
-| `ab_experiments` | A/B эксперименты         |
-| `loyalty_points` | Баллы лояльности         |
-| `wishlists`      | Избранные модели         |
-| `faq`            | Часто задаваемые вопросы |
-| `price_packages` | Пакеты услуг             |
-| `promo_codes`    | Промокоды                |
-| ...              | +30 таблиц               |
+```
+Lovable (React + Supabase PostgreSQL)
+  ├── Публичный каталог
+  ├── Форма бронирования
+  ├── Панель администратора
+  └── Edge Functions (webhook, SMS, email, payments)
 
-Полный список: `lovable-export/supabase/migrations/001_initial_schema.sql`
+VPS / Railway
+  ├── AI Factory (Python, 49 агентов, CEO Intelligence)
+  └── Синхронизация с Supabase через PostgreSQL connection string
+```
 
-## Переменные окружения
+---
+
+## Таблицы: что уже есть vs что добавляется
+
+| Таблица                                    | Статус                                |
+| ------------------------------------------ | ------------------------------------- |
+| `models`, `bookings`, `order_messages`     | ✅ Уже в вашем проекте                |
+| `managers`, `app_settings`, `bot_sessions` | ✅ Уже в вашем проекте                |
+| `client_wallets`, `wallet_transactions`    | ✅ Уже в вашем проекте                |
+| `contact_unlocks`, `user_roles`            | ✅ Уже в вашем проекте                |
+| `reviews`                                  | ➕ Добавляет 002_missing_features.sql |
+| `promo_codes`                              | ➕ Добавляет 002_missing_features.sql |
+| `loyalty_points`, `loyalty_transactions`   | ➕ Добавляет 002_missing_features.sql |
+| `referrals`                                | ➕ Добавляет 002_missing_features.sql |
+| `scheduled_broadcasts`                     | ➕ Добавляет 002_missing_features.sql |
+| `ab_experiments`                           | ➕ Добавляет 002_missing_features.sql |
+| `faq`                                      | ➕ Добавляет 002_missing_features.sql |
+| `price_packages`                           | ➕ Добавляет 002_missing_features.sql |
+
+---
+
+## Переменные окружения (в Lovable)
 
 ```env
 VITE_SUPABASE_URL=https://xxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGci...
 ```
 
-Lovable подставляет их автоматически при подключении Supabase.
-
-## Что НЕ переносится на Lovable
-
-| Компонент                | Причина                       | Альтернатива            |
-| ------------------------ | ----------------------------- | ----------------------- |
-| Telegram бот (`bot.js`)  | Требует серверный процесс     | Оставь на VPS/Railway   |
-| API сервер (`server.js`) | Express не работает в Lovable | Supabase Edge Functions |
-| Файлы `uploads/`         | Локальная файловая система    | Supabase Storage        |
-| SQLite миграции          | PostgreSQL вместо SQLite      | ✅ Уже конвертированы   |
-| AI Factory (Python)      | Требует серверный процесс     | Оставь на VPS/Railway   |
-
-## Рекомендуемая архитектура после переноса
-
-```
-Lovable (Frontend + Supabase)
-  ├── Публичный сайт (каталог, бронирование)
-  ├── Панель администратора
-  └── Supabase PostgreSQL (БД)
-
-VPS / Railway (Backend)
-  ├── Telegram бот (bot.js)
-  ├── AI Factory (Python)
-  └── Обращается к той же Supabase БД
-```
-
-Бот и Factory можно настроить работать с Supabase через PostgreSQL connection string вместо SQLite.
+Lovable подставляет их автоматически.
