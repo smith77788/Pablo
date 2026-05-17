@@ -2955,10 +2955,12 @@ router.put('/admin/orders/:id', auth, async (req, res, next) => {
     );
     // Log status change to history
     if (status && status !== order.status) {
-      await run(
-        'INSERT INTO order_status_history (order_id, old_status, new_status, changed_by, notes) VALUES (?,?,?,?,?)',
-        [id, order.status, status, req.admin.username || 'admin', admin_notes || null]
-      ).catch(() => {}); // non-blocking
+      await run('INSERT INTO order_status_history (order_id, old_status, new_status, changed_by) VALUES (?,?,?,?)', [
+        id,
+        order.status,
+        status,
+        req.admin.username || 'admin',
+      ]).catch(() => {}); // non-blocking
     }
     if (botInstance && order.client_chat_id && status && status !== order.status) {
       botInstance.notifyStatusChange(order.client_chat_id, order.order_number, status);
