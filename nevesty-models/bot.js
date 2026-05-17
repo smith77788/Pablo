@@ -11600,6 +11600,23 @@ async function sendMessageToClient(clientChatId, orderNumber, text) {
   });
 }
 
+/**
+ * sendClientReminder — safe direct message to a client chat.
+ * Used by the reminder scheduler (БЛОК 11.1).
+ * Returns true if the message was delivered, false if blocked/failed.
+ */
+async function sendClientReminder(telegramId, text) {
+  if (!bot || !telegramId) return false;
+  try {
+    await bot.sendMessage(telegramId, text, { parse_mode: 'MarkdownV2' });
+    return true;
+  } catch (e) {
+    // Client may have blocked the bot — log but don't throw
+    console.warn(`[Bot] sendClientReminder→${telegramId}: ${e.message}`);
+    return false;
+  }
+}
+
 async function notifyPaymentSuccess(clientChatId, orderNumber) {
   if (!bot || !clientChatId) return;
   await safeSend(
@@ -14550,6 +14567,7 @@ module.exports = {
   notifyNewOrder,
   notifyStatusChange,
   sendMessageToClient,
+  sendClientReminder,
   notifyPaymentSuccess,
   _registerNewFeatures,
 };

@@ -848,6 +848,24 @@ async function initDatabase() {
     ).catch(() => {});
   }
 
+  // Schema v31 — client reminder columns on orders (БЛОК 11.1)
+  const v31 = await get(`SELECT version FROM schema_versions WHERE version=31`).catch(() => null);
+  if (!v31) {
+    // 24h before shooting reminder timestamp
+    await run(`ALTER TABLE orders ADD COLUMN reminder_24h_sent DATETIME DEFAULT NULL`).catch(() => {});
+    // Time of the event (HH:MM)
+    await run(`ALTER TABLE orders ADD COLUMN event_time TEXT DEFAULT NULL`).catch(() => {});
+    // Post-completion congratulation sent timestamp
+    await run(`ALTER TABLE orders ADD COLUMN completed_reminder_sent DATETIME DEFAULT NULL`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_orders_reminder_24h ON orders(reminder_24h_sent)`).catch(() => {});
+    await run(`CREATE INDEX IF NOT EXISTS idx_orders_completed_reminder ON orders(completed_reminder_sent)`).catch(
+      () => {}
+    );
+    await run(
+      `INSERT OR IGNORE INTO schema_versions(version, description) VALUES(31, 'orders: reminder_24h_sent, event_time, completed_reminder_sent for client reminder system (БЛОК 11.1)')`
+    ).catch(() => {});
+  }
+
   // Seed FAQ items if empty
   const faqCount = await get('SELECT COUNT(*) as n FROM faq').catch(() => ({ n: 0 }));
   if (!faqCount.n) {
