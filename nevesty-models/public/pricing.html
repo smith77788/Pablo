@@ -710,10 +710,10 @@
         <!-- Selected package CTA -->
         <div class="pkg-book-wrap" id="pkgBookWrap">
           <div class="pkg-book-hint" id="pkgBookHint">Выбран пакет: <strong id="pkgBookName"></strong></div>
-          <a id="pkgBookBtn" href="/booking.html" class="btn-gold" style="display: inline-block; padding: 12px 36px;">
+          <a id="pkgBookBtn" href="/booking.html" class="btn-gold" style="display: inline-block; padding: 12px 36px">
             Оформить заказ
           </a>
-          <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 8px;">
+          <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 8px">
             Параметры из калькулятора будут переданы в форму заявки
           </div>
         </div>
@@ -1387,9 +1387,14 @@
         const h = params.hours;
         if (prices[h]) return prices[h];
         // linear interpolation
-        let lo = 1, hi = 2;
+        let lo = 1,
+          hi = 2;
         for (let i = 0; i < anchors.length - 1; i++) {
-          if (h > anchors[i] && h <= anchors[i + 1]) { lo = anchors[i]; hi = anchors[i + 1]; break; }
+          if (h > anchors[i] && h <= anchors[i + 1]) {
+            lo = anchors[i];
+            hi = anchors[i + 1];
+            break;
+          }
         }
         const t = (h - lo) / (hi - lo);
         return Math.round(prices[lo] + (prices[hi] - prices[lo]) * t);
@@ -1536,7 +1541,10 @@
           const h = Math.min(12, Math.max(1, parseInt(hoursVal) || 2));
           params.hours = h;
           const slider = document.getElementById('hoursSlider');
-          if (slider) { slider.value = h; updateHoursLabel(h); }
+          if (slider) {
+            slider.value = h;
+            updateHoursLabel(h);
+          }
         }
         if (catVal && ['standard', 'premium', 'top'].includes(catVal)) {
           params.category = catVal;
@@ -1546,7 +1554,10 @@
           const cnt = Math.min(5, Math.max(1, parseInt(cntVal) || 1));
           params.count = cnt;
           const slider = document.getElementById('countSlider');
-          if (slider) { slider.value = cnt; updateCountLabel(cnt); }
+          if (slider) {
+            slider.value = cnt;
+            updateCountLabel(cnt);
+          }
         }
         if (cityVal) {
           params.city = cityVal;
@@ -1623,9 +1634,9 @@
 
       // ─── Package card selection ───────────────────────────────────────────────
       const PACKAGE_PRESETS = {
-        start:   { event: 'photo', hours: 2, category: 'standard', count: 1 },
-        event:   { event: 'event', hours: 4, category: 'standard', count: 2 },
-        premium: { event: 'runway', hours: 6, category: 'top',      count: 1 },
+        start: { event: 'photo', hours: 2, category: 'standard', count: 1 },
+        event: { event: 'event', hours: 4, category: 'standard', count: 2 },
+        premium: { event: 'runway', hours: 6, category: 'top', count: 1 },
       };
 
       function applyPackagePreset(pkg) {
@@ -1645,9 +1656,15 @@
         params.category = preset.category;
         params.count = preset.count;
         const hSlider = document.getElementById('hoursSlider');
-        if (hSlider) { hSlider.value = preset.hours; updateHoursLabel(preset.hours); }
+        if (hSlider) {
+          hSlider.value = preset.hours;
+          updateHoursLabel(preset.hours);
+        }
         const cSlider = document.getElementById('countSlider');
-        if (cSlider) { cSlider.value = preset.count; updateCountLabel(preset.count); }
+        if (cSlider) {
+          cSlider.value = preset.count;
+          updateCountLabel(preset.count);
+        }
         calc();
       }
 

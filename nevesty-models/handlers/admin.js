@@ -31,7 +31,7 @@ async function showAdminStats(chatId) {
       total,
       todayOrders,
       weekOrders,
-      _monthOrders,
+      monthOrders,
       calMonthOrders,
       statusNew,
       statusConfirmed,
@@ -39,13 +39,13 @@ async function showAdminStats(chatId) {
       done,
       canc,
       newClientsMonth,
-      _totalNew,
+      totalNew,
       confirmedCount,
-      _totalClients,
+      totalClients,
       // Models counts
       totalModels,
       activeModels,
-      _featuredModels,
+      featuredModels,
     ] = await Promise.all([
       get('SELECT COUNT(*) as n FROM orders'),
       get("SELECT COUNT(*) as n FROM orders WHERE date(created_at,'localtime') = date('now','localtime')"),
@@ -90,8 +90,8 @@ async function showAdminStats(chatId) {
     const conversion =
       funnelTotal > 0
         ? Math.round(((confirmedCount?.n || 0) / funnelTotal) * 100)
-        : total?.n > 0
-          ? Math.round(((confirmedCount?.n || 0) / total.n) * 100)
+        : totalNew?.n > 0
+          ? Math.round(((confirmedCount?.n || 0) / totalNew.n) * 100)
           : 0;
 
     // Revenue: sum of budgets for confirmed+completed orders
@@ -191,6 +191,7 @@ async function showAdminStats(chatId) {
     text += `• Сегодня: *${esc(String(todayOrders.n))}*\n`;
     text += `• Неделя: ${esc(String(weekOrders.n))}\n`;
     text += `• Месяц \\(${esc(currentMonthLabel)}\\): *${esc(String(calMonthOrders.n))}*\n`;
+    text += `• За 30 дней: ${esc(String(monthOrders.n))}\n`;
     text += `• Всего: ${esc(String(total.n))}\n`;
 
     // ── Revenue section ──────────────────────────────
@@ -236,6 +237,8 @@ async function showAdminStats(chatId) {
     text += `\n💃 *Модели:*\n`;
     text += `• Всего активных: ${esc(String(totalModels?.n || 0))}\n`;
     text += `• Доступных: *${esc(String(activeModels?.n || 0))}*\n`;
+    text += `• Всего уникальных клиентов: ${esc(String(totalClients?.n || 0))}\n`;
+    text += `• Топовых \\(featured\\): ${esc(String(featuredModels?.n || 0))}\n`;
     text += `• Повторных клиентов: ${esc(String(repeatClients))}\n`;
 
     // ── Additional metrics ───────────────────────────

@@ -61,7 +61,8 @@ if (LOG_JSON) {
   app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
-      if (req.path.startsWith('/health') || req.path.startsWith('/api/health') || req.path.startsWith('/api/metrics')) return;
+      if (req.path.startsWith('/health') || req.path.startsWith('/api/health') || req.path.startsWith('/api/metrics'))
+        return;
       const ms = Date.now() - start;
       if (ms > 1000 || res.statusCode >= 400) {
         const flag = ms > 1000 ? '🐢 SLOW' : res.statusCode >= 500 ? '🔴 ERROR' : '⚠️  WARN';
