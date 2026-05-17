@@ -1626,6 +1626,26 @@ async function getClientPoints(chatId) {
   return row?.total || 0;
 }
 
+/**
+ * Fetch a single order with its model name and note count.
+ * @param {number|string} orderId
+ * @returns {Promise<Object|null>}
+ */
+async function getOrderWithModel(orderId) {
+  const id = parseInt(orderId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return get(
+    `SELECT o.*, m.name as model_name,
+       (SELECT COUNT(*) FROM order_notes WHERE order_id=o.id) as note_count
+     FROM orders o
+     LEFT JOIN models m ON o.model_id = m.id
+     WHERE o.id = ?`,
+    [id]
+  )
+    .then(r => r ?? null)
+    .catch(() => null);
+}
+
 module.exports = {
   initDatabase,
   initDB: initDatabase,
@@ -1639,4 +1659,5 @@ module.exports = {
   invalidateSettingsCache,
   scheduleBackups,
   getClientPoints,
+  getOrderWithModel,
 };

@@ -14,7 +14,7 @@ try {
 const crypto = require('crypto');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
-const { query, run, get, generateOrderNumber, getSetting } = require('../database');
+const { query, run, get, generateOrderNumber, getSetting, getOrderWithModel } = require('../database');
 const auth = require('../middleware/auth');
 const { aiBudgetLimiter } = require('../middleware/rateLimiter');
 const mailer = require('../services/mailer');
@@ -5208,14 +5208,7 @@ router.get('/admin/messages', auth, async (req, res, next) => {
 
 router.get('/admin/orders/:id/detail', auth, async (req, res, next) => {
   try {
-    const id = parseInt(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
-    const order = await get(
-      `SELECT o.*, m.name as model_name FROM orders o
-       LEFT JOIN models m ON o.model_id = m.id
-       WHERE o.id=?`,
-      [id]
-    );
+    const order = await getOrderWithModel(req.params.id);
     if (!order) return res.status(404).json({ error: 'Not found' });
     res.json(order);
   } catch (e) {
@@ -5381,10 +5374,7 @@ router.patch('/admin/orders/:id/status', auth, async (req, res, next) => {
     // ─── CRM webhooks on status change (non-blocking) ────────────────────────
     if (status !== order.prev_status) {
       const { notifyCRM } = require('../services/crm');
-      const updatedOrder = await get(
-        'SELECT o.*, m.name as model_name FROM orders o LEFT JOIN models m ON o.model_id=m.id WHERE o.id=?',
-        [id]
-      );
+      const updatedOrder = await getOrderWithModel(id);
       notifyCRM('order.status_changed', updatedOrder, getSetting).catch(() => {});
     }
     // ─── Notify manager(s) via email when order is confirmed ─────────────────
