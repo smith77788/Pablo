@@ -2998,7 +2998,7 @@
             if (page > 20) break;
           }
           if (!allOrders.length) {
-            alert('Нет данных для экспорта');
+            toast('Нет данных для экспорта', 'warning');
             return;
           }
 
@@ -3035,7 +3035,7 @@
           setTimeout(() => URL.revokeObjectURL(url), 5000);
         } catch (e) {
           console.error('CSV export error', e);
-          alert('Ошибка экспорта: ' + e.message);
+          toast('Ошибка экспорта: ' + e.message, 'error');
         } finally {
           if (btn) {
             btn.disabled = false;

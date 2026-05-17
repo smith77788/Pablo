@@ -706,7 +706,7 @@
             btn.disabled = false;
             btn.textContent = '✅ Одобрить выбранные';
           }
-          alert('Ошибка: ' + (e.message || 'Попробуйте ещё раз'));
+          showToast('❌ Ошибка: ' + (e.message || 'Попробуйте ещё раз'));
         }
       }
 
@@ -728,7 +728,7 @@
             await Promise.all([loadReviews(), loadStats()]);
           } catch (e2) {
             if (card) card.style.opacity = '1';
-            alert('Ошибка: ' + (e2.message || 'Попробуйте ещё раз'));
+            showToast('❌ Ошибка: ' + (e2.message || 'Попробуйте ещё раз'));
           }
         }
       }
@@ -749,7 +749,7 @@
             await Promise.all([loadReviews(), loadStats()]);
           } catch (e2) {
             if (card) card.style.opacity = '1';
-            alert('Ошибка: ' + (e2.message || 'Попробуйте ещё раз'));
+            showToast('❌ Ошибка: ' + (e2.message || 'Попробуйте ещё раз'));
           }
         }
       }
@@ -765,27 +765,29 @@
           await Promise.all([loadReviews(), loadStats()]);
         } catch (e) {
           if (card) card.style.opacity = '1';
-          alert('Ошибка: ' + (e.message || 'Попробуйте ещё раз'));
+          showToast('❌ Ошибка: ' + (e.message || 'Попробуйте ещё раз'));
         }
       }
 
       async function deleteReview(id, name) {
-        if (!confirm(`Удалить отзыв от "${name}"? Это действие нельзя отменить.`)) return;
-        try {
-          await _admin.api(`/admin/reviews/${id}`, { method: 'DELETE' });
-          const card = document.getElementById(`review-${id}`);
-          if (card) {
-            card.style.opacity = '0';
-            card.style.transform = 'translateX(-10px)';
-            card.style.transition = 'all 0.3s';
-            setTimeout(() => card.remove(), 300);
+        adminConfirm('Удалить отзыв', `Удалить отзыв от "${name}"? Это действие нельзя отменить.`, async () => {
+          try {
+            await _admin.api(`/admin/reviews/${id}`, { method: 'DELETE' });
+            const card = document.getElementById(`review-${id}`);
+            if (card) {
+              card.style.opacity = '0';
+              card.style.transform = 'translateX(-10px)';
+              card.style.transition = 'all 0.3s';
+              setTimeout(() => card.remove(), 300);
+            }
+            selectedIds.delete(id);
+            updateBulkToolbar();
+            loadStats();
+            showToast('🗑️ Отзыв удалён');
+          } catch (e) {
+            showToast('❌ Ошибка удаления: ' + (e.message || 'Попробуйте ещё раз'));
           }
-          selectedIds.delete(id);
-          updateBulkToolbar();
-          loadStats();
-        } catch (e) {
-          alert('Ошибка удаления: ' + (e.message || 'Попробуйте ещё раз'));
-        }
+        });
       }
 
       // ── Reply ─────────────────────────────────────────────────────────────────
@@ -824,7 +826,7 @@
             btn.disabled = false;
             btn.textContent = '💾 Сохранить';
           }
-          alert('Ошибка сохранения: ' + e.message);
+          showToast('❌ Ошибка сохранения: ' + e.message);
         }
       }
 
