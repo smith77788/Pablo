@@ -451,30 +451,162 @@
         animation: statusFlash 0.8s ease-out;
       }
 
-      /* Days to event countdown */
+      /* ── Big status display ── */
+      .big-status-display {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 28px 20px 24px;
+        margin-bottom: 24px;
+        text-align: center;
+        border-bottom: 1px solid var(--border);
+      }
+      .big-status-display.visible {
+        display: flex;
+      }
+      .big-status-icon {
+        font-size: 3.2rem;
+        line-height: 1;
+        filter: drop-shadow(0 0 20px rgba(201, 169, 110, 0.3));
+      }
+      .big-status-label {
+        font-family: 'Playfair Display', serif;
+        font-size: clamp(1.4rem, 4vw, 2rem);
+        font-weight: 700;
+        color: var(--white);
+        letter-spacing: 0.5px;
+      }
+      .big-status-sub {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        max-width: 340px;
+      }
+
+      /* ── Days to event countdown — enhanced ── */
       .event-countdown {
         display: none;
+        flex-direction: column;
         align-items: center;
-        gap: 10px;
+        gap: 14px;
         margin-top: 20px;
-        padding: 14px 18px;
-        background: rgba(201, 169, 110, 0.07);
-        border: 1px solid rgba(201, 169, 110, 0.2);
+        padding: 20px 22px;
+        background: rgba(201, 169, 110, 0.05);
+        border: 1px solid rgba(201, 169, 110, 0.22);
+        text-align: center;
       }
       .event-countdown.visible {
         display: flex;
       }
-      .event-countdown .countdown-icon {
+      .countdown-title {
+        font-size: 0.65rem;
+        letter-spacing: 2.5px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      .countdown-blocks {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .countdown-block {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-width: 56px;
+      }
+      .countdown-num {
+        font-family: 'Playfair Display', serif;
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1;
+        min-width: 52px;
+        text-align: center;
+        background: rgba(201, 169, 110, 0.08);
+        padding: 8px 10px;
+        border: 1px solid rgba(201, 169, 110, 0.2);
+      }
+      .countdown-unit {
+        font-size: 0.62rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        margin-top: 5px;
+      }
+      .countdown-colon {
+        font-size: 1.8rem;
+        color: rgba(201, 169, 110, 0.4);
+        line-height: 1;
+        padding-top: 8px;
+        align-self: flex-start;
+      }
+      .countdown-today {
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--gold);
+        letter-spacing: 1px;
+        animation: pulse-today 1.5s ease-in-out infinite;
+      }
+      @keyframes pulse-today {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.6;
+        }
+      }
+
+      /* ── Call / action buttons ── */
+      .action-call-strip {
+        display: none;
+        gap: 10px;
+        margin-top: 20px;
+        flex-wrap: wrap;
+      }
+      .action-call-strip.visible {
+        display: flex;
+      }
+      .action-call-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 13px 18px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        text-decoration: none;
+        border: 1px solid var(--border);
+        background: var(--bg2);
+        color: var(--text-muted);
+        transition:
+          border-color 0.2s,
+          color 0.2s,
+          background 0.2s;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        letter-spacing: 0.3px;
+        flex: 1;
+        justify-content: center;
+        min-width: 160px;
+      }
+      .action-call-btn:hover {
+        border-color: rgba(201, 169, 110, 0.5);
+        color: var(--gold);
+        background: rgba(201, 169, 110, 0.05);
+      }
+      .action-call-btn.tg-action:hover {
+        border-color: rgba(41, 182, 246, 0.5);
+        color: #29b6f6;
+      }
+      .action-call-btn.phone-action:hover {
+        border-color: rgba(34, 197, 94, 0.5);
+        color: #4ade80;
+      }
+      .action-call-icon {
         font-size: 1.1rem;
         flex-shrink: 0;
-      }
-      .event-countdown .countdown-text {
-        font-size: 0.85rem;
-        color: var(--text-muted);
-      }
-      .event-countdown .countdown-days {
-        color: var(--gold);
-        font-weight: 600;
       }
 
       /* Contact buttons */
@@ -656,6 +788,13 @@
               </div>
             </div>
 
+            <!-- Big status display -->
+            <div class="big-status-display" id="bigStatusDisplay">
+              <div class="big-status-icon" id="bigStatusIcon" aria-hidden="true"></div>
+              <div class="big-status-label" id="bigStatusLabel"></div>
+              <div class="big-status-sub" id="bigStatusSub"></div>
+            </div>
+
             <!-- Progress bar -->
             <div class="status-progress" id="progressWrap">
               <div class="progress-steps" id="progressSteps">
@@ -683,10 +822,24 @@
               </div>
             </div>
 
-            <!-- Days-to-event countdown -->
+            <!-- Enhanced countdown timer -->
             <div class="event-countdown" id="eventCountdown">
-              <div class="countdown-icon">📅</div>
-              <div class="countdown-text">До события: <span class="countdown-days" id="countdownDays"></span></div>
+              <div class="countdown-title" id="countdownTitle">До мероприятия</div>
+              <div class="countdown-blocks" id="countdownBlocks">
+                <!-- Injected by JS -->
+              </div>
+            </div>
+
+            <!-- Call / action buttons -->
+            <div class="action-call-strip" id="actionCallStrip">
+              <a class="action-call-btn phone-action" id="callBtn" href="#" style="display: none">
+                <span class="action-call-icon">📞</span>
+                Позвонить менеджеру
+              </a>
+              <a class="action-call-btn tg-action" id="tgActionBtn" href="#" target="_blank" rel="noopener">
+                <span class="action-call-icon">✈</span>
+                Написать в Telegram
+              </a>
             </div>
 
             <!-- Contact & share buttons -->
@@ -948,16 +1101,44 @@
             })
           : '—';
 
-        // Days-to-event countdown
+        // ── Big status display ──────────────────────────────────────────
+        const bigDisp = document.getElementById('bigStatusDisplay');
+        const bigIcon = document.getElementById('bigStatusIcon');
+        const bigLabel = document.getElementById('bigStatusLabel');
+        const bigSub = document.getElementById('bigStatusSub');
+        const STATUS_BIG_SUB = {
+          new: 'Ваша заявка получена и ожидает рассмотрения',
+          reviewing: 'Менеджер изучает детали вашей заявки',
+          confirmed: 'Заявка одобрена — всё готово к работе!',
+          in_progress: 'Команда активно работает над вашим мероприятием',
+          completed: 'Мероприятие успешно завершено. Спасибо за выбор Nevesty Models!',
+          cancelled: 'К сожалению, заявка была отменена',
+        };
+        bigIcon.textContent = STATUS_ICONS[order.status] || '📋';
+        bigLabel.textContent = STATUS_LABELS[order.status] || order.status;
+        bigSub.textContent = STATUS_BIG_SUB[order.status] || '';
+        bigDisp.classList.add('visible');
+
+        // ── Enhanced countdown timer ────────────────────────────────────
         const countdownEl = document.getElementById('eventCountdown');
-        const countdownDaysEl = document.getElementById('countdownDays');
         if (order.event_date && (order.status === 'confirmed' || order.status === 'in_progress')) {
-          const days = Math.max(0, Math.floor((new Date(order.event_date) - Date.now()) / 86400000));
-          countdownDaysEl.textContent = days === 0 ? 'сегодня!' : days + ' ' + pluralDays(days);
+          renderCountdown(order.event_date);
           countdownEl.classList.add('visible');
+          // Update every minute
+          if (window._countdownInterval) clearInterval(window._countdownInterval);
+          window._countdownInterval = setInterval(() => renderCountdown(order.event_date), 60000);
         } else {
           countdownEl.classList.remove('visible');
+          if (window._countdownInterval) {
+            clearInterval(window._countdownInterval);
+            window._countdownInterval = null;
+          }
         }
+
+        // ── Action call strip ───────────────────────────────────────────
+        const callStrip = document.getElementById('actionCallStrip');
+        callStrip.classList.add('visible');
+        loadActionButtons(order.order_number);
 
         // Contact & share buttons
         document.getElementById('contactButtons').classList.add('visible');
@@ -993,6 +1174,62 @@
         if (mod10 === 1) return 'день';
         if (mod10 >= 2 && mod10 <= 4) return 'дня';
         return 'дней';
+      }
+
+      // ── Render countdown blocks (days / hours / minutes) ────────────────────────
+      function renderCountdown(eventDateStr) {
+        const target = new Date(eventDateStr).getTime();
+        const now = Date.now();
+        const diff = target - now;
+        const blocksEl = document.getElementById('countdownBlocks');
+        const titleEl = document.getElementById('countdownTitle');
+        if (!blocksEl) return;
+
+        if (diff <= 0) {
+          blocksEl.innerHTML = '<div class="countdown-today">Сегодня!</div>';
+          if (titleEl) titleEl.textContent = 'День мероприятия';
+          return;
+        }
+        if (titleEl) titleEl.textContent = 'До мероприятия';
+
+        const totalMinutes = Math.floor(diff / 60000);
+        const days = Math.floor(totalMinutes / 1440);
+        const hours = Math.floor((totalMinutes % 1440) / 60);
+        const minutes = totalMinutes % 60;
+
+        let html = '';
+        if (days > 0) {
+          html += `<div class="countdown-block"><div class="countdown-num">${days}</div><div class="countdown-unit">${pluralDays(days)}</div></div>`;
+          html += '<div class="countdown-colon">:</div>';
+        }
+        html += `<div class="countdown-block"><div class="countdown-num">${String(hours).padStart(2, '0')}</div><div class="countdown-unit">часов</div></div>`;
+        html += '<div class="countdown-colon">:</div>';
+        html += `<div class="countdown-block"><div class="countdown-num">${String(minutes).padStart(2, '0')}</div><div class="countdown-unit">минут</div></div>`;
+        blocksEl.innerHTML = html;
+      }
+
+      // ── Load action buttons (call, telegram) ────────────────────────────────────
+      let _actionLoaded = false;
+      async function loadActionButtons(orderNumber) {
+        if (_actionLoaded) return;
+        try {
+          const [settingsRes, configRes] = await Promise.all([fetch('/api/settings/public'), fetch('/api/config')]);
+          const settings = settingsRes.ok ? await settingsRes.json() : {};
+          const config = configRes.ok ? await configRes.json() : {};
+
+          const botUsername = config.bot_username || settings.bot_username || '';
+          const phone = settings.contacts_phone || '';
+          const tgBtn = document.getElementById('tgActionBtn');
+          if (tgBtn) {
+            tgBtn.href = botUsername ? `https://t.me/${botUsername.replace(/^@/, '')}` : 'https://t.me/nevesty_models';
+          }
+          const callBtn = document.getElementById('callBtn');
+          if (callBtn && phone) {
+            callBtn.href = `tel:${phone.replace(/\D/g, '')}`;
+            callBtn.style.display = '';
+          }
+          _actionLoaded = true;
+        } catch (_) {}
       }
 
       // ─── Load contact buttons from settings ─────────────────────────────────────
