@@ -1947,6 +1947,163 @@ router.delete('/admin/models/:id/photo', auth, async (req, res, next) => {
   }
 });
 
+// ─── Model photos portfolio API (БЛОК 16) ────────────────────────────────────
+// GET /api/models/:id/photos — public: list all photos for a model
+router.get('/models/:id/photos', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    const model = await get('SELECT id FROM models WHERE id=? AND archived=0', [id]);
+    if (!model) return res.status(404).json({ error: 'Модель не найдена' });
+    const photos = await query(
+      'SELECT id, url, is_cover, sort_order, uploaded_at FROM model_photos WHERE model_id=? ORDER BY sort_order ASC, id ASC',
+      [id]
+    );
+    res.json(photos);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Multer storage for per-model subdirectories
+const modelPhotoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const modelId = parseInt(req.params.id);
+    if (!Number.isInteger(modelId) || modelId <= 0) return cb(new Error('Invalid model ID'));
+    const dir = path.join(__dirname, '../uploads/models', String(modelId));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `photo_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+  },
+});
+const uploadModelPhoto = multer({
+  storage: modelPhotoStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (file.mimetype.startsWith('image/') && ALLOWED_IMG_EXTS.includes(ext)) cb(null, true);
+    else cb(new Error('Допускаются только изображения JPG, PNG, GIF, WebP'));
+  },
+});
+
+// POST /api/admin/models/:id/photos — admin: upload photo(s) to model portfolio
+router.post('/admin/models/:id/photos', auth, uploadModelPhoto.array('photos', 20), async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    const model = await get('SELECT id FROM models WHERE id=?', [id]);
+    if (!model) return res.status(404).json({ error: 'Модель не найдена' });
+    if (!req.files || !req.files.length) return res.status(400).json({ error: 'Файлы не переданы' });
+
+    const maxPhotos = parseInt(process.env.MODEL_MAX_PHOTOS) || 20;
+    const existingCount = (await get('SELECT COUNT(*) as cnt FROM model_photos WHERE model_id=?', [id]))?.cnt || 0;
+    const available = maxPhotos - existingCount;
+    if (available <= 0) return res.status(400).json({ error: `Достигнут лимит фото (${maxPhotos})` });
+
+    const filesToProcess = req.files.slice(0, available);
+    const maxSortRow = await get('SELECT MAX(sort_order) as max_sort FROM model_photos WHERE model_id=?', [id]);
+    let sortOrder = (maxSortRow?.max_sort ?? -1) + 1;
+
+    const inserted = [];
+    for (const file of filesToProcess) {
+      const { full } = await convertToWebPWithThumb(file.path);
+      const filename = path.basename(full);
+      const url = `/uploads/models/${id}/${filename}`;
+      const result = await run(
+        'INSERT INTO model_photos (model_id, filename, url, is_cover, sort_order) VALUES (?,?,?,0,?)',
+        [id, filename, url, sortOrder]
+      );
+      inserted.push({ id: result.id, url, is_cover: 0, sort_order: sortOrder });
+      sortOrder++;
+    }
+
+    await logAudit(req, 'upload_photos', 'model', id, { count: inserted.length });
+    res.json({ ok: true, photos: inserted });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// DELETE /api/admin/models/:id/photos/:photoId — admin: delete a portfolio photo
+router.delete('/admin/models/:id/photos/:photoId', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    const photoId = parseInt(req.params.photoId);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    if (!Number.isInteger(photoId) || photoId <= 0) return res.status(400).json({ error: 'Invalid photo ID' });
+
+    const photo = await get('SELECT * FROM model_photos WHERE id=? AND model_id=?', [photoId, id]);
+    if (!photo) return res.status(404).json({ error: 'Фото не найдено' });
+
+    await run('DELETE FROM model_photos WHERE id=?', [photoId]);
+    deleteFile(photo.url);
+    deleteFile(deriveThumbUrl(photo.url));
+
+    await logAudit(req, 'delete_photo', 'model', id, { photo_id: photoId, url: photo.url });
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PATCH /api/admin/models/:id/photos/:photoId/cover — admin: set a photo as cover
+router.patch('/admin/models/:id/photos/:photoId/cover', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    const photoId = parseInt(req.params.photoId);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+    if (!Number.isInteger(photoId) || photoId <= 0) return res.status(400).json({ error: 'Invalid photo ID' });
+
+    const model = await get('SELECT id FROM models WHERE id=?', [id]);
+    if (!model) return res.status(404).json({ error: 'Модель не найдена' });
+    const photo = await get('SELECT id FROM model_photos WHERE id=? AND model_id=?', [photoId, id]);
+    if (!photo) return res.status(404).json({ error: 'Фото не найдено' });
+
+    await run('UPDATE model_photos SET is_cover=0 WHERE model_id=?', [id]);
+    await run('UPDATE model_photos SET is_cover=1 WHERE id=?', [photoId]);
+
+    await logAudit(req, 'set_cover_photo', 'model', id, { photo_id: photoId });
+    res.json({ ok: true, cover_photo_id: photoId });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PATCH /api/admin/models/:id/photos/reorder — admin: reorder portfolio photos
+// Body: { "order": [3,1,2,4] } — array of photo IDs in desired order
+router.patch('/admin/models/:id/photos/reorder', auth, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid model ID' });
+
+    const { order } = req.body;
+    if (!Array.isArray(order) || !order.length) return res.status(400).json({ error: 'order должен быть массивом ID' });
+
+    const validOrder = order.map(Number).filter(n => Number.isInteger(n) && n > 0);
+    if (!validOrder.length) return res.status(400).json({ error: 'Некорректные ID фото' });
+
+    // Verify all photos belong to this model
+    const owned = await query(
+      `SELECT id FROM model_photos WHERE model_id=? AND id IN (${validOrder.map(() => '?').join(',')})`,
+      [id, ...validOrder]
+    );
+    const ownedIds = new Set(owned.map(r => r.id));
+    const allOwned = validOrder.every(pid => ownedIds.has(pid));
+    if (!allOwned) return res.status(403).json({ error: 'Некоторые фото не принадлежат этой модели' });
+
+    for (let i = 0; i < validOrder.length; i++) {
+      await run('UPDATE model_photos SET sort_order=? WHERE id=? AND model_id=?', [i, validOrder[i], id]);
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── Model availability (calendar) — new REST-style endpoints ─────────────────
 // GET  /api/admin/models/:id/availability?month=YYYY-MM
 router.get('/admin/models/:id/availability', auth, async (req, res, next) => {
