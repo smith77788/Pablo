@@ -430,6 +430,26 @@ modalOverlay?.addEventListener('click', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && modalOverlay?.classList.contains('open')) closeModal();
 });
+// Focus trap inside model modal
+modalOverlay?.addEventListener('keydown', function (e) {
+  if (e.key !== 'Tab' || !this.classList.contains('open')) return;
+  const focusable = this.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  const arr = Array.from(focusable).filter(el => !el.disabled && el.offsetParent !== null);
+  if (!arr.length) return;
+  const first = arr[0];
+  const last = arr[arr.length - 1];
+  if (e.shiftKey) {
+    if (document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else {
+    if (document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+});
 function closeModal() {
   modalOverlay?.classList.remove('open');
   modalOverlay?.setAttribute('aria-hidden', 'true');

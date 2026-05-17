@@ -32,14 +32,15 @@
 
 /* ─── LIGHT THEME VARIABLES ──────────────────────── */
 [data-theme='light'] {
-  --gold: #b8860b;
-  --gold-light: #d4a853;
-  --gold-dark: #8b6914;
+  /* --gold darkened to #7a5c0a to ensure 4.5:1 contrast on light backgrounds (WCAG AA) */
+  --gold: #7a5c0a;
+  --gold-light: #b8860b;
+  --gold-dark: #5c4408;
   --bg: #f8f6f2;
   --bg2: #f0ece4;
   --bg3: #e8e2d8;
   --border: rgba(0, 0, 0, 0.1);
-  --border-gold: rgba(184, 134, 11, 0.25);
+  --border-gold: rgba(122, 92, 10, 0.25);
   --text: #1a1a1a;
   --text-muted: rgba(0, 0, 0, 0.55);
   --text-dim: rgba(0, 0, 0, 0.38);
