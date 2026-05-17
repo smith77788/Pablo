@@ -6680,6 +6680,7 @@ function initBot(app) {
       { command: 'calculator', description: '🧮 Калькулятор стоимости' },
       { command: 'reviews', description: '⭐ Отзывы' },
       { command: 'faq', description: '❓ Частые вопросы' },
+      { command: 'language', description: '🌐 Сменить язык' },
       { command: 'help', description: '🆘 Помощь' },
       { command: 'cancel', description: '❌ Отменить действие' },
     ])
@@ -16658,4 +16659,7 @@ module.exports = {
   notifyPaymentSuccess,
   sendStarsInvoice,
   _registerNewFeatures,
+  getUserLang,
+  setUserLang,
+  checkFaqMatch,
 };
