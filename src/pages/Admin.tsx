@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/integrations/supabase/client";
 import { AdminDashboard } from "@/components/admin/AdminDashboard";
 import { SettingsPanel } from "@/components/admin/SettingsPanel";
 import { AnalyticsDashboard } from "@/components/analytics/AnalyticsDashboard";

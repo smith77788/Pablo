@@ -21,13 +21,6 @@ jobs:
           path: pablo-source
           fetch-depth: 1
 
-      - name: Debug — list source files
-        run: |
-          echo "=== Source src/ ==="
-          find pablo-source/src -type f | sort
-          echo "=== Source supabase/ ==="
-          find pablo-source/supabase -type f | sort
-
       - name: Checkout pablo-760fe3a5 (Lovable)
         uses: actions/checkout@v4
         with:
@@ -36,21 +29,52 @@ jobs:
           path: lovable-target
           fetch-depth: 1
 
-      - name: Sync all src/ and supabase/
+      - name: Sync src/ (Lovable-compatible, preserve ui/ and integrations/)
         run: |
           cd lovable-target
 
-          # Sync entire src/ from Pablo
-          rsync -av --delete \
-            ../pablo-source/src/ \
-            src/
+          # Pages — полная замена (наши страницы)
+          rsync -av --delete ../pablo-source/src/pages/ src/pages/
 
-          # Sync our migration (don't delete other migrations)
+          # Наши компоненты (admin, booking, catalog, reviews, analytics, payments, promo)
+          for dir in admin booking catalog reviews analytics payments promo; do
+            if [ -d "../pablo-source/src/components/$dir" ]; then
+              mkdir -p src/components/$dir
+              rsync -av --delete ../pablo-source/src/components/$dir/ src/components/$dir/
+              echo "✓ synced components/$dir"
+            fi
+          done
+
+          # Hooks — полная замена
+          rsync -av --delete ../pablo-source/src/hooks/ src/hooks/
+
+          # Types — полная замена
+          rsync -av --delete ../pablo-source/src/types/ src/types/
+
+          # lib/ — добавляем наши файлы (utils.ts, supabase.ts), НЕ удаляем чужие
+          rsync -av ../pablo-source/src/lib/ src/lib/
+
+          # integrations/supabase/client.ts — наш клиент в стандартном пути Lovable
+          mkdir -p src/integrations/supabase
+          cp ../pablo-source/src/integrations/supabase/client.ts \
+             src/integrations/supabase/client.ts
+
+          # App.tsx — наш роутер
+          cp ../pablo-source/src/App.tsx src/App.tsx
+
+          # НЕ трогаем: src/components/ui/ (shadcn Lovable), src/main.tsx, src/index.css
+          # src/integrations/supabase/types.ts (Lovable генерирует из схемы БД)
+
+      - name: Sync supabase/
+        run: |
+          cd lovable-target
+
+          # Migration
           mkdir -p supabase/migrations
           cp ../pablo-source/supabase/migrations/003_nevesty_missing_features.sql \
              supabase/migrations/003_nevesty_missing_features.sql 2>/dev/null || true
 
-          # Sync Edge Functions
+          # Edge Functions
           for fn in telegram-webhook send-sms send-email payment-webhook broadcast; do
             if [ -d "../pablo-source/supabase/functions/$fn" ]; then
               mkdir -p supabase/functions/$fn
@@ -60,14 +84,14 @@ jobs:
             fi
           done
 
-          # Sync LOVABLE_PROMPT.md
-          cp ../pablo-source/LOVABLE_PROMPT.md LOVABLE_PROMPT.md
+      - name: Sync LOVABLE_PROMPT.md
+        run: |
+          cp pablo-source/LOVABLE_PROMPT.md lovable-target/LOVABLE_PROMPT.md
 
-          # Sync bridge file if exists
-          [ -f ../pablo-source/CLAUDE_TO_LOVABLE.md ] && \
-            cp ../pablo-source/CLAUDE_TO_LOVABLE.md CLAUDE_TO_LOVABLE.md || true
-
-          echo "=== Files to commit ==="
+      - name: Debug — show changed files
+        run: |
+          cd lovable-target
+          echo "=== Changed files ==="
           git status --short
 
       - name: Commit and push

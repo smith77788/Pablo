@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/integrations/supabase/client";
 import type { Model } from "@/types";
 
 const EMPTY: Partial<Model> = { name: "", city: "", category: "fashion", is_active: true, featured: false };
