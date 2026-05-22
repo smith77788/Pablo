@@ -2,9 +2,11 @@
 """TG Manager — Telegram bot management platform."""
 import asyncio
 import logging
+import ssl
 import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
@@ -18,9 +20,14 @@ logging.basicConfig(
 
 
 async def main() -> None:
+    # Environment uses a proxy with self-signed cert — disable SSL verification.
+    bot_session = AiohttpSession()
+    bot_session._connector_init["ssl"] = False
+
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=bot_session,
     )
     dp = Dispatcher(storage=MemoryStorage())
 
@@ -33,7 +40,12 @@ async def main() -> None:
     dp.include_router(bulk.router)
 
     pool = await create_pool()
-    async with aiohttp.ClientSession() as http:
+    # Same for outbound calls to managed bots
+    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+    async with aiohttp.ClientSession(connector=connector) as http:
         logging.info("TG Manager started")
         try:
             await dp.start_polling(bot, pool=pool, http=http)

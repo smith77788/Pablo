@@ -19,7 +19,8 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
         return
 
     await message.answer(
-        "👋 <b>TG Manager</b> — управление вашими Telegram-ботами\n\n"
+        f"👋 <b>TG Manager</b> — управление вашими Telegram-ботами\n\n"
+        f"Ваш Telegram ID: <code>{message.from_user.id}</code>\n\n"
         "Добавьте первый бот по токену или выберите из списка:",
         parse_mode="HTML",
         reply_markup=main_menu(),
