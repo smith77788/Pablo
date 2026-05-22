@@ -27,3 +27,7 @@ class BroadcastCb(CallbackData, prefix="bc"):
     action: str   # menu | compose | confirm | cancel | status
     bot_id: int
     broadcast_id: int = 0
+
+
+class BulkCb(CallbackData, prefix="bulk"):
+    action: str   # menu | name | name_lang | desc | desc_lang | short | short_lang | check

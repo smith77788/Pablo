@@ -77,7 +77,7 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
     total = await db.get_audience_count(pool, row["bot_id"])
     bc_id = await db.create_broadcast(pool, row["bot_id"], text, total, callback.from_user.id)
 
-    broadcaster.start(db, http, bc_id, row["token"], row["bot_id"], text)
+    broadcaster.start(pool, http, bc_id, row["token"], row["bot_id"], text)
 
     await state.clear()
     await callback.message.edit_text(

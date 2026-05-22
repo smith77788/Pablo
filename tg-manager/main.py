@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from database.db import create_pool
-from bot.handlers import start, bots, edit, audience, webhooks, broadcast
+from bot.handlers import start, bots, edit, audience, webhooks, broadcast, bulk
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,6 +30,7 @@ async def main() -> None:
     dp.include_router(audience.router)
     dp.include_router(webhooks.router)
     dp.include_router(broadcast.router)
+    dp.include_router(bulk.router)
 
     pool = await create_pool()
     async with aiohttp.ClientSession() as http:

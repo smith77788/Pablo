@@ -1,15 +1,30 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.callbacks import BotCb, EditCb, AudCb, WebhookCb, BroadcastCb
+from bot.callbacks import BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb
 
 PAGE_SIZE = 5
 
 
 def main_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Мои боты", callback_data=BotCb(action="list", page=0))
-    kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
-    kb.adjust(2)
+    kb.button(text="🤖 Мои боты",       callback_data=BotCb(action="list", page=0))
+    kb.button(text="➕ Добавить бота",   callback_data=BotCb(action="add"))
+    kb.button(text="📦 Массовые операции", callback_data=BulkCb(action="menu"))
+    kb.adjust(2, 1)
+    return kb.as_markup()
+
+
+def bulk_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✏️ Имя всем",           callback_data=BulkCb(action="name"))
+    kb.button(text="🌍 Имя по GEO всем",    callback_data=BulkCb(action="name_lang"))
+    kb.button(text="📄 Описание всем",      callback_data=BulkCb(action="desc"))
+    kb.button(text="🌍 Описание по GEO",    callback_data=BulkCb(action="desc_lang"))
+    kb.button(text="📃 Краткое всем",       callback_data=BulkCb(action="short"))
+    kb.button(text="🌍 Краткое по GEO",     callback_data=BulkCb(action="short_lang"))
+    kb.button(text="🔍 Проверить токены",   callback_data=BulkCb(action="check"))
+    kb.button(text="◀️ Главное меню",       callback_data=BotCb(action="list", page=0))
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 

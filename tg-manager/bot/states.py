@@ -29,3 +29,15 @@ class Broadcast(StatesGroup):
 
 class Compare(StatesGroup):
     waiting_second_bot = State()   # user types username or bot_id
+
+
+class BulkEdit(StatesGroup):
+    waiting_name = State()
+    waiting_name_lang = State()
+    waiting_localized_name = State()
+    waiting_desc = State()
+    waiting_desc_lang = State()
+    waiting_localized_desc = State()
+    waiting_short = State()
+    waiting_short_lang = State()
+    waiting_localized_short = State()
