@@ -1,30 +1,36 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.callbacks import BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb
+from bot.callbacks import (
+    BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
+    CommandsCb, TemplateCb, ScheduleCb,
+)
 
 PAGE_SIZE = 5
 
 
 def main_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Мои боты",       callback_data=BotCb(action="list", page=0))
-    kb.button(text="➕ Добавить бота",   callback_data=BotCb(action="add"))
-    kb.button(text="📦 Массовые операции", callback_data=BulkCb(action="menu"))
-    kb.adjust(2, 1)
+    kb.button(text="🤖 Мои боты",           callback_data=BotCb(action="list", page=0))
+    kb.button(text="➕ Добавить бота",       callback_data=BotCb(action="add"))
+    kb.button(text="📥 Импорт ботов",        callback_data=BulkCb(action="import"))
+    kb.button(text="📦 Массовые операции",   callback_data=BulkCb(action="menu"))
+    kb.adjust(2, 2)
     return kb.as_markup()
 
 
 def bulk_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✏️ Имя всем",           callback_data=BulkCb(action="name"))
-    kb.button(text="🌍 Имя по GEO всем",    callback_data=BulkCb(action="name_lang"))
-    kb.button(text="📄 Описание всем",      callback_data=BulkCb(action="desc"))
-    kb.button(text="🌍 Описание по GEO",    callback_data=BulkCb(action="desc_lang"))
-    kb.button(text="📃 Краткое всем",       callback_data=BulkCb(action="short"))
-    kb.button(text="🌍 Краткое по GEO",     callback_data=BulkCb(action="short_lang"))
-    kb.button(text="🔍 Проверить токены",   callback_data=BulkCb(action="check"))
-    kb.button(text="◀️ Главное меню",       callback_data=BotCb(action="list", page=0))
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.button(text="✏️ Имя всем",            callback_data=BulkCb(action="name"))
+    kb.button(text="🌍 Имя по GEO",          callback_data=BulkCb(action="name_lang"))
+    kb.button(text="📄 Описание всем",       callback_data=BulkCb(action="desc"))
+    kb.button(text="🌍 Описание по GEO",     callback_data=BulkCb(action="desc_lang"))
+    kb.button(text="📃 Краткое всем",        callback_data=BulkCb(action="short"))
+    kb.button(text="🌍 Краткое по GEO",      callback_data=BulkCb(action="short_lang"))
+    kb.button(text="🤖 Команды всем",        callback_data=BulkCb(action="commands"))
+    kb.button(text="🌍 Команды по GEO",      callback_data=BulkCb(action="commands_lang"))
+    kb.button(text="🔍 Проверить токены",    callback_data=BulkCb(action="check"))
+    kb.button(text="◀️ Главное меню",        callback_data=BotCb(action="list", page=0))
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -51,76 +57,157 @@ def bots_list(bots: list, page: int = 0) -> InlineKeyboardMarkup:
 
 def bot_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✏️ Профиль",    callback_data=EditCb(action="menu", bot_id=bot_id))
-    kb.button(text="👥 Аудитория",  callback_data=AudCb(action="menu", bot_id=bot_id))
-    kb.button(text="📢 Рассылка",   callback_data=BroadcastCb(action="menu", bot_id=bot_id))
-    kb.button(text="🔗 Вебхук",     callback_data=WebhookCb(action="menu", bot_id=bot_id))
-    kb.button(text="⚖️ Сравнить",   callback_data=AudCb(action="compare", bot_id=bot_id))
-    kb.button(text="🗑 Удалить",    callback_data=BotCb(action="delete", bot_id=bot_id))
-    kb.button(text="◀️ К списку",   callback_data=BotCb(action="list", page=0))
-    kb.adjust(2, 2, 2, 1)
+    kb.button(text="✏️ Профиль",      callback_data=EditCb(action="menu", bot_id=bot_id))
+    kb.button(text="👥 Аудитория",    callback_data=AudCb(action="menu", bot_id=bot_id))
+    kb.button(text="📢 Рассылка",     callback_data=BroadcastCb(action="menu", bot_id=bot_id))
+    kb.button(text="⏰ Расписание",   callback_data=ScheduleCb(action="menu", bot_id=bot_id))
+    kb.button(text="🤖 Команды",      callback_data=CommandsCb(action="menu", bot_id=bot_id))
+    kb.button(text="📝 Шаблоны",      callback_data=TemplateCb(action="list", bot_id=bot_id))
+    kb.button(text="🔗 Вебхук",       callback_data=WebhookCb(action="menu", bot_id=bot_id))
+    kb.button(text="⚖️ Сравнить",    callback_data=AudCb(action="compare", bot_id=bot_id))
+    kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
+    kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
 def edit_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="📝 Имя",              callback_data=EditCb(action="name", bot_id=bot_id))
-    kb.button(text="🌍 Имя по GEO",       callback_data=EditCb(action="name_lang", bot_id=bot_id))
-    kb.button(text="📄 Описание",         callback_data=EditCb(action="desc", bot_id=bot_id))
-    kb.button(text="🌍 Описание по GEO",  callback_data=EditCb(action="desc_lang", bot_id=bot_id))
-    kb.button(text="📃 Краткое описание", callback_data=EditCb(action="short", bot_id=bot_id))
-    kb.button(text="🌍 Краткое по GEO",   callback_data=EditCb(action="short_lang", bot_id=bot_id))
-    kb.button(text="🖼 Фото",             callback_data=EditCb(action="photo", bot_id=bot_id))
-    kb.button(text="◀️ Назад",            callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.button(text="📝 Имя",               callback_data=EditCb(action="name", bot_id=bot_id))
+    kb.button(text="🌍 Имя по GEO",        callback_data=EditCb(action="name_lang", bot_id=bot_id))
+    kb.button(text="📄 Описание",          callback_data=EditCb(action="desc", bot_id=bot_id))
+    kb.button(text="🌍 Описание по GEO",   callback_data=EditCb(action="desc_lang", bot_id=bot_id))
+    kb.button(text="📃 Краткое описание",  callback_data=EditCb(action="short", bot_id=bot_id))
+    kb.button(text="🌍 Краткое по GEO",    callback_data=EditCb(action="short_lang", bot_id=bot_id))
+    kb.button(text="🖼 Фото",              callback_data=EditCb(action="photo", bot_id=bot_id))
+    kb.button(text="🗑 Удалить фото",      callback_data=EditCb(action="del_photo", bot_id=bot_id))
+    kb.button(text="◀️ Назад",             callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
 def audience_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить",    callback_data=AudCb(action="refresh", bot_id=bot_id))
-    kb.button(text="⚖️ Сравнить",   callback_data=AudCb(action="compare", bot_id=bot_id))
-    kb.button(text="◀️ Назад",      callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 1)
+    kb.button(text="🔄 Обновить",      callback_data=AudCb(action="refresh", bot_id=bot_id))
+    kb.button(text="📊 Статистика",    callback_data=AudCb(action="stats", bot_id=bot_id))
+    kb.button(text="📤 Экспорт CSV",   callback_data=AudCb(action="export", bot_id=bot_id))
+    kb.button(text="⚖️ Сравнить",     callback_data=AudCb(action="compare", bot_id=bot_id))
+    kb.button(text="◀️ Назад",        callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 
 def webhook_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔗 Установить URL", callback_data=WebhookCb(action="set", bot_id=bot_id))
-    kb.button(text="❌ Удалить вебхук", callback_data=WebhookCb(action="delete", bot_id=bot_id))
-    kb.button(text="◀️ Назад",          callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.button(text="🔗 Установить URL",  callback_data=WebhookCb(action="set", bot_id=bot_id))
+    kb.button(text="❌ Удалить вебхук",  callback_data=WebhookCb(action="delete", bot_id=bot_id))
+    kb.button(text="◀️ Назад",           callback_data=BotCb(action="select", bot_id=bot_id))
     kb.adjust(2, 1)
     return kb.as_markup()
 
 
 def broadcast_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="📝 Написать рассылку", callback_data=BroadcastCb(action="compose", bot_id=bot_id))
-    kb.button(text="📋 История",           callback_data=BroadcastCb(action="status", bot_id=bot_id))
-    kb.button(text="◀️ Назад",             callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(1)
+    kb.button(text="📝 Написать рассылку",   callback_data=BroadcastCb(action="compose", bot_id=bot_id))
+    kb.button(text="📝 Из шаблона",          callback_data=TemplateCb(action="list", bot_id=bot_id))
+    kb.button(text="📋 История рассылок",    callback_data=BroadcastCb(action="status", bot_id=bot_id))
+    kb.button(text="◀️ Назад",               callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(2, 1, 1)
     return kb.as_markup()
 
 
 def broadcast_confirm(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Запустить", callback_data=BroadcastCb(action="confirm", bot_id=bot_id))
-    kb.button(text="❌ Отмена",    callback_data=BroadcastCb(action="cancel", bot_id=bot_id))
+    kb.button(text="🚀 Запустить",  callback_data=BroadcastCb(action="confirm", bot_id=bot_id))
+    kb.button(text="❌ Отмена",     callback_data=BroadcastCb(action="cancel", bot_id=bot_id))
     kb.adjust(2)
     return kb.as_markup()
 
 
+def commands_menu(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✏️ Установить (дефолт)",  callback_data=CommandsCb(action="set", bot_id=bot_id))
+    kb.button(text="🌍 Установить по языку",   callback_data=CommandsCb(action="set_lang", bot_id=bot_id))
+    kb.button(text="🗑 Удалить команды",       callback_data=CommandsCb(action="delete", bot_id=bot_id))
+    kb.button(text="◀️ Назад",                callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(2, 1, 1)
+    return kb.as_markup()
+
+
+def templates_list(templates: list, bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for tpl in templates[:10]:
+        kb.button(
+            text=f"📝 {tpl['name'][:28]}",
+            callback_data=TemplateCb(action="view", template_id=tpl["id"], bot_id=bot_id),
+        )
+    kb.adjust(1)
+    kb.row(InlineKeyboardButton(
+        text="➕ Новый шаблон",
+        callback_data=TemplateCb(action="add", bot_id=bot_id).pack(),
+    ))
+    if bot_id:
+        kb.row(InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data=BotCb(action="select", bot_id=bot_id).pack(),
+        ))
+    else:
+        kb.row(InlineKeyboardButton(
+            text="◀️ Главное меню",
+            callback_data=BotCb(action="list", page=0).pack(),
+        ))
+    return kb.as_markup()
+
+
+def template_actions(template_id: int, bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if bot_id:
+        kb.button(
+            text="📢 Использовать для рассылки",
+            callback_data=TemplateCb(action="use", template_id=template_id, bot_id=bot_id),
+        )
+    kb.button(
+        text="🗑 Удалить шаблон",
+        callback_data=TemplateCb(action="delete", template_id=template_id, bot_id=bot_id),
+    )
+    kb.button(
+        text="◀️ К шаблонам",
+        callback_data=TemplateCb(action="list", bot_id=bot_id),
+    )
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def schedule_menu(bot_id: int, schedules: list | None = None) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="➕ Запланировать рассылку",
+        callback_data=ScheduleCb(action="create", bot_id=bot_id),
+    )
+    if schedules:
+        for s in schedules:
+            if s["status"] == "pending":
+                dt = s["execute_at"].strftime("%d.%m %H:%M")
+                preview = s["message_text"][:20].replace("\n", " ")
+                kb.button(
+                    text=f"❌ Отменить {dt} — {preview}…",
+                    callback_data=ScheduleCb(action="cancel", bot_id=bot_id, schedule_id=s["id"]),
+                )
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def bots_pick(bots: list, exclude_bot_id: int) -> InlineKeyboardMarkup:
-    """Keyboard for picking a second bot to compare audiences."""
     kb = InlineKeyboardBuilder()
     for bot in bots:
         if bot["bot_id"] == exclude_bot_id:
             continue
         label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
-        kb.button(text=label, callback_data=AudCb(action="pick_b",
-                                                   bot_id=exclude_bot_id,
-                                                   target_id=bot["bot_id"]))
+        kb.button(
+            text=label,
+            callback_data=AudCb(action="pick_b", bot_id=exclude_bot_id, target_id=bot["bot_id"]),
+        )
     kb.adjust(1)
     return kb.as_markup()
 

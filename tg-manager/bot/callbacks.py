@@ -2,32 +2,49 @@ from aiogram.filters.callback_data import CallbackData
 
 
 class BotCb(CallbackData, prefix="bot"):
-    action: str   # list | select | delete | confirm_delete
+    action: str
     bot_id: int = 0
     page: int = 0
 
 
 class EditCb(CallbackData, prefix="edit"):
-    action: str   # menu | name | name_lang | desc | desc_lang | short | short_lang | photo
+    action: str
     bot_id: int
 
 
 class AudCb(CallbackData, prefix="aud"):
-    action: str   # menu | refresh | compare | pick_b
+    action: str
     bot_id: int
-    target_id: int = 0  # second bot for compare
+    target_id: int = 0
 
 
 class WebhookCb(CallbackData, prefix="wh"):
-    action: str   # menu | set | delete
+    action: str
     bot_id: int
 
 
 class BroadcastCb(CallbackData, prefix="bc"):
-    action: str   # menu | compose | confirm | cancel | status
+    action: str
     bot_id: int
     broadcast_id: int = 0
 
 
 class BulkCb(CallbackData, prefix="bulk"):
-    action: str   # menu | name | name_lang | desc | desc_lang | short | short_lang | check
+    action: str
+
+
+class CommandsCb(CallbackData, prefix="cmd"):
+    action: str
+    bot_id: int
+
+
+class TemplateCb(CallbackData, prefix="tpl"):
+    action: str
+    bot_id: int = 0
+    template_id: int = 0
+
+
+class ScheduleCb(CallbackData, prefix="sch"):
+    action: str
+    bot_id: int
+    schedule_id: int = 0

@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from bot.callbacks import BulkCb, BotCb
 from bot.keyboards import bulk_menu, main_menu
-from bot.states import BulkEdit
+from bot.states import BulkEdit, ImportBots
 from database import db
 from services import bot_api
 
@@ -260,3 +260,158 @@ async def msg_bulk_localized_short(message: Message, state: FSMContext,
                                         bot_api.set_short_description, short, lang)
     await msg.edit_text(_result_text(ok, fail, total, f"Краткое [{lang or 'default'}]"),
                          parse_mode="HTML", reply_markup=bulk_menu())
+
+
+# ── Bulk commands (default) ───────────────────────────────────────────────
+
+@router.callback_query(BulkCb.filter(F.action == "commands"))
+async def cb_bulk_commands(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(BulkEdit.waiting_commands)
+    await callback.message.edit_text(
+        "🤖 <b>Команды для всех ботов (по умолчанию)</b>\n\n"
+        "Отправьте список команд, каждая с новой строки:\n\n"
+        "<code>start - Главное меню\n"
+        "help - Помощь\n"
+        "about - О боте</code>",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(BulkEdit.waiting_commands)
+async def msg_bulk_commands(message: Message, state: FSMContext,
+                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    from bot.handlers.commands import _parse_commands
+    commands = _parse_commands(message.text or "")
+    if not commands:
+        await message.answer(
+            "❌ Неверный формат. Каждая строка:\n<code>/команда - Описание</code>",
+            parse_mode="HTML",
+        )
+        return
+    await state.clear()
+    msg = await message.answer("⏳ Применяю команды ко всем ботам…")
+    ok, fail, total = await _apply_all(pool, message.from_user.id, http,
+                                        bot_api.set_my_commands, commands, "")
+    await msg.edit_text(_result_text(ok, fail, total, "Команды установлены"),
+                         parse_mode="HTML", reply_markup=bulk_menu())
+
+
+# ── Bulk commands by GEO ──────────────────────────────────────────────────
+
+@router.callback_query(BulkCb.filter(F.action == "commands_lang"))
+async def cb_bulk_commands_lang(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(BulkEdit.waiting_commands_lang)
+    await callback.message.edit_text(
+        f"🌍 <b>Команды по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(BulkEdit.waiting_commands_lang)
+async def msg_bulk_commands_lang(message: Message, state: FSMContext) -> None:
+    await state.update_data(lang=message.text.strip())
+    await state.set_state(BulkEdit.waiting_localized_commands)
+    await message.answer(
+        "🤖 Отправьте список команд:\n\n"
+        "<code>start - Главное меню\n"
+        "help - Помощь</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(BulkEdit.waiting_localized_commands)
+async def msg_bulk_localized_commands(message: Message, state: FSMContext,
+                                       pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    from bot.handlers.commands import _parse_commands
+    data = await state.get_data()
+    lang = "" if data["lang"] == "-" else data["lang"]
+    commands = _parse_commands(message.text or "")
+    if not commands:
+        await message.answer(
+            "❌ Неверный формат. Каждая строка:\n<code>/команда - Описание</code>",
+            parse_mode="HTML",
+        )
+        return
+    await state.clear()
+    msg = await message.answer("⏳ Применяю ко всем ботам…")
+    ok, fail, total = await _apply_all(pool, message.from_user.id, http,
+                                        bot_api.set_my_commands, commands, lang)
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Команды [{lang or 'default'}]"),
+        parse_mode="HTML", reply_markup=bulk_menu(),
+    )
+
+
+# ── Import multiple bots ──────────────────────────────────────────────────
+
+@router.callback_query(BulkCb.filter(F.action == "import"))
+async def cb_import(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(ImportBots.waiting_tokens)
+    await callback.message.edit_text(
+        "📥 <b>Массовый импорт ботов</b>\n\n"
+        "Отправьте токены ботов — по одному на строке:\n\n"
+        "<code>123456789:AAF...\n"
+        "987654321:BBG...\n"
+        "555555555:CCH...</code>",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(ImportBots.waiting_tokens)
+async def msg_import_tokens(message: Message, state: FSMContext,
+                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    await state.clear()
+    lines = [l.strip() for l in (message.text or "").strip().splitlines() if l.strip()]
+    if not lines:
+        await message.answer("❌ Не найдено ни одного токена.", reply_markup=main_menu())
+        return
+
+    progress = await message.answer(f"⏳ Проверяю {len(lines)} токенов…")
+
+    results = await asyncio.gather(
+        *(bot_api.get_me(http, t) for t in lines),
+        return_exceptions=True,
+    )
+
+    added, skipped, failed = [], [], []
+    for token, info in zip(lines, results):
+        if isinstance(info, Exception) or not info:
+            failed.append(f"❌ {token[:25]}…")
+            continue
+        ok = await db.add_bot(
+            pool,
+            token=token,
+            bot_id=info["id"],
+            username=info.get("username", ""),
+            first_name=info.get("first_name", ""),
+            added_by=message.from_user.id,
+        )
+        label = f"@{info.get('username') or info.get('first_name', str(info['id']))}"
+        if ok:
+            added.append(f"✅ {label}")
+        else:
+            skipped.append(f"⚠️ {label} (уже есть)")
+
+    parts = []
+    if added:
+        parts.append(f"✅ Добавлено: <b>{len(added)}</b>")
+    if skipped:
+        parts.append(f"⚠️ Уже были: <b>{len(skipped)}</b>")
+    if failed:
+        parts.append(f"❌ Ошибок: <b>{len(failed)}</b>")
+
+    all_labels = added + skipped + failed
+    detail = "\n".join(all_labels[:30])
+    if len(all_labels) > 30:
+        detail += f"\n…и ещё {len(all_labels) - 30}"
+
+    await progress.edit_text(
+        f"📥 <b>Результат импорта</b>\n\n"
+        + "\n".join(parts)
+        + (f"\n\n{detail}" if detail else ""),
+        parse_mode="HTML",
+        reply_markup=main_menu(),
+    )

@@ -144,3 +144,110 @@ async def get_recent_broadcasts(pool: asyncpg.Pool, bot_id: int, limit: int = 5)
         "SELECT * FROM broadcasts WHERE bot_id=$1 ORDER BY created_at DESC LIMIT $2",
         bot_id, limit,
     )
+
+
+# ── Audience stats ────────────────────────────────────────────────────────
+
+async def get_audience_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
+    total = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
+    )
+    inactive = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=FALSE", bot_id
+    )
+    langs = await pool.fetch(
+        """SELECT COALESCE(language_code, 'unknown') AS lang, COUNT(*) AS cnt
+           FROM bot_users WHERE bot_id=$1 AND is_active=TRUE
+           GROUP BY lang ORDER BY cnt DESC LIMIT 10""",
+        bot_id,
+    )
+    return {
+        "total": total or 0,
+        "inactive": inactive or 0,
+        "languages": [{"lang": r["lang"], "count": r["cnt"]} for r in langs],
+    }
+
+
+async def get_audience_full(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """SELECT user_id, username, first_name, last_name, language_code,
+                  first_seen, last_seen, is_active
+           FROM bot_users WHERE bot_id=$1 ORDER BY first_seen""",
+        bot_id,
+    )
+
+
+# ── Message templates ─────────────────────────────────────────────────────
+
+async def save_template(pool: asyncpg.Pool, owner_id: int, name: str, text: str) -> bool:
+    try:
+        await pool.execute(
+            "INSERT INTO message_templates (owner_id, name, text) VALUES ($1,$2,$3)",
+            owner_id, name, text,
+        )
+        return True
+    except asyncpg.UniqueViolationError:
+        return False
+
+
+async def get_templates(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM message_templates WHERE owner_id=$1 ORDER BY created_at DESC",
+        owner_id,
+    )
+
+
+async def get_template(pool: asyncpg.Pool, template_id: int, owner_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        "SELECT * FROM message_templates WHERE id=$1 AND owner_id=$2",
+        template_id, owner_id,
+    )
+
+
+async def delete_template(pool: asyncpg.Pool, template_id: int, owner_id: int) -> bool:
+    result = await pool.execute(
+        "DELETE FROM message_templates WHERE id=$1 AND owner_id=$2",
+        template_id, owner_id,
+    )
+    return result == "DELETE 1"
+
+
+# ── Scheduled broadcasts ──────────────────────────────────────────────────
+
+async def create_scheduled(pool: asyncpg.Pool, bot_id: int, text: str,
+                             execute_at, created_by: int) -> int:
+    return await pool.fetchval(
+        """INSERT INTO scheduled_broadcasts (bot_id, message_text, execute_at, created_by)
+           VALUES ($1,$2,$3,$4) RETURNING id""",
+        bot_id, text, execute_at, created_by,
+    )
+
+
+async def get_pending_scheduled(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """SELECT s.*, m.token FROM scheduled_broadcasts s
+           JOIN managed_bots m ON m.bot_id=s.bot_id
+           WHERE s.status='pending' AND s.execute_at <= NOW()""",
+    )
+
+
+async def mark_scheduled_done(pool: asyncpg.Pool, schedule_id: int) -> None:
+    await pool.execute(
+        "UPDATE scheduled_broadcasts SET status='done' WHERE id=$1", schedule_id
+    )
+
+
+async def cancel_scheduled(pool: asyncpg.Pool, schedule_id: int, owner_id: int) -> bool:
+    result = await pool.execute(
+        """UPDATE scheduled_broadcasts SET status='cancelled'
+           WHERE id=$1 AND created_by=$2 AND status='pending'""",
+        schedule_id, owner_id,
+    )
+    return result == "UPDATE 1"
+
+
+async def get_bot_schedules(pool: asyncpg.Pool, bot_id: int, limit: int = 10) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM scheduled_broadcasts WHERE bot_id=$1 ORDER BY execute_at DESC LIMIT $2",
+        bot_id, limit,
+    )

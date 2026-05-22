@@ -274,3 +274,21 @@ async def msg_photo(message: Message, state: FSMContext,
 @router.message(EditProfile.waiting_photo)
 async def msg_photo_wrong(message: Message) -> None:
     await message.answer("Пожалуйста, отправьте изображение как фото, не как файл.")
+
+
+@router.callback_query(EditCb.filter(F.action == "del_photo"))
+async def cb_del_photo(callback: CallbackQuery, callback_data: EditCb,
+                        pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    ok = await bot_api.delete_my_photo(http, row["token"])
+    if ok:
+        await callback.message.edit_text(
+            "✅ Фото удалено.",
+            reply_markup=edit_menu(callback_data.bot_id),
+        )
+        await callback.answer("✅ Фото удалено.")
+    else:
+        await callback.answer("❌ Не удалось удалить фото.", show_alert=True)

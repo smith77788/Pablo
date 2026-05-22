@@ -150,3 +150,37 @@ async def batch_get_me(session: aiohttp.ClientSession,
         token: (r if not isinstance(r, Exception) else None)
         for token, r in zip(tokens, results)
     }
+
+
+# ── Commands ──────────────────────────────────────────────────────────────
+
+async def get_my_commands(session: aiohttp.ClientSession, token: str,
+                           language_code: str = "") -> list[dict]:
+    data = await _call(session, token, "getMyCommands",
+                       language_code=language_code or None)
+    return data.get("result", []) if data.get("ok") else []
+
+
+async def set_my_commands(session: aiohttp.ClientSession, token: str,
+                           commands: list[dict], language_code: str = "") -> bool:
+    data = await _call(session, token, "setMyCommands",
+                       commands=commands, language_code=language_code or None)
+    return data.get("ok", False)
+
+
+async def delete_my_commands(session: aiohttp.ClientSession, token: str,
+                              language_code: str = "") -> bool:
+    data = await _call(session, token, "deleteMyCommands",
+                       language_code=language_code or None)
+    return data.get("ok", False)
+
+
+async def batch_set_commands(session: aiohttp.ClientSession, tokens: list[str],
+                              commands: list[dict], language_code: str = "") -> tuple[int, int]:
+    """Apply commands to many bots concurrently. Returns (success, failed)."""
+    results = await asyncio.gather(
+        *(set_my_commands(session, t, commands, language_code) for t in tokens),
+        return_exceptions=True,
+    )
+    ok = sum(1 for r in results if r is True)
+    return ok, len(results) - ok

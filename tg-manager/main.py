@@ -12,6 +12,10 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from database.db import create_pool
 from bot.handlers import start, bots, edit, audience, webhooks, broadcast, bulk
+from bot.handlers import commands as cmd_handler
+from bot.handlers import templates as tpl_handler
+from bot.handlers import schedule as sch_handler
+from services import scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,15 +41,18 @@ async def main() -> None:
     dp.include_router(audience.router)
     dp.include_router(webhooks.router)
     dp.include_router(broadcast.router)
+    dp.include_router(cmd_handler.router)
+    dp.include_router(tpl_handler.router)
+    dp.include_router(sch_handler.router)
     dp.include_router(bulk.router)
 
     pool = await create_pool()
-    # Same for outbound calls to managed bots
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
     connector = aiohttp.TCPConnector(ssl=ssl_ctx)
     async with aiohttp.ClientSession(connector=connector) as http:
+        asyncio.create_task(scheduler.run(pool, http))
         logging.info("TG Manager started")
         try:
             await dp.start_polling(bot, pool=pool, http=http)

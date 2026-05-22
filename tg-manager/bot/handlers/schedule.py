@@ -1,0 +1,138 @@
+"""Scheduled broadcasts: create, list, cancel."""
+from __future__ import annotations
+from datetime import datetime
+import asyncpg
+from aiogram import Router, F
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+from bot.callbacks import ScheduleCb, BotCb
+from bot.keyboards import schedule_menu, back_to_bot
+from bot.states import ScheduleBroadcast
+from database import db
+
+router = Router()
+
+_DT_HINT = (
+    "Введите дату и время в формате:\n"
+    "<code>25.12.2025 15:30</code> или <code>25.12 15:30</code>\n\n"
+    "Время серверное (UTC)."
+)
+
+
+@router.callback_query(ScheduleCb.filter(F.action == "menu"))
+async def cb_schedule_menu(callback: CallbackQuery, callback_data: ScheduleCb,
+                            pool: asyncpg.Pool) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    schedules = await db.get_bot_schedules(pool, callback_data.bot_id, limit=10)
+    label = f"@{row['username']}" if row["username"] else row["first_name"]
+
+    status_emoji = {"pending": "⏳", "done": "✅", "cancelled": "❌"}
+    lines = []
+    for s in schedules:
+        emoji = status_emoji.get(s["status"], "❓")
+        dt = s["execute_at"].strftime("%d.%m.%Y %H:%M")
+        preview = s["message_text"][:35].replace("\n", " ")
+        lines.append(f"{emoji} {dt} UTC — {preview}…")
+
+    body = "\n".join(lines) if lines else "Запланированных рассылок нет."
+    await callback.message.edit_text(
+        f"⏰ <b>Расписание {label}</b>\n\n{body}",
+        parse_mode="HTML",
+        reply_markup=schedule_menu(callback_data.bot_id, schedules),
+    )
+    await callback.answer()
+
+
+@router.callback_query(ScheduleCb.filter(F.action == "create"))
+async def cb_schedule_create(callback: CallbackQuery, callback_data: ScheduleCb,
+                              state: FSMContext) -> None:
+    await state.set_state(ScheduleBroadcast.waiting_message)
+    await state.update_data(bot_id=callback_data.bot_id)
+    await callback.message.edit_text(
+        "⏰ <b>Запланировать рассылку — шаг 1/2</b>\n\n"
+        "Напишите текст сообщения.\n\n"
+        "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
+        "<code>&lt;a href=...&gt;</code>",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(ScheduleBroadcast.waiting_message)
+async def msg_schedule_message(message: Message, state: FSMContext) -> None:
+    text = message.text or message.caption or ""
+    if not text:
+        await message.answer("❌ Текст не может быть пустым. Попробуйте ещё раз:")
+        return
+    await state.update_data(text=text)
+    await state.set_state(ScheduleBroadcast.waiting_datetime)
+    await message.answer(
+        f"⏰ <b>Шаг 2/2: Дата и время запуска</b>\n\n{_DT_HINT}",
+        parse_mode="HTML",
+    )
+
+
+@router.message(ScheduleBroadcast.waiting_datetime)
+async def msg_schedule_datetime(message: Message, state: FSMContext,
+                                 pool: asyncpg.Pool) -> None:
+    data = await state.get_data()
+    bot_id = data["bot_id"]
+    raw = message.text.strip() if message.text else ""
+
+    execute_at: datetime | None = None
+    for fmt in ("%d.%m.%Y %H:%M", "%d.%m %H:%M"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            if fmt == "%d.%m %H:%M":
+                dt = dt.replace(year=datetime.utcnow().year)
+            execute_at = dt
+            break
+        except ValueError:
+            continue
+
+    if not execute_at:
+        await message.answer(
+            f"❌ Неверный формат даты.\n\n{_DT_HINT}",
+            parse_mode="HTML",
+        )
+        return
+
+    if execute_at <= datetime.utcnow():
+        await message.answer("❌ Время запуска должно быть в будущем. Введите снова:")
+        return
+
+    text = data["text"]
+    await state.clear()
+
+    schedule_id = await db.create_scheduled(
+        pool, bot_id, text, execute_at, message.from_user.id
+    )
+    await message.answer(
+        f"✅ Рассылка запланирована!\n\n"
+        f"🕐 Время: <b>{execute_at.strftime('%d.%m.%Y %H:%M')} UTC</b>\n"
+        f"ID: <code>#{schedule_id}</code>",
+        parse_mode="HTML",
+        reply_markup=back_to_bot(bot_id),
+    )
+
+
+@router.callback_query(ScheduleCb.filter(F.action == "cancel"))
+async def cb_schedule_cancel(callback: CallbackQuery, callback_data: ScheduleCb,
+                              pool: asyncpg.Pool) -> None:
+    cancelled = await db.cancel_scheduled(
+        pool, callback_data.schedule_id, callback.from_user.id
+    )
+    if not cancelled:
+        await callback.answer(
+            "❌ Не удалось отменить. Рассылка уже выполнена или не найдена.",
+            show_alert=True,
+        )
+        return
+    schedules = await db.get_bot_schedules(pool, callback_data.bot_id, limit=10)
+    await callback.message.edit_reply_markup(
+        reply_markup=schedule_menu(callback_data.bot_id, schedules)
+    )
+    await callback.answer("✅ Рассылка отменена.")
