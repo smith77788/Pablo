@@ -55,6 +55,7 @@ async def cb_multigeo_names(callback: CallbackQuery, callback_data: MultigeoCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
         *(bot_api.get_my_name(http, row["token"], code) for code, _, _ in LANGUAGES)
     )
@@ -76,6 +77,7 @@ async def cb_multigeo_short(callback: CallbackQuery, callback_data: MultigeoCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
         *(bot_api.get_my_short_description(http, row["token"], code) for code, _, _ in LANGUAGES)
     )
@@ -97,6 +99,7 @@ async def cb_multigeo_desc(callback: CallbackQuery, callback_data: MultigeoCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
         *(bot_api.get_my_description(http, row["token"], code) for code, _, _ in LANGUAGES)
     )

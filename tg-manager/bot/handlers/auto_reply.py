@@ -139,13 +139,31 @@ async def cb_ar_view(callback: CallbackQuery, callback_data: AutoReplyCb,
 async def cb_ar_toggle(callback: CallbackQuery, callback_data: AutoReplyCb,
                        pool: asyncpg.Pool) -> None:
     await db.toggle_auto_reply(pool, callback_data.reply_id, callback_data.bot_id)
+    replies = await db.get_auto_replies(pool, callback_data.bot_id)
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else "")
+    await callback.message.edit_text(
+        f"🤖 <b>Авто-ответы {label}</b>\n\n"
+        f"Активных правил: <b>{sum(1 for r in replies if r['is_active'])}</b> из {len(replies)}\n\n"
+        "Бот автоматически отвечает на сообщения пользователей по заданным правилам.",
+        parse_mode="HTML",
+        reply_markup=auto_reply_menu(callback_data.bot_id, replies),
+    )
     await callback.answer("✅ Статус изменён.")
-    await cb_ar_menu(callback, AutoReplyCb(action="menu", bot_id=callback_data.bot_id), pool)
 
 
 @router.callback_query(AutoReplyCb.filter(F.action == "delete"))
 async def cb_ar_delete(callback: CallbackQuery, callback_data: AutoReplyCb,
                        pool: asyncpg.Pool) -> None:
     await db.delete_auto_reply(pool, callback_data.reply_id, callback_data.bot_id)
+    replies = await db.get_auto_replies(pool, callback_data.bot_id)
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else "")
+    await callback.message.edit_text(
+        f"🤖 <b>Авто-ответы {label}</b>\n\n"
+        f"Активных правил: <b>{sum(1 for r in replies if r['is_active'])}</b> из {len(replies)}\n\n"
+        "Бот автоматически отвечает на сообщения пользователей по заданным правилам.",
+        parse_mode="HTML",
+        reply_markup=auto_reply_menu(callback_data.bot_id, replies),
+    )
     await callback.answer("🗑 Правило удалено.")
-    await cb_ar_menu(callback, AutoReplyCb(action="menu", bot_id=callback_data.bot_id), pool)

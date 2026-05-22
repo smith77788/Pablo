@@ -48,10 +48,14 @@ async def msg_broadcast_text(message: Message, state: FSMContext,
                               pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     count = await db.get_audience_count(pool, data["bot_id"])
-    await state.update_data(text=message.text or message.caption or "")
+    text = message.text or message.caption or ""
+    if not text:
+        await message.answer("❌ Текст рассылки пустой. Отправьте текстовое сообщение.")
+        return
+    await state.update_data(text=text)
     await state.set_state(Broadcast.confirming)
     await message.answer(
-        f"📢 <b>Предпросмотр:</b>\n\n{message.text}\n\n"
+        f"📢 <b>Предпросмотр:</b>\n\n{text}\n\n"
         f"Получателей: <b>{count}</b> чел.\nЗапустить?",
         parse_mode="HTML",
         reply_markup=broadcast_confirm(data["bot_id"]),

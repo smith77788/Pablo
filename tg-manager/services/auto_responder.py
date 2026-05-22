@@ -23,12 +23,28 @@ def _match_rule(rule: dict, text: str) -> bool:
     return False
 
 
+async def _init_offset(pool: asyncpg.Pool, http: aiohttp.ClientSession,
+                       bot_id: int, token: str) -> int:
+    """On first run: skip all pending updates, store current max_id as start point."""
+    data = await bot_api._call(http, token, "getUpdates", offset=-1, limit=1, timeout=0)
+    updates = data.get("result", []) if data.get("ok") else []
+    if updates:
+        max_id = updates[-1]["update_id"]
+        await db.set_update_offset(pool, bot_id, max_id)
+        return max_id
+    return 0
+
+
 async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                        bot_id: int, token: str) -> None:
     try:
         offset = await db.get_update_offset(pool, bot_id)
+        if offset == 0:
+            # First run — skip old updates to avoid flooding operator with history
+            await _init_offset(pool, http, bot_id, token)
+            return
         data = await bot_api._call(http, token, "getUpdates",
-                                   offset=offset + 1 if offset else 0,
+                                   offset=offset + 1,
                                    limit=100, timeout=0)
         updates = data.get("result", []) if data.get("ok") else []
         if not updates:
