@@ -54,3 +54,9 @@ class MultigeoCb(CallbackData, prefix="mg"):
     action: str
     bot_id: int
     lang: str = ""
+
+
+class AutoReplyCb(CallbackData, prefix="ar"):
+    action: str
+    bot_id: int
+    reply_id: int = 0

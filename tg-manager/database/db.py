@@ -251,3 +251,58 @@ async def get_bot_schedules(pool: asyncpg.Pool, bot_id: int, limit: int = 10) ->
         "SELECT * FROM scheduled_broadcasts WHERE bot_id=$1 ORDER BY execute_at DESC LIMIT $2",
         bot_id, limit,
     )
+
+
+# ── Auto-replies ──────────────────────────────────────────────────────────
+
+async def get_auto_replies(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Record]:
+    return await pool.fetch("SELECT * FROM auto_replies WHERE bot_id=$1 ORDER BY id", bot_id)
+
+
+async def get_active_auto_replies(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM auto_replies WHERE bot_id=$1 AND is_active=true ORDER BY id", bot_id
+    )
+
+
+async def add_auto_reply(pool: asyncpg.Pool, bot_id: int, trigger_type: str,
+                          keyword: str | None, response_text: str) -> asyncpg.Record:
+    return await pool.fetchrow(
+        "INSERT INTO auto_replies(bot_id,trigger_type,keyword,response_text) VALUES($1,$2,$3,$4) RETURNING id",
+        bot_id, trigger_type, keyword, response_text,
+    )
+
+
+async def toggle_auto_reply(pool: asyncpg.Pool, reply_id: int, bot_id: int) -> str:
+    return await pool.execute(
+        "UPDATE auto_replies SET is_active=NOT is_active WHERE id=$1 AND bot_id=$2",
+        reply_id, bot_id,
+    )
+
+
+async def delete_auto_reply(pool: asyncpg.Pool, reply_id: int, bot_id: int) -> str:
+    return await pool.execute("DELETE FROM auto_replies WHERE id=$1 AND bot_id=$2", reply_id, bot_id)
+
+
+# ── Update offsets ────────────────────────────────────────────────────────
+
+async def get_update_offset(pool: asyncpg.Pool, bot_id: int) -> int:
+    row = await pool.fetchrow(
+        "SELECT last_update_id FROM bot_update_offsets WHERE bot_id=$1", bot_id
+    )
+    return row["last_update_id"] if row else 0
+
+
+async def set_update_offset(pool: asyncpg.Pool, bot_id: int, offset: int) -> None:
+    await pool.execute(
+        "INSERT INTO bot_update_offsets(bot_id,last_update_id) VALUES($1,$2) "
+        "ON CONFLICT(bot_id) DO UPDATE SET last_update_id=$2",
+        bot_id, offset,
+    )
+
+
+async def get_bots_with_auto_replies(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT DISTINCT b.bot_id, b.token FROM managed_bots b "
+        "JOIN auto_replies ar ON ar.bot_id=b.bot_id WHERE ar.is_active=true"
+    )

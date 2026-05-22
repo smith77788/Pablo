@@ -57,6 +57,27 @@ async def set_short_description(session: aiohttp.ClientSession, token: str,
     return data.get("ok", False)
 
 
+async def get_my_name(session: aiohttp.ClientSession, token: str,
+                      language_code: str = "") -> str:
+    data = await _call(session, token, "getMyName",
+                       language_code=language_code or None)
+    return data.get("result", {}).get("name", "") if data.get("ok") else ""
+
+
+async def get_my_description(session: aiohttp.ClientSession, token: str,
+                              language_code: str = "") -> str:
+    data = await _call(session, token, "getMyDescription",
+                       language_code=language_code or None)
+    return data.get("result", {}).get("description", "") if data.get("ok") else ""
+
+
+async def get_my_short_description(session: aiohttp.ClientSession, token: str,
+                                    language_code: str = "") -> str:
+    data = await _call(session, token, "getMyShortDescription",
+                       language_code=language_code or None)
+    return data.get("result", {}).get("short_description", "") if data.get("ok") else ""
+
+
 async def set_photo(session: aiohttp.ClientSession, token: str,
                     photo_bytes: bytes, filename: str = "photo.jpg") -> bool:
     """Upload raw photo bytes to the managed bot via multipart form."""

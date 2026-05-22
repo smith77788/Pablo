@@ -2,10 +2,23 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
-    CommandsCb, TemplateCb, ScheduleCb,
+    CommandsCb, TemplateCb, ScheduleCb, MultigeoCb,
 )
 
 PAGE_SIZE = 5
+
+LANGUAGES = [
+    ("ru", "🇷🇺", "Русский"),
+    ("en", "🇬🇧", "English"),
+    ("uk", "🇺🇦", "Українська"),
+    ("de", "🇩🇪", "Deutsch"),
+    ("fr", "🇫🇷", "Français"),
+    ("es", "🇪🇸", "Español"),
+    ("it", "🇮🇹", "Italiano"),
+    ("pt", "🇵🇹", "Português"),
+    ("pl", "🇵🇱", "Polski"),
+    ("tr", "🇹🇷", "Türkçe"),
+]
 
 
 def main_menu() -> InlineKeyboardMarkup:
@@ -74,15 +87,13 @@ def bot_menu(bot_id: int) -> InlineKeyboardMarkup:
 def edit_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="📝 Имя",               callback_data=EditCb(action="name", bot_id=bot_id))
-    kb.button(text="🌍 Имя по GEO",        callback_data=EditCb(action="name_lang", bot_id=bot_id))
     kb.button(text="📄 Описание",          callback_data=EditCb(action="desc", bot_id=bot_id))
-    kb.button(text="🌍 Описание по GEO",   callback_data=EditCb(action="desc_lang", bot_id=bot_id))
     kb.button(text="📃 Краткое описание",  callback_data=EditCb(action="short", bot_id=bot_id))
-    kb.button(text="🌍 Краткое по GEO",    callback_data=EditCb(action="short_lang", bot_id=bot_id))
+    kb.button(text="🌍 Мультигео",         callback_data=MultigeoCb(action="menu", bot_id=bot_id))
     kb.button(text="🖼 Фото",              callback_data=EditCb(action="photo", bot_id=bot_id))
     kb.button(text="🗑 Удалить фото",      callback_data=EditCb(action="del_photo", bot_id=bot_id))
     kb.button(text="◀️ Назад",             callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -99,10 +110,10 @@ def audience_menu(bot_id: int) -> InlineKeyboardMarkup:
 
 def webhook_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔗 Установить URL",  callback_data=WebhookCb(action="set", bot_id=bot_id))
-    kb.button(text="❌ Удалить вебхук",  callback_data=WebhookCb(action="delete", bot_id=bot_id))
-    kb.button(text="◀️ Назад",           callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 1)
+    kb.button(text="📋 Получить информацию",   callback_data=WebhookCb(action="info", bot_id=bot_id))
+    kb.button(text="🔌 Отключить другие боты", callback_data=WebhookCb(action="disable", bot_id=bot_id))
+    kb.button(text="◀️ Назад",                 callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1)
     return kb.as_markup()
 
 
@@ -126,11 +137,11 @@ def broadcast_confirm(bot_id: int) -> InlineKeyboardMarkup:
 
 def commands_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✏️ Установить (дефолт)",  callback_data=CommandsCb(action="set", bot_id=bot_id))
-    kb.button(text="🌍 Установить по языку",   callback_data=CommandsCb(action="set_lang", bot_id=bot_id))
-    kb.button(text="🗑 Удалить команды",       callback_data=CommandsCb(action="delete", bot_id=bot_id))
-    kb.button(text="◀️ Назад",                callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 1, 1)
+    kb.button(text="➕ Добавить команду",    callback_data=CommandsCb(action="add", bot_id=bot_id))
+    kb.button(text="📋 Задать весь список",  callback_data=CommandsCb(action="set_all", bot_id=bot_id))
+    kb.button(text="🗑 Удалить все команды", callback_data=CommandsCb(action="delete", bot_id=bot_id))
+    kb.button(text="◀️ Назад",              callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1)
     return kb.as_markup()
 
 
@@ -223,4 +234,31 @@ def confirm_delete(bot_id: int) -> InlineKeyboardMarkup:
 def back_to_bot(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К боту", callback_data=BotCb(action="select", bot_id=bot_id))
+    return kb.as_markup()
+
+
+def multigeo_menu(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📝 Мультигео имена",       callback_data=MultigeoCb(action="names", bot_id=bot_id))
+    kb.button(text="📋 Мультигео about",       callback_data=MultigeoCb(action="short", bot_id=bot_id))
+    kb.button(text="📄 Мультигео description", callback_data=MultigeoCb(action="desc", bot_id=bot_id))
+    kb.button(text="◀️ Назад",                 callback_data=EditCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def multigeo_field(bot_id: int, field: str, lang_vals: dict) -> InlineKeyboardMarkup:
+    # field: "name", "short", "desc"
+    # lang_vals: {"ru": "current value or ''", ...}
+    kb = InlineKeyboardBuilder()
+    action = f"lang_{field}"
+    for code, flag, name in LANGUAGES:
+        val = lang_vals.get(code, "")
+        display = (val[:15] + "…") if len(val) > 15 else (val or "—")
+        kb.button(
+            text=f"{flag} {name}: {display}",
+            callback_data=MultigeoCb(action=action, bot_id=bot_id, lang=code),
+        )
+    kb.button(text="◀️ Назад", callback_data=MultigeoCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
     return kb.as_markup()

@@ -1,4 +1,4 @@
-"""Manage bot commands (set/view/delete, with language support)."""
+"""Manage bot commands (set/view/delete)."""
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -50,13 +50,71 @@ async def cb_commands_menu(callback: CallbackQuery, callback_data: CommandsCb,
     await callback.answer()
 
 
-@router.callback_query(CommandsCb.filter(F.action == "set"))
-async def cb_commands_set(callback: CallbackQuery, callback_data: CommandsCb,
+@router.callback_query(CommandsCb.filter(F.action == "add"))
+async def cb_commands_add(callback: CallbackQuery, callback_data: CommandsCb,
                            state: FSMContext) -> None:
-    await state.set_state(SetCommands.waiting_commands)
-    await state.update_data(bot_id=callback_data.bot_id, lang="")
+    await state.set_state(SetCommands.waiting_add)
+    await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
-        "🤖 <b>Установка команд (по умолчанию)</b>\n\n"
+        "➕ <b>Добавить команду</b>\n\n"
+        "Отправьте одну строку в формате:\n\n"
+        "<code>команда - Описание команды</code>\n\n"
+        "Например: <code>help - Помощь</code>",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(SetCommands.waiting_add)
+async def msg_commands_add(message: Message, state: FSMContext,
+                            pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    data = await state.get_data()
+    bot_id = data["bot_id"]
+    await state.clear()
+
+    new_cmds = _parse_commands(message.text or "")
+    if not new_cmds or len(new_cmds) != 1:
+        await message.answer(
+            "❌ Неверный формат. Введите одну строку:\n"
+            "<code>/команда - Описание</code>",
+            parse_mode="HTML",
+            reply_markup=back_to_bot(bot_id),
+        )
+        return
+
+    row = await db.get_bot(pool, bot_id, message.from_user.id)
+    if not row:
+        await message.answer("Бот не найден.")
+        return
+
+    # Load existing commands and merge
+    existing = await bot_api.get_my_commands(http, row["token"])
+    new_cmd_name = new_cmds[0]["command"]
+    merged = [c for c in existing if c["command"] != new_cmd_name]
+    merged.append(new_cmds[0])
+
+    ok = await bot_api.set_my_commands(http, row["token"], merged)
+    if ok:
+        lines = "\n".join(f"/{c['command']} — {c['description']}" for c in merged)
+        await message.answer(
+            f"✅ Команда добавлена. Текущий список:\n\n{lines}",
+            parse_mode="HTML",
+            reply_markup=back_to_bot(bot_id),
+        )
+    else:
+        await message.answer(
+            "❌ Не удалось обновить команды.",
+            reply_markup=back_to_bot(bot_id),
+        )
+
+
+@router.callback_query(CommandsCb.filter(F.action == "set_all"))
+async def cb_commands_set_all(callback: CallbackQuery, callback_data: CommandsCb,
+                               state: FSMContext) -> None:
+    await state.set_state(SetCommands.waiting_commands)
+    await state.update_data(bot_id=callback_data.bot_id)
+    await callback.message.edit_text(
+        "📋 <b>Задать весь список команд</b>\n\n"
         "Отправьте список команд, каждая с новой строки:\n\n"
         "<code>start - Главное меню\n"
         "help - Помощь\n"
@@ -66,38 +124,11 @@ async def cb_commands_set(callback: CallbackQuery, callback_data: CommandsCb,
     await callback.answer()
 
 
-@router.callback_query(CommandsCb.filter(F.action == "set_lang"))
-async def cb_commands_set_lang(callback: CallbackQuery, callback_data: CommandsCb,
-                                state: FSMContext) -> None:
-    await state.set_state(SetCommands.waiting_lang)
-    await state.update_data(bot_id=callback_data.bot_id)
-    await callback.message.edit_text(
-        "🌍 <b>Команды по языку</b>\n\n"
-        "Введите код языка (<code>ru</code>, <code>en</code>, <code>uk</code>, <code>de</code>…):",
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
-@router.message(SetCommands.waiting_lang)
-async def msg_commands_lang(message: Message, state: FSMContext) -> None:
-    lang = message.text.strip()
-    await state.update_data(lang=lang)
-    await state.set_state(SetCommands.waiting_commands)
-    await message.answer(
-        f"🤖 Команды для языка <code>{lang}</code>:\n\n"
-        "<code>start - Главное меню\n"
-        "help - Помощь</code>",
-        parse_mode="HTML",
-    )
-
-
 @router.message(SetCommands.waiting_commands)
-async def msg_commands_text(message: Message, state: FSMContext,
-                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_commands_set_all(message: Message, state: FSMContext,
+                                pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
     bot_id = data["bot_id"]
-    lang = data.get("lang", "")
     await state.clear()
 
     commands = _parse_commands(message.text or "")
@@ -115,12 +146,11 @@ async def msg_commands_text(message: Message, state: FSMContext,
         await message.answer("Бот не найден.")
         return
 
-    ok = await bot_api.set_my_commands(http, row["token"], commands, lang)
+    ok = await bot_api.set_my_commands(http, row["token"], commands)
     if ok:
         lines = "\n".join(f"/{c['command']} — {c['description']}" for c in commands)
-        label_lang = f" [{lang}]" if lang else " [default]"
         await message.answer(
-            f"✅ Команды{label_lang} установлены:\n\n{lines}",
+            f"✅ Команды установлены:\n\n{lines}",
             parse_mode="HTML",
             reply_markup=back_to_bot(bot_id),
         )
