@@ -47,8 +47,14 @@ class BulkEdit(StatesGroup):
 
 
 class SetCommands(StatesGroup):
-    waiting_lang = State()
+    waiting_add = State()
     waiting_commands = State()
+
+
+class MultigeoEdit(StatesGroup):
+    waiting_name = State()
+    waiting_short = State()
+    waiting_desc = State()
 
 
 class AddTemplate(StatesGroup):

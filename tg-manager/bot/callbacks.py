@@ -48,3 +48,9 @@ class ScheduleCb(CallbackData, prefix="sch"):
     action: str
     bot_id: int
     schedule_id: int = 0
+
+
+class MultigeoCb(CallbackData, prefix="mg"):
+    action: str
+    bot_id: int
+    lang: str = ""
