@@ -1,4 +1,4 @@
-"""Bot profile editing: name, description, short description, photo (incl. per-GEO)."""
+"""Bot profile editing: name, description, short description, photo (default language only)."""
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -11,11 +11,6 @@ from database import db
 from services import bot_api
 
 router = Router()
-
-_LANG_HINT = (
-    "Введите код языка (например: <code>ru</code>, <code>en</code>, <code>uk</code>, "
-    "<code>de</code>) или <code>-</code> чтобы сбросить до дефолтного."
-)
 
 
 async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | None:
@@ -69,45 +64,6 @@ async def msg_name(message: Message, state: FSMContext,
     )
 
 
-# ── Name by GEO (localised) ───────────────────────────────────────────────
-
-@router.callback_query(EditCb.filter(F.action == "name_lang"))
-async def cb_name_lang(callback: CallbackQuery, callback_data: EditCb,
-                        state: FSMContext) -> None:
-    await state.set_state(EditProfile.waiting_name_lang)
-    await state.update_data(bot_id=callback_data.bot_id)
-    await callback.message.edit_text(f"🌍 <b>Имя по языку</b>\n\n{_LANG_HINT}",
-                                      parse_mode="HTML")
-    await callback.answer()
-
-
-@router.message(EditProfile.waiting_name_lang)
-async def msg_name_lang(message: Message, state: FSMContext) -> None:
-    lang = message.text.strip()
-    await state.update_data(lang=lang)
-    await state.set_state(EditProfile.waiting_localized_name)
-    await message.answer(f"📝 Введите имя для языка <code>{lang}</code>:",
-                          parse_mode="HTML")
-
-
-@router.message(EditProfile.waiting_localized_name)
-async def msg_localized_name(message: Message, state: FSMContext,
-                               pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
-    data = await state.get_data()
-    token = await _get_token(pool, data["bot_id"], message.from_user.id)
-    if not token:
-        await state.clear()
-        return
-
-    lang = "" if data["lang"] == "-" else data["lang"]
-    ok = await bot_api.set_name(http, token, message.text.strip(), language_code=lang)
-    await state.clear()
-    await message.answer(
-        "✅ Локализованное имя обновлено." if ok else "❌ Ошибка при обновлении.",
-        reply_markup=back_to_bot(data["bot_id"]),
-    )
-
-
 # ── Description (default) ────────────────────────────────────────────────
 
 @router.callback_query(EditCb.filter(F.action == "desc"))
@@ -135,42 +91,6 @@ async def msg_desc(message: Message, state: FSMContext,
     )
 
 
-# ── Description by GEO ────────────────────────────────────────────────────
-
-@router.callback_query(EditCb.filter(F.action == "desc_lang"))
-async def cb_desc_lang(callback: CallbackQuery, callback_data: EditCb,
-                        state: FSMContext) -> None:
-    await state.set_state(EditProfile.waiting_desc_lang)
-    await state.update_data(bot_id=callback_data.bot_id)
-    await callback.message.edit_text(f"🌍 <b>Описание по языку</b>\n\n{_LANG_HINT}",
-                                      parse_mode="HTML")
-    await callback.answer()
-
-
-@router.message(EditProfile.waiting_desc_lang)
-async def msg_desc_lang(message: Message, state: FSMContext) -> None:
-    await state.update_data(lang=message.text.strip())
-    await state.set_state(EditProfile.waiting_localized_desc)
-    await message.answer("📄 Введите описание:")
-
-
-@router.message(EditProfile.waiting_localized_desc)
-async def msg_localized_desc(message: Message, state: FSMContext,
-                               pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
-    data = await state.get_data()
-    token = await _get_token(pool, data["bot_id"], message.from_user.id)
-    if not token:
-        await state.clear()
-        return
-    lang = "" if data["lang"] == "-" else data["lang"]
-    ok = await bot_api.set_description(http, token, message.text.strip(), language_code=lang)
-    await state.clear()
-    await message.answer(
-        "✅ Локализованное описание обновлено." if ok else "❌ Ошибка при обновлении.",
-        reply_markup=back_to_bot(data["bot_id"]),
-    )
-
-
 # ── Short description (default) ───────────────────────────────────────────
 
 @router.callback_query(EditCb.filter(F.action == "short"))
@@ -191,42 +111,6 @@ async def msg_short(message: Message, state: FSMContext,
         await state.clear()
         return
     ok = await bot_api.set_short_description(http, token, message.text.strip())
-    await state.clear()
-    await message.answer(
-        "✅ Краткое описание обновлено." if ok else "❌ Ошибка при обновлении.",
-        reply_markup=back_to_bot(data["bot_id"]),
-    )
-
-
-# ── Short description by GEO ──────────────────────────────────────────────
-
-@router.callback_query(EditCb.filter(F.action == "short_lang"))
-async def cb_short_lang(callback: CallbackQuery, callback_data: EditCb,
-                         state: FSMContext) -> None:
-    await state.set_state(EditProfile.waiting_short_lang)
-    await state.update_data(bot_id=callback_data.bot_id)
-    await callback.message.edit_text(f"🌍 <b>Краткое описание по языку</b>\n\n{_LANG_HINT}",
-                                      parse_mode="HTML")
-    await callback.answer()
-
-
-@router.message(EditProfile.waiting_short_lang)
-async def msg_short_lang(message: Message, state: FSMContext) -> None:
-    await state.update_data(lang=message.text.strip())
-    await state.set_state(EditProfile.waiting_localized_short)
-    await message.answer("📃 Введите краткое описание:")
-
-
-@router.message(EditProfile.waiting_localized_short)
-async def msg_localized_short(message: Message, state: FSMContext,
-                                pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
-    data = await state.get_data()
-    token = await _get_token(pool, data["bot_id"], message.from_user.id)
-    if not token:
-        await state.clear()
-        return
-    lang = "" if data["lang"] == "-" else data["lang"]
-    ok = await bot_api.set_short_description(http, token, message.text.strip(), language_code=lang)
     await state.clear()
     await message.answer(
         "✅ Краткое описание обновлено." if ok else "❌ Ошибка при обновлении.",

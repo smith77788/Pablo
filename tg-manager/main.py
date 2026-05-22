@@ -15,7 +15,10 @@ from bot.handlers import start, bots, edit, audience, webhooks, broadcast, bulk
 from bot.handlers import commands as cmd_handler
 from bot.handlers import templates as tpl_handler
 from bot.handlers import schedule as sch_handler
+from bot.handlers import multigeo as multigeo_handler
+from bot.handlers import auto_reply as ar_handler
 from services import scheduler
+from services import auto_responder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +48,8 @@ async def main() -> None:
     dp.include_router(tpl_handler.router)
     dp.include_router(sch_handler.router)
     dp.include_router(bulk.router)
+    dp.include_router(multigeo_handler.router)
+    dp.include_router(ar_handler.router)
 
     pool = await create_pool()
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -53,6 +58,7 @@ async def main() -> None:
     connector = aiohttp.TCPConnector(ssl=ssl_ctx)
     async with aiohttp.ClientSession(connector=connector) as http:
         asyncio.create_task(scheduler.run(pool, http))
+        asyncio.create_task(auto_responder.run(pool, http))
         logging.info("TG Manager started")
         try:
             await dp.start_polling(bot, pool=pool, http=http)

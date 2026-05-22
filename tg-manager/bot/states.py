@@ -69,3 +69,9 @@ class ScheduleBroadcast(StatesGroup):
 
 class ImportBots(StatesGroup):
     waiting_tokens = State()
+
+
+class AddAutoReply(StatesGroup):
+    choosing_trigger = State()
+    waiting_keyword = State()
+    waiting_text = State()

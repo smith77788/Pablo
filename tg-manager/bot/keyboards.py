@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
-    CommandsCb, TemplateCb, ScheduleCb, MultigeoCb,
+    CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb,
 )
 
 PAGE_SIZE = 5
@@ -76,11 +76,12 @@ def bot_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="⏰ Расписание",   callback_data=ScheduleCb(action="menu", bot_id=bot_id))
     kb.button(text="🤖 Команды",      callback_data=CommandsCb(action="menu", bot_id=bot_id))
     kb.button(text="📝 Шаблоны",      callback_data=TemplateCb(action="list", bot_id=bot_id))
+    kb.button(text="🤖 Авто-ответы",  callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
     kb.button(text="🔗 Вебхук",       callback_data=WebhookCb(action="menu", bot_id=bot_id))
     kb.button(text="⚖️ Сравнить",    callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
-    kb.adjust(2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -260,5 +261,47 @@ def multigeo_field(bot_id: int, field: str, lang_vals: dict) -> InlineKeyboardMa
             callback_data=MultigeoCb(action=action, bot_id=bot_id, lang=code),
         )
     kb.button(text="◀️ Назад", callback_data=MultigeoCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def auto_reply_menu(bot_id: int, replies: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for r in replies[:10]:
+        icon = "✅" if r["is_active"] else "❌"
+        trigger = {"start": "/start", "keyword": f"🔑{r['keyword']}", "any": "любое"}.get(r["trigger_type"], "?")
+        preview = r["response_text"][:20].replace("\n", " ")
+        kb.button(
+            text=f"{icon} {trigger} → {preview}…",
+            callback_data=AutoReplyCb(action="view", bot_id=bot_id, reply_id=r["id"]),
+        )
+    kb.adjust(1)
+    kb.row(InlineKeyboardButton(
+        text="➕ Добавить правило",
+        callback_data=AutoReplyCb(action="add", bot_id=bot_id).pack(),
+    ))
+    kb.row(InlineKeyboardButton(
+        text="◀️ Назад",
+        callback_data=BotCb(action="select", bot_id=bot_id).pack(),
+    ))
+    return kb.as_markup()
+
+
+def auto_reply_trigger_menu(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="▶️ /start",         callback_data=AutoReplyCb(action="trig_start", bot_id=bot_id))
+    kb.button(text="🔑 Ключевое слово", callback_data=AutoReplyCb(action="trig_keyword", bot_id=bot_id))
+    kb.button(text="💬 Любое сообщение", callback_data=AutoReplyCb(action="trig_any", bot_id=bot_id))
+    kb.button(text="◀️ Назад",           callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def auto_reply_view(bot_id: int, reply_id: int, is_active: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    toggle_text = "❌ Отключить" if is_active else "✅ Включить"
+    kb.button(text=toggle_text, callback_data=AutoReplyCb(action="toggle", bot_id=bot_id, reply_id=reply_id))
+    kb.button(text="🗑 Удалить",  callback_data=AutoReplyCb(action="delete", bot_id=bot_id, reply_id=reply_id))
+    kb.button(text="◀️ Назад",   callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
