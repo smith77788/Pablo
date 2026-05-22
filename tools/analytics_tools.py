@@ -12,9 +12,6 @@ def _since(days: int) -> str:
 def get_sales_summary(days: int = 30) -> dict:
     """Revenue, order count, and average order value for the last N days."""
     since = _since(days)
-    res = get_client().rpc("get_investor_monthly_revenue", {}).execute()
-
-    # Fallback: direct query
     orders = (
         get_client()
         .table("orders")
