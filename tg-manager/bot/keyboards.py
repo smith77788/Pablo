@@ -465,14 +465,24 @@ def funnels_list(bot_id: int, funnels: list) -> InlineKeyboardMarkup:
             callback_data=FunnelCb(action="view", bot_id=bot_id, funnel_id=f["id"]),
         )
     kb.adjust(1)
-    kb.row(InlineKeyboardButton(
-        text="➕ Создать цепочку",
-        callback_data=FunnelCb(action="create", bot_id=bot_id).pack(),
-    ))
+    kb.row(
+        InlineKeyboardButton(text="➕ Создать", callback_data=FunnelCb(action="create", bot_id=bot_id).pack()),
+        InlineKeyboardButton(text="📋 Скопировать из другого", callback_data=FunnelCb(action="copy_from", bot_id=bot_id).pack()),
+    )
     kb.row(InlineKeyboardButton(
         text="◀️ Назад",
         callback_data=BotCb(action="select", bot_id=bot_id).pack(),
     ))
+    return kb.as_markup()
+
+
+def funnel_copy_target(bot_id: int, bots: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for b in bots[:8]:
+        label = f"@{b['username']}" if b["username"] else b["first_name"]
+        kb.button(text=f"🤖 {label}", callback_data=FunnelCb(action="copy_confirm", bot_id=bot_id, target_bot_id=b["bot_id"]))
+    kb.button(text="◀️ Назад", callback_data=FunnelCb(action="list", bot_id=bot_id))
+    kb.adjust(1)
     return kb.as_markup()
 
 

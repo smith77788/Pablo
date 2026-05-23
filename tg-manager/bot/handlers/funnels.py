@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
 from bot.callbacks import FunnelCb, BotCb
-from bot.keyboards import funnels_list, funnel_view, funnel_trigger_menu, back_to_bot
+from bot.keyboards import funnels_list, funnel_view, funnel_trigger_menu, back_to_bot, funnel_copy_target
 from bot.states import CreateFunnel, FunnelBroadcast
 from database import db
 from services import broadcaster
@@ -302,3 +302,44 @@ async def msg_fn_broadcast(message: Message, state: FSMContext,
         parse_mode="HTML",
         reply_markup=back_to_bot(data["bot_id"]),
     )
+
+
+# ── Copy funnels from another bot ─────────────────────────────────────────
+
+@router.callback_query(FunnelCb.filter(F.action == "copy_from"))
+async def cb_fn_copy_from(callback: CallbackQuery, callback_data: FunnelCb,
+                           pool: asyncpg.Pool) -> None:
+    bots = await db.get_bots(pool, callback.from_user.id)
+    others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
+    if not others:
+        await callback.answer("Нет других ботов для копирования.", show_alert=True)
+        return
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else "")
+    await callback.message.edit_text(
+        f"📋 <b>Скопировать цепочки в {label}</b>\n\nВыберите бот-источник:",
+        parse_mode="HTML",
+        reply_markup=funnel_copy_target(callback_data.bot_id, others),
+    )
+    await callback.answer()
+
+
+@router.callback_query(FunnelCb.filter(F.action == "copy_confirm"))
+async def cb_fn_copy_confirm(callback: CallbackQuery, callback_data: FunnelCb,
+                              pool: asyncpg.Pool) -> None:
+    src_bot = await db.get_bot(pool, callback_data.target_bot_id, callback.from_user.id)
+    dst_bot = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not src_bot or not dst_bot:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    copied = await db.copy_funnels(pool, callback_data.target_bot_id, callback_data.bot_id)
+    dst_label = f"@{dst_bot['username']}" if dst_bot["username"] else dst_bot["first_name"]
+    src_label = f"@{src_bot['username']}" if src_bot["username"] else src_bot["first_name"]
+    funnels = await db.get_funnels(pool, callback_data.bot_id)
+    await callback.message.edit_text(
+        f"🔗 <b>Цепочки сообщений — {dst_label}</b>\n\n"
+        f"Всего цепочек: <b>{len(funnels)}</b>",
+        parse_mode="HTML",
+        reply_markup=funnels_list(callback_data.bot_id, funnels),
+    )
+    await callback.answer(f"✅ Скопировано {copied} цепочек из {src_label}!", show_alert=True)

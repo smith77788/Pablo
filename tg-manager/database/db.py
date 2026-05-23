@@ -494,6 +494,27 @@ async def add_funnel_step(pool: asyncpg.Pool, funnel_id: int, step_order: int,
     )
 
 
+async def copy_funnels(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int) -> int:
+    """Copy all funnels (with steps) from one bot to another. Returns count of copied funnels."""
+    funnels = await pool.fetch("SELECT * FROM funnels WHERE bot_id=$1", from_bot_id)
+    count = 0
+    for f in funnels:
+        new_funnel = await pool.fetchrow(
+            "INSERT INTO funnels(bot_id, name, trigger_type, keyword) VALUES($1,$2,$3,$4) RETURNING id",
+            to_bot_id, f["name"], f["trigger_type"], f["keyword"],
+        )
+        steps = await pool.fetch(
+            "SELECT * FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order", f["id"]
+        )
+        for s in steps:
+            await pool.execute(
+                "INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes) VALUES($1,$2,$3,$4)",
+                new_funnel["id"], s["step_order"], s["message_text"], s["delay_minutes"],
+            )
+        count += 1
+    return count
+
+
 async def get_funnel_subscriber_ids(pool: asyncpg.Pool, funnel_id: int) -> list[int]:
     """Return user_ids of all active (not completed) funnel subscribers."""
     rows = await pool.fetch(
