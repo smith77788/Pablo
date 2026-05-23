@@ -9,6 +9,7 @@ import { BroadcastsModule } from './broadcasts/broadcasts.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { InboxModule } from './inbox/inbox.module';
 import { StatsModule } from './stats/stats.module';
+import { AutomationsModule } from './automations/automations.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { StatsModule } from './stats/stats.module';
     AnalyticsModule,
     InboxModule,
     StatsModule,
+    AutomationsModule,
   ],
 })
 export class AppModule {}
