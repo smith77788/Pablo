@@ -6,6 +6,7 @@ import aiohttp
 import asyncpg
 from database import db
 from services import bot_api
+from services import routing_engine
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +73,18 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                     await bot_api.send_message(http, token, chat_id, rule["response_text"])
                     break  # first matching rule wins
 
+            # Swarm routing: if entry bot in swarm mode and user sent /start
+            if text.strip().lower().startswith("/start"):
+                bot_row = await pool.fetchrow(
+                    "SELECT bot_role, swarm_enabled, cluster FROM managed_bots WHERE bot_id=$1",
+                    bot_id,
+                )
+                if bot_row and bot_row["swarm_enabled"] and bot_row["bot_role"] == "entry":
+                    await routing_engine.make_routing_decision(
+                        pool, http, bot_id, chat_id, chat_id, token,
+                        bot_row["cluster"] or "default"
+                    )
+
             # Check automation rules
             for arule in await db.get_active_automation_rules(pool, bot_id):
                 triggered = False
@@ -97,6 +110,14 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                 elif (funnel["trigger_type"] == "keyword" and funnel["keyword"]
                       and funnel["keyword"].lower() in text.lower()):
                     await db.subscribe_to_funnel(pool, funnel["id"], chat_id)
+
+            # A/B experiment: if /start, assign variant and track impression
+            if text.strip().lower().startswith("/start"):
+                exp = await db.get_active_experiment(pool, bot_id, "start_message")
+                if exp:
+                    variant = await db.assign_experiment_variant(pool, bot_id, chat_id, exp["id"])
+                    if variant:
+                        pass  # variant is assigned, impression tracked in assign_experiment_variant
 
         if max_update_id > offset:
             await db.set_update_offset(pool, bot_id, max_update_id)

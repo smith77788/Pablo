@@ -23,6 +23,7 @@ from bot.handlers import funnels as funnels_handler
 from bot.handlers import notes as notes_handler
 from bot.handlers import swarm as swarm_handler
 from bot.handlers import crm as crm_handler
+from bot.handlers import experiments as experiments_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -63,6 +64,7 @@ async def main() -> None:
     dp.include_router(notes_handler.router)
     dp.include_router(swarm_handler.router)
     dp.include_router(crm_handler.router)
+    dp.include_router(experiments_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
 
     pool = await create_pool()

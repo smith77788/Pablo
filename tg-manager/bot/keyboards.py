@@ -519,8 +519,10 @@ def swarm_menu(bot_id: int, row) -> InlineKeyboardMarkup:
                      ("retention", "🔄 Retention"), ("general", "⚙️ General")]:
         prefix = "✅ " if role == r else ""
         kb.button(text=f"{prefix}{label}", callback_data=SwarmCb(action=f"role_{r}", bot_id=bot_id))
+    kb.button(text="📊 Routing Stats", callback_data=SwarmCb(action="stats", bot_id=bot_id))
+    kb.button(text="🌐 Системный режим", callback_data=SwarmCb(action="set_mode", bot_id=bot_id))
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(1, 2, 2, 1)
+    kb.adjust(1, 2, 2, 2, 1)
     return kb.as_markup()
 
 
