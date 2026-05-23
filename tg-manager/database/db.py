@@ -494,6 +494,14 @@ async def add_funnel_step(pool: asyncpg.Pool, funnel_id: int, step_order: int,
     )
 
 
+async def get_funnel_subscriber_ids(pool: asyncpg.Pool, funnel_id: int) -> list[int]:
+    """Return user_ids of all active (not completed) funnel subscribers."""
+    rows = await pool.fetch(
+        "SELECT user_id FROM funnel_subscriptions WHERE funnel_id=$1", funnel_id
+    )
+    return [r["user_id"] for r in rows]
+
+
 async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) -> None:
     await pool.execute(
         "INSERT INTO funnel_subscriptions(funnel_id,user_id) VALUES($1,$2)"

@@ -2,11 +2,13 @@
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+import aiohttp
 import asyncpg
 from bot.callbacks import FunnelCb, BotCb
 from bot.keyboards import funnels_list, funnel_view, funnel_trigger_menu, back_to_bot
-from bot.states import CreateFunnel
+from bot.states import CreateFunnel, FunnelBroadcast
 from database import db
+from services import broadcaster
 
 router = Router()
 
@@ -248,3 +250,53 @@ async def cb_fn_delete(callback: CallbackQuery, callback_data: FunnelCb,
         reply_markup=funnels_list(callback_data.bot_id, funnels),
     )
     await callback.answer("🗑 Цепочка удалена.")
+
+
+# ── Broadcast to funnel subscribers ───────────────────────────────────────
+
+@router.callback_query(FunnelCb.filter(F.action == "broadcast"))
+async def cb_fn_broadcast(callback: CallbackQuery, callback_data: FunnelCb,
+                           pool: asyncpg.Pool, state: FSMContext) -> None:
+    funnels = await db.get_funnels(pool, callback_data.bot_id)
+    funnel = next((f for f in funnels if f["id"] == callback_data.funnel_id), None)
+    if not funnel:
+        await callback.answer("Цепочка не найдена.", show_alert=True)
+        return
+    user_ids = await db.get_funnel_subscriber_ids(pool, callback_data.funnel_id)
+    if not user_ids:
+        await callback.answer("У цепочки нет подписчиков.", show_alert=True)
+        return
+    await state.set_state(FunnelBroadcast.waiting_message)
+    await state.update_data(bot_id=callback_data.bot_id, funnel_id=callback_data.funnel_id,
+                             funnel_name=funnel["name"], subscriber_ids=user_ids)
+    await callback.message.edit_text(
+        f"📢 <b>Рассылка подписчикам «{funnel['name']}»</b>\n\n"
+        f"Подписчиков: <b>{len(user_ids)}</b>\n\n"
+        "Введите текст сообщения (HTML поддерживается):",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(FunnelBroadcast.waiting_message)
+async def msg_fn_broadcast(message: Message, state: FSMContext,
+                            pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    data = await state.get_data()
+    await state.clear()
+
+    row = await db.get_bot(pool, data["bot_id"], message.from_user.id)
+    if not row:
+        await message.answer("Бот не найден.")
+        return
+
+    user_ids = data["subscriber_ids"]
+    bc_id = await db.create_broadcast(pool, data["bot_id"], message.text,
+                                       len(user_ids), message.from_user.id, None)
+    broadcaster.start(pool, http, bc_id, row["token"], data["bot_id"],
+                      message.text, None, user_ids)
+
+    await message.answer(
+        f"🚀 Рассылка #{bc_id} запущена для <b>{len(user_ids)}</b> подписчиков цепочки «{data['funnel_name']}»!",
+        parse_mode="HTML",
+        reply_markup=back_to_bot(data["bot_id"]),
+    )

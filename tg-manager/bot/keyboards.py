@@ -480,6 +480,7 @@ def funnel_view(bot_id: int, funnel_id: int, is_active: bool, step_count: int) -
     toggle = "❌ Отключить" if is_active else "✅ Включить"
     kb.button(text=toggle, callback_data=FunnelCb(action="toggle", bot_id=bot_id, funnel_id=funnel_id))
     kb.button(text="➕ Добавить шаг", callback_data=FunnelCb(action="add_step", bot_id=bot_id, funnel_id=funnel_id, step=step_count))
+    kb.button(text="📢 Написать подписчикам", callback_data=FunnelCb(action="broadcast", bot_id=bot_id, funnel_id=funnel_id))
     kb.button(text="🗑 Удалить", callback_data=FunnelCb(action="delete", bot_id=bot_id, funnel_id=funnel_id))
     kb.button(text="◀️ К цепочкам", callback_data=FunnelCb(action="list", bot_id=bot_id))
     kb.adjust(1)

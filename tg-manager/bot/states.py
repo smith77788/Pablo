@@ -94,3 +94,7 @@ class UpdateToken(StatesGroup):
 class SendToUser(StatesGroup):
     waiting_user_id = State()
     waiting_message = State()
+
+
+class FunnelBroadcast(StatesGroup):
+    waiting_message = State()
