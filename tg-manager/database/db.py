@@ -593,8 +593,7 @@ async def copy_auto_replies(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int
         try:
             await pool.execute(
                 """INSERT INTO auto_replies (bot_id, trigger_type, keyword, response_text)
-                   VALUES ($1, $2, $3, $4)
-                   ON CONFLICT DO NOTHING""",
+                   VALUES ($1, $2, $3, $4)""",
                 to_bot_id, r["trigger_type"], r["keyword"], r["response_text"],
             )
             count += 1

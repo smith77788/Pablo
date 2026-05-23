@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import asyncpg
 from bot.callbacks import AutoReplyCb, BotCb
-from bot.keyboards import auto_reply_menu, auto_reply_trigger_menu, auto_reply_view, back_to_bot
+from bot.keyboards import auto_reply_menu, auto_reply_trigger_menu, auto_reply_view, back_to_bot, auto_reply_copy_target
 from bot.states import AddAutoReply
 from database import db
 
@@ -167,3 +167,45 @@ async def cb_ar_delete(callback: CallbackQuery, callback_data: AutoReplyCb,
         reply_markup=auto_reply_menu(callback_data.bot_id, replies),
     )
     await callback.answer("🗑 Правило удалено.")
+
+
+@router.callback_query(AutoReplyCb.filter(F.action == "copy_to"))
+async def cb_ar_copy_to(callback: CallbackQuery, callback_data: AutoReplyCb,
+                         pool: asyncpg.Pool) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    bots = await db.get_bots(pool, callback.from_user.id)
+    others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
+    if not others:
+        await callback.answer("Нет других ботов для копирования.", show_alert=True)
+        return
+    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    await callback.message.edit_text(
+        f"📋 <b>Копировать авто-ответы из {label}</b>\n\nВыберите бот-получатель:",
+        parse_mode="HTML",
+        reply_markup=auto_reply_copy_target(callback_data.bot_id, others),
+    )
+    await callback.answer()
+
+
+@router.callback_query(AutoReplyCb.filter(F.action == "copy_confirm"))
+async def cb_ar_copy_confirm(callback: CallbackQuery, callback_data: AutoReplyCb,
+                              pool: asyncpg.Pool) -> None:
+    src_bot = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    dst_bot = await db.get_bot(pool, callback_data.target_bot_id, callback.from_user.id)
+    if not src_bot or not dst_bot:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    copied = await db.copy_auto_replies(pool, callback_data.bot_id, callback_data.target_bot_id)
+    dst_label = f"@{dst_bot['username']}" if dst_bot["username"] else dst_bot["first_name"]
+    replies = await db.get_auto_replies(pool, callback_data.bot_id)
+    src_label = f"@{src_bot['username']}" if src_bot["username"] else src_bot["first_name"]
+    await callback.message.edit_text(
+        f"💬 <b>Авто-ответы {src_label}</b>\n\nПравил: {len(replies)}\n\n"
+        "Бот автоматически отвечает на сообщения пользователей по заданным правилам.",
+        parse_mode="HTML",
+        reply_markup=auto_reply_menu(callback_data.bot_id, replies),
+    )
+    await callback.answer(f"✅ Скопировано {copied} правил в {dst_label}!", show_alert=True)
