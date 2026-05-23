@@ -78,6 +78,16 @@ async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
     total_all = stats["total"] + stats["inactive"]
     block_pct = round(stats["inactive"] / total_all * 100, 1) if total_all else 0
 
+    daily = await db.get_audience_daily_growth(pool, row["bot_id"], days=7)
+    max_day = max((d["count"] for d in daily), default=1)
+    graph_lines = []
+    for d in daily:
+        bar_len = max(1, round(d["count"] * 10 / max_day)) if max_day else 0
+        bar = "█" * bar_len
+        date_str = d["date"].strftime("%d.%m")
+        graph_lines.append(f"  {date_str}: {bar} +{d['count']}")
+    graph = "\n".join(graph_lines) if graph_lines else "  нет данных"
+
     text = (
         f"📊 <b>Статистика аудитории {label}</b>\n\n"
         f"👤 Активных: <b>{stats['total']}</b>\n"
@@ -87,6 +97,7 @@ async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
         f"  За сутки: <b>+{stats['joined_today']}</b>\n"
         f"  За 7 дней: <b>+{stats['joined_week']}</b>\n"
         f"  За 30 дней: <b>+{stats['joined_month']}</b>\n\n"
+        f"📅 <b>График (7 дней):</b>\n<code>{graph}</code>\n\n"
         f"🌍 <b>Языки (топ-10):</b>\n{lang_lines}"
     )
     await callback.message.edit_text(text, parse_mode="HTML",

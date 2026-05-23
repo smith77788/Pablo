@@ -225,3 +225,39 @@ async def msg_update_token(message: Message, state: FSMContext,
         parse_mode="HTML",
         reply_markup=back_to_bot(new_bot_id),
     )
+
+
+# ── Health check ──────────────────────────────────────────────────────────
+
+@router.callback_query(EditCb.filter(F.action == "health"))
+async def cb_health(callback: CallbackQuery, callback_data: EditCb,
+                     pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    await callback.answer("⏳ Проверяю…")
+    info = await bot_api.get_me(http, row["token"])
+    if info:
+        label = f"@{info.get('username', '')}" if info.get("username") else info.get("first_name", str(info["id"]))
+        wh = await bot_api.get_webhook_info(http, row["token"])
+        webhook_url = wh.get("url") if wh else ""
+        wh_text = f"Вебхук: <code>{webhook_url}</code>" if webhook_url else "Вебхук: не установлен (polling)"
+        await callback.message.edit_text(
+            f"✅ <b>Бот работает нормально</b>\n\n"
+            f"Имя: <b>{info.get('first_name', '')}</b>\n"
+            f"Username: {label}\n"
+            f"ID: <code>{info['id']}</code>\n"
+            f"Принимает сообщения: {'✅' if not info.get('has_private_forwards') else '⚠️'}\n"
+            f"{wh_text}",
+            parse_mode="HTML",
+            reply_markup=edit_menu(callback_data.bot_id),
+        )
+    else:
+        await callback.message.edit_text(
+            "❌ <b>Бот недоступен!</b>\n\n"
+            "Токен недействителен или бот заблокирован BotFather.\n"
+            "Обновите токен или проверьте в BotFather.",
+            parse_mode="HTML",
+            reply_markup=edit_menu(callback_data.bot_id),
+        )

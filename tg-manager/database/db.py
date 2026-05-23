@@ -642,6 +642,18 @@ async def update_bot_token(pool: asyncpg.Pool, bot_id: int, added_by: int,
     )
 
 
+async def get_audience_daily_growth(pool: asyncpg.Pool, bot_id: int, days: int = 7) -> list[dict]:
+    """Returns list of {date, new_users} for the last N days."""
+    rows = await pool.fetch(
+        """SELECT DATE(first_seen AT TIME ZONE 'UTC') AS d, COUNT(*) AS cnt
+           FROM bot_users
+           WHERE bot_id=$1 AND first_seen >= NOW() - ($2 || ' days')::INTERVAL
+           GROUP BY d ORDER BY d""",
+        bot_id, str(days),
+    )
+    return [{"date": r["d"], "count": r["cnt"]} for r in rows]
+
+
 async def get_audience_new_users(pool: asyncpg.Pool, bot_id: int, days: int) -> list[int]:
     """Return user_ids of active users who joined within the last N days."""
     rows = await pool.fetch(
