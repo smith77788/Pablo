@@ -187,11 +187,22 @@ def extract_users_from_updates(updates: list[dict]) -> list[dict]:
 
 # ── Sending ───────────────────────────────────────────────────────────────
 
+def _build_inline_keyboard(buttons: list[dict] | None) -> dict | None:
+    """Build Telegram inline_keyboard from list of {text, url} dicts."""
+    if not buttons:
+        return None
+    return {"inline_keyboard": [[{"text": b["text"], "url": b["url"]}] for b in buttons]}
+
+
 async def send_message(session: aiohttp.ClientSession, token: str,
-                        chat_id: int, text: str) -> tuple[bool, int | None]:
+                        chat_id: int, text: str,
+                        buttons: list[dict] | None = None) -> tuple[bool, int | None]:
     """Returns (success, retry_after_seconds_or_None)."""
-    data = await _call(session, token, "sendMessage",
-                       chat_id=chat_id, text=text, parse_mode="HTML")
+    params: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    kb = _build_inline_keyboard(buttons)
+    if kb:
+        params["reply_markup"] = kb
+    data = await _call(session, token, "sendMessage", **params)
     if data.get("ok"):
         return True, None
     error_code = data.get("error_code", 0)
@@ -203,12 +214,16 @@ async def send_message(session: aiohttp.ClientSession, token: str,
 
 async def send_photo(session: aiohttp.ClientSession, token: str,
                      chat_id: int, photo: str,
-                     caption: str = "") -> tuple[bool, int | None]:
+                     caption: str = "",
+                     buttons: list[dict] | None = None) -> tuple[bool, int | None]:
     """Send a photo by file_id. Returns (success, retry_after_seconds_or_None)."""
     params: dict = {"chat_id": chat_id, "photo": photo}
     if caption:
         params["caption"] = caption
         params["parse_mode"] = "HTML"
+    kb = _build_inline_keyboard(buttons)
+    if kb:
+        params["reply_markup"] = kb
     data = await _call(session, token, "sendPhoto", **params)
     if data.get("ok"):
         return True, None

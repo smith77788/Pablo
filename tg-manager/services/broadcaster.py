@@ -17,7 +17,8 @@ _running: dict[int, asyncio.Task] = {}
 async def run(pool: asyncpg.Pool, session: aiohttp.ClientSession,
               broadcast_id: int, token: str, bot_id: int, text: str,
               photo_file_id: str | None = None,
-              user_ids: list[int] | None = None) -> None:
+              user_ids: list[int] | None = None,
+              buttons: list[dict] | None = None) -> None:
     if user_ids is None:
         user_ids = await db.get_audience_user_ids(pool, bot_id)
     sent = failed = 0
@@ -25,9 +26,11 @@ async def run(pool: asyncpg.Pool, session: aiohttp.ClientSession,
 
     for uid in user_ids:
         if photo_file_id:
-            success, retry_after = await bot_api.send_photo(session, token, uid, photo_file_id, text)
+            success, retry_after = await bot_api.send_photo(
+                session, token, uid, photo_file_id, text, buttons=buttons)
         else:
-            success, retry_after = await bot_api.send_message(session, token, uid, text)
+            success, retry_after = await bot_api.send_message(
+                session, token, uid, text, buttons=buttons)
         if success:
             sent += 1
         else:
@@ -35,18 +38,16 @@ async def run(pool: asyncpg.Pool, session: aiohttp.ClientSession,
             if retry_after:
                 logger.info("Broadcast %d: rate-limited, sleeping %ds", broadcast_id, retry_after)
                 await asyncio.sleep(retry_after)
-                # Retry once after the cooldown
                 if photo_file_id:
-                    ok, _ = await bot_api.send_photo(session, token, uid, photo_file_id, text)
+                    ok, _ = await bot_api.send_photo(session, token, uid, photo_file_id, text, buttons=buttons)
                 else:
-                    ok, _ = await bot_api.send_message(session, token, uid, text)
+                    ok, _ = await bot_api.send_message(session, token, uid, text, buttons=buttons)
                 if ok:
                     sent += 1
                     failed -= 1
                 else:
                     await db.mark_user_inactive(pool, bot_id, uid)
             else:
-                # 403 / user blocked the bot — deactivate
                 await db.mark_user_inactive(pool, bot_id, uid)
 
         await asyncio.sleep(BROADCAST_DELAY)
@@ -59,9 +60,10 @@ async def run(pool: asyncpg.Pool, session: aiohttp.ClientSession,
 def start(pool: asyncpg.Pool, session: aiohttp.ClientSession,
           broadcast_id: int, token: str, bot_id: int, text: str,
           photo_file_id: str | None = None,
-          user_ids: list[int] | None = None) -> None:
+          user_ids: list[int] | None = None,
+          buttons: list[dict] | None = None) -> None:
     task = asyncio.create_task(
-        run(pool, session, broadcast_id, token, bot_id, text, photo_file_id, user_ids),
+        run(pool, session, broadcast_id, token, bot_id, text, photo_file_id, user_ids, buttons),
         name=f"broadcast-{broadcast_id}",
     )
     _running[broadcast_id] = task

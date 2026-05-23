@@ -10,6 +10,7 @@ from bot.keyboards import (
     broadcast_history, broadcast_detail, broadcast_segment_menu,
 )
 from bot.states import Broadcast
+from services import bot_api as _bot_api
 from database import db
 from services import broadcaster
 
@@ -111,9 +112,11 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
         total = await db.get_audience_count(pool, row["bot_id"])
         segment_user_ids = None
 
+    buttons = data.get("buttons")
     bc_id = await db.create_broadcast(pool, row["bot_id"], text, total, callback.from_user.id, photo_file_id)
 
-    broadcaster.start(pool, http, bc_id, row["token"], row["bot_id"], text, photo_file_id, segment_user_ids)
+    broadcaster.start(pool, http, bc_id, row["token"], row["bot_id"], text, photo_file_id,
+                      segment_user_ids, buttons=buttons)
 
     await state.clear()
     await callback.message.edit_text(
@@ -123,6 +126,87 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
         reply_markup=back_to_bot(callback_data.bot_id),
     )
     await callback.answer()
+
+
+@router.callback_query(BroadcastCb.filter(F.action == "test"))
+async def cb_test(callback: CallbackQuery, callback_data: BroadcastCb,
+                  state: FSMContext, pool: asyncpg.Pool,
+                  http: aiohttp.ClientSession) -> None:
+    data = await state.get_data()
+    text = data.get("text", "")
+    photo_file_id = data.get("photo_file_id")
+    buttons = data.get("buttons")
+    if not text and not photo_file_id:
+        await callback.answer("Текст рассылки пуст.", show_alert=True)
+        return
+
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    test_uid = callback.from_user.id
+    if photo_file_id:
+        ok, _ = await _bot_api.send_photo(http, row["token"], test_uid, photo_file_id, text, buttons=buttons)
+    else:
+        ok, _ = await _bot_api.send_message(http, row["token"], test_uid, text, buttons=buttons)
+
+    if ok:
+        await callback.answer("✅ Тест отправлен вам!", show_alert=True)
+    else:
+        await callback.answer("❌ Не удалось отправить тест. Убедитесь, что вы написали этому боту /start.", show_alert=True)
+
+
+@router.callback_query(BroadcastCb.filter(F.action == "add_button"))
+async def cb_add_button(callback: CallbackQuery, callback_data: BroadcastCb,
+                        state: FSMContext) -> None:
+    await state.set_state(Broadcast.waiting_button_text)
+    await callback.message.edit_text(
+        "🔗 <b>Добавить кнопку к рассылке</b>\n\nВведите текст кнопки:",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(Broadcast.waiting_button_text)
+async def msg_button_text(message: Message, state: FSMContext) -> None:
+    await state.update_data(pending_btn_text=message.text.strip())
+    await state.set_state(Broadcast.waiting_button_url)
+    await message.answer(
+        f"🔗 Текст кнопки: <b>{message.text.strip()}</b>\n\nТеперь введите URL:",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Broadcast.waiting_button_url)
+async def msg_button_url(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    url = message.text.strip()
+    if not url.startswith(("http://", "https://", "tg://")):
+        await message.answer("❌ Неверный URL. Должен начинаться с http:// или https://")
+        return
+
+    data = await state.get_data()
+    btn_text = data.get("pending_btn_text", "Открыть")
+    buttons = data.get("buttons") or []
+    buttons.append({"text": btn_text, "url": url})
+    await state.update_data(buttons=buttons, pending_btn_text=None)
+    await state.set_state(Broadcast.confirming)
+
+    text = data.get("text", "")
+    photo_file_id = data.get("photo_file_id")
+    segment_label = f"🎯 Сегмент: <b>{data['segment_lang'].upper()}</b>\n" if data.get("segment_lang") else ""
+    btn_list = "\n".join(f"  • {b['text']} → {b['url']}" for b in buttons)
+    count = len(data.get("segment_user_ids") or []) or await db.get_audience_count(pool, data["bot_id"])
+
+    preview_header = "📸 <b>Фото + подпись:</b>\n\n" if photo_file_id else "📢 <b>Предпросмотр:</b>\n\n"
+    await message.answer(
+        f"{preview_header}{text}\n\n"
+        f"🔘 <b>Кнопки:</b>\n{btn_list}\n\n"
+        f"{segment_label}"
+        f"Получателей: <b>{count}</b> чел.\nЗапустить?",
+        parse_mode="HTML",
+        reply_markup=broadcast_confirm(data["bot_id"]),
+    )
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "cancel"))

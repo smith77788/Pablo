@@ -174,9 +174,11 @@ def broadcast_from_template(bot_id: int, templates: list) -> InlineKeyboardMarku
 
 def broadcast_confirm(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🚀 Запустить",  callback_data=BroadcastCb(action="confirm", bot_id=bot_id))
-    kb.button(text="❌ Отмена",     callback_data=BroadcastCb(action="cancel", bot_id=bot_id))
-    kb.adjust(2)
+    kb.button(text="🚀 Запустить",      callback_data=BroadcastCb(action="confirm", bot_id=bot_id))
+    kb.button(text="📩 Тест себе",      callback_data=BroadcastCb(action="test", bot_id=bot_id))
+    kb.button(text="🔗 Добавить кнопку", callback_data=BroadcastCb(action="add_button", bot_id=bot_id))
+    kb.button(text="❌ Отмена",         callback_data=BroadcastCb(action="cancel", bot_id=bot_id))
+    kb.adjust(2, 1, 1)
     return kb.as_markup()
 
 
