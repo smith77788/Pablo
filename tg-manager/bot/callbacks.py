@@ -65,3 +65,10 @@ class AutoReplyCb(CallbackData, prefix="ar"):
 class RelayCb(CallbackData, prefix="rl"):
     action: str
     bot_id: int
+
+
+class FunnelCb(CallbackData, prefix="fn"):
+    action: str
+    bot_id: int = 0
+    funnel_id: int = 0
+    step: int = 0

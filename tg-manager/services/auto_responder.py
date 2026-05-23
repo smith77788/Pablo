@@ -71,6 +71,14 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                     await bot_api.send_message(http, token, chat_id, rule["response_text"])
                     break  # first matching rule wins
 
+            # Check funnels
+            funnels = await db.get_active_funnels(pool, bot_id)
+            for funnel in funnels:
+                if funnel["trigger_type"] == "start" and text.strip().lower().startswith("/start"):
+                    await db.subscribe_to_funnel(pool, funnel["id"], chat_id)
+                elif funnel["trigger_type"] == "keyword" and funnel["keyword"] and funnel["keyword"].lower() in text.lower():
+                    await db.subscribe_to_funnel(pool, funnel["id"], chat_id)
+
         if max_update_id > offset:
             await db.set_update_offset(pool, bot_id, max_update_id)
 

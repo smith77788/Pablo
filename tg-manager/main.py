@@ -18,9 +18,11 @@ from bot.handlers import schedule as sch_handler
 from bot.handlers import multigeo as multigeo_handler
 from bot.handlers import auto_reply as ar_handler
 from bot.handlers import relay as relay_handler
+from bot.handlers import funnels as funnels_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
+from services import funnel_runner
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,6 +54,7 @@ async def main() -> None:
     dp.include_router(bulk.router)
     dp.include_router(multigeo_handler.router)
     dp.include_router(ar_handler.router)
+    dp.include_router(funnels_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
 
     pool = await create_pool()
@@ -63,6 +66,7 @@ async def main() -> None:
         asyncio.create_task(scheduler.run(pool, http))
         asyncio.create_task(auto_responder.run(pool, http))
         asyncio.create_task(relay_service.run(pool, http))
+        asyncio.create_task(funnel_runner.run(pool, http))
         logging.info("TG Manager started")
         try:
             await dp.start_polling(bot, pool=pool, http=http)

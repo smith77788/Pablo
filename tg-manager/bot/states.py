@@ -75,3 +75,11 @@ class AddAutoReply(StatesGroup):
     choosing_trigger = State()
     waiting_keyword = State()
     waiting_text = State()
+
+
+class CreateFunnel(StatesGroup):
+    waiting_name = State()
+    waiting_trigger = State()
+    waiting_keyword = State()
+    waiting_step_text = State()
+    waiting_step_delay = State()

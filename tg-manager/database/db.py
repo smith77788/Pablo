@@ -374,3 +374,91 @@ async def get_relay_sessions(pool: asyncpg.Pool, bot_id: int,
            ORDER BY rs.last_activity DESC LIMIT $2""",
         bot_id, limit,
     )
+
+
+# ── Funnels ────────────────────────────────────────────────────────────────
+
+async def get_funnels(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Record]:
+    return await pool.fetch("SELECT * FROM funnels WHERE bot_id=$1 ORDER BY id", bot_id)
+
+
+async def get_active_funnels(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Record]:
+    return await pool.fetch("SELECT * FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id)
+
+
+async def create_funnel(pool: asyncpg.Pool, bot_id: int, name: str,
+                        trigger_type: str, keyword: str | None = None) -> asyncpg.Record:
+    return await pool.fetchrow(
+        "INSERT INTO funnels(bot_id,name,trigger_type,keyword) VALUES($1,$2,$3,$4) RETURNING id",
+        bot_id, name, trigger_type, keyword,
+    )
+
+
+async def delete_funnel(pool: asyncpg.Pool, funnel_id: int, bot_id: int) -> None:
+    await pool.execute("DELETE FROM funnels WHERE id=$1 AND bot_id=$2", funnel_id, bot_id)
+
+
+async def toggle_funnel(pool: asyncpg.Pool, funnel_id: int, bot_id: int) -> None:
+    await pool.execute(
+        "UPDATE funnels SET is_active=NOT is_active WHERE id=$1 AND bot_id=$2", funnel_id, bot_id,
+    )
+
+
+async def get_funnel_steps(pool: asyncpg.Pool, funnel_id: int) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order", funnel_id,
+    )
+
+
+async def add_funnel_step(pool: asyncpg.Pool, funnel_id: int, step_order: int,
+                          message_text: str, delay_minutes: int) -> None:
+    await pool.execute(
+        "INSERT INTO funnel_steps(funnel_id,step_order,message_text,delay_minutes) VALUES($1,$2,$3,$4)"
+        " ON CONFLICT(funnel_id,step_order) DO UPDATE SET message_text=$3,delay_minutes=$4",
+        funnel_id, step_order, message_text, delay_minutes,
+    )
+
+
+async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) -> None:
+    await pool.execute(
+        "INSERT INTO funnel_subscriptions(funnel_id,user_id) VALUES($1,$2)"
+        " ON CONFLICT(funnel_id,user_id) DO UPDATE SET current_step=0,completed=false,next_send_at=now()",
+        funnel_id, user_id,
+    )
+
+
+async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Returns subscriptions where next step is due."""
+    return await pool.fetch(
+        """SELECT fs.id as sub_id, fs.funnel_id, fs.user_id, fs.current_step,
+                  fst.message_text, fst.delay_minutes,
+                  f.bot_id, mb.token,
+                  (SELECT COUNT(*) FROM funnel_steps WHERE funnel_id=fs.funnel_id) as total_steps
+           FROM funnel_subscriptions fs
+           JOIN funnels f ON f.id=fs.funnel_id AND f.is_active=true
+           JOIN funnel_steps fst ON fst.funnel_id=fs.funnel_id AND fst.step_order=fs.current_step
+           JOIN managed_bots mb ON mb.bot_id=f.bot_id
+           WHERE fs.completed=false AND fs.next_send_at<=now()""",
+    )
+
+
+async def advance_funnel_step(pool: asyncpg.Pool, sub_id: int, next_step: int,
+                               total_steps: int, delay_minutes: int) -> None:
+    if next_step >= total_steps:
+        await pool.execute(
+            "UPDATE funnel_subscriptions SET completed=true WHERE id=$1", sub_id,
+        )
+    else:
+        from datetime import datetime, timedelta
+        next_at = datetime.utcnow() + timedelta(minutes=delay_minutes)
+        await pool.execute(
+            "UPDATE funnel_subscriptions SET current_step=$2, next_send_at=$3 WHERE id=$1",
+            sub_id, next_step, next_at,
+        )
+
+
+async def get_bots_with_funnels(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT DISTINCT b.bot_id, b.token, b.added_by FROM managed_bots b "
+        "JOIN funnels f ON f.bot_id=b.bot_id WHERE f.is_active=true AND b.is_active=true"
+    )

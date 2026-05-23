@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
-    CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb,
+    CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb,
 )
 
 PAGE_SIZE = 5
@@ -78,11 +78,12 @@ def bot_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="📝 Шаблоны",      callback_data=TemplateCb(action="list", bot_id=bot_id))
     kb.button(text="💬 Авто-ответы",  callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
     kb.button(text="📨 Inbox",         callback_data=RelayCb(action="menu", bot_id=bot_id))
+    kb.button(text="🔗 Цепочки",      callback_data=FunnelCb(action="list", bot_id=bot_id))
     kb.button(text="🔗 Вебхук",       callback_data=WebhookCb(action="menu", bot_id=bot_id))
     kb.button(text="⚖️ Сравнить",    callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
-    kb.adjust(2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -320,5 +321,46 @@ def auto_reply_view(bot_id: int, reply_id: int, is_active: bool) -> InlineKeyboa
     kb.button(text=toggle_text, callback_data=AutoReplyCb(action="toggle", bot_id=bot_id, reply_id=reply_id))
     kb.button(text="🗑 Удалить",  callback_data=AutoReplyCb(action="delete", bot_id=bot_id, reply_id=reply_id))
     kb.button(text="◀️ Назад",   callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def funnels_list(bot_id: int, funnels: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for f in funnels[:8]:
+        icon = "✅" if f["is_active"] else "❌"
+        trigger = "/start" if f["trigger_type"] == "start" else f"🔑{f['keyword']}"
+        kb.button(
+            text=f"{icon} {f['name']} [{trigger}]",
+            callback_data=FunnelCb(action="view", bot_id=bot_id, funnel_id=f["id"]),
+        )
+    kb.adjust(1)
+    kb.row(InlineKeyboardButton(
+        text="➕ Создать цепочку",
+        callback_data=FunnelCb(action="create", bot_id=bot_id).pack(),
+    ))
+    kb.row(InlineKeyboardButton(
+        text="◀️ Назад",
+        callback_data=BotCb(action="select", bot_id=bot_id).pack(),
+    ))
+    return kb.as_markup()
+
+
+def funnel_view(bot_id: int, funnel_id: int, is_active: bool, step_count: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    toggle = "❌ Отключить" if is_active else "✅ Включить"
+    kb.button(text=toggle, callback_data=FunnelCb(action="toggle", bot_id=bot_id, funnel_id=funnel_id))
+    kb.button(text="➕ Добавить шаг", callback_data=FunnelCb(action="add_step", bot_id=bot_id, funnel_id=funnel_id, step=step_count))
+    kb.button(text="🗑 Удалить", callback_data=FunnelCb(action="delete", bot_id=bot_id, funnel_id=funnel_id))
+    kb.button(text="◀️ К цепочкам", callback_data=FunnelCb(action="list", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def funnel_trigger_menu(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="▶️ /start", callback_data=FunnelCb(action="trig_start", bot_id=bot_id))
+    kb.button(text="🔑 Ключевое слово", callback_data=FunnelCb(action="trig_keyword", bot_id=bot_id))
+    kb.button(text="◀️ Отмена", callback_data=FunnelCb(action="list", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
