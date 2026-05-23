@@ -12,6 +12,7 @@ import { StatsModule } from './stats/stats.module';
 import { AutomationsModule } from './automations/automations.module';
 import { TemplatesModule } from './templates/templates.module';
 import { TagsModule } from './tags/tags.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { TagsModule } from './tags/tags.module';
     AutomationsModule,
     TemplatesModule,
     TagsModule,
+    ApiKeysModule,
   ],
 })
 export class AppModule {}
