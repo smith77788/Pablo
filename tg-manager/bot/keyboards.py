@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
-    CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb,
+    CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
 )
 
 PAGE_SIZE = 5
@@ -81,9 +81,10 @@ def bot_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="🔗 Цепочки",      callback_data=FunnelCb(action="list", bot_id=bot_id))
     kb.button(text="🔗 Вебхук",       callback_data=WebhookCb(action="menu", bot_id=bot_id))
     kb.button(text="⚖️ Сравнить",    callback_data=AudCb(action="compare", bot_id=bot_id))
+    kb.button(text="📊 Статистика",   callback_data=StatsCb(action="menu", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
-    kb.adjust(2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

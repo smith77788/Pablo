@@ -308,6 +308,17 @@ async def get_bots_with_auto_replies(pool: asyncpg.Pool) -> list[asyncpg.Record]
     )
 
 
+async def get_bots_for_polling(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Return all active bots that have at least one auto-reply or active funnel."""
+    return await pool.fetch(
+        """SELECT DISTINCT b.bot_id, b.token FROM managed_bots b
+           WHERE b.is_active=true AND (
+               EXISTS (SELECT 1 FROM auto_replies ar WHERE ar.bot_id=b.bot_id AND ar.is_active=true)
+               OR EXISTS (SELECT 1 FROM funnels f WHERE f.bot_id=b.bot_id AND f.is_active=true)
+           )"""
+    )
+
+
 # ── Hermes Relay ───────────────────────────────────────────────────────────
 
 async def enable_relay(pool: asyncpg.Pool, bot_id: int, enabled: bool) -> None:
@@ -455,6 +466,47 @@ async def advance_funnel_step(pool: asyncpg.Pool, sub_id: int, next_step: int,
             "UPDATE funnel_subscriptions SET current_step=$2, next_send_at=$3 WHERE id=$1",
             sub_id, next_step, next_at,
         )
+
+
+async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
+    """Get aggregated statistics for a bot."""
+    # Count relay sessions (users who contacted bot via relay)
+    relay_sessions = await pool.fetchval(
+        "SELECT COUNT(*) FROM relay_sessions WHERE bot_id=$1", bot_id
+    )
+    # Count relay messages in/out
+    msg_in = await pool.fetchval(
+        """SELECT COUNT(*) FROM relay_messages rm
+           JOIN relay_sessions rs ON rs.id=rm.session_id
+           WHERE rs.bot_id=$1 AND rm.direction='in'""", bot_id
+    )
+    msg_out = await pool.fetchval(
+        """SELECT COUNT(*) FROM relay_messages rm
+           JOIN relay_sessions rs ON rs.id=rm.session_id
+           WHERE rs.bot_id=$1 AND rm.direction='out'""", bot_id
+    )
+    # Count active auto-replies
+    active_replies = await pool.fetchval(
+        "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=true", bot_id
+    )
+    # Count funnels
+    active_funnels = await pool.fetchval(
+        "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
+    )
+    # Count funnel subscriptions (unique users in funnel)
+    funnel_users = await pool.fetchval(
+        """SELECT COUNT(DISTINCT fs.user_id) FROM funnel_subscriptions fs
+           JOIN funnels f ON f.id=fs.funnel_id
+           WHERE f.bot_id=$1""", bot_id
+    )
+    return {
+        "relay_sessions": relay_sessions or 0,
+        "msg_in": msg_in or 0,
+        "msg_out": msg_out or 0,
+        "active_replies": active_replies or 0,
+        "active_funnels": active_funnels or 0,
+        "funnel_users": funnel_users or 0,
+    }
 
 
 async def get_bots_with_funnels(pool: asyncpg.Pool) -> list[asyncpg.Record]:

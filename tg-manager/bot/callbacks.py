@@ -72,3 +72,8 @@ class FunnelCb(CallbackData, prefix="fn"):
     bot_id: int = 0
     funnel_id: int = 0
     step: int = 0
+
+
+class StatsCb(CallbackData, prefix="st"):
+    action: str
+    bot_id: int

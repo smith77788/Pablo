@@ -17,6 +17,7 @@ from bot.handlers import templates as tpl_handler
 from bot.handlers import schedule as sch_handler
 from bot.handlers import multigeo as multigeo_handler
 from bot.handlers import auto_reply as ar_handler
+from bot.handlers import stats as stats_handler
 from bot.handlers import relay as relay_handler
 from bot.handlers import funnels as funnels_handler
 from services import scheduler
@@ -54,6 +55,7 @@ async def main() -> None:
     dp.include_router(bulk.router)
     dp.include_router(multigeo_handler.router)
     dp.include_router(ar_handler.router)
+    dp.include_router(stats_handler.router)
     dp.include_router(funnels_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
 
