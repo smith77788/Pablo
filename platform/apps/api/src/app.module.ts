@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { BroadcastsModule } from './broadcasts/broadcasts.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { InboxModule } from './inbox/inbox.module';
+import { StatsModule } from './stats/stats.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { InboxModule } from './inbox/inbox.module';
     BroadcastsModule,
     AnalyticsModule,
     InboxModule,
+    StatsModule,
   ],
 })
 export class AppModule {}
