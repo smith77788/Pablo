@@ -96,8 +96,9 @@ def edit_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="🌍 Мультигео",         callback_data=MultigeoCb(action="menu", bot_id=bot_id))
     kb.button(text="🖼 Фото",              callback_data=EditCb(action="photo", bot_id=bot_id))
     kb.button(text="🗑 Удалить фото",      callback_data=EditCb(action="del_photo", bot_id=bot_id))
+    kb.button(text="🔑 Обновить токен",    callback_data=EditCb(action="update_token", bot_id=bot_id))
     kb.button(text="◀️ Назад",             callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 

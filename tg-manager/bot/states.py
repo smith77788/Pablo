@@ -83,3 +83,7 @@ class CreateFunnel(StatesGroup):
     waiting_keyword = State()
     waiting_step_text = State()
     waiting_step_delay = State()
+
+
+class UpdateToken(StatesGroup):
+    waiting_token = State()

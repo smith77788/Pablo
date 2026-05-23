@@ -6,7 +6,7 @@ import aiohttp
 import asyncpg
 from bot.callbacks import EditCb, BotCb
 from bot.keyboards import edit_menu, back_to_bot
-from bot.states import EditProfile
+from bot.states import EditProfile, UpdateToken
 from database import db
 from services import bot_api
 
@@ -176,3 +176,52 @@ async def cb_del_photo(callback: CallbackQuery, callback_data: EditCb,
         await callback.answer("✅ Фото удалено.")
     else:
         await callback.answer("❌ Не удалось удалить фото.", show_alert=True)
+
+
+# ── Update token ──────────────────────────────────────────────────────────
+
+@router.callback_query(EditCb.filter(F.action == "update_token"))
+async def cb_update_token(callback: CallbackQuery, callback_data: EditCb,
+                           state: FSMContext) -> None:
+    await state.set_state(UpdateToken.waiting_token)
+    await state.update_data(old_bot_id=callback_data.bot_id)
+    await callback.message.edit_text(
+        "🔑 <b>Обновление токена</b>\n\n"
+        "Отправьте новый токен бота.\n"
+        "<i>Токен должен быть от того же или нового бота BotFather.</i>",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(UpdateToken.waiting_token)
+async def msg_update_token(message: Message, state: FSMContext,
+                            pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    token = message.text.strip() if message.text else ""
+    if not token or ":" not in token:
+        await message.answer("❌ Неверный формат токена. Попробуйте ещё раз:")
+        return
+
+    data = await state.get_data()
+    old_bot_id = data["old_bot_id"]
+
+    # Validate new token via API
+    info = await bot_api.get_me(http, token)
+    if not info:
+        await message.answer("❌ Токен недействителен. Проверьте и попробуйте снова:")
+        return
+
+    new_bot_id = info["id"]
+    username = info.get("username", "")
+    first_name = info.get("first_name", "")
+
+    await state.clear()
+    await db.update_bot_token(pool, old_bot_id, message.from_user.id,
+                               token, new_bot_id, username, first_name)
+
+    label = f"@{username}" if username else first_name
+    await message.answer(
+        f"✅ Токен обновлён!\n\nБот: <b>{label}</b>",
+        parse_mode="HTML",
+        reply_markup=back_to_bot(new_bot_id),
+    )

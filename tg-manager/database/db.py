@@ -528,3 +528,14 @@ async def get_bots_with_funnels(pool: asyncpg.Pool) -> list[asyncpg.Record]:
         "SELECT DISTINCT b.bot_id, b.token, b.added_by FROM managed_bots b "
         "JOIN funnels f ON f.bot_id=b.bot_id WHERE f.is_active=true AND b.is_active=true"
     )
+
+
+async def update_bot_token(pool: asyncpg.Pool, bot_id: int, added_by: int,
+                            new_token: str, new_bot_id: int,
+                            username: str, first_name: str) -> None:
+    await pool.execute(
+        """UPDATE managed_bots
+           SET token=$3, bot_id=$4, username=$5, first_name=$6
+           WHERE bot_id=$1 AND added_by=$2""",
+        bot_id, added_by, new_token, new_bot_id, username, first_name,
+    )
