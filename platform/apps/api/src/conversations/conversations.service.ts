@@ -1,8 +1,68 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { prisma } from '@platform/db';
 
 @Injectable()
 export class ConversationsService {
+  // ─── REQUIRED API METHODS ─────────────────────────────────────────────────
+
+  /** All conversations for a tenant, with bot and telegramUser JOINs.
+   * Optionally filter by status ('open'|'closed' mapped to Prisma enum values). */
+  async findAll(tenantId: string, status?: string) {
+    const where: any = { tenantId };
+    if (status) {
+      // Map friendly status strings to Prisma enum values
+      const statusMap: Record<string, string> = {
+        open: 'OPEN',
+        closed: 'RESOLVED',
+        pending: 'PENDING',
+        locked: 'LOCKED',
+        spam: 'SPAM',
+      };
+      where.status = statusMap[status.toLowerCase()] ?? status.toUpperCase();
+    }
+
+    return prisma.conversation.findMany({
+      where,
+      orderBy: { lastMessageAt: 'desc' },
+      include: {
+        user: { select: { id: true, telegramId: true, username: true, firstName: true, lastName: true } },
+        bot: { select: { id: true, username: true, firstName: true } },
+        assignedTo: { select: { id: true, name: true, avatarUrl: true } },
+        _count: { select: { messages: true } },
+      },
+    });
+  }
+
+  /** Single conversation by id, scoped to tenant. */
+  async findOne(tenantId: string, id: string) {
+    const conv = await prisma.conversation.findFirst({
+      where: { id, tenantId },
+      include: {
+        user: true,
+        bot: { select: { id: true, username: true, firstName: true } },
+        assignedTo: { select: { id: true, name: true, avatarUrl: true } },
+        _count: { select: { messages: true } },
+      },
+    });
+    if (!conv) throw new NotFoundException('Conversation not found');
+    return conv;
+  }
+
+  /** Messages of a conversation ordered by createdAt DESC. */
+  async getMessages(tenantId: string, conversationId: string, limit = 50) {
+    // Verify the conversation belongs to the tenant
+    const conv = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
+    if (!conv) throw new NotFoundException('Conversation not found');
+
+    return prisma.message.findMany({
+      where: { conversationId, tenantId },
+      orderBy: { sentAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  // ─── FULL CRUD / INBOX METHODS ────────────────────────────────────────────
+
   async list(tenantId: string, filters: {
     status?: string; botId?: string; assignedToId?: string; page?: number; limit?: number;
   }) {

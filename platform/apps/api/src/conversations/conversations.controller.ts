@@ -26,6 +26,15 @@ export class ConversationsController {
     return this.svc.get(req.user.tenantId, id);
   }
 
+  @Get(':id/messages')
+  getMessages(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.svc.getMessages(req.user.tenantId, id, limit ? parseInt(limit, 10) : 50);
+  }
+
   @Patch(':id/assign')
   assign(@Req() req: any, @Param('id') id: string, @Body() dto: AssignDto) {
     return this.svc.assign(req.user.tenantId, id, dto.operatorId);
