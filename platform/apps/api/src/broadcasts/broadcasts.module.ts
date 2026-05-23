@@ -7,5 +7,6 @@ import { BroadcastsService } from './broadcasts.service';
   imports: [BullModule.registerQueue({ name: 'broadcasts' })],
   controllers: [BroadcastsController],
   providers: [BroadcastsService],
+  exports: [BroadcastsService],
 })
 export class BroadcastsModule {}

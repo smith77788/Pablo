@@ -1,14 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { prisma } from '@platform/db';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-
-// This is imported at module level to avoid circular dep with BullModule
-let broadcastQueue: Queue;
+import { prisma } from '@platform/db';
 
 @Injectable()
 export class SchedulerService implements OnModuleInit {
   private readonly logger = new Logger(SchedulerService.name);
+
+  constructor(@InjectQueue('broadcasts') private readonly broadcastQueue: Queue) {}
 
   onModuleInit() {
     setInterval(() => this.checkScheduled(), 60_000);
@@ -28,6 +27,10 @@ export class SchedulerService implements OnModuleInit {
         await prisma.broadcast.update({
           where: { id: bc.id },
           data: { status: 'RUNNING', startedAt: new Date() },
+        });
+        await this.broadcastQueue.add('run', { broadcastId: bc.id, tenantId: bc.tenantId }, {
+          attempts: 1,
+          removeOnComplete: 50,
         });
         this.logger.log(`Firing scheduled broadcast ${bc.id}`);
       }

@@ -7,7 +7,7 @@ import { ConversationsModule } from './conversations/conversations.module';
 import { UsersModule } from './users/users.module';
 import { BroadcastsModule } from './broadcasts/broadcasts.module';
 import { AnalyticsModule } from './analytics/analytics.module';
-import { InboxGateway } from './inbox/inbox.gateway';
+import { InboxModule } from './inbox/inbox.module';
 
 @Module({
   imports: [
@@ -24,7 +24,7 @@ import { InboxGateway } from './inbox/inbox.gateway';
     UsersModule,
     BroadcastsModule,
     AnalyticsModule,
+    InboxModule,
   ],
-  providers: [InboxGateway],
 })
 export class AppModule {}
