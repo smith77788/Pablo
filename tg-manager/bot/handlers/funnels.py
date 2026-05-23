@@ -24,6 +24,7 @@ async def _show_funnel_view(message: Message, pool: asyncpg.Pool,
     steps = await db.get_funnel_steps(pool, funnel_id)
     trigger = "/start" if funnel["trigger_type"] == "start" else f"🔑 {funnel['keyword']}"
     status = "✅ Активна" if funnel["is_active"] else "❌ Отключена"
+    sub_ids = await db.get_funnel_subscriber_ids(pool, funnel_id)
     steps_text = ""
     for s in steps:
         delay_label = f"{s['delay_minutes']} мин" if s["delay_minutes"] > 0 else "сразу"
@@ -34,7 +35,8 @@ async def _show_funnel_view(message: Message, pool: asyncpg.Pool,
         f"🔗 <b>Цепочка: {funnel['name']}</b>\n\n"
         f"Триггер: {trigger}\n"
         f"Статус: {status}\n"
-        f"Шагов: {len(steps)}\n\n"
+        f"Шагов: {len(steps)}\n"
+        f"Подписчиков: <b>{len(sub_ids)}</b>\n\n"
         f"<b>Шаги:</b>{steps_text}"
     )
     await message.edit_text(
