@@ -156,9 +156,13 @@ def broadcast_history(bot_id: int, broadcasts: list) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def broadcast_detail(bot_id: int) -> InlineKeyboardMarkup:
+def broadcast_detail(bot_id: int, running_bc_id: int | None = None) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    if running_bc_id:
+        kb.button(text="🔄 Обновить статус",
+                  callback_data=BroadcastCb(action="detail", bot_id=bot_id, broadcast_id=running_bc_id))
     kb.button(text="◀️ К истории", callback_data=BroadcastCb(action="status", bot_id=bot_id))
+    kb.adjust(1)
     return kb.as_markup()
 
 
@@ -186,10 +190,12 @@ def broadcast_confirm(bot_id: int) -> InlineKeyboardMarkup:
 
 def broadcast_segment_menu(bot_id: int, languages: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    kb.button(text="🆕 Новые за 7 дней",   callback_data=BroadcastCb(action="segment_select", bot_id=bot_id, lang="__new7__"))
+    kb.button(text="🆕 Новые за 30 дней",  callback_data=BroadcastCb(action="segment_select", bot_id=bot_id, lang="__new30__"))
     FLAG_MAP = {"ru": "🇷🇺", "en": "🇬🇧", "uk": "🇺🇦", "de": "🇩🇪",
                 "fr": "🇫🇷", "es": "🇪🇸", "it": "🇮🇹", "pt": "🇵🇹",
                 "pl": "🇵🇱", "tr": "🇹🇷", "unknown": "🌐"}
-    for lang_info in languages[:8]:
+    for lang_info in languages[:6]:
         lang = lang_info["lang"]
         flag = FLAG_MAP.get(lang, "🌐")
         kb.button(
@@ -197,7 +203,7 @@ def broadcast_segment_menu(bot_id: int, languages: list) -> InlineKeyboardMarkup
             callback_data=BroadcastCb(action="segment_select", bot_id=bot_id, lang=lang),
         )
     kb.button(text="◀️ Назад", callback_data=BroadcastCb(action="menu", bot_id=bot_id))
-    kb.adjust(2, 1)
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 

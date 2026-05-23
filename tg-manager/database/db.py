@@ -620,6 +620,17 @@ async def update_bot_token(pool: asyncpg.Pool, bot_id: int, added_by: int,
     )
 
 
+async def get_audience_new_users(pool: asyncpg.Pool, bot_id: int, days: int) -> list[int]:
+    """Return user_ids of active users who joined within the last N days."""
+    rows = await pool.fetch(
+        """SELECT user_id FROM bot_users
+           WHERE bot_id=$1 AND is_active=TRUE
+             AND first_seen >= NOW() - ($2 || ' days')::INTERVAL""",
+        bot_id, str(days),
+    )
+    return [r["user_id"] for r in rows]
+
+
 async def get_audience_by_language(pool: asyncpg.Pool, bot_id: int,
                                     lang_code: str) -> list[int]:
     """Return user_ids filtered by language_code."""

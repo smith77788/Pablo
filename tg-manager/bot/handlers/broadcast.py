@@ -253,9 +253,15 @@ async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
     preview = bc["message_text"][:300] if bc["message_text"] else ""
     success_rate = round(bc["sent_count"] / bc["total_users"] * 100) if bc["total_users"] else 0
     finished = bc["finished_at"].strftime("%d.%m.%Y %H:%M") if bc.get("finished_at") else "—"
+    progress_bar = ""
+    if bc["status"] == "running" and bc["total_users"]:
+        done = bc["sent_count"] + bc["failed_count"]
+        pct = min(done * 100 // bc["total_users"], 100)
+        filled = pct // 10
+        progress_bar = f"\n{'█' * filled}{'░' * (10 - filled)} {pct}%\n"
     text = (
         f"📋 <b>Рассылка #{bc['id']}</b>\n\n"
-        f"Статус: {emoji} {bc['status']}\n"
+        f"Статус: {emoji} {bc['status']}{progress_bar}\n"
         f"Создана: {bc['created_at'].strftime('%d.%m.%Y %H:%M')}\n"
         f"Завершена: {finished}\n\n"
         f"Отправлено: <b>{bc['sent_count']}</b> / {bc['total_users']} ({success_rate}%)\n"
@@ -263,7 +269,8 @@ async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
         f"<b>Текст:</b>\n{preview}"
     )
     await callback.message.edit_text(text, parse_mode="HTML",
-                                     reply_markup=broadcast_detail(callback_data.bot_id))
+                                     reply_markup=broadcast_detail(callback_data.bot_id,
+                                                                    bc["id"] if bc["status"] == "running" else None))
     await callback.answer()
 
 
@@ -347,14 +354,24 @@ async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    user_ids = await db.get_audience_by_language(pool, callback_data.bot_id, lang)
+
+    if lang == "__new7__":
+        user_ids = await db.get_audience_new_users(pool, callback_data.bot_id, 7)
+        segment_label = "🆕 Новые за 7 дней"
+    elif lang == "__new30__":
+        user_ids = await db.get_audience_new_users(pool, callback_data.bot_id, 30)
+        segment_label = "🆕 Новые за 30 дней"
+    else:
+        user_ids = await db.get_audience_by_language(pool, callback_data.bot_id, lang)
+        segment_label = f"🌍 {lang.upper()}"
+
     if not user_ids:
-        await callback.answer(f"Нет пользователей с языком {lang}.", show_alert=True)
+        await callback.answer("Нет пользователей в этом сегменте.", show_alert=True)
         return
     await state.set_state(Broadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment_lang=lang, segment_user_ids=user_ids)
     await callback.message.edit_text(
-        f"🎯 Сегмент: <b>{lang.upper()}</b> ({len(user_ids)} польз.)\n\n"
+        f"🎯 Сегмент: <b>{segment_label}</b> ({len(user_ids)} польз.)\n\n"
         "Напишите сообщение или отправьте фото для этого сегмента:",
         parse_mode="HTML",
     )
