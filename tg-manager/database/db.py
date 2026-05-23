@@ -116,11 +116,12 @@ async def mark_user_inactive(pool: asyncpg.Pool, bot_id: int, user_id: int) -> N
 # ── Broadcasts ────────────────────────────────────────────────────────────
 
 async def create_broadcast(pool: asyncpg.Pool, bot_id: int, message_text: str,
-                            total: int, created_by: int) -> int:
+                            total: int, created_by: int,
+                            photo_file_id: str | None = None) -> int:
     return await pool.fetchval(
-        """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by)
-           VALUES ($1, $2, $3, 'pending', $4) RETURNING id""",
-        bot_id, message_text, total, created_by,
+        """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id)
+           VALUES ($1, $2, $3, 'pending', $4, $5) RETURNING id""",
+        bot_id, message_text, total, created_by, photo_file_id,
     )
 
 

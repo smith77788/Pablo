@@ -159,6 +159,24 @@ async def send_message(session: aiohttp.ClientSession, token: str,
     return False, None
 
 
+async def send_photo(session: aiohttp.ClientSession, token: str,
+                     chat_id: int, photo: str,
+                     caption: str = "") -> tuple[bool, int | None]:
+    """Send a photo by file_id. Returns (success, retry_after_seconds_or_None)."""
+    params: dict = {"chat_id": chat_id, "photo": photo}
+    if caption:
+        params["caption"] = caption
+        params["parse_mode"] = "HTML"
+    data = await _call(session, token, "sendPhoto", **params)
+    if data.get("ok"):
+        return True, None
+    error_code = data.get("error_code", 0)
+    if error_code == 429:
+        retry = data.get("parameters", {}).get("retry_after", 5)
+        return False, retry
+    return False, None
+
+
 # ── Batch operations ──────────────────────────────────────────────────────
 
 async def batch_get_me(session: aiohttp.ClientSession,
