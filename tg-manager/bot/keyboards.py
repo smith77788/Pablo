@@ -3,7 +3,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
-    NoteCb, SwarmCb,
+    NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb,
 )
 
 PAGE_SIZE = 5
@@ -85,13 +85,15 @@ def bot_menu(bot_id: int, username: str | None = None) -> InlineKeyboardMarkup:
     kb.button(text="🌐 Вебхук",       callback_data=WebhookCb(action="menu", bot_id=bot_id))
     kb.button(text="⚖️ Сравнить",    callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="📊 Статистика",   callback_data=StatsCb(action="menu", bot_id=bot_id))
+    kb.button(text="🏷 CRM",           callback_data=CrmCb(action="menu", bot_id=bot_id))
     kb.button(text="📝 Заметка",      callback_data=NoteCb(action="edit", bot_id=bot_id))
     kb.button(text="🧬 Swarm",        callback_data=SwarmCb(action="menu", bot_id=bot_id))
+    kb.button(text="🧪 A/B Тесты",   callback_data=ExperimentCb(action="list", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
     if username:
         kb.row(InlineKeyboardButton(text="🔗 Открыть бота", url=f"https://t.me/{username}"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -519,4 +521,109 @@ def swarm_menu(bot_id: int, row) -> InlineKeyboardMarkup:
         kb.button(text=f"{prefix}{label}", callback_data=SwarmCb(action=f"role_{r}", bot_id=bot_id))
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
     kb.adjust(1, 2, 2, 1)
+    return kb.as_markup()
+
+
+def crm_menu(bot_id: int, tags: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for t in tags[:8]:
+        kb.button(text=f"🏷 {t['tag']} ({t['count']})",
+                  callback_data=CrmCb(action="tag_detail", bot_id=bot_id, tag=t["tag"]))
+    kb.button(text="➕ Новый тег", callback_data=CrmCb(action="add_tag_global", bot_id=bot_id))
+    kb.button(text="🤖 Автоматизация", callback_data=AutoCb(action="menu", bot_id=bot_id))
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def tag_detail_menu(bot_id: int, tag: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📢 Рассылка этому сегменту",
+              callback_data=BroadcastCb(action="segment_select", bot_id=bot_id, lang=f"__tag__{tag}"))
+    kb.button(text="🗑 Удалить тег у всех",
+              callback_data=CrmCb(action="delete_tag_all", bot_id=bot_id, tag=tag))
+    kb.button(text="◀️ Назад", callback_data=CrmCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def automation_menu(bot_id: int, rules: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for r in rules[:8]:
+        icon = "✅" if r["is_active"] else "❌"
+        kb.button(text=f"{icon} {r['name']} [{r['trigger_type']}→{r['action_type']}]",
+                  callback_data=AutoCb(action="view", bot_id=bot_id, rule_id=r["id"]))
+    kb.button(text="➕ Новое правило", callback_data=AutoCb(action="add", bot_id=bot_id))
+    kb.button(text="◀️ Назад", callback_data=CrmCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def automation_trigger_menu(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📩 Сообщение получено", callback_data=AutoCb(action="trig_message", bot_id=bot_id))
+    kb.button(text="👤 Новый пользователь", callback_data=AutoCb(action="trig_joined", bot_id=bot_id))
+    kb.button(text="🔑 Ключевое слово", callback_data=AutoCb(action="trig_keyword", bot_id=bot_id))
+    kb.button(text="🏷 Тег добавлен", callback_data=AutoCb(action="trig_tag", bot_id=bot_id))
+    kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def automation_action_menu(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💬 Отправить сообщение", callback_data=AutoCb(action="act_send", bot_id=bot_id))
+    kb.button(text="🏷 Добавить тег", callback_data=AutoCb(action="act_add_tag", bot_id=bot_id))
+    kb.button(text="🗑 Удалить тег", callback_data=AutoCb(action="act_remove_tag", bot_id=bot_id))
+    kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def experiments_menu(bot_id: int, experiments: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    status_emoji = {"draft": "📝", "active": "🟢", "paused": "⏸", "completed": "✅"}
+    for e in experiments[:8]:
+        emoji = status_emoji.get(e["status"], "❓")
+        kb.button(text=f"{emoji} {e['name']} [{e['experiment_type']}]",
+                  callback_data=ExperimentCb(action="view", bot_id=bot_id, exp_id=e["id"]))
+    kb.button(text="➕ Новый эксперимент", callback_data=ExperimentCb(action="create", bot_id=bot_id))
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def experiment_view_menu(bot_id: int, exp_id: int, status: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if status == "draft":
+        kb.button(text="➕ Добавить вариант", callback_data=ExperimentCb(action="add_variant", bot_id=bot_id, exp_id=exp_id))
+        kb.button(text="▶️ Запустить", callback_data=ExperimentCb(action="start", bot_id=bot_id, exp_id=exp_id))
+    elif status == "active":
+        kb.button(text="⏸ Пауза", callback_data=ExperimentCb(action="pause", bot_id=bot_id, exp_id=exp_id))
+        kb.button(text="🏆 Выбрать победителя вручную", callback_data=ExperimentCb(action="pick_winner", bot_id=bot_id, exp_id=exp_id))
+    elif status == "paused":
+        kb.button(text="▶️ Возобновить", callback_data=ExperimentCb(action="resume", bot_id=bot_id, exp_id=exp_id))
+    kb.button(text="🗑 Удалить", callback_data=ExperimentCb(action="delete", bot_id=bot_id, exp_id=exp_id))
+    kb.button(text="◀️ К списку", callback_data=ExperimentCb(action="list", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def experiment_type_menu(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="▶️ /start сообщение", callback_data=ExperimentCb(action="type_start", bot_id=bot_id))
+    kb.button(text="💬 Авто-ответ", callback_data=ExperimentCb(action="type_reply", bot_id=bot_id))
+    kb.button(text="◀️ Отмена", callback_data=ExperimentCb(action="list", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def variant_pick_menu(bot_id: int, exp_id: int, variants: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for v in variants:
+        ctr = round(v["conversions"]/v["impressions"]*100, 1) if v["impressions"] else 0
+        kb.button(text=f"🏆 {v['name']} (CTR: {ctr}%)",
+                  callback_data=ExperimentCb(action="set_winner", bot_id=bot_id, exp_id=exp_id, variant_id=v["id"]))
+    kb.button(text="◀️ Назад", callback_data=ExperimentCb(action="view", bot_id=bot_id, exp_id=exp_id))
+    kb.adjust(1)
     return kb.as_markup()

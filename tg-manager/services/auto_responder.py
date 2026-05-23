@@ -72,6 +72,25 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                     await bot_api.send_message(http, token, chat_id, rule["response_text"])
                     break  # first matching rule wins
 
+            # Check automation rules
+            for arule in await db.get_active_automation_rules(pool, bot_id):
+                triggered = False
+                if arule["trigger_type"] == "message_received":
+                    triggered = True
+                elif arule["trigger_type"] == "keyword" and arule.get("trigger_value"):
+                    triggered = arule["trigger_value"].lower() in text.lower()
+                elif arule["trigger_type"] == "user_joined":
+                    # handled via upsert tracking
+                    pass
+
+                if triggered:
+                    if arule["action_type"] == "send_message":
+                        await bot_api.send_message(http, token, chat_id, arule["action_value"])
+                    elif arule["action_type"] == "add_tag":
+                        await db.add_user_tag(pool, bot_id, chat_id, arule["action_value"])
+                    elif arule["action_type"] == "remove_tag":
+                        await db.remove_user_tag(pool, bot_id, chat_id, arule["action_value"])
+
             for funnel in funnels:
                 if funnel["trigger_type"] == "start" and text.strip().lower().startswith("/start"):
                     await db.subscribe_to_funnel(pool, funnel["id"], chat_id)

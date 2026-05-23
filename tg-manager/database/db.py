@@ -772,3 +772,255 @@ async def update_bot_metrics(pool: asyncpg.Pool, bot_id: int,
                retention_d7=$5, score=$6, updated_at=now()""",
         bot_id, ctr, conversion, retention_d1, retention_d7, score,
     )
+
+
+# ── CRM Tags ──────────────────────────────────────────────────────────────
+
+async def add_user_tag(pool, bot_id: int, user_id: int, tag: str) -> bool:
+    """Returns True if tag was new."""
+    try:
+        await pool.execute(
+            "INSERT INTO user_tags(bot_id,user_id,tag) VALUES($1,$2,$3)",
+            bot_id, user_id, tag,
+        )
+        return True
+    except Exception:
+        return False
+
+async def remove_user_tag(pool, bot_id: int, user_id: int, tag: str) -> None:
+    await pool.execute(
+        "DELETE FROM user_tags WHERE bot_id=$1 AND user_id=$2 AND tag=$3",
+        bot_id, user_id, tag,
+    )
+
+async def get_user_tags(pool, bot_id: int, user_id: int) -> list[str]:
+    rows = await pool.fetch(
+        "SELECT tag FROM user_tags WHERE bot_id=$1 AND user_id=$2 ORDER BY tag",
+        bot_id, user_id,
+    )
+    return [r["tag"] for r in rows]
+
+async def get_tag_names(pool, bot_id: int) -> list[dict]:
+    """All unique tags for this bot with counts."""
+    rows = await pool.fetch(
+        """SELECT tag, COUNT(*) as cnt
+           FROM user_tags WHERE bot_id=$1
+           GROUP BY tag ORDER BY cnt DESC LIMIT 30""",
+        bot_id,
+    )
+    return [{"tag": r["tag"], "count": r["cnt"]} for r in rows]
+
+async def get_users_by_tag(pool, bot_id: int, tag: str) -> list[int]:
+    rows = await pool.fetch(
+        "SELECT user_id FROM user_tags WHERE bot_id=$1 AND tag=$2",
+        bot_id, tag,
+    )
+    return [r["user_id"] for r in rows]
+
+# ── Automation Rules ───────────────────────────────────────────────────────
+
+async def get_automation_rules(pool, bot_id: int) -> list:
+    return await pool.fetch(
+        "SELECT * FROM automation_rules WHERE bot_id=$1 ORDER BY id",
+        bot_id,
+    )
+
+async def get_active_automation_rules(pool, bot_id: int) -> list:
+    return await pool.fetch(
+        "SELECT * FROM automation_rules WHERE bot_id=$1 AND is_active=TRUE",
+        bot_id,
+    )
+
+async def add_automation_rule(pool, bot_id: int, name: str, trigger_type: str,
+                               trigger_value, action_type: str, action_value: str) -> int:
+    row = await pool.fetchrow(
+        """INSERT INTO automation_rules(bot_id,name,trigger_type,trigger_value,action_type,action_value)
+           VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
+        bot_id, name, trigger_type, trigger_value, action_type, action_value,
+    )
+    return row["id"]
+
+async def toggle_automation_rule(pool, rule_id: int, bot_id: int) -> None:
+    await pool.execute(
+        "UPDATE automation_rules SET is_active=NOT is_active WHERE id=$1 AND bot_id=$2",
+        rule_id, bot_id,
+    )
+
+async def delete_automation_rule(pool, rule_id: int, bot_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM automation_rules WHERE id=$1 AND bot_id=$2", rule_id, bot_id,
+    )
+
+
+# ── A/B Experiments ────────────────────────────────────────────────────────
+
+async def get_experiments(pool, bot_id: int) -> list:
+    return await pool.fetch(
+        "SELECT * FROM experiments WHERE bot_id=$1 ORDER BY id DESC", bot_id
+    )
+
+async def get_experiment(pool, exp_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow("SELECT * FROM experiments WHERE id=$1", exp_id)
+
+async def get_experiment_variants(pool, exp_id: int) -> list:
+    return await pool.fetch(
+        "SELECT * FROM experiment_variants WHERE experiment_id=$1 ORDER BY id", exp_id
+    )
+
+async def create_experiment(pool, bot_id: int, name: str, exp_type: str) -> int:
+    row = await pool.fetchrow(
+        "INSERT INTO experiments(bot_id,name,experiment_type) VALUES($1,$2,$3) RETURNING id",
+        bot_id, name, exp_type,
+    )
+    return row["id"]
+
+async def add_experiment_variant(pool, exp_id: int, name: str, content: str, weight: int = 50) -> int:
+    row = await pool.fetchrow(
+        "INSERT INTO experiment_variants(experiment_id,name,content,weight) VALUES($1,$2,$3,$4) RETURNING id",
+        exp_id, name, content, weight,
+    )
+    return row["id"]
+
+async def set_experiment_status(pool, exp_id: int, status: str) -> None:
+    await pool.execute(
+        "UPDATE experiments SET status=$2 WHERE id=$1", exp_id, status
+    )
+
+async def get_active_experiment(pool, bot_id: int, exp_type: str = 'start_message'):
+    return await pool.fetchrow(
+        "SELECT * FROM experiments WHERE bot_id=$1 AND experiment_type=$2 AND status='active' LIMIT 1",
+        bot_id, exp_type,
+    )
+
+async def assign_experiment_variant(pool, bot_id: int, user_id: int,
+                                     exp_id: int) -> asyncpg.Record | None:
+    """Assign user to variant using weighted random. Returns variant record."""
+    import random
+    existing = await pool.fetchrow(
+        """SELECT ea.*, ev.content, ev.name as variant_name
+           FROM experiment_assignments ea
+           JOIN experiment_variants ev ON ev.id=ea.variant_id
+           WHERE ea.bot_id=$1 AND ea.user_id=$2 AND ea.experiment_id=$3""",
+        bot_id, user_id, exp_id,
+    )
+    if existing:
+        return existing
+
+    variants = await pool.fetch(
+        "SELECT * FROM experiment_variants WHERE experiment_id=$1", exp_id
+    )
+    if not variants:
+        return None
+
+    # Weighted random selection
+    total_weight = sum(v["weight"] for v in variants)
+    r = random.randint(1, total_weight)
+    cumulative = 0
+    chosen = variants[0]
+    for v in variants:
+        cumulative += v["weight"]
+        if r <= cumulative:
+            chosen = v
+            break
+
+    try:
+        await pool.execute(
+            "INSERT INTO experiment_assignments(bot_id,user_id,experiment_id,variant_id) VALUES($1,$2,$3,$4)",
+            bot_id, user_id, exp_id, chosen["id"],
+        )
+        await pool.execute(
+            "UPDATE experiment_variants SET impressions=impressions+1 WHERE id=$1", chosen["id"]
+        )
+    except Exception:
+        pass
+    return chosen
+
+async def record_experiment_conversion(pool, bot_id: int, user_id: int, exp_id: int) -> None:
+    assignment = await pool.fetchrow(
+        "SELECT * FROM experiment_assignments WHERE bot_id=$1 AND user_id=$2 AND experiment_id=$3 AND converted=FALSE",
+        bot_id, user_id, exp_id,
+    )
+    if assignment:
+        await pool.execute(
+            "UPDATE experiment_assignments SET converted=TRUE WHERE id=$1", assignment["id"]
+        )
+        await pool.execute(
+            "UPDATE experiment_variants SET conversions=conversions+1 WHERE id=$1",
+            assignment["variant_id"],
+        )
+
+async def check_experiment_winner(pool, exp_id: int) -> int | None:
+    """If any variant has >= min_sample_size and highest CTR, return its id. Else None."""
+    exp = await pool.fetchrow("SELECT * FROM experiments WHERE id=$1", exp_id)
+    if not exp or exp["status"] != "active":
+        return None
+    variants = await pool.fetch(
+        "SELECT * FROM experiment_variants WHERE experiment_id=$1", exp_id
+    )
+    candidates = [v for v in variants if v["impressions"] >= exp["min_sample_size"]]
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda v: v["conversions"] / v["impressions"] if v["impressions"] else 0)
+    ctr = best["conversions"] / best["impressions"] if best["impressions"] else 0
+    if ctr > 0:
+        await pool.execute(
+            "UPDATE experiments SET status='completed', winner_variant_id=$2 WHERE id=$1",
+            exp_id, best["id"],
+        )
+        return best["id"]
+    return None
+
+async def delete_experiment(pool, exp_id: int, bot_id: int) -> None:
+    await pool.execute("DELETE FROM experiments WHERE id=$1 AND bot_id=$2", exp_id, bot_id)
+
+
+# ── Routing Engine ─────────────────────────────────────────────────────────
+
+async def get_best_conversion_bot(pool, cluster: str, exclude_bot_id: int) -> asyncpg.Record | None:
+    """Get highest-scoring conversion/retention bot in the same cluster."""
+    return await pool.fetchrow(
+        """SELECT m.bot_id, m.token, m.username, m.first_name,
+                  COALESCE(bm.score, 0) as score
+           FROM managed_bots m
+           LEFT JOIN bot_metrics bm ON bm.bot_id=m.bot_id
+           WHERE m.swarm_enabled=TRUE
+             AND m.is_active=TRUE
+             AND m.bot_role IN ('conversion', 'retention', 'general')
+             AND m.cluster=$1
+             AND m.bot_id != $2
+           ORDER BY COALESCE(bm.score, 0) DESC
+           LIMIT 1""",
+        cluster, exclude_bot_id,
+    )
+
+async def log_routing_decision(pool, from_bot_id: int, to_bot_id, user_id: int,
+                                 decision: str, mode: str,
+                                 score_from: float = 0, score_to: float = 0) -> None:
+    await pool.execute(
+        """INSERT INTO routing_log(from_bot_id,to_bot_id,user_id,decision,system_mode,score_from,score_to)
+           VALUES($1,$2,$3,$4,$5,$6,$7)""",
+        from_bot_id, to_bot_id, user_id, decision, mode, score_from, score_to,
+    )
+
+async def get_routing_stats(pool, bot_id: int, days: int = 7) -> dict:
+    total = await pool.fetchval(
+        "SELECT COUNT(*) FROM routing_log WHERE from_bot_id=$1 AND created_at >= NOW()-($2||' days')::INTERVAL",
+        bot_id, str(days),
+    )
+    routed = await pool.fetchval(
+        "SELECT COUNT(*) FROM routing_log WHERE from_bot_id=$1 AND decision='routed' AND created_at >= NOW()-($2||' days')::INTERVAL",
+        bot_id, str(days),
+    )
+    return {"total": total or 0, "routed": routed or 0, "kept": (total or 0) - (routed or 0)}
+
+async def get_mode_routing_config(mode: str) -> dict:
+    """Returns routing config based on system mode."""
+    configs = {
+        "manual": {"routing_enabled": False, "min_score_threshold": 0.0, "routing_probability": 0.0},
+        "assisted": {"routing_enabled": False, "min_score_threshold": 0.3, "routing_probability": 0.0},
+        "autopilot": {"routing_enabled": True, "min_score_threshold": 0.3, "routing_probability": 0.5},
+        "growth": {"routing_enabled": True, "min_score_threshold": 0.2, "routing_probability": 0.8},
+        "experiment": {"routing_enabled": True, "min_score_threshold": 0.1, "routing_probability": 1.0},
+        "stability": {"routing_enabled": False, "min_score_threshold": 0.5, "routing_probability": 0.0},
+    }
+    return configs.get(mode, configs["manual"])

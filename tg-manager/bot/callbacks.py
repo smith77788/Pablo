@@ -92,3 +92,21 @@ class NoteCb(CallbackData, prefix="note"):
 class SwarmCb(CallbackData, prefix="sw"):
     action: str
     bot_id: int = 0
+
+
+class CrmCb(CallbackData, prefix="crm"):
+    action: str
+    bot_id: int = 0
+    user_id: int = 0
+    tag: str = ""
+
+class AutoCb(CallbackData, prefix="au"):
+    action: str
+    bot_id: int = 0
+    rule_id: int = 0
+
+class ExperimentCb(CallbackData, prefix="exp"):
+    action: str
+    bot_id: int = 0
+    exp_id: int = 0
+    variant_id: int = 0

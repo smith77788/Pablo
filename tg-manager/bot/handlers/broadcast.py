@@ -361,6 +361,10 @@ async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
     elif lang == "__new30__":
         user_ids = await db.get_audience_new_users(pool, callback_data.bot_id, 30)
         segment_label = "🆕 Новые за 30 дней"
+    elif lang.startswith("__tag__"):
+        tag = lang[7:]
+        user_ids = await db.get_users_by_tag(pool, callback_data.bot_id, tag)
+        segment_label = f"🏷 {tag}"
     else:
         user_ids = await db.get_audience_by_language(pool, callback_data.bot_id, lang)
         segment_label = f"🌍 {lang.upper()}"
