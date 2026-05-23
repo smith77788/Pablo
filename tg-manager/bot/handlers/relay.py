@@ -4,7 +4,7 @@ from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
 from bot.callbacks import RelayCb, BotCb
-from bot.keyboards import relay_menu, back_to_bot
+from bot.keyboards import relay_menu, back_to_bot, relay_session_view
 from database import db
 from services import bot_api
 
@@ -79,3 +79,69 @@ async def handle_operator_reply(message: Message, pool: asyncpg.Pool,
         await message.reply("✅ Ответ доставлен пользователю.")
     else:
         await message.reply("❌ Не удалось доставить ответ — пользователь мог заблокировать бота.")
+
+
+@router.callback_query(RelayCb.filter(F.action == "session"))
+async def cb_relay_session(callback: CallbackQuery, callback_data: RelayCb,
+                            pool: asyncpg.Pool) -> None:
+    """View message history for a specific relay session."""
+    session_id = callback_data.session_id
+    # Get session info
+    sess = await pool.fetchrow(
+        """SELECT rs.*, mb.username as bot_username, mb.first_name as bot_name
+           FROM relay_sessions rs
+           JOIN managed_bots mb ON mb.bot_id=rs.bot_id
+           WHERE rs.id=$1 AND mb.added_by=$2""",
+        session_id, callback.from_user.id,
+    )
+    if not sess:
+        await callback.answer("Диалог не найден.", show_alert=True)
+        return
+
+    messages = await db.get_relay_session_messages(pool, session_id, limit=10)
+
+    user_label = f"@{sess['username']}" if sess.get("username") else (sess.get("first_name") or str(sess["user_id"]))
+    bot_label = f"@{sess['bot_username']}" if sess.get("bot_username") else sess.get("bot_name", "бот")
+
+    if messages:
+        history = []
+        for msg in reversed(messages):  # chronological order
+            arrow = "📩" if msg["direction"] == "in" else "📤"
+            history.append(f"{arrow} {msg['message_text'][:100]}")
+        history_text = "\n".join(history)
+    else:
+        history_text = "(нет сообщений)"
+
+    text = (
+        f"💬 <b>Диалог с {user_label}</b>\n"
+        f"Бот: {bot_label}\n\n"
+        f"<b>Последние сообщения:</b>\n{history_text}"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML",
+                                      reply_markup=relay_session_view(callback_data.bot_id, session_id))
+    await callback.answer()
+
+
+@router.callback_query(RelayCb.filter(F.action == "close_session"))
+async def cb_relay_close_session(callback: CallbackQuery, callback_data: RelayCb,
+                                   pool: asyncpg.Pool) -> None:
+    """Delete a relay session (and its messages via CASCADE)."""
+    # Verify ownership
+    sess = await pool.fetchrow(
+        """SELECT rs.id FROM relay_sessions rs
+           JOIN managed_bots mb ON mb.bot_id=rs.bot_id
+           WHERE rs.id=$1 AND mb.added_by=$2""",
+        callback_data.session_id, callback.from_user.id,
+    )
+    if not sess:
+        await callback.answer("Диалог не найден.", show_alert=True)
+        return
+
+    await db.close_relay_session(pool, callback_data.session_id)
+
+    # Reload inbox menu
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    sessions = await db.get_relay_sessions(pool, callback_data.bot_id)
+    text, markup = await _relay_menu_text(row, sessions)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    await callback.answer("🗑 Диалог закрыт")

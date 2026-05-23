@@ -378,13 +378,27 @@ async def find_session_by_forwarded_msg(pool: asyncpg.Pool,
 async def get_relay_sessions(pool: asyncpg.Pool, bot_id: int,
                               limit: int = 5) -> list[asyncpg.Record]:
     return await pool.fetch(
-        """SELECT rs.user_id, rs.username, rs.first_name, rs.last_activity, rs.messages_count,
+        """SELECT rs.id, rs.user_id, rs.username, rs.first_name, rs.last_activity, rs.messages_count,
                   (SELECT text FROM relay_messages WHERE session_id=rs.id
                    ORDER BY created_at DESC LIMIT 1) as last_text
            FROM relay_sessions rs WHERE rs.bot_id=$1
            ORDER BY rs.last_activity DESC LIMIT $2""",
         bot_id, limit,
     )
+
+
+async def get_relay_session_messages(pool: asyncpg.Pool, session_id: int,
+                                      limit: int = 20) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """SELECT direction, text AS message_text, created_at
+           FROM relay_messages WHERE session_id=$1
+           ORDER BY created_at DESC LIMIT $2""",
+        session_id, limit,
+    )
+
+
+async def close_relay_session(pool: asyncpg.Pool, session_id: int) -> None:
+    await pool.execute("DELETE FROM relay_sessions WHERE id=$1", session_id)
 
 
 # ── Funnels ────────────────────────────────────────────────────────────────

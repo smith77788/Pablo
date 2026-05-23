@@ -65,6 +65,7 @@ class AutoReplyCb(CallbackData, prefix="ar"):
 class RelayCb(CallbackData, prefix="rl"):
     action: str
     bot_id: int
+    session_id: int = 0
 
 
 class FunnelCb(CallbackData, prefix="fn"):

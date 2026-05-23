@@ -309,9 +309,17 @@ def relay_menu(bot_id: int, relay_enabled: bool, sessions: list) -> InlineKeyboa
         preview = ((s["last_text"] or "нет сообщений")[:22]).replace("\n", " ")
         kb.button(
             text=f"💬 {name}: {preview}",
-            callback_data=RelayCb(action="sessions", bot_id=bot_id),
+            callback_data=RelayCb(action="session", bot_id=bot_id, session_id=s["id"]),
         )
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def relay_session_view(bot_id: int, session_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🗑 Закрыть диалог", callback_data=RelayCb(action="close_session", bot_id=bot_id, session_id=session_id))
+    kb.button(text="◀️ К Inbox", callback_data=RelayCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
 
