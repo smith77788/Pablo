@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { prisma } from '@platform/db';
+import { CreateBotDto } from './dto/create-bot.dto';
+import { UpdateBotDto } from './dto/update-bot.dto';
 import axios from 'axios';
 import * as https from 'https';
 
@@ -11,6 +13,76 @@ const tgHttp = axios.create({
 
 @Injectable()
 export class BotsService {
+  // ─── CRUD ─────────────────────────────────────────────────────────────────
+
+  async findAll(tenantId: string) {
+    return prisma.bot.findMany({
+      where: { tenantId, isActive: true },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true, username: true, firstName: true, telegramId: true,
+        isActive: true, webhookSet: true, createdAt: true,
+        _count: { select: { conversations: true } },
+      },
+    });
+  }
+
+  async findOne(tenantId: string, id: string) {
+    const bot = await prisma.bot.findFirst({ where: { id, tenantId } });
+    if (!bot) throw new NotFoundException('Bot not found');
+    return bot;
+  }
+
+  async create(tenantId: string, dto: CreateBotDto) {
+    const resp = await tgHttp.post(`/bot${dto.token}/getMe`).catch(() => null);
+    if (!resp?.data?.ok) throw new ConflictException('Invalid bot token or bot unreachable');
+
+    const info = resp.data.result;
+    return prisma.bot.create({
+      data: {
+        tenantId,
+        token: dto.token,
+        telegramId: BigInt(info.id),
+        username: info.username,
+        firstName: dto.name || info.first_name,
+      },
+    });
+  }
+
+  async update(tenantId: string, id: string, dto: UpdateBotDto) {
+    await this.findOne(tenantId, id);
+    return prisma.bot.update({
+      where: { id },
+      data: { ...(dto.name !== undefined && { firstName: dto.name }) },
+    });
+  }
+
+  async delete(tenantId: string, id: string) {
+    await this.findOne(tenantId, id);
+    await prisma.bot.update({ where: { id }, data: { isActive: false } });
+    return { ok: true };
+  }
+
+  // ─── STATS ────────────────────────────────────────────────────────────────
+
+  async getStats(tenantId: string, botId: string) {
+    await this.findOne(tenantId, botId);
+
+    const [userCount, messageCount] = await Promise.all([
+      prisma.telegramUser.count({ where: { tenantId } }),
+      prisma.message.count({
+        where: {
+          tenantId,
+          conversation: { botId },
+        },
+      }),
+    ]);
+
+    return { userCount, messageCount };
+  }
+
+  // ─── LEGACY ALIASES (kept for backward compatibility) ─────────────────────
+
   async addBot(tenantId: string, token: string) {
     const resp = await tgHttp.post(`/bot${token}/getMe`).catch(() => null);
     if (!resp?.data?.ok) throw new ConflictException('Invalid bot token or bot unreachable');
@@ -28,31 +100,19 @@ export class BotsService {
   }
 
   async listBots(tenantId: string) {
-    return prisma.bot.findMany({
-      where: { tenantId, isActive: true },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true, username: true, firstName: true, telegramId: true,
-        isActive: true, webhookSet: true, createdAt: true,
-        _count: { select: { conversations: true } },
-      },
-    });
+    return this.findAll(tenantId);
   }
 
   async getBot(tenantId: string, botId: string) {
-    const bot = await prisma.bot.findFirst({ where: { id: botId, tenantId } });
-    if (!bot) throw new NotFoundException('Bot not found');
-    return bot;
+    return this.findOne(tenantId, botId);
   }
 
   async deleteBot(tenantId: string, botId: string) {
-    const bot = await this.getBot(tenantId, botId);
-    await prisma.bot.update({ where: { id: bot.id }, data: { isActive: false } });
-    return { ok: true };
+    return this.delete(tenantId, botId);
   }
 
   async setWebhook(tenantId: string, botId: string, webhookUrl: string) {
-    const bot = await this.getBot(tenantId, botId);
+    const bot = await this.findOne(tenantId, botId);
     const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
     const url = `${webhookUrl}/webhook/${bot.token}`;
     await tgHttp.post(`/bot${bot.token}/setWebhook`, {

@@ -1,9 +1,13 @@
-import { Controller, Get, Post, Delete, Param, Body, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller, Get, Post, Patch, Delete,
+  Param, Body, UseGuards, Req,
+} from '@nestjs/common';
 import { BotsService } from './bots.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { CreateBotDto } from './dto/create-bot.dto';
+import { UpdateBotDto } from './dto/update-bot.dto';
 import { IsString, IsUrl } from 'class-validator';
 
-class AddBotDto { @IsString() token: string; }
 class SetWebhookDto { @IsUrl() webhookUrl: string; }
 
 @Controller('bots')
@@ -12,21 +16,33 @@ export class BotsController {
   constructor(private readonly bots: BotsService) {}
 
   @Get()
-  list(@Req() req: any) { return this.bots.listBots(req.user.tenantId); }
+  list(@Req() req: any) {
+    return this.bots.findAll(req.user.tenantId);
+  }
 
   @Post()
-  add(@Req() req: any, @Body() dto: AddBotDto) {
-    return this.bots.addBot(req.user.tenantId, dto.token);
+  create(@Req() req: any, @Body() dto: CreateBotDto) {
+    return this.bots.create(req.user.tenantId, dto);
   }
 
   @Get(':id')
   get(@Req() req: any, @Param('id') id: string) {
-    return this.bots.getBot(req.user.tenantId, id);
+    return this.bots.findOne(req.user.tenantId, id);
+  }
+
+  @Patch(':id')
+  update(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateBotDto) {
+    return this.bots.update(req.user.tenantId, id, dto);
   }
 
   @Delete(':id')
   delete(@Req() req: any, @Param('id') id: string) {
-    return this.bots.deleteBot(req.user.tenantId, id);
+    return this.bots.delete(req.user.tenantId, id);
+  }
+
+  @Get(':id/stats')
+  stats(@Req() req: any, @Param('id') id: string) {
+    return this.bots.getStats(req.user.tenantId, id);
   }
 
   @Post(':id/webhook')
