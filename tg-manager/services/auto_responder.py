@@ -51,6 +51,7 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
             return
 
         rules = await db.get_active_auto_replies(pool, bot_id)
+        funnels = await db.get_active_funnels(pool, bot_id)
         max_update_id = offset
 
         for upd in updates:
@@ -71,12 +72,11 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                     await bot_api.send_message(http, token, chat_id, rule["response_text"])
                     break  # first matching rule wins
 
-            # Check funnels
-            funnels = await db.get_active_funnels(pool, bot_id)
             for funnel in funnels:
                 if funnel["trigger_type"] == "start" and text.strip().lower().startswith("/start"):
                     await db.subscribe_to_funnel(pool, funnel["id"], chat_id)
-                elif funnel["trigger_type"] == "keyword" and funnel["keyword"] and funnel["keyword"].lower() in text.lower():
+                elif (funnel["trigger_type"] == "keyword" and funnel["keyword"]
+                      and funnel["keyword"].lower() in text.lower()):
                     await db.subscribe_to_funnel(pool, funnel["id"], chat_id)
 
         if max_update_id > offset:
@@ -89,7 +89,7 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     while True:
         try:
-            bots = await db.get_bots_with_auto_replies(pool)
+            bots = await db.get_bots_for_polling(pool)
             if bots:
                 await asyncio.gather(
                     *(_process_bot(pool, http, b["bot_id"], b["token"]) for b in bots),
