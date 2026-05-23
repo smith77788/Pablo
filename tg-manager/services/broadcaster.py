@@ -16,8 +16,10 @@ _running: dict[int, asyncio.Task] = {}
 
 async def run(pool: asyncpg.Pool, session: aiohttp.ClientSession,
               broadcast_id: int, token: str, bot_id: int, text: str,
-              photo_file_id: str | None = None) -> None:
-    user_ids = await db.get_audience_user_ids(pool, bot_id)
+              photo_file_id: str | None = None,
+              user_ids: list[int] | None = None) -> None:
+    if user_ids is None:
+        user_ids = await db.get_audience_user_ids(pool, bot_id)
     sent = failed = 0
     await db.update_broadcast(pool, broadcast_id, 0, 0, "running")
 
@@ -56,9 +58,10 @@ async def run(pool: asyncpg.Pool, session: aiohttp.ClientSession,
 
 def start(pool: asyncpg.Pool, session: aiohttp.ClientSession,
           broadcast_id: int, token: str, bot_id: int, text: str,
-          photo_file_id: str | None = None) -> None:
+          photo_file_id: str | None = None,
+          user_ids: list[int] | None = None) -> None:
     task = asyncio.create_task(
-        run(pool, session, broadcast_id, token, bot_id, text, photo_file_id),
+        run(pool, session, broadcast_id, token, bot_id, text, photo_file_id, user_ids),
         name=f"broadcast-{broadcast_id}",
     )
     _running[broadcast_id] = task

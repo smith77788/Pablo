@@ -7,7 +7,7 @@ import asyncpg
 from bot.callbacks import BroadcastCb, BotCb
 from bot.keyboards import (
     broadcast_menu, broadcast_confirm, back_to_bot, broadcast_from_template,
-    broadcast_history, broadcast_detail,
+    broadcast_history, broadcast_detail, broadcast_segment_menu,
 )
 from bot.states import Broadcast
 from database import db
@@ -50,7 +50,11 @@ async def cb_compose(callback: CallbackQuery, callback_data: BroadcastCb,
 async def msg_broadcast_text(message: Message, state: FSMContext,
                               pool: asyncpg.Pool) -> None:
     data = await state.get_data()
-    count = await db.get_audience_count(pool, data["bot_id"])
+    segment_user_ids = data.get("segment_user_ids")
+    if segment_user_ids:
+        count = len(segment_user_ids)
+    else:
+        count = await db.get_audience_count(pool, data["bot_id"])
 
     if message.photo:
         photo_file_id = message.photo[-1].file_id
@@ -70,8 +74,13 @@ async def msg_broadcast_text(message: Message, state: FSMContext,
     else:
         preview_header = "📢 <b>Предпросмотр:</b>\n\n"
 
+    segment_label = ""
+    if data.get("segment_lang"):
+        segment_label = f"🎯 Сегмент: <b>{data['segment_lang'].upper()}</b>\n"
+
     await message.answer(
         f"{preview_header}{text}\n\n"
+        f"{segment_label}"
         f"Получателей: <b>{count}</b> чел.\nЗапустить?",
         parse_mode="HTML",
         reply_markup=broadcast_confirm(data["bot_id"]),
@@ -95,10 +104,16 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
         await callback.answer("Бот не найден.", show_alert=True)
         return
 
-    total = await db.get_audience_count(pool, row["bot_id"])
+    segment_user_ids = data.get("segment_user_ids")
+    if segment_user_ids:
+        total = len(segment_user_ids)
+    else:
+        total = await db.get_audience_count(pool, row["bot_id"])
+        segment_user_ids = None
+
     bc_id = await db.create_broadcast(pool, row["bot_id"], text, total, callback.from_user.id, photo_file_id)
 
-    broadcaster.start(pool, http, bc_id, row["token"], row["bot_id"], text, photo_file_id)
+    broadcaster.start(pool, http, bc_id, row["token"], row["bot_id"], text, photo_file_id, segment_user_ids)
 
     await state.clear()
     await callback.message.edit_text(
@@ -216,5 +231,47 @@ async def cb_use_template(callback: CallbackQuery, callback_data: BroadcastCb,
         "Отправить эту рассылку?",
         parse_mode="HTML",
         reply_markup=broadcast_confirm(callback_data.bot_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(BroadcastCb.filter(F.action == "segment"))
+async def cb_segment(callback: CallbackQuery, callback_data: BroadcastCb,
+                     pool: asyncpg.Pool) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    languages = await db.get_audience_languages(pool, callback_data.bot_id)
+    if not languages:
+        await callback.answer("Аудитория пуста.", show_alert=True)
+        return
+    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    await callback.message.edit_text(
+        f"🎯 <b>Рассылка по сегменту — {label}</b>\n\nВыберите язык аудитории:",
+        parse_mode="HTML",
+        reply_markup=broadcast_segment_menu(callback_data.bot_id, languages),
+    )
+    await callback.answer()
+
+
+@router.callback_query(BroadcastCb.filter(F.action == "segment_select"))
+async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
+                             state: FSMContext, pool: asyncpg.Pool) -> None:
+    lang = callback_data.lang
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    user_ids = await db.get_audience_by_language(pool, callback_data.bot_id, lang)
+    if not user_ids:
+        await callback.answer(f"Нет пользователей с языком {lang}.", show_alert=True)
+        return
+    await state.set_state(Broadcast.waiting_message)
+    await state.update_data(bot_id=callback_data.bot_id, segment_lang=lang, segment_user_ids=user_ids)
+    await callback.message.edit_text(
+        f"🎯 Сегмент: <b>{lang.upper()}</b> ({len(user_ids)} польз.)\n\n"
+        "Напишите сообщение или отправьте фото для этого сегмента:",
+        parse_mode="HTML",
     )
     await callback.answer()
