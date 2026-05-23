@@ -126,9 +126,10 @@ def broadcast_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="📝 Написать рассылку",   callback_data=BroadcastCb(action="compose", bot_id=bot_id))
     kb.button(text="📋 Из шаблона",          callback_data=BroadcastCb(action="from_template", bot_id=bot_id))
+    kb.button(text="🎯 По сегменту",         callback_data=BroadcastCb(action="segment", bot_id=bot_id))
     kb.button(text="📋 История рассылок",    callback_data=BroadcastCb(action="status", bot_id=bot_id))
     kb.button(text="◀️ Назад",               callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 1, 1)
+    kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 
@@ -170,6 +171,23 @@ def broadcast_confirm(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="🚀 Запустить",  callback_data=BroadcastCb(action="confirm", bot_id=bot_id))
     kb.button(text="❌ Отмена",     callback_data=BroadcastCb(action="cancel", bot_id=bot_id))
     kb.adjust(2)
+    return kb.as_markup()
+
+
+def broadcast_segment_menu(bot_id: int, languages: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    FLAG_MAP = {"ru": "🇷🇺", "en": "🇬🇧", "uk": "🇺🇦", "de": "🇩🇪",
+                "fr": "🇫🇷", "es": "🇪🇸", "it": "🇮🇹", "pt": "🇵🇹",
+                "pl": "🇵🇱", "tr": "🇹🇷", "unknown": "🌐"}
+    for lang_info in languages[:8]:
+        lang = lang_info["lang"]
+        flag = FLAG_MAP.get(lang, "🌐")
+        kb.button(
+            text=f"{flag} {lang.upper()} ({lang_info['count']})",
+            callback_data=BroadcastCb(action="segment_select", bot_id=bot_id, lang=lang),
+        )
+    kb.button(text="◀️ Назад", callback_data=BroadcastCb(action="menu", bot_id=bot_id))
+    kb.adjust(2, 1)
     return kb.as_markup()
 
 

@@ -540,3 +540,24 @@ async def update_bot_token(pool: asyncpg.Pool, bot_id: int, added_by: int,
            WHERE bot_id=$1 AND added_by=$2""",
         bot_id, added_by, new_token, new_bot_id, username, first_name,
     )
+
+
+async def get_audience_by_language(pool: asyncpg.Pool, bot_id: int,
+                                    lang_code: str) -> list[int]:
+    """Return user_ids filtered by language_code."""
+    rows = await pool.fetch(
+        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND language_code=$2",
+        bot_id, lang_code,
+    )
+    return [r["user_id"] for r in rows]
+
+
+async def get_audience_languages(pool: asyncpg.Pool, bot_id: int) -> list[dict]:
+    """Return list of {lang, count} sorted by count desc."""
+    rows = await pool.fetch(
+        """SELECT COALESCE(language_code, 'unknown') AS lang, COUNT(*) AS cnt
+           FROM bot_users WHERE bot_id=$1 AND is_active=TRUE
+           GROUP BY lang ORDER BY cnt DESC LIMIT 10""",
+        bot_id,
+    )
+    return [{"lang": r["lang"], "count": r["cnt"]} for r in rows]

@@ -27,6 +27,7 @@ class BroadcastCb(CallbackData, prefix="bc"):
     action: str
     bot_id: int
     broadcast_id: int = 0
+    lang: str = ""
 
 
 class BulkCb(CallbackData, prefix="bulk"):
