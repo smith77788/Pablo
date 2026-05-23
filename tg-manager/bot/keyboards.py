@@ -211,6 +211,7 @@ def schedule_menu(bot_id: int, schedules: list | None = None) -> InlineKeyboardM
         text="➕ Запланировать рассылку",
         callback_data=ScheduleCb(action="create", bot_id=bot_id),
     )
+    kb.button(text="📋 Из шаблона", callback_data=ScheduleCb(action="from_template", bot_id=bot_id))
     if schedules:
         for s in schedules:
             if s["status"] == "pending":
@@ -221,6 +222,18 @@ def schedule_menu(bot_id: int, schedules: list | None = None) -> InlineKeyboardM
                     callback_data=ScheduleCb(action="cancel", bot_id=bot_id, schedule_id=s["id"]),
                 )
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def schedule_template_list(bot_id: int, templates: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for t in templates[:8]:
+        kb.button(
+            text=f"📋 {t['name']}",
+            callback_data=ScheduleCb(action="use_template", bot_id=bot_id, schedule_id=t["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=ScheduleCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
 

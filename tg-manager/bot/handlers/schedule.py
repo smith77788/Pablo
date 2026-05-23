@@ -6,7 +6,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from bot.callbacks import ScheduleCb, BotCb
-from bot.keyboards import schedule_menu, back_to_bot
+from bot.keyboards import schedule_menu, back_to_bot, schedule_template_list
 from bot.states import ScheduleBroadcast
 from database import db
 
@@ -136,3 +136,40 @@ async def cb_schedule_cancel(callback: CallbackQuery, callback_data: ScheduleCb,
         reply_markup=schedule_menu(callback_data.bot_id, schedules)
     )
     await callback.answer("✅ Рассылка отменена.")
+
+
+@router.callback_query(ScheduleCb.filter(F.action == "from_template"))
+async def cb_schedule_from_template(callback: CallbackQuery, callback_data: ScheduleCb,
+                                     pool: asyncpg.Pool) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    templates = await db.get_templates(pool, callback.from_user.id)
+    if not templates:
+        await callback.answer("Нет шаблонов. Создайте шаблон в разделе шаблонов.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📋 <b>Выберите шаблон для планирования:</b>",
+        parse_mode="HTML",
+        reply_markup=schedule_template_list(callback_data.bot_id, templates),
+    )
+    await callback.answer()
+
+
+@router.callback_query(ScheduleCb.filter(F.action == "use_template"))
+async def cb_schedule_use_template(callback: CallbackQuery, callback_data: ScheduleCb,
+                                    state: FSMContext, pool: asyncpg.Pool) -> None:
+    # schedule_id repurposed as template_id here
+    template = await db.get_template(pool, callback_data.schedule_id, callback.from_user.id)
+    if not template:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    await state.set_state(ScheduleBroadcast.waiting_datetime)
+    await state.update_data(bot_id=callback_data.bot_id, text=template["text"])
+    await callback.message.edit_text(
+        f"📋 Шаблон: <b>{template['name']}</b>\n\n"
+        "Введите дату и время отправки (формат: ДД.ММ.ГГГГ ЧЧ:ММ):",
+        parse_mode="HTML",
+    )
+    await callback.answer()
