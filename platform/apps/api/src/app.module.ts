@@ -10,6 +10,8 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { InboxModule } from './inbox/inbox.module';
 import { StatsModule } from './stats/stats.module';
 import { AutomationsModule } from './automations/automations.module';
+import { TemplatesModule } from './templates/templates.module';
+import { TagsModule } from './tags/tags.module';
 
 @Module({
   imports: [
@@ -29,6 +31,8 @@ import { AutomationsModule } from './automations/automations.module';
     InboxModule,
     StatsModule,
     AutomationsModule,
+    TemplatesModule,
+    TagsModule,
   ],
 })
 export class AppModule {}
