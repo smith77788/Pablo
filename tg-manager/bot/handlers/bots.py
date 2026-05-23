@@ -96,7 +96,7 @@ async def msg_token(message: Message, state: FSMContext,
     await info_msg.edit_text(
         f"✅ Бот <b>@{bot_info.get('username', bot_info['first_name'])}</b> добавлен!",
         parse_mode="HTML",
-        reply_markup=bot_menu(bot_info["id"]),
+        reply_markup=bot_menu(bot_info["id"], username=bot_info.get("username")),
     )
 
 
@@ -111,12 +111,14 @@ async def cb_select(callback: CallbackQuery, callback_data: BotCb,
         return
     label = _bot_label(row)
     count = await db.get_audience_count(pool, row["bot_id"])
+    note_text = f"\n\n📝 <i>{row['note']}</i>" if row.get("note") else ""
     await callback.message.edit_text(
         f"🤖 <b>{label}</b>\n"
         f"ID: <code>{row['bot_id']}</code>\n"
-        f"Аудитория: <b>{count}</b> чел.",
+        f"Аудитория: <b>{count}</b> чел."
+        f"{note_text}",
         parse_mode="HTML",
-        reply_markup=bot_menu(row["bot_id"]),
+        reply_markup=bot_menu(row["bot_id"], username=row.get("username")),
     )
     await callback.answer()
 

@@ -3,6 +3,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
+    NoteCb,
 )
 
 PAGE_SIZE = 5
@@ -68,7 +69,7 @@ def bots_list(bots: list, page: int = 0) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def bot_menu(bot_id: int) -> InlineKeyboardMarkup:
+def bot_menu(bot_id: int, username: str | None = None) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="✏️ Профиль",      callback_data=EditCb(action="menu", bot_id=bot_id))
     kb.button(text="👥 Аудитория",    callback_data=AudCb(action="menu", bot_id=bot_id))
@@ -82,9 +83,12 @@ def bot_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="🌐 Вебхук",       callback_data=WebhookCb(action="menu", bot_id=bot_id))
     kb.button(text="⚖️ Сравнить",    callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="📊 Статистика",   callback_data=StatsCb(action="menu", bot_id=bot_id))
+    kb.button(text="📝 Заметка",      callback_data=NoteCb(action="edit", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    if username:
+        kb.row(InlineKeyboardButton(text="🔗 Открыть бота", url=f"https://t.me/{username}"))
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

@@ -1,0 +1,45 @@
+"""Bot notes handler."""
+from aiogram import Router, F
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
+import asyncpg
+from bot.callbacks import NoteCb
+from bot.keyboards import back_to_bot
+from database import db
+
+router = Router()
+
+
+class EditNote(StatesGroup):
+    waiting_text = State()
+
+
+@router.callback_query(NoteCb.filter(F.action == "edit"))
+async def cb_note_edit(callback: CallbackQuery, callback_data: NoteCb,
+                       pool: asyncpg.Pool, state: FSMContext) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    current = row.get("note") or "(нет заметки)"
+    await state.set_state(EditNote.waiting_text)
+    await state.update_data(bot_id=callback_data.bot_id)
+    await callback.message.edit_text(
+        f"📝 <b>Заметка к боту</b>\n\nТекущая: <i>{current}</i>\n\n"
+        "Отправьте новый текст заметки или «-» чтобы удалить:",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(EditNote.waiting_text)
+async def msg_note_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    data = await state.get_data()
+    await state.clear()
+    note = "" if message.text.strip() == "-" else message.text.strip()
+    await db.save_bot_note(pool, data["bot_id"], message.from_user.id, note)
+    await message.answer(
+        "✅ Заметка сохранена." if note else "🗑 Заметка удалена.",
+        reply_markup=back_to_bot(data["bot_id"]),
+    )

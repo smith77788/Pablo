@@ -44,6 +44,13 @@ async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
     return result == "DELETE 1"
 
 
+async def save_bot_note(pool: asyncpg.Pool, bot_id: int, added_by: int, note: str) -> None:
+    await pool.execute(
+        "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2",
+        bot_id, added_by, note,
+    )
+
+
 # ── Audience ───────────────────────────────────────────────────────────────
 
 async def upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> int:
