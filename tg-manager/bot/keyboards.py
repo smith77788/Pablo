@@ -54,7 +54,9 @@ def bots_list(bots: list, page: int = 0) -> InlineKeyboardMarkup:
     chunk = bots[start: start + PAGE_SIZE]
     for bot in chunk:
         label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
-        kb.button(text=f"🤖 {label}", callback_data=BotCb(action="select", bot_id=bot["bot_id"]))
+        aud = bot["audience_count"] if "audience_count" in bot.keys() else ""
+        suffix = f" · {aud} чел." if aud else ""
+        kb.button(text=f"🤖 {label}{suffix}", callback_data=BotCb(action="select", bot_id=bot["bot_id"]))
     kb.adjust(1)
 
     nav = []

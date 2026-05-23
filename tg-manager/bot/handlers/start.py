@@ -5,6 +5,7 @@ from aiogram.types import Message
 import asyncpg
 from bot.keyboards import main_menu
 from config import ADMIN_IDS
+from database import db
 
 router = Router()
 
@@ -29,10 +30,19 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
         await message.answer("⛔️ Доступ запрещён.")
         return
 
+    bots = await db.get_bots(pool, message.from_user.id)
+    bot_count = len(bots)
+    total_aud = sum(b["audience_count"] for b in bots if "audience_count" in b.keys())
+
+    if bot_count:
+        summary = f"Ботов: <b>{bot_count}</b> · Аудитория: <b>{total_aud}</b> чел."
+    else:
+        summary = "Добавьте первый бот по токену."
+
     await message.answer(
-        f"👋 <b>TG Manager</b> — управление вашими Telegram-ботами\n\n"
-        f"Ваш Telegram ID: <code>{message.from_user.id}</code>\n\n"
-        "Добавьте первый бот по токену или выберите из списка:",
+        f"👋 <b>TG Manager</b>\n\n"
+        f"{summary}\n\n"
+        f"ID: <code>{message.from_user.id}</code>",
         parse_mode="HTML",
         reply_markup=main_menu(),
     )

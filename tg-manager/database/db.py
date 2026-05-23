@@ -24,7 +24,20 @@ async def add_bot(pool: asyncpg.Pool, token: str, bot_id: int, username: str,
 
 async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
     return await pool.fetch(
-        "SELECT * FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY added_at DESC",
+        """SELECT m.*,
+                  COALESCE(aud.cnt, 0) AS audience_count,
+                  COALESCE(ar.ar_cnt, 0) AS active_replies_count
+           FROM managed_bots m
+           LEFT JOIN (
+               SELECT bot_id, COUNT(*) AS cnt
+               FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+           ) aud ON aud.bot_id = m.bot_id
+           LEFT JOIN (
+               SELECT bot_id, COUNT(*) AS ar_cnt
+               FROM auto_replies WHERE is_active=TRUE GROUP BY bot_id
+           ) ar ON ar.bot_id = m.bot_id
+           WHERE m.added_by=$1 AND m.is_active=TRUE
+           ORDER BY m.added_at DESC""",
         added_by,
     )
 
