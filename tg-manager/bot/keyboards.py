@@ -3,7 +3,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
-    NoteCb,
+    NoteCb, SwarmCb,
 )
 
 PAGE_SIZE = 5
@@ -84,11 +84,12 @@ def bot_menu(bot_id: int, username: str | None = None) -> InlineKeyboardMarkup:
     kb.button(text="⚖️ Сравнить",    callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="📊 Статистика",   callback_data=StatsCb(action="menu", bot_id=bot_id))
     kb.button(text="📝 Заметка",      callback_data=NoteCb(action="edit", bot_id=bot_id))
+    kb.button(text="🧬 Swarm",        callback_data=SwarmCb(action="menu", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
     if username:
         kb.row(InlineKeyboardButton(text="🔗 Открыть бота", url=f"https://t.me/{username}"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -469,4 +470,19 @@ def funnel_trigger_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="🔑 Ключевое слово", callback_data=FunnelCb(action="trig_keyword", bot_id=bot_id))
     kb.button(text="◀️ Отмена", callback_data=FunnelCb(action="list", bot_id=bot_id))
     kb.adjust(1)
+    return kb.as_markup()
+
+
+def swarm_menu(bot_id: int, row) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    swarm_on = row.get("swarm_enabled", False)
+    toggle_text = "🟢 Отключить Swarm" if swarm_on else "⚫ Включить Swarm"
+    kb.button(text=toggle_text, callback_data=SwarmCb(action="toggle", bot_id=bot_id))
+    role = row.get("bot_role", "general")
+    for r, label in [("entry", "🚪 Entry"), ("conversion", "💰 Conversion"),
+                     ("retention", "🔄 Retention"), ("general", "⚙️ General")]:
+        prefix = "✅ " if role == r else ""
+        kb.button(text=f"{prefix}{label}", callback_data=SwarmCb(action=f"role_{r}", bot_id=bot_id))
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1, 2, 2, 1)
     return kb.as_markup()

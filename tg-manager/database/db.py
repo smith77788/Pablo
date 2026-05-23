@@ -607,3 +607,50 @@ async def copy_auto_replies(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int
         except Exception:
             pass
     return count
+
+
+# ── Swarm / Mode System ─────────────────────────────────────────────────
+
+async def get_system_mode(pool: asyncpg.Pool) -> str:
+    row = await pool.fetchrow("SELECT mode FROM system_mode WHERE id=1")
+    return row["mode"] if row else "manual"
+
+async def set_system_mode(pool: asyncpg.Pool, mode: str) -> None:
+    await pool.execute(
+        "UPDATE system_mode SET mode=$1, updated_at=now() WHERE id=1", mode
+    )
+
+async def set_bot_role(pool: asyncpg.Pool, bot_id: int, role: str,
+                        cluster: str = "default") -> None:
+    await pool.execute(
+        "UPDATE managed_bots SET bot_role=$2, cluster=$3 WHERE bot_id=$1",
+        bot_id, role, cluster,
+    )
+
+async def toggle_swarm(pool: asyncpg.Pool, bot_id: int, enabled: bool) -> None:
+    await pool.execute(
+        "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1", bot_id, enabled
+    )
+
+async def get_swarm_bots(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """SELECT m.*, bm.score, bm.ctr, bm.conversion_rate, bm.retention_d1
+           FROM managed_bots m
+           LEFT JOIN bot_metrics bm ON bm.bot_id=m.bot_id
+           WHERE m.added_by=$1 AND m.is_active=TRUE AND m.swarm_enabled=TRUE
+           ORDER BY COALESCE(bm.score, 0) DESC""",
+        added_by,
+    )
+
+async def update_bot_metrics(pool: asyncpg.Pool, bot_id: int,
+                              ctr: float, conversion: float,
+                              retention_d1: float, retention_d7: float) -> None:
+    score = ctr * 0.3 + conversion * 0.4 + retention_d1 * 0.2 + retention_d7 * 0.1
+    await pool.execute(
+        """INSERT INTO bot_metrics (bot_id, ctr, conversion_rate, retention_d1, retention_d7, score)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (bot_id) DO UPDATE SET
+               ctr=$2, conversion_rate=$3, retention_d1=$4,
+               retention_d7=$5, score=$6, updated_at=now()""",
+        bot_id, ctr, conversion, retention_d1, retention_d7, score,
+    )
