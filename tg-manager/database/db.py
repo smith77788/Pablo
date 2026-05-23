@@ -580,3 +580,24 @@ async def get_audience_languages(pool: asyncpg.Pool, bot_id: int) -> list[dict]:
         bot_id,
     )
     return [{"lang": r["lang"], "count": r["cnt"]} for r in rows]
+
+
+async def copy_auto_replies(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int) -> int:
+    """Copy all auto-replies from one bot to another. Returns count of copied rules."""
+    rules = await pool.fetch(
+        "SELECT trigger_type, keyword, response_text FROM auto_replies WHERE bot_id=$1",
+        from_bot_id,
+    )
+    count = 0
+    for r in rules:
+        try:
+            await pool.execute(
+                """INSERT INTO auto_replies (bot_id, trigger_type, keyword, response_text)
+                   VALUES ($1, $2, $3, $4)
+                   ON CONFLICT DO NOTHING""",
+                to_bot_id, r["trigger_type"], r["keyword"], r["response_text"],
+            )
+            count += 1
+        except Exception:
+            pass
+    return count

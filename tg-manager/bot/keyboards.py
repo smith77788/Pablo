@@ -349,9 +349,29 @@ def auto_reply_menu(bot_id: int, replies: list) -> InlineKeyboardMarkup:
         callback_data=AutoReplyCb(action="add", bot_id=bot_id).pack(),
     ))
     kb.row(InlineKeyboardButton(
+        text="📋 Копировать в бот",
+        callback_data=AutoReplyCb(action="copy_to", bot_id=bot_id).pack(),
+    ))
+    kb.row(InlineKeyboardButton(
         text="◀️ Назад",
         callback_data=BotCb(action="select", bot_id=bot_id).pack(),
     ))
+    return kb.as_markup()
+
+
+def auto_reply_copy_target(from_bot_id: int, bots: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for b in bots:
+        if b["bot_id"] == from_bot_id:
+            continue
+        label = f"@{b['username']}" if b["username"] else b["first_name"]
+        kb.button(
+            text=f"🤖 {label}",
+            callback_data=AutoReplyCb(action="copy_confirm", bot_id=from_bot_id,
+                                       target_bot_id=b["bot_id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=AutoReplyCb(action="menu", bot_id=from_bot_id))
+    kb.adjust(1)
     return kb.as_markup()
 
 
