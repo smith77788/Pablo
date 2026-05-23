@@ -3,9 +3,10 @@
   "version": "0.0.1",
   "main": "./src/index.ts",
   "scripts": {
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
-    "db:push": "prisma db push"
+    "generate": "prisma generate",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "studio": "prisma studio"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0"
