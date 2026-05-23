@@ -1,5 +1,6 @@
 from aiogram import Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 import asyncpg
 from bot.keyboards import main_menu
@@ -10,6 +11,16 @@ router = Router()
 
 def _is_admin(user_id: int) -> bool:
     return not ADMIN_IDS or user_id in ADMIN_IDS
+
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext) -> None:
+    current = await state.get_state()
+    if current is None:
+        await message.answer("Нет активного действия для отмены.")
+        return
+    await state.clear()
+    await message.answer("❌ Действие отменено. Используйте /start для начала.")
 
 
 @router.message(CommandStart())
