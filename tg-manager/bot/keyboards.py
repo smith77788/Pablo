@@ -131,6 +131,27 @@ def broadcast_menu(bot_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def broadcast_history(bot_id: int, broadcasts: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}
+    for bc in broadcasts[:10]:
+        emoji = status_emoji.get(bc["status"], "❓")
+        date_str = bc["created_at"].strftime("%d.%m %H:%M")
+        kb.button(
+            text=f"{emoji} #{bc['id']} {date_str} ({bc['sent_count']}/{bc['total_users']})",
+            callback_data=BroadcastCb(action="detail", bot_id=bot_id, broadcast_id=bc["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=BroadcastCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def broadcast_detail(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К истории", callback_data=BroadcastCb(action="status", bot_id=bot_id))
+    return kb.as_markup()
+
+
 def broadcast_from_template(bot_id: int, templates: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for t in templates[:8]:

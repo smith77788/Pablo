@@ -139,7 +139,7 @@ async def get_broadcast(pool: asyncpg.Pool, broadcast_id: int) -> asyncpg.Record
     return await pool.fetchrow("SELECT * FROM broadcasts WHERE id=$1", broadcast_id)
 
 
-async def get_recent_broadcasts(pool: asyncpg.Pool, bot_id: int, limit: int = 5) -> list[asyncpg.Record]:
+async def get_recent_broadcasts(pool: asyncpg.Pool, bot_id: int, limit: int = 10) -> list[asyncpg.Record]:
     return await pool.fetch(
         "SELECT * FROM broadcasts WHERE bot_id=$1 ORDER BY created_at DESC LIMIT $2",
         bot_id, limit,

@@ -5,7 +5,10 @@ from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
 from bot.callbacks import BroadcastCb, BotCb
-from bot.keyboards import broadcast_menu, broadcast_confirm, back_to_bot, broadcast_from_template
+from bot.keyboards import (
+    broadcast_menu, broadcast_confirm, back_to_bot, broadcast_from_template,
+    broadcast_history, broadcast_detail,
+)
 from bot.states import Broadcast
 from database import db
 from services import broadcaster
@@ -107,31 +110,47 @@ async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(BroadcastCb.filter(F.action == "status"))
 async def cb_status(callback: CallbackQuery, callback_data: BroadcastCb,
-                     pool: asyncpg.Pool) -> None:
+                    pool: asyncpg.Pool) -> None:
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-
-    history = await db.get_recent_broadcasts(pool, row["bot_id"])
+    history = await db.get_recent_broadcasts(pool, row["bot_id"], limit=10)
     if not history:
         await callback.answer("Рассылок пока не было.", show_alert=True)
         return
-
-    lines = []
-    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}
-    for bc in history:
-        emoji = status_emoji.get(bc["status"], "❓")
-        lines.append(
-            f"{emoji} #{bc['id']} | {bc['sent_count']}/{bc['total_users']} "
-            f"| {bc['created_at'].strftime('%d.%m %H:%M')}"
-        )
-
+    label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
-        "📋 <b>Последние рассылки:</b>\n\n" + "\n".join(lines),
+        f"📋 <b>История рассылок — {label}</b>\n\nНажмите на рассылку для деталей:",
         parse_mode="HTML",
-        reply_markup=back_to_bot(callback_data.bot_id),
+        reply_markup=broadcast_history(callback_data.bot_id, history),
     )
+    await callback.answer()
+
+
+@router.callback_query(BroadcastCb.filter(F.action == "detail"))
+async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
+                    pool: asyncpg.Pool) -> None:
+    bc = await db.get_broadcast(pool, callback_data.broadcast_id)
+    if not bc:
+        await callback.answer("Рассылка не найдена.", show_alert=True)
+        return
+    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}
+    emoji = status_emoji.get(bc["status"], "❓")
+    preview = bc["message_text"][:300] if bc["message_text"] else ""
+    success_rate = round(bc["sent_count"] / bc["total_users"] * 100) if bc["total_users"] else 0
+    finished = bc["finished_at"].strftime("%d.%m.%Y %H:%M") if bc.get("finished_at") else "—"
+    text = (
+        f"📋 <b>Рассылка #{bc['id']}</b>\n\n"
+        f"Статус: {emoji} {bc['status']}\n"
+        f"Создана: {bc['created_at'].strftime('%d.%m.%Y %H:%M')}\n"
+        f"Завершена: {finished}\n\n"
+        f"Отправлено: <b>{bc['sent_count']}</b> / {bc['total_users']} ({success_rate}%)\n"
+        f"Ошибок: {bc['failed_count']}\n\n"
+        f"<b>Текст:</b>\n{preview}"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML",
+                                     reply_markup=broadcast_detail(callback_data.bot_id))
     await callback.answer()
 
 
