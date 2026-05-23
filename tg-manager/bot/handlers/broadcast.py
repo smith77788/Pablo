@@ -39,7 +39,7 @@ async def cb_compose(callback: CallbackQuery, callback_data: BroadcastCb,
     await state.set_state(Broadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
-        "✍️ Напишите текст рассылки.\n\n"
+        "✍️ Напишите текст рассылки или отправьте фото с подписью.\n\n"
         "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
         "<code>&lt;a href=...&gt;</code>"
     )
@@ -51,14 +51,27 @@ async def msg_broadcast_text(message: Message, state: FSMContext,
                               pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     count = await db.get_audience_count(pool, data["bot_id"])
-    text = message.text or message.caption or ""
-    if not text:
-        await message.answer("❌ Текст рассылки пустой. Отправьте текстовое сообщение.")
+
+    if message.photo:
+        photo_file_id = message.photo[-1].file_id
+        text = message.caption or ""
+    elif message.text:
+        photo_file_id = None
+        text = message.text
+    else:
+        await message.answer("❌ Отправьте текст или фото с подписью.")
         return
-    await state.update_data(text=text)
+
+    await state.update_data(text=text, photo_file_id=photo_file_id)
     await state.set_state(Broadcast.confirming)
+
+    if photo_file_id:
+        preview_header = "📸 <b>Фото + подпись:</b>\n\n"
+    else:
+        preview_header = "📢 <b>Предпросмотр:</b>\n\n"
+
     await message.answer(
-        f"📢 <b>Предпросмотр:</b>\n\n{text}\n\n"
+        f"{preview_header}{text}\n\n"
         f"Получателей: <b>{count}</b> чел.\nЗапустить?",
         parse_mode="HTML",
         reply_markup=broadcast_confirm(data["bot_id"]),
@@ -71,7 +84,8 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
                       http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
     text = data.get("text", "")
-    if not text:
+    photo_file_id = data.get("photo_file_id")
+    if not text and not photo_file_id:
         await callback.answer("Текст рассылки пуст.", show_alert=True)
         return
 
@@ -82,9 +96,9 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
         return
 
     total = await db.get_audience_count(pool, row["bot_id"])
-    bc_id = await db.create_broadcast(pool, row["bot_id"], text, total, callback.from_user.id)
+    bc_id = await db.create_broadcast(pool, row["bot_id"], text, total, callback.from_user.id, photo_file_id)
 
-    broadcaster.start(pool, http, bc_id, row["token"], row["bot_id"], text)
+    broadcaster.start(pool, http, bc_id, row["token"], row["bot_id"], text, photo_file_id)
 
     await state.clear()
     await callback.message.edit_text(

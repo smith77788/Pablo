@@ -8,7 +8,7 @@ const NAV = [
   { href: '/dashboard', label: 'Статистика', icon: LayoutDashboard },
   { href: '/inbox', label: 'Входящие', icon: MessageSquare },
   { href: '/conversations', label: 'Разговоры', icon: MessagesSquare },
-  { href: '/users', label: 'CRM', icon: Users },
+  { href: '/users', label: 'Пользователи', icon: Users },
   { href: '/broadcasts', label: 'Рассылки', icon: Send },
   { href: '/analytics', label: 'Аналитика', icon: BarChart2 },
   { href: '/bots', label: 'Боты', icon: Bot },
