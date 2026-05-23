@@ -22,14 +22,18 @@ async def cb_stats_menu(callback: CallbackQuery, callback_data: StatsCb,
     stats = await db.get_bot_stats(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
 
+    completion_rate = round(stats["funnel_completed"] / stats["funnel_total_subs"] * 100) if stats["funnel_total_subs"] else 0
+
     text = (
         f"📊 <b>Статистика — {label}</b>\n\n"
         f"👥 <b>Пользователи в Inbox:</b> {stats['relay_sessions']}\n"
         f"📩 Сообщений получено: {stats['msg_in']}\n"
-        f"📤 Ответов отправлено: {stats['msg_out']}\n\n"
+        f"📤 Ответов отправлено: {stats['msg_out']}\n"
+        f"🆕 Новых диалогов за 24ч: {stats['relay_today']}\n\n"
         f"🤖 <b>Авто-ответы активных:</b> {stats['active_replies']}\n\n"
         f"🔗 <b>Цепочек активных:</b> {stats['active_funnels']}\n"
-        f"👤 Пользователей в цепочках: {stats['funnel_users']}"
+        f"👤 Подписчиков в цепочках: {stats['funnel_users']}\n"
+        f"✅ Завершили цепочку: {stats['funnel_completed']} ({completion_rate}%)"
     )
     await callback.message.edit_text(
         text,

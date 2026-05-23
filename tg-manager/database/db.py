@@ -514,6 +514,22 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
            JOIN funnels f ON f.id=fs.funnel_id
            WHERE f.bot_id=$1""", bot_id
     )
+    # Funnel completion rate
+    funnel_completed = await pool.fetchval(
+        """SELECT COUNT(*) FROM funnel_subscriptions fs
+           JOIN funnels f ON f.id=fs.funnel_id
+           WHERE f.bot_id=$1 AND fs.completed=true""", bot_id
+    )
+    funnel_total_subs = await pool.fetchval(
+        """SELECT COUNT(*) FROM funnel_subscriptions fs
+           JOIN funnels f ON f.id=fs.funnel_id
+           WHERE f.bot_id=$1""", bot_id
+    )
+    # Relay sessions today
+    relay_today = await pool.fetchval(
+        """SELECT COUNT(*) FROM relay_sessions
+           WHERE bot_id=$1 AND created_at >= NOW() - INTERVAL '24 hours'""", bot_id
+    )
     return {
         "relay_sessions": relay_sessions or 0,
         "msg_in": msg_in or 0,
@@ -521,6 +537,9 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
         "active_replies": active_replies or 0,
         "active_funnels": active_funnels or 0,
         "funnel_users": funnel_users or 0,
+        "funnel_completed": funnel_completed or 0,
+        "funnel_total_subs": funnel_total_subs or 0,
+        "relay_today": relay_today or 0,
     }
 
 
