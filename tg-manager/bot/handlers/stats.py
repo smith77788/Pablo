@@ -26,14 +26,18 @@ async def cb_stats_menu(callback: CallbackQuery, callback_data: StatsCb,
 
     text = (
         f"📊 <b>Статистика — {label}</b>\n\n"
-        f"👥 <b>Пользователи в Inbox:</b> {stats['relay_sessions']}\n"
-        f"📩 Сообщений получено: {stats['msg_in']}\n"
-        f"📤 Ответов отправлено: {stats['msg_out']}\n"
-        f"🆕 Новых диалогов за 24ч: {stats['relay_today']}\n\n"
-        f"🤖 <b>Авто-ответы активных:</b> {stats['active_replies']}\n\n"
+        f"👥 <b>Аудитория:</b> {stats['aud_total']} чел.\n"
+        f"  🆕 За сутки: +{stats['aud_today']}\n"
+        f"  📈 За 7 дней: +{stats['aud_week']}\n\n"
+        f"📢 <b>Рассылки:</b> {stats['broadcasts_total']} всего, отправлено {stats['broadcasts_sent']} сообщений\n\n"
+        f"💬 <b>Inbox:</b> {stats['relay_sessions']} диалогов\n"
+        f"  📩 Входящих: {stats['msg_in']}\n"
+        f"  📤 Исходящих: {stats['msg_out']}\n"
+        f"  🆕 Новых за 24ч: {stats['relay_today']}\n\n"
+        f"🤖 <b>Авто-ответов активных:</b> {stats['active_replies']}\n\n"
         f"🔗 <b>Цепочек активных:</b> {stats['active_funnels']}\n"
-        f"👤 Подписчиков в цепочках: {stats['funnel_users']}\n"
-        f"✅ Завершили цепочку: {stats['funnel_completed']} ({completion_rate}%)"
+        f"  👤 Подписчиков: {stats['funnel_users']}\n"
+        f"  ✅ Завершили: {stats['funnel_completed']} ({completion_rate}%)"
     )
     await callback.message.edit_text(
         text,

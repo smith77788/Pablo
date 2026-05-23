@@ -114,10 +114,52 @@ async def get_webhook_info(session: aiohttp.ClientSession, token: str) -> dict:
 # ── Audience collection ───────────────────────────────────────────────────
 
 async def fetch_updates(session: aiohttp.ClientSession, token: str) -> list[dict]:
-    """Pull up to 100 pending updates (non-destructive offset=-1 not possible;
-    this DOES consume updates — acceptable for bots managed exclusively here)."""
+    """Pull up to 100 pending updates."""
     data = await _call(session, token, "getUpdates", offset=0, limit=100, timeout=0)
     return data.get("result", []) if data.get("ok") else []
+
+
+async def scan_all_users(session: aiohttp.ClientSession, token: str,
+                          start_offset: int = 0, max_batches: int = 50) -> tuple[list[dict], int]:
+    """Scan all available updates and return (users_list, last_update_id).
+    Pages through batches of 100. Does advance offset (confirms updates).
+    Returns deduplicated user list and the highest update_id seen.
+    """
+    seen: set[int] = set()
+    users: list[dict] = []
+    offset = start_offset
+    last_id = start_offset
+
+    for _ in range(max_batches):
+        data = await _call(session, token, "getUpdates",
+                           offset=offset + 1 if offset else 0, limit=100, timeout=0)
+        batch = data.get("result", []) if data.get("ok") else []
+        if not batch:
+            break
+        for upd in batch:
+            uid_update = upd.get("update_id", 0)
+            if uid_update > last_id:
+                last_id = uid_update
+            msg = upd.get("message") or upd.get("edited_message") or upd.get("callback_query")
+            if not msg:
+                continue
+            from_user = msg.get("from") or {}
+            uid = from_user.get("id")
+            if not uid or uid in seen or from_user.get("is_bot"):
+                continue
+            seen.add(uid)
+            users.append({
+                "user_id": uid,
+                "username": from_user.get("username"),
+                "first_name": from_user.get("first_name"),
+                "last_name": from_user.get("last_name"),
+                "language_code": from_user.get("language_code"),
+            })
+        offset = last_id
+        if len(batch) < 100:
+            break
+
+    return users, last_id
 
 
 def extract_users_from_updates(updates: list[dict]) -> list[dict]:

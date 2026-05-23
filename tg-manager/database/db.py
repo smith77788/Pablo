@@ -163,6 +163,18 @@ async def get_audience_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
     inactive = await pool.fetchval(
         "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=FALSE", bot_id
     )
+    joined_today = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '24 hours'",
+        bot_id,
+    )
+    joined_week = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '7 days'",
+        bot_id,
+    )
+    joined_month = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '30 days'",
+        bot_id,
+    )
     langs = await pool.fetch(
         """SELECT COALESCE(language_code, 'unknown') AS lang, COUNT(*) AS cnt
            FROM bot_users WHERE bot_id=$1 AND is_active=TRUE
@@ -172,6 +184,9 @@ async def get_audience_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
     return {
         "total": total or 0,
         "inactive": inactive or 0,
+        "joined_today": joined_today or 0,
+        "joined_week": joined_week or 0,
+        "joined_month": joined_month or 0,
         "languages": [{"lang": r["lang"], "count": r["cnt"]} for r in langs],
     }
 
@@ -537,6 +552,25 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
         """SELECT COUNT(*) FROM relay_sessions
            WHERE bot_id=$1 AND created_at >= NOW() - INTERVAL '24 hours'""", bot_id
     )
+    # Audience growth
+    aud_total = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
+    )
+    aud_today = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '24 hours'",
+        bot_id,
+    )
+    aud_week = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '7 days'",
+        bot_id,
+    )
+    # Broadcast count
+    broadcasts_total = await pool.fetchval(
+        "SELECT COUNT(*) FROM broadcasts WHERE bot_id=$1", bot_id
+    )
+    broadcasts_sent = await pool.fetchval(
+        "SELECT COALESCE(SUM(sent_count), 0) FROM broadcasts WHERE bot_id=$1", bot_id
+    )
     return {
         "relay_sessions": relay_sessions or 0,
         "msg_in": msg_in or 0,
@@ -547,6 +581,11 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
         "funnel_completed": funnel_completed or 0,
         "funnel_total_subs": funnel_total_subs or 0,
         "relay_today": relay_today or 0,
+        "aud_total": aud_total or 0,
+        "aud_today": aud_today or 0,
+        "aud_week": aud_week or 0,
+        "broadcasts_total": broadcasts_total or 0,
+        "broadcasts_sent": broadcasts_sent or 0,
     }
 
 

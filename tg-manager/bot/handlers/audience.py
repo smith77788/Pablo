@@ -81,6 +81,10 @@ async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
         f"👤 Активных: <b>{stats['total']}</b>\n"
         f"🚫 Заблокировали бота: <b>{stats['inactive']}</b> ({block_pct}%)\n"
         f"📌 Всего за всё время: <b>{total_all}</b>\n\n"
+        f"📈 <b>Прирост:</b>\n"
+        f"  За сутки: <b>+{stats['joined_today']}</b>\n"
+        f"  За 7 дней: <b>+{stats['joined_week']}</b>\n"
+        f"  За 30 дней: <b>+{stats['joined_month']}</b>\n\n"
         f"🌍 <b>Языки (топ-10):</b>\n{lang_lines}"
     )
     await callback.message.edit_text(text, parse_mode="HTML",
@@ -130,6 +134,42 @@ async def cb_export(callback: CallbackQuery, callback_data: AudCb,
         BufferedInputFile(content, filename=filename),
         caption=f"📤 Аудитория <b>{label}</b> — {len(rows)} записей",
         parse_mode="HTML",
+    )
+
+
+@router.callback_query(AudCb.filter(F.action == "scan"))
+async def cb_scan(callback: CallbackQuery, callback_data: AudCb,
+                   pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    await callback.message.edit_text("⚡ Сканирую все доступные апдейты…")
+    await callback.answer()
+
+    from database import db as _db
+    from services import bot_api as _api
+
+    start_offset = await _db.get_update_offset(pool, callback_data.bot_id)
+    users, last_id = await _api.scan_all_users(http, row["token"], start_offset=start_offset)
+
+    new_count = 0
+    if users:
+        new_count = await db.upsert_users(pool, row["bot_id"], users)
+    if last_id > start_offset:
+        await db.set_update_offset(pool, callback_data.bot_id, last_id)
+
+    total = await db.get_audience_count(pool, row["bot_id"])
+    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    await callback.message.edit_text(
+        f"👥 <b>Аудитория {label}</b>\n\n"
+        f"⚡ Просканировано апдейтов до ID #{last_id}\n"
+        f"Найдено уникальных пользователей: <b>{len(users)}</b>\n"
+        f"Новых добавлено: <b>+{new_count}</b>\n"
+        f"Всего активных: <b>{total}</b>",
+        parse_mode="HTML",
+        reply_markup=audience_menu(row["bot_id"]),
     )
 
 

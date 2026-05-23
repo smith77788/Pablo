@@ -109,12 +109,13 @@ def edit_menu(bot_id: int) -> InlineKeyboardMarkup:
 
 def audience_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить",      callback_data=AudCb(action="refresh", bot_id=bot_id))
-    kb.button(text="📊 Статистика",    callback_data=AudCb(action="stats", bot_id=bot_id))
-    kb.button(text="📤 Экспорт CSV",   callback_data=AudCb(action="export", bot_id=bot_id))
-    kb.button(text="⚖️ Сравнить",     callback_data=AudCb(action="compare", bot_id=bot_id))
-    kb.button(text="◀️ Назад",        callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 2, 1)
+    kb.button(text="🔄 Обновить",        callback_data=AudCb(action="refresh", bot_id=bot_id))
+    kb.button(text="⚡ Собрать всех",    callback_data=AudCb(action="scan", bot_id=bot_id))
+    kb.button(text="📊 Статистика",      callback_data=AudCb(action="stats", bot_id=bot_id))
+    kb.button(text="📤 Экспорт CSV",     callback_data=AudCb(action="export", bot_id=bot_id))
+    kb.button(text="⚖️ Сравнить",       callback_data=AudCb(action="compare", bot_id=bot_id))
+    kb.button(text="◀️ Назад",          callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 
