@@ -363,8 +363,16 @@ def relay_menu(bot_id: int, relay_enabled: bool, sessions: list) -> InlineKeyboa
     return kb.as_markup()
 
 
-def relay_session_view(bot_id: int, session_id: int) -> InlineKeyboardMarkup:
+def relay_session_view(bot_id: int, session_id: int, templates: list = None) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    # Quick reply template buttons
+    if templates:
+        for t in templates[:5]:  # max 5 шаблонов
+            kb.button(
+                text=f"💬 {t['name']}",
+                callback_data=RelayCb(action="quick_reply", bot_id=bot_id,
+                                      session_id=session_id, template_id=t["id"]),
+            )
     kb.button(text="🗑 Закрыть диалог", callback_data=RelayCb(action="close_session", bot_id=bot_id, session_id=session_id))
     kb.button(text="◀️ К Inbox", callback_data=RelayCb(action="menu", bot_id=bot_id))
     kb.adjust(1)

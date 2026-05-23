@@ -117,9 +117,39 @@ async def cb_relay_session(callback: CallbackQuery, callback_data: RelayCb,
         f"Бот: {bot_label}\n\n"
         f"<b>Последние сообщения:</b>\n{history_text}"
     )
+    templates = await db.get_templates(pool, callback.from_user.id)
     await callback.message.edit_text(text, parse_mode="HTML",
-                                      reply_markup=relay_session_view(callback_data.bot_id, session_id))
+                                      reply_markup=relay_session_view(callback_data.bot_id, session_id, templates))
     await callback.answer()
+
+
+@router.callback_query(RelayCb.filter(F.action == "quick_reply"))
+async def cb_relay_quick_reply(callback: CallbackQuery, callback_data: RelayCb,
+                                pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    """Send a template message to the user as operator quick reply."""
+    template = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
+    if not template:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+
+    # Get session details
+    sess = await pool.fetchrow(
+        """SELECT rs.*, mb.token
+           FROM relay_sessions rs
+           JOIN managed_bots mb ON mb.bot_id=rs.bot_id
+           WHERE rs.id=$1 AND mb.added_by=$2""",
+        callback_data.session_id, callback.from_user.id,
+    )
+    if not sess:
+        await callback.answer("Диалог не найден.", show_alert=True)
+        return
+
+    ok, _ = await bot_api.send_message(http, sess["token"], sess["user_id"], template["text"])
+    if ok:
+        await db.save_relay_message(pool, callback_data.session_id, "out", template["text"])
+        await callback.answer(f"✅ «{template['name']}» отправлен!")
+    else:
+        await callback.answer("❌ Не удалось отправить — пользователь мог заблокировать бота.", show_alert=True)
 
 
 @router.callback_query(RelayCb.filter(F.action == "close_session"))
