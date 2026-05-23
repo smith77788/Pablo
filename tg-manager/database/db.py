@@ -306,3 +306,71 @@ async def get_bots_with_auto_replies(pool: asyncpg.Pool) -> list[asyncpg.Record]
         "SELECT DISTINCT b.bot_id, b.token FROM managed_bots b "
         "JOIN auto_replies ar ON ar.bot_id=b.bot_id WHERE ar.is_active=true"
     )
+
+
+# ── Hermes Relay ───────────────────────────────────────────────────────────
+
+async def enable_relay(pool: asyncpg.Pool, bot_id: int, enabled: bool) -> None:
+    await pool.execute(
+        "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2", enabled, bot_id
+    )
+
+
+async def get_bots_with_relay(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT bot_id, token, added_by FROM managed_bots "
+        "WHERE relay_enabled=true AND is_active=true"
+    )
+
+
+async def get_or_create_relay_session(pool: asyncpg.Pool, bot_id: int, user_id: int,
+                                       username: str | None, first_name: str | None) -> int:
+    row = await pool.fetchrow(
+        "SELECT id FROM relay_sessions WHERE bot_id=$1 AND user_id=$2", bot_id, user_id
+    )
+    if row:
+        await pool.execute(
+            "UPDATE relay_sessions SET last_activity=now(), username=$3, first_name=$4, "
+            "messages_count=messages_count+1 WHERE bot_id=$1 AND user_id=$2",
+            bot_id, user_id, username, first_name,
+        )
+        return row["id"]
+    row = await pool.fetchrow(
+        "INSERT INTO relay_sessions(bot_id,user_id,username,first_name) "
+        "VALUES($1,$2,$3,$4) RETURNING id",
+        bot_id, user_id, username, first_name,
+    )
+    return row["id"]
+
+
+async def save_relay_message(pool: asyncpg.Pool, session_id: int, direction: str,
+                              text: str, forwarded_msg_id: int | None = None) -> None:
+    await pool.execute(
+        "INSERT INTO relay_messages(session_id,direction,text,forwarded_msg_id) "
+        "VALUES($1,$2,$3,$4)",
+        session_id, direction, text, forwarded_msg_id,
+    )
+
+
+async def find_session_by_forwarded_msg(pool: asyncpg.Pool,
+                                         forwarded_msg_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        """SELECT rs.bot_id, rs.user_id, mb.token
+           FROM relay_messages rm
+           JOIN relay_sessions rs ON rs.id = rm.session_id
+           JOIN managed_bots mb ON mb.bot_id = rs.bot_id
+           WHERE rm.forwarded_msg_id=$1""",
+        forwarded_msg_id,
+    )
+
+
+async def get_relay_sessions(pool: asyncpg.Pool, bot_id: int,
+                              limit: int = 5) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """SELECT rs.user_id, rs.username, rs.first_name, rs.last_activity, rs.messages_count,
+                  (SELECT text FROM relay_messages WHERE session_id=rs.id
+                   ORDER BY created_at DESC LIMIT 1) as last_text
+           FROM relay_sessions rs WHERE rs.bot_id=$1
+           ORDER BY rs.last_activity DESC LIMIT $2""",
+        bot_id, limit,
+    )

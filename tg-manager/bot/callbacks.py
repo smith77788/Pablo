@@ -60,3 +60,8 @@ class AutoReplyCb(CallbackData, prefix="ar"):
     action: str
     bot_id: int
     reply_id: int = 0
+
+
+class RelayCb(CallbackData, prefix="rl"):
+    action: str
+    bot_id: int

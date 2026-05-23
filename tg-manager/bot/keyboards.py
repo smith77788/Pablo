@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
-    CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb,
+    CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb,
 )
 
 PAGE_SIZE = 5
@@ -76,12 +76,13 @@ def bot_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="⏰ Расписание",   callback_data=ScheduleCb(action="menu", bot_id=bot_id))
     kb.button(text="🤖 Команды",      callback_data=CommandsCb(action="menu", bot_id=bot_id))
     kb.button(text="📝 Шаблоны",      callback_data=TemplateCb(action="list", bot_id=bot_id))
-    kb.button(text="🤖 Авто-ответы",  callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
+    kb.button(text="💬 Авто-ответы",  callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
+    kb.button(text="📨 Inbox",         callback_data=RelayCb(action="menu", bot_id=bot_id))
     kb.button(text="🔗 Вебхук",       callback_data=WebhookCb(action="menu", bot_id=bot_id))
     kb.button(text="⚖️ Сравнить",    callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
-    kb.adjust(2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -293,6 +294,22 @@ def auto_reply_trigger_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="🔑 Ключевое слово", callback_data=AutoReplyCb(action="trig_keyword", bot_id=bot_id))
     kb.button(text="💬 Любое сообщение", callback_data=AutoReplyCb(action="trig_any", bot_id=bot_id))
     kb.button(text="◀️ Назад",           callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def relay_menu(bot_id: int, relay_enabled: bool, sessions: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    toggle = "🔴 Отключить inbox" if relay_enabled else "🟢 Включить inbox"
+    kb.button(text=toggle, callback_data=RelayCb(action="toggle", bot_id=bot_id))
+    for s in sessions:
+        name = f"@{s['username']}" if s["username"] else (s["first_name"] or str(s["user_id"]))
+        preview = ((s["last_text"] or "нет сообщений")[:22]).replace("\n", " ")
+        kb.button(
+            text=f"💬 {name}: {preview}",
+            callback_data=RelayCb(action="sessions", bot_id=bot_id),
+        )
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
 
