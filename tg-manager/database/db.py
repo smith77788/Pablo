@@ -38,10 +38,10 @@ async def get_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> asyncpg.Rec
 
 async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
     result = await pool.execute(
-        "UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1 AND added_by=$2",
+        "DELETE FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
         bot_id, added_by,
     )
-    return result == "UPDATE 1"
+    return result == "DELETE 1"
 
 
 # ── Audience ───────────────────────────────────────────────────────────────
