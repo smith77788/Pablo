@@ -43,7 +43,9 @@ export class BroadcastsService {
     return { ok: true };
   }
 
-  async list(tenantId: string, botId?: string) {
+  // ─── CRUD ─────────────────────────────────────────────────────────────────
+
+  async findAll(tenantId: string, botId?: string) {
     return prisma.broadcast.findMany({
       where: { tenantId, ...(botId ? { botId } : {}) },
       orderBy: { createdAt: 'desc' },
@@ -52,12 +54,42 @@ export class BroadcastsService {
     });
   }
 
-  async get(tenantId: string, id: string) {
+  async findOne(tenantId: string, id: string) {
     const bc = await prisma.broadcast.findFirst({
       where: { id, tenantId },
       include: { recipients: { take: 100 } },
     });
-    if (!bc) throw new NotFoundException();
+    if (!bc) throw new NotFoundException('Broadcast not found');
     return bc;
+  }
+
+  // ─── STATS ────────────────────────────────────────────────────────────────
+
+  async getStats(tenantId: string, id: string) {
+    const bc = await prisma.broadcast.findFirst({ where: { id, tenantId } });
+    if (!bc) throw new NotFoundException('Broadcast not found');
+
+    const total = bc.totalCount;
+    const sent = bc.sentCount;
+    const failed = bc.failedCount;
+    const successRate = total > 0 ? Math.round((sent / total) * 100) : 0;
+
+    return {
+      total,
+      sent,
+      failed,
+      status: bc.status,
+      successRate,
+    };
+  }
+
+  // ─── LEGACY ALIASES (kept for backward compatibility) ─────────────────────
+
+  async list(tenantId: string, botId?: string) {
+    return this.findAll(tenantId, botId);
+  }
+
+  async get(tenantId: string, id: string) {
+    return this.findOne(tenantId, id);
   }
 }
