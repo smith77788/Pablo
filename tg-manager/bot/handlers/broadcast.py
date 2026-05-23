@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
 from bot.callbacks import BroadcastCb, BotCb
-from bot.keyboards import broadcast_menu, broadcast_confirm, back_to_bot
+from bot.keyboards import broadcast_menu, broadcast_confirm, back_to_bot, broadcast_from_template
 from bot.states import Broadcast
 from database import db
 from services import broadcaster
@@ -131,5 +131,57 @@ async def cb_status(callback: CallbackQuery, callback_data: BroadcastCb,
         "📋 <b>Последние рассылки:</b>\n\n" + "\n".join(lines),
         parse_mode="HTML",
         reply_markup=back_to_bot(callback_data.bot_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(BroadcastCb.filter(F.action == "from_template"))
+async def cb_from_template(callback: CallbackQuery, callback_data: BroadcastCb,
+                            pool: asyncpg.Pool) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    templates = await db.get_templates(pool, callback.from_user.id)
+    if not templates:
+        await callback.answer("У вас нет шаблонов. Создайте шаблон в разделе шаблонов.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📋 <b>Выберите шаблон для рассылки:</b>",
+        parse_mode="HTML",
+        reply_markup=broadcast_from_template(callback_data.bot_id, templates),
+    )
+    await callback.answer()
+
+
+@router.callback_query(BroadcastCb.filter(F.action == "use_template"))
+async def cb_use_template(callback: CallbackQuery, callback_data: BroadcastCb,
+                           pool: asyncpg.Pool, state: FSMContext) -> None:
+    # broadcast_id field repurposed here as template_id
+    template = await db.get_template(pool, callback_data.broadcast_id, callback.from_user.id)
+    if not template:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    total = await db.get_audience_count(pool, callback_data.bot_id)
+    if total == 0:
+        await callback.answer("У бота нет аудитории для рассылки.", show_alert=True)
+        return
+
+    await state.set_state(Broadcast.confirming)
+    await state.update_data(bot_id=callback_data.bot_id, text=template["text"])
+
+    preview = template["text"][:200]
+    await callback.message.edit_text(
+        f"📋 <b>Шаблон: {template['name']}</b>\n\n"
+        f"Превью:\n{preview}\n\n"
+        f"👥 Получателей: <b>{total}</b>\n\n"
+        "Отправить эту рассылку?",
+        parse_mode="HTML",
+        reply_markup=broadcast_confirm(callback_data.bot_id),
     )
     await callback.answer()

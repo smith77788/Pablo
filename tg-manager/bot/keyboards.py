@@ -124,10 +124,22 @@ def webhook_menu(bot_id: int) -> InlineKeyboardMarkup:
 def broadcast_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="📝 Написать рассылку",   callback_data=BroadcastCb(action="compose", bot_id=bot_id))
-    kb.button(text="📝 Из шаблона",          callback_data=TemplateCb(action="list", bot_id=bot_id))
+    kb.button(text="📋 Из шаблона",          callback_data=BroadcastCb(action="from_template", bot_id=bot_id))
     kb.button(text="📋 История рассылок",    callback_data=BroadcastCb(action="status", bot_id=bot_id))
     kb.button(text="◀️ Назад",               callback_data=BotCb(action="select", bot_id=bot_id))
     kb.adjust(2, 1, 1)
+    return kb.as_markup()
+
+
+def broadcast_from_template(bot_id: int, templates: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for t in templates[:8]:
+        kb.button(
+            text=f"📋 {t['name']}",
+            callback_data=BroadcastCb(action="use_template", bot_id=bot_id, broadcast_id=t["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=BroadcastCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
     return kb.as_markup()
 
 
