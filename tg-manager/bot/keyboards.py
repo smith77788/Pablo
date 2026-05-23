@@ -109,15 +109,26 @@ def edit_menu(bot_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def user_profile_menu(bot_id: int, user_id: int, is_blocked: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    block_text = "✅ Разблокировать" if is_blocked else "🚫 Заблокировать"
+    block_action = "unblock_user" if is_blocked else "block_user"
+    kb.button(text=block_text, callback_data=AudCb(action=block_action, bot_id=bot_id, target_id=user_id))
+    kb.button(text="◀️ Назад", callback_data=AudCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def audience_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить",        callback_data=AudCb(action="refresh", bot_id=bot_id))
     kb.button(text="⚡ Собрать всех",    callback_data=AudCb(action="scan", bot_id=bot_id))
     kb.button(text="📊 Статистика",      callback_data=AudCb(action="stats", bot_id=bot_id))
+    kb.button(text="📤 Написать юзеру",  callback_data=AudCb(action="send_user", bot_id=bot_id))
     kb.button(text="📤 Экспорт CSV",     callback_data=AudCb(action="export", bot_id=bot_id))
     kb.button(text="⚖️ Сравнить",       callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="◀️ Назад",          callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

@@ -1,13 +1,15 @@
-"""Audience collection, stats, comparison, and CSV export."""
+"""Audience collection, stats, comparison, CSV export, and user management."""
 from __future__ import annotations
 import csv
 import io
 import asyncpg
 import aiohttp
 from aiogram import Router, F
-from aiogram.types import BufferedInputFile, CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from bot.callbacks import AudCb, BotCb
-from bot.keyboards import audience_menu, bots_pick, back_to_bot
+from bot.keyboards import audience_menu, bots_pick, back_to_bot, user_profile_menu
+from bot.states import SendToUser
 from database import db
 from services import bot_api
 
@@ -214,3 +216,93 @@ async def cb_compare_result(callback: CallbackQuery, callback_data: AudCb,
         reply_markup=back_to_bot(row_a["bot_id"]),
     )
     await callback.answer()
+
+
+# ── Send to specific user ──────────────────────────────────────────────────
+
+@router.callback_query(AudCb.filter(F.action == "send_user"))
+async def cb_send_user(callback: CallbackQuery, callback_data: AudCb,
+                        state: FSMContext) -> None:
+    await state.set_state(SendToUser.waiting_user_id)
+    await state.update_data(bot_id=callback_data.bot_id)
+    await callback.message.edit_text(
+        "📤 <b>Написать пользователю</b>\n\n"
+        "Введите Telegram User ID пользователя\n"
+        "(число, например <code>123456789</code>):",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(SendToUser.waiting_user_id)
+async def msg_send_user_id(message: Message, state: FSMContext) -> None:
+    try:
+        user_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Неверный формат. Введите числовой User ID:")
+        return
+    await state.update_data(target_user_id=user_id)
+    await state.set_state(SendToUser.waiting_message)
+    await message.answer(
+        f"✅ User ID: <code>{user_id}</code>\n\nТеперь введите текст сообщения:",
+        parse_mode="HTML",
+    )
+
+
+@router.message(SendToUser.waiting_message)
+async def msg_send_user_text(message: Message, state: FSMContext,
+                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    data = await state.get_data()
+    await state.clear()
+    bot_id = data["bot_id"]
+    target_user_id = data["target_user_id"]
+
+    row = await db.get_bot(pool, bot_id, message.from_user.id)
+    if not row:
+        await message.answer("Бот не найден.")
+        return
+
+    ok, retry = await bot_api.send_message(http, row["token"], target_user_id, message.text)
+    if ok:
+        await message.answer(
+            f"✅ Сообщение доставлено пользователю <code>{target_user_id}</code>.",
+            parse_mode="HTML",
+            reply_markup=audience_menu(bot_id),
+        )
+    else:
+        await message.answer(
+            f"❌ Не удалось отправить. Пользователь <code>{target_user_id}</code> "
+            "мог заблокировать бота или не начинал с ним диалог.",
+            parse_mode="HTML",
+            reply_markup=audience_menu(bot_id),
+        )
+
+
+# ── Block / unblock user ───────────────────────────────────────────────────
+
+@router.callback_query(AudCb.filter(F.action.in_({"block_user", "unblock_user"})))
+async def cb_block_user(callback: CallbackQuery, callback_data: AudCb,
+                         pool: asyncpg.Pool) -> None:
+    blocked = callback_data.action == "block_user"
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    await db.block_user(pool, callback_data.bot_id, callback_data.target_id, blocked)
+    user = await db.get_user_by_id(pool, callback_data.bot_id, callback_data.target_id)
+    if not user:
+        await callback.answer("Пользователь не найден.", show_alert=True)
+        return
+    u_label = f"@{user['username']}" if user.get("username") else str(user["user_id"])
+    action_text = "заблокирован" if blocked else "разблокирован"
+    first = user.get("first_name") or ""
+    lang = user.get("language_code") or "—"
+    await callback.message.edit_text(
+        f"👤 <b>Пользователь {u_label}</b>\n"
+        f"Имя: {first}\n"
+        f"Язык: {lang}\n"
+        f"Статус: {'🚫 Заблокирован' if blocked else '✅ Активен'}",
+        parse_mode="HTML",
+        reply_markup=user_profile_menu(callback_data.bot_id, callback_data.target_id, blocked),
+    )
+    await callback.answer(f"✅ Пользователь {action_text}.")

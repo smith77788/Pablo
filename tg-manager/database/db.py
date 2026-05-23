@@ -102,7 +102,8 @@ async def get_audience_count(pool: asyncpg.Pool, bot_id: int) -> int:
 
 async def get_audience_user_ids(pool: asyncpg.Pool, bot_id: int) -> list[int]:
     rows = await pool.fetch(
-        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
+        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE",
+        bot_id,
     )
     return [r["user_id"] for r in rows]
 
@@ -124,6 +125,19 @@ async def compare_audiences(pool: asyncpg.Pool, bot_id_a: int, bot_id_b: int) ->
         "overlap_pct_a": round(overlap / count_a * 100, 1) if count_a else 0,
         "overlap_pct_b": round(overlap / count_b * 100, 1) if count_b else 0,
     }
+
+
+async def get_user_by_id(pool: asyncpg.Pool, bot_id: int, user_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        "SELECT * FROM bot_users WHERE bot_id=$1 AND user_id=$2", bot_id, user_id
+    )
+
+
+async def block_user(pool: asyncpg.Pool, bot_id: int, user_id: int, blocked: bool) -> None:
+    await pool.execute(
+        "UPDATE bot_users SET is_blocked=$3 WHERE bot_id=$1 AND user_id=$2",
+        bot_id, user_id, blocked,
+    )
 
 
 async def mark_user_inactive(pool: asyncpg.Pool, bot_id: int, user_id: int) -> None:
