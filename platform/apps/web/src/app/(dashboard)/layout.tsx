@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageSquare, Users, BarChart2, Send, Bot, Settings, LogOut, LayoutDashboard } from 'lucide-react';
+import { MessageSquare, Users, BarChart2, Send, Bot, Settings, LogOut, LayoutDashboard, Zap } from 'lucide-react';
 import clsx from 'clsx';
 
 const NAV = [
@@ -11,6 +11,7 @@ const NAV = [
   { href: '/broadcasts', label: 'Рассылки', icon: Send },
   { href: '/analytics', label: 'Аналитика', icon: BarChart2 },
   { href: '/bots', label: 'Боты', icon: Bot },
+  { href: '/automations', label: 'Автоматизации', icon: Zap },
   { href: '/settings', label: 'Настройки', icon: Settings },
 ];
 
