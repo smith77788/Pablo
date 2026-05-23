@@ -79,7 +79,7 @@ def bot_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="💬 Авто-ответы",  callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
     kb.button(text="📨 Inbox",         callback_data=RelayCb(action="menu", bot_id=bot_id))
     kb.button(text="🔗 Цепочки",      callback_data=FunnelCb(action="list", bot_id=bot_id))
-    kb.button(text="🔗 Вебхук",       callback_data=WebhookCb(action="menu", bot_id=bot_id))
+    kb.button(text="🌐 Вебхук",       callback_data=WebhookCb(action="menu", bot_id=bot_id))
     kb.button(text="⚖️ Сравнить",    callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="📊 Статистика",   callback_data=StatsCb(action="menu", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
