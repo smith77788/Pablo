@@ -29,10 +29,16 @@ from bot.handlers import deeplinks as deeplinks_handler
 from bot.handlers import engagement as engagement_handler
 from bot.handlers import seo as seo_handler
 from bot.handlers import network as network_handler
+from bot.handlers import subscription as sub_handler
+from bot.handlers import ai_assistant as ai_handler
+from bot.handlers import net_broadcast as net_bc_handler
+from bot.handlers import network_bulk as net_bulk_handler
+from bot.handlers import admin as admin_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
 from services import funnel_runner
+from services import payment_checker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,18 +60,20 @@ async def _global_error_handler(event: ErrorEvent) -> None:
             except Exception:
                 pass
             try:
+                exc_text = str(exc)[:200].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 await cb.message.answer(
                     f"⚠️ <b>Внутренняя ошибка</b>\n\n"
-                    f"<code>{type(exc).__name__}: {str(exc)[:200]}</code>",
+                    f"<code>{type(exc).__name__}: {exc_text}</code>",
                     parse_mode="HTML",
                 )
             except Exception:
                 pass
         elif update.message:
             try:
+                exc_text = str(exc)[:200].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 await update.message.answer(
                     f"⚠️ <b>Внутренняя ошибка</b>\n\n"
-                    f"<code>{type(exc).__name__}: {str(exc)[:200]}</code>",
+                    f"<code>{type(exc).__name__}: {exc_text}</code>",
                     parse_mode="HTML",
                 )
             except Exception:
@@ -85,6 +93,7 @@ async def main() -> None:
     )
     dp = Dispatcher(storage=MemoryStorage())
 
+    dp.include_router(sub_handler.router)
     dp.include_router(start.router)
     dp.include_router(bots.router)
     dp.include_router(edit.router)
@@ -107,7 +116,12 @@ async def main() -> None:
     dp.include_router(engagement_handler.router)
     dp.include_router(seo_handler.router)
     dp.include_router(network_handler.router)
+    dp.include_router(net_bulk_handler.router)
+    dp.include_router(net_bc_handler.router)
+    dp.include_router(ai_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
+    # admin message handler AFTER relay so FSM handlers take priority
+    dp.include_router(admin_handler.router)
     dp.error.register(_global_error_handler)
 
     pool = await create_pool()
@@ -120,6 +134,7 @@ async def main() -> None:
         asyncio.create_task(auto_responder.run(pool, http))
         asyncio.create_task(relay_service.run(pool, http))
         asyncio.create_task(funnel_runner.run(pool, http))
+        asyncio.create_task(payment_checker.run(pool, http, bot))
         log.info("TG Manager started")
         try:
             await dp.start_polling(bot, pool=pool, http=http)

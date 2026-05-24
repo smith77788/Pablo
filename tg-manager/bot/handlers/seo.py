@@ -7,7 +7,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
 from bot.callbacks import SeoCb, EditCb, BotCb
-from bot.keyboards import seo_menu
+from bot.keyboards import seo_menu, subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
 
@@ -90,15 +91,25 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
                        pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            locked_text("SEO и аналитика поиска", "starter"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
-        f"📈 <b>SEO / Аналитика — {label}</b>\n\n"
-        "Анализируйте профиль бота и отслеживайте что пишут пользователи "
-        "— используйте эти данные для улучшения позиций в поиске Telegram.",
+        f"📈 <b>SEO — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "SEO помогает вашему боту занимать более высокие места в поиске Telegram. Чем выше бот в поиске — тем больше людей его найдут и подпишутся.\n\n"
+        "💡 <b>Что вы можете здесь делать:</b>\n"
+        "• <b>Анализ профиля</b> — получите оценку от 0 до 100 и список конкретных улучшений\n"
+        "• <b>Ключевые слова</b> — посмотрите, что пишут ваши пользователи, и добавьте эти слова в описание\n"
+        "• <b>SEO-советы</b> — пошаговые инструкции по оптимизации",
         parse_mode="HTML",
         reply_markup=seo_menu(callback_data.bot_id),
     )

@@ -10,3 +10,12 @@ ADMIN_IDS: list[int] = [
 ]
 BROADCAST_DELAY: float = float(os.environ.get("BROADCAST_DELAY", "0.05"))
 MAX_CONCURRENT: int = int(os.environ.get("MAX_CONCURRENT", "20"))
+
+TON_WALLET: str = os.getenv("TON_WALLET", "")
+TON_API_KEY: str = os.getenv("TON_API_KEY", "")
+TRON_WALLET: str = os.getenv("TRON_WALLET", "")
+TRON_API_KEY: str = os.getenv("TRON_API_KEY", "")
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+
+PLAN_PRICES_USD: dict[str, int] = {"starter": 9, "pro": 25, "enterprise": 69}
+PERIOD_DISCOUNTS: dict[int, int] = {1: 0, 3: 10, 6: 15, 12: 20}

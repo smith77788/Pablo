@@ -28,7 +28,15 @@ async def cb_aud_menu(callback: CallbackQuery, callback_data: AudCb,
     count = await db.get_audience_count(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
-        f"👥 <b>Аудитория {label}</b>\n\nАктивных пользователей: <b>{count}</b>",
+        f"👥 <b>Аудитория — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Здесь хранится список всех людей, которые когда-либо писали вашему боту. Вы можете посмотреть кто они, сравнить с другими ботами, скачать список или написать конкретному пользователю.\n\n"
+        "💡 <b>Что можно делать:</b>\n"
+        "• <b>Обновить</b> — загрузить новых пользователей из Telegram\n"
+        "• <b>Сравнить</b> — посмотреть, сколько пользователей есть у двух ботов одновременно\n"
+        "• <b>Экспорт</b> — скачать список пользователей в файл\n"
+        "• <b>Профиль</b> — найти и написать конкретному человеку\n\n"
+        f"Активных пользователей: <b>{count}</b>",
         parse_mode="HTML",
         reply_markup=audience_menu(row["bot_id"]),
     )

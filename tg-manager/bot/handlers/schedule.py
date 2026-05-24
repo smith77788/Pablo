@@ -6,8 +6,9 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from bot.callbacks import ScheduleCb, BotCb
-from bot.keyboards import schedule_menu, back_to_bot, schedule_template_list
+from bot.keyboards import schedule_menu, back_to_bot, schedule_template_list, subscription_locked_markup
 from bot.states import ScheduleBroadcast
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 
 router = Router()
@@ -24,6 +25,12 @@ async def cb_schedule_menu(callback: CallbackQuery, callback_data: ScheduleCb,
                             pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            locked_text("Расписание рассылок", "starter"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -39,9 +46,13 @@ async def cb_schedule_menu(callback: CallbackQuery, callback_data: ScheduleCb,
         preview = s["message_text"][:35].replace("\n", " ")
         lines.append(f"{emoji} {dt} UTC — {preview}…")
 
-    body = "\n".join(lines) if lines else "Запланированных рассылок нет."
+    body = "\n".join(lines) if lines else "Запланированных рассылок пока нет."
     await callback.message.edit_text(
-        f"⏰ <b>Расписание {label}</b>\n\n{body}",
+        f"⏰ <b>Расписание — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Расписание позволяет запланировать рассылку заранее. Вы пишете текст сейчас, указываете дату и время — и бот сам отправит сообщение всем подписчикам в нужный момент, даже если вы спите.\n\n"
+        "💡 <b>Например:</b> запланируйте поздравление с праздником на 00:00, или акцию на пятницу вечером.\n\n"
+        f"{body}",
         parse_mode="HTML",
         reply_markup=schedule_menu(callback_data.bot_id, schedules),
     )

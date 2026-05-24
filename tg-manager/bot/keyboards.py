@@ -4,7 +4,7 @@ from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
     NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb, DeepLinkCb, EngageCb, SeoCb,
-    NetworkCb, ClusterCb,
+    NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb,
 )
 
 PAGE_SIZE = 5
@@ -27,11 +27,78 @@ def main_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Мои боты",           callback_data=BotCb(action="list", page=0))
     kb.button(text="➕ Добавить бота",       callback_data=BotCb(action="add"))
-    kb.button(text="📥 Импорт ботов",        callback_data=BulkCb(action="import"))
-    kb.button(text="📦 Массовые операции",   callback_data=BulkCb(action="menu"))
-    kb.button(text="🌐 Управление сетью",    callback_data=NetworkCb(action="menu"))
+    kb.button(text="🌐 Сеть & операции",    callback_data=NetworkCb(action="menu"))
+    kb.button(text="💳 Подписка",           callback_data=SubCb(action="menu"))
+    kb.button(text="🤖 AI-ассистент",       callback_data=AiCb(action="start"))
     kb.adjust(2, 2, 1)
     return kb.as_markup()
+
+
+def network_ops_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    # ── Управление сетью ──
+    kb.button(text="📊 Аналитика сети",       callback_data=NetworkCb(action="analytics"))
+    kb.button(text="🌐 Кластеры",             callback_data=NetworkCb(action="clusters"))
+    kb.button(text="🏆 Рейтинг ботов",        callback_data=NetworkCb(action="ranking"))
+    kb.button(text="⚖️ Веса роутинга",       callback_data=NetworkCb(action="routing"))
+    kb.button(text="❤️ Здоровье сети",        callback_data=NetworkCb(action="health"))
+    kb.button(text="👥 Пересечение аудиторий", callback_data=NetworkCb(action="overlap"))
+    kb.button(text="📢 Сетевая рассылка v2",  callback_data=NetBcCb(action="choose_target"))
+    kb.button(text="🔄 Клонировать настройки", callback_data=NetworkCb(action="clone"))
+    # ── Массовые операции ──
+    kb.button(text="✏️ Имя всем",             callback_data=NetworkCb(action="bulk_name"))
+    kb.button(text="🌍 Имя по GEO",           callback_data=NetworkCb(action="bulk_name_lang"))
+    kb.button(text="📄 Описание всем",        callback_data=NetworkCb(action="bulk_desc"))
+    kb.button(text="🌍 Описание GEO",         callback_data=NetworkCb(action="bulk_desc_lang"))
+    kb.button(text="📃 Краткое всем",         callback_data=NetworkCb(action="bulk_short"))
+    kb.button(text="🌍 Краткое GEO",          callback_data=NetworkCb(action="bulk_short_lang"))
+    kb.button(text="🤖 Команды всем",         callback_data=NetworkCb(action="bulk_commands"))
+    kb.button(text="🌍 Команды GEO",          callback_data=NetworkCb(action="bulk_commands_lang"))
+    kb.button(text="🔍 Проверить токены",     callback_data=NetworkCb(action="bulk_check"))
+    kb.button(text="📥 Импорт ботов",         callback_data=NetworkCb(action="bulk_import"))
+    kb.button(text="◀️ Главное меню",         callback_data=BotCb(action="list", page=0))
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
+    return kb.as_markup()
+
+
+def subscription_locked_markup(required_plan: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💳 Оформить подписку", callback_data=SubCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def net_broadcast_target_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📢 Всем ботам → их аудитория",
+              callback_data=NetBcCb(action="choose_segment", segment="all_each"))
+    kb.button(text="🎯 Уникальным юзерам (дедупликация)",
+              callback_data=NetBcCb(action="choose_segment", segment="unique"))
+    kb.button(text="❄️ Холодные по всей сети",
+              callback_data=NetBcCb(action="type_message", segment="cold_all"))
+    kb.button(text="💀 Потерянные по всей сети",
+              callback_data=NetBcCb(action="type_message", segment="lost_all"))
+    kb.button(text="🌍 По языку (вся сеть)",
+              callback_data=NetBcCb(action="choose_lang"))
+    kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def net_broadcast_lang_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for code, flag, name in LANGUAGES:
+        kb.button(
+            text=f"{flag} {name}",
+            callback_data=NetBcCb(action="type_message", segment="lang", lang=code),
+        )
+    kb.button(text="◀️ Назад", callback_data=NetBcCb(action="choose_target"))
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+def network_menu() -> InlineKeyboardMarkup:
+    return network_ops_menu()
 
 
 def bulk_menu() -> InlineKeyboardMarkup:

@@ -124,3 +124,14 @@ class SetRoutingWeight(StatesGroup):
 
 class AssignCluster(StatesGroup):
     waiting_name = State()
+
+
+class AiChat(StatesGroup):
+    chatting = State()
+
+
+class NetworkBroadcastV2(StatesGroup):
+    choosing_target = State()
+    choosing_segment = State()
+    waiting_message = State()
+    confirming = State()

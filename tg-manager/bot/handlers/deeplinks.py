@@ -4,8 +4,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import asyncpg
 from bot.callbacks import DeepLinkCb, BotCb
-from bot.keyboards import deeplinks_menu, deeplink_view_menu, back_to_bot
+from bot.keyboards import deeplinks_menu, deeplink_view_menu, back_to_bot, subscription_locked_markup
 from bot.states import CreateDeepLink
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 
 router = Router()
@@ -16,6 +17,12 @@ async def cb_dl_menu(callback: CallbackQuery, callback_data: DeepLinkCb,
                       pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            locked_text("Диплинки и рефералы", "starter"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -26,11 +33,14 @@ async def cb_dl_menu(callback: CallbackQuery, callback_data: DeepLinkCb,
     total_clicks = sum(lnk["click_count"] for lnk in links)
     await callback.message.edit_text(
         f"🔗 <b>Диплинки — {label}</b>\n\n"
-        f"Ссылок: <b>{len(links)}</b>\n"
+        "📌 <b>Что это?</b>\n"
+        "Диплинк — это специальная ссылка на вашего бота с меткой. Когда человек переходит по ней и нажимает Start — система записывает, откуда он пришёл.\n\n"
+        "💡 <b>Зачем нужно?</b>\n"
+        "Создайте разные ссылки для Instagram, ВКонтакте, YouTube — и точно узнайте, какой канал приносит больше всего подписчиков.\n\n"
+        f"Ссылок создано: <b>{len(links)}</b>\n"
         f"Кликов всего: <b>{total_clicks}</b>\n"
         f"Рефералов: <b>{total_refs}</b>\n\n"
-        "Каждый диплинк — это уникальный /start параметр для отслеживания источников трафика.\n"
-        "Формат ссылки: <code>t.me/username?start=PARAM</code>",
+        "Формат ссылки: <code>t.me/username?start=ПАРАМЕТР</code>",
         parse_mode="HTML",
         reply_markup=deeplinks_menu(callback_data.bot_id, links),
     )

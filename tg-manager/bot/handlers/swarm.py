@@ -3,7 +3,8 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 import asyncpg
 from bot.callbacks import SwarmCb, BotCb
-from bot.keyboards import swarm_menu, back_to_bot
+from bot.keyboards import swarm_menu, back_to_bot, subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 
 router = Router()
@@ -20,6 +21,12 @@ async def cb_swarm_menu(callback: CallbackQuery, callback_data: SwarmCb,
                          pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.message.edit_text(
+            locked_text("Swarm (умный роутинг трафика)", "enterprise"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -31,9 +38,13 @@ async def cb_swarm_menu(callback: CallbackQuery, callback_data: SwarmCb,
     mode = await db.get_system_mode(pool)
     await callback.message.edit_text(
         f"🧬 <b>Swarm — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Swarm — это система умного распределения пользователей между вашими ботами. Когда новый человек приходит в одного бота, система может автоматически перенаправить его в другой бот, который сейчас лучше конвертирует.\n\n"
+        "💡 <b>Как работает:</b>\n"
+        "Каждый бот получает роль: Entry (точка входа), Conversion (продаёт), Retention (удерживает). Система сама решает, в какой бот направить пользователя, основываясь на статистике.\n\n"
         f"Статус: {swarm_status}\n"
         f"Роль: {role}\n"
-        f"Кластер: <code>{cluster}</code>\n\n"
+        f"Кластер: <code>{cluster}</code>\n"
         f"🌐 Режим системы: <b>{mode.upper()}</b>",
         parse_mode="HTML",
         reply_markup=swarm_menu(callback_data.bot_id, row),

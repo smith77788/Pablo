@@ -4,9 +4,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 import aiohttp
 import asyncpg
-from bot.callbacks import BotCb
-from bot.keyboards import bots_list, bot_menu, confirm_delete, main_menu
+from bot.callbacks import BotCb, SubCb
+from bot.keyboards import bots_list, bot_menu, confirm_delete, main_menu, subscription_locked_markup
 from bot.states import AddBot
+from bot.utils.subscription import get_bot_limit
 from database import db
 from services import bot_api
 from config import ADMIN_IDS
@@ -49,17 +50,37 @@ async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.P
 # ── Add — step 1: ask token ───────────────────────────────────────────────
 
 @router.callback_query(BotCb.filter(F.action == "add"))
-async def cb_add(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_add(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
         return
+    limit = await get_bot_limit(pool, callback.from_user.id)
+    current_bots = await db.get_bots(pool, callback.from_user.id)
+    if len(current_bots) >= limit:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⭐ Улучшить подписку", callback_data=SubCb(action="menu"))
+        await callback.message.edit_text(
+            f"⛔️ <b>Достигнут лимит ботов</b>\n\n"
+            f"На вашем тарифе можно добавить максимум <b>{limit}</b> бот(ов).\n"
+            f"У вас уже добавлено: <b>{len(current_bots)}</b>\n\n"
+            "Улучшите подписку, чтобы добавить больше ботов:\n"
+            "⭐ Starter — до 10 ботов\n"
+            "🚀 Pro — до 30 ботов\n"
+            "👑 Enterprise — без ограничений",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
     await state.set_state(AddBot.waiting_token)
     await callback.message.edit_text(
-        "🔑 Отправьте токен бота (получить у @BotFather):\n\n"
-        "<code>123456789:AAF...</code>",
+        "🔑 <b>Добавление бота</b>\n\n"
+        "Отправьте токен бота (получить у @BotFather):\n\n"
+        "<code>123456789:AAF...</code>\n\n"
+        f"<i>Добавлено {len(current_bots)} из {limit} доступных ботов</i>",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 # ── Add — step 2: receive token ───────────────────────────────────────────

@@ -5,7 +5,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 import asyncpg
 from bot.callbacks import ExperimentCb, BotCb
-from bot.keyboards import experiments_menu, experiment_view_menu, experiment_type_menu, variant_pick_menu, back_to_bot
+from bot.keyboards import experiments_menu, experiment_view_menu, experiment_type_menu, variant_pick_menu, back_to_bot, subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 
 router = Router()
@@ -41,6 +42,12 @@ async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
                        pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.message.edit_text(
+            locked_text("A/B тесты", "pro"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -49,9 +56,12 @@ async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     active = sum(1 for e in exps if e["status"] == "active")
     await callback.message.edit_text(
-        f"🧪 <b>A/B Эксперименты — {label}</b>\n\n"
-        f"Всего: {len(exps)} | Активных: {active}\n\n"
-        "Тестируйте разные варианты /start сообщений и авто-ответов для повышения конверсии.",
+        f"🧪 <b>A/B Тесты — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "A/B тест — это когда вы показываете разным пользователям разные версии сообщения и смотрите, какая лучше работает. Например: одним пришёл заголовок «Привет!», другим «Добро пожаловать!» — и вы видите, после какого больше людей остаётся.\n\n"
+        "💡 <b>Как использовать:</b>\n"
+        "Создайте эксперимент → добавьте 2+ варианта → запустите → через несколько дней выберите победителя.\n\n"
+        f"Экспериментов: <b>{len(exps)}</b> | Активных: <b>{active}</b>",
         parse_mode="HTML",
         reply_markup=experiments_menu(callback_data.bot_id, exps),
     )

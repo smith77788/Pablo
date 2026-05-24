@@ -23,9 +23,14 @@ async def cb_ar_menu(callback: CallbackQuery, callback_data: AutoReplyCb,
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
-        f"🤖 <b>Авто-ответы {label}</b>\n\n"
-        f"Активных правил: <b>{sum(1 for r in replies if r['is_active'])}</b> из {len(replies)}\n\n"
-        "Бот автоматически отвечает на сообщения пользователей по заданным правилам.",
+        f"🤖 <b>Авто-ответы — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Авто-ответы — это правила, по которым бот автоматически отвечает пользователям без вашего участия. Например: если написали «цена» — бот отвечает прайсом.\n\n"
+        "💡 <b>Типы триггеров:</b>\n"
+        "• <b>/start</b> — приветствие при первом запуске\n"
+        "• <b>Ключевое слово</b> — любое слово в сообщении\n"
+        "• <b>Любое сообщение</b> — отвечает на всё подряд\n\n"
+        f"Правил: <b>{len(replies)}</b> | Активных: <b>{sum(1 for r in replies if r['is_active'])}</b>",
         parse_mode="HTML",
         reply_markup=auto_reply_menu(callback_data.bot_id, replies),
     )

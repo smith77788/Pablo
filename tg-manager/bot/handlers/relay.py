@@ -4,7 +4,8 @@ from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
 from bot.callbacks import RelayCb, BotCb
-from bot.keyboards import relay_menu, back_to_bot, relay_session_view
+from bot.keyboards import relay_menu, back_to_bot, relay_session_view, subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
 
@@ -16,11 +17,13 @@ async def _relay_menu_text(row: asyncpg.Record, sessions: list) -> tuple[str, ob
     relay_on = row.get("relay_enabled", False)
     status = "🟢 Активен" if relay_on else "🔴 Выключен"
     text = (
-        f"📨 <b>Inbox {label}</b>\n\n"
+        f"📨 <b>Inbox — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Inbox — это как личная переписка через вашего бота. Когда пользователь пишет боту, его сообщение пересылается вам. Вы отвечаете — и ответ уходит пользователю от имени бота. Это живое общение, но через бота.\n\n"
+        "💡 <b>Как пользоваться:</b>\n"
+        "Включите Inbox → пользователи пишут боту → вы получаете их сообщения → отвечайте «ответом на сообщение» (Reply) прямо здесь.\n\n"
         f"Статус: {status}\n"
-        f"Диалогов: <b>{len(sessions)}</b>\n\n"
-        "Когда включён — сообщения пользователей пересылаются вам.\n"
-        "Отвечайте <b>reply</b> на пересланное сообщение чтобы ответить пользователю."
+        f"Открытых диалогов: <b>{len(sessions)}</b>"
     )
     return text, relay_menu(row["bot_id"], relay_on, sessions)
 
@@ -30,6 +33,12 @@ async def cb_relay_menu(callback: CallbackQuery, callback_data: RelayCb,
                          pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            locked_text("Inbox (входящие)", "starter"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)

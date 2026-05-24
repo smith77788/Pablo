@@ -7,7 +7,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
 from bot.callbacks import MultigeoCb, BotCb
-from bot.keyboards import multigeo_menu, multigeo_field, LANGUAGES
+from bot.keyboards import multigeo_menu, multigeo_field, LANGUAGES, subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
 from bot.states import MultigeoEdit
 from database import db
 from services import bot_api
@@ -35,13 +36,24 @@ async def cb_multigeo_menu(callback: CallbackQuery, callback_data: MultigeoCb,
                             pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.message.edit_text(
+            locked_text("Мультигео (редактирование по языкам)", "pro"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
-        f"🌍 <b>Мультигео {label}</b>\n\nВыберите поле для редактирования по языкам:",
+        f"🌍 <b>Мультигео — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Telegram показывает разным людям разные версии бота в зависимости от языка их устройства. Мультигео позволяет задать имя, описание и краткое описание отдельно для русских, англоязычных, испанских и других пользователей.\n\n"
+        "💡 <b>Зачем нужно?</b>\n"
+        "Если ваш бот работает для нескольких стран — сделайте описание на их языке. Это улучшает позиции в поиске Telegram в этих странах.\n\n"
+        "Выберите поле для редактирования:",
         parse_mode="HTML",
         reply_markup=multigeo_menu(callback_data.bot_id),
     )

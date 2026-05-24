@@ -136,3 +136,22 @@ class ClusterCb(CallbackData, prefix="cl"):
     action: str
     cluster: str = ""
     bot_id: int = 0
+
+
+class SubCb(CallbackData, prefix="sub"):
+    action: str
+    plan: str = ""
+    months: int = 1
+    currency: str = ""
+
+
+class AiCb(CallbackData, prefix="ai"):
+    action: str
+    bot_id: int = 0
+
+
+class NetBcCb(CallbackData, prefix="nbc"):
+    action: str
+    bot_id: int = 0
+    segment: str = "all"
+    lang: str = ""

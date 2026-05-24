@@ -9,7 +9,9 @@ from bot.callbacks import CrmCb, AutoCb
 from bot.keyboards import (
     crm_menu, tag_detail_menu, automation_menu,
     automation_trigger_menu, automation_action_menu, back_to_bot,
+    subscription_locked_markup,
 )
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 
 router = Router()
@@ -31,6 +33,12 @@ class AddGlobalTag(StatesGroup):
 async def cb_crm_menu(callback: CallbackQuery, callback_data: CrmCb,
                        pool: asyncpg.Pool) -> None:
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            locked_text("CRM & автоматизация", "starter"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.message.edit_text("❌ Бот не найден.")
@@ -39,8 +47,11 @@ async def cb_crm_menu(callback: CallbackQuery, callback_data: CrmCb,
     label = f"@{row['username']}" if row["username"] else (row["first_name"] or str(row["bot_id"]))
     await callback.message.edit_text(
         f"🏷 <b>CRM — {label}</b>\n\n"
-        f"Тегов: <b>{len(tags)}</b>\n\n"
-        "Теги позволяют сегментировать аудиторию и настраивать автоматизацию.",
+        "📌 <b>Что это?</b>\n"
+        "CRM — это система для разделения ваших пользователей на группы. Вы вешаете «теги» (метки) на разных людей — например «покупатель», «VIP», «новичок» — и потом делаете рассылки именно для них.\n\n"
+        "💡 <b>Также здесь:</b>\n"
+        "• <b>Автоматизация</b> — бот сам выполняет действия при наступлении события (новый пользователь → отправить сообщение, написал слово → добавить тег)\n\n"
+        f"Тегов создано: <b>{len(tags)}</b>",
         parse_mode="HTML",
         reply_markup=crm_menu(callback_data.bot_id, tags),
     )

@@ -8,7 +8,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
 from bot.callbacks import EngageCb, BotCb, CrmCb
-from bot.keyboards import engagement_menu, back_to_bot
+from bot.keyboards import engagement_menu, back_to_bot, subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
 from bot.states import ReactivateBroadcast
 from database import db
 from services import broadcaster
@@ -35,6 +36,12 @@ async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
                           pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.message.edit_text(
+            locked_text("Активность и реактивация", "pro"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -47,13 +54,15 @@ async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
     pct_cold = round(segs["cold"] / total * 100) if total else 0
     pct_lost = round(segs["lost"] / total * 100) if total else 0
     await callback.message.edit_text(
-        f"🎯 <b>Активность аудитории — {label}</b>\n\n"
+        f"🎯 <b>Активность — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Система делит вашу аудиторию на 4 группы по тому, когда они последний раз писали боту. Вы можете отправить специальное сообщение именно тем, кто давно не заходил, и вернуть их.\n\n"
         f"Всего отслеживается: <b>{total}</b>\n\n"
-        f"🔥 Горячие (< 24ч):    <b>{segs['hot']}</b> ({pct_hot}%)\n"
-        f"🌡 Тёплые (1–7 дн):    <b>{segs['warm']}</b> ({pct_warm}%)\n"
-        f"❄️ Холодные (7–30 дн): <b>{segs['cold']}</b> ({pct_cold}%)\n"
-        f"💀 Потерянные (30+ дн): <b>{segs['lost']}</b> ({pct_lost}%)\n\n"
-        "<i>Реактивируйте холодных и потерянных — это поднимает engagement rate бота.</i>",
+        f"🔥 Горячие (&lt;24ч):     <b>{segs['hot']}</b> ({pct_hot}%) — активны сейчас\n"
+        f"🌡 Тёплые (1–7 дн):     <b>{segs['warm']}</b> ({pct_warm}%) — недавно заходили\n"
+        f"❄️ Холодные (7–30 дн):  <b>{segs['cold']}</b> ({pct_cold}%) — давно нет\n"
+        f"💀 Потерянные (30+ дн): <b>{segs['lost']}</b> ({pct_lost}%) — почти ушли\n\n"
+        "<i>💡 Совет: реактивируйте холодных и потерянных — это поднимает engagement rate в поиске.</i>",
         parse_mode="HTML",
         reply_markup=engagement_menu(callback_data.bot_id, segs),
     )

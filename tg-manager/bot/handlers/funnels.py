@@ -5,8 +5,9 @@ from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
 from bot.callbacks import FunnelCb, BotCb
-from bot.keyboards import funnels_list, funnel_view, funnel_trigger_menu, back_to_bot, funnel_copy_target
+from bot.keyboards import funnels_list, funnel_view, funnel_trigger_menu, back_to_bot, funnel_copy_target, subscription_locked_markup
 from bot.states import CreateFunnel, FunnelBroadcast
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import broadcaster
 
@@ -55,6 +56,12 @@ async def cb_fn_list(callback: CallbackQuery, callback_data: FunnelCb,
                      pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            locked_text("Цепочки сообщений", "starter"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -63,8 +70,11 @@ async def cb_fn_list(callback: CallbackQuery, callback_data: FunnelCb,
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"🔗 <b>Цепочки сообщений — {label}</b>\n\n"
-        f"Всего цепочек: <b>{len(funnels)}</b>\n\n"
-        "Цепочка автоматически отправляет серию сообщений после триггера.",
+        "📌 <b>Что это?</b>\n"
+        "Цепочка (воронка) — это серия сообщений, которые бот отправляет пользователю автоматически одно за другим с нужной задержкой. Например: сразу после /start — приветствие, через 10 минут — первый урок, через 1 день — напоминание.\n\n"
+        "💡 <b>Как использовать:</b>\n"
+        "Создайте цепочку → добавьте шаги с текстом и задержкой → включите. Бот сам будет вести пользователей по шагам.\n\n"
+        f"Цепочек создано: <b>{len(funnels)}</b>",
         parse_mode="HTML",
         reply_markup=funnels_list(callback_data.bot_id, funnels),
     )

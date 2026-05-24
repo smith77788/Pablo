@@ -29,7 +29,15 @@ async def cb_bc_menu(callback: CallbackQuery, callback_data: BroadcastCb,
     count = await db.get_audience_count(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
-        f"📢 <b>Рассылка {label}</b>\n\nАктивная аудитория: <b>{count}</b> чел.",
+        f"📢 <b>Рассылка — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Рассылка — это отправка одного сообщения сразу всем вашим подписчикам или их части. Как письмо, которое получают все сразу.\n\n"
+        "💡 <b>Что можно делать:</b>\n"
+        "• Отправить новость или акцию всем подписчикам\n"
+        "• Выбрать только нужную часть аудитории (по тегам, активности)\n"
+        "• Использовать готовый шаблон\n"
+        "• Посмотреть историю прошлых рассылок\n\n"
+        f"Активная аудитория: <b>{count}</b> чел.",
         parse_mode="HTML",
         reply_markup=broadcast_menu(callback_data.bot_id),
     )
