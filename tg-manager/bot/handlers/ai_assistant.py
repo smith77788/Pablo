@@ -1,5 +1,6 @@
-"""AI assistant powered by Claude — isolated per user, tool access to their own bots only."""
+"""AI-ассистент через OpenRouter — изолирован по user_id, доступ только к данным пользователя."""
 from __future__ import annotations
+import json
 import logging
 import asyncpg
 from aiogram import Router, F
@@ -11,59 +12,82 @@ from bot.callbacks import AiCb
 from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool
-from config import ANTHROPIC_API_KEY
+from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
 
 router = Router()
 log = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """Ты AI-ассистент платформы TG Manager для управления сетью Telegram-ботов.
-Ты помогаешь пользователю анализировать данные его ботов и давать конкретные рекомендации.
-Используй инструменты для получения актуальных данных перед ответом.
-Отвечай на русском языке. Будь конкретным и давай actionable советы.
-У тебя доступ ТОЛЬКО к данным текущего пользователя — данные других пользователей недоступны."""
+_SYSTEM_PROMPT = (
+    "Ты AI-ассистент платформы TG Manager для управления сетью Telegram-ботов. "
+    "Ты помогаешь пользователю анализировать данные его ботов и давать конкретные рекомендации. "
+    "Используй инструменты для получения актуальных данных перед ответом. "
+    "Отвечай только на русском языке. Давай конкретные советы с числами. "
+    "У тебя доступ ТОЛЬКО к данным текущего пользователя — данные других пользователей тебе недоступны и ты не можешь их получить."
+)
 
-_MAX_TURNS = 10  # максимум ходов в одной сессии
+_MAX_TURNS = 10
 
 
-async def _call_claude(messages: list, pool: asyncpg.Pool, user_id: int) -> str:
-    if not ANTHROPIC_API_KEY:
-        return "⚠️ AI-ассистент не настроен. Установите ANTHROPIC_API_KEY в конфиге."
+def _openai_tools() -> list:
+    """Конвертирует tool definitions в формат OpenAI/OpenRouter."""
+    result = []
+    for t in TOOL_DEFINITIONS:
+        result.append({
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["input_schema"],
+            },
+        })
+    return result
+
+
+async def _call_openrouter(messages: list, pool: asyncpg.Pool, user_id: int) -> str:
+    if not OPENROUTER_API_KEY:
+        return "⚠️ AI-ассистент не настроен. Добавьте OPENROUTER_API_KEY в переменные среды."
     try:
-        import anthropic
-        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(
+            api_key=OPENROUTER_API_KEY,
+            base_url="https://openrouter.ai/api/v1",
+        )
+        current_messages = [{"role": "system", "content": _SYSTEM_PROMPT}] + list(messages)
+        tools = _openai_tools()
 
-        current_messages = list(messages)
-        for _ in range(5):  # max tool loops
-            response = await client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1024,
-                system=_SYSTEM_PROMPT,
-                tools=TOOL_DEFINITIONS,
+        for _ in range(5):  # макс. 5 итераций с инструментами
+            response = await client.chat.completions.create(
+                model=OPENROUTER_MODEL,
                 messages=current_messages,
+                tools=tools,
+                tool_choice="auto",
+                max_tokens=1024,
             )
-            if response.stop_reason == "tool_use":
-                tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        result_text = await run_tool(block.name, block.input, pool, user_id)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result_text,
-                        })
-                current_messages.append({"role": "assistant", "content": response.content})
-                current_messages.append({"role": "user", "content": tool_results})
+            choice = response.choices[0]
+            msg = choice.message
+
+            if choice.finish_reason == "tool_calls" and msg.tool_calls:
+                current_messages.append(msg.model_dump())
+                for tc in msg.tool_calls:
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except Exception:
+                        args = {}
+                    result_text = await run_tool(tc.function.name, args, pool, user_id)
+                    current_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result_text,
+                    })
             else:
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        return block.text
-                return "Нет ответа."
+                return msg.content or "Нет ответа."
+
     except ImportError:
-        return "⚠️ Библиотека anthropic не установлена. Выполните: pip install anthropic"
+        return "⚠️ Библиотека openai не установлена."
     except Exception as e:
-        log.exception("Claude API error: %s", e)
-        return f"⚠️ Ошибка AI: {type(e).__name__}"
-    return "Превышен лимит итераций."
+        log.exception("OpenRouter API error: %s", e)
+        return f"⚠️ Ошибка AI-ассистента: {type(e).__name__}"
+    return "Превышен лимит итераций инструментов."
 
 
 @router.message(Command("ai"))
@@ -82,12 +106,16 @@ async def cmd_ai(message: Message, state: FSMContext, pool: asyncpg.Pool) -> Non
     kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
     await message.answer(
         "🤖 <b>AI-ассистент TG Manager</b>\n\n"
-        "Задайте вопрос или дайте команду. Например:\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Умный помощник, который знает все ваши данные и может их анализировать в реальном времени. "
+        "Он видит только ваши боты и аудиторию — данные других пользователей ему недоступны.\n\n"
+        "💡 <b>Примеры вопросов:</b>\n"
         "• «Как дела у моих ботов?»\n"
-        "• «Проанализируй рост аудитории»\n"
-        "• «Какой SEO-score у бота [ID]?»\n"
-        "• «Кто самые активные пользователи?»\n\n"
-        "Я имею доступ только к вашим данным.",
+        "• «У кого самая большая аудитория?»\n"
+        "• «Проанализируй активность за последние 7 дней»\n"
+        "• «Дай советы по SEO для моего бота»\n"
+        "• «Сколько холодных пользователей нужно реактивировать?»\n\n"
+        f"<i>Модель: {OPENROUTER_MODEL}</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -109,7 +137,7 @@ async def cb_ai_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
     kb.button(text="❌ Завершить", callback_data=AiCb(action="stop"))
     await callback.message.edit_text(
         "🤖 <b>AI-ассистент запущен</b>\n\n"
-        "Напишите ваш вопрос или команду:",
+        "Напишите ваш вопрос и я отвечу на основе реальных данных ваших ботов:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -135,33 +163,31 @@ async def msg_ai_chat(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 
     if turns >= _MAX_TURNS:
         await state.clear()
-        await message.answer(
-            "⏳ Лимит сессии достигнут (10 сообщений). Начните новую: /ai",
-        )
+        await message.answer("⏳ Лимит сессии достигнут (10 сообщений). Начните новую: /ai")
         return
 
     messages.append({"role": "user", "content": message.text})
-    thinking = await message.answer("🤖 <i>Анализирую...</i>", parse_mode="HTML")
+    thinking = await message.answer("🤖 <i>Анализирую данные...</i>", parse_mode="HTML")
 
-    reply = await _call_claude(messages, pool, message.from_user.id)
+    reply = await _call_openrouter(messages, pool, message.from_user.id)
     messages.append({"role": "assistant", "content": reply})
-
     await state.update_data(messages=messages, turns=turns + 1)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
     remaining = _MAX_TURNS - turns - 1
-    footer = f"\n\n<i>Осталось сообщений в сессии: {remaining}</i>" if remaining <= 3 else ""
+    footer = f"\n\n<i>Осталось сообщений: {remaining}</i>" if remaining <= 3 else ""
 
+    safe_reply = reply.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     try:
         await thinking.edit_text(
-            f"{reply}{footer}",
+            f"{safe_reply}{footer}",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
     except Exception:
         await message.answer(
-            f"{reply}{footer}",
+            f"{safe_reply}{footer}",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
