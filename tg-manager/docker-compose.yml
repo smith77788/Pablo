@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tgmanager}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tgmanager123}
+      POSTGRES_DB: ${POSTGRES_DB:-tgmanager}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./schema_v2.sql:/docker-entrypoint-initdb.d/02_schema_v2.sql
+      - ./schema_v3.sql:/docker-entrypoint-initdb.d/03_schema_v3.sql
+      - ./schema_v4.sql:/docker-entrypoint-initdb.d/04_schema_v4.sql
+      - ./schema_v5.sql:/docker-entrypoint-initdb.d/05_schema_v5.sql
+      - ./schema_v6.sql:/docker-entrypoint-initdb.d/06_schema_v6.sql
+      - ./schema_v7.sql:/docker-entrypoint-initdb.d/07_schema_v7.sql
+      - ./schema_v8.sql:/docker-entrypoint-initdb.d/08_schema_v8.sql
+      - ./schema_v9.sql:/docker-entrypoint-initdb.d/09_schema_v9.sql
+      - ./schema_v10.sql:/docker-entrypoint-initdb.d/10_schema_v10.sql
+      - ./schema_v11.sql:/docker-entrypoint-initdb.d/11_schema_v11.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tgmanager}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  bot:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MANAGER_BOT_TOKEN: ${MANAGER_BOT_TOKEN}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tgmanager}:${POSTGRES_PASSWORD:-tgmanager123}@db:5432/${POSTGRES_DB:-tgmanager}
+      ADMIN_IDS: ${ADMIN_IDS:-}
+      BROADCAST_DELAY: ${BROADCAST_DELAY:-0.05}
+      MAX_CONCURRENT: ${MAX_CONCURRENT:-20}
+    volumes:
+      - bot_logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "10"
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "python.*main.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  pgdata:
+  bot_logs:
