@@ -101,7 +101,7 @@ async def cb_reactivate_lost(callback: CallbackQuery, callback_data: EngageCb,
     await callback.answer()
 
 
-@router.message(ReactivateBroadcast.waiting_message)
+@router.message(ReactivateBroadcast.waiting_message, F.text)
 async def msg_reactivate(message: Message, state: FSMContext,
                           pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
