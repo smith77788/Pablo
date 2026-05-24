@@ -31,8 +31,8 @@ async def make_routing_decision(pool: asyncpg.Pool, http: aiohttp.ClientSession,
             await db.log_routing_decision(pool, bot_id, None, user_id, "kept", mode)
             return False
 
-        # Find best target bot in same cluster
-        target = await db.get_best_conversion_bot(pool, cluster, bot_id)
+        # Find target bot using weighted random selection
+        target = await db.get_weighted_routing_target(pool, cluster, bot_id)
         if not target:
             await db.log_routing_decision(pool, bot_id, None, user_id, "no_target", mode)
             return False

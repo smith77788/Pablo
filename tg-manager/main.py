@@ -27,6 +27,7 @@ from bot.handlers import experiments as experiments_handler
 from bot.handlers import deeplinks as deeplinks_handler
 from bot.handlers import engagement as engagement_handler
 from bot.handlers import seo as seo_handler
+from bot.handlers import network as network_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -71,6 +72,7 @@ async def main() -> None:
     dp.include_router(deeplinks_handler.router)
     dp.include_router(engagement_handler.router)
     dp.include_router(seo_handler.router)
+    dp.include_router(network_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
 
     pool = await create_pool()

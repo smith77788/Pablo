@@ -4,6 +4,7 @@ from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
     NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb, DeepLinkCb, EngageCb, SeoCb,
+    NetworkCb, ClusterCb,
 )
 
 PAGE_SIZE = 5
@@ -28,7 +29,8 @@ def main_menu() -> InlineKeyboardMarkup:
     kb.button(text="➕ Добавить бота",       callback_data=BotCb(action="add"))
     kb.button(text="📥 Импорт ботов",        callback_data=BulkCb(action="import"))
     kb.button(text="📦 Массовые операции",   callback_data=BulkCb(action="menu"))
-    kb.adjust(2, 2)
+    kb.button(text="🌐 Управление сетью",    callback_data=NetworkCb(action="menu"))
+    kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 
@@ -691,4 +693,118 @@ def seo_menu(bot_id: int) -> InlineKeyboardMarkup:
               callback_data=SeoCb(action="tips", bot_id=bot_id))
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
     kb.adjust(1)
+    return kb.as_markup()
+
+
+# ── Network Management Keyboards ─────────────────────────────────────────────
+
+def network_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Аналитика сети",      callback_data=NetworkCb(action="analytics"))
+    kb.button(text="🌐 Кластеры",            callback_data=NetworkCb(action="clusters"))
+    kb.button(text="🏆 Рейтинг ботов",       callback_data=NetworkCb(action="ranking"))
+    kb.button(text="⚖️ Веса роутинга",      callback_data=NetworkCb(action="routing"))
+    kb.button(text="❤️ Здоровье сети",       callback_data=NetworkCb(action="health"))
+    kb.button(text="📢 Сетевая рассылка",    callback_data=NetworkCb(action="broadcast"))
+    kb.button(text="🔄 Клонировать настройки", callback_data=NetworkCb(action="clone"))
+    kb.button(text="👥 Пересечение аудиторий", callback_data=NetworkCb(action="overlap"))
+    kb.button(text="◀️ Главное меню",        callback_data=BotCb(action="list", page=0))
+    kb.adjust(2, 2, 2, 2, 1)
+    return kb.as_markup()
+
+
+def network_clusters_menu(clusters: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for c in clusters:
+        kb.button(
+            text=f"🌐 {c['cluster']} — {c['bot_count']} бот. · {c['total_audience']:,} юз.",
+            callback_data=ClusterCb(action="view", cluster=c["cluster"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def network_cluster_view(cluster: str, bots: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🟢 Swarm ON для всех",
+              callback_data=ClusterCb(action="bulk_swarm_on", cluster=cluster))
+    kb.button(text="⚫ Swarm OFF для всех",
+              callback_data=ClusterCb(action="bulk_swarm_off", cluster=cluster))
+    kb.button(text="🚪 Роль: Entry всем",
+              callback_data=ClusterCb(action="bulk_role_entry", cluster=cluster))
+    kb.button(text="💰 Роль: Conversion всем",
+              callback_data=ClusterCb(action="bulk_role_conversion", cluster=cluster))
+    kb.button(text="🔄 Роль: Retention всем",
+              callback_data=ClusterCb(action="bulk_role_retention", cluster=cluster))
+    kb.button(text="➕ Назначить бота в кластер",
+              callback_data=ClusterCb(action="assign_start", cluster=cluster))
+    kb.button(text="◀️ К кластерам", callback_data=NetworkCb(action="clusters"))
+    kb.adjust(2, 3, 1, 1)
+    return kb.as_markup()
+
+
+def network_assign_bot_pick(cluster: str, bots: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for b in bots[:12]:
+        label = f"@{b['username']}" if b["username"] else b["first_name"]
+        current = f" [{b.get('cluster') or 'default'}]"
+        kb.button(
+            text=f"🤖 {label}{current}",
+            callback_data=ClusterCb(action="assign_confirm", cluster=cluster, bot_id=b["bot_id"]),
+        )
+    kb.button(text="◀️ Назад",
+              callback_data=ClusterCb(action="view", cluster=cluster))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def network_routing_menu(weights: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for w in weights[:10]:
+        label = f"@{w['username']}" if w["username"] else w["first_name"]
+        kb.button(
+            text=f"⚖️ {label} — вес: {w['weight']:.1f}",
+            callback_data=NetworkCb(action="set_weight_pick", bot_id=w["bot_id"]),
+        )
+    kb.button(text="🔄 Сбросить все веса (равные)",
+              callback_data=NetworkCb(action="reset_weights"))
+    kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def network_clone_pick_source(bots: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for b in bots[:12]:
+        label = f"@{b['username']}" if b["username"] else b["first_name"]
+        kb.button(
+            text=f"📤 {label} (источник)",
+            callback_data=NetworkCb(action="clone_pick_dest", bot_id=b["bot_id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def network_clone_pick_dest(src_id: int, bots: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for b in bots[:12]:
+        if b["bot_id"] == src_id:
+            continue
+        label = f"@{b['username']}" if b["username"] else b["first_name"]
+        kb.button(
+            text=f"📥 {label} (цель)",
+            callback_data=NetworkCb(action="clone_confirm", bot_id=b["bot_id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=NetworkCb(action="clone"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def network_broadcast_confirm() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🚀 Запустить рассылку", callback_data=NetworkCb(action="broadcast_confirm"))
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="broadcast_cancel"))
+    kb.adjust(2)
     return kb.as_markup()

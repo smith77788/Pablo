@@ -3,7 +3,16 @@ from config import DATABASE_URL
 
 
 async def create_pool() -> asyncpg.Pool:
-    return await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=20)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=20)
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS bot_routing_weights (
+                bot_id BIGINT PRIMARY KEY REFERENCES managed_bots(bot_id) ON DELETE CASCADE,
+                weight FLOAT NOT NULL DEFAULT 1.0 CHECK (weight >= 0),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+    return pool
 
 
 # ── Managed bots ───────────────────────────────────────────────────────────
@@ -1243,3 +1252,297 @@ async def get_keyword_stats_summary(pool, bot_id: int) -> dict:
         "SELECT SUM(count) FROM keyword_stats WHERE bot_id=$1", bot_id
     ) or 0
     return {"total_keywords": int(total_keywords), "total_messages": int(total_messages)}
+
+
+# ── Network Management ──────────────────────────────────────────────────────
+
+async def get_network_overview(pool: asyncpg.Pool, added_by: int) -> dict:
+    """Aggregate stats across all active bots for a user."""
+    meta = await pool.fetchrow(
+        """SELECT COUNT(*) as total_bots,
+                  SUM(CASE WHEN swarm_enabled THEN 1 ELSE 0 END) as swarm_bots,
+                  COUNT(DISTINCT COALESCE(cluster,'default')) as clusters
+           FROM managed_bots WHERE added_by=$1 AND is_active=TRUE""",
+        added_by,
+    )
+    total_users = await pool.fetchval(
+        """SELECT COUNT(*) FROM bot_users bu
+           JOIN managed_bots m ON m.bot_id=bu.bot_id
+           WHERE m.added_by=$1 AND bu.is_active=TRUE""", added_by,
+    ) or 0
+    unique_users = await pool.fetchval(
+        """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+           JOIN managed_bots m ON m.bot_id=bu.bot_id
+           WHERE m.added_by=$1 AND bu.is_active=TRUE""", added_by,
+    ) or 0
+    total_sent = await pool.fetchval(
+        """SELECT COALESCE(SUM(bc.sent_count),0) FROM broadcasts bc
+           JOIN managed_bots m ON m.bot_id=bc.bot_id WHERE m.added_by=$1""", added_by,
+    ) or 0
+    avg_score = await pool.fetchval(
+        """SELECT AVG(bm.score) FROM bot_metrics bm
+           JOIN managed_bots m ON m.bot_id=bm.bot_id
+           WHERE m.added_by=$1 AND m.is_active=TRUE""", added_by,
+    ) or 0
+    return {
+        "total_bots": int(meta["total_bots"] or 0),
+        "swarm_bots": int(meta["swarm_bots"] or 0),
+        "clusters": int(meta["clusters"] or 0),
+        "total_users": int(total_users),
+        "unique_users": int(unique_users),
+        "total_sent": int(total_sent),
+        "avg_score": float(avg_score),
+    }
+
+
+async def get_cluster_list(pool: asyncpg.Pool, added_by: int) -> list[dict]:
+    """Return list of clusters with stats."""
+    rows = await pool.fetch(
+        """SELECT COALESCE(m.cluster,'default') as cluster,
+                  COUNT(*) as bot_count,
+                  SUM(CASE WHEN m.swarm_enabled THEN 1 ELSE 0 END) as swarm_count,
+                  COALESCE(SUM(aud.cnt),0) as total_audience
+           FROM managed_bots m
+           LEFT JOIN (
+               SELECT bot_id, COUNT(*) AS cnt FROM bot_users
+               WHERE is_active=TRUE GROUP BY bot_id
+           ) aud ON aud.bot_id=m.bot_id
+           WHERE m.added_by=$1 AND m.is_active=TRUE
+           GROUP BY COALESCE(m.cluster,'default')
+           ORDER BY total_audience DESC""",
+        added_by,
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_bots_in_cluster(pool: asyncpg.Pool, added_by: int, cluster: str) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """SELECT m.*, COALESCE(aud.cnt,0) as audience_count, COALESCE(bm.score,0) as score
+           FROM managed_bots m
+           LEFT JOIN (
+               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+           ) aud ON aud.bot_id=m.bot_id
+           LEFT JOIN bot_metrics bm ON bm.bot_id=m.bot_id
+           WHERE m.added_by=$1 AND m.is_active=TRUE AND COALESCE(m.cluster,'default')=$2
+           ORDER BY COALESCE(bm.score,0) DESC""",
+        added_by, cluster,
+    )
+
+
+async def set_bot_cluster_name(pool: asyncpg.Pool, bot_id: int, added_by: int, cluster: str) -> None:
+    await pool.execute(
+        "UPDATE managed_bots SET cluster=$3 WHERE bot_id=$1 AND added_by=$2",
+        bot_id, added_by, cluster,
+    )
+
+
+async def bulk_set_swarm(pool: asyncpg.Pool, added_by: int, cluster: str, enabled: bool) -> int:
+    result = await pool.execute(
+        """UPDATE managed_bots SET swarm_enabled=$3
+           WHERE added_by=$1 AND COALESCE(cluster,'default')=$2 AND is_active=TRUE""",
+        added_by, cluster, enabled,
+    )
+    return int(result.split()[-1])
+
+
+async def bulk_set_role(pool: asyncpg.Pool, added_by: int, cluster: str, role: str) -> int:
+    result = await pool.execute(
+        """UPDATE managed_bots SET bot_role=$3
+           WHERE added_by=$1 AND COALESCE(cluster,'default')=$2 AND is_active=TRUE""",
+        added_by, cluster, role,
+    )
+    return int(result.split()[-1])
+
+
+async def get_routing_weights_for_user(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """SELECT m.bot_id, m.username, m.first_name, m.cluster,
+                  m.bot_role, COALESCE(rw.weight, 1.0) as weight,
+                  COALESCE(bm.score,0) as score
+           FROM managed_bots m
+           LEFT JOIN bot_routing_weights rw ON rw.bot_id=m.bot_id
+           LEFT JOIN bot_metrics bm ON bm.bot_id=m.bot_id
+           WHERE m.added_by=$1 AND m.is_active=TRUE AND m.swarm_enabled=TRUE
+           ORDER BY m.cluster, weight DESC""",
+        added_by,
+    )
+
+
+async def set_routing_weight(pool: asyncpg.Pool, bot_id: int, weight: float) -> None:
+    await pool.execute(
+        """INSERT INTO bot_routing_weights(bot_id, weight)
+           VALUES($1,$2) ON CONFLICT(bot_id) DO UPDATE SET weight=$2, updated_at=NOW()""",
+        bot_id, weight,
+    )
+
+
+async def reset_routing_weights(pool: asyncpg.Pool, added_by: int) -> None:
+    await pool.execute(
+        """DELETE FROM bot_routing_weights
+           WHERE bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$1)""",
+        added_by,
+    )
+
+
+async def get_bot_ranking(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """SELECT m.bot_id, m.username, m.first_name, m.cluster,
+                  m.bot_role, m.swarm_enabled,
+                  COALESCE(aud.cnt,0) as audience,
+                  COALESCE(bm.score,0) as score,
+                  COALESCE(bm.ctr,0) as ctr,
+                  COALESCE(bm.conversion_rate,0) as conversion_rate,
+                  COALESCE(rw.weight,1.0) as weight
+           FROM managed_bots m
+           LEFT JOIN (
+               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+           ) aud ON aud.bot_id=m.bot_id
+           LEFT JOIN bot_metrics bm ON bm.bot_id=m.bot_id
+           LEFT JOIN bot_routing_weights rw ON rw.bot_id=m.bot_id
+           WHERE m.added_by=$1 AND m.is_active=TRUE
+           ORDER BY COALESCE(aud.cnt,0) DESC""",
+        added_by,
+    )
+
+
+async def get_network_health(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """SELECT m.bot_id, m.username, m.first_name, m.token, m.swarm_enabled, m.cluster,
+                  COALESCE(o.last_update_id,0) as last_update_id,
+                  COALESCE(aud.cnt,0) as audience
+           FROM managed_bots m
+           LEFT JOIN bot_update_offsets o ON o.bot_id=m.bot_id
+           LEFT JOIN (
+               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+           ) aud ON aud.bot_id=m.bot_id
+           WHERE m.added_by=$1 AND m.is_active=TRUE
+           ORDER BY aud.cnt DESC""",
+        added_by,
+    )
+
+
+async def get_unique_network_users(pool: asyncpg.Pool, added_by: int) -> list[dict]:
+    """One (user_id, bot_id, token) per unique user. Picks most recently active bot."""
+    rows = await pool.fetch(
+        """SELECT DISTINCT ON (bu.user_id)
+               bu.user_id, bu.bot_id, m.token
+           FROM bot_users bu
+           JOIN managed_bots m ON m.bot_id=bu.bot_id
+           WHERE m.added_by=$1 AND m.is_active=TRUE
+             AND bu.is_active=TRUE AND bu.is_blocked=FALSE
+           ORDER BY bu.user_id, bu.last_seen DESC""",
+        added_by,
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_bot_overlap_stats(pool: asyncpg.Pool, added_by: int) -> dict:
+    total_entries = await pool.fetchval(
+        """SELECT COUNT(*) FROM bot_users bu
+           JOIN managed_bots m ON m.bot_id=bu.bot_id
+           WHERE m.added_by=$1 AND bu.is_active=TRUE""", added_by,
+    ) or 0
+    unique_users = await pool.fetchval(
+        """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+           JOIN managed_bots m ON m.bot_id=bu.bot_id
+           WHERE m.added_by=$1 AND bu.is_active=TRUE""", added_by,
+    ) or 0
+    multi_bot = await pool.fetchval(
+        """SELECT COUNT(*) FROM (
+               SELECT bu.user_id FROM bot_users bu
+               JOIN managed_bots m ON m.bot_id=bu.bot_id
+               WHERE m.added_by=$1 AND bu.is_active=TRUE
+               GROUP BY bu.user_id HAVING COUNT(DISTINCT bu.bot_id) > 1
+           ) sub""", added_by,
+    ) or 0
+    return {
+        "total_entries": int(total_entries),
+        "unique_users": int(unique_users),
+        "multi_bot_users": int(multi_bot),
+        "overlap_pct": round(int(multi_bot) / int(unique_users) * 100, 1) if unique_users else 0,
+    }
+
+
+async def clone_bot_settings(pool: asyncpg.Pool, src_id: int, dst_id: int) -> dict:
+    """Clone auto-replies, funnels (+steps), automation rules from src to dst."""
+    counts = {"auto_replies": 0, "funnels": 0, "automation_rules": 0}
+    replies = await pool.fetch(
+        "SELECT trigger_type,keyword,response_text FROM auto_replies WHERE bot_id=$1", src_id,
+    )
+    for r in replies:
+        try:
+            await pool.execute(
+                "INSERT INTO auto_replies(bot_id,trigger_type,keyword,response_text) VALUES($1,$2,$3,$4)",
+                dst_id, r["trigger_type"], r["keyword"], r["response_text"],
+            )
+            counts["auto_replies"] += 1
+        except Exception:
+            pass
+    funnels_src = await pool.fetch(
+        "SELECT id,name,trigger_type,keyword FROM funnels WHERE bot_id=$1", src_id,
+    )
+    for fn in funnels_src:
+        try:
+            new_fn = await pool.fetchrow(
+                "INSERT INTO funnels(bot_id,name,trigger_type,keyword) VALUES($1,$2,$3,$4) RETURNING id",
+                dst_id, fn["name"], fn["trigger_type"], fn["keyword"],
+            )
+            if new_fn:
+                steps = await pool.fetch(
+                    "SELECT step_order,message_text,delay_minutes FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order",
+                    fn["id"],
+                )
+                for s in steps:
+                    await pool.execute(
+                        "INSERT INTO funnel_steps(funnel_id,step_order,message_text,delay_minutes) VALUES($1,$2,$3,$4)",
+                        new_fn["id"], s["step_order"], s["message_text"], s["delay_minutes"],
+                    )
+                counts["funnels"] += 1
+        except Exception:
+            pass
+    rules = await pool.fetch(
+        "SELECT name,trigger_type,trigger_value,action_type,action_value FROM automation_rules WHERE bot_id=$1",
+        src_id,
+    )
+    for r in rules:
+        try:
+            await pool.execute(
+                """INSERT INTO automation_rules(bot_id,name,trigger_type,trigger_value,action_type,action_value)
+                   VALUES($1,$2,$3,$4,$5,$6)""",
+                dst_id, r["name"], r["trigger_type"], r["trigger_value"],
+                r["action_type"], r["action_value"],
+            )
+            counts["automation_rules"] += 1
+        except Exception:
+            pass
+    return counts
+
+
+async def get_weighted_routing_target(pool: asyncpg.Pool, cluster: str,
+                                       exclude_bot_id: int) -> asyncpg.Record | None:
+    """Weighted random selection of routing target bot."""
+    import random as _random
+    candidates = await pool.fetch(
+        """SELECT m.bot_id, m.token, m.username, m.first_name,
+                  COALESCE(bm.score,0) as score,
+                  COALESCE(rw.weight,1.0) as weight
+           FROM managed_bots m
+           LEFT JOIN bot_metrics bm ON bm.bot_id=m.bot_id
+           LEFT JOIN bot_routing_weights rw ON rw.bot_id=m.bot_id
+           WHERE m.swarm_enabled=TRUE AND m.is_active=TRUE
+             AND m.bot_role IN ('conversion','retention','general')
+             AND m.cluster=$1 AND m.bot_id!=$2""",
+        cluster, exclude_bot_id,
+    )
+    if not candidates:
+        return None
+    total = sum(float(c["weight"]) for c in candidates)
+    if total <= 0:
+        return candidates[0]
+    r = _random.random() * total
+    cum = 0.0
+    for c in candidates:
+        cum += float(c["weight"])
+        if r <= cum:
+            return c
+    return candidates[-1]

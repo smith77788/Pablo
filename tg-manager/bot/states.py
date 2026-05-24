@@ -107,3 +107,20 @@ class CreateDeepLink(StatesGroup):
 
 class ReactivateBroadcast(StatesGroup):
     waiting_message = State()
+
+
+class NetworkBroadcast(StatesGroup):
+    waiting_message = State()
+    confirming = State()
+
+
+class CloneSettings(StatesGroup):
+    picking_dest = State()
+
+
+class SetRoutingWeight(StatesGroup):
+    waiting_weight = State()
+
+
+class AssignCluster(StatesGroup):
+    waiting_name = State()

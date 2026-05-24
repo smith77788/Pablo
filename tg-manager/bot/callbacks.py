@@ -124,3 +124,15 @@ class EngageCb(CallbackData, prefix="eng"):
 class SeoCb(CallbackData, prefix="seo"):
     action: str
     bot_id: int = 0
+
+
+class NetworkCb(CallbackData, prefix="net"):
+    action: str
+    bot_id: int = 0
+    page: int = 0
+
+
+class ClusterCb(CallbackData, prefix="cl"):
+    action: str
+    cluster: str = ""
+    bot_id: int = 0
