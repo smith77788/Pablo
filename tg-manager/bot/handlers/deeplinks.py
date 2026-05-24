@@ -94,22 +94,25 @@ async def msg_dl_name(message: Message, state: FSMContext) -> None:
 
 @router.message(CreateDeepLink.waiting_param)
 async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
-    data = await state.get_data()
-    await state.clear()
-    param = message.text.strip().replace(" ", "_")
-    # Validate param
     import re
+    data = await state.get_data()
+    param = message.text.strip().replace(" ", "_")
+    # Validate before clearing state so user can retry
     if not re.match(r'^[a-zA-Z0-9_-]{1,50}$', param):
         await message.answer(
-            "❌ Параметр должен содержать только латиницу, цифры, _ или - (максимум 50 символов).\n"
-            "Попробуйте ещё раз: /start или нажмите кнопку снова."
+            "❌ Параметр должен содержать только латиницу, цифры, _ или - (максимум 50 символов).\n\n"
+            "Попробуйте снова:",
         )
-        return
+        return  # keep state active so user can send another value
     try:
         link_id = await db.create_deep_link(pool, data["bot_id"], data["link_name"], param)
     except Exception:
-        await message.answer("❌ Такой параметр уже существует. Используйте другой.")
-        return
+        await message.answer(
+            "❌ Параметр <b>{}</b> уже занят. Введите другой:".format(param),
+            parse_mode="HTML",
+        )
+        return  # keep state active
+    await state.clear()
     row = await db.get_bot(pool, data["bot_id"], message.from_user.id)
     username = row.get("username") or "" if row else ""
     url = f"https://t.me/{username}?start={param}" if username else f"?start={param}"

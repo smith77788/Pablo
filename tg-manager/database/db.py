@@ -1055,18 +1055,24 @@ async def record_deep_link_visit(pool, bot_id: int, param: str, user_id: int) ->
     if not link:
         return None
     link_id = link["id"]
-    # Check if this user already visited this link
-    visited = await pool.fetchval(
-        "SELECT 1 FROM referrals WHERE bot_id=$1 AND referred_user_id=$2 AND deep_link_id=$3",
-        bot_id, user_id, link_id,
-    )
+    # Always count the click
     await pool.execute(
         "UPDATE bot_deep_links SET click_count=click_count+1 WHERE id=$1", link_id
     )
-    if not visited:
-        await pool.execute(
-            "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1", link_id
+    # Track unique: try inserting into visits table
+    try:
+        result = await pool.execute(
+            "INSERT INTO deep_link_visits(link_id, user_id) VALUES($1, $2)",
+            link_id, user_id,
         )
+        if result == "INSERT 0 1":
+            # New unique visit
+            await pool.execute(
+                "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1", link_id
+            )
+    except Exception:
+        # Duplicate — not a new unique visit (ON CONFLICT equivalent via try/except)
+        pass
     return link_id
 
 async def delete_deep_link(pool, link_id: int, bot_id: int) -> None:
