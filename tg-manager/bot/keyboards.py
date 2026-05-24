@@ -4,7 +4,7 @@ from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
     NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb, DeepLinkCb, EngageCb, SeoCb,
-    NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb,
+    NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb, AccCb, RankCb,
 )
 
 PAGE_SIZE = 5
@@ -28,9 +28,10 @@ def main_menu() -> InlineKeyboardMarkup:
     kb.button(text="🤖 Мои боты",           callback_data=BotCb(action="list", page=0))
     kb.button(text="➕ Добавить бота",       callback_data=BotCb(action="add"))
     kb.button(text="🌐 Сеть & операции",    callback_data=NetworkCb(action="menu"))
+    kb.button(text="📱 Мои аккаунты",       callback_data=AccCb(action="menu"))
     kb.button(text="💳 Подписка",           callback_data=SubCb(action="menu"))
     kb.button(text="🤖 AI-ассистент",       callback_data=AiCb(action="start"))
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2, 2)
     return kb.as_markup()
 
 
@@ -161,11 +162,12 @@ def bot_menu(bot_id: int, username: str | None = None) -> InlineKeyboardMarkup:
     kb.button(text="🔗 Диплинки",     callback_data=DeepLinkCb(action="menu", bot_id=bot_id))
     kb.button(text="🎯 Активность",   callback_data=EngageCb(action="menu", bot_id=bot_id))
     kb.button(text="📈 SEO",          callback_data=SeoCb(action="menu", bot_id=bot_id))
+    kb.button(text="📊 Позиции",      callback_data=RankCb(action="menu", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
     if username:
         kb.row(InlineKeyboardButton(text="🔗 Открыть бота", url=f"https://t.me/{username}"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

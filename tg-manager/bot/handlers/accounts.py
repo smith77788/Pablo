@@ -1,0 +1,737 @@
+"""Telegram personal account manager handler.
+
+Users connect their own Telegram accounts (phone + OTP + optional 2FA via Telethon)
+so the platform can list channels/groups, post messages, and track search rankings.
+"""
+from __future__ import annotations
+
+import re
+from html import escape
+
+import asyncpg
+from aiogram import F, Router
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from bot.callbacks import AccCb, BotCb
+from bot.keyboards import subscription_locked_markup
+from bot.utils.subscription import get_plan, locked_text
+from config import TG_API_ID, TG_API_HASH
+from database import db
+from services.account_manager import (
+    cleanup_pending,
+    confirm_2fa,
+    confirm_code,
+    get_dialogs,
+    get_session_string,
+    send_message,
+    start_login,
+)
+
+router = Router()
+
+# ── Plan limits ────────────────────────────────────────────────────────────────
+
+ACC_LIMITS: dict[str, int] = {
+    "free": 0,
+    "starter": 1,
+    "pro": 3,
+    "enterprise": 9999,
+}
+
+# ── FSM States ─────────────────────────────────────────────────────────────────
+
+
+class AccountLogin(StatesGroup):
+    waiting_phone = State()
+    waiting_code = State()   # state data: phone, phone_code_hash
+    waiting_2fa = State()    # state data: phone
+
+
+class AccountPost(StatesGroup):
+    choosing_chat = State()   # unused in handler body; present for context
+    waiting_text = State()    # state data: acc_id, chat_id
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _api_configured() -> bool:
+    """Return True if Telethon credentials are set in config."""
+    try:
+        return bool(TG_API_ID and TG_API_HASH)
+    except Exception:
+        return False
+
+
+def _api_missing_text() -> str:
+    return (
+        "⚙️ <b>API не настроен</b>\n\n"
+        "Для работы с личными аккаунтами необходимо задать переменные окружения:\n"
+        "<code>TG_API_ID</code> и <code>TG_API_HASH</code>\n\n"
+        "Получить их можно на <a href=\"https://my.telegram.org/apps\">my.telegram.org/apps</a>.\n"
+        "После добавления — перезапустите бота."
+    )
+
+
+async def _get_account_limit(pool: asyncpg.Pool, user_id: int) -> tuple[str, int]:
+    """Return (plan, limit) for this user."""
+    plan = await get_plan(pool, user_id)
+    return plan, ACC_LIMITS.get(plan, 0)
+
+
+def _acc_menu_markup(acc_id: int):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Каналы/группы",
+              callback_data=AccCb(action="channels", acc_id=acc_id))
+    kb.button(text="📤 Написать",
+              callback_data=AccCb(action="post", acc_id=acc_id))
+    kb.button(text="🗑 Удалить",
+              callback_data=AccCb(action="remove", acc_id=acc_id))
+    kb.button(text="◀️ Мои аккаунты",
+              callback_data=AccCb(action="menu"))
+    kb.adjust(2, 1, 1)
+    return kb.as_markup()
+
+
+def _cancel_markup():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена",
+              callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+# ── /accounts command ──────────────────────────────────────────────────────────
+
+@router.message(Command("accounts"))
+async def cmd_accounts(message: Message, pool: asyncpg.Pool) -> None:
+    await _show_accounts_menu(message, pool, message.from_user.id, edit=False)
+
+
+@router.callback_query(AccCb.filter(F.action == "menu"))
+async def cb_accounts_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    await _show_accounts_menu(callback.message, pool, callback.from_user.id, edit=True)
+
+
+async def _show_accounts_menu(
+    message: Message,
+    pool: asyncpg.Pool,
+    user_id: int,
+    *,
+    edit: bool,
+) -> None:
+    plan, limit = await _get_account_limit(pool, user_id)
+
+    if limit == 0:
+        text = locked_text("Личные аккаунты Telegram", "starter")
+        markup = subscription_locked_markup("starter")
+        if edit:
+            await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+        else:
+            await message.answer(text, parse_mode="HTML", reply_markup=markup)
+        return
+
+    accounts = await db.get_tg_accounts(pool, user_id)
+    kb = InlineKeyboardBuilder()
+
+    if accounts:
+        lines = ["👤 <b>Подключённые аккаунты:</b>\n"]
+        for acc in accounts:
+            name = escape(acc["first_name"] or "")
+            uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
+            phone = escape(acc.get("phone", ""))
+            label = name or uname or phone or f"ID {acc['acc_id']}"
+            display = f"{label} ({phone})" if phone and name else label
+            lines.append(f"  • {display}")
+            kb.button(
+                text=f"👤 {display}",
+                callback_data=AccCb(action="view", acc_id=acc["acc_id"]),
+            )
+        text = "\n".join(lines)
+    else:
+        text = "👤 <b>Личные аккаунты</b>\n\nУ вас нет подключённых аккаунтов."
+
+    kb.adjust(1)
+
+    limit_label = "∞" if limit >= 9999 else str(limit)
+    used = len(accounts) if accounts else 0
+    text += f"\n\n<i>Использовано: {used} / {limit_label}</i>"
+
+    if used < limit:
+        kb.button(text="➕ Добавить аккаунт",
+                  callback_data=AccCb(action="add"))
+
+    kb.button(text="◀️ Главное меню",
+              callback_data=BotCb(action="list", page=0))
+    kb.adjust(1)
+
+    if edit:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    else:
+        await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── Add account ────────────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "add"))
+async def cb_add_account(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+
+    if not _api_configured():
+        await callback.message.edit_text(
+            _api_missing_text(),
+            parse_mode="HTML",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    plan, limit = await _get_account_limit(pool, callback.from_user.id)
+    if limit == 0:
+        await callback.message.edit_text(
+            locked_text("Личные аккаунты Telegram", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
+
+    accounts = await db.get_tg_accounts(pool, callback.from_user.id)
+    if len(accounts) >= limit:
+        limit_label = "∞" if limit >= 9999 else str(limit)
+        await callback.message.edit_text(
+            f"⚠️ Достигнут лимит аккаунтов для вашего плана "
+            f"(<b>{plan.upper()}</b>: {limit_label} аккаунт{'ов' if limit != 1 else ''}).\n\n"
+            f"Обновите подписку, чтобы добавить больше аккаунтов.",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(plan),
+        )
+        return
+
+    await state.set_state(AccountLogin.waiting_phone)
+    await callback.message.edit_text(
+        "📱 <b>Добавление аккаунта</b>\n\n"
+        "Введите номер телефона в международном формате:\n"
+        "<code>+79001234567</code>",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+# ── Step 1: receive phone ──────────────────────────────────────────────────────
+
+@router.message(AccountLogin.waiting_phone)
+async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    phone = (message.text or "").strip()
+
+    if not re.match(r"^\+\d{7,15}$", phone):
+        await message.answer(
+            "❌ Неверный формат номера.\n"
+            "Введите номер в формате: <code>+79001234567</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    await message.answer("⏳ Отправляю код на " + escape(phone) + "…")
+
+    try:
+        phone_code_hash = await start_login(phone)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await message.answer(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(
+                f"❌ Ошибка при отправке кода: <code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+            )
+        return
+
+    await state.update_data(phone=phone, phone_code_hash=phone_code_hash)
+    await state.set_state(AccountLogin.waiting_code)
+    await message.answer(
+        f"✅ Код отправлен на <code>{escape(phone)}</code>.\n\n"
+        f"Введите его (только цифры, например <code>12345</code>):",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+# ── Step 2: receive OTP code ───────────────────────────────────────────────────
+
+@router.message(AccountLogin.waiting_code)
+async def handle_code(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    code = (message.text or "").strip()
+    data = await state.get_data()
+    phone: str = data.get("phone", "")
+    phone_code_hash: str = data.get("phone_code_hash", "")
+
+    if not code.isdigit():
+        await message.answer("❌ Код должен содержать только цифры. Введите ещё раз:")
+        return
+
+    try:
+        result = await confirm_code(phone, code, phone_code_hash)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await message.answer(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+            )
+        elif "SessionPasswordNeededError" in err or "need_2fa" in err.lower():
+            await state.set_state(AccountLogin.waiting_2fa)
+            await message.answer(
+                "🔐 Аккаунт защищён двухфакторной аутентификацией.\n\n"
+                "Введите ваш пароль 2FA:",
+                parse_mode="HTML",
+                reply_markup=_cancel_markup(),
+            )
+        else:
+            await message.answer(
+                f"❌ Ошибка подтверждения кода: <code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+            )
+        return
+
+    # confirm_code may signal "need_2fa" as a dict/string result instead of exception
+    if result == "need_2fa" or (isinstance(result, dict) and result.get("need_2fa")):
+        await state.set_state(AccountLogin.waiting_2fa)
+        await message.answer(
+            "🔐 Аккаунт защищён двухфакторной аутентификацией.\n\n"
+            "Введите ваш пароль 2FA:",
+            parse_mode="HTML",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    await _finalize_login(message, pool, state, phone)
+
+
+# ── Step 3: receive 2FA password ───────────────────────────────────────────────
+
+@router.message(AccountLogin.waiting_2fa)
+async def handle_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    password = (message.text or "").strip()
+    data = await state.get_data()
+    phone: str = data.get("phone", "")
+
+    try:
+        await confirm_2fa(phone, password)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await message.answer(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+            )
+            return
+        if "PasswordHashInvalidError" in err or "invalid" in err.lower():
+            await message.answer(
+                "❌ Неверный пароль 2FA. Попробуйте снова:"
+            )
+            return
+        await message.answer(
+            f"❌ Ошибка 2FA: <code>{escape(err[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    await _finalize_login(message, pool, state, phone)
+
+
+# ── Login finalization ─────────────────────────────────────────────────────────
+
+async def _finalize_login(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+    phone: str,
+) -> None:
+    """Fetch session, save to DB, clean up pending login state."""
+    try:
+        session_str, tg_user_id, first_name, username = await get_session_string(phone)
+    except Exception as exc:
+        await message.answer(
+            f"❌ Не удалось получить сессию: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        await state.clear()
+        return
+
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=message.from_user.id,
+            phone=phone,
+            session_str=session_str,
+            tg_user_id=tg_user_id,
+            first_name=first_name,
+            username=username,
+        )
+    except Exception as exc:
+        await message.answer(
+            f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        await state.clear()
+        return
+
+    await cleanup_pending(phone)
+    await state.clear()
+
+    display_name = escape(first_name or username or phone)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await message.answer(
+        f"✅ <b>Аккаунт успешно добавлен!</b>\n\n"
+        f"👤 {display_name}\n"
+        f"📱 {escape(phone)}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── View account ───────────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "view"))
+async def cb_view_account(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    name = escape(acc.get("first_name") or "")
+    uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
+    phone = escape(acc.get("phone") or "")
+    tg_id = acc.get("tg_user_id") or ""
+
+    lines = ["👤 <b>Аккаунт</b>\n"]
+    if name:
+        lines.append(f"Имя: <b>{name}</b>")
+    if uname:
+        lines.append(f"Username: <b>{uname}</b>")
+    if phone:
+        lines.append(f"Телефон: <code>{phone}</code>")
+    if tg_id:
+        lines.append(f"Telegram ID: <code>{tg_id}</code>")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_acc_menu_markup(callback_data.acc_id),
+    )
+
+
+# ── Channels / groups list ─────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "channels"))
+async def cb_channels(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await callback.message.edit_text(
+        "⏳ Загружаю список каналов и групп…",
+        parse_mode="HTML",
+    )
+
+    try:
+        dialogs = await get_dialogs(session_str)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Не удалось получить список диалогов:\n"
+                f"<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        return
+
+    if not dialogs:
+        await callback.message.edit_text(
+            "📭 Каналов и групп не найдено.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    lines = ["📋 <b>Каналы и группы:</b>\n"]
+    for dialog in dialogs[:30]:
+        title = escape(dialog.get("title") or "Без названия")
+        members = dialog.get("members") or dialog.get("participants_count") or 0
+        chat_id = dialog.get("id") or 0
+        lines.append(f"  • {title}" + (f" — {members:,} участн." if members else ""))
+        kb.button(
+            text=f"📤 {title[:28]}",
+            callback_data=AccCb(
+                action="post_to",
+                acc_id=callback_data.acc_id,
+                chat_id=chat_id,
+            ),
+        )
+
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=callback_data.acc_id))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Post: choose chat ──────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "post"))
+async def cb_post_choose_chat(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await callback.message.edit_text("⏳ Загружаю список каналов…", parse_mode="HTML")
+
+    try:
+        dialogs = await get_dialogs(session_str)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Не удалось загрузить каналы:\n<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        return
+
+    if not dialogs:
+        await callback.message.edit_text(
+            "📭 Нет доступных каналов/групп для отправки.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for dialog in dialogs[:30]:
+        title = dialog.get("title") or "Без названия"
+        chat_id = dialog.get("id") or 0
+        kb.button(
+            text=f"📣 {title[:30]}",
+            callback_data=AccCb(
+                action="post_to",
+                acc_id=callback_data.acc_id,
+                chat_id=chat_id,
+            ),
+        )
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=callback_data.acc_id))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "📤 <b>Выберите канал или группу для отправки сообщения:</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Post: set destination → ask for text ──────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "post_to"))
+async def cb_post_to(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    await state.set_state(AccountPost.waiting_text)
+    await state.update_data(acc_id=callback_data.acc_id, chat_id=callback_data.chat_id)
+
+    await callback.message.edit_text(
+        "✏️ <b>Введите текст сообщения</b>, которое нужно опубликовать:",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+# ── Post: receive message text and send ───────────────────────────────────────
+
+@router.message(AccountPost.waiting_text)
+async def handle_post_text(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("❌ Сообщение не может быть пустым. Введите текст:")
+        return
+
+    data = await state.get_data()
+    acc_id: int = data.get("acc_id", 0)
+    chat_id: int = data.get("chat_id", 0)
+
+    if not acc_id or not chat_id:
+        await message.answer("❌ Ошибка: не выбран аккаунт или канал. Начните заново.")
+        await state.clear()
+        return
+
+    acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
+    if not acc:
+        await message.answer("❌ Аккаунт не найден.")
+        await state.clear()
+        return
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await message.answer("⏳ Отправляю сообщение…")
+
+    try:
+        await send_message(session_str, chat_id, text)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await message.answer(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(
+                f"❌ Не удалось отправить сообщение:\n<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+            )
+        await state.clear()
+        return
+
+    await state.clear()
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await message.answer(
+        "✅ <b>Сообщение успешно отправлено!</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Remove account ─────────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "remove"))
+async def cb_remove_account(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    name = escape(acc.get("first_name") or "")
+    phone = escape(acc.get("phone") or "")
+    label = name or phone or f"ID {callback_data.acc_id}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="✅ Да, удалить",
+        callback_data=AccCb(action="remove_confirm", acc_id=callback_data.acc_id),
+    )
+    kb.button(
+        text="❌ Отмена",
+        callback_data=AccCb(action="view", acc_id=callback_data.acc_id),
+    )
+    kb.adjust(2)
+
+    await callback.message.edit_text(
+        f"🗑 <b>Удалить аккаунт?</b>\n\n"
+        f"👤 {label}\n\n"
+        f"<i>Сессия будет удалена из системы. Восстановить без повторного входа нельзя.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "remove_confirm"))
+async def cb_remove_confirm(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    await db.remove_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "✅ <b>Аккаунт удалён.</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )

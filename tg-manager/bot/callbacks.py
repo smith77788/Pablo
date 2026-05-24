@@ -155,3 +155,15 @@ class NetBcCb(CallbackData, prefix="nbc"):
     bot_id: int = 0
     segment: str = "all"
     lang: str = ""
+
+
+class AccCb(CallbackData, prefix="acc"):
+    action: str
+    acc_id: int = 0
+    chat_id: int = 0
+
+
+class RankCb(CallbackData, prefix="rank"):
+    action: str
+    bot_id: int = 0
+    keyword_id: int = 0

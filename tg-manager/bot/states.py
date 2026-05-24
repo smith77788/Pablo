@@ -135,3 +135,7 @@ class NetworkBroadcastV2(StatesGroup):
     choosing_segment = State()
     waiting_message = State()
     confirming = State()
+
+
+class AddKeyword(StatesGroup):
+    waiting_keyword = State()

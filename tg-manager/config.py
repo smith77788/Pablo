@@ -19,6 +19,8 @@ ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")  # оставлен 
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
 ADMIN_SECRET: str = os.getenv("ADMIN_SECRET", "")
+TG_API_ID: str = os.getenv("TG_API_ID", "")
+TG_API_HASH: str = os.getenv("TG_API_HASH", "")
 
 PLAN_PRICES_USD: dict[str, int] = {"starter": 9, "pro": 25, "enterprise": 69}
 PERIOD_DISCOUNTS: dict[int, int] = {1: 0, 3: 10, 6: 15, 12: 20}

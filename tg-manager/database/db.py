@@ -1555,3 +1555,105 @@ async def get_weighted_routing_target(pool: asyncpg.Pool, cluster: str,
         if r <= cum:
             return c
     return candidates[-1]
+
+
+# ── Telegram user accounts ──────────────────────────────────────────────────
+
+async def get_tg_accounts(pool: asyncpg.Pool, owner_id: int) -> list:
+    return await pool.fetch(
+        "SELECT id, phone, tg_user_id, first_name, username, added_at, is_active "
+        "FROM tg_accounts WHERE owner_id=$1 ORDER BY added_at DESC",
+        owner_id,
+    )
+
+
+async def get_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int):
+    return await pool.fetchrow(
+        "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        acc_id, owner_id,
+    )
+
+
+async def add_tg_account(pool: asyncpg.Pool, owner_id: int, phone: str,
+                         session_str: str, tg_user_id: int,
+                         first_name: str, username: str) -> int:
+    row = await pool.fetchrow(
+        """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id, first_name, username)
+           VALUES($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (owner_id, phone) DO UPDATE
+           SET session_str=$3, tg_user_id=$4, first_name=$5, username=$6,
+               is_active=true, last_used=now()
+           RETURNING id""",
+        owner_id, phone, session_str, tg_user_id, first_name, username,
+    )
+    return row["id"]
+
+
+async def remove_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> bool:
+    result = await pool.execute(
+        "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        acc_id, owner_id,
+    )
+    return result != "DELETE 0"
+
+
+async def update_tg_account_used(pool: asyncpg.Pool, acc_id: int) -> None:
+    await pool.execute(
+        "UPDATE tg_accounts SET last_used=now() WHERE id=$1", acc_id,
+    )
+
+
+# ── Search rankings ─────────────────────────────────────────────────────────
+
+async def get_tracked_keywords(pool: asyncpg.Pool, bot_id: int) -> list:
+    return await pool.fetch(
+        "SELECT id, keyword, is_active, created_at FROM tracked_keywords "
+        "WHERE bot_id=$1 ORDER BY created_at",
+        bot_id,
+    )
+
+
+async def add_tracked_keyword(pool: asyncpg.Pool, bot_id: int,
+                               owner_id: int, keyword: str) -> bool:
+    try:
+        await pool.execute(
+            "INSERT INTO tracked_keywords(bot_id, owner_id, keyword) VALUES($1,$2,$3)",
+            bot_id, owner_id, keyword,
+        )
+        return True
+    except Exception:
+        return False
+
+
+async def remove_tracked_keyword(pool: asyncpg.Pool, keyword_id: int,
+                                  owner_id: int) -> bool:
+    result = await pool.execute(
+        "DELETE FROM tracked_keywords WHERE id=$1 AND owner_id=$2",
+        keyword_id, owner_id,
+    )
+    return result != "DELETE 0"
+
+
+async def get_keyword_rankings(pool: asyncpg.Pool, keyword_id: int,
+                                limit: int = 10) -> list:
+    return await pool.fetch(
+        "SELECT position, checked_at FROM search_rankings "
+        "WHERE keyword_id=$1 ORDER BY checked_at DESC LIMIT $2",
+        keyword_id, limit,
+    )
+
+
+async def get_latest_ranking(pool: asyncpg.Pool, keyword_id: int):
+    return await pool.fetchrow(
+        "SELECT position, checked_at FROM search_rankings "
+        "WHERE keyword_id=$1 ORDER BY checked_at DESC LIMIT 1",
+        keyword_id,
+    )
+
+
+async def save_ranking(pool: asyncpg.Pool, keyword_id: int,
+                        bot_id: int, position) -> None:
+    await pool.execute(
+        "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
+        keyword_id, bot_id, position,
+    )

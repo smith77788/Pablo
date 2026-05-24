@@ -33,12 +33,15 @@ from bot.handlers import subscription as sub_handler
 from bot.handlers import ai_assistant as ai_handler
 from bot.handlers import net_broadcast as net_bc_handler
 from bot.handlers import network_bulk as net_bulk_handler
+from bot.handlers import ranking as ranking_handler
+from bot.handlers import accounts as accounts_handler
 from bot.handlers import admin as admin_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
 from services import funnel_runner
 from services import payment_checker
+from services import ranking_checker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -119,6 +122,8 @@ async def main() -> None:
     dp.include_router(net_bulk_handler.router)
     dp.include_router(net_bc_handler.router)
     dp.include_router(ai_handler.router)
+    dp.include_router(ranking_handler.router)
+    dp.include_router(accounts_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_handler.router)
@@ -135,6 +140,7 @@ async def main() -> None:
         asyncio.create_task(relay_service.run(pool, http))
         asyncio.create_task(funnel_runner.run(pool, http))
         asyncio.create_task(payment_checker.run(pool, http, bot))
+        asyncio.create_task(ranking_checker.run(pool))
         log.info("TG Manager started")
         try:
             await dp.start_polling(bot, pool=pool, http=http)
