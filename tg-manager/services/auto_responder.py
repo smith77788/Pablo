@@ -68,6 +68,24 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
             if not chat_id or not text:
                 continue
 
+            # Track user activity (every message)
+            await db.upsert_user_activity(pool, bot_id, chat_id)
+
+            # Deep link tracking: /start <param>
+            if text.strip().lower().startswith("/start "):
+                parts = text.strip().split(None, 1)
+                if len(parts) == 2:
+                    param = parts[1].strip()
+                    link_id = await db.record_deep_link_visit(pool, bot_id, param, chat_id)
+                    if param.startswith("ref") and param[3:].isdigit():
+                        referrer_id = int(param[3:])
+                        if referrer_id != chat_id:
+                            await db.record_referral(pool, bot_id, referrer_id, chat_id, link_id)
+
+            # Track non-command keywords
+            if text and not text.startswith("/"):
+                await db.record_message_keywords(pool, bot_id, text)
+
             for rule in rules:
                 if _match_rule(rule, text):
                     await bot_api.send_message(http, token, chat_id, rule["response_text"])

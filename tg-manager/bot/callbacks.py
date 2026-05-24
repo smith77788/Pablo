@@ -110,3 +110,17 @@ class ExperimentCb(CallbackData, prefix="exp"):
     bot_id: int = 0
     exp_id: int = 0
     variant_id: int = 0
+
+class DeepLinkCb(CallbackData, prefix="dl"):
+    action: str
+    bot_id: int = 0
+    link_id: int = 0
+
+class EngageCb(CallbackData, prefix="eng"):
+    action: str
+    bot_id: int = 0
+
+
+class SeoCb(CallbackData, prefix="seo"):
+    action: str
+    bot_id: int = 0

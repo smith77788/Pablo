@@ -3,7 +3,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
-    NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb,
+    NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb, DeepLinkCb, EngageCb, SeoCb,
 )
 
 PAGE_SIZE = 5
@@ -89,11 +89,14 @@ def bot_menu(bot_id: int, username: str | None = None) -> InlineKeyboardMarkup:
     kb.button(text="📝 Заметка",      callback_data=NoteCb(action="edit", bot_id=bot_id))
     kb.button(text="🧬 Swarm",        callback_data=SwarmCb(action="menu", bot_id=bot_id))
     kb.button(text="🧪 A/B Тесты",   callback_data=ExperimentCb(action="list", bot_id=bot_id))
+    kb.button(text="🔗 Диплинки",     callback_data=DeepLinkCb(action="menu", bot_id=bot_id))
+    kb.button(text="🎯 Активность",   callback_data=EngageCb(action="menu", bot_id=bot_id))
+    kb.button(text="📈 SEO",          callback_data=SeoCb(action="menu", bot_id=bot_id))
     kb.button(text="🗑 Удалить",      callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку",    callback_data=BotCb(action="list", page=0))
     if username:
         kb.row(InlineKeyboardButton(text="🔗 Открыть бота", url=f"https://t.me/{username}"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -627,5 +630,65 @@ def variant_pick_menu(bot_id: int, exp_id: int, variants: list) -> InlineKeyboar
         kb.button(text=f"🏆 {v['name']} (CTR: {ctr}%)",
                   callback_data=ExperimentCb(action="set_winner", bot_id=bot_id, exp_id=exp_id, variant_id=v["id"]))
     kb.button(text="◀️ Назад", callback_data=ExperimentCb(action="view", bot_id=bot_id, exp_id=exp_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def deeplinks_menu(bot_id: int, links: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for lnk in links[:10]:
+        kb.button(
+            text=f"🔗 {lnk['name']} — {lnk['click_count']} кликов ({lnk['unique_users']} уник.)",
+            callback_data=DeepLinkCb(action="view", bot_id=bot_id, link_id=lnk["id"]),
+        )
+    kb.button(text="➕ Создать диплинк", callback_data=DeepLinkCb(action="create", bot_id=bot_id))
+    kb.button(text="🏆 Рефeral лидерборд", callback_data=DeepLinkCb(action="leaders", bot_id=bot_id))
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def deeplink_view_menu(bot_id: int, link_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🗑 Удалить", callback_data=DeepLinkCb(action="delete", bot_id=bot_id, link_id=link_id))
+    kb.button(text="◀️ Назад", callback_data=DeepLinkCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def engagement_menu(bot_id: int, segs: dict) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    hot  = segs.get("hot",  0)
+    warm = segs.get("warm", 0)
+    cold = segs.get("cold", 0)
+    lost = segs.get("lost", 0)
+    kb.button(text=f"🔥 Горячие ({hot}) — < 24ч",
+              callback_data=EngageCb(action="segment_hot", bot_id=bot_id))
+    kb.button(text=f"🌡 Тёплые ({warm}) — 1–7 дн",
+              callback_data=EngageCb(action="segment_warm", bot_id=bot_id))
+    kb.button(text=f"❄️ Холодные ({cold}) — 7–30 дн → реактивировать",
+              callback_data=EngageCb(action="reactivate_cold", bot_id=bot_id))
+    kb.button(text=f"💀 Потерянные ({lost}) — 30+ дн → реактивировать",
+              callback_data=EngageCb(action="reactivate_lost", bot_id=bot_id))
+    kb.button(text="📊 Тепловая карта по часам",
+              callback_data=EngageCb(action="heatmap", bot_id=bot_id))
+    kb.button(text="🏆 Топ-10 активных юзеров",
+              callback_data=EngageCb(action="top_users", bot_id=bot_id))
+    kb.button(text="🏷 Авто-теги (hot/warm/cold/lost)",
+              callback_data=EngageCb(action="autotag", bot_id=bot_id))
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def seo_menu(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 SEO-скор профиля (0–100)",
+              callback_data=SeoCb(action="analyze", bot_id=bot_id))
+    kb.button(text="🔑 Ключевые слова юзеров",
+              callback_data=SeoCb(action="keywords", bot_id=bot_id))
+    kb.button(text="💡 SEO-советы для Telegram",
+              callback_data=SeoCb(action="tips", bot_id=bot_id))
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()

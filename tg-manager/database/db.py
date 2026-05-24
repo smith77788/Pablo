@@ -1024,3 +1024,220 @@ async def get_mode_routing_config(mode: str) -> dict:
         "stability": {"routing_enabled": False, "min_score_threshold": 0.5, "routing_probability": 0.0},
     }
     return configs.get(mode, configs["manual"])
+
+
+# ── Deep Links ──────────────────────────────────────────────────────────────
+
+async def create_deep_link(pool, bot_id: int, name: str, start_param: str) -> int:
+    row = await pool.fetchrow(
+        "INSERT INTO bot_deep_links(bot_id,name,start_param) VALUES($1,$2,$3) RETURNING id",
+        bot_id, name, start_param,
+    )
+    return row["id"]
+
+async def get_deep_links(pool, bot_id: int) -> list:
+    return await pool.fetch(
+        "SELECT * FROM bot_deep_links WHERE bot_id=$1 ORDER BY click_count DESC",
+        bot_id,
+    )
+
+async def get_deep_link_by_param(pool, bot_id: int, param: str):
+    return await pool.fetchrow(
+        "SELECT * FROM bot_deep_links WHERE bot_id=$1 AND start_param=$2",
+        bot_id, param,
+    )
+
+async def record_deep_link_visit(pool, bot_id: int, param: str, user_id: int) -> int | None:
+    """Increments click_count, increments unique_users if first visit. Returns link_id or None."""
+    link = await pool.fetchrow(
+        "SELECT id FROM bot_deep_links WHERE bot_id=$1 AND start_param=$2", bot_id, param
+    )
+    if not link:
+        return None
+    link_id = link["id"]
+    # Check if this user already visited this link
+    visited = await pool.fetchval(
+        "SELECT 1 FROM referrals WHERE bot_id=$1 AND referred_user_id=$2 AND deep_link_id=$3",
+        bot_id, user_id, link_id,
+    )
+    await pool.execute(
+        "UPDATE bot_deep_links SET click_count=click_count+1 WHERE id=$1", link_id
+    )
+    if not visited:
+        await pool.execute(
+            "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1", link_id
+        )
+    return link_id
+
+async def delete_deep_link(pool, link_id: int, bot_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM bot_deep_links WHERE id=$1 AND bot_id=$2", link_id, bot_id
+    )
+
+async def record_referral(pool, bot_id: int, referrer_user_id: int,
+                           referred_user_id: int, deep_link_id: int | None = None) -> bool:
+    """Returns True if referral was new."""
+    try:
+        await pool.execute(
+            """INSERT INTO referrals(bot_id,referrer_user_id,referred_user_id,deep_link_id)
+               VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING""",
+            bot_id, referrer_user_id, referred_user_id, deep_link_id,
+        )
+        return True
+    except Exception:
+        return False
+
+async def get_referral_leaderboard(pool, bot_id: int, limit: int = 10) -> list:
+    return await pool.fetch(
+        """SELECT referrer_user_id, COUNT(*) as referral_count
+           FROM referrals WHERE bot_id=$1
+           GROUP BY referrer_user_id ORDER BY referral_count DESC LIMIT $2""",
+        bot_id, limit,
+    )
+
+async def get_referral_total(pool, bot_id: int) -> int:
+    return await pool.fetchval(
+        "SELECT COUNT(DISTINCT referred_user_id) FROM referrals WHERE bot_id=$1", bot_id
+    ) or 0
+
+
+# ── User Activity ──────────────────────────────────────────────────────────
+
+async def upsert_user_activity(pool, bot_id: int, user_id: int) -> None:
+    await pool.execute(
+        """INSERT INTO user_activity(bot_id, user_id, message_count, last_seen, first_seen)
+           VALUES($1, $2, 1, now(), now())
+           ON CONFLICT (bot_id, user_id) DO UPDATE
+           SET message_count = user_activity.message_count + 1,
+               last_seen = now()""",
+        bot_id, user_id,
+    )
+
+async def get_activity_segments(pool, bot_id: int) -> dict:
+    """Returns counts: hot(<1d), warm(1-7d), cold(7-30d), lost(30d+)."""
+    rows = await pool.fetch(
+        """SELECT
+             COUNT(*) FILTER (WHERE last_seen >= now() - INTERVAL '1 day')   AS hot,
+             COUNT(*) FILTER (WHERE last_seen >= now() - INTERVAL '7 days'
+                                AND last_seen <  now() - INTERVAL '1 day')   AS warm,
+             COUNT(*) FILTER (WHERE last_seen >= now() - INTERVAL '30 days'
+                                AND last_seen <  now() - INTERVAL '7 days')  AS cold,
+             COUNT(*) FILTER (WHERE last_seen <  now() - INTERVAL '30 days') AS lost,
+             COUNT(*) AS total
+           FROM user_activity WHERE bot_id=$1""",
+        bot_id,
+    )
+    row = rows[0] if rows else {}
+    return {
+        "hot":   int(row.get("hot",  0) or 0),
+        "warm":  int(row.get("warm", 0) or 0),
+        "cold":  int(row.get("cold", 0) or 0),
+        "lost":  int(row.get("lost", 0) or 0),
+        "total": int(row.get("total",0) or 0),
+    }
+
+async def get_inactive_user_ids(pool, bot_id: int, min_days: int,
+                                  max_days: int | None = None) -> list[int]:
+    """Users not seen for min_days to max_days (None = no upper limit)."""
+    if max_days is None:
+        rows = await pool.fetch(
+            """SELECT user_id FROM user_activity
+               WHERE bot_id=$1 AND last_seen < now() - ($2 || ' days')::INTERVAL""",
+            bot_id, str(min_days),
+        )
+    else:
+        rows = await pool.fetch(
+            """SELECT user_id FROM user_activity
+               WHERE bot_id=$1
+                 AND last_seen < now() - ($2 || ' days')::INTERVAL
+                 AND last_seen >= now() - ($3 || ' days')::INTERVAL""",
+            bot_id, str(min_days), str(max_days),
+        )
+    return [r["user_id"] for r in rows]
+
+async def get_activity_heatmap(pool, bot_id: int, days: int = 7) -> list[dict]:
+    """Message count per hour-of-day over last N days."""
+    rows = await pool.fetch(
+        """SELECT EXTRACT(HOUR FROM last_seen)::int AS hour, COUNT(*) AS cnt
+           FROM user_activity
+           WHERE bot_id=$1 AND last_seen >= now() - ($2 || ' days')::INTERVAL
+           GROUP BY hour ORDER BY hour""",
+        bot_id, str(days),
+    )
+    return [{"hour": r["hour"], "count": int(r["cnt"])} for r in rows]
+
+async def get_top_active_users(pool, bot_id: int, limit: int = 10) -> list:
+    return await pool.fetch(
+        """SELECT user_id, message_count, last_seen
+           FROM user_activity WHERE bot_id=$1
+           ORDER BY message_count DESC LIMIT $2""",
+        bot_id, limit,
+    )
+
+async def autotag_by_activity(pool, bot_id: int) -> dict:
+    """Auto-tags users as activity:hot/warm/cold/lost. Returns counts."""
+    segs = await get_activity_segments(pool, bot_id)
+
+    async def _tag_segment(user_ids, tag):
+        for uid in user_ids:
+            try:
+                await pool.execute(
+                    "DELETE FROM user_tags WHERE bot_id=$1 AND user_id=$2 AND tag LIKE 'activity:%'",
+                    bot_id, uid,
+                )
+                await pool.execute(
+                    "INSERT INTO user_tags(bot_id,user_id,tag) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
+                    bot_id, uid, tag,
+                )
+            except Exception:
+                pass
+
+    hot_ids = await pool.fetch(
+        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '1 day'", bot_id
+    )
+    warm_ids = await pool.fetch(
+        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'", bot_id
+    )
+    cold_ids = await pool.fetch(
+        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'", bot_id
+    )
+    lost_ids = await pool.fetch(
+        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen < now() - INTERVAL '30 days'", bot_id
+    )
+    await _tag_segment([r["user_id"] for r in hot_ids], "activity:hot")
+    await _tag_segment([r["user_id"] for r in warm_ids], "activity:warm")
+    await _tag_segment([r["user_id"] for r in cold_ids], "activity:cold")
+    await _tag_segment([r["user_id"] for r in lost_ids], "activity:lost")
+    return segs
+
+# ── Keyword Analytics ──────────────────────────────────────────────────────
+
+async def record_message_keywords(pool, bot_id: int, text: str) -> None:
+    import re
+    words = list(set(re.findall(r'[а-яёА-ЯЁa-zA-Z]{3,}', text.lower())))[:10]
+    for word in words:
+        try:
+            await pool.execute(
+                """INSERT INTO keyword_stats(bot_id, keyword, count, last_seen)
+                   VALUES($1, $2, 1, now())
+                   ON CONFLICT (bot_id, keyword) DO UPDATE
+                   SET count = keyword_stats.count + 1, last_seen = now()""",
+                bot_id, word,
+            )
+        except Exception:
+            pass
+
+async def get_top_keywords(pool, bot_id: int, limit: int = 20) -> list:
+    return await pool.fetch(
+        "SELECT keyword, count FROM keyword_stats WHERE bot_id=$1 ORDER BY count DESC LIMIT $2",
+        bot_id, limit,
+    )
+
+async def get_keyword_stats_summary(pool, bot_id: int) -> dict:
+    total_keywords = await pool.fetchval(
+        "SELECT COUNT(*) FROM keyword_stats WHERE bot_id=$1", bot_id
+    ) or 0
+    total_messages = await pool.fetchval(
+        "SELECT SUM(count) FROM keyword_stats WHERE bot_id=$1", bot_id
+    ) or 0
+    return {"total_keywords": int(total_keywords), "total_messages": int(total_messages)}

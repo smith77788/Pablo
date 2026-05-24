@@ -98,3 +98,12 @@ class SendToUser(StatesGroup):
 
 class FunnelBroadcast(StatesGroup):
     waiting_message = State()
+
+
+class CreateDeepLink(StatesGroup):
+    waiting_name = State()
+    waiting_param = State()
+
+
+class ReactivateBroadcast(StatesGroup):
+    waiting_message = State()
