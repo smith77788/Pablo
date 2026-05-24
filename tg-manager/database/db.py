@@ -359,13 +359,9 @@ async def get_bots_with_auto_replies(pool: asyncpg.Pool) -> list[asyncpg.Record]
 
 
 async def get_bots_for_polling(pool: asyncpg.Pool) -> list[asyncpg.Record]:
-    """Return all active bots that have at least one auto-reply or active funnel."""
+    """Return all active managed bots for polling (activity, deep links, swarm, A/B, etc.)."""
     return await pool.fetch(
-        """SELECT DISTINCT b.bot_id, b.token FROM managed_bots b
-           WHERE b.is_active=true AND (
-               EXISTS (SELECT 1 FROM auto_replies ar WHERE ar.bot_id=b.bot_id AND ar.is_active=true)
-               OR EXISTS (SELECT 1 FROM funnels f WHERE f.bot_id=b.bot_id AND f.is_active=true)
-           )"""
+        "SELECT bot_id, token FROM managed_bots WHERE is_active=true"
     )
 
 

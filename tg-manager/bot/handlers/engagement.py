@@ -129,7 +129,7 @@ async def msg_reactivate(message: Message, state: FSMContext,
         )
         return
 
-    bc_id = await db.create_broadcast(pool, bot_id, message.text, None)
+    bc_id = await db.create_broadcast(pool, bot_id, message.text, len(user_ids), message.from_user.id)
     await message.answer(
         f"✅ <b>Реактивация запущена!</b>\n\n"
         f"Сегмент: {seg_label}\n"

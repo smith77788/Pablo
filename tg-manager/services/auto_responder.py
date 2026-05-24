@@ -31,9 +31,10 @@ async def _init_offset(pool: asyncpg.Pool, http: aiohttp.ClientSession,
     updates = data.get("result", []) if data.get("ok") else []
     if updates:
         max_id = updates[-1]["update_id"]
-        await db.set_update_offset(pool, bot_id, max_id)
-        return max_id
-    return 0
+    else:
+        max_id = 1  # sentinel: no pending updates, mark as initialized
+    await db.set_update_offset(pool, bot_id, max_id)
+    return max_id
 
 
 async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,

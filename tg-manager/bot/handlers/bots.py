@@ -147,6 +147,6 @@ async def cb_confirm_delete(callback: CallbackQuery, callback_data: BotCb,
     deleted = await db.delete_bot(pool, callback_data.bot_id, callback.from_user.id)
     if deleted:
         await callback.message.edit_text("✅ Бот удалён.", reply_markup=main_menu())
+        await callback.answer()
     else:
         await callback.answer("Не удалось удалить.", show_alert=True)
-    await callback.answer()
