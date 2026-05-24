@@ -18,6 +18,8 @@ ROLE_LABELS = {
 @router.callback_query(SwarmCb.filter(F.action == "menu"))
 async def cb_swarm_menu(callback: CallbackQuery, callback_data: SwarmCb,
                          pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -42,6 +44,8 @@ async def cb_swarm_menu(callback: CallbackQuery, callback_data: SwarmCb,
 @router.callback_query(SwarmCb.filter(F.action == "toggle"))
 async def cb_swarm_toggle(callback: CallbackQuery, callback_data: SwarmCb,
                            pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -68,6 +72,8 @@ async def cb_swarm_toggle(callback: CallbackQuery, callback_data: SwarmCb,
 @router.callback_query(SwarmCb.filter(F.action == "stats"))
 async def cb_swarm_stats(callback: CallbackQuery, callback_data: SwarmCb,
                           pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -105,6 +111,8 @@ async def cb_swarm_stats(callback: CallbackQuery, callback_data: SwarmCb,
 @router.callback_query(SwarmCb.filter(F.action.startswith("role_")))
 async def cb_swarm_role(callback: CallbackQuery, callback_data: SwarmCb,
                          pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     role = callback_data.action.replace("role_", "")
     if role not in ("entry", "conversion", "retention", "general"):
         await callback.answer("Неверная роль", show_alert=True)
@@ -139,6 +147,8 @@ MODE_DESCRIPTIONS = {
 @router.callback_query(SwarmCb.filter(F.action == "set_mode"))
 async def cb_set_mode(callback: CallbackQuery, callback_data: SwarmCb,
                        pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from bot.callbacks import SwarmCb as SC
     kb = InlineKeyboardBuilder()
@@ -160,6 +170,8 @@ async def cb_set_mode(callback: CallbackQuery, callback_data: SwarmCb,
 @router.callback_query(SwarmCb.filter(F.action.startswith("mode_")))
 async def cb_change_mode(callback: CallbackQuery, callback_data: SwarmCb,
                           pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     mode = callback_data.action.removeprefix("mode_")
     valid_modes = ["manual", "assisted", "autopilot", "growth", "experiment", "stability"]
     if mode not in valid_modes:

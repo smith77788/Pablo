@@ -20,6 +20,8 @@ router = Router()
 @router.callback_query(BroadcastCb.filter(F.action == "menu"))
 async def cb_bc_menu(callback: CallbackQuery, callback_data: BroadcastCb,
                       pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -92,6 +94,8 @@ async def msg_broadcast_text(message: Message, state: FSMContext,
 async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
                       state: FSMContext, pool: asyncpg.Pool,
                       http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     data = await state.get_data()
     text = data.get("text", "")
     photo_file_id = data.get("photo_file_id")
@@ -132,6 +136,8 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
 async def cb_test(callback: CallbackQuery, callback_data: BroadcastCb,
                   state: FSMContext, pool: asyncpg.Pool,
                   http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     data = await state.get_data()
     text = data.get("text", "")
     photo_file_id = data.get("photo_file_id")
@@ -224,6 +230,8 @@ async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(BroadcastCb.filter(F.action == "status"))
 async def cb_status(callback: CallbackQuery, callback_data: BroadcastCb,
                     pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -244,6 +252,8 @@ async def cb_status(callback: CallbackQuery, callback_data: BroadcastCb,
 @router.callback_query(BroadcastCb.filter(F.action == "detail"))
 async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
                     pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     bc = await db.get_broadcast(pool, callback_data.broadcast_id)
     if not bc:
         await callback.answer("Рассылка не найдена.", show_alert=True)
@@ -277,6 +287,8 @@ async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
 @router.callback_query(BroadcastCb.filter(F.action == "from_template"))
 async def cb_from_template(callback: CallbackQuery, callback_data: BroadcastCb,
                             pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -296,6 +308,8 @@ async def cb_from_template(callback: CallbackQuery, callback_data: BroadcastCb,
 @router.callback_query(BroadcastCb.filter(F.action == "use_template"))
 async def cb_use_template(callback: CallbackQuery, callback_data: BroadcastCb,
                            pool: asyncpg.Pool, state: FSMContext) -> None:
+
+    await callback.answer()
     # broadcast_id field repurposed here as template_id
     template = await db.get_template(pool, callback_data.broadcast_id, callback.from_user.id)
     if not template:
@@ -329,6 +343,8 @@ async def cb_use_template(callback: CallbackQuery, callback_data: BroadcastCb,
 @router.callback_query(BroadcastCb.filter(F.action == "segment"))
 async def cb_segment(callback: CallbackQuery, callback_data: BroadcastCb,
                      pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -349,6 +365,8 @@ async def cb_segment(callback: CallbackQuery, callback_data: BroadcastCb,
 @router.callback_query(BroadcastCb.filter(F.action == "segment_select"))
 async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
                              state: FSMContext, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     lang = callback_data.lang
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:

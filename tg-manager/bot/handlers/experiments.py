@@ -39,6 +39,8 @@ async def _exp_text(exp, variants: list) -> str:
 @router.callback_query(ExperimentCb.filter(F.action == "list"))
 async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
                        pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -59,6 +61,8 @@ async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "view"))
 async def cb_exp_view(callback: CallbackQuery, callback_data: ExperimentCb,
                        pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     exp = await db.get_experiment(pool, callback_data.exp_id)
     if not exp:
         await callback.answer("Эксперимент не найден.", show_alert=True)
@@ -158,6 +162,8 @@ async def cb_add_variant(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "start"))
 async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
                         pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     if len(variants) < 2:
         await callback.answer("Нужно минимум 2 варианта для запуска.", show_alert=True)
@@ -175,6 +181,8 @@ async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "pause"))
 async def cb_exp_pause(callback: CallbackQuery, callback_data: ExperimentCb,
                         pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     await db.set_experiment_status(pool, callback_data.exp_id, "paused")
     exp = await db.get_experiment(pool, callback_data.exp_id)
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
@@ -189,6 +197,8 @@ async def cb_exp_pause(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "resume"))
 async def cb_exp_resume(callback: CallbackQuery, callback_data: ExperimentCb,
                          pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     await db.set_experiment_status(pool, callback_data.exp_id, "active")
     exp = await db.get_experiment(pool, callback_data.exp_id)
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
@@ -203,6 +213,8 @@ async def cb_exp_resume(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "pick_winner"))
 async def cb_pick_winner(callback: CallbackQuery, callback_data: ExperimentCb,
                           pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     if not variants:
         await callback.answer("Нет вариантов.", show_alert=True)
@@ -219,6 +231,8 @@ async def cb_pick_winner(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "set_winner"))
 async def cb_set_winner(callback: CallbackQuery, callback_data: ExperimentCb,
                          pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     await pool.execute(
         "UPDATE experiments SET status='completed', winner_variant_id=$2 WHERE id=$1",
         callback_data.exp_id, callback_data.variant_id,
@@ -236,6 +250,8 @@ async def cb_set_winner(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "delete"))
 async def cb_exp_delete(callback: CallbackQuery, callback_data: ExperimentCb,
                          pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     await db.delete_experiment(pool, callback_data.exp_id, callback_data.bot_id)
     exps = await db.get_experiments(pool, callback_data.bot_id)
     await callback.message.edit_text(

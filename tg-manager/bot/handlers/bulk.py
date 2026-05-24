@@ -50,6 +50,8 @@ def _result_text(ok: int, fail: int, total: int, action: str) -> str:
 
 @router.callback_query(BulkCb.filter(F.action == "menu"))
 async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     total = len(await db.get_bots(pool, callback.from_user.id))
     await callback.message.edit_text(
         f"📦 <b>Массовые операции</b>\n\nБотов в системе: <b>{total}</b>\n\n"
@@ -65,6 +67,8 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(BulkCb.filter(F.action == "check"))
 async def cb_check(callback: CallbackQuery, pool: asyncpg.Pool,
                     http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         await callback.answer("Нет ботов для проверки.", show_alert=True)

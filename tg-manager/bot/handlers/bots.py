@@ -26,6 +26,8 @@ def _bot_label(row: asyncpg.Record) -> str:
 
 @router.callback_query(BotCb.filter(F.action == "list"))
 async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
         return
@@ -105,6 +107,8 @@ async def msg_token(message: Message, state: FSMContext,
 @router.callback_query(BotCb.filter(F.action == "select"))
 async def cb_select(callback: CallbackQuery, callback_data: BotCb,
                     pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -128,6 +132,8 @@ async def cb_select(callback: CallbackQuery, callback_data: BotCb,
 @router.callback_query(BotCb.filter(F.action == "delete"))
 async def cb_delete(callback: CallbackQuery, callback_data: BotCb,
                     pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -144,9 +150,10 @@ async def cb_delete(callback: CallbackQuery, callback_data: BotCb,
 @router.callback_query(BotCb.filter(F.action == "confirm_delete"))
 async def cb_confirm_delete(callback: CallbackQuery, callback_data: BotCb,
                              pool: asyncpg.Pool) -> None:
+
     deleted = await db.delete_bot(pool, callback_data.bot_id, callback.from_user.id)
     if deleted:
+        await callback.answer("✅ Бот удалён.")
         await callback.message.edit_text("✅ Бот удалён.", reply_markup=main_menu())
-        await callback.answer()
     else:
         await callback.answer("Не удалось удалить.", show_alert=True)

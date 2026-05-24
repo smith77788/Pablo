@@ -22,6 +22,8 @@ _DT_HINT = (
 @router.callback_query(ScheduleCb.filter(F.action == "menu"))
 async def cb_schedule_menu(callback: CallbackQuery, callback_data: ScheduleCb,
                             pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -122,6 +124,8 @@ async def msg_schedule_datetime(message: Message, state: FSMContext,
 @router.callback_query(ScheduleCb.filter(F.action == "cancel"))
 async def cb_schedule_cancel(callback: CallbackQuery, callback_data: ScheduleCb,
                               pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     cancelled = await db.cancel_scheduled(
         pool, callback_data.schedule_id, callback.from_user.id
     )
@@ -141,6 +145,8 @@ async def cb_schedule_cancel(callback: CallbackQuery, callback_data: ScheduleCb,
 @router.callback_query(ScheduleCb.filter(F.action == "from_template"))
 async def cb_schedule_from_template(callback: CallbackQuery, callback_data: ScheduleCb,
                                      pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -160,6 +166,8 @@ async def cb_schedule_from_template(callback: CallbackQuery, callback_data: Sche
 @router.callback_query(ScheduleCb.filter(F.action == "use_template"))
 async def cb_schedule_use_template(callback: CallbackQuery, callback_data: ScheduleCb,
                                     state: FSMContext, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     # schedule_id repurposed as template_id here
     template = await db.get_template(pool, callback_data.schedule_id, callback.from_user.id)
     if not template:

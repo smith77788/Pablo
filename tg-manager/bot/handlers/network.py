@@ -32,6 +32,8 @@ _ROLE_LABELS = {
 @router.callback_query(NetworkCb.filter(F.action == "menu"))
 async def cb_net_menu(callback: CallbackQuery, callback_data: NetworkCb,
                       pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     ov = await db.get_network_overview(pool, callback.from_user.id)
     swarm_pct = round(ov["swarm_bots"] / ov["total_bots"] * 100) if ov["total_bots"] else 0
     await callback.message.edit_text(
@@ -53,6 +55,8 @@ async def cb_net_menu(callback: CallbackQuery, callback_data: NetworkCb,
 
 @router.callback_query(NetworkCb.filter(F.action == "analytics"))
 async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     ov = await db.get_network_overview(pool, callback.from_user.id)
     bots = await db.get_bot_ranking(pool, callback.from_user.id)
     overlap = await db.get_bot_overlap_stats(pool, callback.from_user.id)
@@ -96,6 +100,8 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(NetworkCb.filter(F.action == "clusters"))
 async def cb_net_clusters(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     clusters = await db.get_cluster_list(pool, callback.from_user.id)
     if not clusters:
         kb = InlineKeyboardBuilder()
@@ -119,6 +125,8 @@ async def cb_net_clusters(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(ClusterCb.filter(F.action == "view"))
 async def cb_cluster_view(callback: CallbackQuery, callback_data: ClusterCb,
                            pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     cluster = callback_data.cluster
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     total_aud = sum(b["audience_count"] for b in bots)
@@ -145,6 +153,8 @@ async def cb_cluster_view(callback: CallbackQuery, callback_data: ClusterCb,
 @router.callback_query(ClusterCb.filter(F.action == "bulk_swarm_on"))
 async def cb_bulk_swarm_on(callback: CallbackQuery, callback_data: ClusterCb,
                             pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     n = await db.bulk_set_swarm(pool, callback.from_user.id, callback_data.cluster, True)
     await callback.answer(f"✅ Swarm включён для {n} ботов.", show_alert=True)
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, callback_data.cluster)
@@ -165,6 +175,8 @@ async def cb_bulk_swarm_on(callback: CallbackQuery, callback_data: ClusterCb,
 @router.callback_query(ClusterCb.filter(F.action == "bulk_swarm_off"))
 async def cb_bulk_swarm_off(callback: CallbackQuery, callback_data: ClusterCb,
                              pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     n = await db.bulk_set_swarm(pool, callback.from_user.id, callback_data.cluster, False)
     await callback.answer(f"⚫ Swarm отключён для {n} ботов.", show_alert=True)
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, callback_data.cluster)
@@ -181,6 +193,8 @@ async def cb_bulk_swarm_off(callback: CallbackQuery, callback_data: ClusterCb,
 @router.callback_query(ClusterCb.filter(F.action.in_({"bulk_role_entry", "bulk_role_conversion", "bulk_role_retention"})))
 async def cb_bulk_role(callback: CallbackQuery, callback_data: ClusterCb,
                        pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     role_map = {"bulk_role_entry": "entry", "bulk_role_conversion": "conversion",
                 "bulk_role_retention": "retention"}
     role = role_map[callback_data.action]
@@ -198,6 +212,8 @@ async def cb_bulk_role(callback: CallbackQuery, callback_data: ClusterCb,
 @router.callback_query(ClusterCb.filter(F.action == "assign_start"))
 async def cb_cluster_assign_start(callback: CallbackQuery, callback_data: ClusterCb,
                                    pool: asyncpg.Pool, state: FSMContext) -> None:
+
+    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         await callback.answer("Нет ботов.", show_alert=True)
@@ -215,6 +231,8 @@ async def cb_cluster_assign_start(callback: CallbackQuery, callback_data: Cluste
 @router.callback_query(ClusterCb.filter(F.action == "assign_confirm"))
 async def cb_cluster_assign_confirm(callback: CallbackQuery, callback_data: ClusterCb,
                                      pool: asyncpg.Pool, state: FSMContext) -> None:
+
+    await callback.answer()
     await state.clear()
     await db.set_bot_cluster_name(pool, callback_data.bot_id, callback.from_user.id,
                                    callback_data.cluster)
@@ -237,6 +255,8 @@ async def cb_cluster_assign_confirm(callback: CallbackQuery, callback_data: Clus
 
 @router.callback_query(NetworkCb.filter(F.action == "ranking"))
 async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     bots = await db.get_bot_ranking(pool, callback.from_user.id)
     medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 30
     lines = ["🏆 <b>Рейтинг ботов (по аудитории)</b>\n"]
@@ -264,6 +284,8 @@ async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(NetworkCb.filter(F.action == "routing"))
 async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     weights = await db.get_routing_weights_for_user(pool, callback.from_user.id)
     if not weights:
         kb = InlineKeyboardBuilder()
@@ -296,6 +318,8 @@ async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(NetworkCb.filter(F.action == "set_weight_pick"))
 async def cb_set_weight_pick(callback: CallbackQuery, callback_data: NetworkCb,
                               pool: asyncpg.Pool, state: FSMContext) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -343,6 +367,8 @@ async def msg_set_weight(message: Message, state: FSMContext, pool: asyncpg.Pool
 
 @router.callback_query(NetworkCb.filter(F.action == "reset_weights"))
 async def cb_reset_weights(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     await db.reset_routing_weights(pool, callback.from_user.id)
     await callback.answer("✅ Все веса сброшены до 1.0 (равное распределение).", show_alert=True)
     weights = await db.get_routing_weights_for_user(pool, callback.from_user.id)
@@ -405,6 +431,8 @@ async def cb_net_health(callback: CallbackQuery, pool: asyncpg.Pool,
 @router.callback_query(NetworkCb.filter(F.action == "broadcast"))
 async def cb_net_broadcast(callback: CallbackQuery, pool: asyncpg.Pool,
                             state: FSMContext) -> None:
+
+    await callback.answer()
     users = await db.get_unique_network_users(pool, callback.from_user.id)
     if not users:
         kb = InlineKeyboardBuilder()
@@ -445,6 +473,8 @@ async def msg_net_broadcast_text(message: Message, state: FSMContext) -> None:
 async def cb_net_broadcast_confirm(callback: CallbackQuery, callback_data: NetworkCb,
                                     state: FSMContext, pool: asyncpg.Pool,
                                     http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     data = await state.get_data()
     await state.clear()
     text = data.get("text", "")
@@ -500,6 +530,8 @@ async def cb_net_broadcast_cancel(callback: CallbackQuery, state: FSMContext) ->
 
 @router.callback_query(NetworkCb.filter(F.action == "clone"))
 async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     if len(bots) < 2:
         kb = InlineKeyboardBuilder()
@@ -523,6 +555,8 @@ async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(NetworkCb.filter(F.action == "clone_pick_dest"))
 async def cb_net_clone_pick_dest(callback: CallbackQuery, callback_data: NetworkCb,
                                   pool: asyncpg.Pool, state: FSMContext) -> None:
+
+    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     src_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not src_row:
@@ -543,6 +577,8 @@ async def cb_net_clone_pick_dest(callback: CallbackQuery, callback_data: Network
 @router.callback_query(NetworkCb.filter(F.action == "clone_confirm"))
 async def cb_net_clone_confirm(callback: CallbackQuery, callback_data: NetworkCb,
                                 pool: asyncpg.Pool, state: FSMContext) -> None:
+
+    await callback.answer()
     data = await state.get_data()
     await state.clear()
     src_id = data.get("src_id")
@@ -583,6 +619,8 @@ async def cb_net_clone_confirm(callback: CallbackQuery, callback_data: NetworkCb
 
 @router.callback_query(NetworkCb.filter(F.action == "overlap"))
 async def cb_net_overlap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     stats = await db.get_bot_overlap_stats(pool, callback.from_user.id)
     bots = await db.get_bot_ranking(pool, callback.from_user.id)
 

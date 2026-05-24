@@ -33,6 +33,8 @@ def _after_save_markup(bot_id: int):
 @router.callback_query(MultigeoCb.filter(F.action == "menu"))
 async def cb_multigeo_menu(callback: CallbackQuery, callback_data: MultigeoCb,
                             pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -51,6 +53,8 @@ async def cb_multigeo_menu(callback: CallbackQuery, callback_data: MultigeoCb,
 @router.callback_query(MultigeoCb.filter(F.action == "names"))
 async def cb_multigeo_names(callback: CallbackQuery, callback_data: MultigeoCb,
                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -73,6 +77,8 @@ async def cb_multigeo_names(callback: CallbackQuery, callback_data: MultigeoCb,
 @router.callback_query(MultigeoCb.filter(F.action == "short"))
 async def cb_multigeo_short(callback: CallbackQuery, callback_data: MultigeoCb,
                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -95,6 +101,8 @@ async def cb_multigeo_short(callback: CallbackQuery, callback_data: MultigeoCb,
 @router.callback_query(MultigeoCb.filter(F.action == "desc"))
 async def cb_multigeo_desc(callback: CallbackQuery, callback_data: MultigeoCb,
                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)

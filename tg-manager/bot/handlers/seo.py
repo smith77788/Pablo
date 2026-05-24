@@ -88,6 +88,8 @@ def _score_bar(score: int) -> str:
 @router.callback_query(SeoCb.filter(F.action == "menu"))
 async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
                        pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -106,6 +108,8 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
 @router.callback_query(SeoCb.filter(F.action == "analyze"))
 async def cb_seo_analyze(callback: CallbackQuery, callback_data: SeoCb,
                           pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -170,6 +174,8 @@ async def cb_seo_analyze(callback: CallbackQuery, callback_data: SeoCb,
 @router.callback_query(SeoCb.filter(F.action == "keywords"))
 async def cb_seo_keywords(callback: CallbackQuery, callback_data: SeoCb,
                            pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     keywords = await db.get_top_keywords(pool, callback_data.bot_id, limit=20)
     summary = await db.get_keyword_stats_summary(pool, callback_data.bot_id)
     kb = InlineKeyboardBuilder()

@@ -23,6 +23,8 @@ async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | Non
 @router.callback_query(EditCb.filter(F.action == "menu"))
 async def cb_edit_menu(callback: CallbackQuery, callback_data: EditCb,
                         pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -163,6 +165,8 @@ async def msg_photo_wrong(message: Message) -> None:
 @router.callback_query(EditCb.filter(F.action == "del_photo"))
 async def cb_del_photo(callback: CallbackQuery, callback_data: EditCb,
                         pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -232,6 +236,8 @@ async def msg_update_token(message: Message, state: FSMContext,
 @router.callback_query(EditCb.filter(F.action == "health"))
 async def cb_health(callback: CallbackQuery, callback_data: EditCb,
                      pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)

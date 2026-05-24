@@ -33,6 +33,8 @@ def _heatmap_chart(data: list[dict]) -> str:
 @router.callback_query(EngageCb.filter(F.action == "menu"))
 async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
                           pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -146,6 +148,8 @@ async def msg_reactivate(message: Message, state: FSMContext,
 @router.callback_query(EngageCb.filter(F.action == "heatmap"))
 async def cb_engage_heatmap(callback: CallbackQuery, callback_data: EngageCb,
                               pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     data = await db.get_activity_heatmap(pool, callback_data.bot_id, days=7)
     chart = _heatmap_chart(data)
     kb = InlineKeyboardBuilder()
@@ -163,6 +167,8 @@ async def cb_engage_heatmap(callback: CallbackQuery, callback_data: EngageCb,
 @router.callback_query(EngageCb.filter(F.action == "top_users"))
 async def cb_engage_top(callback: CallbackQuery, callback_data: EngageCb,
                          pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     users = await db.get_top_active_users(pool, callback_data.bot_id, limit=10)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=EngageCb(action="menu", bot_id=callback_data.bot_id))

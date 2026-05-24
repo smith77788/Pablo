@@ -53,6 +53,8 @@ async def _show_funnel_view(message: Message, pool: asyncpg.Pool,
 @router.callback_query(FunnelCb.filter(F.action == "list"))
 async def cb_fn_list(callback: CallbackQuery, callback_data: FunnelCb,
                      pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -109,6 +111,8 @@ async def msg_fn_name(message: Message, state: FSMContext) -> None:
 @router.callback_query(FunnelCb.filter(F.action == "trig_start"))
 async def cb_fn_trig_start(callback: CallbackQuery, callback_data: FunnelCb,
                             state: FSMContext, pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     data = await state.get_data()
     funnel_name = data.get("funnel_name", "Новая цепочка")
     bot_id = callback_data.bot_id or data.get("bot_id", 0)
@@ -234,6 +238,8 @@ async def msg_fn_step_delay(message: Message, state: FSMContext, pool: asyncpg.P
 @router.callback_query(FunnelCb.filter(F.action == "toggle"))
 async def cb_fn_toggle(callback: CallbackQuery, callback_data: FunnelCb,
                        pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     await db.toggle_funnel(pool, callback_data.funnel_id, callback_data.bot_id)
     await _show_funnel_view(callback.message, pool, callback_data.bot_id, callback_data.funnel_id)
     await callback.answer("✅ Статус изменён.")
@@ -244,6 +250,8 @@ async def cb_fn_toggle(callback: CallbackQuery, callback_data: FunnelCb,
 @router.callback_query(FunnelCb.filter(F.action == "delete"))
 async def cb_fn_delete(callback: CallbackQuery, callback_data: FunnelCb,
                        pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     await db.delete_funnel(pool, callback_data.funnel_id, callback_data.bot_id)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     funnels = await db.get_funnels(pool, callback_data.bot_id)
@@ -263,6 +271,8 @@ async def cb_fn_delete(callback: CallbackQuery, callback_data: FunnelCb,
 @router.callback_query(FunnelCb.filter(F.action == "broadcast"))
 async def cb_fn_broadcast(callback: CallbackQuery, callback_data: FunnelCb,
                            pool: asyncpg.Pool, state: FSMContext) -> None:
+
+    await callback.answer()
     funnels = await db.get_funnels(pool, callback_data.bot_id)
     funnel = next((f for f in funnels if f["id"] == callback_data.funnel_id), None)
     if not funnel:
@@ -313,6 +323,8 @@ async def msg_fn_broadcast(message: Message, state: FSMContext,
 @router.callback_query(FunnelCb.filter(F.action == "copy_from"))
 async def cb_fn_copy_from(callback: CallbackQuery, callback_data: FunnelCb,
                            pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
     if not others:
@@ -331,6 +343,8 @@ async def cb_fn_copy_from(callback: CallbackQuery, callback_data: FunnelCb,
 @router.callback_query(FunnelCb.filter(F.action == "copy_confirm"))
 async def cb_fn_copy_confirm(callback: CallbackQuery, callback_data: FunnelCb,
                               pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     src_bot = await db.get_bot(pool, callback_data.target_bot_id, callback.from_user.id)
     dst_bot = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not src_bot or not dst_bot:

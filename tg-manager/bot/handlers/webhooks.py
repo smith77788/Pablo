@@ -14,6 +14,8 @@ router = Router()
 @router.callback_query(WebhookCb.filter(F.action == "menu"))
 async def cb_webhook_menu(callback: CallbackQuery, callback_data: WebhookCb,
                            pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -35,6 +37,8 @@ async def cb_webhook_menu(callback: CallbackQuery, callback_data: WebhookCb,
 @router.callback_query(WebhookCb.filter(F.action == "info"))
 async def cb_webhook_info(callback: CallbackQuery, callback_data: WebhookCb,
                            pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -66,6 +70,8 @@ async def cb_webhook_info(callback: CallbackQuery, callback_data: WebhookCb,
 @router.callback_query(WebhookCb.filter(F.action == "disable"))
 async def cb_webhook_disable(callback: CallbackQuery, callback_data: WebhookCb,
                               pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)

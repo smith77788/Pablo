@@ -34,6 +34,8 @@ def _parse_commands(text: str) -> list[dict] | None:
 @router.callback_query(CommandsCb.filter(F.action == "menu"))
 async def cb_commands_menu(callback: CallbackQuery, callback_data: CommandsCb,
                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -164,6 +166,8 @@ async def msg_commands_set_all(message: Message, state: FSMContext,
 @router.callback_query(CommandsCb.filter(F.action == "delete"))
 async def cb_commands_delete(callback: CallbackQuery, callback_data: CommandsCb,
                               pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)

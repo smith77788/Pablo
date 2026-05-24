@@ -12,24 +12,28 @@ router = Router()
 @router.callback_query(StatsCb.filter(F.action == "menu"))
 async def cb_stats_menu(callback: CallbackQuery, callback_data: StatsCb,
                          pool: asyncpg.Pool) -> None:
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
-        await callback.answer("Бот не найден.", show_alert=True)
+        await callback.message.edit_text("❌ Бот не найден.")
         return
-    await callback.answer()
     await callback.message.edit_text("⏳ Загружаю статистику…")
 
     stats = await db.get_bot_stats(pool, callback_data.bot_id)
-    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    label = f"@{row['username']}" if row["username"] else (row["first_name"] or str(row["bot_id"]))
 
-    completion_rate = round(stats["funnel_completed"] / stats["funnel_total_subs"] * 100) if stats["funnel_total_subs"] else 0
+    completion_rate = (
+        round(stats["funnel_completed"] / stats["funnel_total_subs"] * 100)
+        if stats["funnel_total_subs"] else 0
+    )
 
     text = (
         f"📊 <b>Статистика — {label}</b>\n\n"
         f"👥 <b>Аудитория:</b> {stats['aud_total']} чел.\n"
         f"  🆕 За сутки: +{stats['aud_today']}\n"
         f"  📈 За 7 дней: +{stats['aud_week']}\n\n"
-        f"📢 <b>Рассылки:</b> {stats['broadcasts_total']} всего, отправлено {stats['broadcasts_sent']} сообщений\n\n"
+        f"📢 <b>Рассылки:</b> {stats['broadcasts_total']} всего, "
+        f"отправлено {stats['broadcasts_sent']} сообщений\n\n"
         f"💬 <b>Inbox:</b> {stats['relay_sessions']} диалогов\n"
         f"  📩 Входящих: {stats['msg_in']}\n"
         f"  📤 Исходящих: {stats['msg_out']}\n"

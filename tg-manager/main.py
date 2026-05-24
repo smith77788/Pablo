@@ -9,6 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import ErrorEvent, CallbackQuery
 from config import BOT_TOKEN
 from database.db import create_pool
 from bot.handlers import start, bots, edit, audience, webhooks, broadcast, bulk
@@ -38,6 +39,39 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 log = logging.getLogger(__name__)
+
+
+async def _global_error_handler(event: ErrorEvent) -> None:
+    """Catch any unhandled exception and show it to the user."""
+    exc = event.exception
+    log.exception("Unhandled error in update %s", event.update, exc_info=exc)
+    update = event.update
+    try:
+        if update.callback_query:
+            cb: CallbackQuery = update.callback_query
+            try:
+                await cb.answer(f"⚠️ Ошибка: {type(exc).__name__}", show_alert=True)
+            except Exception:
+                pass
+            try:
+                await cb.message.answer(
+                    f"⚠️ <b>Внутренняя ошибка</b>\n\n"
+                    f"<code>{type(exc).__name__}: {str(exc)[:200]}</code>",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        elif update.message:
+            try:
+                await update.message.answer(
+                    f"⚠️ <b>Внутренняя ошибка</b>\n\n"
+                    f"<code>{type(exc).__name__}: {str(exc)[:200]}</code>",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 async def main() -> None:
@@ -74,6 +108,7 @@ async def main() -> None:
     dp.include_router(seo_handler.router)
     dp.include_router(network_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
+    dp.error.register(_global_error_handler)
 
     pool = await create_pool()
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

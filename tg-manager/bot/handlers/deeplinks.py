@@ -14,6 +14,8 @@ router = Router()
 @router.callback_query(DeepLinkCb.filter(F.action == "menu"))
 async def cb_dl_menu(callback: CallbackQuery, callback_data: DeepLinkCb,
                       pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -38,6 +40,8 @@ async def cb_dl_menu(callback: CallbackQuery, callback_data: DeepLinkCb,
 @router.callback_query(DeepLinkCb.filter(F.action == "view"))
 async def cb_dl_view(callback: CallbackQuery, callback_data: DeepLinkCb,
                       pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -129,6 +133,8 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
 @router.callback_query(DeepLinkCb.filter(F.action == "delete"))
 async def cb_dl_delete(callback: CallbackQuery, callback_data: DeepLinkCb,
                         pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     await db.delete_deep_link(pool, callback_data.link_id, callback_data.bot_id)
     links = await db.get_deep_links(pool, callback_data.bot_id)
     total_refs = await db.get_referral_total(pool, callback_data.bot_id)
@@ -143,6 +149,8 @@ async def cb_dl_delete(callback: CallbackQuery, callback_data: DeepLinkCb,
 @router.callback_query(DeepLinkCb.filter(F.action == "leaders"))
 async def cb_dl_leaders(callback: CallbackQuery, callback_data: DeepLinkCb,
                          pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     leaders = await db.get_referral_leaderboard(pool, callback_data.bot_id, limit=10)
     total = await db.get_referral_total(pool, callback_data.bot_id)
     from aiogram.utils.keyboard import InlineKeyboardBuilder

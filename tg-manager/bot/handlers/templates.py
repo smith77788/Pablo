@@ -14,6 +14,8 @@ router = Router()
 @router.callback_query(TemplateCb.filter(F.action == "list"))
 async def cb_templates_list(callback: CallbackQuery, callback_data: TemplateCb,
                              pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     bot_id = callback_data.bot_id
     templates = await db.get_templates(pool, callback.from_user.id)
     count = len(templates)
@@ -95,6 +97,8 @@ async def msg_template_text(message: Message, state: FSMContext,
 @router.callback_query(TemplateCb.filter(F.action == "view"))
 async def cb_template_view(callback: CallbackQuery, callback_data: TemplateCb,
                             pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
         await callback.answer("Шаблон не найден.", show_alert=True)
@@ -111,6 +115,8 @@ async def cb_template_view(callback: CallbackQuery, callback_data: TemplateCb,
 @router.callback_query(TemplateCb.filter(F.action == "delete"))
 async def cb_template_delete(callback: CallbackQuery, callback_data: TemplateCb,
                               pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     deleted = await db.delete_template(pool, callback_data.template_id, callback.from_user.id)
     if not deleted:
         await callback.answer("Не удалось удалить шаблон.", show_alert=True)
@@ -130,6 +136,8 @@ async def cb_template_delete(callback: CallbackQuery, callback_data: TemplateCb,
 @router.callback_query(TemplateCb.filter(F.action == "use"))
 async def cb_template_use(callback: CallbackQuery, callback_data: TemplateCb,
                            pool: asyncpg.Pool, state: FSMContext) -> None:
+
+    await callback.answer()
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
         await callback.answer("Шаблон не найден.", show_alert=True)

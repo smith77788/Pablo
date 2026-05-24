@@ -19,6 +19,8 @@ router = Router()
 @router.callback_query(AudCb.filter(F.action == "menu"))
 async def cb_aud_menu(callback: CallbackQuery, callback_data: AudCb,
                        pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -36,6 +38,8 @@ async def cb_aud_menu(callback: CallbackQuery, callback_data: AudCb,
 @router.callback_query(AudCb.filter(F.action == "refresh"))
 async def cb_refresh(callback: CallbackQuery, callback_data: AudCb,
                       pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -63,6 +67,8 @@ async def cb_refresh(callback: CallbackQuery, callback_data: AudCb,
 @router.callback_query(AudCb.filter(F.action == "stats"))
 async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
                     pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -108,6 +114,8 @@ async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
 @router.callback_query(AudCb.filter(F.action == "export"))
 async def cb_export(callback: CallbackQuery, callback_data: AudCb,
                      pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -153,6 +161,8 @@ async def cb_export(callback: CallbackQuery, callback_data: AudCb,
 @router.callback_query(AudCb.filter(F.action == "scan"))
 async def cb_scan(callback: CallbackQuery, callback_data: AudCb,
                    pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -189,6 +199,8 @@ async def cb_scan(callback: CallbackQuery, callback_data: AudCb,
 @router.callback_query(AudCb.filter(F.action == "compare"))
 async def cb_compare_pick(callback: CallbackQuery, callback_data: AudCb,
                            pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
     if not others:
@@ -206,6 +218,8 @@ async def cb_compare_pick(callback: CallbackQuery, callback_data: AudCb,
 @router.callback_query(AudCb.filter(F.action == "pick_b"))
 async def cb_compare_result(callback: CallbackQuery, callback_data: AudCb,
                               pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row_a = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     row_b = await db.get_bot(pool, callback_data.target_id, callback.from_user.id)
     if not row_a or not row_b:
@@ -294,6 +308,8 @@ async def msg_send_user_text(message: Message, state: FSMContext,
 @router.callback_query(AudCb.filter(F.action.in_({"block_user", "unblock_user"})))
 async def cb_block_user(callback: CallbackQuery, callback_data: AudCb,
                          pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     blocked = callback_data.action == "block_user"
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:

@@ -28,6 +28,8 @@ async def _relay_menu_text(row: asyncpg.Record, sessions: list) -> tuple[str, ob
 @router.callback_query(RelayCb.filter(F.action == "menu"))
 async def cb_relay_menu(callback: CallbackQuery, callback_data: RelayCb,
                          pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -41,6 +43,8 @@ async def cb_relay_menu(callback: CallbackQuery, callback_data: RelayCb,
 @router.callback_query(RelayCb.filter(F.action == "toggle"))
 async def cb_relay_toggle(callback: CallbackQuery, callback_data: RelayCb,
                            pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -84,6 +88,8 @@ async def handle_operator_reply(message: Message, pool: asyncpg.Pool,
 @router.callback_query(RelayCb.filter(F.action == "session"))
 async def cb_relay_session(callback: CallbackQuery, callback_data: RelayCb,
                             pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     """View message history for a specific relay session."""
     session_id = callback_data.session_id
     # Get session info
@@ -126,6 +132,8 @@ async def cb_relay_session(callback: CallbackQuery, callback_data: RelayCb,
 @router.callback_query(RelayCb.filter(F.action == "quick_reply"))
 async def cb_relay_quick_reply(callback: CallbackQuery, callback_data: RelayCb,
                                 pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+
+    await callback.answer()
     """Send a template message to the user as operator quick reply."""
     template = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not template:
@@ -155,6 +163,8 @@ async def cb_relay_quick_reply(callback: CallbackQuery, callback_data: RelayCb,
 @router.callback_query(RelayCb.filter(F.action == "close_session"))
 async def cb_relay_close_session(callback: CallbackQuery, callback_data: RelayCb,
                                    pool: asyncpg.Pool) -> None:
+
+    await callback.answer()
     """Delete a relay session (and its messages via CASCADE)."""
     # Verify ownership
     sess = await pool.fetchrow(
