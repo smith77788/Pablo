@@ -2,9 +2,7 @@
 """TG Manager — Telegram bot management platform."""
 import asyncio
 import logging
-import signal
 import ssl
-import sys
 import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -41,12 +39,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Максимальные задержки при reconnect-loop (секунды)
-_RETRY_DELAYS = [5, 10, 30, 60, 120]
 
-
-async def _run_once(stop_event: asyncio.Event) -> None:
-    """Один запуск polling. Поднимает исключение при критической ошибке."""
+async def main() -> None:
     bot_session = AiohttpSession()
     bot_session._connector_init["ssl"] = False
 
@@ -97,41 +91,6 @@ async def _run_once(stop_event: asyncio.Event) -> None:
         finally:
             await pool.close()
             await bot.session.close()
-
-
-async def main() -> None:
-    stop_event = asyncio.Event()
-
-    def _handle_signal(sig: int) -> None:
-        log.info("Получен сигнал %s — завершаем работу...", signal.Signals(sig).name)
-        stop_event.set()
-
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _handle_signal, sig)
-
-    attempt = 0
-    while not stop_event.is_set():
-        try:
-            await _run_once(stop_event)
-            # Нормальное завершение (сигнал) — выходим без перезапуска
-            break
-        except (KeyboardInterrupt, SystemExit):
-            break
-        except Exception as exc:
-            delay = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
-            log.error(
-                "Критическая ошибка (попытка %d): %s — перезапуск через %ds",
-                attempt + 1, exc, delay, exc_info=True,
-            )
-            attempt += 1
-            # Ждём задержку, но прерываемся при получении сигнала
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=delay)
-            except asyncio.TimeoutError:
-                pass
-        else:
-            attempt = 0  # успешная работа сбрасывает счётчик
 
 
 if __name__ == "__main__":

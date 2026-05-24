@@ -1,17 +1,26 @@
 import asyncpg
+import glob
+import os
 from config import DATABASE_URL
 
 
 async def create_pool() -> asyncpg.Pool:
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=20)
     async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS bot_routing_weights (
-                bot_id BIGINT PRIMARY KEY REFERENCES managed_bots(bot_id) ON DELETE CASCADE,
-                weight FLOAT NOT NULL DEFAULT 1.0 CHECK (weight >= 0),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
+        # Run all schema migration files in order (schema.sql, schema_v2.sql, ..., schema_v11.sql)
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        schema_files = sorted(
+            glob.glob(os.path.join(base_dir, "schema*.sql")),
+            key=lambda p: (
+                0 if os.path.basename(p) == "schema.sql"
+                else int("".join(filter(str.isdigit, os.path.basename(p))) or "0")
+            ),
+        )
+        for path in schema_files:
+            with open(path) as f:
+                sql = f.read().strip()
+            if sql:
+                await conn.execute(sql)
     return pool
 
 
