@@ -136,16 +136,20 @@ async def cb_select(callback: CallbackQuery, callback_data: BotCb,
         return
     label = _bot_label(row)
     count = await db.get_audience_count(pool, row["bot_id"])
-    note_text = f"\n\n📝 <i>{row['note']}</i>" if row.get("note") else ""
+    safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if row.get("note"):
+        safe_note = row["note"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        note_text = f"\n\n📝 <i>{safe_note}</i>"
+    else:
+        note_text = ""
     await callback.message.edit_text(
-        f"🤖 <b>{label}</b>\n"
+        f"🤖 <b>{safe_label}</b>\n"
         f"ID: <code>{row['bot_id']}</code>\n"
         f"Аудитория: <b>{count}</b> чел."
         f"{note_text}",
         parse_mode="HTML",
         reply_markup=bot_menu(row["bot_id"], username=row.get("username")),
     )
-    await callback.answer()
 
 
 # ── Delete — confirm ──────────────────────────────────────────────────────

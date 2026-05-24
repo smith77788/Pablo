@@ -30,7 +30,7 @@ def _calc(plan: str, months: int, currency: str) -> tuple[float, float]:
     return usd, usd  # USDT 1:1
 
 
-async def _show_menu(target, pool: asyncpg.Pool, user_id: int) -> None:
+async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     plan = await get_plan(pool, user_id)
     lim = BOT_LIMITS.get(plan, 3)
     lim_label = "∞" if lim >= 9999 else str(lim)
@@ -56,22 +56,20 @@ async def _show_menu(target, pool: asyncpg.Pool, user_id: int) -> None:
             callback_data=SubCb(action="choose_plan", plan=p),
         )
     kb.adjust(1)
-    markup = kb.as_markup()
-    if hasattr(target, "edit_text"):
-        await target.edit_text(text, parse_mode="HTML", reply_markup=markup)
-    else:
-        await target.answer(text, parse_mode="HTML", reply_markup=markup)
+    return text, kb.as_markup()
 
 
 @router.message(Command("subscription"))
 async def cmd_subscription(message: Message, pool: asyncpg.Pool) -> None:
-    await _show_menu(message, pool, message.from_user.id)
+    text, markup = await _build_menu_text_and_kb(pool, message.from_user.id)
+    await message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
 @router.callback_query(SubCb.filter(F.action == "menu"))
 async def cb_sub_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    await _show_menu(callback.message, pool, callback.from_user.id)
+    text, markup = await _build_menu_text_and_kb(pool, callback.from_user.id)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
 
 
 @router.callback_query(SubCb.filter(F.action == "choose_plan"))

@@ -9,12 +9,11 @@ from datetime import datetime, timedelta
 import asyncpg
 import aiohttp
 from aiogram import Router, F
-from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BotCb
-from config import ADMIN_IDS
+from config import ADMIN_IDS, ADMIN_SECRET
 from database import db
 
 log = logging.getLogger(__name__)
@@ -66,13 +65,19 @@ def _back_kb():
     return kb.as_markup()
 
 
-# ── /admin command ─────────────────────────────────────────────────────────────
+# ── Секретная фраза для входа в админку ────────────────────────────────────────
 
-@router.message(Command("admin"))
-async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
+@router.message(F.text.func(lambda t: bool(ADMIN_SECRET) and t == ADMIN_SECRET))
+async def cmd_admin_secret(message: Message) -> None:
     if not _is_admin(message.from_user.id):
         return
-    await _show_admin_main(message, pool, edit=False)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔑 Открыть Админ Меню", callback_data="adm:main")
+    await message.answer("🔑", reply_markup=kb.as_markup())
 
 
 async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> None:

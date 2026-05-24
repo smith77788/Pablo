@@ -29,7 +29,8 @@ async def _show_funnel_view(message: Message, pool: asyncpg.Pool,
     steps_text = ""
     for s in steps:
         delay_label = f"{s['delay_minutes']} мин" if s["delay_minutes"] > 0 else "сразу"
-        preview = s['message_text'][:60]
+        raw_preview = s['message_text'][:60]
+        preview = raw_preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         ellipsis = "…" if len(s['message_text']) > 60 else ""
         steps_text += f"\n  <b>Шаг {s['step_order'] + 1}</b> [{delay_label}]: {preview}{ellipsis}"
     if not steps_text:
@@ -225,7 +226,8 @@ async def msg_fn_step_delay(message: Message, state: FSMContext, pool: asyncpg.P
     steps_text = ""
     for s in steps:
         delay_label = f"{s['delay_minutes']} мин" if s["delay_minutes"] > 0 else "сразу"
-        preview = s['message_text'][:60]
+        raw_preview = s['message_text'][:60]
+        preview = raw_preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         ellipsis = "…" if len(s['message_text']) > 60 else ""
         steps_text += f"\n  <b>Шаг {s['step_order'] + 1}</b> [{delay_label}]: {preview}{ellipsis}"
     if not steps_text:

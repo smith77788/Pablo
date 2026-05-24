@@ -24,7 +24,8 @@ async def cb_note_edit(callback: CallbackQuery, callback_data: NoteCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    current = row.get("note") or "(нет заметки)"
+    raw_note = row.get("note") or "(нет заметки)"
+    current = raw_note.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await state.set_state(EditNote.waiting_text)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
