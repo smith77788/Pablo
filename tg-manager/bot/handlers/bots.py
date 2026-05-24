@@ -62,7 +62,7 @@ async def cb_add(callback: CallbackQuery, state: FSMContext) -> None:
 
 # ── Add — step 2: receive token ───────────────────────────────────────────
 
-@router.message(AddBot.waiting_token)
+@router.message(AddBot.waiting_token, F.text)
 async def msg_token(message: Message, state: FSMContext,
                     pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     token = message.text.strip()

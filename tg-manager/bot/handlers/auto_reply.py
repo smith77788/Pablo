@@ -79,7 +79,7 @@ async def cb_trig_any(callback: CallbackQuery, callback_data: AutoReplyCb,
     await callback.answer()
 
 
-@router.message(AddAutoReply.waiting_keyword)
+@router.message(AddAutoReply.waiting_keyword, F.text)
 async def msg_ar_keyword(message: Message, state: FSMContext) -> None:
     await state.update_data(keyword=message.text.strip())
     await state.set_state(AddAutoReply.waiting_text)
@@ -90,7 +90,7 @@ async def msg_ar_keyword(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(AddAutoReply.waiting_text)
+@router.message(AddAutoReply.waiting_text, F.text)
 async def msg_ar_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     await state.clear()

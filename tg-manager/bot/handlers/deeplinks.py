@@ -80,7 +80,7 @@ async def cb_dl_create(callback: CallbackQuery, callback_data: DeepLinkCb,
     await callback.answer()
 
 
-@router.message(CreateDeepLink.waiting_name)
+@router.message(CreateDeepLink.waiting_name, F.text)
 async def msg_dl_name(message: Message, state: FSMContext) -> None:
     await state.update_data(link_name=message.text.strip())
     await state.set_state(CreateDeepLink.waiting_param)
@@ -92,7 +92,7 @@ async def msg_dl_name(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(CreateDeepLink.waiting_param)
+@router.message(CreateDeepLink.waiting_param, F.text)
 async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     import re
     data = await state.get_data()

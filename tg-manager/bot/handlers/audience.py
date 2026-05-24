@@ -245,7 +245,7 @@ async def cb_send_user(callback: CallbackQuery, callback_data: AudCb,
     await callback.answer()
 
 
-@router.message(SendToUser.waiting_user_id)
+@router.message(SendToUser.waiting_user_id, F.text)
 async def msg_send_user_id(message: Message, state: FSMContext) -> None:
     try:
         user_id = int(message.text.strip())
@@ -260,7 +260,7 @@ async def msg_send_user_id(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(SendToUser.waiting_message)
+@router.message(SendToUser.waiting_message, F.text)
 async def msg_send_user_text(message: Message, state: FSMContext,
                               pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()

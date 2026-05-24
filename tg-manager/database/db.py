@@ -179,11 +179,11 @@ async def create_broadcast(pool: asyncpg.Pool, bot_id: int, message_text: str,
 
 async def update_broadcast(pool: asyncpg.Pool, broadcast_id: int,
                             sent: int, failed: int, status: str) -> None:
-    finished = "NOW()" if status in ("done", "cancelled") else "NULL"
     await pool.execute(
-        f"""UPDATE broadcasts
-            SET sent_count=$2, failed_count=$3, status=$4, finished_at={finished}
-            WHERE id=$1""",
+        """UPDATE broadcasts
+           SET sent_count=$2, failed_count=$3, status=$4,
+               finished_at=CASE WHEN $4 IN ('done','cancelled') THEN NOW() ELSE NULL END
+           WHERE id=$1""",
         broadcast_id, sent, failed, status,
     )
 

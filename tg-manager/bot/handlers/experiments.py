@@ -98,7 +98,7 @@ async def cb_exp_type(callback: CallbackQuery, callback_data: ExperimentCb,
     await callback.answer()
 
 
-@router.message(CreateExperiment.waiting_name)
+@router.message(CreateExperiment.waiting_name, F.text)
 async def msg_exp_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     exp_id = await db.create_experiment(pool, data["bot_id"], message.text.strip(), data.get("exp_type", "start_message"))
@@ -111,7 +111,7 @@ async def msg_exp_name(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     )
 
 
-@router.message(CreateExperiment.waiting_variant_name)
+@router.message(CreateExperiment.waiting_variant_name, F.text)
 async def msg_variant_name(message: Message, state: FSMContext) -> None:
     await state.update_data(variant_name=message.text.strip())
     await state.set_state(CreateExperiment.waiting_variant_content)
@@ -122,7 +122,7 @@ async def msg_variant_name(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(CreateExperiment.waiting_variant_content)
+@router.message(CreateExperiment.waiting_variant_content, F.text)
 async def msg_variant_content(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     variant_id = await db.add_experiment_variant(pool, data["exp_id"], data["variant_name"], message.text)

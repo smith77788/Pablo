@@ -75,7 +75,7 @@ async def msg_schedule_message(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(ScheduleBroadcast.waiting_datetime)
+@router.message(ScheduleBroadcast.waiting_datetime, F.text)
 async def msg_schedule_datetime(message: Message, state: FSMContext,
                                  pool: asyncpg.Pool) -> None:
     data = await state.get_data()

@@ -43,7 +43,7 @@ async def cb_template_add(callback: CallbackQuery, callback_data: TemplateCb,
     await callback.answer()
 
 
-@router.message(AddTemplate.waiting_name)
+@router.message(AddTemplate.waiting_name, F.text)
 async def msg_template_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip() if message.text else ""
     if not name:
@@ -64,7 +64,7 @@ async def msg_template_name(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(AddTemplate.waiting_text)
+@router.message(AddTemplate.waiting_text, F.text)
 async def msg_template_text(message: Message, state: FSMContext,
                              pool: asyncpg.Pool) -> None:
     data = await state.get_data()

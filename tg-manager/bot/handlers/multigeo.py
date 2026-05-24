@@ -128,7 +128,7 @@ async def cb_lang_name(callback: CallbackQuery, callback_data: MultigeoCb,
     await callback.answer()
 
 
-@router.message(MultigeoEdit.waiting_name)
+@router.message(MultigeoEdit.waiting_name, F.text)
 async def msg_multigeo_name(message: Message, state: FSMContext,
                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
@@ -165,7 +165,7 @@ async def cb_lang_short(callback: CallbackQuery, callback_data: MultigeoCb,
     await callback.answer()
 
 
-@router.message(MultigeoEdit.waiting_short)
+@router.message(MultigeoEdit.waiting_short, F.text)
 async def msg_multigeo_short(message: Message, state: FSMContext,
                               pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
@@ -202,7 +202,7 @@ async def cb_lang_desc(callback: CallbackQuery, callback_data: MultigeoCb,
     await callback.answer()
 
 
-@router.message(MultigeoEdit.waiting_desc)
+@router.message(MultigeoEdit.waiting_desc, F.text)
 async def msg_multigeo_desc(message: Message, state: FSMContext,
                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()

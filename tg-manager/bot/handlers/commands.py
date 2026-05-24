@@ -65,7 +65,7 @@ async def cb_commands_add(callback: CallbackQuery, callback_data: CommandsCb,
     await callback.answer()
 
 
-@router.message(SetCommands.waiting_add)
+@router.message(SetCommands.waiting_add, F.text)
 async def msg_commands_add(message: Message, state: FSMContext,
                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
@@ -124,7 +124,7 @@ async def cb_commands_set_all(callback: CallbackQuery, callback_data: CommandsCb
     await callback.answer()
 
 
-@router.message(SetCommands.waiting_commands)
+@router.message(SetCommands.waiting_commands, F.text)
 async def msg_commands_set_all(message: Message, state: FSMContext,
                                 pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()

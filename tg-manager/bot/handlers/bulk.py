@@ -106,7 +106,7 @@ async def cb_bulk_name(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(BulkEdit.waiting_name)
+@router.message(BulkEdit.waiting_name, F.text)
 async def msg_bulk_name(message: Message, state: FSMContext,
                          pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     name = message.text.strip()
@@ -129,7 +129,7 @@ async def cb_bulk_name_lang(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(BulkEdit.waiting_name_lang)
+@router.message(BulkEdit.waiting_name_lang, F.text)
 async def msg_bulk_name_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_name)
@@ -137,7 +137,7 @@ async def msg_bulk_name_lang(message: Message, state: FSMContext) -> None:
                           parse_mode="HTML")
 
 
-@router.message(BulkEdit.waiting_localized_name)
+@router.message(BulkEdit.waiting_localized_name, F.text)
 async def msg_bulk_localized_name(message: Message, state: FSMContext,
                                     pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
@@ -161,7 +161,7 @@ async def cb_bulk_desc(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(BulkEdit.waiting_desc)
+@router.message(BulkEdit.waiting_desc, F.text)
 async def msg_bulk_desc(message: Message, state: FSMContext,
                          pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     desc = message.text.strip()
@@ -184,14 +184,14 @@ async def cb_bulk_desc_lang(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(BulkEdit.waiting_desc_lang)
+@router.message(BulkEdit.waiting_desc_lang, F.text)
 async def msg_bulk_desc_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_desc)
     await message.answer("📄 Введите описание:")
 
 
-@router.message(BulkEdit.waiting_localized_desc)
+@router.message(BulkEdit.waiting_localized_desc, F.text)
 async def msg_bulk_localized_desc(message: Message, state: FSMContext,
                                     pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
@@ -217,7 +217,7 @@ async def cb_bulk_short(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(BulkEdit.waiting_short)
+@router.message(BulkEdit.waiting_short, F.text)
 async def msg_bulk_short(message: Message, state: FSMContext,
                           pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     short = message.text.strip()
@@ -241,14 +241,14 @@ async def cb_bulk_short_lang(callback: CallbackQuery, state: FSMContext) -> None
     await callback.answer()
 
 
-@router.message(BulkEdit.waiting_short_lang)
+@router.message(BulkEdit.waiting_short_lang, F.text)
 async def msg_bulk_short_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_short)
     await message.answer("📃 Введите краткое описание:")
 
 
-@router.message(BulkEdit.waiting_localized_short)
+@router.message(BulkEdit.waiting_localized_short, F.text)
 async def msg_bulk_localized_short(message: Message, state: FSMContext,
                                      pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
@@ -278,7 +278,7 @@ async def cb_bulk_commands(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(BulkEdit.waiting_commands)
+@router.message(BulkEdit.waiting_commands, F.text)
 async def msg_bulk_commands(message: Message, state: FSMContext,
                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     from bot.handlers.commands import _parse_commands
@@ -309,7 +309,7 @@ async def cb_bulk_commands_lang(callback: CallbackQuery, state: FSMContext) -> N
     await callback.answer()
 
 
-@router.message(BulkEdit.waiting_commands_lang)
+@router.message(BulkEdit.waiting_commands_lang, F.text)
 async def msg_bulk_commands_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_commands)
@@ -321,7 +321,7 @@ async def msg_bulk_commands_lang(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(BulkEdit.waiting_localized_commands)
+@router.message(BulkEdit.waiting_localized_commands, F.text)
 async def msg_bulk_localized_commands(message: Message, state: FSMContext,
                                        pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     from bot.handlers.commands import _parse_commands
@@ -360,7 +360,7 @@ async def cb_import(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(ImportBots.waiting_tokens)
+@router.message(ImportBots.waiting_tokens, F.text)
 async def msg_import_tokens(message: Message, state: FSMContext,
                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     await state.clear()

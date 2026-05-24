@@ -316,7 +316,7 @@ async def cb_set_weight_pick(callback: CallbackQuery, callback_data: NetworkCb,
     await callback.answer()
 
 
-@router.message(SetRoutingWeight.waiting_weight)
+@router.message(SetRoutingWeight.waiting_weight, F.text)
 async def msg_set_weight(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     try:
         weight = float(message.text.strip().replace(",", "."))
@@ -428,7 +428,7 @@ async def cb_net_broadcast(callback: CallbackQuery, pool: asyncpg.Pool,
     await callback.answer()
 
 
-@router.message(NetworkBroadcast.waiting_message)
+@router.message(NetworkBroadcast.waiting_message, F.text)
 async def msg_net_broadcast_text(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     await state.update_data(text=message.text)

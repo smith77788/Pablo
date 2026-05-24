@@ -33,7 +33,7 @@ async def cb_note_edit(callback: CallbackQuery, callback_data: NoteCb,
     await callback.answer()
 
 
-@router.message(EditNote.waiting_text)
+@router.message(EditNote.waiting_text, F.text)
 async def msg_note_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     await state.clear()

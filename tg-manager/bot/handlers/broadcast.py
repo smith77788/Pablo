@@ -168,7 +168,7 @@ async def cb_add_button(callback: CallbackQuery, callback_data: BroadcastCb,
     await callback.answer()
 
 
-@router.message(Broadcast.waiting_button_text)
+@router.message(Broadcast.waiting_button_text, F.text)
 async def msg_button_text(message: Message, state: FSMContext) -> None:
     await state.update_data(pending_btn_text=message.text.strip())
     await state.set_state(Broadcast.waiting_button_url)
@@ -178,7 +178,7 @@ async def msg_button_text(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(Broadcast.waiting_button_url)
+@router.message(Broadcast.waiting_button_url, F.text)
 async def msg_button_url(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     url = message.text.strip()
     if not url.startswith(("http://", "https://", "tg://")):

@@ -92,7 +92,7 @@ async def cb_fn_create(callback: CallbackQuery, callback_data: FunnelCb,
     await callback.answer()
 
 
-@router.message(CreateFunnel.waiting_name)
+@router.message(CreateFunnel.waiting_name, F.text)
 async def msg_fn_name(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     await state.update_data(funnel_name=message.text.strip())
@@ -138,7 +138,7 @@ async def cb_fn_trig_keyword(callback: CallbackQuery, callback_data: FunnelCb,
     await callback.answer()
 
 
-@router.message(CreateFunnel.waiting_keyword)
+@router.message(CreateFunnel.waiting_keyword, F.text)
 async def msg_fn_keyword(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     keyword = message.text.strip()
@@ -174,7 +174,7 @@ async def cb_fn_add_step(callback: CallbackQuery, callback_data: FunnelCb,
     await callback.answer()
 
 
-@router.message(CreateFunnel.waiting_step_text)
+@router.message(CreateFunnel.waiting_step_text, F.text)
 async def msg_fn_step_text(message: Message, state: FSMContext) -> None:
     await state.update_data(step_text=message.text)
     await state.set_state(CreateFunnel.waiting_step_delay)
@@ -184,7 +184,7 @@ async def msg_fn_step_text(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(CreateFunnel.waiting_step_delay)
+@router.message(CreateFunnel.waiting_step_delay, F.text)
 async def msg_fn_step_delay(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     try:
         delay = int(message.text.strip())
@@ -284,7 +284,7 @@ async def cb_fn_broadcast(callback: CallbackQuery, callback_data: FunnelCb,
     await callback.answer()
 
 
-@router.message(FunnelBroadcast.waiting_message)
+@router.message(FunnelBroadcast.waiting_message, F.text)
 async def msg_fn_broadcast(message: Message, state: FSMContext,
                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()

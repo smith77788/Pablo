@@ -22,6 +22,10 @@ class AddAutoRule(StatesGroup):
     waiting_name = State()
 
 
+class AddGlobalTag(StatesGroup):
+    waiting_name = State()
+
+
 @router.callback_query(CrmCb.filter(F.action == "menu"))
 async def cb_crm_menu(callback: CallbackQuery, callback_data: CrmCb,
                        pool: asyncpg.Pool) -> None:
@@ -39,6 +43,40 @@ async def cb_crm_menu(callback: CallbackQuery, callback_data: CrmCb,
         reply_markup=crm_menu(callback_data.bot_id, tags),
     )
     await callback.answer()
+
+
+@router.callback_query(CrmCb.filter(F.action == "add_tag_global"))
+async def cb_add_tag_global(callback: CallbackQuery, callback_data: CrmCb,
+                             state: FSMContext) -> None:
+    await state.set_state(AddGlobalTag.waiting_name)
+    await state.update_data(bot_id=callback_data.bot_id)
+    await callback.message.edit_text(
+        "🏷 <b>Создать тег</b>\n\n"
+        "Введите название тега (латиница, кириллица, цифры, _ допустимы).\n"
+        "Тег будет создан и доступен для назначения пользователям через автоматизацию.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AddGlobalTag.waiting_name, F.text)
+async def msg_global_tag_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    data = await state.get_data()
+    await state.clear()
+    tag = message.text.strip()
+    if not tag:
+        await message.answer("❌ Название тега не может быть пустым.")
+        return
+    # Tags are implicit — they exist when assigned to any user.
+    # Create a placeholder assignment for the bot owner so the tag appears in the list.
+    await db.add_user_tag(pool, data["bot_id"], message.from_user.id, tag)
+    tags = await db.get_tag_names(pool, data["bot_id"])
+    await message.answer(
+        f"✅ Тег <b>{tag}</b> создан!\n\n"
+        f"Всего тегов в боте: <b>{len(tags)}</b>",
+        parse_mode="HTML",
+        reply_markup=back_to_bot(data["bot_id"]),
+    )
 
 
 @router.callback_query(CrmCb.filter(F.action == "tag_detail"))
@@ -214,7 +252,7 @@ async def cb_trig_tag(callback: CallbackQuery, callback_data: AutoCb, state: FSM
     await _set_trigger(callback, state, "tag_added", True)
 
 
-@router.message(AddAutoRule.waiting_trigger_value)
+@router.message(AddAutoRule.waiting_trigger_value, F.text)
 async def msg_trigger_value(message: Message, state: FSMContext) -> None:
     await state.update_data(trigger_value=message.text.strip())
     await state.set_state(AddAutoRule.choosing_action)
@@ -246,7 +284,7 @@ async def cb_choose_action(callback: CallbackQuery, callback_data: AutoCb, state
     await callback.answer()
 
 
-@router.message(AddAutoRule.waiting_action_value)
+@router.message(AddAutoRule.waiting_action_value, F.text)
 async def msg_action_value(message: Message, state: FSMContext) -> None:
     await state.update_data(action_value=message.text.strip())
     await state.set_state(AddAutoRule.waiting_name)
@@ -255,7 +293,7 @@ async def msg_action_value(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(AddAutoRule.waiting_name)
+@router.message(AddAutoRule.waiting_name, F.text)
 async def msg_rule_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     await state.clear()

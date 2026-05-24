@@ -47,7 +47,7 @@ async def cb_name(callback: CallbackQuery, callback_data: EditCb,
     await callback.answer()
 
 
-@router.message(EditProfile.waiting_name)
+@router.message(EditProfile.waiting_name, F.text)
 async def msg_name(message: Message, state: FSMContext,
                    pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
@@ -75,7 +75,7 @@ async def cb_desc(callback: CallbackQuery, callback_data: EditCb,
     await callback.answer()
 
 
-@router.message(EditProfile.waiting_desc)
+@router.message(EditProfile.waiting_desc, F.text)
 async def msg_desc(message: Message, state: FSMContext,
                    pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
@@ -102,7 +102,7 @@ async def cb_short(callback: CallbackQuery, callback_data: EditCb,
     await callback.answer()
 
 
-@router.message(EditProfile.waiting_short)
+@router.message(EditProfile.waiting_short, F.text)
 async def msg_short(message: Message, state: FSMContext,
                     pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     data = await state.get_data()
@@ -194,7 +194,7 @@ async def cb_update_token(callback: CallbackQuery, callback_data: EditCb,
     await callback.answer()
 
 
-@router.message(UpdateToken.waiting_token)
+@router.message(UpdateToken.waiting_token, F.text)
 async def msg_update_token(message: Message, state: FSMContext,
                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     token = message.text.strip() if message.text else ""
