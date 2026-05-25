@@ -16,6 +16,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+_DIALOGS_PAGE_SIZE = 10
+
 from bot.callbacks import AccCb, BotCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
@@ -90,7 +92,7 @@ async def _get_account_limit(pool: asyncpg.Pool, user_id: int) -> tuple[str, int
     return plan, ACC_LIMITS.get(plan, 0)
 
 
-def _acc_menu_markup(acc_id: int):
+def _acc_menu_markup(acc_id: int, is_active: bool = True):
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Каналы/группы",
               callback_data=AccCb(action="channels", acc_id=acc_id))
@@ -100,13 +102,18 @@ def _acc_menu_markup(acc_id: int):
               callback_data=AccCb(action="check_health", acc_id=acc_id))
     kb.button(text="📊 Диалоги",
               callback_data=AccCb(action="dialogs_stats", acc_id=acc_id))
+    kb.button(text="📂 Список диалогов",
+              callback_data=AccCb(action="dialogs", acc_id=acc_id, chat_id=0))
     kb.button(text="✉️ Отправить",
               callback_data=AccCb(action="send_msg", acc_id=acc_id))
+    toggle_text = "⏸ Отключить" if is_active else "▶️ Включить"
+    kb.button(text=toggle_text,
+              callback_data=AccCb(action="toggle", acc_id=acc_id))
     kb.button(text="🗑 Удалить",
               callback_data=AccCb(action="remove", acc_id=acc_id))
     kb.button(text="◀️ Мои аккаунты",
               callback_data=AccCb(action="menu"))
-    kb.adjust(2, 2, 1, 1, 1)
+    kb.adjust(2, 2, 1, 1, 2, 1)
     return kb.as_markup()
 
 
@@ -116,6 +123,24 @@ def _cancel_markup():
               callback_data=AccCb(action="menu"))
     kb.adjust(1)
     return kb.as_markup()
+
+
+# ── /cancel — выход из любого FSM-состояния ───────────────────────────────────
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext) -> None:
+    current = await state.get_state()
+    if current is None:
+        await message.answer(
+            "ℹ️ Нет активного действия для отмены.",
+            reply_markup=_cancel_markup(),
+        )
+        return
+    await state.clear()
+    await message.answer(
+        "❌ <b>Действие отменено.</b>\n\nВоспользуйтесь /accounts для управления аккаунтами.",
+        parse_mode="HTML",
+    )
 
 
 # ── /accounts command ──────────────────────────────────────────────────────────
@@ -441,6 +466,7 @@ async def cb_view_account(
     uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
     phone = escape(acc.get("phone") or "")
     tg_id = acc.get("tg_user_id") or ""
+    is_active = bool(acc.get("is_active", True))
 
     lines = ["👤 <b>Аккаунт</b>\n"]
     if name:
@@ -451,11 +477,12 @@ async def cb_view_account(
         lines.append(f"Телефон: <code>{phone}</code>")
     if tg_id:
         lines.append(f"Telegram ID: <code>{tg_id}</code>")
+    lines.append(f"Статус: {'✅ Активен' if is_active else '⏸ Отключён'}")
 
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
-        reply_markup=_acc_menu_markup(callback_data.acc_id),
+        reply_markup=_acc_menu_markup(callback_data.acc_id, is_active=is_active),
     )
 
 

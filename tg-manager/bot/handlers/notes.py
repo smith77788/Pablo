@@ -19,7 +19,6 @@ class EditNote(StatesGroup):
 async def cb_note_edit(callback: CallbackQuery, callback_data: NoteCb,
                        pool: asyncpg.Pool, state: FSMContext) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)

@@ -127,14 +127,14 @@ async def get_account_info(session_string: str) -> dict:
             pass
 
 
-async def get_dialogs(session_string: str, limit: int = 50) -> list[dict]:
-    """Возвращает каналы и группы аккаунта."""
+async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0) -> list[dict]:
+    """Возвращает каналы и группы аккаунта с поддержкой пагинации."""
     from telethon.tl.types import Channel, Chat
     client = _make_client(session_string)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         dialogs = []
-        async for dialog in client.iter_dialogs(limit=limit):
+        async for dialog in client.iter_dialogs(limit=limit, offset_id=offset):
             entity = dialog.entity
             if isinstance(entity, (Channel, Chat)):
                 dialogs.append({
