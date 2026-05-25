@@ -35,8 +35,8 @@ def _heatmap_chart(data: list[dict]) -> str:
 async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
                           pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
         await callback.message.edit_text(
             locked_text("Активность и реактивация", "pro"), parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro"),
@@ -46,15 +46,17 @@ async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     segs = await db.get_activity_segments(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
+    safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     total = segs["total"]
     pct_hot  = round(segs["hot"]  / total * 100) if total else 0
     pct_warm = round(segs["warm"] / total * 100) if total else 0
     pct_cold = round(segs["cold"] / total * 100) if total else 0
     pct_lost = round(segs["lost"] / total * 100) if total else 0
     await callback.message.edit_text(
-        f"🎯 <b>Активность — {label}</b>\n\n"
+        f"🎯 <b>Активность — {safe_label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
         "Система делит вашу аудиторию на 4 группы по тому, когда они последний раз писали боту. Вы можете отправить специальное сообщение именно тем, кто давно не заходил, и вернуть их.\n\n"
         f"Всего отслеживается: <b>{total}</b>\n\n"
@@ -66,7 +68,6 @@ async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
         parse_mode="HTML",
         reply_markup=engagement_menu(callback_data.bot_id, segs),
     )
-    await callback.answer()
 
 
 @router.callback_query(EngageCb.filter(F.action.in_({"segment_hot", "segment_warm"})))
@@ -170,7 +171,6 @@ async def cb_engage_heatmap(callback: CallbackQuery, callback_data: EngageCb,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
 
 
 @router.callback_query(EngageCb.filter(F.action == "top_users"))
@@ -196,7 +196,6 @@ async def cb_engage_top(callback: CallbackQuery, callback_data: EngageCb,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
 
 
 @router.callback_query(EngageCb.filter(F.action == "autotag"))

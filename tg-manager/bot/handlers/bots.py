@@ -132,11 +132,11 @@ async def msg_token(message: Message, state: FSMContext,
 async def cb_select(callback: CallbackQuery, callback_data: BotCb,
                     pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     label = _bot_label(row)
     count = await db.get_audience_count(pool, row["bot_id"])
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

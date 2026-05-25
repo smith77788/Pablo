@@ -68,14 +68,34 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     bot_count = len(bots)
     total_aud = sum(b["audience_count"] for b in bots if "audience_count" in b.keys())
 
+    # Подсчёт активных рассылок по всем ботам пользователя
+    active_broadcasts = 0
     if bot_count:
-        summary = f"Ботов: <b>{bot_count}</b> · Аудитория: <b>{total_aud}</b> чел."
+        try:
+            bot_ids = [b["bot_id"] for b in bots]
+            active_broadcasts = await pool.fetchval(
+                "SELECT COUNT(*) FROM broadcasts WHERE bot_id = ANY($1::bigint[]) AND status IN ('pending', 'running')",
+                bot_ids,
+            ) or 0
+        except Exception:
+            active_broadcasts = 0
+
+    if bot_count:
+        stats_lines = [
+            f"🤖 Ботов: <b>{bot_count}</b>",
+            f"👥 Аудитория: <b>{total_aud}</b> чел.",
+        ]
+        if active_broadcasts:
+            stats_lines.append(f"📢 Активных рассылок: <b>{active_broadcasts}</b>")
+        summary = " · ".join(stats_lines[:2])
+        extra = f"\n{stats_lines[2]}" if active_broadcasts else ""
     else:
         summary = "Добавьте первый бот по токену."
+        extra = ""
 
     await message.answer(
         f"👋 <b>TG Manager</b>\n\n"
-        f"{summary}\n\n"
+        f"{summary}{extra}\n\n"
         f"ID: <code>{uid}</code>",
         parse_mode="HTML",
         reply_markup=main_menu(),
