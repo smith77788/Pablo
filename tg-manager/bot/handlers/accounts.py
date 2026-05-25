@@ -208,7 +208,7 @@ async def _show_accounts_menu(
     kb.button(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu"))
     kb.button(text="⚡ Массовые операции",     callback_data=ChanCb(action="bulk_menu"))
     kb.button(text="◀️ Главное меню",
-              callback_data=BotCb(action="list", page=0))
+              callback_data=BotCb(action="main"))
     kb.adjust(1)
 
     if edit:

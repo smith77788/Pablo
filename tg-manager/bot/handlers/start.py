@@ -136,7 +136,7 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="list", page=0))
+    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
 
     text = (
         f"❓ <b>Справка TG Manager</b>\n\n"

@@ -23,6 +23,32 @@ def _bot_label(row: asyncpg.Record) -> str:
     return f"@{row['username']}" if row["username"] else row["first_name"]
 
 
+# ── Main menu (inline) ───────────────────────────────────────────────────
+
+@router.callback_query(BotCb.filter(F.action == "main"))
+async def cb_main_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
+        return
+    await callback.answer()
+    from bot.utils.subscription import is_platform_admin
+    admin = is_platform_admin(callback.from_user.id)
+    bots = await db.get_bots(pool, callback.from_user.id)
+    bot_count = len(bots)
+    if not bot_count:
+        await callback.message.edit_text(
+            "👋 <b>TG Manager</b>\n\nУ вас пока нет добавленных ботов.\nНажмите ➕ Добавить бота.",
+            parse_mode="HTML",
+            reply_markup=main_menu(is_admin=admin),
+        )
+    else:
+        await callback.message.edit_text(
+            f"👋 <b>TG Manager</b>\n\n🤖 Ботов: <b>{bot_count}</b>\n\nВыберите раздел:",
+            parse_mode="HTML",
+            reply_markup=main_menu(is_admin=admin),
+        )
+
+
 # ── List ──────────────────────────────────────────────────────────────────
 
 @router.callback_query(BotCb.filter(F.action == "list"))

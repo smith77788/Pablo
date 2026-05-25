@@ -61,7 +61,7 @@ def network_ops_menu() -> InlineKeyboardMarkup:
     kb.button(text="🌍 Команды GEO",          callback_data=NetworkCb(action="bulk_commands_lang"))
     kb.button(text="🔍 Проверить токены",     callback_data=NetworkCb(action="bulk_check"))
     kb.button(text="📥 Импорт ботов",         callback_data=NetworkCb(action="bulk_import"))
-    kb.button(text="◀️ Главное меню",         callback_data=BotCb(action="list", page=0))
+    kb.button(text="◀️ Главное меню",         callback_data=BotCb(action="main"))
     kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
@@ -117,7 +117,7 @@ def bulk_menu() -> InlineKeyboardMarkup:
     kb.button(text="🤖 Команды всем",        callback_data=BulkCb(action="commands"))
     kb.button(text="🌍 Команды по GEO",      callback_data=BulkCb(action="commands_lang"))
     kb.button(text="🔍 Проверить токены",    callback_data=BulkCb(action="check"))
-    kb.button(text="◀️ Главное меню",        callback_data=BotCb(action="list", page=0))
+    kb.button(text="◀️ Главное меню",        callback_data=BotCb(action="main"))
     kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
@@ -331,7 +331,7 @@ def templates_list(templates: list, bot_id: int) -> InlineKeyboardMarkup:
     else:
         kb.row(InlineKeyboardButton(
             text="◀️ Главное меню",
-            callback_data=BotCb(action="list", page=0).pack(),
+            callback_data=BotCb(action="main").pack(),
         ))
     return kb.as_markup()
 
@@ -783,7 +783,7 @@ def network_menu() -> InlineKeyboardMarkup:
     kb.button(text="📢 Сетевая рассылка",    callback_data=NetworkCb(action="broadcast"))
     kb.button(text="🔄 Клонировать настройки", callback_data=NetworkCb(action="clone"))
     kb.button(text="👥 Пересечение аудиторий", callback_data=NetworkCb(action="overlap"))
-    kb.button(text="◀️ Главное меню",        callback_data=BotCb(action="list", page=0))
+    kb.button(text="◀️ Главное меню",        callback_data=BotCb(action="main"))
     kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 
