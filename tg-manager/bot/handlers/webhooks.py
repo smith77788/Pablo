@@ -23,15 +23,16 @@ async def cb_webhook_menu(callback: CallbackQuery, callback_data: WebhookCb,
 
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     text = (
-        f"🔗 Webhook {label}\n\n"
-        "• Получить информацию — текущий URL, очередь и параметры.\n"
-        "• Отключить другие боты — снять URL у этого бота "
-        "(если апдейты шли на чужой сервер).\n\n"
-        "Не путать с удалением бота из панели."
+        f"🔗 <b>Webhook — {label}</b>\n\n"
+        "📌 <b>Что это?</b>\n"
+        "Webhook — адрес вашего сервера, куда Telegram отправляет все сообщения боту в реальном времени.\n\n"
+        "💡 <b>Как использовать:</b>\n"
+        "• Проверьте текущий URL и статус очереди\n"
+        "• Если бот «завис» — удалите вебхук, это сбросит очередь\n"
+        "• Не нужен для большинства функций TG Manager (используется polling)"
     )
-    await callback.message.edit_text(text,
+    await callback.message.edit_text(text, parse_mode="HTML",
                                       reply_markup=webhook_menu(callback_data.bot_id))
-    await callback.answer()
 
 
 @router.callback_query(WebhookCb.filter(F.action == "info"))

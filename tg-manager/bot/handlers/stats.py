@@ -27,6 +27,14 @@ async def cb_stats_menu(callback: CallbackQuery, callback_data: StatsCb,
         if stats["funnel_total_subs"] else 0
     )
 
+    hint = (
+        "\n\n📌 <b>Что это?</b>\n"
+        "Статистика показывает рост аудитории, активность рассылок и состояние автоматизации.\n\n"
+        "💡 <b>Как использовать:</b>\n"
+        "• Следите за приростом аудитории по дням\n"
+        "• Оценивайте эффективность рассылок\n"
+        "• Отслеживайте активность цепочек и inbox"
+    )
     text = (
         f"📊 <b>Статистика — {label}</b>\n\n"
         f"👥 <b>Аудитория:</b> {stats['aud_total']} чел.\n"
@@ -42,6 +50,7 @@ async def cb_stats_menu(callback: CallbackQuery, callback_data: StatsCb,
         f"🔗 <b>Цепочек активных:</b> {stats['active_funnels']}\n"
         f"  👤 Подписчиков: {stats['funnel_users']}\n"
         f"  ✅ Завершили: {stats['funnel_completed']} ({completion_rate}%)"
+        + hint
     )
     await callback.message.edit_text(
         text,

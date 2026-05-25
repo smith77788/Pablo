@@ -29,7 +29,12 @@ async def cb_note_edit(callback: CallbackQuery, callback_data: NoteCb,
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
         f"📝 <b>Заметка к боту</b>\n\nТекущая: <i>{current}</i>\n\n"
-        "Отправьте новый текст заметки или «-» чтобы удалить:",
+        "📌 <b>Что это?</b>\n"
+        "Заметка — личная пометка для бота, видна только вам. Помогает не запутаться среди нескольких ботов.\n\n"
+        "💡 <b>Как использовать:</b>\n"
+        "• Запишите назначение бота (например: «продажи», «тест»)\n"
+        "• Отправьте «-» чтобы удалить заметку\n\n"
+        "Отправьте новый текст заметки:",
         parse_mode="HTML",
     )
     await callback.answer()

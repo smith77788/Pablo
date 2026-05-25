@@ -42,14 +42,21 @@ async def cb_commands_menu(callback: CallbackQuery, callback_data: CommandsCb,
         return
     cmds = await bot_api.get_my_commands(http, row["token"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
+    hint = (
+        "\n\n📌 <b>Что это?</b>\n"
+        "Команды бота — список кнопок, которые пользователь видит, набирая / в чате.\n\n"
+        "💡 <b>Как использовать:</b>\n"
+        "• Добавьте команды вида <code>start - Начать</code>\n"
+        "• Команды появятся в меню бота у всех пользователей\n"
+        "• Настройте отдельные команды для разных языков"
+    )
     if cmds:
         lines = "\n".join(f"/{c['command']} — {c['description']}" for c in cmds)
-        text = f"🤖 <b>Команды {label}</b>\n\n{lines}"
+        text = f"🤖 <b>Команды {label}</b>\n\n{lines}" + hint
     else:
-        text = f"🤖 <b>Команды {label}</b>\n\nКоманды не заданы."
+        text = f"🤖 <b>Команды {label}</b>\n\nКоманды не заданы." + hint
     await callback.message.edit_text(text, parse_mode="HTML",
                                       reply_markup=commands_menu(callback_data.bot_id))
-    await callback.answer()
 
 
 @router.callback_query(CommandsCb.filter(F.action == "add"))

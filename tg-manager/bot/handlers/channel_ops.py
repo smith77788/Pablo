@@ -113,6 +113,7 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
 
 # OP label map for display
 _BULK_OP_LABELS = {
+    "create":     "📢 Создать канал/группу",
     "dm":         "✉️ Рассылка по username-списку",
     "join":       "🔗 Вступить в канал",
     "leave":      "🚪 Выйти из канала",
@@ -441,16 +442,12 @@ async def cb_bulk_create_start(
             parse_mode="HTML", reply_markup=_back_kb().as_markup(),
         )
         return
-    await state.set_state(BulkCreateFSM.waiting_title)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
-    await callback.message.edit_text(
-        "🔁 <b>Массовое создание</b>\n\n"
-        "Одинаковый канал/группа будет создан на ВСЕХ активных аккаунтах.\n\n"
-        "Введите название:",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+    accounts = await pool.fetch(
+        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", callback.from_user.id
     )
+    selected = {a["id"] for a in accounts}
+    await state.update_data(bulk_op="create", bulk_selected=list(selected))
+    await _show_bulk_select(callback, pool, "create", selected)
 
 
 @router.message(BulkCreateFSM.waiting_title)
@@ -507,20 +504,20 @@ async def cb_bulk_type_chosen(
     is_group = callback_data.action == "bulk_type_group"
     await state.update_data(is_group=is_group)
     data = await state.get_data()
-    accounts = await _get_accounts(pool, callback.from_user.id)
-    active = [a for a in accounts if a["is_active"]]
+    selected_ids = data.get("bulk_selected", [])
+    n_acc = len(selected_ids)
     title_s = html.escape(data["title"])
     entity = "группа" if is_group else "канал"
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"✅ Создать на {len(active)} аккаунтах", callback_data=ChanCb(action="do_bulk_create"))
-    kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
+    kb.button(text=f"✅ Создать на {n_acc} аккаунтах", callback_data=ChanCb(action="do_bulk_create"))
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     kb.adjust(1)
     await state.set_state(BulkCreateFSM.confirming)
     await callback.message.edit_text(
         f"🔁 <b>Подтверждение массового создания</b>\n\n"
         f"Тип: <b>{entity}</b>\n"
         f"Название: <b>{title_s}</b>\n"
-        f"Аккаунтов: <b>{len(active)}</b>\n\n"
+        f"Аккаунтов: <b>{n_acc}</b>\n\n"
         "⚠️ Telegram может ограничить создание каналов с одного IP. Продолжить?",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -533,12 +530,20 @@ async def cb_do_bulk_create(
 ) -> None:
     await callback.answer("⏳ Запускаю массовое создание...")
     data = await state.get_data()
+    selected_ids = data.get("bulk_selected", [])
     await state.clear()
-    accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE",
-        callback.from_user.id,
-    )
+    if selected_ids:
+        accounts = await pool.fetch(
+            "SELECT id, session_str, first_name, phone FROM tg_accounts "
+            "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            callback.from_user.id, selected_ids,
+        )
+    else:
+        accounts = await pool.fetch(
+            "SELECT id, session_str, first_name, phone FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE",
+            callback.from_user.id,
+        )
     from services import account_manager
     results_ok, results_err = [], []
     for acc in accounts:
@@ -1776,7 +1781,19 @@ async def cb_bulk_confirm_selection(
         return
 
     # Route to the appropriate input step
-    if op == "dm":
+    if op == "create":
+        await state.update_data(bulk_op=op)
+        await state.set_state(BulkCreateFSM.waiting_title)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+        await callback.message.edit_text(
+            f"🔁 <b>Массовое создание</b>\n\n"
+            f"Выбрано аккаунтов: <b>{len(selected_ids)}</b>\n\n"
+            "Введите <b>название</b> канала/группы:",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+
+    elif op == "dm":
         await state.update_data(bulk_op=op)
         await state.set_state(BulkDmFSM.waiting_usernames)
         n_acc = len(selected_ids)
@@ -2177,6 +2194,7 @@ async def fsm_bulk_dm_usernames(message: Message, state: FSMContext) -> None:
 
 @router.message(BulkDmFSM.waiting_text)
 async def fsm_bulk_dm_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    from services import account_manager
     text_to_send = message.text or message.caption or ""
     if not text_to_send.strip():
         await message.answer("⚠️ Текст не может быть пустым. Отправьте текст сообщения:")

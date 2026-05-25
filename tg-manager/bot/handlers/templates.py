@@ -24,12 +24,19 @@ async def cb_templates_list(callback: CallbackQuery, callback_data: TemplateCb,
         if count else
         "📝 <b>Шаблоны сообщений</b>\n\nШаблонов ещё нет."
     )
+    hint = (
+        "\n\n📌 <b>Что это?</b>\n"
+        "Шаблоны — готовые тексты сообщений, которые можно быстро вставлять при рассылке.\n\n"
+        "💡 <b>Как использовать:</b>\n"
+        "• Создайте шаблон один раз\n"
+        "• Используйте его в рассылках без повторного ввода\n"
+        "• Шаблоны доступны для всех ботов в аккаунте"
+    )
     await callback.message.edit_text(
-        header,
+        header + hint,
         parse_mode="HTML",
         reply_markup=templates_list(templates, bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(TemplateCb.filter(F.action == "add"))

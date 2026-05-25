@@ -61,14 +61,23 @@ async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.P
     from bot.utils.subscription import is_platform_admin
     admin = is_platform_admin(callback.from_user.id)
     bots = await db.get_bots(pool, callback.from_user.id)
+    hint = (
+        "\n\n📌 <b>Что это?</b>\n"
+        "Здесь все ваши Telegram-боты. Выберите бота для управления его функциями.\n\n"
+        "💡 <b>Как использовать:</b>\n"
+        "• Нажмите на бота, чтобы открыть его меню\n"
+        "• ➕ Добавить бота — подключите нового через токен BotFather\n"
+        "• Каждый бот управляется независимо"
+    )
     if not bots:
         await callback.message.edit_text(
-            "У вас пока нет добавленных ботов.\nНажмите «➕ Добавить бота».",
+            "У вас пока нет добавленных ботов.\nНажмите «➕ Добавить бота»." + hint,
+            parse_mode="HTML",
             reply_markup=main_menu(is_admin=admin),
         )
     else:
         await callback.message.edit_text(
-            f"🤖 <b>Ваши боты</b> — {len(bots)} шт.",
+            f"🤖 <b>Ваши боты</b> — {len(bots)} шт." + hint,
             parse_mode="HTML",
             reply_markup=bots_list(bots, callback_data.page),
         )

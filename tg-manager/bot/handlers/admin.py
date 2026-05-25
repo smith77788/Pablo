@@ -13,6 +13,7 @@ from aiogram import Router, F
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from aiogram.filters import Command
 from bot.callbacks import BotCb
 from bot.keyboards import main_menu
 from bot.utils.subscription import is_platform_admin
@@ -104,6 +105,15 @@ def _back_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Главное меню админки", callback_data="adm:main")
     return kb.as_markup()
+
+
+# ── /admin команда ─────────────────────────────────────────────────────────────
+
+@router.message(Command("admin"))
+async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        return  # silent — не раскрываем существование команды
+    await _show_admin_main(message, pool, edit=False)
 
 
 # ── Секретная фраза для входа в админку ────────────────────────────────────────
@@ -735,10 +745,28 @@ async def _adm_env_edit_ask(
     kb.button(text="◀️ Назад",              callback_data="adm:env_list")
     kb.adjust(1)
 
+    # Special hint for ADMIN_IDS — show user's own ID
+    extra_hint = ""
+    if key == "ADMIN_IDS":
+        uid = callback.from_user.id
+        extra_hint = (
+            f"\n💡 <b>Ваш Telegram ID:</b> <code>{uid}</code>\n"
+            "Введите через запятую если нужно несколько: "
+            f"<code>{uid},другой_id</code>\n"
+            "После сохранения кнопка ⚙️ Админка появится в главном меню."
+        )
+    elif key == "RAILWAY_TOKEN":
+        extra_hint = "\n💡 Получить: railway.com → Account Settings → Tokens → Create Token"
+    elif key == "RAILWAY_PROJECT_ID":
+        extra_hint = "\n💡 UUID из URL проекта: railway.com/project/<b>ВОТ-ЭТО</b>"
+    elif key in ("TON_WALLET", "TRON_WALLET"):
+        extra_hint = "\n💡 После сохранения кнопка оплаты появится в /subscription"
+
     await callback.message.edit_text(
         f"✏️ <b>{label}</b>\n\n"
         f"Ключ: <code>{key}</code>\n"
-        f"Текущее значение: <code>{masked if masked else 'не задано'}</code>\n\n"
+        f"Текущее значение: <code>{masked if masked else 'не задано'}</code>\n"
+        f"{extra_hint}\n\n"
         "Отправьте новое значение следующим сообщением:",
         parse_mode="HTML", reply_markup=kb.as_markup(),
     )
