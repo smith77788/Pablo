@@ -8,8 +8,9 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from bot.callbacks import AudCb, BotCb
-from bot.keyboards import audience_menu, bots_pick, back_to_bot, user_profile_menu
+from bot.keyboards import audience_menu, bots_pick, back_to_bot, user_profile_menu, subscription_locked_markup
 from bot.states import SendToUser
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
 
@@ -309,6 +310,61 @@ async def msg_send_user_text(message: Message, state: FSMContext,
             parse_mode="HTML",
             reply_markup=audience_menu(bot_id),
         )
+
+
+# ── Export audience from bot menu ─────────────────────────────────────────
+
+@router.callback_query(BotCb.filter(F.action == "export_audience"))
+async def cb_bot_export_audience(callback: CallbackQuery, callback_data: BotCb,
+                                  pool: asyncpg.Pool) -> None:
+    """Export all bot users as a CSV file. Available from STARTER plan."""
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Экспорт аудитории", "starter"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
+
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    await callback.answer("⏳ Генерирую CSV…")
+
+    rows = await db.get_audience_full(pool, callback_data.bot_id)
+    if not rows:
+        await callback.message.answer("📤 Аудитория пуста — нечего экспортировать.")
+        return
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "user_id", "username", "first_name", "last_name",
+        "language_code", "first_seen", "last_seen",
+    ])
+    for r in rows:
+        writer.writerow([
+            r["user_id"],
+            r["username"] or "",
+            r["first_name"] or "",
+            r["last_name"] or "",
+            r["language_code"] or "",
+            r["first_seen"].strftime("%Y-%m-%d %H:%M:%S"),
+            r["last_seen"].strftime("%Y-%m-%d %H:%M:%S"),
+        ])
+
+    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    safe_label = row["username"] or str(callback_data.bot_id)
+    filename = f"audience_{safe_label}.csv"
+    content = buf.getvalue().encode("utf-8-sig")
+
+    await callback.message.answer_document(
+        BufferedInputFile(content, filename=filename),
+        caption=f"📤 <b>Экспорт аудитории {label}</b>\n\nЗаписей: <b>{len(rows)}</b>",
+        parse_mode="HTML",
+    )
 
 
 # ── Block / unblock user ───────────────────────────────────────────────────

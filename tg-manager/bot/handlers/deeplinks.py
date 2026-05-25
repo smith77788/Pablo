@@ -16,8 +16,8 @@ router = Router()
 async def cb_dl_menu(callback: CallbackQuery, callback_data: DeepLinkCb,
                       pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
         await callback.message.edit_text(
             locked_text("Диплинки и рефералы", "starter"), parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter"),
@@ -51,7 +51,6 @@ async def cb_dl_menu(callback: CallbackQuery, callback_data: DeepLinkCb,
 async def cb_dl_view(callback: CallbackQuery, callback_data: DeepLinkCb,
                       pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -64,8 +63,9 @@ async def cb_dl_view(callback: CallbackQuery, callback_data: DeepLinkCb,
     username = row.get("username") or ""
     url = f"https://t.me/{username}?start={link['start_param']}" if username else f"start={link['start_param']}"
     ctr = round(link['unique_users'] / link['click_count'] * 100, 1) if link['click_count'] else 0
+    safe_name = link['name'].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
-        f"🔗 <b>{link['name']}</b>\n\n"
+        f"🔗 <b>{safe_name}</b>\n\n"
         f"Параметр: <code>{link['start_param']}</code>\n"
         f"Ссылка: <code>{url}</code>\n\n"
         f"📊 <b>Статистика:</b>\n"
@@ -130,9 +130,10 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     row = await db.get_bot(pool, data["bot_id"], message.from_user.id)
     username = row.get("username") or "" if row else ""
     url = f"https://t.me/{username}?start={param}" if username else f"?start={param}"
+    safe_link_name = data['link_name'].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await message.answer(
         f"✅ <b>Диплинк создан!</b>\n\n"
-        f"Название: {data['link_name']}\n"
+        f"Название: {safe_link_name}\n"
         f"Ссылка: <code>{url}</code>\n\n"
         "Поделитесь этой ссылкой в нужном месте и отслеживайте трафик.",
         parse_mode="HTML",
@@ -144,7 +145,6 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
 async def cb_dl_delete(callback: CallbackQuery, callback_data: DeepLinkCb,
                         pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     await db.delete_deep_link(pool, callback_data.link_id, callback_data.bot_id)
     links = await db.get_deep_links(pool, callback_data.bot_id)
     total_refs = await db.get_referral_total(pool, callback_data.bot_id)
@@ -160,7 +160,6 @@ async def cb_dl_delete(callback: CallbackQuery, callback_data: DeepLinkCb,
 async def cb_dl_leaders(callback: CallbackQuery, callback_data: DeepLinkCb,
                          pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     leaders = await db.get_referral_leaderboard(pool, callback_data.bot_id, limit=10)
     total = await db.get_referral_total(pool, callback_data.bot_id)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
