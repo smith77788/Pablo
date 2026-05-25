@@ -195,8 +195,14 @@ class BulkCreateFSM(StatesGroup):
     waiting_about = State()
     choosing_type = State()
     waiting_count = State()
+    choosing_name_mode = State()
     choosing_accounts = State()
     confirming = State()
+
+
+class BulkPostChansFSM(StatesGroup):
+    choosing_channels = State()
+    waiting_text = State()
 
 
 class BulkDmFSM(StatesGroup):

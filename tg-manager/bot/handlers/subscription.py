@@ -202,10 +202,13 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
 
 @router.callback_query(SubCb.filter(F.action == "choose_period"))
 async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb) -> None:
-    await callback.answer()
     plan, months = callback_data.plan, callback_data.months
     ton = _ton_wallet()
     tron = _tron_wallet()
+    if not ton and not tron:
+        await callback.answer("Оплата временно недоступна. Свяжитесь с поддержкой.", show_alert=True)
+        return
+    await callback.answer()
     kb = InlineKeyboardBuilder()
     if ton:
         kb.button(
@@ -217,12 +220,9 @@ async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb) -> Non
             text="💵 USDT (TRC-20)",
             callback_data=SubCb(action="pay", plan=plan, months=months, currency="USDT_TRC20"),
         )
-    if not ton and not tron:
-        await callback.answer("Оплата временно недоступна. Свяжитесь с поддержкой.", show_alert=True)
-        return
     kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan))
     kb.adjust(1)
-    usd, _ = _calc(plan, months, "TON")
+    usd, _ = _calc(plan, months, "TON" if ton else "USDT_TRC20")
     await callback.message.edit_text(
         f"💳 <b>{plan.upper()} × {months} мес.</b>\n\nИтого: <b>${usd}</b>\n\nВыберите способ оплаты:",
         parse_mode="HTML",

@@ -409,6 +409,9 @@ async def create_channel(
             "invite_link": invite_link,
         }
     except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            return {"error": f"FloodWait {e.seconds}с — Telegram ограничил создание", "flood_wait": e.seconds}
         log.exception("create_channel error: %s", e)
         return {"error": str(e)[:200]}
     finally:
@@ -676,17 +679,37 @@ async def kick_from_channel(
 
 async def post_to_channel(
     session_string: str, channel_id: int | str, text: str
-) -> int | None:
-    """Post a text message to a channel/group. Returns message_id or None."""
+) -> dict:
+    """Post a text message to a channel/group.
+
+    Returns {"msg_id": int} on success or {"error": str, "flood_wait"?: int} on failure.
+    """
+    from telethon.tl.types import PeerChannel
+    from telethon.errors import FloodWaitError, ChatWriteForbiddenError, UserNotParticipantError
     client = _make_client(session_string)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(channel_id)
-        msg = await client.send_message(entity, text)
-        return msg.id
+        # Convert positive numeric IDs to PeerChannel so Telethon resolves them correctly.
+        # Fresh clients have no entity cache, so get_entity(positive_int) would fail.
+        if isinstance(channel_id, int) and channel_id > 0:
+            peer = PeerChannel(channel_id)
+        elif isinstance(channel_id, str) and channel_id.lstrip("-").isdigit():
+            n = int(channel_id)
+            peer = PeerChannel(abs(n)) if n > 0 else channel_id
+        else:
+            peer = channel_id  # @username or already-negative ID — pass as-is
+        entity = await client.get_entity(peer)
+        msg = await client.send_message(entity, text, parse_mode="html")
+        return {"msg_id": msg.id}
+    except FloodWaitError as e:
+        return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds}
+    except ChatWriteForbiddenError:
+        return {"error": "Нет прав для публикации в этом канале"}
+    except UserNotParticipantError:
+        return {"error": "Аккаунт не является участником канала"}
     except Exception as e:
         log.exception("post_to_channel error: %s", e)
-        return None
+        return {"error": str(e)[:150]}
     finally:
         try:
             await client.disconnect()
@@ -878,6 +901,9 @@ async def create_bot_via_botfather(
             "display_name": bot_display_name,
         }
     except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            return {"error": f"FloodWait {e.seconds}с — Telegram ограничил создание", "flood_wait": e.seconds}
         log.exception("create_bot_via_botfather error: %s", e)
         return {"error": str(e)[:200]}
     finally:
