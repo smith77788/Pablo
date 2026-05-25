@@ -28,11 +28,11 @@ _SYSTEM_PROMPT = (
 
 _MAX_TURNS = 100  # практически без ограничений
 
-# Модели для fallback при превышении лимита — первой всегда идёт основная модель
+# Проверенные slugи OpenRouter — в порядке приоритета
 _FALLBACK_MODELS = [
-    "anthropic/claude-3.5-sonnet",
-    "anthropic/claude-3-haiku",
     "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+    "anthropic/claude-3.5-sonnet",
     "google/gemini-flash-1.5",
     "meta-llama/llama-3.1-8b-instruct:free",
 ]
@@ -44,7 +44,7 @@ def _get_api_key() -> str:
 
 
 def _get_model() -> str:
-    return os.getenv("OPENROUTER_MODEL", "") or OPENROUTER_MODEL or "anthropic/claude-3.5-sonnet"
+    return os.getenv("OPENROUTER_MODEL", "") or OPENROUTER_MODEL or "openai/gpt-4o-mini"
 
 
 def _get_models_to_try() -> list[str]:
@@ -78,20 +78,23 @@ async def _call_openrouter(messages: list, pool: asyncpg.Pool, user_id: int) -> 
             "Добавьте её в настройки Railway и перезапустите сервис."
         )
     try:
-        from openai import AsyncOpenAI, RateLimitError
+        from openai import AsyncOpenAI
     except ImportError:
         return "⚠️ Библиотека openai не установлена (pip install openai)."
 
     client = AsyncOpenAI(
         api_key=api_key,
         base_url="https://openrouter.ai/api/v1",
+        timeout=60.0,
     )
-    current_messages = [{"role": "system", "content": _SYSTEM_PROMPT}] + list(messages)
+    base_messages = [{"role": "system", "content": _SYSTEM_PROMPT}] + list(messages)
     tools = _openai_tools()
     primary_model = _get_model()
     models_to_try = _get_models_to_try()
 
     for model in models_to_try:
+        # Сбрасываем историю инструментов для каждой новой модели
+        current_messages = list(base_messages)
         try:
             for _ in range(5):  # макс. 5 итераций с инструментами
                 response = await client.chat.completions.create(
@@ -105,7 +108,23 @@ async def _call_openrouter(messages: list, pool: asyncpg.Pool, user_id: int) -> 
                 msg = choice.message
 
                 if choice.finish_reason == "tool_calls" and msg.tool_calls:
-                    current_messages.append(msg.model_dump())
+                    # Сериализуем сообщение вручную, чтобы избежать null content
+                    assistant_msg: dict = {
+                        "role": "assistant",
+                        "content": msg.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                            for tc in msg.tool_calls
+                        ],
+                    }
+                    current_messages.append(assistant_msg)
                     for tc in msg.tool_calls:
                         try:
                             args = json.loads(tc.function.arguments)
@@ -122,18 +141,19 @@ async def _call_openrouter(messages: list, pool: asyncpg.Pool, user_id: int) -> 
                     return (msg.content or "Нет ответа.") + suffix
             return "Превышен лимит итераций инструментов."
 
-        except RateLimitError:
-            log.warning("Rate limit for model %s, trying next", model)
-            continue
         except Exception as e:
             err_str = str(e).lower()
-            if "rate" in err_str or "limit" in err_str or "429" in err_str or "quota" in err_str:
-                log.warning("Quota/rate error for model %s: %s, trying next", model, e)
+            should_retry = any(x in err_str for x in (
+                "rate", "limit", "429", "quota", "overloaded", "timeout",
+                "model_not_found", "not found", "404", "invalid model",
+            ))
+            if should_retry:
+                log.warning("Model %s failed (%s), trying next", model, type(e).__name__)
                 continue
             log.exception("OpenRouter API error with model %s: %s", model, e)
-            return f"⚠️ Ошибка AI-ассистента: {type(e).__name__}: {str(e)[:100]}"
+            return f"⚠️ Ошибка AI-ассистента ({model}): {type(e).__name__}: {str(e)[:120]}"
 
-    return "⚠️ Все модели недоступны. Попробуйте позже."
+    return "⚠️ Все модели недоступны. Попробуйте позже или смените OPENROUTER_MODEL."
 
 
 @router.message(Command("ai"))

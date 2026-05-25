@@ -178,7 +178,7 @@ TOOL_DEFINITIONS = [
     {
         "name": "get_my_bots",
         "description": "Get list of all user's bots with basic stats (audience, swarm status, cluster)",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
+        "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "get_bot_details",
@@ -192,7 +192,7 @@ TOOL_DEFINITIONS = [
     {
         "name": "get_network_stats",
         "description": "Get aggregated statistics across all user's bots",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
+        "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "get_audience_activity",
