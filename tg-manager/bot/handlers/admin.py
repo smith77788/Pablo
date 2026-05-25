@@ -111,8 +111,12 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
         f"📅 {datetime.utcnow().strftime('%d.%m.%Y %H:%M')} UTC"
     )
     if edit and hasattr(msg_or_cb, "message"):
-        await msg_or_cb.message.edit_text(text, parse_mode="HTML",
-                                           reply_markup=_admin_main_kb())
+        try:
+            await msg_or_cb.message.edit_text(text, parse_mode="HTML",
+                                               reply_markup=_admin_main_kb())
+        except Exception as e:
+            if "message is not modified" not in str(e):
+                raise
     else:
         target = msg_or_cb if hasattr(msg_or_cb, "answer") else msg_or_cb.message
         await target.answer(text, parse_mode="HTML", reply_markup=_admin_main_kb())

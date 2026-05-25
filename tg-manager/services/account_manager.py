@@ -1,5 +1,6 @@
 """Telethon user account session management."""
 from __future__ import annotations
+import asyncio
 import logging
 from config import TG_API_ID, TG_API_HASH
 
@@ -8,20 +9,43 @@ log = logging.getLogger(__name__)
 # In-memory pending clients (phone -> client) during login flow
 _pending: dict[str, object] = {}
 
+# Таймаут подключения в секундах
+_CONNECT_TIMEOUT = 30
+
 
 def _make_client(session_string: str = ""):
     from telethon import TelegramClient
     from telethon.sessions import StringSession
-    return TelegramClient(StringSession(session_string), int(TG_API_ID), TG_API_HASH)
+    return TelegramClient(
+        StringSession(session_string),
+        int(TG_API_ID),
+        TG_API_HASH,
+        connection_retries=1,
+        timeout=_CONNECT_TIMEOUT,
+    )
 
 
 async def start_login(phone: str) -> str:
-    """Start phone login. Returns phone_code_hash."""
+    """Начинает авторизацию по номеру телефона. Возвращает phone_code_hash."""
+    from telethon.errors import FloodWaitError
     if not TG_API_ID or not TG_API_HASH:
         raise ValueError("TG_API_ID / TG_API_HASH не настроены. Укажите в переменных среды.")
     client = _make_client()
-    await client.connect()
-    result = await client.send_code_request(phone)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        result = await client.send_code_request(phone)
+    except FloodWaitError as e:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise
+    except Exception:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise
     _pending[phone] = client
     return result.phone_code_hash
 
