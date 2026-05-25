@@ -120,7 +120,9 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
             text="❓ Что входит в план",
             callback_data=SubCb(action="plan_features", plan=p),
         )
-    kb.adjust(2)
+    from bot.callbacks import BotCb
+    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="list", page=0))
+    kb.adjust(2, 2, 2, 1)
     return text, kb.as_markup()
 
 

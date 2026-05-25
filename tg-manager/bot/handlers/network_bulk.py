@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from bot.callbacks import NetworkCb, BulkCb, BotCb
 from bot.keyboards import network_ops_menu, main_menu, subscription_locked_markup
 from bot.states import BulkEdit, ImportBots
-from bot.utils.subscription import require_plan, locked_text
+from bot.utils.subscription import require_plan, locked_text, is_platform_admin
 from database import db
 from services import bot_api
 
@@ -312,7 +312,7 @@ async def msg_import_tokens(message: Message, state: FSMContext,
     await state.clear()
     lines = [l.strip() for l in (message.text or "").strip().splitlines() if l.strip()]
     if not lines:
-        await message.answer("❌ Не найдено ни одного токена.", reply_markup=main_menu())
+        await message.answer("❌ Не найдено ни одного токена.", reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)))
         return
     progress = await message.answer(f"⏳ Проверяю {len(lines)} токенов…")
     import asyncio as _aio
@@ -335,7 +335,7 @@ async def msg_import_tokens(message: Message, state: FSMContext,
     detail = "\n".join((added + skipped + failed)[:30])
     await progress.edit_text(
         f"📥 <b>Результат импорта</b>\n\n" + "\n".join(parts) + (f"\n\n{detail}" if detail else ""),
-        parse_mode="HTML", reply_markup=main_menu(),
+        parse_mode="HTML", reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
     )
 
 
