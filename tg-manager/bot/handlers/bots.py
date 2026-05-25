@@ -10,13 +10,8 @@ from bot.states import AddBot
 from bot.utils.subscription import get_bot_limit
 from database import db
 from services import bot_api
-from config import ADMIN_IDS
 
 router = Router()
-
-
-def _is_admin(uid: int) -> bool:
-    return not ADMIN_IDS or uid in ADMIN_IDS
 
 
 def _bot_label(row: asyncpg.Record) -> str:
@@ -27,9 +22,6 @@ def _bot_label(row: asyncpg.Record) -> str:
 
 @router.callback_query(BotCb.filter(F.action == "main"))
 async def cb_main_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
-        return
     await callback.answer()
     from bot.utils.subscription import is_platform_admin
     admin = is_platform_admin(callback.from_user.id)
@@ -53,10 +45,6 @@ async def cb_main_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(BotCb.filter(F.action == "list"))
 async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool) -> None:
-
-    if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
-        return
     await callback.answer()
     from bot.utils.subscription import is_platform_admin
     admin = is_platform_admin(callback.from_user.id)
@@ -87,9 +75,6 @@ async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.P
 
 @router.callback_query(BotCb.filter(F.action == "add"))
 async def cb_add(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
-        return
     await callback.answer()
     from bot.utils.subscription import get_plan
     current_plan = await get_plan(pool, callback.from_user.id)

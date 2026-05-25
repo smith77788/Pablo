@@ -202,3 +202,9 @@ class BulkCreateFSM(StatesGroup):
 class BulkDmFSM(StatesGroup):
     waiting_usernames = State()
     waiting_text = State()
+
+
+class MyChannelsFSM(StatesGroup):
+    choosing_account = State()
+    browsing = State()
+    posting = State()
