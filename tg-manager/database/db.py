@@ -199,6 +199,14 @@ async def get_recent_broadcasts(pool: asyncpg.Pool, bot_id: int, limit: int = 10
     )
 
 
+async def get_broadcast_history(pool: asyncpg.Pool, bot_id: int, limit: int = 5) -> list[asyncpg.Record]:
+    """Return last N broadcasts with stats for summary view."""
+    return await pool.fetch(
+        "SELECT * FROM broadcasts WHERE bot_id=$1 ORDER BY created_at DESC LIMIT $2",
+        bot_id, limit,
+    )
+
+
 # ── Audience stats ────────────────────────────────────────────────────────
 
 async def get_audience_stats(pool: asyncpg.Pool, bot_id: int) -> dict:

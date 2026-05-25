@@ -292,6 +292,56 @@ async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
                                                                     bc["id"] if bc["status"] == "running" else None))
 
 
+@router.callback_query(BroadcastCb.filter(F.action == "bc_summary"))
+async def cb_bc_summary(callback: CallbackQuery, callback_data: BroadcastCb,
+                         pool: asyncpg.Pool) -> None:
+    """Show a concise summary of last 5 broadcasts with delivery stats."""
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    history = await db.get_broadcast_history(pool, callback_data.bot_id, limit=5)
+    if not history:
+        await callback.answer("Рассылок пока не было.", show_alert=True)
+        return
+    await callback.answer()
+
+    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}
+    lines = []
+    total_sent = 0
+    total_users = 0
+    for bc in history:
+        emoji = status_emoji.get(bc["status"], "❓")
+        date_str = bc["created_at"].strftime("%d.%m.%Y %H:%M")
+        sent = bc["sent_count"] or 0
+        total = bc["total_users"] or 0
+        delivery_pct = round(sent / total * 100) if total else 0
+        bar_filled = delivery_pct // 10
+        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+        lines.append(
+            f"{emoji} <b>#{bc['id']}</b> {date_str}\n"
+            f"   {bar} {delivery_pct}% ({sent}/{total})"
+        )
+        total_sent += sent
+        total_users += total
+
+    overall_pct = round(total_sent / total_users * 100) if total_users else 0
+    summary_block = "\n\n".join(lines)
+
+    await callback.message.edit_text(
+        f"📈 <b>Сводка рассылок — {safe_label}</b>\n\n"
+        f"{summary_block}\n\n"
+        f"─────────────────\n"
+        f"📊 Итого за 5 рассылок:\n"
+        f"Отправлено: <b>{total_sent}</b> / {total_users} (<b>{overall_pct}%</b>)",
+        parse_mode="HTML",
+        reply_markup=broadcast_detail(callback_data.bot_id),
+    )
+
+
 @router.callback_query(BroadcastCb.filter(F.action == "from_template"))
 async def cb_from_template(callback: CallbackQuery, callback_data: BroadcastCb,
                             pool: asyncpg.Pool) -> None:

@@ -225,8 +225,9 @@ def broadcast_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="📋 Из шаблона",          callback_data=BroadcastCb(action="from_template", bot_id=bot_id))
     kb.button(text="🎯 По сегменту",         callback_data=BroadcastCb(action="segment", bot_id=bot_id))
     kb.button(text="📋 История рассылок",    callback_data=BroadcastCb(action="status", bot_id=bot_id))
+    kb.button(text="📈 Сводка рассылок",     callback_data=BroadcastCb(action="bc_summary", bot_id=bot_id))
     kb.button(text="◀️ Назад",               callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2, 1, 1)
     return kb.as_markup()
 
 
