@@ -5,16 +5,11 @@ from aiogram.types import Message, CallbackQuery
 import asyncpg
 from bot.keyboards import main_menu
 from bot.utils.subscription import get_plan, PLAN_EMOJIS, is_platform_admin
-from config import ADMIN_IDS
 from database import db
 from bot.callbacks import BotCb
 from bot.handlers.admin import notify_new_platform_user
 
 router = Router()
-
-
-def _is_admin(user_id: int) -> bool:
-    return not ADMIN_IDS or user_id in ADMIN_IDS
 
 
 @router.message(Command("cancel"))
@@ -44,10 +39,6 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
             return
     except Exception:
         pass
-
-    if not _is_admin(uid):
-        await message.answer("⛔️ Доступ запрещён.")
-        return
 
     try:
         is_new = not await pool.fetchval(
@@ -166,9 +157,6 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
     uid = message.from_user.id
     admin = is_platform_admin(uid)
-    if not _is_admin(uid):
-        await message.answer("⛔️ Доступ запрещён.")
-        return
     try:
         plan = await get_plan(pool, uid)
     except Exception:

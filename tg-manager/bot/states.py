@@ -173,6 +173,7 @@ class UpdateProfileFSM(StatesGroup):
 
 
 class CreateBotFSM(StatesGroup):
+    waiting_count = State()
     waiting_name = State()
     waiting_username = State()
 
@@ -193,6 +194,7 @@ class BulkCreateFSM(StatesGroup):
     waiting_title = State()
     waiting_about = State()
     choosing_type = State()
+    waiting_count = State()
     choosing_accounts = State()
     confirming = State()
 

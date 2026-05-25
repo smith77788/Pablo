@@ -111,6 +111,7 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
 # OP label map for display
 _BULK_OP_LABELS = {
     "create":     "📢 Создать канал/группу",
+    "botfather":  "🤖 Создать бота через @BotFather",
     "dm":         "✉️ Рассылка по username-списку",
     "join":       "🔗 Вступить в канал",
     "leave":      "🚪 Выйти из канала",
@@ -500,24 +501,42 @@ async def cb_bulk_type_chosen(
     await callback.answer()
     is_group = callback_data.action == "bulk_type_group"
     await state.update_data(is_group=is_group)
+    await state.set_state(BulkCreateFSM.waiting_count)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+    await callback.message.edit_text(
+        "📢 <b>Сколько каналов создать на каждом аккаунте?</b>\n\n"
+        "Введите число от 1 до 10:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkCreateFSM.waiting_count)
+async def fsm_bulk_create_count(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not (1 <= int(raw) <= 10):
+        await message.answer("⚠️ Введите число от 1 до 10:")
+        return
+    count = int(raw)
+    await state.update_data(channel_count=count)
     data = await state.get_data()
     selected_ids = data.get("bulk_selected", [])
     n_acc = len(selected_ids)
+    total = n_acc * count
     title_s = html.escape(data["title"])
-    entity = "группа" if is_group else "канал"
+    entity = "группа" if data.get("is_group") else "канал"
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"✅ Создать на {n_acc} аккаунтах", callback_data=ChanCb(action="do_bulk_create"))
+    kb.button(text=f"✅ Создать {total} объект(ов)", callback_data=ChanCb(action="do_bulk_create"))
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     kb.adjust(1)
     await state.set_state(BulkCreateFSM.confirming)
-    await callback.message.edit_text(
+    await message.answer(
         f"🔁 <b>Подтверждение массового создания</b>\n\n"
         f"Тип: <b>{entity}</b>\n"
         f"Название: <b>{title_s}</b>\n"
-        f"Аккаунтов: <b>{n_acc}</b>\n\n"
+        f"Аккаунтов: <b>{n_acc}</b> × <b>{count}</b> = итого <b>{total}</b>\n\n"
         "⚠️ Telegram может ограничить создание каналов с одного IP. Продолжить?",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+        parse_mode="HTML", reply_markup=kb.as_markup(),
     )
 
 
@@ -542,20 +561,23 @@ async def cb_do_bulk_create(
             callback.from_user.id,
         )
     from services import account_manager
+    channel_count = data.get("channel_count", 1)
     results_ok, results_err = [], []
     for acc in accounts:
-        result = await account_manager.create_channel(
-            acc["session_str"],
-            title=data["title"],
-            about=data.get("about", ""),
-            megagroup=data.get("is_group", False),
-        )
-        label = acc["first_name"] or acc["phone"]
-        if "error" in result:
-            results_err.append(f"❌ {html.escape(label)}: {html.escape(result['error'][:60])}")
-        else:
-            results_ok.append(f"✅ {html.escape(label)}: id={result['channel_id']}")
-        await asyncio.sleep(2)
+        label = html.escape(acc["first_name"] or acc["phone"])
+        for i in range(channel_count):
+            suffix = f" {i + 1}" if channel_count > 1 else ""
+            result = await account_manager.create_channel(
+                acc["session_str"],
+                title=data["title"] + suffix,
+                about=data.get("about", ""),
+                megagroup=data.get("is_group", False),
+            )
+            if "error" in result:
+                results_err.append(f"❌ {label}{suffix}: {html.escape(result['error'][:60])}")
+            else:
+                results_ok.append(f"✅ {label}{suffix}: id={result['channel_id']}")
+            await asyncio.sleep(2)
 
     lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err
@@ -1276,7 +1298,7 @@ for _prof_action, _prof_field, _prof_prompt in [
 
 @router.callback_query(ChanCb.filter(F.action == "botfather_pick"))
 async def cb_botfather_pick_account(
-    callback: CallbackQuery, pool: asyncpg.Pool
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _PRO):
@@ -1285,34 +1307,23 @@ async def cb_botfather_pick_account(
             parse_mode="HTML", reply_markup=_back_kb().as_markup(),
         )
         return
-    accounts = await _get_accounts(pool, callback.from_user.id)
-    active = [a for a in accounts if a["is_active"]]
-    kb = _account_picker_kb(active, "botfather_start")
-    await callback.message.edit_text(
-        "🤖 <b>Создать бота через @BotFather</b>\n\nВыберите аккаунт:",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
-    )
+    await state.update_data(bulk_op="botfather", bulk_selected=[])
+    await _show_bulk_select(callback, pool, "botfather", set())
 
 
-@router.callback_query(ChanCb.filter(F.action == "botfather_start"))
-async def cb_botfather_account_chosen(
-    callback: CallbackQuery, callback_data: ChanCb, state: FSMContext, pool: asyncpg.Pool
-) -> None:
-    acc = await pool.fetchrow(
-        "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
-    if not acc:
-        await callback.answer("Аккаунт не найден.", show_alert=True)
+@router.message(CreateBotFSM.waiting_count)
+async def fsm_botfather_count(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not (1 <= int(raw) <= 5):
+        await message.answer("⚠️ Введите число от 1 до 5:")
         return
-    await callback.answer()
+    await state.update_data(bot_count=int(raw))
     await state.set_state(CreateBotFSM.waiting_name)
-    await state.update_data(acc_id=acc["id"])
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
-    await callback.message.edit_text(
-        "🤖 <b>Создание бота</b>\n\n"
-        "Шаг 1/2: Введите <b>отображаемое имя</b> бота (можно на любом языке):\n\n"
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+    await message.answer(
+        "🤖 <b>Создание ботов</b>\n\n"
+        "Введите <b>отображаемое имя</b> бота (одинаковое для всех):\n\n"
         "Например: <i>My Sales Bot</i>",
         parse_mode="HTML", reply_markup=kb.as_markup(),
     )
@@ -1327,10 +1338,11 @@ async def fsm_botfather_name(message: Message, state: FSMContext) -> None:
     await state.update_data(bot_name=name)
     await state.set_state(CreateBotFSM.waiting_username)
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     await message.answer(
         f"🤖 Имя: <b>{html.escape(name)}</b>\n\n"
-        "Шаг 2/2: Введите <b>username</b> бота (только a-z, 0-9, _, должен заканчиваться на 'bot'):\n\n"
+        "Введите <b>базовый username</b> бота.\n"
+        "Для нескольких ботов будет добавляться порядковый номер (например: <i>mysalesbot</i>, <i>mysalesbot2</i>):\n\n"
         "Например: <i>mysalesbot</i>",
         parse_mode="HTML", reply_markup=kb.as_markup(),
     )
@@ -1338,51 +1350,62 @@ async def fsm_botfather_name(message: Message, state: FSMContext) -> None:
 
 @router.message(CreateBotFSM.waiting_username)
 async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
-    username = (message.text or "").strip().lstrip("@")
-    if not username or len(username) < 5:
+    base_username = (message.text or "").strip().lstrip("@")
+    if not base_username or len(base_username) < 5:
         await message.answer("⚠️ Username минимум 5 символов.")
         return
     data = await state.get_data()
     await state.clear()
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        data.get("acc_id"), message.from_user.id,
+
+    selected_ids = data.get("bulk_selected", [])
+    bot_count = data.get("bot_count", 1)
+
+    # Fallback to single-account mode (legacy path, shouldn't normally trigger)
+    if not selected_ids and data.get("acc_id"):
+        selected_ids = [data["acc_id"]]
+
+    accounts = await pool.fetch(
+        "SELECT id, session_str, first_name, phone FROM tg_accounts "
+        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+        message.from_user.id, selected_ids,
     )
-    if not acc:
-        await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
+    if not accounts:
+        await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
         return
+
+    total = len(accounts) * bot_count
     msg = await message.answer(
-        "⏳ <b>Создаю бота через @BotFather...</b>\n\n"
-        "Это займёт 5–15 секунд. Не нажимайте ничего.",
+        f"⏳ <b>Создаю ботов через @BotFather...</b>\n\n"
+        f"Аккаунтов: {len(accounts)} × {bot_count} = {total} бот(ов)\n"
+        "Это займёт некоторое время. Не нажимайте ничего.",
         parse_mode="HTML",
     )
+
     from services import account_manager
-    result = await account_manager.create_bot_via_botfather(
-        acc["session_str"], data["bot_name"], username
-    )
-    kb = _back_kb()
-    if "error" in result:
-        await msg.edit_text(
-            f"❌ <b>Ошибка создания бота</b>\n\n<code>{html.escape(result['error'])}</code>",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
-        )
-        return
-    token = result["token"]
-    bot_uname = result["username"]
-    kb2 = InlineKeyboardBuilder()
-    kb2.button(text="➕ Добавить бота в платформу", callback_data=f"add_bot_token:{token}")
-    kb2.button(text="◀️ Меню", callback_data=ChanCb(action="menu").pack())
-    kb2.adjust(1)
-    await msg.edit_text(
-        f"✅ <b>Бот создан!</b>\n\n"
-        f"Имя: <b>{html.escape(result['display_name'])}</b>\n"
-        f"Username: @{html.escape(bot_uname)}\n"
-        f"Токен: <code>{token}</code>\n\n"
-        "⚠️ Сохраните токен — он показан один раз.\n\n"
-        "Нажмите кнопку ниже чтобы добавить бота в платформу:",
-        parse_mode="HTML",
-        reply_markup=kb2.as_markup(),
-    )
+    results_ok, results_err = [], []
+
+    for acc in accounts:
+        acc_label = html.escape(acc["first_name"] or acc["phone"])
+        for i in range(bot_count):
+            # Append index suffix for bot_count > 1 or multiple accounts
+            suffix = str(i + 1) if (bot_count > 1 or len(accounts) > 1) else ""
+            username = base_username.rstrip("bot") + (suffix if suffix else "") + "bot" if base_username.endswith("bot") else base_username + suffix
+            result = await account_manager.create_bot_via_botfather(
+                acc["session_str"], data["bot_name"], username
+            )
+            if "error" in result:
+                results_err.append(f"❌ {acc_label} [{username}]: {html.escape(result['error'][:60])}")
+            else:
+                token = result["token"]
+                results_ok.append(
+                    f"✅ {acc_label}: @{html.escape(result['username'])} — <code>{token}</code>"
+                )
+            await asyncio.sleep(3)
+
+    lines = [f"🤖 <b>Результаты создания ботов</b> ({len(results_ok)}/{total})\n"]
+    lines += results_ok + results_err
+    kb2 = _back_kb()
+    await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb2.as_markup())
 
 
 @router.callback_query(F.data.startswith("add_bot_token:"))
@@ -1845,6 +1868,18 @@ async def cb_bulk_confirm_selection(
             f"📤 <b>Опубликовать пост</b>\n\n"
             f"Выбрано аккаунтов: <b>{len(selected_ids)}</b>\n\n"
             "Введите username или числовой ID канала для публикации:",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+
+    elif op == "botfather":
+        await state.update_data(bulk_op=op)
+        await state.set_state(CreateBotFSM.waiting_count)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+        await callback.message.edit_text(
+            f"🤖 <b>Создать боты через @BotFather</b>\n\n"
+            f"Выбрано аккаунтов: <b>{len(selected_ids)}</b>\n\n"
+            "Сколько ботов создать на каждом аккаунте? (1–5):",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
 
