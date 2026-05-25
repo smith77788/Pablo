@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import asyncpg
 
 PLAN_LEVELS: dict[str, int] = {"free": 0, "starter": 1, "pro": 2, "enterprise": 3}
@@ -12,7 +13,20 @@ PLAN_FEATURES = {
 }
 
 
+def _admin_ids() -> set[int]:
+    raw = os.getenv("ADMIN_IDS", "")
+    return {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+
+
+def is_platform_admin(user_id: int) -> bool:
+    """Admins bypass all subscription gates and get enterprise access."""
+    ids = _admin_ids()
+    return bool(ids) and user_id in ids
+
+
 async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
+    if is_platform_admin(user_id):
+        return "enterprise"
     row = await pool.fetchrow(
         "SELECT plan FROM subscriptions "
         "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
@@ -22,11 +36,15 @@ async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
 
 
 async def require_plan(pool: asyncpg.Pool, user_id: int, min_plan: str) -> bool:
+    if is_platform_admin(user_id):
+        return True
     plan = await get_plan(pool, user_id)
     return PLAN_LEVELS.get(plan, 0) >= PLAN_LEVELS.get(min_plan, 0)
 
 
 async def get_bot_limit(pool: asyncpg.Pool, user_id: int) -> int:
+    if is_platform_admin(user_id):
+        return 9999
     plan = await get_plan(pool, user_id)
     return BOT_LIMITS.get(plan, 3)
 

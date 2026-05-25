@@ -32,11 +32,13 @@ async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.P
         await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
         return
     await callback.answer()
+    from bot.utils.subscription import is_platform_admin
+    admin = is_platform_admin(callback.from_user.id)
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         await callback.message.edit_text(
             "У вас пока нет добавленных ботов.\nНажмите «➕ Добавить бота».",
-            reply_markup=main_menu(),
+            reply_markup=main_menu(is_admin=admin),
         )
     else:
         await callback.message.edit_text(
@@ -142,7 +144,7 @@ async def msg_token(message: Message, state: FSMContext,
         safe_uname = (bot_info.get('username') or '').replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         await info_msg.edit_text(
             f"⚠️ Бот @{safe_uname} уже добавлен.",
-            reply_markup=main_menu(),
+            reply_markup=main_menu(is_admin=_is_admin(callback.from_user.id)),
         )
         return
 

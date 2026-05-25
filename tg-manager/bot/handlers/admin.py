@@ -14,6 +14,8 @@ from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BotCb
+from bot.keyboards import main_menu
+from bot.utils.subscription import is_platform_admin
 from config import ADMIN_IDS, ADMIN_SECRET
 from database import db
 from services import railway_api
@@ -58,7 +60,8 @@ def _admin_main_kb():
     kb.button(text="🔍 Поиск юзера",            callback_data="adm:find_user")
     kb.button(text="⚙️ Системный режим Swarm",   callback_data="adm:swarm_mode")
     kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1, 1)
+    kb.button(text="◀️ Выйти из админки",        callback_data="adm:exit")
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1, 1, 1)
     return kb.as_markup()
 
 
@@ -306,6 +309,12 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
         await db.set_system_mode(pool, mode)
         await callback.answer(f"✅ Режим: {mode.upper()}", show_alert=True)
         await _adm_swarm_mode(callback, pool)
+
+    elif action == "exit":
+        await callback.message.edit_text(
+            "👋 Вышли из админки.",
+            reply_markup=main_menu(is_admin=True),
+        )
 
 
 # ── Sub-screens ───────────────────────────────────────────────────────────────
