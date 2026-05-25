@@ -1617,6 +1617,19 @@ async def update_tg_account_status(
     return result != "UPDATE 0"
 
 
+async def get_active_account_for_owner(pool: asyncpg.Pool, owner_id: int) -> dict | None:
+    """Возвращает первый активный аккаунт пользователя (используется ranking_checker'ом).
+
+    Всегда фильтруется по owner_id — пользователь видит только свои аккаунты.
+    """
+    row = await pool.fetchrow(
+        "SELECT * FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+        "ORDER BY last_used DESC NULLS LAST, added_at DESC LIMIT 1",
+        owner_id,
+    )
+    return dict(row) if row else None
+
+
 # ── Search rankings ─────────────────────────────────────────────────────────
 
 async def get_tracked_keywords(pool: asyncpg.Pool, bot_id: int) -> list:

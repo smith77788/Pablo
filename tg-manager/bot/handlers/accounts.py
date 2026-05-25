@@ -30,6 +30,7 @@ from services.account_manager import (
     get_dialogs,
     get_client_info_and_session,
     send_message,
+    send_message_via_account,
     start_login,
 )
 
@@ -56,6 +57,11 @@ class AccountLogin(StatesGroup):
 class AccountPost(StatesGroup):
     choosing_chat = State()   # unused in handler body; present for context
     waiting_text = State()    # state data: acc_id, chat_id
+
+
+class AccountSendMsg(StatesGroup):
+    waiting_chat_id = State()  # state data: acc_id
+    waiting_text = State()     # state data: acc_id, chat_id
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -94,11 +100,13 @@ def _acc_menu_markup(acc_id: int):
               callback_data=AccCb(action="check_health", acc_id=acc_id))
     kb.button(text="📊 Диалоги",
               callback_data=AccCb(action="dialogs_stats", acc_id=acc_id))
+    kb.button(text="✉️ Отправить",
+              callback_data=AccCb(action="send_msg", acc_id=acc_id))
     kb.button(text="🗑 Удалить",
               callback_data=AccCb(action="remove", acc_id=acc_id))
     kb.button(text="◀️ Мои аккаунты",
               callback_data=AccCb(action="menu"))
-    kb.adjust(2, 2, 1, 1)
+    kb.adjust(2, 2, 1, 1, 1)
     return kb.as_markup()
 
 
@@ -835,3 +843,119 @@ async def cb_dialogs_stats(
         parse_mode="HTML",
         reply_markup=_acc_menu_markup(callback_data.acc_id),
     )
+
+
+# ── Send message via personal account (FSM) ────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "send_msg"))
+async def cb_send_msg_start(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    await state.set_state(AccountSendMsg.waiting_chat_id)
+    await state.update_data(acc_id=callback_data.acc_id)
+
+    await callback.message.edit_text(
+        "✉️ <b>Отправка сообщения из личного аккаунта</b>\n\n"
+        "⚠️ <i>Отправка из вашего личного аккаунта — будьте осторожны с частотой.</i>\n\n"
+        "Введите <b>chat_id</b> или <b>@username</b> получателя:\n"
+        "<code>@channel_name</code> или <code>123456789</code>",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+@router.message(AccountSendMsg.waiting_chat_id)
+async def handle_send_msg_chat_id(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("❌ Введите chat_id или @username:")
+        return
+
+    # Принимаем @username или числовой chat_id
+    if raw.startswith("@"):
+        chat_id_value: str | int = raw
+    elif raw.lstrip("-").isdigit():
+        chat_id_value = int(raw)
+    else:
+        await message.answer(
+            "❌ Неверный формат. Введите числовой ID или @username:"
+        )
+        return
+
+    await state.update_data(chat_id=chat_id_value)
+    await state.set_state(AccountSendMsg.waiting_text)
+
+    await message.answer(
+        f"✏️ Получатель: <code>{escape(str(chat_id_value))}</code>\n\n"
+        "Введите <b>текст сообщения</b>:",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+@router.message(AccountSendMsg.waiting_text)
+async def handle_send_msg_text(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("❌ Сообщение не может быть пустым. Введите текст:")
+        return
+
+    data = await state.get_data()
+    acc_id: int = data.get("acc_id", 0)
+    chat_id = data.get("chat_id")
+
+    if not acc_id or chat_id is None:
+        await message.answer("❌ Ошибка состояния. Начните заново.")
+        await state.clear()
+        return
+
+    acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
+    if not acc:
+        await message.answer("❌ Аккаунт не найден.")
+        await state.clear()
+        return
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await message.answer("⏳ Отправляю сообщение…")
+
+    ok = await send_message_via_account(session_str, chat_id, text)
+
+    await state.clear()
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    if ok:
+        await message.answer(
+            "✅ <b>Сообщение успешно отправлено!</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        await message.answer(
+            "❌ <b>Не удалось отправить сообщение.</b>\n\n"
+            "<i>Проверьте корректность chat_id/@username и убедитесь, "
+            "что аккаунт имеет доступ к этому чату.</i>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )

@@ -237,6 +237,64 @@ async def check_account_health(session_string: str) -> dict:
             pass
 
 
+async def get_channel_members_count(session_string: str, channel_username: str) -> int:
+    """Возвращает количество участников канала/группы по username. При ошибке — -1."""
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_username)
+        count = getattr(entity, "participants_count", None)
+        if count is None:
+            # Для мегагрупп participants_count может быть None — запрашиваем напрямую
+            from telethon.tl.functions.channels import GetFullChannelRequest
+            full = await client(GetFullChannelRequest(entity))
+            count = full.full_chat.participants_count
+        return count if count is not None else -1
+    except Exception as e:
+        log.exception("get_channel_members_count error: %s", e)
+        return -1
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def get_recent_messages(
+    session_string: str,
+    channel_username: str,
+    limit: int = 5,
+) -> list[dict]:
+    """Возвращает последние сообщения из канала/группы.
+
+    Каждый элемент: {"date": str, "text": str, "views": int}.
+    Текст обрезается до 100 символов.
+    """
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        messages = []
+        async for msg in client.iter_messages(channel_username, limit=limit):
+            text = (msg.text or msg.message or "").strip()
+            if len(text) > 100:
+                text = text[:100] + "…"
+            date_str = msg.date.strftime("%Y-%m-%d %H:%M") if msg.date else ""
+            messages.append({
+                "date": date_str,
+                "text": text,
+                "views": getattr(msg, "views", 0) or 0,
+            })
+        return messages
+    except Exception as e:
+        log.exception("get_recent_messages error: %s", e)
+        return []
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def search_in_telegram(session_string: str, query: str, limit: int = 20) -> list[dict]:
     """Search Telegram contacts/global and return ordered results."""
     from telethon.tl.functions.contacts import SearchRequest
