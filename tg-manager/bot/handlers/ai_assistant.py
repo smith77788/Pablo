@@ -25,7 +25,16 @@ _SYSTEM_PROMPT = (
     "У тебя доступ ТОЛЬКО к данным текущего пользователя — данные других пользователей тебе недоступны и ты не можешь их получить."
 )
 
-_MAX_TURNS = 10
+_MAX_TURNS = 100  # практически без ограничений
+
+# Модели для fallback при превышении лимита
+_FALLBACK_MODELS = [
+    OPENROUTER_MODEL,
+    "anthropic/claude-3-haiku",
+    "openai/gpt-4o-mini",
+    "google/gemini-flash-1.5",
+    "meta-llama/llama-3.1-8b-instruct:free",
+]
 
 
 def _openai_tools() -> list:
@@ -47,47 +56,63 @@ async def _call_openrouter(messages: list, pool: asyncpg.Pool, user_id: int) -> 
     if not OPENROUTER_API_KEY:
         return "⚠️ AI-ассистент не настроен. Добавьте OPENROUTER_API_KEY в переменные среды."
     try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(
-            api_key=OPENROUTER_API_KEY,
-            base_url="https://openrouter.ai/api/v1",
-        )
-        current_messages = [{"role": "system", "content": _SYSTEM_PROMPT}] + list(messages)
-        tools = _openai_tools()
-
-        for _ in range(5):  # макс. 5 итераций с инструментами
-            response = await client.chat.completions.create(
-                model=OPENROUTER_MODEL,
-                messages=current_messages,
-                tools=tools,
-                tool_choice="auto",
-                max_tokens=1024,
-            )
-            choice = response.choices[0]
-            msg = choice.message
-
-            if choice.finish_reason == "tool_calls" and msg.tool_calls:
-                current_messages.append(msg.model_dump())
-                for tc in msg.tool_calls:
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except Exception:
-                        args = {}
-                    result_text = await run_tool(tc.function.name, args, pool, user_id)
-                    current_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result_text,
-                    })
-            else:
-                return msg.content or "Нет ответа."
-
+        from openai import AsyncOpenAI, RateLimitError
     except ImportError:
         return "⚠️ Библиотека openai не установлена."
-    except Exception as e:
-        log.exception("OpenRouter API error: %s", e)
-        return f"⚠️ Ошибка AI-ассистента: {type(e).__name__}"
-    return "Превышен лимит итераций инструментов."
+
+    client = AsyncOpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+    )
+    current_messages = [{"role": "system", "content": _SYSTEM_PROMPT}] + list(messages)
+    tools = _openai_tools()
+
+    # Пробуем каждую модель из fallback-списка
+    models_to_try = list(dict.fromkeys(_FALLBACK_MODELS))  # убираем дубли, сохраняя порядок
+
+    for model in models_to_try:
+        try:
+            for _ in range(5):  # макс. 5 итераций с инструментами
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=current_messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    max_tokens=1500,
+                )
+                choice = response.choices[0]
+                msg = choice.message
+
+                if choice.finish_reason == "tool_calls" and msg.tool_calls:
+                    current_messages.append(msg.model_dump())
+                    for tc in msg.tool_calls:
+                        try:
+                            args = json.loads(tc.function.arguments)
+                        except Exception:
+                            args = {}
+                        result_text = await run_tool(tc.function.name, args, pool, user_id)
+                        current_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result_text,
+                        })
+                else:
+                    suffix = f"\n\n<i>Модель: {model}</i>" if model != OPENROUTER_MODEL else ""
+                    return (msg.content or "Нет ответа.") + suffix
+            return "Превышен лимит итераций инструментов."
+
+        except RateLimitError:
+            log.warning("Rate limit for model %s, trying next", model)
+            continue
+        except Exception as e:
+            err_str = str(e).lower()
+            if "rate" in err_str or "limit" in err_str or "429" in err_str or "quota" in err_str:
+                log.warning("Quota/rate error for model %s: %s, trying next", model, e)
+                continue
+            log.exception("OpenRouter API error with model %s: %s", model, e)
+            return f"⚠️ Ошибка AI-ассистента: {type(e).__name__}: {str(e)[:100]}"
+
+    return "⚠️ Все модели недоступны. Попробуйте позже."
 
 
 @router.message(Command("ai"))
@@ -163,7 +188,7 @@ async def msg_ai_chat(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 
     if turns >= _MAX_TURNS:
         await state.clear()
-        await message.answer("⏳ Лимит сессии достигнут (10 сообщений). Начните новую: /ai")
+        await message.answer("⏳ Начните новую сессию: /ai")
         return
 
     messages.append({"role": "user", "content": message.text})
@@ -175,19 +200,16 @@ async def msg_ai_chat(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
-    remaining = _MAX_TURNS - turns - 1
-    footer = f"\n\n<i>Осталось сообщений: {remaining}</i>" if remaining <= 3 else ""
-
     safe_reply = reply.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     try:
         await thinking.edit_text(
-            f"{safe_reply}{footer}",
+            safe_reply,
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
     except Exception:
         await message.answer(
-            f"{safe_reply}{footer}",
+            safe_reply,
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

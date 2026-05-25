@@ -33,7 +33,9 @@ async def start_login(phone: str) -> str:
     client = _make_client()
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        result = await client.send_code_request(phone)
+        result = await asyncio.wait_for(
+            client.send_code_request(phone), timeout=_CONNECT_TIMEOUT
+        )
     except FloodWaitError as e:
         try:
             await client.disconnect()
