@@ -2,10 +2,16 @@
 from __future__ import annotations
 import asyncio
 import logging
+import os
 import aiohttp
 import asyncpg
 from aiogram import Bot
-from config import TON_WALLET, TON_API_KEY, TRON_WALLET, TRON_API_KEY
+
+
+def _TON_WALLET() -> str: return os.getenv("TON_WALLET", "")
+def _TON_API_KEY() -> str: return os.getenv("TON_API_KEY", "")
+def _TRON_WALLET() -> str: return os.getenv("TRON_WALLET", "")
+def _TRON_API_KEY() -> str: return os.getenv("TRON_API_KEY", "")
 
 log = logging.getLogger(__name__)
 NANOTON = 1_000_000_000
@@ -31,8 +37,8 @@ async def _check_pending(pool: asyncpg.Pool, http: aiohttp.ClientSession, bot: B
     if not rows:
         return
 
-    ton_rows = [r for r in rows if r["currency"] == "TON" and TON_WALLET]
-    trc_rows = [r for r in rows if r["currency"] == "USDT_TRC20" and TRON_WALLET]
+    ton_rows = [r for r in rows if r["currency"] == "TON" and _TON_WALLET()]
+    trc_rows = [r for r in rows if r["currency"] == "USDT_TRC20" and _TRON_WALLET()]
 
     if ton_rows:
         await _check_ton(pool, http, bot, ton_rows)
@@ -42,8 +48,8 @@ async def _check_pending(pool: asyncpg.Pool, http: aiohttp.ClientSession, bot: B
 
 async def _check_ton(pool, http, bot, payments) -> None:
     try:
-        params = {"address": TON_WALLET, "limit": 30}
-        headers = {"X-API-Key": TON_API_KEY} if TON_API_KEY else {}
+        params = {"address": _TON_WALLET(), "limit": 30}
+        headers = {"X-API-Key": _TON_API_KEY()} if _TON_API_KEY() else {}
         async with http.get(
             "https://toncenter.com/api/v2/getTransactions",
             params=params, headers=headers,
@@ -75,10 +81,10 @@ async def _check_ton(pool, http, bot, payments) -> None:
 
 async def _check_trc20(pool, http, bot, payments) -> None:
     try:
-        headers = {"TRON-PRO-API-KEY": TRON_API_KEY} if TRON_API_KEY else {}
+        headers = {"TRON-PRO-API-KEY": _TRON_API_KEY()} if _TRON_API_KEY() else {}
         params = {"limit": 30, "only_to": "true"}
         async with http.get(
-            f"https://api.trongrid.io/v1/accounts/{TRON_WALLET}/transactions/trc20",
+            f"https://api.trongrid.io/v1/accounts/{_TRON_WALLET()}/transactions/trc20",
             params=params, headers=headers,
             timeout=aiohttp.ClientTimeout(total=10),
         ) as r:

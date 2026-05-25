@@ -1,5 +1,6 @@
 """Subscription plan selection and crypto payment flow."""
 from __future__ import annotations
+import os
 import random
 import string
 import asyncpg
@@ -9,7 +10,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import SubCb
 from bot.utils.subscription import get_plan, PLAN_LEVELS, PLAN_EMOJIS, PLAN_FEATURES, BOT_LIMITS
-from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS, TON_WALLET, TRON_WALLET
+from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
 
 # Детальные фичи для каждого плана
 PLAN_DETAILED_FEATURES: dict[str, list[str]] = {
@@ -64,6 +65,14 @@ PLAN_DETAILED_FEATURES: dict[str, list[str]] = {
 router = Router()
 
 _TON_RATE = 3.0  # 1 TON ≈ $3
+
+
+def _ton_wallet() -> str:
+    return os.getenv("TON_WALLET", "")
+
+
+def _tron_wallet() -> str:
+    return os.getenv("TRON_WALLET", "")
 
 
 def _gen_ref() -> str:
@@ -189,18 +198,20 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
 async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb) -> None:
     await callback.answer()
     plan, months = callback_data.plan, callback_data.months
+    ton = _ton_wallet()
+    tron = _tron_wallet()
     kb = InlineKeyboardBuilder()
-    if TON_WALLET:
+    if ton:
         kb.button(
             text="💎 TON",
             callback_data=SubCb(action="pay", plan=plan, months=months, currency="TON"),
         )
-    if TRON_WALLET:
+    if tron:
         kb.button(
             text="💵 USDT (TRC-20)",
             callback_data=SubCb(action="pay", plan=plan, months=months, currency="USDT_TRC20"),
         )
-    if not TON_WALLET and not TRON_WALLET:
+    if not ton and not tron:
         await callback.answer("Оплата временно недоступна. Свяжитесь с поддержкой.", show_alert=True)
         return
     kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan))
@@ -217,7 +228,7 @@ async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb) -> Non
 async def cb_pay(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
     plan, months, currency = callback_data.plan, callback_data.months, callback_data.currency
-    wallet = TON_WALLET if currency == "TON" else TRON_WALLET
+    wallet = _ton_wallet() if currency == "TON" else _tron_wallet()
     if not wallet:
         await callback.answer("Оплата временно недоступна.", show_alert=True)
         return
