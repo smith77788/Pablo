@@ -80,8 +80,6 @@ _ENV_VARS: list[tuple[str, str]] = [
     ("BROADCAST_DELAY",        "⏱ Broadcast Delay"),
     ("RAILWAY_TOKEN",          "🚂 Railway Token"),
     ("RAILWAY_PROJECT_ID",     "🚂 Railway Project ID"),
-    ("RAILWAY_SERVICE_ID",     "🚂 Railway Service ID"),
-    ("RAILWAY_ENVIRONMENT_ID", "🚂 Railway Env ID"),
 ]
 _ENV_KEYS = {k for k, _ in _ENV_VARS}
 
@@ -677,12 +675,14 @@ async def _adm_env_list(callback: CallbackQuery, http: aiohttp.ClientSession) ->
         await callback.message.edit_text(
             "🔑 <b>Переменные Railway</b>\n\n"
             "⚠️ Railway API не настроен.\n\n"
-            "Добавьте вручную в Railway Dashboard:\n"
-            "• <code>RAILWAY_TOKEN</code> — токен из railway.app/account\n"
-            "• <code>RAILWAY_PROJECT_ID</code>\n"
-            "• <code>RAILWAY_SERVICE_ID</code>\n"
-            "• <code>RAILWAY_ENVIRONMENT_ID</code>\n\n"
-            "После добавления этих 4 переменных — управление остальными будет здесь.",
+            "Добавьте <b>2 переменные</b> вручную в Railway Dashboard → Variables:\n\n"
+            "1. <code>RAILWAY_TOKEN</code>\n"
+            "   → railway.com/account → Tokens → Create Token\n\n"
+            "2. <code>RAILWAY_PROJECT_ID</code>\n"
+            "   → UUID из URL вашего проекта:\n"
+            "   <code>railway.com/project/<b>ВОТ-ЭТОТ-UUID</b></code>\n\n"
+            "Service ID и Environment ID определятся <b>автоматически</b>.\n\n"
+            "После добавления этих 2 переменных — управление всеми остальными будет здесь.",
             parse_mode="HTML", reply_markup=_back_kb(),
         )
         return

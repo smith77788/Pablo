@@ -1,9 +1,17 @@
-"""Railway GraphQL API client for environment variable management."""
+"""Railway GraphQL API client for environment variable management.
+
+Required env vars (minimum):
+  RAILWAY_TOKEN      — API token from railway.com/account/tokens
+  RAILWAY_PROJECT_ID — UUID from project URL
+
+Optional (auto-discovered if missing):
+  RAILWAY_SERVICE_ID      — first service in the project
+  RAILWAY_ENVIRONMENT_ID  — first environment (usually 'production')
+"""
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any
 
 import aiohttp
 
@@ -11,18 +19,20 @@ log = logging.getLogger(__name__)
 
 _GQL = "https://backboard.railway.app/graphql/v2"
 
+# In-process cache so we only auto-discover once per restart
+_discovered: dict[str, str] = {}
 
-def _creds() -> tuple[str, str, str, str]:
-    return (
-        os.getenv("RAILWAY_TOKEN", ""),
-        os.getenv("RAILWAY_PROJECT_ID", ""),
-        os.getenv("RAILWAY_SERVICE_ID", ""),
-        os.getenv("RAILWAY_ENVIRONMENT_ID", ""),
-    )
+
+def _token() -> str:
+    return os.getenv("RAILWAY_TOKEN", "")
+
+
+def _project_id() -> str:
+    return os.getenv("RAILWAY_PROJECT_ID", "")
 
 
 async def _gql(http: aiohttp.ClientSession, query: str, variables: dict) -> dict:
-    token, *_ = _creds()
+    token = _token()
     async with http.post(
         _GQL,
         json={"query": query, "variables": variables},
@@ -35,33 +45,75 @@ async def _gql(http: aiohttp.ClientSession, query: str, variables: dict) -> dict
     return data.get("data", {})
 
 
-async def list_variables(http: aiohttp.ClientSession) -> dict[str, str]:
-    """Return dict of {KEY: value} for the configured service/environment."""
-    token, project_id, service_id, env_id = _creds()
-    if not all([token, project_id, service_id, env_id]):
-        raise RuntimeError("RAILWAY_TOKEN / RAILWAY_PROJECT_ID / RAILWAY_SERVICE_ID / RAILWAY_ENVIRONMENT_ID не настроены")
+async def _resolve_ids(http: aiohttp.ClientSession) -> tuple[str, str]:
+    """Return (service_id, environment_id), auto-discovering if not set."""
+    service_id = os.getenv("RAILWAY_SERVICE_ID") or _discovered.get("service_id", "")
+    env_id = os.getenv("RAILWAY_ENVIRONMENT_ID") or _discovered.get("env_id", "")
 
+    if service_id and env_id:
+        return service_id, env_id
+
+    project_id = _project_id()
+    if not project_id:
+        raise RuntimeError("RAILWAY_PROJECT_ID не задан")
+
+    data = await _gql(http, """
+        query Project($id: String!) {
+            project(id: $id) {
+                services { edges { node { id name } } }
+                environments { edges { node { id name } } }
+            }
+        }
+    """, {"id": project_id})
+
+    project = data.get("project", {})
+    services = [e["node"] for e in project.get("services", {}).get("edges", [])]
+    envs = [e["node"] for e in project.get("environments", {}).get("edges", [])]
+
+    if not services:
+        raise RuntimeError("В проекте нет сервисов")
+    if not envs:
+        raise RuntimeError("В проекте нет окружений (environments)")
+
+    # Prefer first service; prefer 'production' environment
+    svc = services[0]
+    env = next((e for e in envs if "prod" in e["name"].lower()), envs[0])
+
+    _discovered["service_id"] = svc["id"]
+    _discovered["env_id"] = env["id"]
+    log.info("Railway auto-discovered: service=%s (%s), env=%s (%s)",
+             svc["id"], svc["name"], env["id"], env["name"])
+
+    return svc["id"], env["id"]
+
+
+async def list_variables(http: aiohttp.ClientSession) -> dict[str, str]:
+    """Return {KEY: value} for the project's first service/environment."""
+    if not _token() or not _project_id():
+        raise RuntimeError("Задайте RAILWAY_TOKEN и RAILWAY_PROJECT_ID")
+
+    service_id, env_id = await _resolve_ids(http)
     data = await _gql(http, """
         query Variables($projectId: String!, $environmentId: String!, $serviceId: String!) {
             variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId)
         }
-    """, {"projectId": project_id, "environmentId": env_id, "serviceId": service_id})
+    """, {"projectId": _project_id(), "environmentId": env_id, "serviceId": service_id})
 
     return dict(data.get("variables", {}))
 
 
 async def set_variable(http: aiohttp.ClientSession, key: str, value: str) -> None:
     """Create or update a single environment variable."""
-    token, project_id, service_id, env_id = _creds()
-    if not all([token, project_id, service_id, env_id]):
-        raise RuntimeError("Railway API не настроен")
+    if not _token() or not _project_id():
+        raise RuntimeError("Задайте RAILWAY_TOKEN и RAILWAY_PROJECT_ID")
 
+    service_id, env_id = await _resolve_ids(http)
     await _gql(http, """
         mutation VariableCollectionUpsert($input: VariableCollectionUpsertInput!) {
             variableCollectionUpsert(input: $input)
         }
     """, {"input": {
-        "projectId": project_id,
+        "projectId": _project_id(),
         "environmentId": env_id,
         "serviceId": service_id,
         "variables": {key: value},
@@ -70,16 +122,16 @@ async def set_variable(http: aiohttp.ClientSession, key: str, value: str) -> Non
 
 async def delete_variable(http: aiohttp.ClientSession, key: str) -> None:
     """Delete an environment variable."""
-    token, project_id, service_id, env_id = _creds()
-    if not all([token, project_id, service_id, env_id]):
-        raise RuntimeError("Railway API не настроен")
+    if not _token() or not _project_id():
+        raise RuntimeError("Задайте RAILWAY_TOKEN и RAILWAY_PROJECT_ID")
 
+    service_id, env_id = await _resolve_ids(http)
     await _gql(http, """
         mutation VariableDelete($input: VariableDeleteInput!) {
             variableDelete(input: $input)
         }
     """, {"input": {
-        "projectId": project_id,
+        "projectId": _project_id(),
         "environmentId": env_id,
         "serviceId": service_id,
         "name": key,
@@ -87,5 +139,4 @@ async def delete_variable(http: aiohttp.ClientSession, key: str) -> None:
 
 
 def is_configured() -> bool:
-    token, project_id, service_id, env_id = _creds()
-    return all([token, project_id, service_id, env_id])
+    return bool(_token() and _project_id())
