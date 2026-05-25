@@ -80,6 +80,19 @@ def _relative_date(checked_at: datetime) -> str:
     return f"{delta} дней назад"
 
 
+async def _has_active_account(pool: asyncpg.Pool, owner_id: int) -> bool:
+    """Return True if the user has at least one active TG account."""
+    try:
+        row = await pool.fetchrow(
+            "SELECT 1 FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE LIMIT 1",
+            owner_id,
+        )
+        return row is not None
+    except Exception as exc:
+        log.warning("_has_active_account error: %s", exc)
+        return False
+
+
 # ── /ranking command — pick a bot ─────────────────────────────────────────
 
 
@@ -130,10 +143,9 @@ async def cb_rank_menu(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
-
     plan = await get_plan(pool, callback.from_user.id)
     if plan == "free":
+        await callback.answer()
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
@@ -147,6 +159,7 @@ async def cb_rank_menu(
         await callback.answer("Бот не найден.", show_alert=True)
         return
 
+    await callback.answer()
     await _render_rank_menu(callback, bot_id, bot_row, plan, pool)
 
 
@@ -160,13 +173,12 @@ async def cb_rank_add(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
-
     plan = await get_plan(pool, callback.from_user.id)
     limit = KEYWORD_LIMITS.get(plan, 0)
     bot_id = callback_data.bot_id
 
     if limit == 0:
+        await callback.answer()
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
@@ -184,6 +196,7 @@ async def cb_rank_add(
         )
         return
 
+    await callback.answer()
     await state.set_state(AddKeyword.waiting_keyword)
     await state.update_data(bot_id=bot_id)
 
@@ -196,9 +209,31 @@ async def cb_rank_add(
         "🔑 <b>Добавить ключевое слово</b>\n\n"
         "Введите ключевое слово или фразу для отслеживания:\n\n"
         "<i>Примеры: крипто бот, tg магазин, ai assistant</i>\n"
-        "<i>Максимум 50 символов.</i>",
+        "<i>Максимум 50 символов.</i>\n\n"
+        "<i>Для отмены нажмите кнопку ниже или /cancel.</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
+    )
+
+
+# ── /cancel — cancel FSM ──────────────────────────────────────────────────
+
+
+@router.message(Command("cancel"), AddKeyword.waiting_keyword)
+async def cmd_cancel_add_keyword(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    bot_id: int = data.get("bot_id", 0)
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    if bot_id:
+        kb.button(
+            text="📊 К позициям",
+            callback_data=RankCb(action="menu", bot_id=bot_id),
+        )
+    await message.answer(
+        "❌ Добавление ключевого слова отменено.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup() if bot_id else None,
     )
 
 
@@ -269,12 +304,12 @@ async def cb_rank_remove(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
-
     ok = await db.remove_tracked_keyword(pool, callback_data.keyword_id, callback.from_user.id)
     if not ok:
         await callback.answer("Ключевое слово не найдено или уже удалено.", show_alert=True)
+        return
 
+    await callback.answer()
     await _show_rank_menu(callback, callback_data.bot_id, pool)
 
 
@@ -371,10 +406,25 @@ async def cb_rank_check_now(
             callback_data=RankCb(action="menu", bot_id=bot_id),
         )
 
+    # Check for active account first
+    if not await _has_active_account(pool, owner_id):
+        await callback.message.edit_text(
+            "⚠️ <b>Нет подключённого аккаунта</b>\n\n"
+            "Для проверки позиций нужен хотя бы один подключённый аккаунт Telegram.\n"
+            "Подключите аккаунт через /accounts",
+            parse_mode="HTML",
+            reply_markup=back_kb.as_markup(),
+        )
+        return
+
     # Fetch the bot's username
     bot_row = await db.get_bot(pool, bot_id, owner_id)
     if not bot_row:
-        await callback.answer("Бот не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "⚠️ Бот не найден.",
+            parse_mode="HTML",
+            reply_markup=back_kb.as_markup(),
+        )
         return
 
     username = (bot_row.get("username") or "").lstrip("@")
@@ -415,7 +465,11 @@ async def cb_rank_check_now(
         keywords = list(all_keywords)
 
     if not keywords:
-        await callback.answer("Нет ключевых слов для проверки.", show_alert=True)
+        await callback.message.edit_text(
+            "ℹ️ Нет ключевых слов для проверки.",
+            parse_mode="HTML",
+            reply_markup=back_kb.as_markup(),
+        )
         return
 
     # Run search via account_manager
@@ -487,6 +541,96 @@ async def cb_rank_check_now(
     )
 
 
+# ── action="check_all" — check all keywords for a bot immediately ──────────
+
+
+@router.callback_query(RankCb.filter(F.action == "check_all"))
+async def cb_rank_check_all(
+    callback: CallbackQuery,
+    callback_data: RankCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer("⏳ Проверяю все ключевые слова...")
+
+    bot_id = callback_data.bot_id
+    owner_id = callback.from_user.id
+
+    back_kb = InlineKeyboardBuilder()
+    back_kb.button(
+        text="◀️ Назад к позициям",
+        callback_data=RankCb(action="menu", bot_id=bot_id),
+    )
+
+    # Warn if no active accounts
+    if not await _has_active_account(pool, owner_id):
+        await callback.message.edit_text(
+            "⚠️ <b>Нет подключённого аккаунта</b>\n\n"
+            "Для проверки позиций нужен хотя бы один подключённый аккаунт Telegram.\n"
+            "Подключите аккаунт через /accounts",
+            parse_mode="HTML",
+            reply_markup=back_kb.as_markup(),
+        )
+        return
+
+    try:
+        from services import ranking_checker  # type: ignore
+
+        results = await ranking_checker.check_bot_keywords(pool, bot_id, owner_id)
+    except ImportError:
+        log.warning("ranking_checker service not available")
+        await callback.message.edit_text(
+            "⚠️ Сервис проверки позиций недоступен.",
+            parse_mode="HTML",
+            reply_markup=back_kb.as_markup(),
+        )
+        return
+    except Exception as exc:
+        log.warning("check_all error: %s", exc)
+        await callback.message.edit_text(
+            "⚠️ Ошибка при проверке. Попробуйте позже.",
+            parse_mode="HTML",
+            reply_markup=back_kb.as_markup(),
+        )
+        return
+
+    if not results:
+        await callback.message.edit_text(
+            "ℹ️ Нет активных ключевых слов для проверки.",
+            parse_mode="HTML",
+            reply_markup=back_kb.as_markup(),
+        )
+        return
+
+    n = len(results)
+    lines: list[str] = [f"✅ <b>Проверено {n} ключевых слов</b>\n"]
+    for r in results:
+        kw_safe = html.escape(r["keyword"])
+        pos = r["position"]
+        if r.get("error"):
+            lines.append(f"🔑 <b>{kw_safe}</b> — ошибка проверки ⚠️")
+        elif pos is None:
+            lines.append(f"🔑 <b>{kw_safe}</b> — не в топ 20 ❌")
+        else:
+            lines.append(f"🔑 <b>{kw_safe}</b> — позиция #{pos} ✅")
+
+    result_kb = InlineKeyboardBuilder()
+    result_kb.button(
+        text="📊 К позициям",
+        callback_data=RankCb(action="menu", bot_id=bot_id),
+    )
+    result_kb.button(
+        text="🔄 Проверить снова",
+        callback_data=RankCb(action="check_all", bot_id=bot_id),
+    )
+    result_kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=result_kb.as_markup(),
+    )
+
+
 # ── action="dashboard" — общая таблица позиций по всем ботам ─────────────
 
 
@@ -515,9 +659,14 @@ async def cb_rank_dashboard(
 
     kb = InlineKeyboardBuilder()
     kb.button(
+        text="🔄 Обновить дашборд",
+        callback_data=RankCb(action="dashboard", bot_id=0),
+    )
+    kb.button(
         text="◀️ Назад",
         callback_data=RankCb(action="menu", bot_id=0),
     )
+    kb.adjust(1)
 
     if not keywords:
         await callback.message.edit_text(
@@ -527,9 +676,25 @@ async def cb_rank_dashboard(
         )
         return
 
-    total = len(keywords)
-    display = keywords[:DASHBOARD_LIMIT]
-    lines: list[str] = ["📊 <b>Дашборд позиций</b>\n"]
+    # Sort: entries with a position first (ascending), then without (❓)
+    with_pos = sorted(
+        [e for e in keywords if e["position"] is not None],
+        key=lambda e: e["position"],
+    )
+    without_pos = [e for e in keywords if e["position"] is None]
+    sorted_keywords = with_pos + without_pos
+
+    total = len(sorted_keywords)
+    display = sorted_keywords[:DASHBOARD_LIMIT]
+
+    # Compute average rating for entries that have a position
+    positions_with_value = [e["position"] for e in keywords if e["position"] is not None]
+    avg_line = ""
+    if positions_with_value:
+        avg = sum(positions_with_value) / len(positions_with_value)
+        avg_line = f"Средняя позиция: <b>#{avg:.1f}</b> по {len(positions_with_value)} из {total} слов\n\n"
+
+    lines: list[str] = [f"📊 <b>Дашборд позиций</b>\n\n{avg_line}"]
 
     for entry in display:
         bot_un = entry["bot_username"] or "?"
@@ -560,8 +725,6 @@ async def cb_rank_toggle_keyword(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
-
     keyword_id = callback_data.keyword_id
     bot_id = callback_data.bot_id
     owner_id = callback.from_user.id
@@ -571,6 +734,7 @@ async def cb_rank_toggle_keyword(
         await callback.answer("Ключевое слово не найдено.", show_alert=True)
         return
 
+    await callback.answer()
     await _show_rank_menu(callback, bot_id, pool)
 
 
@@ -588,6 +752,7 @@ async def _render_rank_menu(
     label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
     keywords = await db.get_tracked_keywords(pool, bot_id)
     limit = KEYWORD_LIMITS.get(plan, 0)
+    owner_id = callback.from_user.id
 
     # Build keyword lines
     kw_lines: list[str] = []
@@ -617,6 +782,14 @@ async def _render_rank_menu(
     limit_display = "∞" if limit >= 9999 else str(limit)
     plan_upper = plan.upper()
 
+    # Account warning
+    no_account_warning = ""
+    if not await _has_active_account(pool, owner_id):
+        no_account_warning = (
+            "\n\n⚠️ <b>Нет подключённого аккаунта.</b> "
+            "Для проверки позиций нужен хотя бы один подключённый аккаунт → /accounts"
+        )
+
     text = (
         f"📊 <b>Позиции в поиске — {html.escape(label)}</b>\n\n"
         "📌 <b>Что это?</b>\n"
@@ -624,6 +797,7 @@ async def _render_rank_menu(
         "Позиции обновляются автоматически если подключён аккаунт Telegram.\n\n"
         f"Ключевых слов: <b>{len(keywords)} из {limit_display}</b> ({plan_upper})\n\n"
         f"{kw_block}"
+        f"{no_account_warning}"
     )
 
     kb = InlineKeyboardBuilder()
@@ -632,8 +806,8 @@ async def _render_rank_menu(
         callback_data=RankCb(action="add", bot_id=bot_id),
     )
     kb.button(
-        text="🔄 Проверить сейчас",
-        callback_data=RankCb(action="check_now", bot_id=bot_id),
+        text="🔄 Проверить все сейчас",
+        callback_data=RankCb(action="check_all", bot_id=bot_id),
     )
     kb.adjust(2)
     for kw in keywords:
