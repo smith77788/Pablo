@@ -252,7 +252,7 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     rows = await pool.fetch(
         """SELECT added_by as uid,
                   COUNT(*) as bot_count,
-                  MAX(mb.created_at) as last_bot
+                  MAX(mb.added_at) as last_bot
            FROM managed_bots mb
            GROUP BY added_by
            ORDER BY last_bot DESC
@@ -295,8 +295,8 @@ async def _adm_subscriptions(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
 async def _adm_bots_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     bots = await pool.fetch(
-        "SELECT bot_id, username, first_name, added_by, created_at "
-        "FROM managed_bots ORDER BY created_at DESC LIMIT 20"
+        "SELECT bot_id, username, first_name, added_by, added_at "
+        "FROM managed_bots ORDER BY added_at DESC LIMIT 20"
     )
     lines = []
     for b in bots:
@@ -339,15 +339,15 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     bots = await pool.fetch(
-        "SELECT bot_id, username, first_name, token, added_by, created_at "
-        "FROM managed_bots ORDER BY added_by, created_at"
+        "SELECT bot_id, username, first_name, token, added_by, added_at "
+        "FROM managed_bots ORDER BY added_by, added_at"
     )
     lines = ["BOT_ID\tUSERNAME\tNAME\tOWNER_ID\tCREATED\tTOKEN"]
     for b in bots:
         label = b["username"] or b["first_name"] or "unknown"
         lines.append(
             f"{b['bot_id']}\t@{label}\t{b['first_name'] or ''}\t"
-            f"{b['added_by']}\t{b['created_at'].strftime('%Y-%m-%d')}\t{b['token']}"
+            f"{b['added_by']}\t{b['added_at'].strftime('%Y-%m-%d')}\t{b['token']}"
         )
     content = "\n".join(lines).encode("utf-8")
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M")
