@@ -4,17 +4,19 @@ import asyncio
 import csv
 import io
 import logging
+import os
 from datetime import datetime, timedelta
 
 import asyncpg
 import aiohttp
 from aiogram import Router, F
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BotCb
 from config import ADMIN_IDS, ADMIN_SECRET
 from database import db
+from services import railway_api
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -55,7 +57,45 @@ def _admin_main_kb():
     kb.button(text="📋 Экспорт юзеров (CSV)",   callback_data="adm:users_csv")
     kb.button(text="🔍 Поиск юзера",            callback_data="adm:find_user")
     kb.button(text="⚙️ Системный режим Swarm",   callback_data="adm:swarm_mode")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1, 1)
+    return kb.as_markup()
+
+
+# ── Список отображаемых переменных (с метками) ────────────────────────────────
+
+_ENV_VARS: list[tuple[str, str]] = [
+    ("MANAGER_BOT_TOKEN",      "🤖 Bot Token"),
+    ("ADMIN_IDS",              "👑 Admin IDs"),
+    ("ADMIN_SECRET",           "🔐 Admin Secret"),
+    ("TON_WALLET",             "💎 TON Wallet"),
+    ("TON_API_KEY",            "🔑 TON API Key"),
+    ("TRON_WALLET",            "💵 TRON Wallet"),
+    ("TRON_API_KEY",           "🔑 TRON API Key"),
+    ("OPENROUTER_API_KEY",     "🤖 OpenRouter Key"),
+    ("OPENROUTER_MODEL",       "🧠 OpenRouter Model"),
+    ("ANTHROPIC_API_KEY",      "🧠 Anthropic Key"),
+    ("TG_API_ID",              "📱 TG API ID"),
+    ("TG_API_HASH",            "📱 TG API Hash"),
+    ("BROADCAST_DELAY",        "⏱ Broadcast Delay"),
+    ("RAILWAY_TOKEN",          "🚂 Railway Token"),
+    ("RAILWAY_PROJECT_ID",     "🚂 Railway Project ID"),
+    ("RAILWAY_SERVICE_ID",     "🚂 Railway Service ID"),
+    ("RAILWAY_ENVIRONMENT_ID", "🚂 Railway Env ID"),
+]
+_ENV_KEYS = {k for k, _ in _ENV_VARS}
+
+
+def _env_list_kb(vars_online: dict[str, str] | None = None):
+    kb = InlineKeyboardBuilder()
+    for key, label in _ENV_VARS:
+        val = (vars_online or {}).get(key, "")
+        status = "✅" if val else "❌"
+        kb.button(text=f"{status} {label}", callback_data=f"adm:env_edit:{key}")
+    kb.button(text="➕ Добавить переменную",   callback_data="adm:env_add")
+    kb.button(text="🔄 Обновить список",        callback_data="adm:env_list")
+    kb.button(text="◀️ Главное меню админки",  callback_data="adm:main")
+    kb.adjust(1)
     return kb.as_markup()
 
 
@@ -238,6 +278,30 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
 
     elif action == "swarm_mode":
         await _adm_swarm_mode(callback, pool)
+
+    elif action == "env_list":
+        await _adm_env_list(callback, http)
+
+    elif action.startswith("env_edit:"):
+        key = action.split(":", 1)[1]
+        await _adm_env_edit_ask(callback, pool, key)
+
+    elif action == "env_add":
+        await callback.message.edit_text(
+            "➕ <b>Добавить переменную</b>\n\n"
+            "Отправьте в формате:\n<code>КЛЮЧ значение</code>\n\n"
+            "Пример: <code>MY_VAR hello123</code>",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'env_add','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='env_add',data=''",
+            callback.from_user.id,
+        )
+
+    elif action.startswith("env_del:"):
+        key = action.split(":", 1)[1]
+        await _adm_env_delete(callback, http, key)
 
     elif action.startswith("set_mode:"):
         mode = action.split(":", 1)[1]
@@ -559,6 +623,131 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+
+    elif state.startswith("env_edit:"):
+        key = state.split(":", 1)[1]
+        http = message.bot._session  # type: ignore[attr-defined]
+        # Use the shared http session from bot's aiohttp session if available
+        async with aiohttp.ClientSession() as tmp_http:
+            try:
+                await railway_api.set_variable(tmp_http, key, text)
+                os.environ[key] = text  # update in-process immediately
+                await message.answer(
+                    f"✅ <b>Переменная обновлена</b>\n\n"
+                    f"<code>{key}</code> = <code>{text[:80]}{'...' if len(text) > 80 else ''}</code>\n\n"
+                    "Railway начнёт переразворачивание автоматически.",
+                    parse_mode="HTML", reply_markup=_admin_main_kb(),
+                )
+            except Exception as e:
+                await message.answer(
+                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{e}</code>",
+                    parse_mode="HTML", reply_markup=_admin_main_kb(),
+                )
+
+    elif state == "env_add":
+        parts = text.split(None, 1)
+        if len(parts) != 2:
+            await message.answer(
+                "❌ Неверный формат. Нужно: <code>КЛЮЧ значение</code>",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+            return
+        key, val = parts[0].upper(), parts[1]
+        async with aiohttp.ClientSession() as tmp_http:
+            try:
+                await railway_api.set_variable(tmp_http, key, val)
+                os.environ[key] = val
+                await message.answer(
+                    f"✅ <b>Переменная добавлена</b>\n\n"
+                    f"<code>{key}</code> = <code>{val[:80]}{'...' if len(val) > 80 else ''}</code>\n\n"
+                    "Railway начнёт переразворачивание автоматически.",
+                    parse_mode="HTML", reply_markup=_admin_main_kb(),
+                )
+            except Exception as e:
+                await message.answer(
+                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{e}</code>",
+                    parse_mode="HTML", reply_markup=_admin_main_kb(),
+                )
+
+
+# ── Railway env var management helpers ────────────────────────────────────────
+
+async def _adm_env_list(callback: CallbackQuery, http: aiohttp.ClientSession) -> None:
+    if not railway_api.is_configured():
+        await callback.message.edit_text(
+            "🔑 <b>Переменные Railway</b>\n\n"
+            "⚠️ Railway API не настроен.\n\n"
+            "Добавьте вручную в Railway Dashboard:\n"
+            "• <code>RAILWAY_TOKEN</code> — токен из railway.app/account\n"
+            "• <code>RAILWAY_PROJECT_ID</code>\n"
+            "• <code>RAILWAY_SERVICE_ID</code>\n"
+            "• <code>RAILWAY_ENVIRONMENT_ID</code>\n\n"
+            "После добавления этих 4 переменных — управление остальными будет здесь.",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        return
+
+    try:
+        vars_online = await railway_api.list_variables(http)
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка Railway API</b>\n\n<code>{e}</code>",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        return
+
+    total = len(vars_online)
+    await callback.message.edit_text(
+        f"🔑 <b>Переменные Railway</b>\n\n"
+        f"Всего в Railway: <b>{total}</b> переменных\n"
+        f"Ниже — управляемые ключи платформы:\n\n"
+        f"✅ = задана  ❌ = не задана",
+        parse_mode="HTML",
+        reply_markup=_env_list_kb(vars_online),
+    )
+
+
+async def _adm_env_edit_ask(
+    callback: CallbackQuery, pool: asyncpg.Pool, key: str
+) -> None:
+    label = next((l for k, l in _ENV_VARS if k == key), key)
+    cur_val = os.getenv(key, "")
+    masked = ""
+    if cur_val:
+        if len(cur_val) > 8:
+            masked = cur_val[:4] + "****" + cur_val[-4:]
+        else:
+            masked = "****"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🗑 Удалить переменную", callback_data=f"adm:env_del:{key}")
+    kb.button(text="◀️ Назад",              callback_data="adm:env_list")
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"✏️ <b>{label}</b>\n\n"
+        f"Ключ: <code>{key}</code>\n"
+        f"Текущее значение: <code>{masked if masked else 'не задано'}</code>\n\n"
+        "Отправьте новое значение следующим сообщением:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+    await pool.execute(
+        f"INSERT INTO admin_state(admin_id,state,data) VALUES($1,'env_edit:{key}','') "
+        "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
+        callback.from_user.id, f"env_edit:{key}",
+    )
+
+
+async def _adm_env_delete(
+    callback: CallbackQuery, http: aiohttp.ClientSession, key: str
+) -> None:
+    try:
+        await railway_api.delete_variable(http, key)
+        os.environ.pop(key, None)
+        await callback.answer(f"✅ {key} удалена", show_alert=True)
+        await _adm_env_list(callback, http)
+    except Exception as e:
+        await callback.answer(f"❌ {e}", show_alert=True)
 
 
 # ── New user tracker (called from start.py or inline) ─────────────────────────
