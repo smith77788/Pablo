@@ -103,6 +103,10 @@ async def cmd_ranking(message: Message, pool: asyncpg.Pool) -> None:
         return
 
     kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📊 Дашборд позиций",
+        callback_data=RankCb(action="dashboard", bot_id=0),
+    )
     for bot in bots:
         label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
         kb.button(
@@ -483,6 +487,93 @@ async def cb_rank_check_now(
     )
 
 
+# ── action="dashboard" — общая таблица позиций по всем ботам ─────────────
+
+
+DASHBOARD_LIMIT = 20
+
+
+@router.callback_query(RankCb.filter(F.action == "dashboard"))
+async def cb_rank_dashboard(
+    callback: CallbackQuery,
+    callback_data: RankCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+
+    owner_id = callback.from_user.id
+    plan = await get_plan(pool, owner_id)
+    if plan == "free":
+        await callback.message.edit_text(
+            locked_text("Трекер позиций в поиске", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
+
+    keywords = await db.get_all_keywords_with_latest_ranking(pool, owner_id)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="◀️ Назад",
+        callback_data=RankCb(action="menu", bot_id=0),
+    )
+
+    if not keywords:
+        await callback.message.edit_text(
+            "📊 <b>Дашборд позиций</b>\n\nУ вас пока нет отслеживаемых ключевых слов.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    total = len(keywords)
+    display = keywords[:DASHBOARD_LIMIT]
+    lines: list[str] = ["📊 <b>Дашборд позиций</b>\n"]
+
+    for entry in display:
+        bot_un = entry["bot_username"] or "?"
+        bot_safe = html.escape(f"@{bot_un}")
+        kw_safe = html.escape(entry["keyword"])
+        pos = entry["position"]
+        if pos is None:
+            lines.append(f"❓ {bot_safe} — «{kw_safe}»")
+        else:
+            lines.append(f"#{pos} {bot_safe} — «{kw_safe}»")
+
+    if total > DASHBOARD_LIMIT:
+        lines.append(f"\n<i>...и ещё {total - DASHBOARD_LIMIT} слов (показаны первые {DASHBOARD_LIMIT})</i>")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── action="toggle_keyword" — пауза/возобновление ключевого слова ─────────
+
+
+@router.callback_query(RankCb.filter(F.action == "toggle_keyword"))
+async def cb_rank_toggle_keyword(
+    callback: CallbackQuery,
+    callback_data: RankCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+
+    keyword_id = callback_data.keyword_id
+    bot_id = callback_data.bot_id
+    owner_id = callback.from_user.id
+
+    new_state = await db.toggle_keyword_active(pool, keyword_id, owner_id)
+    if new_state is None:
+        await callback.answer("Ключевое слово не найдено.", show_alert=True)
+        return
+
+    await _show_rank_menu(callback, bot_id, pool)
+
+
 # ── Internal helper (shared between menu and post-remove) ─────────────────
 
 
@@ -547,16 +638,21 @@ async def _render_rank_menu(
     kb.adjust(2)
     for kw in keywords:
         kw_safe_btn = kw["keyword"][:20]
+        pause_label = "▶️ Возобновить" if not kw["is_active"] else "⏸ Пауза"
         kb.button(
             text=f"📈 {kw_safe_btn}",
             callback_data=RankCb(action="history", bot_id=bot_id, keyword_id=kw["id"]),
+        )
+        kb.button(
+            text=pause_label,
+            callback_data=RankCb(action="toggle_keyword", bot_id=bot_id, keyword_id=kw["id"]),
         )
         kb.button(
             text=f"🗑 {kw_safe_btn}",
             callback_data=RankCb(action="remove", bot_id=bot_id, keyword_id=kw["id"]),
         )
     if keywords:
-        kb.adjust(2, *([2] * len(keywords)))
+        kb.adjust(2, *([3] * len(keywords)))
 
     kb.row(*back_to_bot(bot_id).inline_keyboard[0])
 

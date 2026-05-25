@@ -1694,3 +1694,54 @@ async def get_ranking_history(pool: asyncpg.Pool, keyword_id: int,
         "WHERE keyword_id=$1 ORDER BY checked_at DESC LIMIT $2",
         keyword_id, limit,
     )
+
+
+async def get_all_keywords_with_latest_ranking(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
+    """Возвращает все ключевые слова пользователя с последней позицией и username бота.
+
+    Формат: [{"keyword_id", "keyword", "bot_id", "bot_username", "position", "checked_at"}]
+    """
+    rows = await pool.fetch(
+        """SELECT
+               tk.id              AS keyword_id,
+               tk.keyword         AS keyword,
+               tk.bot_id          AS bot_id,
+               mb.username        AS bot_username,
+               sr.position        AS position,
+               sr.checked_at      AS checked_at
+           FROM tracked_keywords tk
+           JOIN managed_bots mb ON mb.bot_id = tk.bot_id
+           LEFT JOIN LATERAL (
+               SELECT position, checked_at
+               FROM search_rankings
+               WHERE keyword_id = tk.id
+               ORDER BY checked_at DESC
+               LIMIT 1
+           ) sr ON TRUE
+           WHERE tk.owner_id = $1
+           ORDER BY mb.username, tk.keyword""",
+        owner_id,
+    )
+    return [
+        {
+            "keyword_id": r["keyword_id"],
+            "keyword": r["keyword"],
+            "bot_id": r["bot_id"],
+            "bot_username": r["bot_username"],
+            "position": r["position"],
+            "checked_at": r["checked_at"],
+        }
+        for r in rows
+    ]
+
+
+async def toggle_keyword_active(pool: asyncpg.Pool, keyword_id: int, owner_id: int) -> bool | None:
+    """Переключает is_active ключевого слова. Возвращает новое значение или None если не найдено."""
+    row = await pool.fetchrow(
+        """UPDATE tracked_keywords
+           SET is_active = NOT is_active
+           WHERE id = $1 AND owner_id = $2
+           RETURNING is_active""",
+        keyword_id, owner_id,
+    )
+    return row["is_active"] if row else None

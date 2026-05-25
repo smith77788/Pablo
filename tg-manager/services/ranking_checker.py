@@ -4,6 +4,7 @@ import asyncio
 import logging
 import asyncpg
 from services.account_manager import search_in_telegram
+from database import db
 
 log = logging.getLogger(__name__)
 _INTERVAL = 3600  # check every hour
@@ -17,6 +18,19 @@ async def run(pool: asyncpg.Pool) -> None:
         except Exception as e:
             log.exception("ranking_checker error: %s", e)
         await asyncio.sleep(_INTERVAL)
+
+
+async def _get_least_used_account(pool: asyncpg.Pool, owner_id: int) -> asyncpg.Record | None:
+    """Выбирает активный аккаунт владельца, давно не использовавшийся (last_used ASC).
+
+    Это равномерно распределяет нагрузку между несколькими аккаунтами.
+    """
+    return await pool.fetchrow(
+        "SELECT id, session_str FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=true "
+        "ORDER BY last_used ASC NULLS FIRST LIMIT 1",
+        owner_id,
+    )
 
 
 async def _check_all(pool: asyncpg.Pool) -> None:
@@ -34,13 +48,8 @@ async def _check_all(pool: asyncpg.Pool) -> None:
 
     for kw in keywords:
         try:
-            # Выбираем случайный активный аккаунт владельца бота
-            account = await pool.fetchrow(
-                "SELECT id, session_str FROM tg_accounts "
-                "WHERE owner_id=$1 AND is_active=true "
-                "ORDER BY RANDOM() LIMIT 1",
-                kw["owner_id"],
-            )
+            # Выбираем аккаунт владельца, который дольше всего не использовался
+            account = await _get_least_used_account(pool, kw["owner_id"])
             if not account:
                 log.warning(
                     "ranking_checker: нет активных аккаунтов у пользователя %s "
@@ -62,9 +71,11 @@ async def _check_all(pool: asyncpg.Pool) -> None:
                 "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
                 kw["id"], kw["bot_id"], position,
             )
+            # Обновляем время последнего использования аккаунта
+            await db.update_tg_account_used(pool, account["id"])
             log.debug(
-                "ranking_checker: keyword=%r bot=%r position=%s",
-                kw["keyword"], bot_username, position,
+                "ranking_checker: keyword=%r bot=%r position=%s account_id=%s",
+                kw["keyword"], bot_username, position, account["id"],
             )
             await asyncio.sleep(2)  # rate limit between searches
         except Exception as e:

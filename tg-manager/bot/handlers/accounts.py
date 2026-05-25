@@ -872,6 +872,155 @@ async def cb_dialogs_stats(
     )
 
 
+# ── Dialogs list with pagination ───────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "dialogs"))
+async def cb_dialogs(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+    page_offset = callback_data.chat_id  # используем chat_id как page offset
+
+    await callback.message.edit_text(
+        "⏳ <b>Загружаю список диалогов…</b>",
+        parse_mode="HTML",
+    )
+
+    # Загружаем на одну страницу больше, чтобы проверить наличие следующей
+    fetch_limit = _DIALOGS_PAGE_SIZE + 1
+    try:
+        dialogs = await get_dialogs(session_str, limit=fetch_limit + page_offset, offset=0)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Не удалось получить диалоги:\n<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        return
+
+    # Срезаем уже просмотренные страницы
+    page_dialogs = dialogs[page_offset:]
+    has_next = len(page_dialogs) > _DIALOGS_PAGE_SIZE
+    page_dialogs = page_dialogs[:_DIALOGS_PAGE_SIZE]
+
+    if not page_dialogs:
+        await callback.message.edit_text(
+            "📭 Диалогов не найдено.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    _type_labels = {"channel": "📢 Канал", "group": "👥 Группа"}
+    lines = [f"📂 <b>Диалоги (стр. {page_offset // _DIALOGS_PAGE_SIZE + 1})</b>\n"]
+    for dialog in page_dialogs:
+        title = escape(dialog.get("title") or "Без названия")
+        d_type = _type_labels.get(dialog.get("type", ""), "💬")
+        members = dialog.get("members") or 0
+        members_str = f" · {members:,} уч." if members else ""
+        lines.append(f"  • {d_type} {title}{members_str}")
+
+    kb = InlineKeyboardBuilder()
+
+    # Навигация
+    next_offset = page_offset + _DIALOGS_PAGE_SIZE
+    prev_offset = page_offset - _DIALOGS_PAGE_SIZE
+
+    nav_row = []
+    if page_offset > 0:
+        kb.button(
+            text="◀️ Назад",
+            callback_data=AccCb(action="dialogs", acc_id=callback_data.acc_id, chat_id=max(0, prev_offset)),
+        )
+    if has_next:
+        kb.button(
+            text="▶️ Далее",
+            callback_data=AccCb(action="dialogs", acc_id=callback_data.acc_id, chat_id=next_offset),
+        )
+    kb.button(
+        text="◀️ К аккаунту",
+        callback_data=AccCb(action="view", acc_id=callback_data.acc_id),
+    )
+
+    nav_count = (1 if page_offset > 0 else 0) + (1 if has_next else 0)
+    if nav_count == 2:
+        kb.adjust(2, 1)
+    else:
+        kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Toggle account active status ───────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "toggle"))
+async def cb_toggle_account(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    current_status = bool(acc.get("is_active", True))
+    new_status = not current_status
+
+    updated = await db.update_tg_account_status(
+        pool, callback_data.acc_id, callback.from_user.id, new_status
+    )
+    if not updated:
+        await callback.answer("Не удалось обновить статус.", show_alert=True)
+        return
+
+    status_text = "▶️ <b>Аккаунт включён.</b>" if new_status else "⏸ <b>Аккаунт отключён.</b>"
+    name = escape(acc.get("first_name") or "")
+    uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
+    phone = escape(acc.get("phone") or "")
+    tg_id = acc.get("tg_user_id") or ""
+
+    lines = [f"👤 <b>Аккаунт</b>\n", status_text]
+    if name:
+        lines.append(f"Имя: <b>{name}</b>")
+    if uname:
+        lines.append(f"Username: <b>{uname}</b>")
+    if phone:
+        lines.append(f"Телефон: <code>{phone}</code>")
+    if tg_id:
+        lines.append(f"Telegram ID: <code>{tg_id}</code>")
+    lines.append(f"Статус: {'✅ Активен' if new_status else '⏸ Отключён'}")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_acc_menu_markup(callback_data.acc_id, is_active=new_status),
+    )
+
+
 # ── Send message via personal account (FSM) ────────────────────────────────────
 
 @router.callback_query(AccCb.filter(F.action == "send_msg"))
