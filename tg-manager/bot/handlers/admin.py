@@ -10,13 +10,11 @@ from datetime import datetime, timedelta
 import asyncpg
 import aiohttp
 from aiogram import Router, F
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from aiogram.filters import Command
-from bot.callbacks import BotCb
 from bot.keyboards import main_menu
-from bot.utils.subscription import is_platform_admin
 from config import ADMIN_SECRET
 from database import db
 from services import railway_api

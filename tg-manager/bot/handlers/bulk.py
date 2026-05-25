@@ -6,7 +6,7 @@ import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from bot.callbacks import BulkCb, BotCb
+from bot.callbacks import BulkCb
 from bot.keyboards import bulk_menu, main_menu
 from bot.states import BulkEdit, ImportBots
 from database import db
@@ -413,7 +413,7 @@ async def msg_import_tokens(message: Message, state: FSMContext,
         detail += f"\n…и ещё {len(all_labels) - 30}"
 
     await progress.edit_text(
-        f"📥 <b>Результат импорта</b>\n\n"
+        "📥 <b>Результат импорта</b>\n\n"
         + "\n".join(parts)
         + (f"\n\n{detail}" if detail else ""),
         parse_mode="HTML",

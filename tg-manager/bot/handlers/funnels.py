@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
-from bot.callbacks import FunnelCb, BotCb
+from bot.callbacks import FunnelCb
 from bot.keyboards import funnels_list, funnel_view, funnel_trigger_menu, back_to_bot, funnel_copy_target, subscription_locked_markup
 from bot.states import CreateFunnel, FunnelBroadcast
 from bot.utils.subscription import require_plan, locked_text
@@ -132,8 +132,8 @@ async def cb_fn_trig_start(callback: CallbackQuery, callback_data: FunnelCb,
     await state.update_data(funnel_id=funnel_id, bot_id=bot_id, current_step=0)
     await state.set_state(CreateFunnel.waiting_step_text)
     await callback.message.edit_text(
-        f"▶️ Триггер: <b>/start</b>\n\n"
-        f"Цепочка создана! Теперь добавьте первый шаг.\n\n"
+        "▶️ Триггер: <b>/start</b>\n\n"
+        "Цепочка создана! Теперь добавьте первый шаг.\n\n"
         "Введите текст сообщения для шага 1:",
         parse_mode="HTML",
     )

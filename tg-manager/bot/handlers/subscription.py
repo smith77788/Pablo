@@ -9,7 +9,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import SubCb
-from bot.utils.subscription import get_plan, PLAN_LEVELS, PLAN_EMOJIS, PLAN_FEATURES, BOT_LIMITS
+from bot.utils.subscription import get_plan, PLAN_EMOJIS, BOT_LIMITS
 from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
 
 # Детальные фичи для каждого плана

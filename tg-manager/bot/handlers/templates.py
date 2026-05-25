@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import asyncpg
-from bot.callbacks import TemplateCb, BotCb, BroadcastCb
+from bot.callbacks import TemplateCb
 from bot.keyboards import templates_list, template_actions, broadcast_confirm, back_to_bot
 from bot.states import AddTemplate, Broadcast
 from database import db

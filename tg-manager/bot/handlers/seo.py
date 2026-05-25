@@ -6,7 +6,7 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
-from bot.callbacks import SeoCb, EditCb, BotCb
+from bot.callbacks import SeoCb, EditCb
 from bot.keyboards import seo_menu, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
@@ -159,7 +159,7 @@ async def cb_seo_analyze(callback: CallbackQuery, callback_data: SeoCb,
         f"  👥 Аудитория: {int(audience):,} чел.",
     ]
     if tips:
-        lines.append(f"\n<b>Что улучшить:</b>")
+        lines.append("\n<b>Что улучшить:</b>")
         for t in tips:
             lines.append(f"  • {t}")
     if score >= 80:

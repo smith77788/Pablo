@@ -2,7 +2,7 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 import asyncpg
-from bot.callbacks import SwarmCb, BotCb
+from bot.callbacks import SwarmCb
 from bot.keyboards import swarm_menu, back_to_bot, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db

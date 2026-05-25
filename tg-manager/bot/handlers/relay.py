@@ -3,8 +3,8 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
-from bot.callbacks import RelayCb, BotCb
-from bot.keyboards import relay_menu, back_to_bot, relay_session_view, subscription_locked_markup
+from bot.callbacks import RelayCb
+from bot.keyboards import relay_menu, relay_session_view, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api

@@ -17,7 +17,6 @@ _offsets: dict[int, int] = {}
 async def _send_via_management(http: aiohttp.ClientSession, operator_id: int,
                                  text: str) -> int | None:
     """Send message to operator via management bot. Returns message_id."""
-    import ssl
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": operator_id, "text": text, "parse_mode": "HTML"}
     try:

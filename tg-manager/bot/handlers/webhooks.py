@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 import aiohttp
 import asyncpg
-from bot.callbacks import WebhookCb, BotCb
+from bot.callbacks import WebhookCb
 from bot.keyboards import webhook_menu, back_to_bot
 from database import db
 from services import bot_api

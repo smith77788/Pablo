@@ -36,7 +36,7 @@ async def start_login(phone: str) -> str:
         result = await asyncio.wait_for(
             client.send_code_request(phone), timeout=_CONNECT_TIMEOUT
         )
-    except FloodWaitError as e:
+    except FloodWaitError:
         try:
             await client.disconnect()
         except Exception:
@@ -457,7 +457,6 @@ async def join_channel(session_string: str, invite_or_username: str) -> dict:
 async def leave_channel(session_string: str, channel_id: int | str) -> bool:
     """Leave a channel/group by internal Telegram channel_id."""
     from telethon.tl.functions.channels import LeaveChannelRequest
-    from telethon.tl.types import InputChannel
     client = _make_client(session_string)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -777,7 +776,7 @@ async def update_profile(
     client = _make_client(session_string)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        me = await client.get_me()
+        await client.get_me()
         kwargs: dict = {}
         if first_name is not None:
             kwargs["first_name"] = first_name

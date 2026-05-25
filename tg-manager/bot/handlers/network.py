@@ -8,14 +8,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import NetworkCb, ClusterCb, BotCb, BulkCb
+from bot.callbacks import NetworkCb, ClusterCb
 from bot.keyboards import (
     network_ops_menu, network_clusters_menu, network_cluster_view,
     network_assign_bot_pick, network_routing_menu,
     network_clone_pick_source, network_clone_pick_dest,
-    network_broadcast_confirm, back_to_bot, subscription_locked_markup,
+    network_broadcast_confirm, subscription_locked_markup,
 )
-from bot.states import NetworkBroadcast, CloneSettings, SetRoutingWeight, AssignCluster, BulkEdit, ImportBots
+from bot.states import NetworkBroadcast, CloneSettings, SetRoutingWeight, AssignCluster
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import broadcaster, bot_api
@@ -133,7 +133,7 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"  Пересечений: {overlap['multi_bot_users']:,} ({overlap['overlap_pct']}%)\n\n"
         f"<b>Рассылки отправлено:</b> {ov['total_sent']:,}\n"
         f"<b>Средний Score:</b> {ov['avg_score']:.3f}\n\n"
-        + (f"<b>Топ-3 по аудитории:</b>\n" + "\n".join(top3_lines) if top3 else ""),
+        + ("<b>Топ-3 по аудитории:</b>\n" + "\n".join(top3_lines) if top3 else ""),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

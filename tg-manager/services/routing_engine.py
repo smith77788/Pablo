@@ -1,6 +1,5 @@
 """Swarm routing engine: decides whether to redirect users between bots based on mode and scores."""
 from __future__ import annotations
-import asyncio
 import logging
 import random
 import aiohttp

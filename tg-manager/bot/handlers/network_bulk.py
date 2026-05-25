@@ -6,7 +6,7 @@ import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from bot.callbacks import NetworkCb, BulkCb, BotCb
+from bot.callbacks import NetworkCb, BulkCb
 from bot.keyboards import network_ops_menu, main_menu, subscription_locked_markup
 from bot.states import BulkEdit, ImportBots
 from bot.utils.subscription import require_plan, locked_text, is_platform_admin
@@ -334,7 +334,7 @@ async def msg_import_tokens(message: Message, state: FSMContext,
     if failed: parts.append(f"❌ Ошибок: <b>{len(failed)}</b>")
     detail = "\n".join((added + skipped + failed)[:30])
     await progress.edit_text(
-        f"📥 <b>Результат импорта</b>\n\n" + "\n".join(parts) + (f"\n\n{detail}" if detail else ""),
+        "📥 <b>Результат импорта</b>\n\n" + "\n".join(parts) + (f"\n\n{detail}" if detail else ""),
         parse_mode="HTML", reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
     )
 

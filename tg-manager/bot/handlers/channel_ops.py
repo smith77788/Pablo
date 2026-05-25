@@ -18,10 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import html
-import json
 import logging
-from typing import Any
-
+import aiohttp
 import asyncpg
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -29,14 +27,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import AccCb, ChanCb
+from bot.callbacks import ChanCb
 from bot.states import (
     BulkCreateFSM, BulkDmFSM, CreateBotFSM, CreateChannelFSM, EditChannelFSM,
     InviteUsersFSM, JoinChannelFSM, PostToChannelFSM, ReportFSM,
     SendReactionFSM, UpdateProfileFSM,
 )
 from bot.utils.subscription import require_plan
-from database import db
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -560,7 +557,7 @@ async def cb_do_bulk_create(
             results_ok.append(f"✅ {html.escape(label)}: id={result['channel_id']}")
         await asyncio.sleep(2)
 
-    lines = [f"🔁 <b>Результаты массового создания</b>\n"]
+    lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err
     await callback.message.edit_text(
         "\n".join(lines),
@@ -1600,7 +1597,7 @@ async def cb_report_reason(callback: CallbackQuery, state: FSMContext, pool: asy
     await callback.message.edit_text(
         f"✅ <b>Жалоба отправлена!</b>\n\nПричина: {label}\nОбъект: <code>{html.escape(data['peer'])}</code>"
         if ok else
-        f"❌ <b>Ошибка отправки жалобы</b>\n\nПроверьте username и попробуйте снова.",
+        "❌ <b>Ошибка отправки жалобы</b>\n\nПроверьте username и попробуйте снова.",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
@@ -2237,7 +2234,6 @@ async def fsm_bulk_dm_text(message: Message, state: FSMContext, pool: asyncpg.Po
 
     for i, username in enumerate(usernames):
         acc = accounts[i % n_acc]
-        acc_label = html.escape(acc["first_name"] or acc["phone"])
         result = await account_manager.send_dm(acc["session_str"], username, text_to_send)
 
         u_escaped = html.escape(username)

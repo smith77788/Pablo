@@ -1,13 +1,12 @@
 """User activity tracking and re-engagement broadcasts."""
 from __future__ import annotations
-import asyncio
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
-from bot.callbacks import EngageCb, BotCb, CrmCb
+from bot.callbacks import EngageCb, CrmCb
 from bot.keyboards import engagement_menu, back_to_bot, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from bot.states import ReactivateBroadcast

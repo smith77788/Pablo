@@ -2,7 +2,7 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 import asyncpg
-from bot.callbacks import StatsCb, BotCb
+from bot.callbacks import StatsCb
 from bot.keyboards import back_to_bot
 from database import db
 

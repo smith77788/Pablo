@@ -102,9 +102,6 @@ def net_broadcast_lang_menu() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def network_menu() -> InlineKeyboardMarkup:
-    return network_ops_menu()
-
 
 def bulk_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()

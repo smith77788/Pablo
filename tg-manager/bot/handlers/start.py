@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 import asyncpg
 from bot.keyboards import main_menu
-from bot.utils.subscription import get_plan, PLAN_LEVELS, PLAN_EMOJIS, is_platform_admin
+from bot.utils.subscription import get_plan, PLAN_EMOJIS, is_platform_admin
 from config import ADMIN_IDS
 from database import db
 from bot.callbacks import BotCb
@@ -36,6 +36,7 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
 @router.message(CommandStart())
 async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     uid = message.from_user.id
+    admin = is_platform_admin(uid)
     try:
         blocked = await pool.fetchval("SELECT 1 FROM blocked_users WHERE user_id=$1", uid)
         if blocked:
@@ -70,7 +71,6 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     except Exception:
         pass
 
-    admin = is_platform_admin(uid)
     bots = await db.get_bots(pool, uid)
     bot_count = len(bots)
 
@@ -132,7 +132,6 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     except Exception:
         plan = "free"
     emoji = PLAN_EMOJIS.get(plan, "🆓")
-    admin = is_platform_admin(uid)
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     kb = InlineKeyboardBuilder()
@@ -166,6 +165,7 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
     uid = message.from_user.id
+    admin = is_platform_admin(uid)
     if not _is_admin(uid):
         await message.answer("⛔️ Доступ запрещён.")
         return
@@ -174,7 +174,6 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
     except Exception:
         plan = "free"
     emoji = PLAN_EMOJIS.get(plan, "🆓")
-    admin = is_platform_admin(uid)
 
     text = (
         f"❓ <b>Справка TG Manager</b>\n\n"

@@ -1,6 +1,5 @@
 """Network Broadcast v2 — send to each bot's own audience with segment filters."""
 from __future__ import annotations
-import asyncio
 import asyncpg
 import aiohttp
 from aiogram import Router, F

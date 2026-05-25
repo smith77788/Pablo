@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import asyncpg
-from bot.callbacks import AutoReplyCb, BotCb
+from bot.callbacks import AutoReplyCb
 from bot.keyboards import auto_reply_menu, auto_reply_trigger_menu, auto_reply_view, back_to_bot, auto_reply_copy_target
 from bot.states import AddAutoReply
 from database import db

@@ -4,8 +4,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 import asyncpg
-from bot.callbacks import ExperimentCb, BotCb
-from bot.keyboards import experiments_menu, experiment_view_menu, experiment_type_menu, variant_pick_menu, back_to_bot, subscription_locked_markup
+from bot.callbacks import ExperimentCb
+from bot.keyboards import experiments_menu, experiment_view_menu, experiment_type_menu, variant_pick_menu, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 
@@ -146,8 +146,7 @@ async def msg_variant_name(message: Message, state: FSMContext) -> None:
 @router.message(CreateExperiment.waiting_variant_content, F.text)
 async def msg_variant_content(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
-    variant_id = await db.add_experiment_variant(pool, data["exp_id"], data["variant_name"], message.text)
-    exp = await db.get_experiment(pool, data["exp_id"])
+    await db.add_experiment_variant(pool, data["exp_id"], data["variant_name"], message.text)
     variants = await db.get_experiment_variants(pool, data["exp_id"])
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from bot.callbacks import ExperimentCb as EC

@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
-from bot.callbacks import CommandsCb, BotCb
+from bot.callbacks import CommandsCb
 from bot.keyboards import commands_menu, back_to_bot
 from bot.states import SetCommands
 from database import db

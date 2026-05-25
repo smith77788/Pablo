@@ -5,7 +5,7 @@ from aiogram.types import Message, CallbackQuery
 import aiohttp
 import asyncpg
 from bot.callbacks import BotCb, SubCb
-from bot.keyboards import bots_list, bot_menu, confirm_delete, main_menu, subscription_locked_markup
+from bot.keyboards import bots_list, bot_menu, confirm_delete, main_menu
 from bot.states import AddBot
 from bot.utils.subscription import get_bot_limit
 from database import db

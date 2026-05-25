@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
-from bot.callbacks import BroadcastCb, BotCb
+from bot.callbacks import BroadcastCb
 from bot.keyboards import (
     broadcast_menu, broadcast_confirm, back_to_bot, broadcast_from_template,
     broadcast_history, broadcast_detail, broadcast_segment_menu,

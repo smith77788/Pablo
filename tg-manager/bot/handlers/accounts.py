@@ -947,7 +947,6 @@ async def cb_dialogs(
     next_offset = page_offset + _DIALOGS_PAGE_SIZE
     prev_offset = page_offset - _DIALOGS_PAGE_SIZE
 
-    nav_row = []
     if page_offset > 0:
         kb.button(
             text="◀️ Назад",
@@ -1006,7 +1005,7 @@ async def cb_toggle_account(
     phone = escape(acc.get("phone") or "")
     tg_id = acc.get("tg_user_id") or ""
 
-    lines = [f"👤 <b>Аккаунт</b>\n", status_text]
+    lines = ["👤 <b>Аккаунт</b>\n", status_text]
     if name:
         lines.append(f"Имя: <b>{name}</b>")
     if uname:

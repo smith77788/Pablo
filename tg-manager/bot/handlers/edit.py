@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
-from bot.callbacks import EditCb, BotCb
+from bot.callbacks import EditCb
 from bot.keyboards import edit_menu, back_to_bot
 from bot.states import EditProfile, UpdateToken
 from database import db

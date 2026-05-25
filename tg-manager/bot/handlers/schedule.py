@@ -5,7 +5,7 @@ import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from bot.callbacks import ScheduleCb, BotCb
+from bot.callbacks import ScheduleCb
 from bot.keyboards import schedule_menu, back_to_bot, schedule_template_list, subscription_locked_markup
 from bot.states import ScheduleBroadcast
 from bot.utils.subscription import require_plan, locked_text

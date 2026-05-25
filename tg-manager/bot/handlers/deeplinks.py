@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import asyncpg
-from bot.callbacks import DeepLinkCb, BotCb
+from bot.callbacks import DeepLinkCb
 from bot.keyboards import deeplinks_menu, deeplink_view_menu, back_to_bot, subscription_locked_markup
 from bot.states import CreateDeepLink
 from bot.utils.subscription import require_plan, locked_text
@@ -117,7 +117,7 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
         )
         return  # keep state active so user can send another value
     try:
-        link_id = await db.create_deep_link(pool, data["bot_id"], data["link_name"], param)
+        await db.create_deep_link(pool, data["bot_id"], data["link_name"], param)
     except Exception:
         await message.answer(
             "❌ Параметр <b>{}</b> уже занят. Введите другой:".format(param),
