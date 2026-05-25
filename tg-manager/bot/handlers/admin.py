@@ -698,10 +698,12 @@ async def _adm_env_list(callback: CallbackQuery, http: aiohttp.ClientSession) ->
 
     total = len(vars_online)
     await callback.message.edit_text(
-        f"🔑 <b>Переменные Railway</b>\n\n"
-        f"Всего в Railway: <b>{total}</b> переменных\n"
-        f"Ниже — управляемые ключи платформы:\n\n"
-        f"✅ = задана  ❌ = не задана",
+        f"🔑 <b>Переменные окружения (Railway)</b>\n\n"
+        f"Всего переменных в Railway: <b>{total}</b>\n\n"
+        f"Нажмите на переменную чтобы изменить или удалить её.\n"
+        f"➕ Добавить переменную — любой ключ и значение.\n\n"
+        f"После изменения Railway автоматически перезапустит сервис (~1 мин).\n\n"
+        f"✅ = задана   ❌ = не задана",
         parse_mode="HTML",
         reply_markup=_env_list_kb(vars_online),
     )
