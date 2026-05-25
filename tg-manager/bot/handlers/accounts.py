@@ -138,8 +138,9 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
         return
     await state.clear()
     await message.answer(
-        "❌ <b>Действие отменено.</b>\n\nВоспользуйтесь /accounts для управления аккаунтами.",
+        "❌ <b>Действие отменено.</b>",
         parse_mode="HTML",
+        reply_markup=_cancel_markup(),
     )
 
 
