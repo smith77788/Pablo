@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import logging
+import os
 import asyncpg
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -12,7 +13,7 @@ from bot.callbacks import AiCb
 from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool
-from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
+from config import OPENROUTER_MODEL
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -27,14 +28,29 @@ _SYSTEM_PROMPT = (
 
 _MAX_TURNS = 100  # практически без ограничений
 
-# Модели для fallback при превышении лимита
+# Модели для fallback при превышении лимита — первой всегда идёт основная модель
 _FALLBACK_MODELS = [
-    OPENROUTER_MODEL,
+    "anthropic/claude-3.5-sonnet",
     "anthropic/claude-3-haiku",
     "openai/gpt-4o-mini",
     "google/gemini-flash-1.5",
     "meta-llama/llama-3.1-8b-instruct:free",
 ]
+
+
+def _get_api_key() -> str:
+    """Всегда читаем из env — не кешируем на уровне модуля."""
+    return os.getenv("OPENROUTER_API_KEY", "")
+
+
+def _get_model() -> str:
+    return os.getenv("OPENROUTER_MODEL", "") or OPENROUTER_MODEL or "anthropic/claude-3.5-sonnet"
+
+
+def _get_models_to_try() -> list[str]:
+    primary = _get_model()
+    models = [primary] + [m for m in _FALLBACK_MODELS if m != primary]
+    return list(dict.fromkeys(models))
 
 
 def _openai_tools() -> list:
@@ -53,22 +69,27 @@ def _openai_tools() -> list:
 
 
 async def _call_openrouter(messages: list, pool: asyncpg.Pool, user_id: int) -> str:
-    if not OPENROUTER_API_KEY:
-        return "⚠️ AI-ассистент не настроен. Добавьте OPENROUTER_API_KEY в переменные среды."
+    api_key = _get_api_key()
+    if not api_key:
+        log.error("OPENROUTER_API_KEY is not set in environment")
+        return (
+            "⚠️ <b>AI-ассистент не настроен</b>\n\n"
+            "Переменная <code>OPENROUTER_API_KEY</code> не задана.\n"
+            "Добавьте её в настройки Railway и перезапустите сервис."
+        )
     try:
         from openai import AsyncOpenAI, RateLimitError
     except ImportError:
-        return "⚠️ Библиотека openai не установлена."
+        return "⚠️ Библиотека openai не установлена (pip install openai)."
 
     client = AsyncOpenAI(
-        api_key=OPENROUTER_API_KEY,
+        api_key=api_key,
         base_url="https://openrouter.ai/api/v1",
     )
     current_messages = [{"role": "system", "content": _SYSTEM_PROMPT}] + list(messages)
     tools = _openai_tools()
-
-    # Пробуем каждую модель из fallback-списка
-    models_to_try = list(dict.fromkeys(_FALLBACK_MODELS))  # убираем дубли, сохраняя порядок
+    primary_model = _get_model()
+    models_to_try = _get_models_to_try()
 
     for model in models_to_try:
         try:
@@ -97,7 +118,7 @@ async def _call_openrouter(messages: list, pool: asyncpg.Pool, user_id: int) -> 
                             "content": result_text,
                         })
                 else:
-                    suffix = f"\n\n<i>Модель: {model}</i>" if model != OPENROUTER_MODEL else ""
+                    suffix = f"\n\n<i>Модель: {model}</i>" if model != primary_model else ""
                     return (msg.content or "Нет ответа.") + suffix
             return "Превышен лимит итераций инструментов."
 
@@ -140,7 +161,7 @@ async def cmd_ai(message: Message, state: FSMContext, pool: asyncpg.Pool) -> Non
         "• «Проанализируй активность за последние 7 дней»\n"
         "• «Дай советы по SEO для моего бота»\n"
         "• «Сколько холодных пользователей нужно реактивировать?»\n\n"
-        f"<i>Модель: {OPENROUTER_MODEL}</i>",
+        f"<i>Модель: {_get_model()}</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
