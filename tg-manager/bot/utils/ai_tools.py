@@ -10,7 +10,7 @@ async def get_my_bots(pool: asyncpg.Pool, user_id: int) -> dict:
                COUNT(DISTINCT a.user_id) AS audience,
                b.swarm_enabled, b.bot_role, b.cluster
         FROM managed_bots b
-        LEFT JOIN bot_audience a ON a.bot_id = b.bot_id
+        LEFT JOIN bot_users a ON a.bot_id = b.bot_id AND a.is_active = TRUE
         WHERE b.added_by=$1
         GROUP BY b.bot_id, b.username, b.first_name, b.swarm_enabled, b.bot_role, b.cluster
         ORDER BY audience DESC
@@ -41,10 +41,10 @@ async def get_bot_details(pool: asyncpg.Pool, user_id: int, bot_id: int) -> dict
         return {"error": "Bot not found"}
 
     audience = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_audience WHERE bot_id=$1", bot_id
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
     )
     today = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_audience WHERE bot_id=$1 AND joined_at > now() - INTERVAL '24 hours'",
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND first_seen > now() - INTERVAL '24 hours'",
         bot_id,
     )
     broadcasts = await pool.fetchval(
@@ -70,8 +70,8 @@ async def get_network_stats(pool: asyncpg.Pool, user_id: int) -> dict:
         "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", user_id
     )
     total_audience = await pool.fetchval(
-        "SELECT COUNT(DISTINCT a.user_id) FROM bot_audience a "
-        "JOIN managed_bots b ON b.bot_id=a.bot_id WHERE b.added_by=$1",
+        "SELECT COUNT(DISTINCT a.user_id) FROM bot_users a "
+        "JOIN managed_bots b ON b.bot_id=a.bot_id WHERE b.added_by=$1 AND a.is_active=TRUE",
         user_id,
     )
     total_sent = await pool.fetchval(
@@ -127,9 +127,9 @@ async def get_growth_trend(pool: asyncpg.Pool, user_id: int, bot_id: int, days: 
         return {"error": "Bot not found"}
     rows = await pool.fetch(
         """
-        SELECT DATE(joined_at) AS day, COUNT(*) AS new_users
-        FROM bot_audience
-        WHERE bot_id=$1 AND joined_at > now() - ($2 || ' days')::INTERVAL
+        SELECT DATE(first_seen) AS day, COUNT(*) AS new_users
+        FROM bot_users
+        WHERE bot_id=$1 AND first_seen > now() - ($2 || ' days')::INTERVAL
         GROUP BY day ORDER BY day
         """,
         bot_id, str(days),
