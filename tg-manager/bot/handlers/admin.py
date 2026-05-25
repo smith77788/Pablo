@@ -1,0 +1,586 @@
+"""Super-admin panel — platform management, monitoring, token vault, user control."""
+from __future__ import annotations
+import asyncio
+import csv
+import io
+import logging
+from datetime import datetime, timedelta
+
+import asyncpg
+import aiohttp
+from aiogram import Router, F
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from bot.callbacks import BotCb
+from config import ADMIN_IDS, ADMIN_SECRET
+from database import db
+
+log = logging.getLogger(__name__)
+router = Router()
+
+_NOTIFY_NEW_USERS = True  # toggle via /admin toggle_notify
+
+
+def _is_admin(uid: int) -> bool:
+    return bool(ADMIN_IDS) and uid in ADMIN_IDS
+
+
+def _admin_guard(func):
+    """Decorator: reject non-admins silently."""
+    async def wrapper(event, *args, **kwargs):
+        uid = event.from_user.id if hasattr(event, "from_user") else None
+        if not uid or not _is_admin(uid):
+            return
+        return await func(event, *args, **kwargs)
+    wrapper.__name__ = func.__name__
+    return wrapper
+
+
+# ── Keyboards ─────────────────────────────────────────────────────────────────
+
+def _admin_main_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👥 Пользователи платформы", callback_data="adm:users")
+    kb.button(text="💳 Подписки & платежи",     callback_data="adm:subs")
+    kb.button(text="🤖 Все боты & токены",       callback_data="adm:bots")
+    kb.button(text="📊 Системная статистика",    callback_data="adm:stats")
+    kb.button(text="📨 Рассылка всем юзерам",    callback_data="adm:broadcast")
+    kb.button(text="🔔 Уведомления о новых",     callback_data="adm:notify_toggle")
+    kb.button(text="🚫 Заблокировать юзера",     callback_data="adm:block_ask")
+    kb.button(text="✅ Разблокировать юзера",    callback_data="adm:unblock_ask")
+    kb.button(text="🗑 Удалить данные юзера",    callback_data="adm:delete_ask")
+    kb.button(text="💰 Выдать подписку",         callback_data="adm:grant_ask")
+    kb.button(text="📁 Экспорт токенов (файл)", callback_data="adm:tokens_file")
+    kb.button(text="📋 Экспорт юзеров (CSV)",   callback_data="adm:users_csv")
+    kb.button(text="🔍 Поиск юзера",            callback_data="adm:find_user")
+    kb.button(text="⚙️ Системный режим Swarm",   callback_data="adm:swarm_mode")
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    return kb.as_markup()
+
+
+def _back_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Главное меню админки", callback_data="adm:main")
+    return kb.as_markup()
+
+
+# ── Секретная фраза для входа в админку ────────────────────────────────────────
+
+@router.message(F.text.func(lambda t: bool(ADMIN_SECRET) and t == ADMIN_SECRET))
+async def cmd_admin_secret(message: Message) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔑 Открыть Админ Меню", callback_data="adm:main")
+    await message.answer("🔑", reply_markup=kb.as_markup())
+
+
+async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> None:
+    total_users = await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots") or 0
+    total_bots  = await pool.fetchval("SELECT COUNT(*) FROM managed_bots") or 0
+    total_subs  = await pool.fetchval(
+        "SELECT COUNT(*) FROM subscriptions WHERE is_active=true AND expires_at > now()"
+    ) or 0
+    total_payments = await pool.fetchval(
+        "SELECT COUNT(*) FROM payments WHERE status='confirmed'"
+    ) or 0
+    revenue = await pool.fetchval(
+        "SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='confirmed'"
+    ) or 0
+
+    try:
+        today_users = await pool.fetchval(
+            "SELECT COUNT(DISTINCT user_id) FROM platform_users "
+            "WHERE first_seen >= CURRENT_DATE"
+        ) or 0
+    except Exception:
+        today_users = 0
+
+    text = (
+        "🛡 <b>Nano-Admin Panel</b>\n\n"
+        f"👥 Всего пользователей: <b>{total_users}</b> (+{today_users} сегодня)\n"
+        f"🤖 Ботов в системе: <b>{total_bots}</b>\n"
+        f"💳 Активных подписок: <b>{total_subs}</b>\n"
+        f"✅ Оплат подтверждено: <b>{total_payments}</b>\n"
+        f"💰 Выручка (USD): <b>${float(revenue):.2f}</b>\n\n"
+        f"📅 {datetime.utcnow().strftime('%d.%m.%Y %H:%M')} UTC"
+    )
+    if edit and hasattr(msg_or_cb, "message"):
+        try:
+            await msg_or_cb.message.edit_text(text, parse_mode="HTML",
+                                               reply_markup=_admin_main_kb())
+        except Exception as e:
+            if "message is not modified" not in str(e):
+                raise
+    else:
+        target = msg_or_cb if hasattr(msg_or_cb, "answer") else msg_or_cb.message
+        await target.answer(text, parse_mode="HTML", reply_markup=_admin_main_kb())
+
+
+# ── Callback dispatcher ────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("adm:"))
+async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
+                    http: aiohttp.ClientSession) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("⛔️ Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    action = callback.data.removeprefix("adm:")
+
+    if action == "main":
+        await _show_admin_main(callback, pool, edit=True)
+
+    elif action == "users":
+        await _adm_users(callback, pool)
+
+    elif action == "subs":
+        await _adm_subscriptions(callback, pool)
+
+    elif action == "bots":
+        await _adm_bots_summary(callback, pool)
+
+    elif action == "stats":
+        await _adm_system_stats(callback, pool)
+
+    elif action == "broadcast":
+        await callback.message.edit_text(
+            "📨 <b>Рассылка по всем пользователям платформы</b>\n\n"
+            "Отправьте текст сообщения следующим сообщением.\n"
+            "Сообщение получат все зарегистрированные пользователи.",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        # set FSM flag via message text — simple approach: store in temp table
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id, state, data) "
+            "VALUES($1,'broadcast','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='broadcast',data=''",
+            callback.from_user.id,
+        )
+
+    elif action == "notify_toggle":
+        global _NOTIFY_NEW_USERS
+        _NOTIFY_NEW_USERS = not _NOTIFY_NEW_USERS
+        status = "🔔 Включены" if _NOTIFY_NEW_USERS else "🔕 Отключены"
+        await callback.answer(f"Уведомления: {status}", show_alert=True)
+        await _show_admin_main(callback, pool, edit=True)
+
+    elif action == "block_ask":
+        await callback.message.edit_text(
+            "🚫 <b>Заблокировать пользователя</b>\n\nОтправьте Telegram ID (число):",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'block','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='block',data=''",
+            callback.from_user.id,
+        )
+
+    elif action == "unblock_ask":
+        await callback.message.edit_text(
+            "✅ <b>Разблокировать пользователя</b>\n\nОтправьте Telegram ID:",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'unblock','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='unblock',data=''",
+            callback.from_user.id,
+        )
+
+    elif action == "delete_ask":
+        await callback.message.edit_text(
+            "🗑 <b>Удалить все данные пользователя</b>\n\n"
+            "⚠️ Это действие необратимо! Отправьте Telegram ID:",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'delete_user','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='delete_user',data=''",
+            callback.from_user.id,
+        )
+
+    elif action == "grant_ask":
+        await callback.message.edit_text(
+            "💰 <b>Выдать подписку</b>\n\n"
+            "Отправьте в формате:\n"
+            "<code>USER_ID план месяцев</code>\n\n"
+            "Пример: <code>123456789 pro 3</code>\n"
+            "Планы: starter, pro, enterprise",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'grant','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='grant',data=''",
+            callback.from_user.id,
+        )
+
+    elif action == "tokens_file":
+        await _adm_send_tokens_file(callback, pool)
+
+    elif action == "users_csv":
+        await _adm_send_users_csv(callback, pool)
+
+    elif action == "find_user":
+        await callback.message.edit_text(
+            "🔍 <b>Поиск пользователя</b>\n\nОтправьте Telegram ID:",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'find','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='find',data=''",
+            callback.from_user.id,
+        )
+
+    elif action == "swarm_mode":
+        await _adm_swarm_mode(callback, pool)
+
+    elif action.startswith("set_mode:"):
+        mode = action.split(":", 1)[1]
+        await db.set_system_mode(pool, mode)
+        await callback.answer(f"✅ Режим: {mode.upper()}", show_alert=True)
+        await _adm_swarm_mode(callback, pool)
+
+
+# ── Sub-screens ───────────────────────────────────────────────────────────────
+
+async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    rows = await pool.fetch(
+        """SELECT added_by as uid,
+                  COUNT(*) as bot_count,
+                  MAX(mb.added_at) as last_bot
+           FROM managed_bots mb
+           GROUP BY added_by
+           ORDER BY last_bot DESC
+           LIMIT 15"""
+    )
+    lines = []
+    for r in rows:
+        lines.append(
+            f"<code>{r['uid']}</code> — {r['bot_count']} бот(ов) "
+            f"(посл. {r['last_bot'].strftime('%d.%m')})"
+        )
+    body = "\n".join(lines) if lines else "Пользователей нет."
+    await callback.message.edit_text(
+        f"👥 <b>Последние 15 пользователей платформы</b>\n\n{body}",
+        parse_mode="HTML", reply_markup=_back_kb(),
+    )
+
+
+async def _adm_subscriptions(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    active = await pool.fetch(
+        "SELECT user_id, plan, expires_at FROM subscriptions "
+        "WHERE is_active=true AND expires_at > now() ORDER BY expires_at DESC LIMIT 20"
+    )
+    expired = await pool.fetchval(
+        "SELECT COUNT(*) FROM subscriptions WHERE is_active=false OR expires_at <= now()"
+    ) or 0
+    lines = []
+    for s in active:
+        lines.append(
+            f"<code>{s['user_id']}</code> — <b>{s['plan'].upper()}</b> "
+            f"до {s['expires_at'].strftime('%d.%m.%Y')}"
+        )
+    body = "\n".join(lines) if lines else "Активных подписок нет."
+    await callback.message.edit_text(
+        f"💳 <b>Активные подписки</b>\n\n{body}\n\n"
+        f"<i>Истёкших: {expired}</i>",
+        parse_mode="HTML", reply_markup=_back_kb(),
+    )
+
+
+async def _adm_bots_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    bots = await pool.fetch(
+        "SELECT bot_id, username, first_name, added_by, added_at "
+        "FROM managed_bots ORDER BY added_at DESC LIMIT 20"
+    )
+    lines = []
+    for b in bots:
+        label = f"@{b['username']}" if b["username"] else b["first_name"]
+        lines.append(
+            f"<code>{b['bot_id']}</code> {label} "
+            f"(owner: <code>{b['added_by']}</code>)"
+        )
+    body = "\n".join(lines) if lines else "Ботов нет."
+    await callback.message.edit_text(
+        f"🤖 <b>Последние 20 ботов в системе</b>\n\n{body}\n\n"
+        "Для полного списка с токенами нажмите «Экспорт токенов».",
+        parse_mode="HTML", reply_markup=_back_kb(),
+    )
+
+
+async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    total_msgs = await pool.fetchval("SELECT COALESCE(SUM(messages_sent),0) FROM broadcasts") or 0
+    total_bc   = await pool.fetchval("SELECT COUNT(*) FROM broadcasts") or 0
+    total_relay = await pool.fetchval("SELECT COUNT(*) FROM relay_sessions") or 0
+    total_funnels = await pool.fetchval("SELECT COUNT(*) FROM funnels") or 0
+    total_schedules = await pool.fetchval(
+        "SELECT COUNT(*) FROM scheduled_broadcasts WHERE status='pending'"
+    ) or 0
+    db_users = await pool.fetchval("SELECT COUNT(*) FROM bot_users") or 0
+    mode = await db.get_system_mode(pool)
+
+    await callback.message.edit_text(
+        "📊 <b>Системная статистика</b>\n\n"
+        f"💬 Сообщений отправлено: <b>{int(total_msgs):,}</b>\n"
+        f"📢 Рассылок всего: <b>{int(total_bc):,}</b>\n"
+        f"📨 Relay-диалогов: <b>{int(total_relay):,}</b>\n"
+        f"🔗 Цепочек: <b>{int(total_funnels):,}</b>\n"
+        f"⏰ Запланировано: <b>{int(total_schedules):,}</b>\n"
+        f"👥 Записей в bot_users: <b>{int(db_users):,}</b>\n\n"
+        f"🌐 Swarm mode: <b>{mode.upper()}</b>",
+        parse_mode="HTML", reply_markup=_back_kb(),
+    )
+
+
+async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    bots = await pool.fetch(
+        "SELECT bot_id, username, first_name, token, added_by, added_at "
+        "FROM managed_bots ORDER BY added_by, added_at"
+    )
+    lines = ["BOT_ID\tUSERNAME\tNAME\tOWNER_ID\tCREATED\tTOKEN"]
+    for b in bots:
+        label = b["username"] or b["first_name"] or "unknown"
+        lines.append(
+            f"{b['bot_id']}\t@{label}\t{b['first_name'] or ''}\t"
+            f"{b['added_by']}\t{b['added_at'].strftime('%Y-%m-%d')}\t{b['token']}"
+        )
+    content = "\n".join(lines).encode("utf-8")
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M")
+    file = BufferedInputFile(content, filename=f"tokens_{ts}.tsv")
+    await callback.message.answer_document(
+        file,
+        caption=f"🔑 Токены всех ботов ({len(bots)} шт.) — {ts} UTC\n"
+                "<b>⚠️ Держите файл в тайне!</b>",
+        parse_mode="HTML",
+    )
+
+
+async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    rows = await pool.fetch(
+        """SELECT mb.added_by, COUNT(DISTINCT mb.bot_id) as bots,
+                  s.plan, s.expires_at
+           FROM managed_bots mb
+           LEFT JOIN subscriptions s ON s.user_id=mb.added_by AND s.is_active=true
+           GROUP BY mb.added_by, s.plan, s.expires_at
+           ORDER BY mb.added_by"""
+    )
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["user_id", "bots_count", "plan", "expires_at"])
+    for r in rows:
+        writer.writerow([
+            r["added_by"], r["bots"],
+            r["plan"] or "free",
+            r["expires_at"].strftime("%Y-%m-%d") if r["expires_at"] else "",
+        ])
+    content = buf.getvalue().encode("utf-8")
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M")
+    file = BufferedInputFile(content, filename=f"users_{ts}.csv")
+    await callback.message.answer_document(
+        file,
+        caption=f"📋 Экспорт пользователей ({len(rows)} чел.) — {ts} UTC",
+    )
+
+
+async def _adm_swarm_mode(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    current = await db.get_system_mode(pool)
+    modes = {
+        "manual":     "🟢 Manual — ручной контроль",
+        "assisted":   "🟡 Assisted — система предлагает",
+        "autopilot":  "🔵 Autopilot — авто-оптимизация",
+        "growth":     "🔴 Growth — агрессивный рост",
+        "experiment": "🟣 Experiment — макс. тестирование",
+        "stability":  "⚫ Stability — фиксированный роутинг",
+    }
+    kb = InlineKeyboardBuilder()
+    for mode, label in modes.items():
+        prefix = "✅ " if mode == current else ""
+        kb.button(text=f"{prefix}{label}", callback_data=f"adm:set_mode:{mode}")
+    kb.button(text="◀️ Назад", callback_data="adm:main")
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"⚙️ <b>Swarm системный режим</b>\n\nТекущий: <b>{current.upper()}</b>\n\n"
+        "Режим определяет поведение всего swarm-роутинга:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+# ── Message handler for admin FSM states ─────────────────────────────────────
+
+@router.message(F.text)
+async def handle_admin_message(message: Message, pool: asyncpg.Pool,
+                                http: aiohttp.ClientSession) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+
+    # Check admin state
+    try:
+        state_row = await pool.fetchrow(
+            "SELECT state, data FROM admin_state WHERE admin_id=$1",
+            message.from_user.id,
+        )
+    except Exception:
+        return  # admin_state table not yet created
+
+    if not state_row:
+        return
+
+    state = state_row["state"]
+    text = message.text.strip()
+
+    await pool.execute("DELETE FROM admin_state WHERE admin_id=$1", message.from_user.id)
+
+    if state == "broadcast":
+        users = await pool.fetch(
+            "SELECT DISTINCT added_by FROM managed_bots"
+        )
+        sent = 0
+        for u in users:
+            try:
+                await message.bot.send_message(u["added_by"], text)
+                sent += 1
+                await asyncio.sleep(0.05)
+            except Exception:
+                pass
+        await message.answer(
+            f"✅ Рассылка завершена\n\nОтправлено: <b>{sent}</b> / {len(users)}",
+            parse_mode="HTML", reply_markup=_admin_main_kb(),
+        )
+
+    elif state == "block":
+        try:
+            uid = int(text)
+            await pool.execute(
+                "INSERT INTO blocked_users(user_id) VALUES($1) ON CONFLICT DO NOTHING", uid
+            )
+            await message.answer(
+                f"🚫 Пользователь <code>{uid}</code> заблокирован.",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+        except ValueError:
+            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+
+    elif state == "unblock":
+        try:
+            uid = int(text)
+            await pool.execute("DELETE FROM blocked_users WHERE user_id=$1", uid)
+            await message.answer(
+                f"✅ Пользователь <code>{uid}</code> разблокирован.",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+        except ValueError:
+            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+
+    elif state == "delete_user":
+        try:
+            uid = int(text)
+            bot_ids = await pool.fetch("SELECT bot_id FROM managed_bots WHERE added_by=$1", uid)
+            for b in bot_ids:
+                await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", b["bot_id"])
+            await pool.execute("DELETE FROM subscriptions WHERE user_id=$1", uid)
+            await pool.execute("DELETE FROM payments WHERE user_id=$1", uid)
+            await message.answer(
+                f"🗑 Данные пользователя <code>{uid}</code> удалены "
+                f"({len(bot_ids)} ботов).",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+        except ValueError:
+            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+
+    elif state == "grant":
+        try:
+            parts = text.split()
+            uid = int(parts[0])
+            plan = parts[1].lower()
+            months = int(parts[2]) if len(parts) > 2 else 1
+            months = max(1, min(months, 1200))  # cap: 1–1200 месяцев (100 лет)
+            if plan not in ("starter", "pro", "enterprise"):
+                raise ValueError("bad plan")
+            expires = datetime.utcnow() + timedelta(days=30 * months)
+            await pool.execute(
+                """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
+                   VALUES($1,$2,$3,true)
+                   ON CONFLICT(user_id) DO UPDATE
+                   SET plan=$2, expires_at=$3, is_active=true""",
+                uid, plan, expires,
+            )
+            await message.answer(
+                f"✅ Подписка <b>{plan.upper()}</b> выдана пользователю "
+                f"<code>{uid}</code> на {months} мес.",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+            try:
+                await message.bot.send_message(
+                    uid,
+                    f"🎁 <b>Подарок!</b>\n\nВам активирована подписка "
+                    f"<b>{plan.upper()}</b> на {months} месяц(ев).\n"
+                    f"Действует до {expires.strftime('%d.%m.%Y')}.",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        except (ValueError, IndexError):
+            await message.answer(
+                "❌ Формат: <code>USER_ID план месяцев</code>\n"
+                "Пример: <code>123456 pro 3</code>",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+
+    elif state == "find":
+        try:
+            uid = int(text)
+            bots = await pool.fetch(
+                "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1", uid
+            )
+            sub = await pool.fetchrow(
+                "SELECT plan, expires_at FROM subscriptions "
+                "WHERE user_id=$1 AND is_active=true AND expires_at > now()", uid
+            )
+            plan_info = (
+                f"{sub['plan'].upper()} до {sub['expires_at'].strftime('%d.%m.%Y')}"
+                if sub else "FREE"
+            )
+            bot_lines = []
+            for b in bots[:10]:
+                label = f"@{b['username']}" if b["username"] else b["first_name"]
+                bot_lines.append(f"  • {label} (<code>{b['bot_id']}</code>)")
+            body = "\n".join(bot_lines) if bot_lines else "  Нет ботов"
+            await message.answer(
+                f"🔍 <b>Пользователь <code>{uid}</code></b>\n\n"
+                f"Подписка: <b>{plan_info}</b>\n"
+                f"Ботов: <b>{len(bots)}</b>\n\n"
+                f"{body}",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+        except ValueError:
+            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+
+
+# ── New user tracker (called from start.py or inline) ─────────────────────────
+
+async def notify_new_platform_user(bot, pool: asyncpg.Pool, user_id: int,
+                                    username: str | None, first_name: str) -> None:
+    """Call this when a new user starts the management bot for the first time."""
+    if not _NOTIFY_NEW_USERS or not ADMIN_IDS:
+        return
+    total = await pool.fetchval(
+        "SELECT COUNT(DISTINCT added_by) FROM managed_bots"
+    ) or 0
+    label = f"@{username}" if username else first_name
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"🆕 <b>Новый пользователь!</b>\n\n"
+                f"ID: <code>{user_id}</code>\n"
+                f"Имя: {label}\n"
+                f"Всего пользователей: <b>{total}</b>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass

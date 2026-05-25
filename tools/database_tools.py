@@ -11,12 +11,12 @@ from database.models import get_client
 # ---------------------------------------------------------------------------
 
 def get_customer_by_email(email: str) -> dict | None:
-    res = get_client().table("customers").select("*").eq("email", email).single().execute()
+    res = get_client().table("customers").select("*").eq("email", email).maybe_single().execute()
     return res.data
 
 
 def get_customer_by_id(customer_id: str) -> dict | None:
-    res = get_client().table("customers").select("*").eq("id", customer_id).single().execute()
+    res = get_client().table("customers").select("*").eq("id", customer_id).maybe_single().execute()
     return res.data
 
 
@@ -26,7 +26,7 @@ def get_customer_by_telegram(chat_id: int) -> dict | None:
         .table("customers")
         .select("*")
         .eq("telegram_chat_id", chat_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     return res.data
@@ -157,7 +157,7 @@ def get_recent_orders(days: int = 7, limit: int = 50) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def get_product(product_id: str) -> dict | None:
-    res = get_client().table("products").select("*").eq("id", product_id).single().execute()
+    res = get_client().table("products").select("*").eq("id", product_id).maybe_single().execute()
     return res.data
 
 
@@ -271,7 +271,7 @@ def get_telegram_chat_meta(chat_id: int) -> dict | None:
         .table("telegram_customer_chats")
         .select("*")
         .eq("chat_id", chat_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     return res.data

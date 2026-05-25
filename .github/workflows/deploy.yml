@@ -1,0 +1,56 @@
+name: Deploy TG Manager
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "tg-manager/**"
+      - ".github/workflows/deploy.yml"
+
+jobs:
+  # ── Вариант 1: деплой на VPS по SSH ──────────────────────────────────────
+  deploy-vps:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    # Включи этот job, добавив секрет VPS_HOST в настройках репо
+    if: ${{ vars.DEPLOY_TARGET == 'vps' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            cd /opt/tg-manager
+            git pull origin main
+            /opt/tg-manager/venv/bin/pip install -q -r requirements.txt
+            systemctl restart tg-manager
+            systemctl status tg-manager --no-pager
+
+  # ── Вариант 2: деплой на Railway ─────────────────────────────────────────
+  deploy-railway:
+    name: Deploy to Railway
+    runs-on: ubuntu-latest
+    if: ${{ vars.DEPLOY_TARGET == 'railway' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: railwayapp/railway-deploy@v1
+        with:
+          railway-token: ${{ secrets.RAILWAY_TOKEN }}
+          service: tg-manager
+
+  # ── Вариант 3: деплой на Fly.io ──────────────────────────────────────────
+  deploy-fly:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    if: ${{ vars.DEPLOY_TARGET == 'fly' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only --config tg-manager/fly.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
