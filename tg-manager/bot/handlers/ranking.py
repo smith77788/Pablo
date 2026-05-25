@@ -436,13 +436,13 @@ async def cb_rank_check_now(
         )
         return
 
-    # Find a connected TG account for this user (random active one)
+    # Pick least-recently-used active account (fair distribution across accounts)
     account: asyncpg.Record | None = None
     try:
         account = await pool.fetchrow(
             "SELECT id, session_str FROM tg_accounts "
             "WHERE owner_id=$1 AND is_active=TRUE "
-            "ORDER BY RANDOM() LIMIT 1",
+            "ORDER BY last_used ASC NULLS FIRST LIMIT 1",
             owner_id,
         )
     except Exception as exc:
@@ -472,22 +472,48 @@ async def cb_rank_check_now(
         )
         return
 
-    # Run search via account_manager
+    # Run search — each (keyword × account) is an independent observation unit
     results: list[dict[str, Any]] = []
     try:
+        import uuid as _uuid
         from services import account_manager  # type: ignore
+        from services.search_observer import canonicalize, process_search_result  # type: ignore
+
+        entity_id = canonicalize(username)
+        run_id = str(_uuid.uuid4())
 
         for kw in keywords:
             try:
                 search_results = await account_manager.search_in_telegram(
                     account["session_str"], kw["keyword"]
                 )
-                position = None
+
+                # Deterministic position lookup for UI display
+                position: int | None = None
                 for r in search_results:
-                    if r.get("is_bot") and r.get("username", "").lower().lstrip("@") == username.lower():
+                    if r.get("is_bot") and canonicalize(r.get("username", "")) == entity_id:
                         position = r["position"]
                         break
+
+                # Write to search_rankings for UI history
                 await db.save_ranking(pool, kw["id"], bot_id, position)
+
+                # Feed into the observability pipeline:
+                # snapshot → observation → state comparison → change event
+                await process_search_result(
+                    pool=pool,
+                    run_id=run_id,
+                    keyword_id=kw["id"],
+                    account_id=account["id"],
+                    keyword=kw["keyword"],
+                    entity_id=entity_id,
+                    results=search_results,
+                    truncated=len(search_results) >= 20,
+                )
+
+                # Mark account as used (least-recently-used rotation)
+                await db.update_tg_account_used(pool, account["id"])
+
                 results.append({
                     "keyword": kw["keyword"],
                     "position": position,

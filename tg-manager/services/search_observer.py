@@ -99,17 +99,16 @@ def extract_observation(
 
     found = entity_id exists in canonicalized results.
     rank  = first occurrence index + 1; null if not found.
+    Only the first occurrence is used; duplicates are ignored.
     Pure function. Only declared inputs. No IO.
     """
-    for item in results:
+    for idx, item in enumerate(results):
         raw = item.get("username") or ""
         if canonicalize(raw) == entity_id:
-            # Use the position field if present (already 1-based from account_manager),
-            # otherwise derive from iteration index.
+            # position field is 1-based if set by account_manager;
+            # fall back to iteration index (also 1-based) if absent.
             pos = item.get("position")
-            if pos is None:
-                pos = results.index(item) + 1
-            return True, int(pos)
+            return True, int(pos) if pos is not None else idx + 1
     return False, None
 
 
