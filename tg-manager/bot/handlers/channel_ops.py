@@ -1605,10 +1605,9 @@ async def _show_bulk_select(
     msg_or_cb, pool: asyncpg.Pool, op: str, selected: set[int], edit: bool = True
 ) -> None:
     """Render account selection keyboard for a bulk operation."""
-    if hasattr(msg_or_cb, "from_user"):
-        owner_id = msg_or_cb.from_user.id
-    else:
-        owner_id = msg_or_cb.message.from_user.id if hasattr(msg_or_cb, "message") else msg_or_cb.chat.id
+    from aiogram.types import CallbackQuery as _CQ, Message as _Msg
+    is_cb = isinstance(msg_or_cb, _CQ)
+    owner_id = msg_or_cb.from_user.id if is_cb else msg_or_cb.from_user.id
 
     accounts = await pool.fetch(
         "SELECT id, first_name, username, phone, is_active FROM tg_accounts "
@@ -1616,35 +1615,44 @@ async def _show_bulk_select(
         owner_id,
     )
     active = [a for a in accounts if a["is_active"]]
+
     if not active:
-        text = "⚠️ Нет активных аккаунтов. Проверьте: /accounts"
-        if edit and hasattr(msg_or_cb, "message"):
+        text = (
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Добавьте аккаунт через 📱 <b>Мои аккаунты</b> в главном меню,\n"
+            "или нажмите /accounts"
+        )
+        kb = _back_kb()
+        if is_cb:
             try:
-                await msg_or_cb.message.edit_text(text, reply_markup=_back_kb().as_markup())
-                return
+                await msg_or_cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             except Exception:
-                pass
-        target = msg_or_cb if hasattr(msg_or_cb, "answer") else msg_or_cb.message
-        await target.answer(text, reply_markup=_back_kb().as_markup())
+                await msg_or_cb.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        else:
+            await msg_or_cb.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
         return
+
+    # Filter selected to only existing active account IDs
+    active_ids = {a["id"] for a in active}
+    selected = selected & active_ids if selected else active_ids
 
     op_label = _BULK_OP_LABELS.get(op, op)
     n = len(selected)
     total = len(active)
     text = (
         f"⚡ <b>{op_label}</b>\n\n"
-        f"Выберите аккаунты: <b>{n}</b> из {total}\n\n"
-        "<i>Нажмите на аккаунт чтобы включить/выключить его</i>"
+        f"Выбрано: <b>{n}</b> из {total} аккаунтов\n\n"
+        "Нажмите на аккаунт чтобы включить/выключить.\n"
+        "Когда готово — нажмите <b>▶️ Продолжить</b>."
     )
     kb = _bulk_select_kb(active, selected, op)
-    if edit and hasattr(msg_or_cb, "message"):
+    if is_cb:
         try:
             await msg_or_cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
-            return
         except Exception:
-            pass
-    target = msg_or_cb if hasattr(msg_or_cb, "answer") else msg_or_cb.message
-    await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+            await msg_or_cb.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    else:
+        await msg_or_cb.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # Entry point for each bulk operation — shows account picker with all accounts pre-selected
