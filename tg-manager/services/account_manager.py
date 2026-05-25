@@ -60,6 +60,22 @@ async def get_session_string(client) -> str:
     return client.session.save()
 
 
+async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
+    """Get session string + user info from a pending login. Call after confirm_code/confirm_2fa."""
+    client = _pending.get(phone)
+    if not client:
+        raise ValueError("Сессия не найдена — начните авторизацию заново.")
+    session_str = client.session.save()
+    me = await client.get_me()
+    info = {
+        "tg_user_id": me.id,
+        "phone": me.phone or phone,
+        "first_name": me.first_name or "",
+        "username": me.username or "",
+    }
+    return session_str, info
+
+
 async def cleanup_pending(phone: str) -> None:
     client = _pending.pop(phone, None)
     if client:

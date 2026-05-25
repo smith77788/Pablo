@@ -470,10 +470,15 @@ async def cb_rank_check_now(
 
         for kw in keywords:
             try:
-                position = await account_manager.search_bots(
-                    account, kw["keyword"], target_username=username
+                search_results = await account_manager.search_in_telegram(
+                    account, kw["keyword"]
                 )
-                await db.save_ranking(pool, kw["id"], position)
+                position = None
+                for r in search_results:
+                    if r.get("is_bot") and r.get("username", "").lower() == username.lower():
+                        position = r["position"]
+                        break
+                await db.save_ranking(pool, kw["id"], bot_id, position)
                 results.append({
                     "keyword": kw["keyword"],
                     "position": position,

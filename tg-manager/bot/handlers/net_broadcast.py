@@ -160,7 +160,7 @@ async def cb_net_bc_confirm(callback: CallbackQuery, callback_data: NetBcCb,
     if segment == "all_each":
         for bot in bots:
             user_ids = await pool.fetch(
-                "SELECT user_id FROM bot_audience WHERE bot_id=$1", bot["bot_id"]
+                "SELECT user_id FROM bot_users WHERE bot_id=$1", bot["bot_id"]
             )
             ids = [r["user_id"] for r in user_ids]
             if ids:
@@ -203,7 +203,7 @@ async def cb_net_bc_confirm(callback: CallbackQuery, callback_data: NetBcCb,
     elif segment == "lang":
         for bot in bots:
             user_ids = await pool.fetch(
-                "SELECT user_id FROM bot_audience WHERE bot_id=$1 AND language_code=$2",
+                "SELECT user_id FROM bot_users WHERE bot_id=$1 AND language_code=$2",
                 bot["bot_id"], lang,
             )
             ids = [r["user_id"] for r in user_ids]

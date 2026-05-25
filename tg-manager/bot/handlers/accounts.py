@@ -26,7 +26,7 @@ from services.account_manager import (
     confirm_2fa,
     confirm_code,
     get_dialogs,
-    get_session_string,
+    get_client_info_and_session,
     send_message,
     start_login,
 )
@@ -144,12 +144,12 @@ async def _show_accounts_menu(
             name = escape(acc["first_name"] or "")
             uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
             phone = escape(acc.get("phone", ""))
-            label = name or uname or phone or f"ID {acc['acc_id']}"
+            label = name or uname or phone or f"ID {acc['id']}"
             display = f"{label} ({phone})" if phone and name else label
             lines.append(f"  • {display}")
             kb.button(
                 text=f"👤 {display}",
-                callback_data=AccCb(action="view", acc_id=acc["acc_id"]),
+                callback_data=AccCb(action="view", acc_id=acc["id"]),
             )
         text = "\n".join(lines)
     else:
@@ -365,7 +365,7 @@ async def _finalize_login(
 ) -> None:
     """Fetch session, save to DB, clean up pending login state."""
     try:
-        session_str, tg_user_id, first_name, username = await get_session_string(phone)
+        session_str, info = await get_client_info_and_session(phone)
     except Exception as exc:
         await message.answer(
             f"❌ Не удалось получить сессию: <code>{escape(str(exc)[:200])}</code>",
@@ -378,11 +378,11 @@ async def _finalize_login(
         await db.add_tg_account(
             pool,
             owner_id=message.from_user.id,
-            phone=phone,
+            phone=info.get("phone") or phone,
             session_str=session_str,
-            tg_user_id=tg_user_id,
-            first_name=first_name,
-            username=username,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
         )
     except Exception as exc:
         await message.answer(
@@ -395,7 +395,7 @@ async def _finalize_login(
     await cleanup_pending(phone)
     await state.clear()
 
-    display_name = escape(first_name or username or phone)
+    display_name = escape(info.get("first_name") or info.get("username") or phone)
     kb = InlineKeyboardBuilder()
     kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
