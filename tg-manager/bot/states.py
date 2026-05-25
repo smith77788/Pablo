@@ -195,3 +195,8 @@ class BulkCreateFSM(StatesGroup):
     choosing_type = State()
     choosing_accounts = State()
     confirming = State()
+
+
+class BulkDmFSM(StatesGroup):
+    waiting_usernames = State()
+    waiting_text = State()

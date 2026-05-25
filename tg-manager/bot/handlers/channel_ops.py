@@ -31,7 +31,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AccCb, ChanCb
 from bot.states import (
-    BulkCreateFSM, CreateBotFSM, CreateChannelFSM, EditChannelFSM,
+    BulkCreateFSM, BulkDmFSM, CreateBotFSM, CreateChannelFSM, EditChannelFSM,
     InviteUsersFSM, JoinChannelFSM, PostToChannelFSM, ReportFSM,
     SendReactionFSM, UpdateProfileFSM,
 )
@@ -98,6 +98,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
 
 def _bulk_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
+    kb.button(text="✉️ Рассылка по username-списку", callback_data=ChanCb(action="bulk_dm"))
     kb.button(text="📢 Создать канал/группу",  callback_data=ChanCb(action="bulk_create"))
     kb.button(text="🔗 Вступить в канал",      callback_data=ChanCb(action="bulk_join"))
     kb.button(text="🚪 Выйти из канала",       callback_data=ChanCb(action="bulk_leave"))
@@ -112,6 +113,7 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
 
 # OP label map for display
 _BULK_OP_LABELS = {
+    "dm":         "✉️ Рассылка по username-списку",
     "join":       "🔗 Вступить в канал",
     "leave":      "🚪 Выйти из канала",
     "post":       "📤 Опубликовать пост",
@@ -1691,13 +1693,15 @@ async def _show_bulk_select(
 
 
 # Entry point for each bulk operation — shows account picker with all accounts pre-selected
-@router.callback_query(ChanCb.filter(F.action.in_({"bulk_join", "bulk_leave", "bulk_post",
-                                                    "bulk_prof_name", "bulk_prof_bio", "bulk_prof_uname"})))
+@router.callback_query(ChanCb.filter(F.action.in_({"bulk_dm", "bulk_join", "bulk_leave",
+                                                    "bulk_post", "bulk_prof_name",
+                                                    "bulk_prof_bio", "bulk_prof_uname"})))
 async def cb_bulk_start_op(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer()
     op_map = {
+        "bulk_dm":         "dm",
         "bulk_join":       "join",
         "bulk_leave":      "leave",
         "bulk_post":       "post",
@@ -1772,7 +1776,27 @@ async def cb_bulk_confirm_selection(
         return
 
     # Route to the appropriate input step
-    if op == "join":
+    if op == "dm":
+        await state.update_data(bulk_op=op)
+        await state.set_state(BulkDmFSM.waiting_usernames)
+        n_acc = len(selected_ids)
+        # delay per account: 5s single, 3s two, 2.5s three+
+        delay_s = 5.0 if n_acc == 1 else (3.0 if n_acc == 2 else 2.5)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+        await callback.message.edit_text(
+            f"✉️ <b>Рассылка личных сообщений</b>\n\n"
+            f"Аккаунтов для отправки: <b>{n_acc}</b>\n"
+            f"Задержка между сообщениями: ~<b>{delay_s:.0f}с</b>\n\n"
+            "📋 <b>Шаг 1/2 — Список получателей</b>\n\n"
+            "Отправьте список username (по одному на строку):\n\n"
+            "<code>@username1\n@username2\n@username3</code>\n\n"
+            "💡 Символ @ необязателен. Принимаются также числовые ID.\n"
+            "⚠️ Рекомендуется не более 200 получателей за сеанс.",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+
+    elif op == "join":
         await state.update_data(bulk_op=op)
         await state.set_state(JoinChannelFSM.waiting_invite)
         kb = InlineKeyboardBuilder()
@@ -2091,3 +2115,160 @@ async def fsm_update_profile(message: Message, state: FSMContext, pool: asyncpg.
                 "✅ Профиль обновлён!" if ok else "❌ Ошибка обновления профиля.",
                 parse_mode="HTML", reply_markup=kb.as_markup(),
             )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# BULK DM — mass direct messages to a username list
+# ══════════════════════════════════════════════════════════════════════════
+
+def _parse_username_list(raw: str) -> list[str]:
+    """Parse a multiline/comma-separated username list into clean targets."""
+    import re
+    # split on newlines, commas, semicolons, spaces
+    parts = re.split(r"[\n,;]+", raw)
+    result = []
+    seen: set[str] = set()
+    for p in parts:
+        p = p.strip().lstrip("@").strip()
+        if not p:
+            continue
+        key = p.lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(p)
+    return result
+
+
+@router.message(BulkDmFSM.waiting_usernames)
+async def fsm_bulk_dm_usernames(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").strip()
+    usernames = _parse_username_list(raw)
+    if not usernames:
+        await message.answer(
+            "⚠️ Список пустой. Отправьте usernames — по одному на строке:\n"
+            "<code>@username1\n@username2</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    await state.update_data(bulk_dm_usernames=usernames)
+    await state.set_state(BulkDmFSM.waiting_text)
+
+    data = await state.get_data()
+    selected_ids = data.get("bulk_selected", [])
+    n_acc = max(len(selected_ids), 1)
+    delay_s = 5.0 if n_acc == 1 else (3.0 if n_acc == 2 else 2.5)
+    est_min = round(len(usernames) * delay_s / 60, 1)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+
+    await message.answer(
+        f"✅ Получателей: <b>{len(usernames)}</b>\n"
+        f"Аккаунтов: <b>{n_acc}</b> | задержка ~{delay_s:.0f}с\n"
+        f"Ориентировочное время: ~<b>{est_min}</b> мин\n\n"
+        "📝 <b>Шаг 2/2 — Текст сообщения</b>\n\n"
+        "Отправьте текст, который будет разослан всем получателям.\n"
+        "Поддерживается HTML-форматирование: <b>жирный</b>, <i>курсив</i>, <code>код</code>.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkDmFSM.waiting_text)
+async def fsm_bulk_dm_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    text_to_send = message.text or message.caption or ""
+    if not text_to_send.strip():
+        await message.answer("⚠️ Текст не может быть пустым. Отправьте текст сообщения:")
+        return
+
+    data = await state.get_data()
+    usernames = data.get("bulk_dm_usernames", [])
+    selected_ids = data.get("bulk_selected", [])
+    await state.clear()
+
+    if not usernames or not selected_ids:
+        await message.answer("⚠️ Данные рассылки устарели. Начните заново: /ops")
+        return
+
+    accounts = await pool.fetch(
+        "SELECT id, session_str, first_name, phone FROM tg_accounts "
+        "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE",
+        message.from_user.id, selected_ids,
+    )
+    if not accounts:
+        await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
+        return
+
+    n_acc = len(accounts)
+    # Delay between consecutive sends; per-account delay = n_acc × base_delay
+    base_delay = 5.0 if n_acc == 1 else (3.0 if n_acc == 2 else 2.5)
+    total = len(usernames)
+
+    progress_msg = await message.answer(
+        f"⏳ <b>Рассылка запущена</b>\n\n"
+        f"Получателей: <b>{total}</b> | Аккаунтов: <b>{n_acc}</b>\n"
+        f"Задержка: ~{base_delay:.0f}с | Ожидаемое время: ~{round(total * base_delay / 60, 1)} мин\n\n"
+        "⏳ 0 / " + str(total),
+        parse_mode="HTML",
+    )
+
+    ok_list: list[str] = []
+    err_list: list[str] = []
+    flood_wait_total = 0
+
+    for i, username in enumerate(usernames):
+        acc = accounts[i % n_acc]
+        acc_label = html.escape(acc["first_name"] or acc["phone"])
+        result = await account_manager.send_dm(acc["session_str"], username, text_to_send)
+
+        u_escaped = html.escape(username)
+        if result.get("ok"):
+            ok_list.append(f"✅ @{u_escaped}")
+        else:
+            err = html.escape(result.get("error", "неизвестная ошибка")[:60])
+            err_list.append(f"❌ @{u_escaped}: {err}")
+            # If flood wait from Telegram — add extra wait on top of base delay
+            flood_wait_total += result.get("flood_wait", 0)
+
+        # Update progress every 10 sends or on last
+        if (i + 1) % 10 == 0 or i + 1 == total:
+            done = i + 1
+            sent = len(ok_list)
+            failed = len(err_list)
+            try:
+                await progress_msg.edit_text(
+                    f"⏳ <b>Рассылка...</b> {done}/{total}\n"
+                    f"✅ Отправлено: {sent} | ❌ Ошибок: {failed}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        # Delay: base + any extra flood wait accumulated
+        wait = base_delay + min(flood_wait_total, 30)
+        flood_wait_total = max(0, flood_wait_total - base_delay)  # drain gradually
+        await asyncio.sleep(wait)
+
+    # Final report — split into chunks if too long (Telegram 4096 char limit)
+    sent = len(ok_list)
+    failed = len(err_list)
+    header = (
+        f"📊 <b>Рассылка завершена</b>\n\n"
+        f"Всего: <b>{total}</b> | ✅ Успешно: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>\n\n"
+    )
+
+    # Show first 30 errors (most useful for debugging)
+    error_section = ""
+    if err_list:
+        shown_errors = err_list[:30]
+        error_section = "<b>Ошибки:</b>\n" + "\n".join(shown_errors)
+        if len(err_list) > 30:
+            error_section += f"\n<i>...и ещё {len(err_list) - 30} ошибок</i>"
+
+    final_text = header + error_section
+    await progress_msg.edit_text(
+        final_text,
+        parse_mode="HTML",
+        reply_markup=_back_kb().as_markup(),
+    )

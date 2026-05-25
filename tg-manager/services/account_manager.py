@@ -175,6 +175,54 @@ async def send_message_via_account(session_string: str, chat_id: int, text: str)
 send_message = send_message_via_account
 
 
+async def send_dm(session_string: str, username: str, text: str) -> dict:
+    """Send a DM to a user by username or numeric ID.
+
+    Returns {"ok": True} or {"error": "description", "flood_wait": seconds (optional)}.
+    Handles common Telegram errors gracefully.
+    """
+    from telethon.errors import (
+        UserPrivacyRestrictedError,
+        FloodWaitError,
+        PeerFloodError,
+        UserIsBlockedError,
+        ChatWriteForbiddenError,
+        InputUserDeactivatedError,
+        UsernameNotOccupiedError,
+        UsernameInvalidError,
+    )
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        target = username.lstrip("@") if isinstance(username, str) else username
+        # Try to resolve numeric IDs
+        if isinstance(target, str) and target.isdigit():
+            target = int(target)
+        await client.send_message(target, text)
+        return {"ok": True}
+    except FloodWaitError as e:
+        return {"error": f"FloodWait: подождите {e.seconds}с", "flood_wait": e.seconds}
+    except PeerFloodError:
+        return {"error": "PeerFlood: аккаунт временно ограничен по рассылке"}
+    except UserPrivacyRestrictedError:
+        return {"error": "приватность: пользователь запретил входящие"}
+    except UserIsBlockedError:
+        return {"error": "заблокирован: вы в чёрном списке"}
+    except ChatWriteForbiddenError:
+        return {"error": "нет доступа к написанию"}
+    except InputUserDeactivatedError:
+        return {"error": "аккаунт удалён"}
+    except (UsernameNotOccupiedError, UsernameInvalidError):
+        return {"error": "username не существует"}
+    except Exception as e:
+        return {"error": str(e)[:80]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def get_account_dialogs_stats(session_string: str) -> dict:
     """Возвращает статистику диалогов: всего, каналов, групп, личных чатов."""
     from telethon.tl.types import Channel, Chat, User
