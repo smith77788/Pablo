@@ -168,9 +168,10 @@ async def msg_token(message: Message, state: FSMContext,
 
     if not added:
         safe_uname = (bot_info.get('username') or '').replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        from bot.utils.subscription import is_platform_admin
         await info_msg.edit_text(
             f"⚠️ Бот @{safe_uname} уже добавлен.",
-            reply_markup=main_menu(is_admin=_is_admin(callback.from_user.id)),
+            reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
         )
         return
 

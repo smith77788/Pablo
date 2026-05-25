@@ -283,7 +283,6 @@ async def cb_create_account_chosen(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
     acc = await pool.fetchrow(
         "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
@@ -291,6 +290,7 @@ async def cb_create_account_chosen(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
     is_group = callback_data.action == "create_group_acc"
     entity_type = "группу" if is_group else "канал"
     await state.update_data(acc_id=acc["id"], session_str=acc["session_str"], is_group=is_group)
@@ -594,7 +594,6 @@ async def cb_join_pick_account(
 async def cb_join_account_chosen(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
     acc = await pool.fetchrow(
         "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
@@ -602,6 +601,7 @@ async def cb_join_account_chosen(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
     await state.update_data(acc_id=acc["id"], session_str=acc["session_str"])
     await _start_join_fsm(callback.message, state, edit=True)
 
@@ -660,7 +660,7 @@ async def cb_leave_show_dialogs(
         callback_data.acc_id, callback.from_user.id,
     )
     if not acc:
-        await callback.answer("Аккаунт не найден.", show_alert=True)
+        await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30)
@@ -742,7 +742,7 @@ async def cb_post_show_dialogs(
         callback_data.acc_id, callback.from_user.id,
     )
     if not acc:
-        await callback.answer("Аккаунт не найден.", show_alert=True)
+        await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30)
@@ -814,7 +814,7 @@ async def cb_manage_show_dialogs(
         callback_data.acc_id, callback.from_user.id,
     )
     if not acc:
-        await callback.answer("Аккаунт не найден.", show_alert=True)
+        await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30)
@@ -1086,7 +1086,7 @@ async def cb_members_view(
         callback_data.acc_id, callback.from_user.id,
     )
     if not acc:
-        await callback.answer("Аккаунт не найден.", show_alert=True)
+        await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
     from services import account_manager
     members = await account_manager.get_channel_members(
@@ -1374,10 +1374,45 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
         f"Имя: <b>{html.escape(result['display_name'])}</b>\n"
         f"Username: @{html.escape(bot_uname)}\n"
         f"Токен: <code>{token}</code>\n\n"
-        "⚠️ Сохраните токен — он показан один раз.",
+        "⚠️ Сохраните токен — он показан один раз.\n\n"
+        "Нажмите кнопку ниже чтобы добавить бота в платформу:",
         parse_mode="HTML",
-        reply_markup=_back_kb().as_markup(),
+        reply_markup=kb2.as_markup(),
     )
+
+
+@router.callback_query(F.data.startswith("add_bot_token:"))
+async def cb_add_bot_token(
+    callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    await callback.answer()
+    token = callback.data.split(":", 1)[1]
+    from database import db as _db
+    from services import bot_api as _bot_api
+    from bot.keyboards import bot_menu
+    progress = await callback.message.answer("⏳ Добавляю бота...")
+    bot_info = await _bot_api.get_me(http, token)
+    if not bot_info:
+        await progress.edit_text("❌ Не удалось получить информацию о боте. Токен недействителен.")
+        return
+    added = await _db.add_bot(
+        pool, token=token, bot_id=bot_info["id"],
+        username=bot_info.get("username", ""),
+        first_name=bot_info.get("first_name", ""),
+        added_by=callback.from_user.id,
+    )
+    safe = (bot_info.get("username") or bot_info.get("first_name", "")).replace("&", "&amp;")
+    if added:
+        await progress.edit_text(
+            f"✅ Бот @{safe} добавлен в платформу!",
+            parse_mode="HTML",
+            reply_markup=bot_menu(bot_info["id"], username=bot_info.get("username")),
+        )
+    else:
+        await progress.edit_text(
+            f"⚠️ Бот @{safe} уже добавлен в вашу платформу.",
+            parse_mode="HTML",
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1457,7 +1492,7 @@ async def fsm_react_msg_id(message: Message, state: FSMContext) -> None:
     await state.set_state(SendReactionFSM.choosing_emoji)
     kb = InlineKeyboardBuilder()
     for emoji in REACTION_EMOJIS:
-        kb.button(text=emoji, callback_data=ChanCb(action=f"do_react:{emoji}"))
+        kb.button(text=emoji, callback_data=f"chan:do_react:{emoji}")
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
     kb.adjust(5, 5, 1)
     await message.answer(
@@ -1530,7 +1565,7 @@ async def fsm_report_peer(message: Message, state: FSMContext) -> None:
     await state.set_state(ReportFSM.choosing_reason)
     kb = InlineKeyboardBuilder()
     for key, label in REPORT_REASONS.items():
-        kb.button(text=label, callback_data=ChanCb(action=f"report_reason:{key}"))
+        kb.button(text=label, callback_data=f"chan:report_reason:{key}")
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
     kb.adjust(2, 2, 2, 1)
     await message.answer(

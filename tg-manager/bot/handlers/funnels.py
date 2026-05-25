@@ -56,8 +56,8 @@ async def _show_funnel_view(message: Message, pool: asyncpg.Pool,
 async def cb_fn_list(callback: CallbackQuery, callback_data: FunnelCb,
                      pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
         await callback.message.edit_text(
             locked_text("Цепочки сообщений", "starter"), parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter"),
@@ -67,6 +67,7 @@ async def cb_fn_list(callback: CallbackQuery, callback_data: FunnelCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     funnels = await db.get_funnels(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
@@ -79,7 +80,6 @@ async def cb_fn_list(callback: CallbackQuery, callback_data: FunnelCb,
         parse_mode="HTML",
         reply_markup=funnels_list(callback_data.bot_id, funnels),
     )
-    await callback.answer()
 
 
 # ── View ───────────────────────────────────────────────────────────────────
@@ -87,8 +87,8 @@ async def cb_fn_list(callback: CallbackQuery, callback_data: FunnelCb,
 @router.callback_query(FunnelCb.filter(F.action == "view"))
 async def cb_fn_view(callback: CallbackQuery, callback_data: FunnelCb,
                      pool: asyncpg.Pool) -> None:
-    await _show_funnel_view(callback.message, pool, callback_data.bot_id, callback_data.funnel_id)
     await callback.answer()
+    await _show_funnel_view(callback.message, pool, callback_data.bot_id, callback_data.funnel_id)
 
 
 # ── Create: ask name ───────────────────────────────────────────────────────
@@ -96,13 +96,13 @@ async def cb_fn_view(callback: CallbackQuery, callback_data: FunnelCb,
 @router.callback_query(FunnelCb.filter(F.action == "create"))
 async def cb_fn_create(callback: CallbackQuery, callback_data: FunnelCb,
                        state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(CreateFunnel.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
         "➕ <b>Новая цепочка</b>\n\nВведите название цепочки:",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(CreateFunnel.waiting_name, F.text)
@@ -250,8 +250,6 @@ async def msg_fn_step_delay(message: Message, state: FSMContext, pool: asyncpg.P
 @router.callback_query(FunnelCb.filter(F.action == "toggle"))
 async def cb_fn_toggle(callback: CallbackQuery, callback_data: FunnelCb,
                        pool: asyncpg.Pool) -> None:
-
-    await callback.answer()
     await db.toggle_funnel(pool, callback_data.funnel_id, callback_data.bot_id)
     await _show_funnel_view(callback.message, pool, callback_data.bot_id, callback_data.funnel_id)
     await callback.answer("✅ Статус изменён.")
@@ -262,8 +260,6 @@ async def cb_fn_toggle(callback: CallbackQuery, callback_data: FunnelCb,
 @router.callback_query(FunnelCb.filter(F.action == "delete"))
 async def cb_fn_delete(callback: CallbackQuery, callback_data: FunnelCb,
                        pool: asyncpg.Pool) -> None:
-
-    await callback.answer()
     await db.delete_funnel(pool, callback_data.funnel_id, callback_data.bot_id)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     funnels = await db.get_funnels(pool, callback_data.bot_id)

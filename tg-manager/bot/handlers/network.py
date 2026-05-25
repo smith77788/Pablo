@@ -87,7 +87,6 @@ async def cb_net_menu(callback: CallbackQuery, callback_data: NetworkCb,
         parse_mode="HTML",
         reply_markup=network_ops_menu(),
     )
-    await callback.answer()
 
 
 # ── Analytics (PRO) ───────────────────────────────────────────────────────────
