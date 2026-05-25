@@ -17,7 +17,7 @@ from aiogram.filters import Command
 from bot.callbacks import BotCb
 from bot.keyboards import main_menu
 from bot.utils.subscription import is_platform_admin
-from config import ADMIN_IDS, ADMIN_SECRET
+from config import ADMIN_SECRET
 from database import db
 from services import railway_api
 
@@ -26,20 +26,18 @@ router = Router()
 
 _NOTIFY_NEW_USERS = True  # toggle via /admin toggle_notify
 
+# Пользователи, вошедшие через ADMIN_SECRET в текущей сессии бота
+_session_admins: set[int] = set()
+
 
 def _is_admin(uid: int) -> bool:
-    return bool(ADMIN_IDS) and uid in ADMIN_IDS
-
-
-def _admin_guard(func):
-    """Decorator: reject non-admins silently."""
-    async def wrapper(event, *args, **kwargs):
-        uid = event.from_user.id if hasattr(event, "from_user") else None
-        if not uid or not _is_admin(uid):
-            return
-        return await func(event, *args, **kwargs)
-    wrapper.__name__ = func.__name__
-    return wrapper
+    # Сессионный доступ (через секретную фразу)
+    if uid in _session_admins:
+        return True
+    # Постоянный доступ (через ADMIN_IDS в env — читаем динамически)
+    raw = os.getenv("ADMIN_IDS", "")
+    ids = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+    return bool(ids) and uid in ids
 
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
@@ -111,24 +109,39 @@ def _back_kb():
 
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
-    if not _is_admin(message.from_user.id):
-        return  # silent — не раскрываем существование команды
-    await _show_admin_main(message, pool, edit=False)
+    uid = message.from_user.id
+    if _is_admin(uid):
+        await _show_admin_main(message, pool, edit=False)
+        return
+    # Если ADMIN_IDS пустой но ADMIN_SECRET задан — подсказываем как войти
+    if ADMIN_SECRET:
+        await message.answer(
+            "🔑 <b>Введите секретную фразу для доступа к AdminPanel</b>\n\n"
+            f"Ваш ID: <code>{uid}</code>",
+            parse_mode="HTML",
+        )
+    # Иначе — молчим (не раскрываем существование команды)
 
 
 # ── Секретная фраза для входа в админку ────────────────────────────────────────
 
 @router.message(F.text.func(lambda t: bool(ADMIN_SECRET) and t == ADMIN_SECRET))
 async def cmd_admin_secret(message: Message) -> None:
-    if not _is_admin(message.from_user.id):
-        return
+    # Секретная фраза совпала — даём сессионный доступ без проверки ADMIN_IDS
+    _session_admins.add(message.from_user.id)
     try:
         await message.delete()
     except Exception:
         pass
     kb = InlineKeyboardBuilder()
     kb.button(text="🔑 Открыть Админ Меню", callback_data="adm:main")
-    await message.answer("🔑", reply_markup=kb.as_markup())
+    await message.answer(
+        f"🔑 Доступ предоставлен\n\n"
+        f"💡 Ваш ID: <code>{message.from_user.id}</code>\n"
+        f"Добавьте его в переменную <code>ADMIN_IDS</code> через Railway чтобы зафиксировать доступ.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> None:
@@ -794,13 +807,15 @@ async def _adm_env_delete(
 async def notify_new_platform_user(bot, pool: asyncpg.Pool, user_id: int,
                                     username: str | None, first_name: str) -> None:
     """Call this when a new user starts the management bot for the first time."""
-    if not _NOTIFY_NEW_USERS or not ADMIN_IDS:
+    raw = os.getenv("ADMIN_IDS", "")
+    admin_ids = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+    if not _NOTIFY_NEW_USERS or not admin_ids:
         return
     total = await pool.fetchval(
         "SELECT COUNT(DISTINCT added_by) FROM managed_bots"
     ) or 0
     label = f"@{username}" if username else first_name
-    for admin_id in ADMIN_IDS:
+    for admin_id in admin_ids:
         try:
             await bot.send_message(
                 admin_id,
