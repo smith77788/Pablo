@@ -72,11 +72,16 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     if not bot_count:
         await message.answer(
             "👋 <b>Добро пожаловать в TG Manager!</b>\n\n"
-            "📌 <b>Как начать:</b>\n"
-            "1. Нажмите ➕ Добавить бота\n"
-            "2. Отправьте токен вашего бота (от @BotFather)\n"
-            "3. Управляйте ботами из одного места\n\n"
-            f"ID: <code>{uid}</code>",
+            "Здесь вы управляете своими Telegram-ботами: рассылки, аудитория, автоответы, CRM и многое другое.\n\n"
+            "🚀 <b>Начало работы — 3 шага:</b>\n"
+            "1️⃣ Нажмите ➕ Добавить бота → вставьте токен от @BotFather\n"
+            "2️⃣ Откройте бота из списка → изучите разделы\n"
+            "3️⃣ Используйте Рассылка, Аудитория, Авто-ответы\n\n"
+            "💡 <b>Подсказки:</b>\n"
+            "• 🌐 Сеть &amp; операции — массовые действия сразу по всем ботам\n"
+            "• 📱 Мои аккаунты — подключите личный Telegram-аккаунт\n"
+            "• 🤖 AI-ассистент — задайте вопрос об управлении ботами\n\n"
+            f"Ваш ID: <code>{uid}</code>",
             parse_mode="HTML",
             reply_markup=main_menu(),
         )
@@ -107,7 +112,8 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     await message.answer(
         f"👋 <b>TG Manager</b>\n\n"
         f"{summary}{extra}\n\n"
-        f"ID: <code>{uid}</code>",
+        f"ID: <code>{uid}</code>\n\n"
+        f"💡 Нажмите на бота из списка → откроется меню управления",
         parse_mode="HTML",
         reply_markup=main_menu(),
     )
@@ -129,37 +135,38 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
     level = PLAN_LEVELS.get(plan, 0)
     emoji = PLAN_EMOJIS.get(plan, "🆓")
 
-    def _avail(min_plan: str) -> str:
-        return "✅" if level >= PLAN_LEVELS.get(min_plan, 0) else "🔒"
-
-    lines = [
-        f"❓ <b>Справка TG Manager</b>",
-        f"",
-        f"Ваш план: <b>{emoji} {plan.upper()}</b>",
-        f"",
-        f"<b>Доступные команды:</b>",
-        f"",
-        f"✅ /start — главное меню",
-        f"✅ /help — эта справка",
-        f"✅ /subscription — управление подпиской",
-        f"✅ /cancel — отменить текущее действие",
-        f"",
-        f"{_avail('starter')} /ai — AI-ассистент",
-        f"{'<i>Доступно с STARTER+</i>' if level < PLAN_LEVELS['starter'] else '<i>Задайте вопрос по вашим ботам</i>'}",
-        f"",
-        f"{_avail('starter')} /accounts — личные аккаунты",
-        f"{'<i>Доступно с STARTER+</i>' if level < PLAN_LEVELS['starter'] else '<i>Управление Telegram-аккаунтами</i>'}",
-    ]
-
-    if level < PLAN_LEVELS.get("starter", 1):
-        lines += [
-            f"",
-            f"💡 <b>Хотите больше возможностей?</b>",
-            f"Используйте /subscription для просмотра планов.",
-        ]
+    text = (
+        f"❓ <b>Справка TG Manager</b>\n\n"
+        f"Ваш план: <b>{emoji} {plan.upper()}</b>\n\n"
+        f"<b>📋 Команды:</b>\n"
+        f"/start — главное меню\n"
+        f"/help — эта справка\n"
+        f"/subscription — управление подпиской и оплата\n"
+        f"/ranking — трекер позиций в поиске Telegram\n"
+        f"/accounts — мои Telegram-аккаунты\n"
+        f"/ops — операции с аккаунтами (вступить, опубликовать, профиль)\n"
+        f"/cancel — отменить текущее действие\n\n"
+        f"<b>🤖 Управление ботами:</b>\n"
+        f"Добавьте бота → выберите из списка → откроется меню с разделами:\n"
+        f"• Аудитория — список пользователей бота\n"
+        f"• Рассылка — отправить сообщение всем\n"
+        f"• Команды — /start, /help и свои команды\n"
+        f"• Авто-ответы — ответы на ключевые слова\n"
+        f"• Шаблоны — готовые тексты для рассылок\n"
+        f"• Inbox — живой чат с пользователями (STARTER+)\n"
+        f"• Цепочки — воронки сообщений (STARTER+)\n"
+        f"• CRM — теги и сегментация (STARTER+)\n"
+        f"• A/B тесты — сравнение вариантов сообщений (PRO+)\n"
+        f"• 📊 Позиции — позиция бота в поиске Telegram (STARTER+)\n\n"
+        f"<b>🌐 Сеть &amp; операции:</b>\n"
+        f"Управление всеми ботами одновременно — массовые правки имени, описания, команд, рассылка по всей сети, аналитика, кластеры.\n\n"
+        f"<b>📡 Операции с аккаунтами:</b>\n"
+        f"Через ваш личный Telegram-аккаунт: создать канал, вступить, публиковать посты, редактировать профиль.\n\n"
+        f"💡 <b>Подсказка:</b> добавьте несколько ботов и подключите личный аккаунт, чтобы получить доступ ко всем функциям платформы."
+    )
 
     await message.answer(
-        "\n".join(lines),
+        text,
         parse_mode="HTML",
         reply_markup=main_menu(),
     )

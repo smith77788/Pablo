@@ -97,13 +97,15 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     text = (
         f"💳 <b>Подписка</b>\n\n"
         f"Текущий план: <b>{emoji} {plan.upper()}</b> · до {lim_label} ботов\n\n"
-        f"<b>Доступные планы:</b>\n\n"
+        f"Выберите план для апгрейда:\n\n"
         f"⭐ <b>STARTER</b> — $9/мес · до 10 ботов\n"
-        f"<i>{PLAN_FEATURES['starter']}</i>\n\n"
+        f"<i>Inbox, CRM, расписание, воронки, диплинки, SEO</i>\n\n"
         f"🚀 <b>PRO</b> — $25/мес · до 30 ботов\n"
-        f"<i>{PLAN_FEATURES['pro']}</i>\n\n"
-        f"👑 <b>ENTERPRISE</b> — $69/мес · неограниченно\n"
-        f"<i>{PLAN_FEATURES['enterprise']}</i>"
+        f"<i>A/B тесты, аналитика активности, мультигео, массовые операции</i>\n\n"
+        f"👑 <b>ENTERPRISE</b> — $69/мес · без ограничений\n"
+        f"<i>Swarm, кластеры, сетевая рассылка v2, AI-ассистент, приоритетная поддержка</i>\n\n"
+        f"💡 Нажмите на план → выберите период → выберите криптовалюту → оплатите\n"
+        f"❓ Кнопка «Что входит в план» — полный список функций"
     )
     kb = InlineKeyboardBuilder()
     for p in ("starter", "pro", "enterprise"):
@@ -188,7 +190,9 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
     kb.button(text="◀️ Назад", callback_data=SubCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
-        f"💳 {em} <b>{plan.upper()}</b>\n\nБазовая цена: <b>${base}/мес</b>\n\nВыберите период:",
+        f"💳 {em} <b>{plan.upper()}</b>\n"
+        f"Базовая цена: <b>${base}/мес</b>\n\n"
+        f"📅 Выберите период (чем дольше — тем дешевле):",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

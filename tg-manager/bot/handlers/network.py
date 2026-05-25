@@ -68,13 +68,22 @@ async def cb_net_menu(callback: CallbackQuery, callback_data: NetworkCb,
     ov = await db.get_network_overview(pool, callback.from_user.id)
     swarm_pct = round(ov["swarm_bots"] / ov["total_bots"] * 100) if ov["total_bots"] else 0
     await callback.message.edit_text(
-        f"🌐 <b>Сеть & массовые операции</b>\n\n"
+        f"🌐 <b>Сеть &amp; массовые операции</b>\n\n"
         f"🤖 Ботов: <b>{ov['total_bots']}</b> | "
         f"🧬 Swarm: <b>{ov['swarm_bots']}</b> ({swarm_pct}%)\n"
         f"🌐 Кластеров: <b>{ov['clusters']}</b>\n"
         f"👤 Уникальных юзеров: <b>{ov['unique_users']:,}</b>\n"
         f"📢 Сообщений отправлено: <b>{ov['total_sent']:,}</b>\n\n"
-        "<i>⭐ Аналитика и операции: PRO | 👑 Кластеры/рассылка/клон: ENTERPRISE</i>",
+        "── <b>Управление сетью (PRO+)</b> ──\n"
+        "📊 Аналитика — сводка по всей сети ботов\n"
+        "🏆 Рейтинг — боты по размеру аудитории\n"
+        "❤️ Здоровье — проверка доступности ботов\n"
+        "👥 Пересечение — общие юзеры между ботами\n"
+        "⚖️ Роутинг — распределение нагрузки (ENTERPRISE)\n"
+        "🌐 Кластеры — группировка ботов (ENTERPRISE)\n\n"
+        "── <b>Массовые правки</b> ──\n"
+        "Изменить имя/описание/команды сразу для всех ботов\n\n"
+        "💡 Кнопки с замком 🔒 откроются при повышении плана (/subscription)",
         parse_mode="HTML",
         reply_markup=network_ops_menu(),
     )
