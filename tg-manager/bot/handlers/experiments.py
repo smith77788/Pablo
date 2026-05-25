@@ -39,7 +39,7 @@ async def _exp_text(exp, variants: list) -> str:
         winner_mark = " 🏆" if exp.get("winner_variant_id") == v["id"] else ""
         safe_vname = _html_escape(v['name'])
         lines.append(f"  • <b>{safe_vname}{winner_mark}</b>: {v['impressions']} показов, {v['conversions']} конверсий ({ctr}%)")
-        lines.append(f"    {_html_escape(v['content'][:80])}…")
+        lines.append(f"    {_html_escape((v.get('content') or '')[:80])}…")
     return "\n".join(lines)
 
 
@@ -71,7 +71,6 @@ async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
         parse_mode="HTML",
         reply_markup=experiments_menu(callback_data.bot_id, exps),
     )
-    await callback.answer()
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "view"))
@@ -88,7 +87,6 @@ async def cb_exp_view(callback: CallbackQuery, callback_data: ExperimentCb,
         text, parse_mode="HTML",
         reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, exp["status"]),
     )
-    await callback.answer()
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "create"))
@@ -101,7 +99,6 @@ async def cb_exp_create(callback: CallbackQuery, callback_data: ExperimentCb,
         parse_mode="HTML",
         reply_markup=experiment_type_menu(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(ExperimentCb.filter(F.action.in_({"type_start", "type_reply"})))
@@ -244,7 +241,6 @@ async def cb_pick_winner(callback: CallbackQuery, callback_data: ExperimentCb,
         parse_mode="HTML",
         reply_markup=variant_pick_menu(callback_data.bot_id, callback_data.exp_id, variants),
     )
-    await callback.answer()
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "set_winner"))

@@ -141,11 +141,11 @@ async def cb_sub_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(SubCb.filter(F.action == "plan_features"))
 async def cb_plan_features(callback: CallbackQuery, callback_data: SubCb) -> None:
-    await callback.answer()
     plan = callback_data.plan
     if plan not in PLAN_DETAILED_FEATURES:
         await callback.answer("Неизвестный план.", show_alert=True)
         return
+    await callback.answer()
 
     em = PLAN_EMOJIS.get(plan, "")
     price = PLAN_PRICES_USD.get(plan, 0)
@@ -174,11 +174,11 @@ async def cb_plan_features(callback: CallbackQuery, callback_data: SubCb) -> Non
 
 @router.callback_query(SubCb.filter(F.action == "choose_plan"))
 async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
-    await callback.answer()
     plan = callback_data.plan
     if plan not in PLAN_PRICES_USD:
         await callback.answer("Неизвестный план.", show_alert=True)
         return
+    await callback.answer()
     base = PLAN_PRICES_USD[plan]
     em = PLAN_EMOJIS.get(plan, "")
     kb = InlineKeyboardBuilder()
@@ -232,12 +232,12 @@ async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb) -> Non
 
 @router.callback_query(SubCb.filter(F.action == "pay"))
 async def cb_pay(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
     plan, months, currency = callback_data.plan, callback_data.months, callback_data.currency
     wallet = _ton_wallet() if currency == "TON" else _tron_wallet()
     if not wallet:
         await callback.answer("Оплата временно недоступна.", show_alert=True)
         return
+    await callback.answer()
 
     usd, crypto = _calc(plan, months, currency)
 

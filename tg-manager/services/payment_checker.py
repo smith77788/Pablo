@@ -94,13 +94,21 @@ async def _check_trc20(pool, http, bot, payments) -> None:
     except Exception:
         return
 
+    used_txids: set[str] = set()
     for payment in payments:
-        expected = float(payment["amount_crypto"])
+        try:
+            expected = float(payment["amount_crypto"])
+        except (TypeError, ValueError):
+            continue
         for tx in data.get("data", []):
             try:
+                txid = tx.get("transaction_id", "")
+                if txid in used_txids:
+                    continue
                 value = int(tx.get("value", 0)) / 1_000_000
                 if abs(value - expected) < 0.02:
-                    await _confirm(pool, bot, payment, tx.get("transaction_id", ""))
+                    await _confirm(pool, bot, payment, txid)
+                    used_txids.add(txid)
                     break
             except Exception:
                 continue

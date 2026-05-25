@@ -21,11 +21,11 @@ router = Router()
 async def cb_aud_menu(callback: CallbackQuery, callback_data: AudCb,
                        pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     count = await db.get_audience_count(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
@@ -41,18 +41,17 @@ async def cb_aud_menu(callback: CallbackQuery, callback_data: AudCb,
         parse_mode="HTML",
         reply_markup=audience_menu(row["bot_id"]),
     )
-    await callback.answer()
 
 
 @router.callback_query(AudCb.filter(F.action == "refresh"))
 async def cb_refresh(callback: CallbackQuery, callback_data: AudCb,
                       pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     await callback.message.edit_text("⏳ Собираю обновления…")
 
@@ -70,18 +69,17 @@ async def cb_refresh(callback: CallbackQuery, callback_data: AudCb,
         parse_mode="HTML",
         reply_markup=audience_menu(row["bot_id"]),
     )
-    await callback.answer()
 
 
 @router.callback_query(AudCb.filter(F.action == "stats"))
 async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
                     pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     stats = await db.get_audience_stats(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
@@ -124,11 +122,11 @@ async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
 async def cb_export(callback: CallbackQuery, callback_data: AudCb,
                      pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     await callback.answer("⏳ Генерирую CSV…")
 
@@ -171,11 +169,11 @@ async def cb_export(callback: CallbackQuery, callback_data: AudCb,
 async def cb_scan(callback: CallbackQuery, callback_data: AudCb,
                    pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     await callback.message.edit_text("⚡ Сканирую все доступные апдейты…")
     await callback.answer()
@@ -221,19 +219,18 @@ async def cb_compare_pick(callback: CallbackQuery, callback_data: AudCb,
         "⚖️ Выберите второй бот для сравнения аудиторий:",
         reply_markup=bots_pick(bots, exclude_bot_id=callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(AudCb.filter(F.action == "pick_b"))
 async def cb_compare_result(callback: CallbackQuery, callback_data: AudCb,
                               pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row_a = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     row_b = await db.get_bot(pool, callback_data.target_id, callback.from_user.id)
     if not row_a or not row_b:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     stats = await db.compare_audiences(pool, row_a["bot_id"], row_b["bot_id"])
     label_a = f"@{row_a['username']}" if row_a["username"] else row_a["first_name"]
@@ -373,12 +370,12 @@ async def cb_bot_export_audience(callback: CallbackQuery, callback_data: BotCb,
 async def cb_block_user(callback: CallbackQuery, callback_data: AudCb,
                          pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     blocked = callback_data.action == "block_user"
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     await db.block_user(pool, callback_data.bot_id, callback_data.target_id, blocked)
     user = await db.get_user_by_id(pool, callback_data.bot_id, callback_data.target_id)
     if not user:

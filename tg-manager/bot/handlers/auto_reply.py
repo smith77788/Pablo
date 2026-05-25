@@ -15,11 +15,11 @@ router = Router()
 async def cb_ar_menu(callback: CallbackQuery, callback_data: AutoReplyCb,
                      pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
@@ -34,7 +34,6 @@ async def cb_ar_menu(callback: CallbackQuery, callback_data: AutoReplyCb,
         parse_mode="HTML",
         reply_markup=auto_reply_menu(callback_data.bot_id, replies),
     )
-    await callback.answer()
 
 
 @router.callback_query(AutoReplyCb.filter(F.action == "add"))
@@ -47,7 +46,6 @@ async def cb_ar_add(callback: CallbackQuery, callback_data: AutoReplyCb,
         parse_mode="HTML",
         reply_markup=auto_reply_trigger_menu(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(AutoReplyCb.filter(F.action == "trig_start"))
@@ -121,12 +119,12 @@ async def msg_ar_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 async def cb_ar_view(callback: CallbackQuery, callback_data: AutoReplyCb,
                      pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
     r = next((x for x in replies if x["id"] == callback_data.reply_id), None)
     if not r:
         await callback.answer("Правило не найдено.", show_alert=True)
         return
+    await callback.answer()
     trigger = {
         "start": "/start",
         "keyword": f"🔑 {r['keyword']}",
@@ -141,7 +139,6 @@ async def cb_ar_view(callback: CallbackQuery, callback_data: AutoReplyCb,
         parse_mode="HTML",
         reply_markup=auto_reply_view(callback_data.bot_id, r["id"], r["is_active"]),
     )
-    await callback.answer()
 
 
 @router.callback_query(AutoReplyCb.filter(F.action == "toggle"))
@@ -186,11 +183,11 @@ async def cb_ar_delete(callback: CallbackQuery, callback_data: AutoReplyCb,
 async def cb_ar_copy_to(callback: CallbackQuery, callback_data: AutoReplyCb,
                          pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
     if not others:
@@ -202,19 +199,18 @@ async def cb_ar_copy_to(callback: CallbackQuery, callback_data: AutoReplyCb,
         parse_mode="HTML",
         reply_markup=auto_reply_copy_target(callback_data.bot_id, others),
     )
-    await callback.answer()
 
 
 @router.callback_query(AutoReplyCb.filter(F.action == "copy_confirm"))
 async def cb_ar_copy_confirm(callback: CallbackQuery, callback_data: AutoReplyCb,
                               pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     src_bot = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     dst_bot = await db.get_bot(pool, callback_data.target_bot_id, callback.from_user.id)
     if not src_bot or not dst_bot:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     copied = await db.copy_auto_replies(pool, callback_data.bot_id, callback_data.target_bot_id)
     dst_label = f"@{dst_bot['username']}" if dst_bot["username"] else dst_bot["first_name"]
     replies = await db.get_auto_replies(pool, callback_data.bot_id)

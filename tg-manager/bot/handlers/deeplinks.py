@@ -44,7 +44,6 @@ async def cb_dl_menu(callback: CallbackQuery, callback_data: DeepLinkCb,
         parse_mode="HTML",
         reply_markup=deeplinks_menu(callback_data.bot_id, links),
     )
-    await callback.answer()
 
 
 @router.callback_query(DeepLinkCb.filter(F.action == "view"))
@@ -77,7 +76,6 @@ async def cb_dl_view(callback: CallbackQuery, callback_data: DeepLinkCb,
         parse_mode="HTML",
         reply_markup=deeplink_view_menu(callback_data.bot_id, callback_data.link_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(DeepLinkCb.filter(F.action == "create"))

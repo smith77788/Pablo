@@ -459,11 +459,11 @@ async def cb_view_account(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     name = escape(acc.get("first_name") or "")
     uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
@@ -497,11 +497,11 @@ async def cb_channels(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
 
@@ -573,11 +573,11 @@ async def cb_post_choose_chat(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
 
@@ -642,11 +642,11 @@ async def cb_post_to(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     await state.set_state(AccountPost.waiting_text)
     await state.update_data(acc_id=callback_data.acc_id, chat_id=callback_data.chat_id)
@@ -731,11 +731,11 @@ async def cb_remove_account(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     name = escape(acc.get("first_name") or "")
     phone = escape(acc.get("phone") or "")
@@ -789,11 +789,11 @@ async def cb_check_health(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
 
@@ -831,11 +831,11 @@ async def cb_dialogs_stats(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
 
@@ -883,11 +883,11 @@ async def cb_dialogs(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
     page_offset = callback_data.chat_id  # используем chat_id как page offset
@@ -984,11 +984,11 @@ async def cb_toggle_account(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     current_status = bool(acc.get("is_active", True))
     new_status = not current_status
@@ -1033,11 +1033,11 @@ async def cb_send_msg_start(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
     acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     await state.set_state(AccountSendMsg.waiting_chat_id)
     await state.update_data(acc_id=callback_data.acc_id)

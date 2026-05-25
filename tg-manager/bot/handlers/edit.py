@@ -24,11 +24,11 @@ async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | Non
 async def cb_edit_menu(callback: CallbackQuery, callback_data: EditCb,
                         pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"✏️ <b>Редактирование {label}</b>\n\nВыберите что изменить:",
@@ -166,11 +166,11 @@ async def msg_photo_wrong(message: Message) -> None:
 async def cb_del_photo(callback: CallbackQuery, callback_data: EditCb,
                         pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     ok = await bot_api.delete_my_photo(http, row["token"])
     if ok:
         await callback.message.edit_text(
@@ -237,11 +237,11 @@ async def msg_update_token(message: Message, state: FSMContext,
 async def cb_health(callback: CallbackQuery, callback_data: EditCb,
                      pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     await callback.answer("⏳ Проверяю…")
     info = await bot_api.get_me(http, row["token"])
     if info:

@@ -90,8 +90,8 @@ def _score_bar(score: int) -> str:
 async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
                        pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
         await callback.message.edit_text(
             locked_text("SEO и аналитика поиска", "starter"), parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter"),
@@ -101,6 +101,7 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"📈 <b>SEO — {label}</b>\n\n"
@@ -113,18 +114,17 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
         parse_mode="HTML",
         reply_markup=seo_menu(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(SeoCb.filter(F.action == "analyze"))
 async def cb_seo_analyze(callback: CallbackQuery, callback_data: SeoCb,
                           pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     await callback.answer("⏳ Анализирую профиль...")
 
     token = row["token"]
@@ -213,7 +213,6 @@ async def cb_seo_keywords(callback: CallbackQuery, callback_data: SeoCb,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
 
 
 @router.callback_query(SeoCb.filter(F.action == "tips"))

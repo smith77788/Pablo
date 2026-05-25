@@ -137,7 +137,6 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
 
 
 # ── Clusters (ENTERPRISE) ────────────────────────────────────────────────────
@@ -197,7 +196,6 @@ async def cb_cluster_view(callback: CallbackQuery, callback_data: ClusterCb,
         "\n".join(lines), parse_mode="HTML",
         reply_markup=network_cluster_view(cluster, bots),
     )
-    await callback.answer()
 
 
 @router.callback_query(ClusterCb.filter(F.action == "bulk_swarm_on"))
@@ -263,11 +261,11 @@ async def cb_bulk_role(callback: CallbackQuery, callback_data: ClusterCb,
 async def cb_cluster_assign_start(callback: CallbackQuery, callback_data: ClusterCb,
                                    pool: asyncpg.Pool, state: FSMContext) -> None:
 
-    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         await callback.answer("Нет ботов.", show_alert=True)
         return
+    await callback.answer()
     await state.set_state(AssignCluster.waiting_name)
     await state.update_data(cluster=callback_data.cluster)
     await callback.message.edit_text(
@@ -275,7 +273,6 @@ async def cb_cluster_assign_start(callback: CallbackQuery, callback_data: Cluste
         parse_mode="HTML",
         reply_markup=network_assign_bot_pick(callback_data.cluster, list(bots)),
     )
-    await callback.answer()
 
 
 @router.callback_query(ClusterCb.filter(F.action == "assign_confirm"))
@@ -374,18 +371,17 @@ async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         parse_mode="HTML",
         reply_markup=network_routing_menu(list(weights)),
     )
-    await callback.answer()
 
 
 @router.callback_query(NetworkCb.filter(F.action == "set_weight_pick"))
 async def cb_set_weight_pick(callback: CallbackQuery, callback_data: NetworkCb,
                               pool: asyncpg.Pool, state: FSMContext) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await state.set_state(SetRoutingWeight.waiting_weight)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -548,13 +544,13 @@ async def cb_net_broadcast_confirm(callback: CallbackQuery, callback_data: Netwo
                                     state: FSMContext, pool: asyncpg.Pool,
                                     http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     data = await state.get_data()
     await state.clear()
     text = data.get("text", "")
     if not text:
         await callback.answer("Текст не найден.", show_alert=True)
         return
+    await callback.answer()
 
     users = await db.get_unique_network_users(pool, callback.from_user.id)
     if not users:
@@ -588,7 +584,6 @@ async def cb_net_broadcast_confirm(callback: CallbackQuery, callback_data: Netwo
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
 
 
 @router.callback_query(NetworkCb.filter(F.action == "broadcast_cancel"))
@@ -629,19 +624,18 @@ async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         parse_mode="HTML",
         reply_markup=network_clone_pick_source(list(bots)),
     )
-    await callback.answer()
 
 
 @router.callback_query(NetworkCb.filter(F.action == "clone_pick_dest"))
 async def cb_net_clone_pick_dest(callback: CallbackQuery, callback_data: NetworkCb,
                                   pool: asyncpg.Pool, state: FSMContext) -> None:
 
-    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     src_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not src_row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     src_label = f"@{src_row['username']}" if src_row["username"] else src_row["first_name"]
     await state.set_state(CloneSettings.picking_dest)
     await state.update_data(src_id=callback_data.bot_id)
@@ -651,14 +645,12 @@ async def cb_net_clone_pick_dest(callback: CallbackQuery, callback_data: Network
         parse_mode="HTML",
         reply_markup=network_clone_pick_dest(callback_data.bot_id, list(bots)),
     )
-    await callback.answer()
 
 
 @router.callback_query(NetworkCb.filter(F.action == "clone_confirm"))
 async def cb_net_clone_confirm(callback: CallbackQuery, callback_data: NetworkCb,
                                 pool: asyncpg.Pool, state: FSMContext) -> None:
 
-    await callback.answer()
     data = await state.get_data()
     await state.clear()
     src_id = data.get("src_id")
@@ -666,6 +658,7 @@ async def cb_net_clone_confirm(callback: CallbackQuery, callback_data: NetworkCb
     if not src_id or src_id == dst_id:
         await callback.answer("Ошибка: некорректные боты.", show_alert=True)
         return
+    await callback.answer()
 
     src_row = await db.get_bot(pool, src_id, callback.from_user.id)
     dst_row = await db.get_bot(pool, dst_id, callback.from_user.id)

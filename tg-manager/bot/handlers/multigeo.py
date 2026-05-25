@@ -35,8 +35,8 @@ def _after_save_markup(bot_id: int):
 async def cb_multigeo_menu(callback: CallbackQuery, callback_data: MultigeoCb,
                             pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
         await callback.message.edit_text(
             locked_text("Мультигео (редактирование по языкам)", "pro"), parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro"),
@@ -46,6 +46,7 @@ async def cb_multigeo_menu(callback: CallbackQuery, callback_data: MultigeoCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"🌍 <b>Мультигео — {label}</b>\n\n"
@@ -57,7 +58,6 @@ async def cb_multigeo_menu(callback: CallbackQuery, callback_data: MultigeoCb,
         parse_mode="HTML",
         reply_markup=multigeo_menu(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 # ── Names list ────────────────────────────────────────────────────────────
@@ -66,22 +66,22 @@ async def cb_multigeo_menu(callback: CallbackQuery, callback_data: MultigeoCb,
 async def cb_multigeo_names(callback: CallbackQuery, callback_data: MultigeoCb,
                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
-        *(bot_api.get_my_name(http, row["token"], code) for code, _, _ in LANGUAGES)
+        *(bot_api.get_my_name(http, row["token"], code) for code, _, _ in LANGUAGES),
+        return_exceptions=True,
     )
-    lang_vals = {code: val for (code, _, _), val in zip(LANGUAGES, values)}
+    lang_vals = {code: (v if not isinstance(v, Exception) else "") for (code, _, _), v in zip(LANGUAGES, values)}
     await callback.message.edit_text(
         "🌍 <b>Имена по языкам</b>\n\nВыберите язык для редактирования:",
         parse_mode="HTML",
         reply_markup=multigeo_field(callback_data.bot_id, "name", lang_vals),
     )
-    await callback.answer()
 
 
 # ── Short descriptions list ───────────────────────────────────────────────
@@ -90,22 +90,22 @@ async def cb_multigeo_names(callback: CallbackQuery, callback_data: MultigeoCb,
 async def cb_multigeo_short(callback: CallbackQuery, callback_data: MultigeoCb,
                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
-        *(bot_api.get_my_short_description(http, row["token"], code) for code, _, _ in LANGUAGES)
+        *(bot_api.get_my_short_description(http, row["token"], code) for code, _, _ in LANGUAGES),
+        return_exceptions=True,
     )
-    lang_vals = {code: val for (code, _, _), val in zip(LANGUAGES, values)}
+    lang_vals = {code: (v if not isinstance(v, Exception) else "") for (code, _, _), v in zip(LANGUAGES, values)}
     await callback.message.edit_text(
         "📋 <b>Краткие описания (about) по языкам</b>\n\nВыберите язык для редактирования:",
         parse_mode="HTML",
         reply_markup=multigeo_field(callback_data.bot_id, "short", lang_vals),
     )
-    await callback.answer()
 
 
 # ── Descriptions list ─────────────────────────────────────────────────────
@@ -114,22 +114,22 @@ async def cb_multigeo_short(callback: CallbackQuery, callback_data: MultigeoCb,
 async def cb_multigeo_desc(callback: CallbackQuery, callback_data: MultigeoCb,
                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
-        *(bot_api.get_my_description(http, row["token"], code) for code, _, _ in LANGUAGES)
+        *(bot_api.get_my_description(http, row["token"], code) for code, _, _ in LANGUAGES),
+        return_exceptions=True,
     )
-    lang_vals = {code: val for (code, _, _), val in zip(LANGUAGES, values)}
+    lang_vals = {code: (v if not isinstance(v, Exception) else "") for (code, _, _), v in zip(LANGUAGES, values)}
     await callback.message.edit_text(
         "📄 <b>Описания по языкам</b>\n\nВыберите язык для редактирования:",
         parse_mode="HTML",
         reply_markup=multigeo_field(callback_data.bot_id, "desc", lang_vals),
     )
-    await callback.answer()
 
 
 # ── Per-language edit: name ───────────────────────────────────────────────

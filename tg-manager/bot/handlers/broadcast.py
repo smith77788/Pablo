@@ -144,7 +144,6 @@ async def cb_test(callback: CallbackQuery, callback_data: BroadcastCb,
                   state: FSMContext, pool: asyncpg.Pool,
                   http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     data = await state.get_data()
     text = data.get("text", "")
     photo_file_id = data.get("photo_file_id")
@@ -152,6 +151,7 @@ async def cb_test(callback: CallbackQuery, callback_data: BroadcastCb,
     if not text and not photo_file_id:
         await callback.answer("Текст рассылки пуст.", show_alert=True)
         return
+    await callback.answer()
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -231,7 +231,6 @@ async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
         "❌ Рассылка отменена.",
         reply_markup=back_to_bot(bot_id) if bot_id else None,
     )
-    await callback.answer()
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "status"))

@@ -137,7 +137,6 @@ async def cb_fn_trig_start(callback: CallbackQuery, callback_data: FunnelCb,
         "Введите текст сообщения для шага 1:",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.callback_query(FunnelCb.filter(F.action == "trig_keyword"))
@@ -280,7 +279,6 @@ async def cb_fn_delete(callback: CallbackQuery, callback_data: FunnelCb,
 async def cb_fn_broadcast(callback: CallbackQuery, callback_data: FunnelCb,
                            pool: asyncpg.Pool, state: FSMContext) -> None:
 
-    await callback.answer()
     funnels = await db.get_funnels(pool, callback_data.bot_id)
     funnel = next((f for f in funnels if f["id"] == callback_data.funnel_id), None)
     if not funnel:
@@ -290,6 +288,7 @@ async def cb_fn_broadcast(callback: CallbackQuery, callback_data: FunnelCb,
     if not user_ids:
         await callback.answer("У цепочки нет подписчиков.", show_alert=True)
         return
+    await callback.answer()
     await state.set_state(FunnelBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, funnel_id=callback_data.funnel_id,
                              funnel_name=funnel["name"], subscriber_ids=user_ids)
@@ -299,7 +298,6 @@ async def cb_fn_broadcast(callback: CallbackQuery, callback_data: FunnelCb,
         "Введите текст сообщения (HTML поддерживается):",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(FunnelBroadcast.waiting_message, F.text)
@@ -332,12 +330,12 @@ async def msg_fn_broadcast(message: Message, state: FSMContext,
 async def cb_fn_copy_from(callback: CallbackQuery, callback_data: FunnelCb,
                            pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
     if not others:
         await callback.answer("Нет других ботов для копирования.", show_alert=True)
         return
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else "")
     await callback.message.edit_text(
@@ -345,19 +343,18 @@ async def cb_fn_copy_from(callback: CallbackQuery, callback_data: FunnelCb,
         parse_mode="HTML",
         reply_markup=funnel_copy_target(callback_data.bot_id, others),
     )
-    await callback.answer()
 
 
 @router.callback_query(FunnelCb.filter(F.action == "copy_confirm"))
 async def cb_fn_copy_confirm(callback: CallbackQuery, callback_data: FunnelCb,
                               pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     src_bot = await db.get_bot(pool, callback_data.target_bot_id, callback.from_user.id)
     dst_bot = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not src_bot or not dst_bot:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     copied = await db.copy_funnels(pool, callback_data.target_bot_id, callback_data.bot_id)
     dst_label = f"@{dst_bot['username']}" if dst_bot["username"] else dst_bot["first_name"]
     src_label = f"@{src_bot['username']}" if src_bot["username"] else src_bot["first_name"]

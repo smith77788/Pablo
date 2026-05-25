@@ -15,11 +15,11 @@ router = Router()
 async def cb_webhook_menu(callback: CallbackQuery, callback_data: WebhookCb,
                            pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     text = (
@@ -39,11 +39,11 @@ async def cb_webhook_menu(callback: CallbackQuery, callback_data: WebhookCb,
 async def cb_webhook_info(callback: CallbackQuery, callback_data: WebhookCb,
                            pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     info = await bot_api.get_webhook_info(http, row["token"])
     url = info.get("url", "") or "не установлен"
@@ -65,18 +65,17 @@ async def cb_webhook_info(callback: CallbackQuery, callback_data: WebhookCb,
 
     await callback.message.edit_text(text, parse_mode="HTML",
                                       reply_markup=webhook_menu(callback_data.bot_id))
-    await callback.answer()
 
 
 @router.callback_query(WebhookCb.filter(F.action == "disable"))
 async def cb_webhook_disable(callback: CallbackQuery, callback_data: WebhookCb,
                               pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     result = await bot_api.delete_webhook(http, row["token"])
     if result.get("ok"):

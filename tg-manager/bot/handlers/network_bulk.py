@@ -57,13 +57,13 @@ async def _check_pro(callback: CallbackQuery, pool: asyncpg.Pool) -> bool:
 @router.callback_query(NetworkCb.filter(F.action == "bulk_check"))
 async def cb_bulk_check(callback: CallbackQuery, pool: asyncpg.Pool,
                         http: aiohttp.ClientSession) -> None:
-    await callback.answer()
     if not await _check_pro(callback, pool):
         return
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         await callback.answer("Нет ботов для проверки.", show_alert=True)
         return
+    await callback.answer()
     await callback.message.edit_text(f"⏳ Проверяю {len(bots)} токенов...")
     tokens = [b["token"] for b in bots]
     results = await bot_api.batch_get_me(http, tokens)

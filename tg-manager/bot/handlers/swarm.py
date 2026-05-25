@@ -20,8 +20,8 @@ ROLE_LABELS = {
 async def cb_swarm_menu(callback: CallbackQuery, callback_data: SwarmCb,
                          pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
         await callback.message.edit_text(
             locked_text("Swarm (умный роутинг трафика)", "enterprise"), parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
@@ -31,6 +31,7 @@ async def cb_swarm_menu(callback: CallbackQuery, callback_data: SwarmCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     swarm_status = "🟢 Активен в Swarm" if row.get("swarm_enabled") else "⚫ Не в Swarm"
     role = ROLE_LABELS.get(row.get("bot_role", "general"), "⚙️ General")
@@ -49,18 +50,17 @@ async def cb_swarm_menu(callback: CallbackQuery, callback_data: SwarmCb,
         parse_mode="HTML",
         reply_markup=swarm_menu(callback_data.bot_id, row),
     )
-    await callback.answer()
 
 
 @router.callback_query(SwarmCb.filter(F.action == "toggle"))
 async def cb_swarm_toggle(callback: CallbackQuery, callback_data: SwarmCb,
                            pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     new_state = not row.get("swarm_enabled", False)
     await db.toggle_swarm(pool, callback_data.bot_id, new_state)
     row2 = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -84,20 +84,21 @@ async def cb_swarm_toggle(callback: CallbackQuery, callback_data: SwarmCb,
 async def cb_swarm_stats(callback: CallbackQuery, callback_data: SwarmCb,
                           pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     stats = await db.get_routing_stats(pool, callback_data.bot_id, days=7)
     metrics = await pool.fetchrow("SELECT * FROM bot_metrics WHERE bot_id=$1", callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     mode = await db.get_system_mode(pool)
     config = await db.get_mode_routing_config(mode)
-    score = metrics["score"] if metrics else 0
-    ctr = metrics["ctr"] if metrics else 0
-    conv = metrics["conversion_rate"] if metrics else 0
-    ret_d1 = metrics["retention_d1"] if metrics else 0
+    # Use 0 as default; also guard against DB returning NULL in numeric columns
+    score = float(metrics["score"] or 0) if metrics else 0.0
+    ctr   = float(metrics["ctr"] or 0) if metrics else 0.0
+    conv  = float(metrics["conversion_rate"] or 0) if metrics else 0.0
+    ret_d1 = float(metrics["retention_d1"] or 0) if metrics else 0.0
 
     await callback.message.edit_text(
         f"📊 <b>Routing Stats — {label}</b>\n\n"
@@ -116,18 +117,17 @@ async def cb_swarm_stats(callback: CallbackQuery, callback_data: SwarmCb,
         parse_mode="HTML",
         reply_markup=back_to_bot(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(SwarmCb.filter(F.action.startswith("role_")))
 async def cb_swarm_role(callback: CallbackQuery, callback_data: SwarmCb,
                          pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     role = callback_data.action.replace("role_", "")
     if role not in ("entry", "conversion", "retention", "general"):
         await callback.answer("Неверная роль", show_alert=True)
         return
+    await callback.answer()
     await db.set_bot_role(pool, callback_data.bot_id, role)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else "")
@@ -175,19 +175,18 @@ async def cb_set_mode(callback: CallbackQuery, callback_data: SwarmCb,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
 
 
 @router.callback_query(SwarmCb.filter(F.action.startswith("mode_")))
 async def cb_change_mode(callback: CallbackQuery, callback_data: SwarmCb,
                           pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     mode = callback_data.action.removeprefix("mode_")
     valid_modes = ["manual", "assisted", "autopilot", "growth", "experiment", "stability"]
     if mode not in valid_modes:
         await callback.answer("Неизвестный режим.", show_alert=True)
         return
+    await callback.answer()
     await db.set_system_mode(pool, mode)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:

@@ -68,11 +68,11 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_check(callback: CallbackQuery, pool: asyncpg.Pool,
                     http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         await callback.answer("Нет ботов для проверки.", show_alert=True)
         return
+    await callback.answer()
 
     await callback.message.edit_text(f"⏳ Проверяю {len(bots)} токенов...")
 

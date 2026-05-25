@@ -105,29 +105,28 @@ async def msg_template_text(message: Message, state: FSMContext,
 async def cb_template_view(callback: CallbackQuery, callback_data: TemplateCb,
                             pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
+    await callback.answer()
     preview = tpl["text"][:900] + ("…" if len(tpl["text"]) > 900 else "")
     await callback.message.edit_text(
         f"📝 <b>{tpl['name']}</b>\n\n{preview}",
         parse_mode="HTML",
         reply_markup=template_actions(callback_data.template_id, callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(TemplateCb.filter(F.action == "delete"))
 async def cb_template_delete(callback: CallbackQuery, callback_data: TemplateCb,
                               pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     deleted = await db.delete_template(pool, callback_data.template_id, callback.from_user.id)
     if not deleted:
         await callback.answer("Не удалось удалить шаблон.", show_alert=True)
         return
+    await callback.answer()
     templates = await db.get_templates(pool, callback.from_user.id)
     bot_id = callback_data.bot_id
     count = len(templates)
@@ -137,18 +136,17 @@ async def cb_template_delete(callback: CallbackQuery, callback_data: TemplateCb,
         parse_mode="HTML",
         reply_markup=templates_list(templates, bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(TemplateCb.filter(F.action == "use"))
 async def cb_template_use(callback: CallbackQuery, callback_data: TemplateCb,
                            pool: asyncpg.Pool, state: FSMContext) -> None:
 
-    await callback.answer()
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
+    await callback.answer()
     bot_id = callback_data.bot_id
     count = await db.get_audience_count(pool, bot_id)
     preview = tpl["text"][:600] + ("…" if len(tpl["text"]) > 600 else "")

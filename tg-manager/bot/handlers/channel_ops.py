@@ -1301,7 +1301,6 @@ async def cb_botfather_pick_account(
 async def cb_botfather_account_chosen(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     acc = await pool.fetchrow(
         "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
@@ -1309,6 +1308,7 @@ async def cb_botfather_account_chosen(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
     await state.set_state(CreateBotFSM.waiting_name)
     await state.update_data(acc_id=acc["id"])
     kb = InlineKeyboardBuilder()
@@ -1647,9 +1647,9 @@ async def _show_bulk_select(
     msg_or_cb, pool: asyncpg.Pool, op: str, selected: set[int], edit: bool = True
 ) -> None:
     """Render account selection keyboard for a bulk operation."""
-    from aiogram.types import CallbackQuery as _CQ, Message as _Msg
+    from aiogram.types import CallbackQuery as _CQ
     is_cb = isinstance(msg_or_cb, _CQ)
-    owner_id = msg_or_cb.from_user.id if is_cb else msg_or_cb.from_user.id
+    owner_id = msg_or_cb.from_user.id
 
     accounts = await pool.fetch(
         "SELECT id, first_name, username, phone, is_active FROM tg_accounts "
@@ -1772,13 +1772,13 @@ async def cb_bulk_select_none(callback: CallbackQuery, state: FSMContext, pool: 
 async def cb_bulk_confirm_selection(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     op = callback.data.split(":", 2)[2] if callback.data.count(":") >= 2 else ""
     data = await state.get_data()
     selected_ids = data.get("bulk_selected", [])
     if not selected_ids:
         await callback.answer("⚠️ Не выбрано ни одного аккаунта.", show_alert=True)
         return
+    await callback.answer()
 
     # Route to the appropriate input step
     if op == "create":

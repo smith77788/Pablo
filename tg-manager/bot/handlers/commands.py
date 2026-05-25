@@ -35,11 +35,11 @@ def _parse_commands(text: str) -> list[dict] | None:
 async def cb_commands_menu(callback: CallbackQuery, callback_data: CommandsCb,
                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     cmds = await bot_api.get_my_commands(http, row["token"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     hint = (
@@ -174,11 +174,11 @@ async def msg_commands_set_all(message: Message, state: FSMContext,
 async def cb_commands_delete(callback: CallbackQuery, callback_data: CommandsCb,
                               pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     ok = await bot_api.delete_my_commands(http, row["token"])
     if ok:
         await callback.message.edit_text(
