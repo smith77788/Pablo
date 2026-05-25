@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+from typing import Any
 import asyncpg
 from services.account_manager import search_in_telegram
 from database import db
@@ -31,6 +32,76 @@ async def _get_least_used_account(pool: asyncpg.Pool, owner_id: int) -> asyncpg.
         "ORDER BY last_used ASC NULLS FIRST LIMIT 1",
         owner_id,
     )
+
+
+async def check_bot_keywords(
+    pool: asyncpg.Pool,
+    bot_id: int,
+    owner_id: int,
+) -> list[dict[str, Any]]:
+    """Проверяет все активные ключевые слова конкретного бота прямо сейчас.
+
+    Возвращает список словарей вида:
+        {"keyword": str, "keyword_id": int, "position": int | None, "error": bool}
+    """
+    # Fetch bot username
+    bot_row = await pool.fetchrow(
+        "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        bot_id, owner_id,
+    )
+    if not bot_row:
+        log.warning("check_bot_keywords: бот %s не найден для owner %s", bot_id, owner_id)
+        return []
+
+    bot_username = (bot_row["username"] or "").lower().lstrip("@")
+
+    # Fetch active account for this owner (least recently used)
+    account = await _get_least_used_account(pool, owner_id)
+    if not account:
+        log.warning(
+            "check_bot_keywords: нет активных аккаунтов у пользователя %s",
+            owner_id,
+        )
+        return []
+
+    # Fetch active keywords for this bot
+    keywords = await pool.fetch(
+        "SELECT id, keyword FROM tracked_keywords "
+        "WHERE bot_id=$1 AND owner_id=$2 AND is_active=TRUE",
+        bot_id, owner_id,
+    )
+    if not keywords:
+        return []
+
+    results: list[dict[str, Any]] = []
+    for kw in keywords:
+        try:
+            search_results = await search_in_telegram(account["session_str"], kw["keyword"])
+            position: int | None = None
+            for r in search_results:
+                if r.get("is_bot") and r.get("username", "").lower().lstrip("@") == bot_username:
+                    position = r["position"]
+                    break
+
+            await pool.execute(
+                "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
+                kw["id"], bot_id, position,
+            )
+            await db.update_tg_account_used(pool, account["id"])
+            log.debug(
+                "check_bot_keywords: keyword=%r bot=%r position=%s",
+                kw["keyword"], bot_username, position,
+            )
+            results.append({"keyword": kw["keyword"], "keyword_id": kw["id"], "position": position, "error": False})
+            await asyncio.sleep(2)  # rate limit
+        except Exception as exc:
+            log.warning(
+                "check_bot_keywords: ошибка при проверке %r: %s",
+                kw["keyword"], exc,
+            )
+            results.append({"keyword": kw["keyword"], "keyword_id": kw["id"], "position": None, "error": True})
+
+    return results
 
 
 async def _check_all(pool: asyncpg.Pool) -> None:

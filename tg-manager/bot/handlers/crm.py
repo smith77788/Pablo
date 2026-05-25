@@ -45,8 +45,9 @@ async def cb_crm_menu(callback: CallbackQuery, callback_data: CrmCb,
         return
     tags = await db.get_tag_names(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else (row["first_name"] or str(row["bot_id"]))
+    safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
-        f"🏷 <b>CRM — {label}</b>\n\n"
+        f"🏷 <b>CRM — {safe_label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
         "CRM — это система для разделения ваших пользователей на группы. Вы вешаете «теги» (метки) на разных людей — например «покупатель», «VIP», «новичок» — и потом делаете рассылки именно для них.\n\n"
         "💡 <b>Также здесь:</b>\n"
@@ -127,14 +128,21 @@ async def cb_delete_tag_all(callback: CallbackQuery, callback_data: CrmCb,
 async def cb_auto_menu(callback: CallbackQuery, callback_data: AutoCb,
                         pool: asyncpg.Pool) -> None:
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            locked_text("Автоматизация", "starter"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.message.edit_text("❌ Бот не найден.")
         return
     rules = await db.get_automation_rules(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else (row["first_name"] or str(row["bot_id"]))
+    safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
-        f"⚙️ <b>Автоматизация — {label}</b>\n\n"
+        f"⚙️ <b>Автоматизация — {safe_label}</b>\n\n"
         f"Активных правил: <b>{sum(1 for r in rules if r['is_active'])}</b> из {len(rules)}\n\n"
         "Правила выполняются автоматически при наступлении триггера.",
         parse_mode="HTML",
@@ -158,12 +166,15 @@ async def cb_auto_view(callback: CallbackQuery, callback_data: AutoCb,
     kb.button(text="◀️ Назад", callback_data=AutoCb(action="menu", bot_id=callback_data.bot_id))
     kb.adjust(1)
     trig_val = f" [{rule['trigger_value']}]" if rule.get("trigger_value") else ""
+    safe_name = rule['name'].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_trig_val = trig_val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_action_val = rule['action_value'][:100].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
-        f"⚙️ <b>Правило: {rule['name']}</b>\n\n"
+        f"⚙️ <b>Правило: {safe_name}</b>\n\n"
         f"Статус: {'✅ Активно' if rule['is_active'] else '❌ Отключено'}\n"
-        f"Триггер: <code>{rule['trigger_type']}{trig_val}</code>\n"
+        f"Триггер: <code>{rule['trigger_type']}{safe_trig_val}</code>\n"
         f"Действие: <code>{rule['action_type']}</code>\n"
-        f"Значение: <code>{rule['action_value'][:100]}</code>",
+        f"Значение: <code>{safe_action_val}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

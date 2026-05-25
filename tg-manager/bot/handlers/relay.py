@@ -32,8 +32,8 @@ async def _relay_menu_text(row: asyncpg.Record, sessions: list) -> tuple[str, ob
 async def cb_relay_menu(callback: CallbackQuery, callback_data: RelayCb,
                          pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
         await callback.message.edit_text(
             locked_text("Inbox (входящие)", "starter"), parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter"),
@@ -43,17 +43,16 @@ async def cb_relay_menu(callback: CallbackQuery, callback_data: RelayCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     sessions = await db.get_relay_sessions(pool, callback_data.bot_id)
     text, markup = await _relay_menu_text(row, sessions)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
-    await callback.answer()
 
 
 @router.callback_query(RelayCb.filter(F.action == "toggle"))
 async def cb_relay_toggle(callback: CallbackQuery, callback_data: RelayCb,
                            pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -61,12 +60,12 @@ async def cb_relay_toggle(callback: CallbackQuery, callback_data: RelayCb,
     new_state = not row.get("relay_enabled", False)
     await db.enable_relay(pool, callback_data.bot_id, new_state)
     status = "включён ✅" if new_state else "отключён ❌"
+    await callback.answer(f"Inbox {status}")
     # Reload row with updated state
     row2 = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     sessions = await db.get_relay_sessions(pool, callback_data.bot_id)
     text, markup = await _relay_menu_text(row2, sessions)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
-    await callback.answer(f"Inbox {status}")
 
 
 # ── Operator reply detection — route back to user ─────────────────────────
@@ -97,8 +96,6 @@ async def handle_operator_reply(message: Message, pool: asyncpg.Pool,
 @router.callback_query(RelayCb.filter(F.action == "session"))
 async def cb_relay_session(callback: CallbackQuery, callback_data: RelayCb,
                             pool: asyncpg.Pool) -> None:
-
-    await callback.answer()
     """View message history for a specific relay session."""
     session_id = callback_data.session_id
     # Get session info
@@ -113,6 +110,7 @@ async def cb_relay_session(callback: CallbackQuery, callback_data: RelayCb,
         await callback.answer("Диалог не найден.", show_alert=True)
         return
 
+    await callback.answer()
     messages = await db.get_relay_session_messages(pool, session_id, limit=10)
 
     user_label = f"@{sess['username']}" if sess.get("username") else (sess.get("first_name") or str(sess["user_id"]))
@@ -122,27 +120,27 @@ async def cb_relay_session(callback: CallbackQuery, callback_data: RelayCb,
         history = []
         for msg in reversed(messages):  # chronological order
             arrow = "📩" if msg["direction"] == "in" else "📤"
-            history.append(f"{arrow} {msg['message_text'][:100]}")
+            safe_msg = msg["message_text"][:100].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            history.append(f"{arrow} {safe_msg}")
         history_text = "\n".join(history)
     else:
         history_text = "(нет сообщений)"
 
+    safe_user = user_label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_bot = bot_label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     text = (
-        f"💬 <b>Диалог с {user_label}</b>\n"
-        f"Бот: {bot_label}\n\n"
+        f"💬 <b>Диалог с {safe_user}</b>\n"
+        f"Бот: {safe_bot}\n\n"
         f"<b>Последние сообщения:</b>\n{history_text}"
     )
     templates = await db.get_templates(pool, callback.from_user.id)
     await callback.message.edit_text(text, parse_mode="HTML",
                                       reply_markup=relay_session_view(callback_data.bot_id, session_id, templates))
-    await callback.answer()
 
 
 @router.callback_query(RelayCb.filter(F.action == "quick_reply"))
 async def cb_relay_quick_reply(callback: CallbackQuery, callback_data: RelayCb,
                                 pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
-
-    await callback.answer()
     """Send a template message to the user as operator quick reply."""
     template = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not template:
@@ -172,8 +170,6 @@ async def cb_relay_quick_reply(callback: CallbackQuery, callback_data: RelayCb,
 @router.callback_query(RelayCb.filter(F.action == "close_session"))
 async def cb_relay_close_session(callback: CallbackQuery, callback_data: RelayCb,
                                    pool: asyncpg.Pool) -> None:
-
-    await callback.answer()
     """Delete a relay session (and its messages via CASCADE)."""
     # Verify ownership
     sess = await pool.fetchrow(
@@ -187,10 +183,10 @@ async def cb_relay_close_session(callback: CallbackQuery, callback_data: RelayCb
         return
 
     await db.close_relay_session(pool, callback_data.session_id)
+    await callback.answer("🗑 Диалог закрыт")
 
     # Reload inbox menu
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     sessions = await db.get_relay_sessions(pool, callback_data.bot_id)
     text, markup = await _relay_menu_text(row, sessions)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
-    await callback.answer("🗑 Диалог закрыт")
