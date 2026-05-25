@@ -112,7 +112,7 @@ async def cleanup_pending(phone: str) -> None:
 async def get_account_info(session_string: str) -> dict:
     client = _make_client(session_string)
     try:
-        await client.connect()
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         me = await client.get_me()
         return {
             "tg_user_id": me.id,
@@ -121,15 +121,18 @@ async def get_account_info(session_string: str) -> dict:
             "username": me.username or "",
         }
     finally:
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
 
 
 async def get_dialogs(session_string: str, limit: int = 50) -> list[dict]:
-    """Get user's channels and groups."""
+    """Возвращает каналы и группы аккаунта."""
     from telethon.tl.types import Channel, Chat
     client = _make_client(session_string)
     try:
-        await client.connect()
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         dialogs = []
         async for dialog in client.iter_dialogs(limit=limit):
             entity = dialog.entity
@@ -142,24 +145,96 @@ async def get_dialogs(session_string: str, limit: int = 50) -> list[dict]:
                     "username": getattr(entity, "username", "") or "",
                 })
         return dialogs
-    except Exception as e:
-        log.exception("get_dialogs error: %s", e)
-        return []
     finally:
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
 
 
 async def send_message_via_account(session_string: str, chat_id: int, text: str) -> bool:
+    """Отправляет сообщение через личный аккаунт. Возвращает True при успехе."""
     client = _make_client(session_string)
     try:
-        await client.connect()
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         await client.send_message(chat_id, text)
         return True
     except Exception as e:
         log.exception("send_message error: %s", e)
         return False
     finally:
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# Псевдоним для обратной совместимости с хендлером accounts.py
+send_message = send_message_via_account
+
+
+async def get_account_dialogs_stats(session_string: str) -> dict:
+    """Возвращает статистику диалогов: всего, каналов, групп, личных чатов."""
+    from telethon.tl.types import Channel, Chat, User
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        total = 0
+        channels = 0
+        groups = 0
+        personal = 0
+        async for dialog in client.iter_dialogs():
+            total += 1
+            entity = dialog.entity
+            if isinstance(entity, Channel):
+                if getattr(entity, "broadcast", False):
+                    channels += 1
+                else:
+                    groups += 1
+            elif isinstance(entity, Chat):
+                groups += 1
+            elif isinstance(entity, User):
+                personal += 1
+        return {
+            "total": total,
+            "channels": channels,
+            "groups": groups,
+            "personal": personal,
+        }
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def check_account_health(session_string: str) -> dict:
+    """Проверяет доступность аккаунта: авторизован ли, не заблокирован ли.
+
+    Возвращает {"ok": bool, "reason": str}.
+    """
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        me = await client.get_me()
+        if me is None:
+            return {"ok": False, "reason": "Аккаунт не авторизован или сессия истекла."}
+        return {"ok": True, "reason": f"Аккаунт активен: {me.first_name or me.username or me.id}"}
+    except Exception as e:
+        err = str(e)
+        if "AuthKeyUnregisteredError" in type(e).__name__ or "AUTH_KEY_UNREGISTERED" in err:
+            return {"ok": False, "reason": "Сессия отозвана — требуется повторный вход."}
+        if "UserDeactivatedBanError" in type(e).__name__ or "USER_DEACTIVATED_BAN" in err:
+            return {"ok": False, "reason": "Аккаунт заблокирован Telegram."}
+        if "UserDeactivatedError" in type(e).__name__ or "USER_DEACTIVATED" in err:
+            return {"ok": False, "reason": "Аккаунт удалён или деактивирован."}
+        log.exception("check_account_health error: %s", e)
+        return {"ok": False, "reason": f"Ошибка проверки: {err[:200]}"}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
 
 
 async def search_in_telegram(session_string: str, query: str, limit: int = 20) -> list[dict]:

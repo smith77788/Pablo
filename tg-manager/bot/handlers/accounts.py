@@ -22,9 +22,11 @@ from bot.utils.subscription import get_plan, locked_text
 from config import TG_API_ID, TG_API_HASH
 from database import db
 from services.account_manager import (
+    check_account_health,
     cleanup_pending,
     confirm_2fa,
     confirm_code,
+    get_account_dialogs_stats,
     get_dialogs,
     get_client_info_and_session,
     send_message,
@@ -88,11 +90,15 @@ def _acc_menu_markup(acc_id: int):
               callback_data=AccCb(action="channels", acc_id=acc_id))
     kb.button(text="📤 Написать",
               callback_data=AccCb(action="post", acc_id=acc_id))
+    kb.button(text="🔍 Проверить",
+              callback_data=AccCb(action="check_health", acc_id=acc_id))
+    kb.button(text="📊 Диалоги",
+              callback_data=AccCb(action="dialogs_stats", acc_id=acc_id))
     kb.button(text="🗑 Удалить",
               callback_data=AccCb(action="remove", acc_id=acc_id))
     kb.button(text="◀️ Мои аккаунты",
               callback_data=AccCb(action="menu"))
-    kb.adjust(2, 1, 1)
+    kb.adjust(2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -734,4 +740,98 @@ async def cb_remove_confirm(
         "✅ <b>Аккаунт удалён.</b>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
+    )
+
+
+# ── Check account health ───────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "check_health"))
+async def cb_check_health(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await callback.message.edit_text(
+        "🔍 <b>Проверяю аккаунт…</b>",
+        parse_mode="HTML",
+    )
+
+    try:
+        result = await check_account_health(session_str)
+    except Exception as exc:
+        result = {"ok": False, "reason": f"Ошибка: {escape(str(exc)[:200])}"}
+
+    if result["ok"]:
+        status_icon = "✅"
+        status_title = "Аккаунт в порядке"
+    else:
+        status_icon = "❌"
+        status_title = "Проблема с аккаунтом"
+
+    reason = escape(result.get("reason", ""))
+    await callback.message.edit_text(
+        f"{status_icon} <b>{status_title}</b>\n\n"
+        f"{reason}",
+        parse_mode="HTML",
+        reply_markup=_acc_menu_markup(callback_data.acc_id),
+    )
+
+
+# ── Dialogs stats ──────────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "dialogs_stats"))
+async def cb_dialogs_stats(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await callback.message.edit_text(
+        "📊 <b>Загружаю статистику диалогов…</b>",
+        parse_mode="HTML",
+    )
+
+    try:
+        stats = await get_account_dialogs_stats(session_str)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Не удалось получить статистику:\n<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        return
+
+    await callback.message.edit_text(
+        f"📊 <b>Статистика диалогов</b>\n\n"
+        f"📁 Всего диалогов: <b>{stats.get('total', 0)}</b>\n"
+        f"📢 Каналы: <b>{stats.get('channels', 0)}</b>\n"
+        f"👥 Группы: <b>{stats.get('groups', 0)}</b>\n"
+        f"💬 Личные чаты: <b>{stats.get('personal', 0)}</b>",
+        parse_mode="HTML",
+        reply_markup=_acc_menu_markup(callback_data.acc_id),
     )

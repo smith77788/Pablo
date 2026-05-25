@@ -1603,6 +1603,20 @@ async def update_tg_account_used(pool: asyncpg.Pool, acc_id: int) -> None:
     )
 
 
+async def update_tg_account_status(
+    pool: asyncpg.Pool,
+    acc_id: int,
+    owner_id: int,
+    is_active: bool,
+) -> bool:
+    """Обновляет статус активности аккаунта. Возвращает True если запись найдена и обновлена."""
+    result = await pool.execute(
+        "UPDATE tg_accounts SET is_active=$3 WHERE id=$1 AND owner_id=$2",
+        acc_id, owner_id, is_active,
+    )
+    return result != "UPDATE 0"
+
+
 # ── Search rankings ─────────────────────────────────────────────────────────
 
 async def get_tracked_keywords(pool: asyncpg.Pool, bot_id: int) -> list:
@@ -1656,4 +1670,14 @@ async def save_ranking(pool: asyncpg.Pool, keyword_id: int,
     await pool.execute(
         "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
         keyword_id, bot_id, position,
+    )
+
+
+async def get_ranking_history(pool: asyncpg.Pool, keyword_id: int,
+                               limit: int = 7) -> list:
+    """Return last N ranking records for a keyword: [(position, checked_at)]."""
+    return await pool.fetch(
+        "SELECT position, checked_at FROM search_rankings "
+        "WHERE keyword_id=$1 ORDER BY checked_at DESC LIMIT $2",
+        keyword_id, limit,
     )
