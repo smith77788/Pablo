@@ -139,3 +139,59 @@ class NetworkBroadcastV2(StatesGroup):
 
 class AddKeyword(StatesGroup):
     waiting_keyword = State()
+
+
+class CreateChannelFSM(StatesGroup):
+    choosing_type = State()
+    waiting_title = State()
+    waiting_about = State()
+    confirming = State()
+
+
+class JoinChannelFSM(StatesGroup):
+    waiting_invite = State()
+
+
+class PostToChannelFSM(StatesGroup):
+    waiting_channel_id = State()
+    waiting_text = State()
+
+
+class EditChannelFSM(StatesGroup):
+    choosing_field = State()
+    waiting_value = State()
+
+
+class InviteUsersFSM(StatesGroup):
+    waiting_channel_id = State()
+    waiting_usernames = State()
+
+
+class UpdateProfileFSM(StatesGroup):
+    choosing_field = State()
+    waiting_value = State()
+
+
+class CreateBotFSM(StatesGroup):
+    waiting_name = State()
+    waiting_username = State()
+
+
+class SendReactionFSM(StatesGroup):
+    waiting_channel_id = State()
+    waiting_msg_id = State()
+    choosing_emoji = State()
+
+
+class ReportFSM(StatesGroup):
+    waiting_peer = State()
+    choosing_reason = State()
+    waiting_comment = State()
+
+
+class BulkCreateFSM(StatesGroup):
+    waiting_title = State()
+    waiting_about = State()
+    choosing_type = State()
+    choosing_accounts = State()
+    confirming = State()

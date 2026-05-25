@@ -319,3 +319,522 @@ async def search_in_telegram(session_string: str, query: str, limit: int = 20) -
         return []
     finally:
         await client.disconnect()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHANNEL / GROUP OPERATIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def create_channel(
+    session_string: str,
+    title: str,
+    about: str = "",
+    megagroup: bool = False,
+) -> dict:
+    """Create a broadcast channel (megagroup=False) or supergroup (megagroup=True).
+
+    Returns dict: {channel_id, title, username, type, invite_link, error?}
+    """
+    from telethon.tl.functions.channels import CreateChannelRequest
+    from telethon.tl.functions.messages import ExportChatInviteRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        result = await client(CreateChannelRequest(
+            title=title,
+            about=about,
+            megagroup=megagroup,
+            broadcast=not megagroup,
+        ))
+        ch = result.chats[0]
+        invite_link = ""
+        try:
+            inv = await client(ExportChatInviteRequest(peer=ch))
+            invite_link = getattr(inv, "link", "") or ""
+        except Exception:
+            pass
+        return {
+            "channel_id": ch.id,
+            "title": ch.title,
+            "username": getattr(ch, "username", "") or "",
+            "type": "group" if megagroup else "channel",
+            "invite_link": invite_link,
+        }
+    except Exception as e:
+        log.exception("create_channel error: %s", e)
+        return {"error": str(e)[:200]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def join_channel(session_string: str, invite_or_username: str) -> dict:
+    """Join a channel or group by username (@name) or invite link (https://t.me/...).
+
+    Returns dict: {title, members, channel_id, error?}
+    """
+    from telethon.tl.functions.channels import JoinChannelRequest
+    from telethon.tl.functions.messages import ImportChatInviteRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        invite = invite_or_username.strip()
+        if "t.me/+" in invite or "t.me/joinchat" in invite:
+            # Private invite link
+            hash_part = invite.split("/")[-1].lstrip("+")
+            result = await client(ImportChatInviteRequest(hash=hash_part))
+            ch = result.chats[0]
+        else:
+            username = invite.lstrip("@").lstrip("https://t.me/")
+            entity = await client.get_entity(username)
+            result = await client(JoinChannelRequest(channel=entity))
+            ch = result.chats[0]
+        return {
+            "channel_id": ch.id,
+            "title": ch.title,
+            "members": getattr(ch, "participants_count", 0) or 0,
+        }
+    except Exception as e:
+        log.exception("join_channel error: %s", e)
+        return {"error": str(e)[:200]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def leave_channel(session_string: str, channel_id: int | str) -> bool:
+    """Leave a channel/group by internal Telegram channel_id."""
+    from telethon.tl.functions.channels import LeaveChannelRequest
+    from telethon.tl.types import InputChannel
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        await client(LeaveChannelRequest(channel=entity))
+        return True
+    except Exception as e:
+        log.exception("leave_channel error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def edit_channel_title(
+    session_string: str, channel_id: int, title: str
+) -> bool:
+    from telethon.tl.functions.channels import EditTitleRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        await client(EditTitleRequest(channel=entity, title=title))
+        return True
+    except Exception as e:
+        log.exception("edit_channel_title error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def edit_channel_about(
+    session_string: str, channel_id: int, about: str
+) -> bool:
+    from telethon.tl.functions.channels import EditAboutRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        await client(EditAboutRequest(peer=entity, about=about))
+        return True
+    except Exception as e:
+        log.exception("edit_channel_about error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def set_channel_username(
+    session_string: str, channel_id: int, username: str
+) -> str:
+    """Set public username for channel. Returns '' on success, error string on failure."""
+    from telethon.tl.functions.channels import UpdateUsernameRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        await client(UpdateUsernameRequest(channel=entity, username=username.lstrip("@")))
+        return ""
+    except Exception as e:
+        log.exception("set_channel_username error: %s", e)
+        return str(e)[:200]
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def get_channel_invite_link(session_string: str, channel_id: int) -> str:
+    """Get (or create) an invite link for the channel. Returns link string or ''."""
+    from telethon.tl.functions.messages import ExportChatInviteRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        result = await client(ExportChatInviteRequest(peer=entity))
+        return getattr(result, "link", "") or ""
+    except Exception as e:
+        log.exception("get_channel_invite_link error: %s", e)
+        return ""
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def delete_channel(session_string: str, channel_id: int) -> bool:
+    """Permanently delete a channel or group. Irreversible."""
+    from telethon.tl.functions.channels import DeleteChannelRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        await client(DeleteChannelRequest(channel=entity))
+        return True
+    except Exception as e:
+        log.exception("delete_channel error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def get_channel_members(
+    session_string: str, channel_id: int, limit: int = 50
+) -> list[dict]:
+    """Return list of channel/group members (up to limit)."""
+    from telethon.tl.functions.channels import GetParticipantsRequest
+    from telethon.tl.types import ChannelParticipantsRecent
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        result = await client(GetParticipantsRequest(
+            channel=entity,
+            filter=ChannelParticipantsRecent(),
+            offset=0,
+            limit=limit,
+            hash=0,
+        ))
+        members = []
+        for user in result.users:
+            members.append({
+                "user_id": user.id,
+                "username": getattr(user, "username", "") or "",
+                "first_name": getattr(user, "first_name", "") or "",
+                "is_bot": getattr(user, "bot", False),
+            })
+        return members
+    except Exception as e:
+        log.exception("get_channel_members error: %s", e)
+        return []
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def invite_users_to_channel(
+    session_string: str, channel_id: int, usernames: list[str]
+) -> dict:
+    """Invite a list of users (@username or phone) to a group.
+
+    Returns {invited: int, failed: list[str]}.
+    """
+    from telethon.tl.functions.channels import InviteToChannelRequest
+    client = _make_client(session_string)
+    invited = 0
+    failed = []
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        for username in usernames:
+            try:
+                user = await client.get_entity(username.strip())
+                await client(InviteToChannelRequest(channel=entity, users=[user]))
+                invited += 1
+                await asyncio.sleep(1)
+            except Exception as e:
+                failed.append(f"{username}: {str(e)[:60]}")
+        return {"invited": invited, "failed": failed}
+    except Exception as e:
+        log.exception("invite_users_to_channel error: %s", e)
+        return {"invited": invited, "failed": failed + [str(e)[:100]]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def kick_from_channel(
+    session_string: str, channel_id: int, user_id: int
+) -> bool:
+    """Kick (ban + unban) a user from a channel/group."""
+    from telethon.tl.functions.channels import EditBannedRequest
+    from telethon.tl.types import ChatBannedRights
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        channel = await client.get_entity(channel_id)
+        user = await client.get_entity(user_id)
+        # Ban
+        banned = ChatBannedRights(until_date=None, view_messages=True)
+        await client(EditBannedRequest(channel=channel, participant=user, banned_rights=banned))
+        await asyncio.sleep(1)
+        # Unban (kick, not permanent ban)
+        unbanned = ChatBannedRights(until_date=None)
+        await client(EditBannedRequest(channel=channel, participant=user, banned_rights=unbanned))
+        return True
+    except Exception as e:
+        log.exception("kick_from_channel error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CONTENT OPERATIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def post_to_channel(
+    session_string: str, channel_id: int | str, text: str
+) -> int | None:
+    """Post a text message to a channel/group. Returns message_id or None."""
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        msg = await client.send_message(entity, text)
+        return msg.id
+    except Exception as e:
+        log.exception("post_to_channel error: %s", e)
+        return None
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def send_reaction(
+    session_string: str, channel_id: int, msg_id: int, emoji: str
+) -> bool:
+    """Send a reaction emoji to a specific message."""
+    from telethon.tl.functions.messages import SendReactionRequest
+    from telethon.tl.types import ReactionEmoji
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(channel_id)
+        await client(SendReactionRequest(
+            peer=entity,
+            msg_id=msg_id,
+            reaction=[ReactionEmoji(emoticon=emoji)],
+        ))
+        return True
+    except Exception as e:
+        log.exception("send_reaction error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def report_peer(
+    session_string: str,
+    peer_username: str,
+    reason: str,
+    message: str = "",
+) -> bool:
+    """Report a channel/user to Telegram moderators.
+
+    reason: 'spam' | 'violence' | 'pornography' | 'childabuse' | 'copyright' | 'other'
+    """
+    from telethon.tl.functions.account import ReportPeerRequest
+    from telethon.tl.types import (
+        InputReportReasonSpam, InputReportReasonViolence,
+        InputReportReasonPornography, InputReportReasonChildAbuse,
+        InputReportReasonCopyright, InputReportReasonOther,
+    )
+    reason_map = {
+        "spam": InputReportReasonSpam(),
+        "violence": InputReportReasonViolence(),
+        "pornography": InputReportReasonPornography(),
+        "childabuse": InputReportReasonChildAbuse(),
+        "copyright": InputReportReasonCopyright(),
+        "other": InputReportReasonOther(),
+    }
+    tg_reason = reason_map.get(reason, InputReportReasonSpam())
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(peer_username.lstrip("@"))
+        await client(ReportPeerRequest(peer=entity, reason=tg_reason, message=message))
+        return True
+    except Exception as e:
+        log.exception("report_peer error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ACCOUNT PROFILE
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def update_profile(
+    session_string: str,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    about: str | None = None,
+) -> bool:
+    """Update the connected account's profile. Pass None to leave a field unchanged."""
+    from telethon.tl.functions.account import UpdateProfileRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        me = await client.get_me()
+        kwargs: dict = {}
+        if first_name is not None:
+            kwargs["first_name"] = first_name
+        if last_name is not None:
+            kwargs["last_name"] = last_name
+        if about is not None:
+            kwargs["about"] = about
+        if not kwargs:
+            return True
+        await client(UpdateProfileRequest(**kwargs))
+        return True
+    except Exception as e:
+        log.exception("update_profile error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def update_account_username(session_string: str, username: str) -> str:
+    """Update account username. Returns '' on success, error string on failure."""
+    from telethon.tl.functions.account import UpdateUsernameRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await client(UpdateUsernameRequest(username=username.lstrip("@")))
+        return ""
+    except Exception as e:
+        log.exception("update_account_username error: %s", e)
+        return str(e)[:200]
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BOTFATHER BOT CREATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+_BOTFATHER_USERNAME = "BotFather"
+
+
+async def create_bot_via_botfather(
+    session_string: str,
+    bot_display_name: str,
+    bot_username: str,
+) -> dict:
+    """Create a new Telegram bot via @BotFather automated dialog.
+
+    Returns dict with 'token' and 'username' on success,
+    or 'error' key with message on failure.
+    """
+    import re
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+
+        async def _bf_send(text: str) -> str:
+            """Send message to BotFather and return its response text."""
+            await client.send_message(_BOTFATHER_USERNAME, text)
+            await asyncio.sleep(3)
+            msgs = await client.get_messages(_BOTFATHER_USERNAME, limit=1)
+            return msgs[0].text if msgs else ""
+
+        # Step 1: start fresh
+        resp = await _bf_send("/newbot")
+        if "name" not in resp.lower() and "Alright" not in resp:
+            # May be in a previous incomplete flow — cancel first
+            await _bf_send("/cancel")
+            await asyncio.sleep(1)
+            resp = await _bf_send("/newbot")
+
+        # Step 2: send display name
+        resp = await _bf_send(bot_display_name)
+
+        # Check for username prompt
+        if "username" not in resp.lower():
+            return {"error": f"Unexpected BotFather response after name: {resp[:200]}"}
+
+        # Step 3: send username
+        uname = bot_username.lstrip("@")
+        if not uname.endswith("bot") and not uname.endswith("Bot"):
+            uname = uname + "bot"
+        resp = await _bf_send(uname)
+
+        # Extract token (format: 123456789:AAABBBCCC...)
+        token_match = re.search(r"\b(\d{8,12}:[A-Za-z0-9_-]{35,})\b", resp)
+        if not token_match:
+            return {"error": f"Token not found in BotFather response: {resp[:300]}"}
+
+        token = token_match.group(1)
+        return {
+            "token": token,
+            "username": uname,
+            "display_name": bot_display_name,
+        }
+    except Exception as e:
+        log.exception("create_bot_via_botfather error: %s", e)
+        return {"error": str(e)[:200]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass

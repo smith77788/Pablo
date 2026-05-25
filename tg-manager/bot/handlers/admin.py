@@ -314,7 +314,7 @@ async def _adm_bots_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 
 async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    total_msgs = await pool.fetchval("SELECT COALESCE(SUM(messages_sent),0) FROM broadcasts") or 0
+    total_msgs = await pool.fetchval("SELECT COALESCE(SUM(sent_count),0) FROM broadcasts") or 0
     total_bc   = await pool.fetchval("SELECT COUNT(*) FROM broadcasts") or 0
     total_relay = await pool.fetchval("SELECT COUNT(*) FROM relay_sessions") or 0
     total_funnels = await pool.fetchval("SELECT COUNT(*) FROM funnels") or 0

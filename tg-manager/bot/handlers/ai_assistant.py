@@ -221,16 +221,14 @@ async def msg_ai_chat(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
-    safe_reply = reply.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     try:
         await thinking.edit_text(
-            safe_reply,
+            reply,
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
     except Exception:
-        await message.answer(
-            safe_reply,
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
+        try:
+            await thinking.edit_text(reply, reply_markup=kb.as_markup())
+        except Exception:
+            await message.answer(reply, parse_mode="HTML", reply_markup=kb.as_markup())

@@ -167,3 +167,10 @@ class RankCb(CallbackData, prefix="rank"):
     action: str
     bot_id: int = 0
     keyword_id: int = 0
+
+
+class ChanCb(CallbackData, prefix="chan"):
+    action: str
+    acc_id: int = 0
+    channel_id: int = 0
+    page: int = 0
