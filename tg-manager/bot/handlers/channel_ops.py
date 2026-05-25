@@ -805,12 +805,12 @@ async def cb_bpchans_page(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("chan:cpsdone:"))
 async def cb_bpchans_done(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
     data = await state.get_data()
     selected = data.get("bpchans_selected", [])
     if not selected:
         await callback.answer("Выберите хотя бы один канал.", show_alert=True)
         return
+    await callback.answer()
     await state.set_state(BulkPostChansFSM.waiting_text)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
@@ -1676,7 +1676,7 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
         acc_label = html.escape(acc["first_name"] or acc["phone"])
         for i in range(bot_count):
             suffix = str(i + 1) if (bot_count > 1 or len(accounts) > 1) else ""
-            username = base_username.rstrip("bot") + (suffix if suffix else "") + "bot" if base_username.endswith("bot") else base_username + suffix
+            username = (base_username.rstrip("bot") + (suffix if suffix else "") + "bot") if base_username.endswith("bot") else (base_username + suffix)
             result = await account_manager.create_bot_via_botfather(
                 acc["session_str"], data["bot_name"], username
             )
@@ -2673,7 +2673,10 @@ async def cb_my_chans(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCon
         )
         await state.update_data(my_chans_acc_id=acc["id"], my_chans_session=acc["session_str"])
         await state.set_state(MyChannelsFSM.browsing)
-        await _show_my_chans_page(callback.message, acc["session_str"], acc["id"], page=0, edit=True)
+        await _show_my_chans_page(
+            callback.message, pool, acc["session_str"], acc["id"], page=0, edit=True,
+            owner_id=callback.from_user.id,
+        )
         return
     kb = InlineKeyboardBuilder()
     for a in active:
@@ -2702,12 +2705,15 @@ async def cb_my_chans_acc(
     await callback.answer()
     await state.update_data(my_chans_acc_id=acc["id"], my_chans_session=acc["session_str"])
     await state.set_state(MyChannelsFSM.browsing)
-    await _show_my_chans_page(callback.message, acc["session_str"], acc["id"], page=0, edit=True)
+    await _show_my_chans_page(
+        callback.message, pool, acc["session_str"], acc["id"], page=0, edit=True,
+        owner_id=callback.from_user.id,
+    )
 
 
 @router.callback_query(ChanCb.filter(F.action == "my_chans_page"))
 async def cb_my_chans_page(
-    callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
+    callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer()
     data = await state.get_data()
@@ -2716,30 +2722,65 @@ async def cb_my_chans_page(
     if not session:
         await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops")
         return
-    await _show_my_chans_page(callback.message, session, acc_id, page=callback_data.page, edit=True)
+    await _show_my_chans_page(
+        callback.message, pool, session, acc_id, page=callback_data.page, edit=True,
+        owner_id=callback.from_user.id,
+    )
 
 
-async def _show_my_chans_page(msg, session_str: str, acc_id: int, page: int, edit: bool = True) -> None:
+@router.callback_query(ChanCb.filter(F.action == "my_chans_refresh"))
+async def cb_my_chans_refresh(
+    callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer("🔄 Обновляю из Telegram...")
+    data = await state.get_data()
+    session = data.get("my_chans_session")
+    acc_id = callback_data.acc_id or data.get("my_chans_acc_id")
+    if not session:
+        await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops")
+        return
+    await _show_my_chans_page(
+        callback.message, pool, session, acc_id, page=0, edit=True,
+        force_refresh=True, owner_id=callback.from_user.id,
+    )
+
+
+async def _show_my_chans_page(
+    msg, pool: asyncpg.Pool, session_str: str, acc_id: int, page: int,
+    edit: bool = True, force_refresh: bool = False, owner_id: int = 0,
+) -> None:
     from services import account_manager
-    loading_text = f"⏳ Загружаю список каналов (страница {page + 1})..."
-    try:
-        if edit:
-            await msg.edit_text(loading_text, parse_mode="HTML")
-        else:
-            await msg.answer(loading_text, parse_mode="HTML")
-    except Exception:
-        pass
+    from database.db import get_managed_channels, upsert_managed_channels
 
-    try:
-        dialogs = await account_manager.get_dialogs(session_str, limit=200)
-    except Exception as e:
-        kb = _back_kb()
-        text = f"❌ Не удалось загрузить каналы: {html.escape(str(e)[:80])}"
+    cached = await get_managed_channels(pool, owner_id, acc_id) if owner_id else []
+    need_fetch = force_refresh or not cached
+
+    if need_fetch:
         try:
-            await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+            if edit:
+                await msg.edit_text("⏳ Загружаю список каналов из Telegram...", parse_mode="HTML")
         except Exception:
             pass
-        return
+        try:
+            raw = await account_manager.get_dialogs(session_str, limit=200)
+        except Exception as e:
+            kb = _back_kb()
+            try:
+                await msg.edit_text(
+                    f"❌ Не удалось загрузить каналы: {html.escape(str(e)[:80])}",
+                    parse_mode="HTML", reply_markup=kb.as_markup(),
+                )
+            except Exception:
+                pass
+            return
+        if owner_id:
+            await upsert_managed_channels(pool, owner_id, acc_id, raw)
+        dialogs = raw
+    else:
+        dialogs = [
+            {"id": r["channel_id"], "title": r["title"] or "", "username": r["username"] or "", "type": "channel", "members": 0}
+            for r in cached
+        ]
 
     total = len(dialogs)
     total_pages = max(1, (total + _CHANS_PAGE_SIZE - 1) // _CHANS_PAGE_SIZE)
@@ -2748,10 +2789,10 @@ async def _show_my_chans_page(msg, session_str: str, acc_id: int, page: int, edi
 
     kb = InlineKeyboardBuilder()
     for ch in chunk:
-        ch_type = "📢" if ch["type"] == "channel" else "👥"
+        ch_type = "📢" if ch.get("type") == "channel" else "👥"
         uname = f" @{ch['username']}" if ch.get("username") else ""
         members = f" · {ch['members']:,}" if ch.get("members") else ""
-        label = f"{ch_type} {ch['title'][:28]}{uname}{members}"
+        label = f"{ch_type} {(ch.get('title') or '')[:28]}{uname}{members}"
         kb.button(text=label, callback_data=ChanCb(action="my_chans_item", channel_id=ch["id"], acc_id=acc_id))
     kb.adjust(1)
 
@@ -2760,16 +2801,18 @@ async def _show_my_chans_page(msg, session_str: str, acc_id: int, page: int, edi
         nav_row.append(("◀ Пред.", ChanCb(action="my_chans_page", page=page - 1, acc_id=acc_id)))
     if page < total_pages - 1:
         nav_row.append(("След. ▶", ChanCb(action="my_chans_page", page=page + 1, acc_id=acc_id)))
-    for label, cd in nav_row:
-        kb.button(text=label, callback_data=cd)
+    for btn_label, cd in nav_row:
+        kb.button(text=btn_label, callback_data=cd)
     if nav_row:
         kb.adjust(*([1] * len(chunk)), len(nav_row))
 
+    kb.button(text="🔄 Обновить из Telegram", callback_data=ChanCb(action="my_chans_refresh", acc_id=acc_id))
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
 
+    src = "Telegram" if need_fetch else "кэш"
     text = (
         f"📋 <b>Мои каналы/чаты</b>\n\n"
-        f"Всего: <b>{total}</b> · Страница <b>{page + 1}/{total_pages}</b>\n\n"
+        f"Всего: <b>{total}</b> · Страница <b>{page + 1}/{total_pages}</b> · <i>{src}</i>\n\n"
         "Нажмите на канал для управления:"
     )
     try:

@@ -350,7 +350,7 @@ async def search_in_telegram(session_string: str, query: str, limit: int = 20) -
     from telethon.tl.functions.contacts import SearchRequest
     client = _make_client(session_string)
     try:
-        await client.connect()
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await client(SearchRequest(q=query, limit=limit))
         items = []
         for i, user in enumerate(result.users):

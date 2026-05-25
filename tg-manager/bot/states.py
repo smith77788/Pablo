@@ -142,7 +142,6 @@ class AddKeyword(StatesGroup):
 
 
 class CreateChannelFSM(StatesGroup):
-    choosing_type = State()
     waiting_title = State()
     waiting_about = State()
     confirming = State()
@@ -158,7 +157,6 @@ class PostToChannelFSM(StatesGroup):
 
 
 class EditChannelFSM(StatesGroup):
-    choosing_field = State()
     waiting_value = State()
 
 
@@ -168,7 +166,6 @@ class InviteUsersFSM(StatesGroup):
 
 
 class UpdateProfileFSM(StatesGroup):
-    choosing_field = State()
     waiting_value = State()
 
 
@@ -179,7 +176,6 @@ class CreateBotFSM(StatesGroup):
 
 
 class SendReactionFSM(StatesGroup):
-    waiting_channel_id = State()
     waiting_msg_id = State()
     choosing_emoji = State()
 
@@ -196,7 +192,6 @@ class BulkCreateFSM(StatesGroup):
     choosing_type = State()
     waiting_count = State()
     choosing_name_mode = State()
-    choosing_accounts = State()
     confirming = State()
 
 
