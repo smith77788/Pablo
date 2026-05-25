@@ -656,8 +656,6 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
 
     elif state.startswith("env_edit:"):
         key = state.split(":", 1)[1]
-        http = message.bot._session  # type: ignore[attr-defined]
-        # Use the shared http session from bot's aiohttp session if available
         async with aiohttp.ClientSession() as tmp_http:
             try:
                 await railway_api.set_variable(tmp_http, key, text)
