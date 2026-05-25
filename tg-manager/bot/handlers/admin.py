@@ -498,6 +498,7 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             uid = int(parts[0])
             plan = parts[1].lower()
             months = int(parts[2]) if len(parts) > 2 else 1
+            months = max(1, min(months, 1200))  # cap: 1–1200 месяцев (100 лет)
             if plan not in ("starter", "pro", "enterprise"):
                 raise ValueError("bad plan")
             expires = datetime.utcnow() + timedelta(days=30 * months)
