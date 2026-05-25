@@ -18,7 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 _DIALOGS_PAGE_SIZE = 10
 
-from bot.callbacks import AccCb, BotCb
+from bot.callbacks import AccCb, BotCb, ChanCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
 from config import TG_API_ID, TG_API_HASH
@@ -204,6 +204,8 @@ async def _show_accounts_menu(
         kb.button(text="➕ Добавить аккаунт",
                   callback_data=AccCb(action="add"))
 
+    kb.button(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu"))
+    kb.button(text="⚡ Массовые операции",     callback_data=ChanCb(action="bulk_menu"))
     kb.button(text="◀️ Главное меню",
               callback_data=BotCb(action="list", page=0))
     kb.adjust(1)

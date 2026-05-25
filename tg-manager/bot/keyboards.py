@@ -4,7 +4,7 @@ from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
     NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb, DeepLinkCb, EngageCb, SeoCb,
-    NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb, AccCb, RankCb,
+    NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb, AccCb, RankCb, ChanCb,
 )
 
 PAGE_SIZE = 5
@@ -29,9 +29,10 @@ def main_menu() -> InlineKeyboardMarkup:
     kb.button(text="➕ Добавить бота",       callback_data=BotCb(action="add"))
     kb.button(text="🌐 Сеть & операции",    callback_data=NetworkCb(action="menu"))
     kb.button(text="📱 Мои аккаунты",       callback_data=AccCb(action="menu"))
+    kb.button(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu"))
     kb.button(text="💳 Подписка",           callback_data=SubCb(action="menu"))
     kb.button(text="🤖 AI-ассистент",       callback_data=AiCb(action="start"))
-    kb.adjust(2, 2, 2)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
