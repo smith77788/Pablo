@@ -11,6 +11,56 @@ from bot.callbacks import SubCb
 from bot.utils.subscription import get_plan, PLAN_LEVELS, PLAN_EMOJIS, PLAN_FEATURES, BOT_LIMITS
 from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS, TON_WALLET, TRON_WALLET
 
+# Детальные фичи для каждого плана
+PLAN_DETAILED_FEATURES: dict[str, list[str]] = {
+    "free": [
+        "🤖 До 3 ботов",
+        "👥 Управление аудиторией",
+        "📢 Рассылки (без ограничений по объёму)",
+        "⏰ Расписание рассылок",
+        "🤖 Команды бота",
+        "📝 Шаблоны сообщений",
+        "🌐 Вебхуки",
+        "📊 Базовая статистика",
+    ],
+    "starter": [
+        "🤖 До 10 ботов",
+        "✅ Всё из FREE",
+        "📨 Inbox (live-чат с пользователями)",
+        "🏷 CRM и теги",
+        "🤖 Автоматизация (правила и триггеры)",
+        "🔗 Цепочки сообщений (воронки)",
+        "🌍 Мультигео (разные имена/описания по языку)",
+        "🔗 Диплинки с аналитикой",
+        "📈 SEO-анализ профиля бота",
+        "🔄 Клонирование настроек между ботами",
+    ],
+    "pro": [
+        "🤖 До 30 ботов",
+        "✅ Всё из STARTER",
+        "🧪 A/B тесты сообщений",
+        "🎯 Аналитика активности (горячие/холодные/потерянные)",
+        "🌐 Массовые операции по всей сети ботов",
+        "📢 Сетевые рассылки (по нескольким ботам)",
+        "📊 Аналитика сети ботов",
+        "🏆 Рейтинг и позиции ботов",
+        "📱 Личные аккаунты (Telegram-аккаунты)",
+        "👥 Пересечение аудиторий",
+    ],
+    "enterprise": [
+        "🤖 Без ограничений на количество ботов",
+        "✅ Всё из PRO",
+        "🧬 Swarm — умное роутинг-распределение",
+        "🌐 Кластеры ботов и управление сетью",
+        "📢 Сетевая рассылка v2 (дедупликация, сегментация)",
+        "🔄 Клонирование с полным переносом настроек",
+        "🤖 AI-ассистент для анализа ботов",
+        "⚖️ Веса роутинга и балансировка нагрузки",
+        "📊 Полная аналитика и экспорт данных",
+        "👑 Приоритетная поддержка",
+    ],
+}
+
 router = Router()
 
 _TON_RATE = 3.0  # 1 TON ≈ $3
@@ -55,7 +105,11 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
             text=f"{prefix}{em} {p.upper()} — ${price}/мес",
             callback_data=SubCb(action="choose_plan", plan=p),
         )
-    kb.adjust(1)
+        kb.button(
+            text="❓ Что входит в план",
+            callback_data=SubCb(action="plan_features", plan=p),
+        )
+    kb.adjust(2)
     return text, kb.as_markup()
 
 
@@ -70,6 +124,39 @@ async def cb_sub_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     text, markup = await _build_menu_text_and_kb(pool, callback.from_user.id)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+
+
+@router.callback_query(SubCb.filter(F.action == "plan_features"))
+async def cb_plan_features(callback: CallbackQuery, callback_data: SubCb) -> None:
+    await callback.answer()
+    plan = callback_data.plan
+    if plan not in PLAN_DETAILED_FEATURES:
+        await callback.answer("Неизвестный план.", show_alert=True)
+        return
+
+    em = PLAN_EMOJIS.get(plan, "")
+    price = PLAN_PRICES_USD.get(plan, 0)
+    features = PLAN_DETAILED_FEATURES[plan]
+    bot_limit = BOT_LIMITS.get(plan, 0)
+    limit_label = "∞" if bot_limit >= 9999 else str(bot_limit)
+
+    features_text = "\n".join(f"  {f}" for f in features)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=f"💳 Оформить {plan.upper()}",
+        callback_data=SubCb(action="choose_plan", plan=plan),
+    )
+    kb.button(text="◀️ Назад к планам", callback_data=SubCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"{em} <b>{plan.upper()}</b> — ${price}/мес · до {limit_label} ботов\n\n"
+        f"<b>Что входит в план:</b>\n\n"
+        f"{features_text}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(SubCb.filter(F.action == "choose_plan"))

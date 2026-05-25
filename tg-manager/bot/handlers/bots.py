@@ -54,20 +54,50 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool)
         await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
         return
     await callback.answer()
+    from bot.utils.subscription import get_plan
+    current_plan = await get_plan(pool, callback.from_user.id)
     limit = await get_bot_limit(pool, callback.from_user.id)
     current_bots = await db.get_bots(pool, callback.from_user.id)
     if len(current_bots) >= limit:
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         kb = InlineKeyboardBuilder()
-        kb.button(text="⭐ Улучшить подписку", callback_data=SubCb(action="menu"))
+
+        if current_plan == "free":
+            kb.button(text="💳 Обновить до STARTER", callback_data=SubCb(action="choose_plan", plan="starter"))
+            kb.button(text="🔍 Все планы", callback_data=SubCb(action="menu"))
+            upgrade_text = (
+                f"⛔️ <b>Достигнут лимит FREE плана</b>\n\n"
+                f"На бесплатном плане можно добавить максимум <b>{limit}</b> бота.\n"
+                f"У вас уже добавлено: <b>{len(current_bots)}</b>\n\n"
+                "⭐ <b>STARTER</b> — до 10 ботов · $9/мес\n"
+                "<i>Inbox, CRM, автоматизация, цепочки, расписание</i>\n\n"
+                "Обновите до STARTER, чтобы продолжить добавлять ботов."
+            )
+        elif current_plan == "starter":
+            kb.button(text="💳 Обновить до PRO", callback_data=SubCb(action="choose_plan", plan="pro"))
+            kb.button(text="🔍 Все планы", callback_data=SubCb(action="menu"))
+            upgrade_text = (
+                f"⛔️ <b>Достигнут лимит STARTER плана</b>\n\n"
+                f"На плане STARTER можно добавить максимум <b>{limit}</b> ботов.\n"
+                f"У вас уже добавлено: <b>{len(current_bots)}</b>\n\n"
+                "🚀 <b>PRO</b> — до 30 ботов · $25/мес\n"
+                "<i>A/B тесты, активность, мультигео, массовые операции, аналитика сети</i>\n\n"
+                "Обновите до PRO, чтобы продолжить добавлять ботов."
+            )
+        else:
+            kb.button(text="⭐ Улучшить подписку", callback_data=SubCb(action="menu"))
+            upgrade_text = (
+                f"⛔️ <b>Достигнут лимит ботов</b>\n\n"
+                f"На вашем тарифе можно добавить максимум <b>{limit}</b> бот(ов).\n"
+                f"У вас уже добавлено: <b>{len(current_bots)}</b>\n\n"
+                "Улучшите подписку, чтобы добавить больше ботов:\n"
+                "🚀 Pro — до 30 ботов\n"
+                "👑 Enterprise — без ограничений"
+            )
+
+        kb.adjust(1)
         await callback.message.edit_text(
-            f"⛔️ <b>Достигнут лимит ботов</b>\n\n"
-            f"На вашем тарифе можно добавить максимум <b>{limit}</b> бот(ов).\n"
-            f"У вас уже добавлено: <b>{len(current_bots)}</b>\n\n"
-            "Улучшите подписку, чтобы добавить больше ботов:\n"
-            "⭐ Starter — до 10 ботов\n"
-            "🚀 Pro — до 30 ботов\n"
-            "👑 Enterprise — без ограничений",
+            upgrade_text,
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
