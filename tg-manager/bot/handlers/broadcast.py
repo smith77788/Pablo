@@ -21,15 +21,16 @@ router = Router()
 async def cb_bc_menu(callback: CallbackQuery, callback_data: BroadcastCb,
                       pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     count = await db.get_audience_count(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
+    safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
-        f"📢 <b>Рассылка — {label}</b>\n\n"
+        f"📢 <b>Рассылка — {safe_label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
         "Рассылка — это отправка одного сообщения сразу всем вашим подписчикам или их части. Как письмо, которое получают все сразу.\n\n"
         "💡 <b>Что можно делать:</b>\n"
@@ -41,7 +42,6 @@ async def cb_bc_menu(callback: CallbackQuery, callback_data: BroadcastCb,
         parse_mode="HTML",
         reply_markup=broadcast_menu(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "compose"))
@@ -103,13 +103,13 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
                       state: FSMContext, pool: asyncpg.Pool,
                       http: aiohttp.ClientSession) -> None:
 
-    await callback.answer()
     data = await state.get_data()
     text = data.get("text", "")
     photo_file_id = data.get("photo_file_id")
     if not text and not photo_file_id:
         await callback.answer("Текст рассылки пуст.", show_alert=True)
         return
+    await callback.answer()
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -137,7 +137,6 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
         "Проверить статус можно в меню «📋 История».",
         reply_markup=back_to_bot(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "test"))
@@ -239,7 +238,6 @@ async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_status(callback: CallbackQuery, callback_data: BroadcastCb,
                     pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -248,24 +246,25 @@ async def cb_status(callback: CallbackQuery, callback_data: BroadcastCb,
     if not history:
         await callback.answer("Рассылок пока не было.", show_alert=True)
         return
+    await callback.answer()
     label = f"@{row['username']}" if row["username"] else row["first_name"]
+    safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
-        f"📋 <b>История рассылок — {label}</b>\n\nНажмите на рассылку для деталей:",
+        f"📋 <b>История рассылок — {safe_label}</b>\n\nНажмите на рассылку для деталей:",
         parse_mode="HTML",
         reply_markup=broadcast_history(callback_data.bot_id, history),
     )
-    await callback.answer()
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "detail"))
 async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
                     pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     bc = await db.get_broadcast(pool, callback_data.broadcast_id)
     if not bc:
         await callback.answer("Рассылка не найдена.", show_alert=True)
         return
+    await callback.answer()
     status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}
     emoji = status_emoji.get(bc["status"], "❓")
     preview = bc["message_text"][:300] if bc["message_text"] else ""
@@ -277,6 +276,8 @@ async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
         pct = min(done * 100 // bc["total_users"], 100)
         filled = pct // 10
         progress_bar = f"\n{'█' * filled}{'░' * (10 - filled)} {pct}%\n"
+    # Escape broadcast preview text to avoid HTML parse errors
+    safe_preview = preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     text = (
         f"📋 <b>Рассылка #{bc['id']}</b>\n\n"
         f"Статус: {emoji} {bc['status']}{progress_bar}\n"
@@ -284,19 +285,17 @@ async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
         f"Завершена: {finished}\n\n"
         f"Отправлено: <b>{bc['sent_count']}</b> / {bc['total_users']} ({success_rate}%)\n"
         f"Ошибок: {bc['failed_count']}\n\n"
-        f"<b>Текст:</b>\n{preview}"
+        f"<b>Текст:</b>\n{safe_preview}"
     )
     await callback.message.edit_text(text, parse_mode="HTML",
                                      reply_markup=broadcast_detail(callback_data.bot_id,
                                                                     bc["id"] if bc["status"] == "running" else None))
-    await callback.answer()
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "from_template"))
 async def cb_from_template(callback: CallbackQuery, callback_data: BroadcastCb,
                             pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -305,19 +304,18 @@ async def cb_from_template(callback: CallbackQuery, callback_data: BroadcastCb,
     if not templates:
         await callback.answer("У вас нет шаблонов. Создайте шаблон в разделе шаблонов.", show_alert=True)
         return
+    await callback.answer()
     await callback.message.edit_text(
         "📋 <b>Выберите шаблон для рассылки:</b>",
         parse_mode="HTML",
         reply_markup=broadcast_from_template(callback_data.bot_id, templates),
     )
-    await callback.answer()
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "use_template"))
 async def cb_use_template(callback: CallbackQuery, callback_data: BroadcastCb,
                            pool: asyncpg.Pool, state: FSMContext) -> None:
 
-    await callback.answer()
     # broadcast_id field repurposed here as template_id
     template = await db.get_template(pool, callback_data.broadcast_id, callback.from_user.id)
     if not template:
@@ -333,26 +331,26 @@ async def cb_use_template(callback: CallbackQuery, callback_data: BroadcastCb,
         await callback.answer("У бота нет аудитории для рассылки.", show_alert=True)
         return
 
+    await callback.answer()
     await state.set_state(Broadcast.confirming)
     await state.update_data(bot_id=callback_data.bot_id, text=template["text"])
 
-    preview = template["text"][:200]
+    safe_name = template['name'].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_preview = template["text"][:200].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
-        f"📋 <b>Шаблон: {template['name']}</b>\n\n"
-        f"Превью:\n{preview}\n\n"
+        f"📋 <b>Шаблон: {safe_name}</b>\n\n"
+        f"Превью:\n{safe_preview}\n\n"
         f"👥 Получателей: <b>{total}</b>\n\n"
         "Отправить эту рассылку?",
         parse_mode="HTML",
         reply_markup=broadcast_confirm(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "segment"))
 async def cb_segment(callback: CallbackQuery, callback_data: BroadcastCb,
                      pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -361,20 +359,20 @@ async def cb_segment(callback: CallbackQuery, callback_data: BroadcastCb,
     if not languages:
         await callback.answer("Аудитория пуста.", show_alert=True)
         return
+    await callback.answer()
     label = f"@{row['username']}" if row["username"] else row["first_name"]
+    safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
-        f"🎯 <b>Рассылка по сегменту — {label}</b>\n\nВыберите язык аудитории:",
+        f"🎯 <b>Рассылка по сегменту — {safe_label}</b>\n\nВыберите язык аудитории:",
         parse_mode="HTML",
         reply_markup=broadcast_segment_menu(callback_data.bot_id, languages),
     )
-    await callback.answer()
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "segment_select"))
 async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
                              state: FSMContext, pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     lang = callback_data.lang
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -398,6 +396,7 @@ async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
     if not user_ids:
         await callback.answer("Нет пользователей в этом сегменте.", show_alert=True)
         return
+    await callback.answer()
     await state.set_state(Broadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment_lang=lang, segment_user_ids=user_ids)
     await callback.message.edit_text(
@@ -405,4 +404,3 @@ async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
         "Напишите сообщение или отправьте фото для этого сегмента:",
         parse_mode="HTML",
     )
-    await callback.answer()

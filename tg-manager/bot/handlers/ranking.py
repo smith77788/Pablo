@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import html
 import logging
-import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
@@ -63,8 +62,22 @@ def _trend_arrow(latest: int | None, previous: int | None) -> str:
 
 def _format_position(position: int | None) -> str:
     if position is None:
-        return "не найден в топ-20"
+        return "не в топ 20"
     return f"позиция #{position}"
+
+
+def _relative_date(checked_at: datetime) -> str:
+    """Return human-readable relative date: сегодня, вчера, N дней назад."""
+    now = datetime.now(timezone.utc)
+    # Make checked_at timezone-aware if needed
+    if checked_at.tzinfo is None:
+        checked_at = checked_at.replace(tzinfo=timezone.utc)
+    delta = (now.date() - checked_at.date()).days
+    if delta == 0:
+        return f"сегодня в {checked_at.strftime('%H:%M')}"
+    if delta == 1:
+        return "вчера"
+    return f"{delta} дней назад"
 
 
 # ── /ranking command — pick a bot ─────────────────────────────────────────
@@ -130,72 +143,7 @@ async def cb_rank_menu(
         await callback.answer("Бот не найден.", show_alert=True)
         return
 
-    label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
-    keywords = await db.get_tracked_keywords(pool, bot_id)
-    limit = KEYWORD_LIMITS.get(plan, 0)
-
-    # Build keyword lines
-    kw_lines: list[str] = []
-    for kw in keywords:
-        latest = await db.get_latest_ranking(pool, kw["id"])
-        history = await db.get_keyword_rankings(pool, kw["id"], limit=2)
-
-        cur_pos = latest["position"] if latest else None
-        prev_pos = history[1]["position"] if len(history) >= 2 else None
-        arrow = _trend_arrow(cur_pos, prev_pos)
-
-        kw_safe = html.escape(kw["keyword"])
-        status_icon = "✅" if kw["is_active"] else "⏸"
-
-        if cur_pos is None:
-            pos_text = "не найден в топ-20 ❌"
-        else:
-            trend_detail = ""
-            if prev_pos and prev_pos != cur_pos:
-                trend_detail = f" (с #{prev_pos}{arrow})"
-            pos_text = f"позиция #{cur_pos}{trend_detail} ✅"
-
-        kw_lines.append(f"🔑 <b>{kw_safe}</b> — {pos_text} {status_icon}")
-
-    kw_block = "\n".join(kw_lines) if kw_lines else "Нет отслеживаемых ключевых слов."
-    limit_display = "∞" if limit >= 9999 else str(limit)
-    plan_upper = plan.upper()
-
-    text = (
-        f"📊 <b>Позиции в поиске — {html.escape(label)}</b>\n\n"
-        "📌 <b>Что это?</b>\n"
-        "Трекер показывает на какой позиции ваш бот появляется в поиске Telegram по ключевым словам. "
-        "Позиции обновляются автоматически если подключён аккаунт Telegram.\n\n"
-        f"Ключевых слов: <b>{len(keywords)} из {limit_display}</b> ({plan_upper})\n\n"
-        f"{kw_block}"
-    )
-
-    kb = InlineKeyboardBuilder()
-    kb.button(
-        text="➕ Добавить слово",
-        callback_data=RankCb(action="add", bot_id=bot_id),
-    )
-    kb.button(
-        text="🔄 Проверить сейчас",
-        callback_data=RankCb(action="check_now", bot_id=bot_id),
-    )
-    kb.adjust(2)
-    for kw in keywords:
-        kw_safe_btn = kw["keyword"][:20]
-        kb.button(
-            text=f"📈 {kw_safe_btn}",
-            callback_data=RankCb(action="history", bot_id=bot_id, keyword_id=kw["id"]),
-        )
-        kb.button(
-            text=f"🗑 {kw_safe_btn}",
-            callback_data=RankCb(action="remove", bot_id=bot_id, keyword_id=kw["id"]),
-        )
-    if keywords:
-        kb.adjust(2, *([2] * len(keywords)))
-
-    kb.row(*back_to_bot(bot_id).inline_keyboard[0])
-
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await _render_rank_menu(callback, bot_id, bot_row, plan, pool)
 
 
 # ── action="add" — ask for keyword ────────────────────────────────────────
@@ -340,7 +288,7 @@ async def cb_rank_history(
     keyword_id = callback_data.keyword_id
     bot_id = callback_data.bot_id
 
-    rankings = await db.get_keyword_rankings(pool, keyword_id, limit=10)
+    rankings = await db.get_ranking_history(pool, keyword_id, limit=7)
 
     # Fetch keyword name
     keywords = await db.get_tracked_keywords(pool, bot_id)
@@ -349,9 +297,14 @@ async def cb_rank_history(
 
     kb = InlineKeyboardBuilder()
     kb.button(
+        text="🔄 Проверить сейчас",
+        callback_data=RankCb(action="check_now", bot_id=bot_id, keyword_id=keyword_id),
+    )
+    kb.button(
         text="◀️ Назад к позициям",
         callback_data=RankCb(action="menu", bot_id=bot_id),
     )
+    kb.adjust(1)
 
     if not rankings:
         await callback.message.edit_text(
@@ -363,15 +316,22 @@ async def cb_rank_history(
         return
 
     lines: list[str] = [f"📈 <b>История позиций: «{kw_safe}»</b>\n"]
-    for entry in rankings:
+
+    # Rankings are ordered DESC (newest first) — compute trend relative to next entry
+    for i, entry in enumerate(rankings):
         pos: int | None = entry["position"]
         checked_at: datetime = entry["checked_at"]
-        date_str = checked_at.strftime("%d.%m")
+        date_label = _relative_date(checked_at)
+
+        # Trend: compare current entry to the previous one (older, i+1)
+        prev_pos: int | None = rankings[i + 1]["position"] if i + 1 < len(rankings) else None
+        arrow = _trend_arrow(pos, prev_pos)
+
         bar = _position_bar(pos)
         if pos is None:
-            lines.append(f"<code>{date_str} — н/д</code>")
+            lines.append(f"• {date_label} — <b>не в топ 20</b>{arrow}")
         else:
-            lines.append(f"<code>{date_str} — #{pos:<2}  {bar}</code>")
+            lines.append(f"• {date_label} — <b>#{pos}</b>{arrow}  <code>{bar}</code>")
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -392,26 +352,20 @@ async def cb_rank_check_now(
     await callback.answer("⏳ Запускаю проверку...")
 
     bot_id = callback_data.bot_id
+    keyword_id = callback_data.keyword_id  # 0 means check all keywords for bot
     owner_id = callback.from_user.id
 
-    # Verify TG credentials are configured
-    tg_api_id = os.environ.get("TG_API_ID", "")
-    tg_api_hash = os.environ.get("TG_API_HASH", "")
-    if not tg_api_id or not tg_api_hash:
-        kb = InlineKeyboardBuilder()
-        kb.button(
+    back_kb = InlineKeyboardBuilder()
+    if keyword_id:
+        back_kb.button(
+            text="◀️ Назад к истории",
+            callback_data=RankCb(action="history", bot_id=bot_id, keyword_id=keyword_id),
+        )
+    else:
+        back_kb.button(
             text="◀️ Назад к позициям",
             callback_data=RankCb(action="menu", bot_id=bot_id),
         )
-        await callback.message.edit_text(
-            "⚠️ <b>Настройки не заполнены</b>\n\n"
-            "Для проверки позиций необходимы переменные окружения "
-            "<code>TG_API_ID</code> и <code>TG_API_HASH</code>.\n\n"
-            "Обратитесь к администратору.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
-        return
 
     # Fetch the bot's username
     bot_row = await db.get_bot(pool, bot_id, owner_id)
@@ -419,46 +373,43 @@ async def cb_rank_check_now(
         await callback.answer("Бот не найден.", show_alert=True)
         return
 
-    username = bot_row.get("username") or ""
+    username = (bot_row.get("username") or "").lstrip("@")
     if not username:
-        kb = InlineKeyboardBuilder()
-        kb.button(
-            text="◀️ Назад к позициям",
-            callback_data=RankCb(action="menu", bot_id=bot_id),
-        )
         await callback.message.edit_text(
             "⚠️ У бота нет username — поиск невозможен.",
             parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            reply_markup=back_kb.as_markup(),
         )
         return
 
-    # Find a connected TG account for this user
+    # Find a connected TG account for this user (random active one)
     account: asyncpg.Record | None = None
     try:
         account = await pool.fetchrow(
-            "SELECT * FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE LIMIT 1",
+            "SELECT id, session_str FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE "
+            "ORDER BY RANDOM() LIMIT 1",
             owner_id,
         )
     except Exception as exc:
-        log.warning("Could not query tg_accounts: %s", exc)
+        log.warning("Ошибка при запросе tg_accounts: %s", exc)
 
     if not account:
-        kb = InlineKeyboardBuilder()
-        kb.button(
-            text="◀️ Назад к позициям",
-            callback_data=RankCb(action="menu", bot_id=bot_id),
-        )
         await callback.message.edit_text(
             "⚠️ <b>Нет подключённого аккаунта</b>\n\n"
             "Для автоматической проверки подключите аккаунт Telegram: /accounts",
             parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            reply_markup=back_kb.as_markup(),
         )
         return
 
-    # Fetch keywords
-    keywords = await db.get_tracked_keywords(pool, bot_id)
+    # Fetch keywords — either one specific or all
+    all_keywords = await db.get_tracked_keywords(pool, bot_id)
+    if keyword_id:
+        keywords = [kw for kw in all_keywords if kw["id"] == keyword_id]
+    else:
+        keywords = list(all_keywords)
+
     if not keywords:
         await callback.answer("Нет ключевых слов для проверки.", show_alert=True)
         return
@@ -471,93 +422,90 @@ async def cb_rank_check_now(
         for kw in keywords:
             try:
                 search_results = await account_manager.search_in_telegram(
-                    account, kw["keyword"]
+                    account["session_str"], kw["keyword"]
                 )
                 position = None
                 for r in search_results:
-                    if r.get("is_bot") and r.get("username", "").lower() == username.lower():
+                    if r.get("is_bot") and r.get("username", "").lower().lstrip("@") == username.lower():
                         position = r["position"]
                         break
                 await db.save_ranking(pool, kw["id"], bot_id, position)
                 results.append({
                     "keyword": kw["keyword"],
                     "position": position,
+                    "keyword_id": kw["id"],
                 })
             except Exception as exc:
-                log.warning("search_bots failed for %r: %s", kw["keyword"], exc)
-                results.append({"keyword": kw["keyword"], "position": None})
+                log.warning("Ошибка поиска для ключевого слова %r: %s", kw["keyword"], exc)
+                results.append({
+                    "keyword": kw["keyword"],
+                    "position": None,
+                    "keyword_id": kw["id"],
+                })
 
     except ImportError:
-        # account_manager not yet implemented — gracefully degrade
         log.warning("account_manager service not available")
-        kb = InlineKeyboardBuilder()
-        kb.button(
-            text="◀️ Назад к позициям",
-            callback_data=RankCb(action="menu", bot_id=bot_id),
-        )
         await callback.message.edit_text(
             "⚠️ Сервис проверки позиций ещё не подключён.\n\n"
             "Позиции будут обновляться автоматически при следующем плановом цикле.",
             parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            reply_markup=back_kb.as_markup(),
         )
         return
 
     # Show results summary
-    lines = [f"🔄 <b>Результаты проверки — @{html.escape(username)}</b>\n"]
+    username_safe = html.escape(username)
+    lines = [f"🔄 <b>Результаты проверки — @{username_safe}</b>\n"]
     for r in results:
         kw_safe = html.escape(r["keyword"])
         pos = r["position"]
         if pos is None:
-            lines.append(f"🔑 <b>{kw_safe}</b> — не найден в топ-20 ❌")
+            lines.append(f"🔑 <b>{kw_safe}</b> — не в топ 20 ❌")
         else:
             lines.append(f"🔑 <b>{kw_safe}</b> — позиция #{pos} ✅")
 
-    kb = InlineKeyboardBuilder()
-    kb.button(
+    result_kb = InlineKeyboardBuilder()
+    if keyword_id and len(results) == 1:
+        result_kb.button(
+            text="📈 История позиций",
+            callback_data=RankCb(action="history", bot_id=bot_id, keyword_id=keyword_id),
+        )
+    result_kb.button(
         text="📊 К позициям",
         callback_data=RankCb(action="menu", bot_id=bot_id),
     )
+    result_kb.adjust(1)
+
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+        reply_markup=result_kb.as_markup(),
     )
 
 
 # ── Internal helper (shared between menu and post-remove) ─────────────────
 
 
-async def _show_rank_menu(
+async def _render_rank_menu(
     callback: CallbackQuery,
     bot_id: int,
+    bot_row: asyncpg.Record,
+    plan: str,
     pool: asyncpg.Pool,
 ) -> None:
-    """Render the ranking menu; extracted so remove can reuse it."""
-    plan = await get_plan(pool, callback.from_user.id)
-    if plan == "free":
-        await callback.message.edit_text(
-            locked_text("Трекер позиций в поиске", "starter"),
-            parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
-        )
-        return
-
-    bot_row = await db.get_bot(pool, bot_id, callback.from_user.id)
-    if not bot_row:
-        await callback.answer("Бот не найден.", show_alert=True)
-        return
-
+    """Build and render the ranking menu message."""
     label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
     keywords = await db.get_tracked_keywords(pool, bot_id)
     limit = KEYWORD_LIMITS.get(plan, 0)
 
+    # Build keyword lines
     kw_lines: list[str] = []
     for kw in keywords:
         latest = await db.get_latest_ranking(pool, kw["id"])
         history = await db.get_keyword_rankings(pool, kw["id"], limit=2)
 
         cur_pos = latest["position"] if latest else None
+        # history[0] == latest entry, history[1] == previous entry
         prev_pos = history[1]["position"] if len(history) >= 2 else None
         arrow = _trend_arrow(cur_pos, prev_pos)
 
@@ -565,12 +513,12 @@ async def _show_rank_menu(
         status_icon = "✅" if kw["is_active"] else "⏸"
 
         if cur_pos is None:
-            pos_text = "не найден в топ-20 ❌"
+            pos_text = f"не в топ 20{arrow} ❌"
         else:
             trend_detail = ""
-            if prev_pos and prev_pos != cur_pos:
-                trend_detail = f" (с #{prev_pos}{arrow})"
-            pos_text = f"позиция #{cur_pos}{trend_detail} ✅"
+            if prev_pos is not None and prev_pos != cur_pos:
+                trend_detail = f" (с #{prev_pos})"
+            pos_text = f"#{cur_pos}{trend_detail}{arrow} ✅"
 
         kw_lines.append(f"🔑 <b>{kw_safe}</b> — {pos_text} {status_icon}")
 
@@ -598,13 +546,13 @@ async def _show_rank_menu(
     )
     kb.adjust(2)
     for kw in keywords:
-        kw_short = kw["keyword"][:20]
+        kw_safe_btn = kw["keyword"][:20]
         kb.button(
-            text=f"📈 {kw_short}",
+            text=f"📈 {kw_safe_btn}",
             callback_data=RankCb(action="history", bot_id=bot_id, keyword_id=kw["id"]),
         )
         kb.button(
-            text=f"🗑 {kw_short}",
+            text=f"🗑 {kw_safe_btn}",
             callback_data=RankCb(action="remove", bot_id=bot_id, keyword_id=kw["id"]),
         )
     if keywords:
@@ -613,3 +561,26 @@ async def _show_rank_menu(
     kb.row(*back_to_bot(bot_id).inline_keyboard[0])
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+async def _show_rank_menu(
+    callback: CallbackQuery,
+    bot_id: int,
+    pool: asyncpg.Pool,
+) -> None:
+    """Render the ranking menu; used after removal and other redirects."""
+    plan = await get_plan(pool, callback.from_user.id)
+    if plan == "free":
+        await callback.message.edit_text(
+            locked_text("Трекер позиций в поиске", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
+
+    bot_row = await db.get_bot(pool, bot_id, callback.from_user.id)
+    if not bot_row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    await _render_rank_menu(callback, bot_id, bot_row, plan, pool)

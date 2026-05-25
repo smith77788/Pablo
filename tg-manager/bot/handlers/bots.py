@@ -28,10 +28,10 @@ def _bot_label(row: asyncpg.Record) -> str:
 @router.callback_query(BotCb.filter(F.action == "list"))
 async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
         return
+    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         await callback.message.edit_text(
@@ -44,17 +44,16 @@ async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.P
             parse_mode="HTML",
             reply_markup=bots_list(bots, callback_data.page),
         )
-    await callback.answer()
 
 
 # ── Add — step 1: ask token ───────────────────────────────────────────────
 
 @router.callback_query(BotCb.filter(F.action == "add"))
 async def cb_add(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Доступ запрещён.", show_alert=True)
         return
+    await callback.answer()
     limit = await get_bot_limit(pool, callback.from_user.id)
     current_bots = await db.get_bots(pool, callback.from_user.id)
     if len(current_bots) >= limit:
@@ -110,14 +109,18 @@ async def msg_token(message: Message, state: FSMContext,
     await state.clear()
 
     if not added:
+        safe_uname = (bot_info.get('username') or '').replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         await info_msg.edit_text(
-            f"⚠️ Бот @{bot_info.get('username')} уже добавлен.",
+            f"⚠️ Бот @{safe_uname} уже добавлен.",
             reply_markup=main_menu(),
         )
         return
 
+    raw_label = bot_info.get('username') or bot_info.get('first_name', '')
+    safe_label = raw_label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    prefix = "@" if bot_info.get('username') else ""
     await info_msg.edit_text(
-        f"✅ Бот <b>@{bot_info.get('username', bot_info['first_name'])}</b> добавлен!",
+        f"✅ Бот <b>{prefix}{safe_label}</b> добавлен!",
         parse_mode="HTML",
         reply_markup=bot_menu(bot_info["id"], username=bot_info.get("username")),
     )
@@ -158,18 +161,18 @@ async def cb_select(callback: CallbackQuery, callback_data: BotCb,
 async def cb_delete(callback: CallbackQuery, callback_data: BotCb,
                     pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
+    safe_label = _bot_label(row).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
-        f"🗑 Удалить бота <b>{_bot_label(row)}</b>?\n"
+        f"🗑 Удалить бота <b>{safe_label}</b>?\n"
         "Аудитория и история рассылок тоже удалятся.",
         parse_mode="HTML",
         reply_markup=confirm_delete(row["bot_id"]),
     )
-    await callback.answer()
 
 
 @router.callback_query(BotCb.filter(F.action == "confirm_delete"))
