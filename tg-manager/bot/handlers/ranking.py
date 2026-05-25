@@ -809,7 +809,10 @@ async def _render_rank_menu(
         text="🔄 Проверить все сейчас",
         callback_data=RankCb(action="check_all", bot_id=bot_id),
     )
-    kb.adjust(2)
+    kb.button(
+        text="🔔 Уведомления",
+        callback_data=RankCb(action="notify_settings", bot_id=bot_id),
+    )
     for kw in keywords:
         kw_safe_btn = kw["keyword"][:20]
         pause_label = "▶️ Возобновить" if not kw["is_active"] else "⏸ Пауза"
@@ -825,8 +828,11 @@ async def _render_rank_menu(
             text=f"🗑 {kw_safe_btn}",
             callback_data=RankCb(action="remove", bot_id=bot_id, keyword_id=kw["id"]),
         )
+    # Layout: [add, check_all], [notify], then [3 buttons per keyword]
     if keywords:
-        kb.adjust(2, *([3] * len(keywords)))
+        kb.adjust(2, 1, *([3] * len(keywords)))
+    else:
+        kb.adjust(2, 1)
 
     kb.row(*back_to_bot(bot_id).inline_keyboard[0])
 
@@ -854,3 +860,105 @@ async def _show_rank_menu(
         return
 
     await _render_rank_menu(callback, bot_id, bot_row, plan, pool)
+
+
+# ── action="notify_settings" — управление уведомлениями о позиции ─────────
+
+
+@router.callback_query(RankCb.filter(F.action == "notify_settings"))
+async def cb_rank_notify_settings(
+    callback: CallbackQuery,
+    callback_data: RankCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+
+    bot_id = callback_data.bot_id
+    owner_id = callback.from_user.id
+
+    bot_row = await db.get_bot(pool, bot_id, owner_id)
+    if not bot_row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
+    notify_on = await db.get_keyword_notify_enabled(pool, bot_id, owner_id)
+
+    status_text = "✅ включены" if notify_on else "❌ выключены"
+    toggle_label = "🔕 Выключить уведомления" if notify_on else "🔔 Включить уведомления"
+
+    text = (
+        f"🔔 <b>Уведомления об изменении позиции — {html.escape(label)}</b>\n\n"
+        f"Статус: <b>{status_text}</b>\n\n"
+        "Бот отправит уведомление, если:\n"
+        "• позиция улучшилась на 3+ пункта 📈\n"
+        "• позиция ухудшилась на 5+ пунктов 📉\n"
+        "• бот появился в топ-20 🎉\n"
+        "• бот выпал из топ-20 ⚠️"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=toggle_label,
+        callback_data=RankCb(action="notify_toggle", bot_id=bot_id),
+    )
+    kb.button(
+        text="◀️ Назад к позициям",
+        callback_data=RankCb(action="menu", bot_id=bot_id),
+    )
+    kb.adjust(1)
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── action="notify_toggle" — переключить уведомления ──────────────────────
+
+
+@router.callback_query(RankCb.filter(F.action == "notify_toggle"))
+async def cb_rank_notify_toggle(
+    callback: CallbackQuery,
+    callback_data: RankCb,
+    pool: asyncpg.Pool,
+) -> None:
+    bot_id = callback_data.bot_id
+    owner_id = callback.from_user.id
+
+    new_val = await db.toggle_keyword_notify(pool, bot_id, owner_id)
+    if new_val is None:
+        await callback.answer("Нет ключевых слов для изменения настроек.", show_alert=True)
+        return
+
+    status = "включены ✅" if new_val else "выключены ❌"
+    await callback.answer(f"Уведомления {status}", show_alert=False)
+
+    # Re-render the notify_settings screen
+    bot_row = await db.get_bot(pool, bot_id, owner_id)
+    if not bot_row:
+        return
+
+    label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
+    toggle_label = "🔕 Выключить уведомления" if new_val else "🔔 Включить уведомления"
+    status_text = "✅ включены" if new_val else "❌ выключены"
+
+    text = (
+        f"🔔 <b>Уведомления об изменении позиции — {html.escape(label)}</b>\n\n"
+        f"Статус: <b>{status_text}</b>\n\n"
+        "Бот отправит уведомление, если:\n"
+        "• позиция улучшилась на 3+ пункта 📈\n"
+        "• позиция ухудшилась на 5+ пунктов 📉\n"
+        "• бот появился в топ-20 🎉\n"
+        "• бот выпал из топ-20 ⚠️"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=toggle_label,
+        callback_data=RankCb(action="notify_toggle", bot_id=bot_id),
+    )
+    kb.button(
+        text="◀️ Назад к позициям",
+        callback_data=RankCb(action="menu", bot_id=bot_id),
+    )
+    kb.adjust(1)
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())

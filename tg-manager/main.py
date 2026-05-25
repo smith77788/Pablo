@@ -140,7 +140,7 @@ async def main() -> None:
         asyncio.create_task(relay_service.run(pool, http))
         asyncio.create_task(funnel_runner.run(pool, http))
         asyncio.create_task(payment_checker.run(pool, http, bot))
-        asyncio.create_task(ranking_checker.run(pool))
+        asyncio.create_task(ranking_checker.run(pool, bot))
         log.info("TG Manager started")
         try:
             await dp.start_polling(bot, pool=pool, http=http)

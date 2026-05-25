@@ -1743,6 +1743,14 @@ async def get_all_keywords_with_latest_ranking(pool: asyncpg.Pool, owner_id: int
     ]
 
 
+async def get_bot_owner(pool: asyncpg.Pool, bot_id: int) -> int | None:
+    """Возвращает added_by (owner_id) для бота или None если бот не найден."""
+    return await pool.fetchval(
+        "SELECT added_by FROM managed_bots WHERE bot_id=$1 AND is_active=TRUE",
+        bot_id,
+    )
+
+
 async def toggle_keyword_active(pool: asyncpg.Pool, keyword_id: int, owner_id: int) -> bool | None:
     """Переключает is_active ключевого слова. Возвращает новое значение или None если не найдено."""
     row = await pool.fetchrow(
@@ -1753,3 +1761,32 @@ async def toggle_keyword_active(pool: asyncpg.Pool, keyword_id: int, owner_id: i
         keyword_id, owner_id,
     )
     return row["is_active"] if row else None
+
+
+async def toggle_keyword_notify(pool: asyncpg.Pool, bot_id: int, owner_id: int) -> bool | None:
+    """Переключает notify_enabled для всех ключевых слов бота.
+
+    Если хотя бы одно включено — выключает все; иначе — включает все.
+    Возвращает новое значение или None если ключевых слов не найдено.
+    """
+    current = await pool.fetchval(
+        "SELECT bool_or(notify_enabled) FROM tracked_keywords WHERE bot_id=$1 AND owner_id=$2",
+        bot_id, owner_id,
+    )
+    if current is None:
+        return None
+    new_value = not current
+    await pool.execute(
+        "UPDATE tracked_keywords SET notify_enabled=$3 WHERE bot_id=$1 AND owner_id=$2",
+        bot_id, owner_id, new_value,
+    )
+    return new_value
+
+
+async def get_keyword_notify_enabled(pool: asyncpg.Pool, bot_id: int, owner_id: int) -> bool:
+    """Возвращает True если хотя бы одно ключевое слово бота имеет notify_enabled=TRUE."""
+    val = await pool.fetchval(
+        "SELECT bool_or(notify_enabled) FROM tracked_keywords WHERE bot_id=$1 AND owner_id=$2",
+        bot_id, owner_id,
+    )
+    return bool(val)
