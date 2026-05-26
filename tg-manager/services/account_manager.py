@@ -20,7 +20,13 @@ def _make_client(session_string: str = ""):
         StringSession(session_string),
         int(TG_API_ID),
         TG_API_HASH,
-        connection_retries=1,
+        # Mimic Android client — improves code delivery from datacenter IPs
+        device_model="Samsung SM-S911B",
+        system_version="Android 14",
+        app_version="10.9.1",
+        lang_code="ru",
+        system_lang_code="ru-RU",
+        connection_retries=3,
         timeout=_CONNECT_TIMEOUT,
     )
 
