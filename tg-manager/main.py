@@ -139,7 +139,8 @@ async def main() -> None:
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
     connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-    async with aiohttp.ClientSession(connector=connector) as http:
+    http = aiohttp.ClientSession(connector=connector)
+    try:
         asyncio.create_task(scheduler.run(pool, http))
         asyncio.create_task(auto_responder.run(pool, http))
         asyncio.create_task(relay_service.run(pool, http))
@@ -148,11 +149,11 @@ async def main() -> None:
         asyncio.create_task(ranking_checker.run(pool, bot))
         asyncio.create_task(search_observer.run_confirmation_loop(pool, bot))
         log.info("TG Manager started")
-        try:
-            await dp.start_polling(bot, pool=pool, http=http)
-        finally:
-            await pool.close()
-            await bot.session.close()
+        await dp.start_polling(bot, pool=pool, http=http)
+    finally:
+        await pool.close()
+        await http.close()
+        await bot.session.close()
 
 
 if __name__ == "__main__":
