@@ -301,7 +301,8 @@ async def _qr_wait_task(user_id: int, pool: asyncpg.Pool, bot, chat_id: int) -> 
 
     display = escape(info.get("first_name") or info.get("username") or info.get("phone") or "Аккаунт")
     kb = InlineKeyboardBuilder()
-    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
+    kb.button(text="👤 Все аккаунты",         callback_data=AccCb(action="menu"))
     kb.adjust(1)
     await bot.send_message(
         chat_id,
@@ -627,13 +628,13 @@ async def _finalize_login(
 
     display_name = escape(info.get("first_name") or info.get("username") or phone)
     kb = InlineKeyboardBuilder()
-    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
+    kb.button(text="👤 Все аккаунты",         callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
     await message.answer(
-        f"✅ <b>Аккаунт успешно добавлен!</b>\n\n"
-        f"👤 {display_name}\n"
-        f"📱 {escape(phone)}",
+        f"✅ <b>Аккаунт добавлен!</b>\n\n"
+        f"👤 {display_name}  📱 <code>{escape(phone)}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1612,14 +1613,13 @@ async def _finalize_import(
     uname = f"@{info['username']}" if info.get("username") else "—"
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
+    kb.button(text="👤 Все аккаунты",         callback_data=AccCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        f"✅ <b>Аккаунт успешно импортирован!</b>\n\n"
-        f"Имя: <b>{escape(name)}</b>\n"
-        f"Username: {escape(uname)}\n"
-        f"Телефон: <code>{escape(phone)}</code>\n"
-        f"Telegram ID: <code>{info.get('tg_user_id', '?')}</code>",
+        f"✅ <b>Аккаунт импортирован!</b>\n\n"
+        f"Имя: <b>{escape(name)}</b>  |  {escape(uname)}\n"
+        f"Телефон: <code>{escape(phone)}</code>  |  ID: <code>{info.get('tg_user_id', '?')}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
