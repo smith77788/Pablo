@@ -201,12 +201,31 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
 
 
 @router.callback_query(SubCb.filter(F.action == "choose_period"))
-async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb) -> None:
+async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
     plan, months = callback_data.plan, callback_data.months
     ton = _ton_wallet()
     tron = _tron_wallet()
     if not ton and not tron:
-        await callback.answer("Оплата временно недоступна. Свяжитесь с поддержкой.", show_alert=True)
+        await callback.answer()
+        from bot.utils.subscription import is_platform_admin
+        kb = InlineKeyboardBuilder()
+        if is_platform_admin(callback.from_user.id):
+            kb.button(
+                text="🎁 Выдать подписку себе (Admin)",
+                callback_data=SubCb(action="admin_grant", plan=plan, months=months),
+            )
+        kb.button(text="◀️ Назад к планам", callback_data=SubCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            f"⚠️ <b>Оплата не настроена</b>\n\n"
+            f"Криптовалютные кошельки не сконфигурированы.\n\n"
+            f"<b>Для администратора:</b>\n"
+            f"Откройте /admin → 🔑 Переменные Railway → добавьте <code>TON_WALLET</code> "
+            f"или <code>TRON_WALLET</code>.\n\n"
+            f"Или выдайте подписку вручную: /admin → 💰 Выдать подписку.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
         return
     await callback.answer()
     kb = InlineKeyboardBuilder()
@@ -225,6 +244,33 @@ async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb) -> Non
     usd, _ = _calc(plan, months, "TON" if ton else "USDT_TRC20")
     await callback.message.edit_text(
         f"💳 <b>{plan.upper()} × {months} мес.</b>\n\nИтого: <b>${usd}</b>\n\nВыберите способ оплаты:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(SubCb.filter(F.action == "admin_grant"))
+async def cb_admin_grant(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
+    from bot.utils.subscription import is_platform_admin
+    if not is_platform_admin(callback.from_user.id):
+        await callback.answer("⛔️ Только для администратора.", show_alert=True)
+        return
+    await callback.answer()
+    plan, months = callback_data.plan, max(1, callback_data.months)
+    from datetime import datetime, timedelta
+    expires = datetime.utcnow() + timedelta(days=30 * months)
+    await pool.execute(
+        """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
+           VALUES($1,$2,$3,true)
+           ON CONFLICT(user_id) DO UPDATE SET plan=$2, expires_at=$3, is_active=true""",
+        callback.from_user.id, plan, expires,
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Готово", callback_data=SubCb(action="menu"))
+    await callback.message.edit_text(
+        f"✅ <b>Подписка активирована!</b>\n\n"
+        f"План: <b>{plan.upper()}</b>\n"
+        f"Срок: {months} мес. (до {expires.strftime('%d.%m.%Y')})",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

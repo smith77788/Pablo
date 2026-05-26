@@ -21,7 +21,14 @@ def _admin_ids() -> set[int]:
 def is_platform_admin(user_id: int) -> bool:
     """Admins bypass all subscription gates and get enterprise access."""
     ids = _admin_ids()
-    return bool(ids) and user_id in ids
+    if bool(ids) and user_id in ids:
+        return True
+    # Also check session admins set via ADMIN_SECRET in admin panel
+    try:
+        from bot.handlers.admin import _session_admins
+        return user_id in _session_admins
+    except Exception:
+        return False
 
 
 async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
