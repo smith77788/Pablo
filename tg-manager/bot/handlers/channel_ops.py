@@ -849,7 +849,8 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
         parse_mode="HTML",
     )
     for idx, ch_id in enumerate(selected_ids, 1):
-        result = await account_manager.post_to_channel(acc["session_str"], ch_id, text)
+        access_hash = ch_map.get(ch_id, {}).get("access_hash", 0) or 0
+        result = await account_manager.post_to_channel(acc["session_str"], ch_id, text, access_hash=access_hash)
         if "error" in result:
             err += 1
         else:
@@ -871,6 +872,7 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
+
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2283,10 +2285,19 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
             _progress_text("Публикую посты...", 0, total, 0, 0), parse_mode="HTML"
         )
         from services import account_manager
+        # Для числового ID канала пробуем найти access_hash в кэше
+        bulk_access_hash = 0
+        if channel_ref.lstrip("-").isdigit():
+            cid = abs(int(channel_ref))
+            ah_row = await pool.fetchrow(
+                "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+                message.from_user.id, cid,
+            )
+            bulk_access_hash = (ah_row["access_hash"] if ah_row else 0) or 0
         ok_list, err_list = [], []
         for idx, acc in enumerate(accounts):
             label = html.escape(acc["first_name"] or acc["phone"])
-            result = await account_manager.post_to_channel(acc["session_str"], channel_ref, text_to_post)
+            result = await account_manager.post_to_channel(acc["session_str"], channel_ref, text_to_post, access_hash=bulk_access_hash)
             if "msg_id" in result:
                 ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
             else:
@@ -2316,7 +2327,12 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
             return
         msg = await message.answer("⏳ Публикую...")
         from services import account_manager
-        result = await account_manager.post_to_channel(acc["session_str"], ch_id, text_to_post)
+        single_ah_row = await pool.fetchrow(
+            "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+            message.from_user.id, ch_id,
+        )
+        single_access_hash = (single_ah_row["access_hash"] if single_ah_row else 0) or 0
+        result = await account_manager.post_to_channel(acc["session_str"], ch_id, text_to_post, access_hash=single_access_hash)
         kb = _back_kb()
         if "msg_id" in result:
             await msg.edit_text(
@@ -2914,8 +2930,13 @@ async def fsm_my_chans_post_text(message: Message, state: FSMContext, pool: asyn
         await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
         return
     from services import account_manager
+    access_hash_row = await pool.fetchrow(
+        "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+        message.from_user.id, ch_id,
+    )
+    access_hash = (access_hash_row["access_hash"] if access_hash_row else 0) or 0
     msg = await message.answer("⏳ Публикую...")
-    result = await account_manager.post_to_channel(session_row["session_str"], ch_id, text_to_post)
+    result = await account_manager.post_to_channel(session_row["session_str"], ch_id, text_to_post, access_hash=access_hash)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К каналам", callback_data=ChanCb(action="my_chans"))
     if "msg_id" in result:

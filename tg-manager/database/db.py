@@ -1805,12 +1805,13 @@ async def upsert_managed_channels(
                 owner_id, acc_id,
             )
             await conn.executemany(
-                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
-                   VALUES($1, $2, $3, $4, $5)
+                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash)
+                   VALUES($1, $2, $3, $4, $5, $6)
                    ON CONFLICT (owner_id, channel_id) DO UPDATE
-                   SET title=EXCLUDED.title, username=EXCLUDED.username, acc_id=EXCLUDED.acc_id""",
+                   SET title=EXCLUDED.title, username=EXCLUDED.username,
+                       acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash""",
                 [
-                    (owner_id, acc_id, ch["id"], ch.get("title", ""), ch.get("username", ""))
+                    (owner_id, acc_id, ch["id"], ch.get("title", ""), ch.get("username", ""), ch.get("access_hash", 0))
                     for ch in channels
                 ],
             )

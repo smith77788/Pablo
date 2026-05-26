@@ -145,6 +145,7 @@ async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0) -> 
                     "type": "channel" if isinstance(entity, Channel) and getattr(entity, "broadcast", False) else "group",
                     "members": getattr(entity, "participants_count", 0) or 0,
                     "username": getattr(entity, "username", "") or "",
+                    "access_hash": getattr(entity, "access_hash", 0) or 0,
                 })
         return dialogs
     finally:
@@ -678,28 +679,42 @@ async def kick_from_channel(
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def post_to_channel(
-    session_string: str, channel_id: int | str, text: str
+    session_string: str, channel_id: int | str, text: str, access_hash: int = 0
 ) -> dict:
     """Post a text message to a channel/group.
 
+    access_hash: if provided, uses InputPeerChannel directly (fast, no cache needed).
+    Without access_hash and without @username, fetches dialogs to populate entity cache.
+
     Returns {"msg_id": int} on success or {"error": str, "flood_wait"?: int} on failure.
     """
-    from telethon.tl.types import PeerChannel
+    from telethon.tl.types import InputPeerChannel
     from telethon.errors import FloodWaitError, ChatWriteForbiddenError, UserNotParticipantError
     client = _make_client(session_string)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        # Convert positive numeric IDs to PeerChannel so Telethon resolves them correctly.
-        # Fresh clients have no entity cache, so get_entity(positive_int) would fail.
-        if isinstance(channel_id, int) and channel_id > 0:
-            peer = PeerChannel(channel_id)
-        elif isinstance(channel_id, str) and channel_id.lstrip("-").isdigit():
-            n = int(channel_id)
-            peer = PeerChannel(abs(n)) if n > 0 else channel_id
+
+        # Resolve peer — 3 strategies in order of speed:
+        # 1. InputPeerChannel with access_hash (no API call needed)
+        # 2. @username string (single API call)
+        # 3. Populate entity cache via get_dialogs (slow but reliable)
+        if access_hash and isinstance(channel_id, int) and channel_id > 0:
+            peer = InputPeerChannel(channel_id=channel_id, access_hash=access_hash)
+        elif isinstance(channel_id, str) and not channel_id.lstrip("-").isdigit():
+            peer = channel_id  # @username — Telethon resolves via API
         else:
-            peer = channel_id  # @username or already-negative ID — pass as-is
-        entity = await client.get_entity(peer)
-        msg = await client.send_message(entity, text, parse_mode="html")
+            cid = abs(int(channel_id)) if isinstance(channel_id, str) else abs(channel_id)
+            async for _d in client.iter_dialogs(limit=500):
+                if getattr(_d.entity, "id", None) == cid:
+                    peer = InputPeerChannel(
+                        channel_id=cid,
+                        access_hash=getattr(_d.entity, "access_hash", 0),
+                    )
+                    break
+            else:
+                return {"error": "Канал не найден в диалогах аккаунта"}
+
+        msg = await client.send_message(peer, text, parse_mode="html")
         return {"msg_id": msg.id}
     except FloodWaitError as e:
         return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds}
