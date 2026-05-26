@@ -1108,7 +1108,7 @@ async def record_referral(pool, bot_id: int, referrer_user_id: int,
     try:
         await pool.execute(
             """INSERT INTO referrals(bot_id,referrer_user_id,referred_user_id,deep_link_id)
-               VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING""",
+               VALUES($1,$2,$3,$4) ON CONFLICT (bot_id, referred_user_id) DO NOTHING""",
             bot_id, referrer_user_id, referred_user_id, deep_link_id,
         )
         return True
@@ -1214,7 +1214,7 @@ async def autotag_by_activity(pool, bot_id: int) -> dict:
                     bot_id, uid,
                 )
                 await pool.execute(
-                    "INSERT INTO user_tags(bot_id,user_id,tag) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
+                    "INSERT INTO user_tags(bot_id,user_id,tag) VALUES($1,$2,$3) ON CONFLICT (bot_id,user_id,tag) DO NOTHING",
                     bot_id, uid, tag,
                 )
             except Exception:
