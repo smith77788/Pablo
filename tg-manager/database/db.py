@@ -2096,3 +2096,44 @@ async def deactivate_account(pool: asyncpg.Pool, account_id: int, reason: str = 
     )
     if reason:
         log.warning("Account %s deactivated: %s", account_id, reason)
+
+
+# ── Trust Engine ───────────────────────────────────────────────────────────
+
+async def get_trusted_accounts(
+    pool: asyncpg.Pool,
+    owner_id: int,
+) -> list[asyncpg.Record]:
+    """Return active accounts not in cooldown, ordered by trust_score DESC."""
+    return await pool.fetch(
+        """SELECT * FROM tg_accounts
+           WHERE owner_id=$1 AND is_active=true
+             AND (cooldown_until IS NULL OR cooldown_until < NOW())
+           ORDER BY trust_score DESC NULLS LAST, last_used ASC NULLS FIRST""",
+        owner_id,
+    )
+
+
+async def record_flood_event(
+    pool: asyncpg.Pool,
+    account_id: int,
+    operation: str = "",
+    flood_seconds: int = 0,
+) -> None:
+    """Record a flood event: increment counter, set cooldown, log it."""
+    cooldown_hours = 2
+    if flood_seconds > 3600:
+        cooldown_hours = 6
+    await pool.execute(
+        """UPDATE tg_accounts
+           SET flood_count_7d = flood_count_7d + 1,
+               last_flood_at  = NOW(),
+               cooldown_until = NOW() + ($1 * INTERVAL '1 hour')
+           WHERE id = $2""",
+        cooldown_hours, account_id,
+    )
+    await pool.execute(
+        """INSERT INTO account_flood_log(account_id, operation, flood_seconds)
+           VALUES($1, $2, $3)""",
+        account_id, operation, flood_seconds,
+    )

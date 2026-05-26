@@ -32,13 +32,9 @@ async def _get_all_active_accounts(
     pool: asyncpg.Pool,
     owner_id: int,
 ) -> list[asyncpg.Record]:
-    """Return all active TG accounts for owner, least-recently-used first."""
-    return await pool.fetch(
-        """SELECT * FROM tg_accounts
-           WHERE owner_id=$1 AND is_active=true
-           ORDER BY last_used ASC NULLS FIRST""",
-        owner_id,
-    )
+    """Return trusted active accounts ordered by trust_score DESC."""
+    from database import db
+    return await db.get_trusted_accounts(pool, owner_id)
 
 
 # ── On-demand check (called from ranking.py handler) ──────────────────────
@@ -129,6 +125,8 @@ async def check_bot_keywords(
                         "check_bot_keywords FloodWait %ds kw=%r account=%s — sleeping",
                         wait, kw["keyword"], account["id"],
                     )
+                    from database import db as _db
+                    await _db.record_flood_event(pool, account["id"], operation="ranking_check", flood_seconds=exc.seconds if hasattr(exc, 'seconds') else 0)
                     await asyncio.sleep(wait)
                 else:
                     log.warning(
@@ -230,6 +228,8 @@ async def _check_all(pool: asyncpg.Pool) -> None:
                         "ranking_checker FloodWait %ds kw=%r account=%s — sleeping",
                         wait, kw["keyword"], account["id"],
                     )
+                    from database import db as _db
+                    await _db.record_flood_event(pool, account["id"], operation="ranking_check", flood_seconds=exc.seconds if hasattr(exc, 'seconds') else 0)
                     await asyncio.sleep(wait)
                 else:
                     log.warning(

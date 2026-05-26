@@ -46,6 +46,7 @@ from services import payment_checker
 from services import ranking_checker
 from services import search_observer
 from services import account_monitor
+from services import trust_engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -150,6 +151,7 @@ async def main() -> None:
         asyncio.create_task(ranking_checker.run(pool, bot))
         asyncio.create_task(search_observer.run_confirmation_loop(pool, bot))
         asyncio.create_task(account_monitor.run(pool, bot))
+        asyncio.create_task(trust_engine.run(pool))
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:
