@@ -1137,8 +1137,9 @@ async def get_referral_total(pool, bot_id: int) -> int:
 
 # ── User Activity ──────────────────────────────────────────────────────────
 
-async def upsert_user_activity(pool, bot_id: int, user_id: int) -> None:
-    await pool.execute(
+async def upsert_user_activity(pool, bot_id: int, user_id: int) -> bool:
+    """Returns True if this is the user's first message (new user)."""
+    result = await pool.execute(
         """INSERT INTO user_activity(bot_id, user_id, message_count, last_seen, first_seen)
            VALUES($1, $2, 1, now(), now())
            ON CONFLICT (bot_id, user_id) DO UPDATE
@@ -1146,6 +1147,7 @@ async def upsert_user_activity(pool, bot_id: int, user_id: int) -> None:
                last_seen = now()""",
         bot_id, user_id,
     )
+    return result == "INSERT 0 1"
 
 async def get_activity_segments(pool, bot_id: int) -> dict:
     """Returns counts: hot(<1d), warm(1-7d), cold(7-30d), lost(30d+)."""

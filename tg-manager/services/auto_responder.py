@@ -78,8 +78,8 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
 
             is_start = text.strip().lower().startswith("/start")
 
-            # Track user activity
-            await db.upsert_user_activity(pool, bot_id, chat_id)
+            # Track user activity — returns True for first-ever message (new user)
+            is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)
 
             # Deep link tracking: /start <param>
             if text.strip().lower().startswith("/start "):
@@ -110,21 +110,46 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                 )
 
             # Automation rules
+            newly_added_tags: list[str] = []
             for arule in automation_rules:
                 triggered = False
                 if arule["trigger_type"] == "message_received":
                     triggered = True
                 elif arule["trigger_type"] == "keyword" and arule.get("trigger_value"):
                     triggered = arule["trigger_value"].lower() in text.lower()
-                # user_joined handled elsewhere; tag_added handled in CRM
+                elif arule["trigger_type"] == "user_joined" and is_new_user:
+                    triggered = True
 
                 if triggered:
                     if arule["action_type"] == "send_message":
                         await bot_api.send_message(http, token, chat_id, arule["action_value"])
                     elif arule["action_type"] == "add_tag":
                         await db.add_user_tag(pool, bot_id, chat_id, arule["action_value"])
+                        newly_added_tags.append(arule["action_value"])
                     elif arule["action_type"] == "remove_tag":
                         await db.remove_user_tag(pool, bot_id, chat_id, arule["action_value"])
+                    elif arule["action_type"] == "subscribe_funnel":
+                        try:
+                            await db.subscribe_to_funnel(pool, int(arule["action_value"]), chat_id)
+                        except (ValueError, TypeError):
+                            pass
+
+            # tag_added rules: fire once for each tag added above (one level, no recursion)
+            for arule in automation_rules:
+                if (arule["trigger_type"] == "tag_added"
+                        and arule.get("trigger_value")
+                        and arule["trigger_value"] in newly_added_tags):
+                    if arule["action_type"] == "send_message":
+                        await bot_api.send_message(http, token, chat_id, arule["action_value"])
+                    elif arule["action_type"] == "add_tag":
+                        await db.add_user_tag(pool, bot_id, chat_id, arule["action_value"])
+                    elif arule["action_type"] == "remove_tag":
+                        await db.remove_user_tag(pool, bot_id, chat_id, arule["action_value"])
+                    elif arule["action_type"] == "subscribe_funnel":
+                        try:
+                            await db.subscribe_to_funnel(pool, int(arule["action_value"]), chat_id)
+                        except (ValueError, TypeError):
+                            pass
 
             # Funnels: subscribe on /start or keyword
             for funnel in funnels:

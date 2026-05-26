@@ -655,6 +655,16 @@ def automation_action_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="💬 Отправить сообщение", callback_data=AutoCb(action="act_send", bot_id=bot_id))
     kb.button(text="🏷 Добавить тег", callback_data=AutoCb(action="act_add_tag", bot_id=bot_id))
     kb.button(text="🗑 Удалить тег", callback_data=AutoCb(action="act_remove_tag", bot_id=bot_id))
+    kb.button(text="🔗 Подписать на цепочку", callback_data=AutoCb(action="act_funnel", bot_id=bot_id))
+    kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def automation_funnel_select(bot_id: int, funnels: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for f in funnels[:8]:
+        kb.button(text=f["name"], callback_data=AutoCb(action="sel_funnel", bot_id=bot_id, rule_id=f["id"]))
     kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()

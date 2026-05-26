@@ -8,8 +8,8 @@ import asyncpg
 from bot.callbacks import CrmCb, AutoCb
 from bot.keyboards import (
     crm_menu, tag_detail_menu, automation_menu,
-    automation_trigger_menu, automation_action_menu, back_to_bot,
-    subscription_locked_markup,
+    automation_trigger_menu, automation_action_menu, automation_funnel_select,
+    back_to_bot, subscription_locked_markup,
 )
 from bot.utils.subscription import require_plan, locked_text
 from database import db
@@ -304,6 +304,45 @@ async def cb_choose_action(callback: CallbackQuery, callback_data: AutoCb, state
     await callback.message.edit_text(
         f"⚙️ Действие: <b>{ACTION_LABELS[action_type]}</b>\n\n"
         f"<b>Шаг 3/3</b> — Введите {hints[action_type]}:",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(AutoCb.filter(F.action == "act_funnel"), AddAutoRule.choosing_action)
+async def cb_act_funnel(callback: CallbackQuery, callback_data: AutoCb,
+                         state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    bot_id = data.get("bot_id", callback_data.bot_id)
+    await state.update_data(action_type="subscribe_funnel")
+    funnels = await db.get_funnels(pool, bot_id)
+    if not funnels:
+        await callback.message.edit_text(
+            "❌ У этого бота нет цепочек.\n\nСначала создайте цепочку в разделе «Цепочки».",
+            reply_markup=back_to_bot(bot_id),
+        )
+        await state.clear()
+        return
+    await callback.message.edit_text(
+        "🔗 <b>Шаг 3/3</b> — Выберите цепочку для подписки:",
+        parse_mode="HTML",
+        reply_markup=automation_funnel_select(bot_id, funnels),
+    )
+
+
+@router.callback_query(AutoCb.filter(F.action == "sel_funnel"), AddAutoRule.choosing_action)
+async def cb_sel_funnel(callback: CallbackQuery, callback_data: AutoCb,
+                         state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    funnel_id = callback_data.rule_id
+    funnels = await db.get_funnels(pool, callback_data.bot_id)
+    funnel = next((f for f in funnels if f["id"] == funnel_id), None)
+    funnel_name = funnel["name"] if funnel else str(funnel_id)
+    safe_name = funnel_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    await state.update_data(action_value=str(funnel_id))
+    await state.set_state(AddAutoRule.waiting_name)
+    await callback.message.edit_text(
+        f"✅ Цепочка: <b>{safe_name}</b>\n\nВведите название для этого правила:",
         parse_mode="HTML",
     )
 
