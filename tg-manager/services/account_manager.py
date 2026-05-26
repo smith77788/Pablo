@@ -645,6 +645,39 @@ async def invite_users_to_channel(
             pass
 
 
+async def get_contacts(session_string: str) -> list[dict]:
+    """Fetch contacts list from a Telegram account.
+
+    Returns list of {user_id, username, phone, first_name, last_name}.
+    Bots and deleted accounts are excluded.
+    """
+    from telethon.tl.functions.contacts import GetContactsRequest
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        result = await client(GetContactsRequest(hash=0))
+        contacts = []
+        for user in result.users:
+            if getattr(user, "deleted", False) or getattr(user, "bot", False):
+                continue
+            contacts.append({
+                "user_id": user.id,
+                "username": getattr(user, "username", "") or "",
+                "phone": getattr(user, "phone", "") or "",
+                "first_name": getattr(user, "first_name", "") or "",
+                "last_name": getattr(user, "last_name", "") or "",
+            })
+        return contacts
+    except Exception as e:
+        log.warning("get_contacts error: %s", e)
+        return []
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def kick_from_channel(
     session_string: str, channel_id: int, user_id: int
 ) -> bool:

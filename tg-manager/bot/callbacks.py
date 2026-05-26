@@ -175,3 +175,10 @@ class ChanCb(CallbackData, prefix="chan"):
     acc_id: int = 0
     channel_id: int = 0
     page: int = 0
+
+
+class ContactInvCb(CallbackData, prefix="cinv"):
+    action: str
+    acc_id: int = 0
+    channel_id: int = 0
+    page: int = 0

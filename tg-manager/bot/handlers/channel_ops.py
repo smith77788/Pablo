@@ -27,11 +27,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ChanCb
+from bot.callbacks import ChanCb, ContactInvCb
 from bot.states import (
-    BulkCreateFSM, BulkDmFSM, BulkPostChansFSM, CreateBotFSM, CreateChannelFSM, EditChannelFSM,
-    InviteUsersFSM, JoinChannelFSM, MyChannelsFSM, PostToChannelFSM, ReportFSM,
-    SendReactionFSM, UpdateProfileFSM,
+    BulkCreateFSM, BulkDmFSM, BulkPostChansFSM, ContactInviteFSM, CreateBotFSM,
+    CreateChannelFSM, EditChannelFSM, InviteUsersFSM, JoinChannelFSM, MyChannelsFSM,
+    PostToChannelFSM, ReportFSM, SendReactionFSM, UpdateProfileFSM,
 )
 from bot.utils.subscription import require_plan
 
@@ -105,7 +105,8 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="🤖 Создать бота",       callback_data=ChanCb(action="botfather_pick"))
     kb.button(text="⚡ Массовые операции",  callback_data=ChanCb(action="bulk_menu"))
     kb.button(text="📋 Мои каналы/чаты",   callback_data=ChanCb(action="my_chans"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 1)
+    kb.button(text="👥 Инвайт из контактов", callback_data=ChanCb(action="contact_invite"))
+    kb.adjust(2, 2, 2, 2, 2, 2, 2)
     return kb
 
 
@@ -2950,3 +2951,388 @@ async def fsm_my_chans_post_text(message: Message, state: FSMContext, pool: asyn
             f"❌ <b>Ошибка публикации</b>\n\n<code>{err_detail}</code>",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
+
+
+# ── Contact Invite Flow ────────────────────────────────────────────────────────
+
+def _cinv_channel_picker_kb(channels: list, page: int = 0) -> InlineKeyboardBuilder:
+    PAGE = 10
+    start = page * PAGE
+    chunk = channels[start: start + PAGE]
+    kb = InlineKeyboardBuilder()
+    for ch in chunk:
+        label = f"@{ch['username']}" if ch.get("username") else (ch.get("title") or str(ch["channel_id"]))[:32]
+        kb.button(text=label, callback_data=ContactInvCb(action="pick_channel", channel_id=ch["channel_id"]))
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardBuilder())
+        kb.button(text="◀️", callback_data=ContactInvCb(action="chans_page", page=page - 1))
+    if start + PAGE < len(channels):
+        kb.button(text="▶️", callback_data=ContactInvCb(action="chans_page", page=page + 1))
+    kb.button(text="✏️ Ввести вручную", callback_data=ContactInvCb(action="enter_channel"))
+    kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+    kb.adjust(1)
+    return kb
+
+
+def _cinv_acc_picker_kb(accounts: list, selected: set) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    for acc in accounts:
+        mark = "✅" if acc["id"] in selected else "⬜"
+        label = _acc_label(acc)
+        kb.button(text=f"{mark} {label}", callback_data=ContactInvCb(action="toggle_acc", acc_id=acc["id"]))
+    if selected:
+        kb.button(text=f"🚀 Продолжить ({len(selected)} акк.)", callback_data=ContactInvCb(action="proceed"))
+    if len(selected) < len(accounts):
+        kb.button(text="✅ Выбрать все", callback_data=ContactInvCb(action="all_accs"))
+    else:
+        kb.button(text="⬜ Снять выбор", callback_data=ContactInvCb(action="deselect_all"))
+    kb.button(text="◀️ Назад", callback_data=ChanCb(action="contact_invite"))
+    kb.adjust(1)
+    return kb
+
+
+@router.callback_query(ChanCb.filter(F.action == "contact_invite"))
+async def cb_contact_invite_start(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.clear()
+    if not await require_plan(pool, callback.from_user.id, _PRO):
+        from bot.utils.subscription import locked_text
+        await callback.message.edit_text(
+            locked_text("Инвайт из контактов", "pro"),
+            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+        )
+        return
+    channels = await _get_managed_channels_cached(pool, callback.from_user.id)
+    kb = _cinv_channel_picker_kb(channels, 0)
+    total = len(channels)
+    text = (
+        f"👥 <b>Инвайт из контактов</b>\n\n"
+        f"Выберите канал/чат куда пригласить контакты со всех аккаунтов:\n\n"
+        f"<i>Каналов в кэше: {total}. Нет нужного — введите вручную или обновите список в «Мои каналы/чаты».</i>"
+        if channels else
+        "👥 <b>Инвайт из контактов</b>\n\n"
+        "Кэш каналов пуст. Введите @username или числовой ID канала/группы вручную.\n\n"
+        "<i>Чтобы заполнить кэш: /ops → 📋 Мои каналы/чаты</i>"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "chans_page"))
+async def cb_cinv_chans_page(
+    callback: CallbackQuery, callback_data: ContactInvCb,
+    pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    channels = await _get_managed_channels_cached(pool, callback.from_user.id)
+    kb = _cinv_channel_picker_kb(channels, callback_data.page)
+    await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "enter_channel"))
+async def cb_cinv_enter_channel(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(ContactInviteFSM.entering_channel)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="contact_invite"))
+    await callback.message.edit_text(
+        "✏️ <b>Введите @username или ID канала/группы</b>\n\n"
+        "Примеры:\n"
+        "• <code>@mychannel</code>\n"
+        "• <code>-1001234567890</code>",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(ContactInviteFSM.entering_channel, F.text)
+async def fsm_cinv_channel_input(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    raw = message.text.strip()
+    try:
+        ch_id = int(raw)
+        identifier = ch_id
+        display = str(ch_id)
+        access_hash = 0
+    except ValueError:
+        identifier = raw if raw.startswith("@") else f"@{raw}"
+        display = identifier
+        access_hash = 0
+
+    await state.update_data(channel_identifier=str(identifier), channel_display=display, channel_id=0, access_hash=access_hash)
+    accounts = await _get_accounts(pool, message.from_user.id)
+    if not accounts:
+        await message.answer("⚠️ Нет подключённых аккаунтов. Добавьте через /accounts")
+        await state.clear()
+        return
+    await state.set_state(ContactInviteFSM.choosing_accounts)
+    kb = _cinv_acc_picker_kb(accounts, set())
+    await message.answer(
+        f"📱 <b>Выберите аккаунты</b>\n\nКанал: <b>{display}</b>\n\n"
+        "Контакты будут собраны со всех выбранных аккаунтов и объединены по уникальным пользователям:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "pick_channel"))
+async def cb_cinv_pick_channel(
+    callback: CallbackQuery, callback_data: ContactInvCb,
+    pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    ch_id = callback_data.channel_id
+    row = await pool.fetchrow(
+        "SELECT title, username, access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+        callback.from_user.id, ch_id,
+    )
+    display = (f"@{row['username']}" if row and row["username"] else (row["title"] if row else str(ch_id)))
+    access_hash = (row["access_hash"] if row else 0) or 0
+
+    await state.update_data(
+        channel_id=ch_id,
+        channel_identifier=str(ch_id),
+        channel_display=display,
+        access_hash=access_hash,
+    )
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    if not accounts:
+        await callback.message.edit_text("⚠️ Нет подключённых аккаунтов. Добавьте через /accounts")
+        await state.clear()
+        return
+    await state.set_state(ContactInviteFSM.choosing_accounts)
+    kb = _cinv_acc_picker_kb(accounts, set())
+    await callback.message.edit_text(
+        f"📱 <b>Выберите аккаунты</b>\n\nКанал: <b>{display}</b>\n\n"
+        "Контакты будут собраны со всех выбранных аккаунтов и объединены по уникальным пользователям:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+async def _cinv_refresh_acc_picker(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    data = await state.get_data()
+    selected = set(data.get("selected_accs", []))
+    display = data.get("channel_display", "?")
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    kb = _cinv_acc_picker_kb(accounts, selected)
+    await callback.message.edit_text(
+        f"📱 <b>Выберите аккаунты</b>\n\nКанал: <b>{display}</b>\n\n"
+        f"Выбрано: <b>{len(selected)}</b> из {len(accounts)}:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "toggle_acc"))
+async def cb_cinv_toggle_acc(
+    callback: CallbackQuery, callback_data: ContactInvCb,
+    pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    selected = set(data.get("selected_accs", []))
+    if callback_data.acc_id in selected:
+        selected.discard(callback_data.acc_id)
+    else:
+        selected.add(callback_data.acc_id)
+    await state.update_data(selected_accs=list(selected))
+    await _cinv_refresh_acc_picker(callback, pool, state)
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "all_accs"))
+async def cb_cinv_all_accs(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    selected = {a["id"] for a in accounts}
+    await state.update_data(selected_accs=list(selected))
+    await _cinv_refresh_acc_picker(callback, pool, state)
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "deselect_all"))
+async def cb_cinv_deselect_all(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.update_data(selected_accs=[])
+    await _cinv_refresh_acc_picker(callback, pool, state)
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "proceed"))
+async def cb_cinv_proceed(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    data = await state.get_data()
+    selected_accs = data.get("selected_accs", [])
+    channel_display = data.get("channel_display", "?")
+    if not selected_accs:
+        await callback.answer("Выберите хотя бы один аккаунт.", show_alert=True)
+        return
+    await callback.answer()
+    msg = await callback.message.edit_text(
+        f"⏳ Подсчёт контактов с {len(selected_accs)} аккаунт(ов)...",
+        parse_mode="HTML",
+    )
+    from services import account_manager as _am
+    acc_rows = await pool.fetch(
+        "SELECT id, session_str, first_name, username FROM tg_accounts "
+        "WHERE id = ANY($1::int[]) AND owner_id=$2 AND is_active=true",
+        selected_accs, callback.from_user.id,
+    )
+    unique_ids: set[int] = set()
+    for acc in acc_rows:
+        contacts = await _am.get_contacts(acc["session_str"])
+        for c in contacts:
+            unique_ids.add(c["user_id"])
+
+    await state.update_data(contact_count=len(unique_ids))
+    await state.set_state(ContactInviteFSM.confirming)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🚀 Запустить инвайт", callback_data=ContactInvCb(action="run"))
+    kb.button(text="❌ Отмена", callback_data=ContactInvCb(action="cancel"))
+    kb.adjust(1)
+    est_min = max(1, len(unique_ids) // 60)
+    await msg.edit_text(
+        f"👥 <b>Подтверждение инвайта</b>\n\n"
+        f"Канал: <b>{channel_display}</b>\n"
+        f"Аккаунтов: <b>{len(acc_rows)}</b>\n"
+        f"Уникальных контактов: <b>{len(unique_ids):,}</b>\n\n"
+        f"⏱ Примерное время: ~{est_min} мин.\n"
+        f"Процесс запустится в фоне, уведомление придёт по завершении.",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "run"))
+async def cb_cinv_run(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    data = await state.get_data()
+    selected_accs = data.get("selected_accs", [])
+    channel_id = data.get("channel_id", 0)
+    channel_identifier = data.get("channel_identifier", "")
+    channel_display = data.get("channel_display", "?")
+    access_hash = data.get("access_hash", 0)
+    if not selected_accs or not channel_identifier:
+        await callback.answer("Недостаточно данных. Начните заново.", show_alert=True)
+        return
+    await callback.answer()
+    await state.clear()
+    acc_rows = await pool.fetch(
+        "SELECT id, session_str, first_name, username FROM tg_accounts "
+        "WHERE id = ANY($1::int[]) AND owner_id=$2 AND is_active=true",
+        selected_accs, callback.from_user.id,
+    )
+    if not acc_rows:
+        await callback.message.edit_text("⚠️ Аккаунты не найдены или деактивированы.")
+        return
+    await callback.message.edit_text(
+        f"🚀 <b>Инвайт запущен в фоне</b>\n\n"
+        f"Канал: <b>{channel_display}</b>\n"
+        f"Аккаунтов: <b>{len(acc_rows)}</b>\n\n"
+        "Уведомление придёт когда всё завершится.",
+        parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+    )
+    asyncio.create_task(_cinv_bg(
+        bot=callback.bot,
+        user_id=callback.from_user.id,
+        acc_rows=list(acc_rows),
+        channel_id=channel_id,
+        channel_identifier=channel_identifier,
+        access_hash=access_hash,
+        channel_display=channel_display,
+    ))
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "cancel"))
+async def cb_cinv_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.answer("Отменено.")
+    await callback.message.edit_text("❌ Инвайт отменён.", reply_markup=_back_kb().as_markup())
+
+
+async def _get_managed_channels_cached(pool: asyncpg.Pool, owner_id: int) -> list:
+    from database import db as _db
+    return await _db.get_managed_channels(pool, owner_id)
+
+
+async def _cinv_bg(
+    bot, user_id: int, acc_rows: list,
+    channel_id: int, channel_identifier: str, access_hash: int, channel_display: str,
+) -> None:
+    """Background task: collect contacts from accounts and invite to channel."""
+    from services import account_manager as _am
+
+    # 1. Collect and deduplicate contacts
+    contacts_map: dict[int, dict] = {}
+    for acc in acc_rows:
+        try:
+            for c in await _am.get_contacts(acc["session_str"]):
+                contacts_map[c["user_id"]] = c
+        except Exception as e:
+            log.warning("cinv get_contacts acc=%s: %s", acc["id"], e)
+
+    if not contacts_map:
+        try:
+            await bot.send_message(
+                user_id,
+                "⚠️ <b>Инвайт: нет контактов</b>\n\nНи у одного аккаунта не найдено контактов.",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        return
+
+    # 2. Build identifier list: @username preferred, phone as fallback
+    identifiers: list[str] = []
+    for c in contacts_map.values():
+        if c["username"]:
+            identifiers.append(f"@{c['username']}")
+        elif c["phone"]:
+            ph = c["phone"]
+            identifiers.append(ph if ph.startswith("+") else f"+{ph}")
+
+    if not identifiers:
+        try:
+            await bot.send_message(
+                user_id,
+                "⚠️ <b>Инвайт: нет идентификаторов</b>\n\n"
+                "У контактов нет username и телефонов — невозможно пригласить.",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        return
+
+    # 3. Split list among accounts (round-robin distribution)
+    chan_target = channel_id if channel_id else channel_identifier
+    n = len(acc_rows)
+    chunks = [identifiers[i::n] for i in range(n)]
+
+    total_invited = 0
+    total_failed = 0
+    for acc, chunk in zip(acc_rows, chunks):
+        if not chunk:
+            continue
+        try:
+            res = await _am.invite_users_to_channel(acc["session_str"], chan_target, chunk)
+            total_invited += res.get("invited", 0)
+            total_failed += len(res.get("failed", []))
+        except Exception as e:
+            log.warning("cinv invite acc=%s: %s", acc["id"], e)
+            total_failed += len(chunk)
+
+    # 4. Notify user
+    try:
+        await bot.send_message(
+            user_id,
+            f"✅ <b>Инвайт завершён!</b>\n\n"
+            f"Канал: <b>{html.escape(channel_display)}</b>\n"
+            f"Всего контактов: <b>{len(identifiers):,}</b>\n"
+            f"Приглашено: <b>{total_invited}</b>\n"
+            f"Не удалось: <b>{total_failed}</b>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass

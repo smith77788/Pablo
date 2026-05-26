@@ -213,3 +213,9 @@ class MyChannelsFSM(StatesGroup):
 
 class PaymentSettingsFSM(StatesGroup):
     waiting_value = State()
+
+
+class ContactInviteFSM(StatesGroup):
+    entering_channel = State()
+    choosing_accounts = State()
+    confirming = State()
