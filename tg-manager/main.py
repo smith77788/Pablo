@@ -45,6 +45,7 @@ from services import funnel_runner
 from services import payment_checker
 from services import ranking_checker
 from services import search_observer
+from services import account_monitor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -148,6 +149,7 @@ async def main() -> None:
         asyncio.create_task(payment_checker.run(pool, http, bot))
         asyncio.create_task(ranking_checker.run(pool, bot))
         asyncio.create_task(search_observer.run_confirmation_loop(pool, bot))
+        asyncio.create_task(account_monitor.run(pool, bot))
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:
