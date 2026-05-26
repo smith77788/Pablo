@@ -9,6 +9,9 @@ log = logging.getLogger(__name__)
 # In-memory pending clients (phone -> client) during login flow
 _pending: dict[str, object] = {}
 
+# QR login sessions: user_id -> (client, qr_login_object)
+_pending_qr: dict[int, tuple] = {}
+
 # Таймаут подключения в секундах
 _CONNECT_TIMEOUT = 30
 
@@ -273,6 +276,93 @@ async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
 async def cleanup_pending(phone: str) -> None:
     client = _pending.pop(phone, None)
     if client:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# ── QR Login ──────────────────────────────────────────────────────────────────
+
+async def start_qr_login(user_id: int) -> bytes:
+    """Start QR code login. Returns PNG image bytes.
+
+    Keeps a connected client in _pending_qr[user_id].
+    Call wait_qr_login() in a background task to detect scan.
+    """
+    import io
+    import qrcode  # type: ignore
+
+    await cleanup_qr_pending(user_id)
+
+    client = _make_client()
+    await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+    qr = await client.qr_login()
+    _pending_qr[user_id] = (client, qr)
+
+    img = qrcode.make(qr.url)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+async def wait_qr_login(user_id: int, timeout: float = 120.0) -> tuple[str, dict]:
+    """Block until user scans QR code or timeout. Returns (session_str, info).
+
+    Raises asyncio.TimeoutError if not scanned in time.
+    Raises SessionPasswordNeededError if account requires 2FA.
+    """
+    from telethon.errors import SessionPasswordNeededError
+
+    entry = _pending_qr.get(user_id)
+    if not entry:
+        raise ValueError("QR сессия не найдена — начните заново.")
+    client, qr = entry
+    try:
+        await asyncio.wait_for(qr.wait(), timeout=timeout)
+    except SessionPasswordNeededError:
+        # Caller must handle 2FA separately; client stays in _pending_qr
+        raise
+
+    me = await client.get_me()
+    session_str = client.session.save()
+    info = {
+        "tg_user_id": me.id,
+        "phone": getattr(me, "phone", "") or f"id:{me.id}",
+        "first_name": getattr(me, "first_name", "") or "",
+        "username": getattr(me, "username", "") or "",
+    }
+    return session_str, info
+
+
+async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
+    """Finish QR login that required 2FA. Returns (session_str, info)."""
+    from telethon.errors import PasswordHashInvalidError
+
+    entry = _pending_qr.get(user_id)
+    if not entry:
+        raise ValueError("QR сессия не найдена — начните заново.")
+    client, _ = entry
+    try:
+        await client.sign_in(password=password)
+    except PasswordHashInvalidError:
+        raise ValueError("Неверный пароль 2FA.")
+
+    me = await client.get_me()
+    session_str = client.session.save()
+    info = {
+        "tg_user_id": me.id,
+        "phone": getattr(me, "phone", "") or f"id:{me.id}",
+        "first_name": getattr(me, "first_name", "") or "",
+        "username": getattr(me, "username", "") or "",
+    }
+    return session_str, info
+
+
+async def cleanup_qr_pending(user_id: int) -> None:
+    entry = _pending_qr.pop(user_id, None)
+    if entry:
+        client, _ = entry
         try:
             await client.disconnect()
         except Exception:

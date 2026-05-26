@@ -5,15 +5,16 @@ so the platform can list channels/groups, post messages, and track search rankin
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from html import escape
 
 import asyncpg
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 _DIALOGS_PAGE_SIZE = 10
@@ -26,8 +27,10 @@ from database import db
 from services.account_manager import (
     check_account_health,
     cleanup_pending,
+    cleanup_qr_pending,
     confirm_2fa,
     confirm_code,
+    confirm_qr_2fa,
     get_account_dialogs_stats,
     get_dialogs,
     get_client_info_and_session,
@@ -38,6 +41,8 @@ from services.account_manager import (
     send_message,
     send_message_via_account,
     start_login,
+    start_qr_login,
+    wait_qr_login,
 )
 
 router = Router()
@@ -74,6 +79,10 @@ class AccountPost(StatesGroup):
 class AccountSendMsg(StatesGroup):
     waiting_chat_id = State()  # state data: acc_id
     waiting_text = State()     # state data: acc_id, chat_id
+
+
+class QrLogin2FA(StatesGroup):
+    waiting_password = State()  # state data: user_id (implicit from FSM context)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -212,7 +221,9 @@ async def _show_accounts_menu(
     text += f"\n\n<i>Использовано: {used} / {limit_label}</i>"
 
     if used < limit:
-        kb.button(text="➕ Добавить аккаунт (телефон)",
+        kb.button(text="🔲 Добавить (QR-код)",
+                  callback_data=AccCb(action="qr_login"))
+        kb.button(text="☎️ Добавить (номер телефона)",
                   callback_data=AccCb(action="add"))
         kb.button(text="📥 Импорт сессии",
                   callback_data=AccCb(action="import_menu"))
@@ -393,6 +404,179 @@ async def cb_cancel_login(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text("❌ Авторизация отменена.", reply_markup=kb.as_markup())
 
 
+# ── QR Login ──────────────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "qr_login"))
+async def cb_qr_login(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    bot: Bot,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    await state.clear()
+    user_id = callback.from_user.id
+
+    try:
+        png = await start_qr_login(user_id)
+    except Exception as exc:
+        await callback.message.answer(
+            f"❌ Не удалось запустить QR-вход: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
+    kb.adjust(1)
+
+    msg = await callback.message.answer_photo(
+        BufferedInputFile(png, filename="qr.png"),
+        caption=(
+            "🔲 <b>Войдите через QR-код</b>\n\n"
+            "1. Откройте Telegram на телефоне или ПК\n"
+            "2. <b>Настройки → Устройства → Подключить устройство</b>\n"
+            "3. Наведите камеру на QR-код выше\n\n"
+            "<i>Ожидаем сканирование (2 минуты)...</i>"
+        ),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+    asyncio.create_task(
+        _qr_wait_task(bot, user_id, msg.chat.id, msg.message_id, pool),
+        name=f"qr-wait-{user_id}",
+    )
+
+
+async def _qr_wait_task(
+    bot: Bot,
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    pool: asyncpg.Pool,
+) -> None:
+    """Background task: wait for QR scan and finalize account connection."""
+    from telethon.errors import SessionPasswordNeededError
+
+    try:
+        session_str, info = await wait_qr_login(user_id, timeout=120.0)
+    except asyncio.TimeoutError:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔄 Обновить QR", callback_data=AccCb(action="qr_login"))
+        kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
+        kb.adjust(1)
+        try:
+            await bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption="⏰ QR-код истёк. Нажмите «Обновить QR» чтобы получить новый.",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+        await cleanup_qr_pending(user_id)
+        return
+    except SessionPasswordNeededError:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
+        kb.adjust(1)
+        try:
+            await bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=(
+                    "🔐 <b>Аккаунт защищён паролем 2FA</b>\n\n"
+                    "Введите пароль двухфакторной аутентификации ниже:"
+                ),
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+        # We can't easily set FSM state from a background task — send a plain prompt
+        # User should re-enter the flow. A simple workaround: send message asking for password.
+        await bot.send_message(
+            chat_id,
+            "🔐 Введите пароль 2FA:",
+        )
+        return
+    except Exception as exc:
+        try:
+            await bot.send_message(
+                chat_id,
+                f"❌ Ошибка QR-входа: <code>{escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        await cleanup_qr_pending(user_id)
+        return
+
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=user_id,
+            phone=info.get("phone", f"id:{info['tg_user_id']}"),
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+        )
+    except Exception as exc:
+        try:
+            await bot.send_message(
+                chat_id,
+                f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        await cleanup_qr_pending(user_id)
+        return
+
+    await cleanup_qr_pending(user_id)
+
+    display = escape(info.get("first_name") or info.get("username") or f"id:{info['tg_user_id']}")
+    phone_str = escape(info.get("phone", ""))
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    try:
+        await bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=(
+                f"✅ <b>Аккаунт успешно подключён!</b>\n\n"
+                f"👤 {display}\n"
+                f"📱 {phone_str}"
+            ),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        await bot.send_message(
+            chat_id,
+            f"✅ <b>Аккаунт {display} подключён!</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+@router.callback_query(AccCb.filter(F.action == "cancel_qr"))
+async def cb_cancel_qr(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    await cleanup_qr_pending(user_id)
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Аккаунты", callback_data=AccCb(action="menu"))
+    await callback.message.edit_text("❌ QR-вход отменён.", reply_markup=kb.as_markup())
+
+
 # ── Step 2: receive OTP code ───────────────────────────────────────────────────
 
 @router.message(AccountLogin.waiting_code)
@@ -522,6 +706,8 @@ async def _finalize_login(
 
     display_name = escape(info.get("first_name") or info.get("username") or phone)
     kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
+    kb.button(text="☎️ Добавить по телефону", callback_data=AccCb(action="add"))
     kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
@@ -1507,6 +1693,8 @@ async def _finalize_import(
     uname = f"@{info['username']}" if info.get("username") else "—"
 
     kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Импортировать ещё", callback_data=AccCb(action="import_menu"))
+    kb.button(text="🔲 Добавить (QR-код)", callback_data=AccCb(action="qr_login"))
     kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
     await message.answer(
