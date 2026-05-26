@@ -9,24 +9,66 @@ log = logging.getLogger(__name__)
 # In-memory pending clients (phone -> client) during login flow
 _pending: dict[str, object] = {}
 
-# QR login sessions: user_id -> (client, qr_login_object)
+# Device fingerprints for pending phone logins (phone -> device dict)
+_pending_device: dict[str, dict] = {}
+
+# QR login sessions: user_id -> (client, qr_login_object, device dict)
 _pending_qr: dict[int, tuple] = {}
 
 # Таймаут подключения в секундах
 _CONNECT_TIMEOUT = 30
 
+# Pool of realistic Android device fingerprints
+_ANDROID_DEVICES: list[tuple[str, str]] = [
+    ("Samsung SM-S928B", "Android 14"),
+    ("Samsung SM-S918B", "Android 14"),
+    ("Samsung SM-S911B", "Android 14"),
+    ("Samsung SM-A546B", "Android 13"),
+    ("Xiaomi 14 Pro",    "Android 14"),
+    ("Xiaomi 13T Pro",   "Android 13"),
+    ("Xiaomi Redmi Note 13 Pro", "Android 13"),
+    ("Google Pixel 8 Pro", "Android 14"),
+    ("Google Pixel 7a",    "Android 13"),
+    ("OnePlus 12",         "Android 14"),
+    ("OnePlus 11",         "Android 13"),
+    ("POCO X6 Pro",        "Android 14"),
+    ("realme GT 5 Pro",    "Android 14"),
+    ("Motorola Edge 50 Pro", "Android 14"),
+    ("Samsung SM-A336B",   "Android 12"),
+    ("Xiaomi POCO M5s",    "Android 12"),
+    ("Samsung SM-A135F",   "Android 13"),
+    ("Vivo V27 Pro",       "Android 13"),
+    ("Nokia G60 5G",       "Android 12"),
+    ("Motorola Moto G84",  "Android 13"),
+]
+_APP_VERSIONS: list[str] = [
+    "10.14.4", "10.14.3", "10.13.2", "10.12.2", "10.11.0",
+    "10.10.1", "10.9.1",  "10.8.2",  "10.7.0",  "10.6.2",
+]
 
-def _make_client(session_string: str = ""):
+
+def generate_device_fingerprint() -> dict:
+    """Return a random realistic Android device fingerprint."""
+    import random
+    device_model, system_version = random.choice(_ANDROID_DEVICES)
+    return {
+        "device_model": device_model,
+        "system_version": system_version,
+        "app_version": random.choice(_APP_VERSIONS),
+    }
+
+
+def _make_client(session_string: str = "", device: dict | None = None):
     from telethon import TelegramClient
     from telethon.sessions import StringSession
+    d = device or {}
     return TelegramClient(
         StringSession(session_string),
         int(TG_API_ID),
         TG_API_HASH,
-        # Mimic Android client — improves code delivery from datacenter IPs
-        device_model="Samsung SM-S911B",
-        system_version="Android 14",
-        app_version="10.9.1",
+        device_model=d.get("device_model") or "Samsung SM-S911B",
+        system_version=d.get("system_version") or "Android 14",
+        app_version=d.get("app_version") or "10.9.1",
         lang_code="ru",
         system_lang_code="ru-RU",
         connection_retries=3,
@@ -41,7 +83,9 @@ async def start_login(phone: str) -> tuple[str, str]:
     from telethon.errors import FloodWaitError
     if not TG_API_ID or not TG_API_HASH:
         raise ValueError("TG_API_ID / TG_API_HASH не настроены. Укажите в переменных среды.")
-    client = _make_client()
+    device = generate_device_fingerprint()
+    _pending_device[phone] = device
+    client = _make_client("", device)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await asyncio.wait_for(
@@ -269,11 +313,13 @@ async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
         "phone": me.phone or phone,
         "first_name": me.first_name or "",
         "username": me.username or "",
+        **_pending_device.get(phone, {}),
     }
     return session_str, info
 
 
 async def cleanup_pending(phone: str) -> None:
+    _pending_device.pop(phone, None)
     client = _pending.pop(phone, None)
     if client:
         try:
@@ -295,10 +341,11 @@ async def start_qr_login(user_id: int) -> bytes:
 
     await cleanup_qr_pending(user_id)
 
-    client = _make_client()
+    device = generate_device_fingerprint()
+    client = _make_client("", device)
     await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
     qr = await client.qr_login()
-    _pending_qr[user_id] = (client, qr)
+    _pending_qr[user_id] = (client, qr, device)
 
     img = qrcode.make(qr.url)
     buf = io.BytesIO()
@@ -317,7 +364,7 @@ async def wait_qr_login(user_id: int, timeout: float = 120.0) -> tuple[str, dict
     entry = _pending_qr.get(user_id)
     if not entry:
         raise ValueError("QR сессия не найдена — начните заново.")
-    client, qr = entry
+    client, qr, device = entry
     try:
         await asyncio.wait_for(qr.wait(), timeout=timeout)
     except SessionPasswordNeededError:
@@ -331,6 +378,7 @@ async def wait_qr_login(user_id: int, timeout: float = 120.0) -> tuple[str, dict
         "phone": getattr(me, "phone", "") or f"id:{me.id}",
         "first_name": getattr(me, "first_name", "") or "",
         "username": getattr(me, "username", "") or "",
+        **device,
     }
     return session_str, info
 
@@ -342,7 +390,7 @@ async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
     entry = _pending_qr.get(user_id)
     if not entry:
         raise ValueError("QR сессия не найдена — начните заново.")
-    client, _ = entry
+    client, _, device = entry
     try:
         await client.sign_in(password=password)
     except PasswordHashInvalidError:
@@ -355,6 +403,7 @@ async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
         "phone": getattr(me, "phone", "") or f"id:{me.id}",
         "first_name": getattr(me, "first_name", "") or "",
         "username": getattr(me, "username", "") or "",
+        **device,
     }
     return session_str, info
 
@@ -362,15 +411,15 @@ async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
 async def cleanup_qr_pending(user_id: int) -> None:
     entry = _pending_qr.pop(user_id, None)
     if entry:
-        client, _ = entry
+        client, *_ = entry
         try:
             await client.disconnect()
         except Exception:
             pass
 
 
-async def get_account_info(session_string: str) -> dict:
-    client = _make_client(session_string)
+async def get_account_info(session_string: str, _acc: dict | None = None) -> dict:
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         me = await client.get_me()
@@ -387,10 +436,11 @@ async def get_account_info(session_string: str) -> dict:
             pass
 
 
-async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0) -> list[dict]:
+async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
+                      _acc: dict | None = None) -> list[dict]:
     """Возвращает каналы и группы аккаунта с поддержкой пагинации."""
     from telethon.tl.types import Channel, Chat
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         dialogs = []
@@ -413,9 +463,10 @@ async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0) -> 
             pass
 
 
-async def send_message_via_account(session_string: str, chat_id: int, text: str) -> bool:
+async def send_message_via_account(session_string: str, chat_id: int, text: str,
+                                   _acc: dict | None = None) -> bool:
     """Отправляет сообщение через личный аккаунт. Возвращает True при успехе."""
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         await client.send_message(chat_id, text)
@@ -434,7 +485,8 @@ async def send_message_via_account(session_string: str, chat_id: int, text: str)
 send_message = send_message_via_account
 
 
-async def send_dm(session_string: str, username: str, text: str) -> dict:
+async def send_dm(session_string: str, username: str, text: str,
+                  _acc: dict | None = None) -> dict:
     """Send a DM to a user by username or numeric ID.
 
     Returns {"ok": True} or {"error": "description", "flood_wait": seconds (optional)}.
@@ -450,7 +502,7 @@ async def send_dm(session_string: str, username: str, text: str) -> dict:
         UsernameNotOccupiedError,
         UsernameInvalidError,
     )
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         target = username.lstrip("@") if isinstance(username, str) else username
@@ -482,10 +534,10 @@ async def send_dm(session_string: str, username: str, text: str) -> dict:
             pass
 
 
-async def get_account_dialogs_stats(session_string: str) -> dict:
+async def get_account_dialogs_stats(session_string: str, _acc: dict | None = None) -> dict:
     """Возвращает статистику диалогов: всего, каналов, групп, личных чатов."""
     from telethon.tl.types import Channel, Chat, User
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         total = 0
@@ -517,12 +569,12 @@ async def get_account_dialogs_stats(session_string: str) -> dict:
             pass
 
 
-async def check_account_health(session_string: str) -> dict:
+async def check_account_health(session_string: str, _acc: dict | None = None) -> dict:
     """Проверяет доступность аккаунта: авторизован ли, не заблокирован ли.
 
     Возвращает {"ok": bool, "reason": str}.
     """
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         me = await client.get_me()
@@ -546,9 +598,10 @@ async def check_account_health(session_string: str) -> dict:
             pass
 
 
-async def get_channel_members_count(session_string: str, channel_username: str) -> int:
+async def get_channel_members_count(session_string: str, channel_username: str,
+                                    _acc: dict | None = None) -> int:
     """Возвращает количество участников канала/группы по username. При ошибке — -1."""
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_username)
@@ -573,13 +626,14 @@ async def get_recent_messages(
     session_string: str,
     channel_username: str,
     limit: int = 5,
+    _acc: dict | None = None,
 ) -> list[dict]:
     """Возвращает последние сообщения из канала/группы.
 
     Каждый элемент: {"date": str, "text": str, "views": int}.
     Текст обрезается до 100 символов.
     """
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         messages = []
@@ -604,10 +658,11 @@ async def get_recent_messages(
             pass
 
 
-async def search_in_telegram(session_string: str, query: str, limit: int = 20) -> list[dict]:
+async def search_in_telegram(session_string: str, query: str, limit: int = 20,
+                             _acc: dict | None = None) -> list[dict]:
     """Search Telegram contacts/global and return ordered results."""
     from telethon.tl.functions.contacts import SearchRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await client(SearchRequest(q=query, limit=limit))
@@ -637,6 +692,7 @@ async def create_channel(
     title: str,
     about: str = "",
     megagroup: bool = False,
+    _acc: dict | None = None,
 ) -> dict:
     """Create a broadcast channel (megagroup=False) or supergroup (megagroup=True).
 
@@ -644,7 +700,7 @@ async def create_channel(
     """
     from telethon.tl.functions.channels import CreateChannelRequest
     from telethon.tl.functions.messages import ExportChatInviteRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await client(CreateChannelRequest(
@@ -680,14 +736,15 @@ async def create_channel(
             pass
 
 
-async def join_channel(session_string: str, invite_or_username: str) -> dict:
+async def join_channel(session_string: str, invite_or_username: str,
+                       _acc: dict | None = None) -> dict:
     """Join a channel or group by username (@name) or invite link (https://t.me/...).
 
     Returns dict: {title, members, channel_id, error?}
     """
     from telethon.tl.functions.channels import JoinChannelRequest
     from telethon.tl.functions.messages import ImportChatInviteRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         invite = invite_or_username.strip()
@@ -716,10 +773,11 @@ async def join_channel(session_string: str, invite_or_username: str) -> dict:
             pass
 
 
-async def leave_channel(session_string: str, channel_id: int | str) -> bool:
+async def leave_channel(session_string: str, channel_id: int | str,
+                        _acc: dict | None = None) -> bool:
     """Leave a channel/group by internal Telegram channel_id."""
     from telethon.tl.functions.channels import LeaveChannelRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -736,10 +794,10 @@ async def leave_channel(session_string: str, channel_id: int | str) -> bool:
 
 
 async def edit_channel_title(
-    session_string: str, channel_id: int, title: str
+    session_string: str, channel_id: int, title: str, _acc: dict | None = None,
 ) -> bool:
     from telethon.tl.functions.channels import EditTitleRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -756,10 +814,10 @@ async def edit_channel_title(
 
 
 async def edit_channel_about(
-    session_string: str, channel_id: int, about: str
+    session_string: str, channel_id: int, about: str, _acc: dict | None = None,
 ) -> bool:
     from telethon.tl.functions.channels import EditAboutRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -776,11 +834,11 @@ async def edit_channel_about(
 
 
 async def set_channel_username(
-    session_string: str, channel_id: int, username: str
+    session_string: str, channel_id: int, username: str, _acc: dict | None = None,
 ) -> str:
     """Set public username for channel. Returns '' on success, error string on failure."""
     from telethon.tl.functions.channels import UpdateUsernameRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -796,10 +854,11 @@ async def set_channel_username(
             pass
 
 
-async def get_channel_invite_link(session_string: str, channel_id: int) -> str:
+async def get_channel_invite_link(session_string: str, channel_id: int,
+                                  _acc: dict | None = None) -> str:
     """Get (or create) an invite link for the channel. Returns link string or ''."""
     from telethon.tl.functions.messages import ExportChatInviteRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -815,10 +874,11 @@ async def get_channel_invite_link(session_string: str, channel_id: int) -> str:
             pass
 
 
-async def delete_channel(session_string: str, channel_id: int) -> bool:
+async def delete_channel(session_string: str, channel_id: int,
+                         _acc: dict | None = None) -> bool:
     """Permanently delete a channel or group. Irreversible."""
     from telethon.tl.functions.channels import DeleteChannelRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -835,12 +895,12 @@ async def delete_channel(session_string: str, channel_id: int) -> bool:
 
 
 async def get_channel_members(
-    session_string: str, channel_id: int, limit: int = 50
+    session_string: str, channel_id: int, limit: int = 50, _acc: dict | None = None,
 ) -> list[dict]:
     """Return list of channel/group members (up to limit)."""
     from telethon.tl.functions.channels import GetParticipantsRequest
     from telethon.tl.types import ChannelParticipantsRecent
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -871,14 +931,14 @@ async def get_channel_members(
 
 
 async def invite_users_to_channel(
-    session_string: str, channel_id: int, usernames: list[str]
+    session_string: str, channel_id: int, usernames: list[str], _acc: dict | None = None,
 ) -> dict:
     """Invite a list of users (@username or phone) to a group.
 
     Returns {invited: int, failed: list[str]}.
     """
     from telethon.tl.functions.channels import InviteToChannelRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     invited = 0
     failed = []
     try:
@@ -903,14 +963,14 @@ async def invite_users_to_channel(
             pass
 
 
-async def get_contacts(session_string: str) -> list[dict]:
+async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
     """Fetch contacts list from a Telegram account.
 
     Returns list of {user_id, username, phone, first_name, last_name}.
     Bots and deleted accounts are excluded.
     """
     from telethon.tl.functions.contacts import GetContactsRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await client(GetContactsRequest(hash=0))
@@ -937,12 +997,12 @@ async def get_contacts(session_string: str) -> list[dict]:
 
 
 async def kick_from_channel(
-    session_string: str, channel_id: int, user_id: int
+    session_string: str, channel_id: int, user_id: int, _acc: dict | None = None,
 ) -> bool:
     """Kick (ban + unban) a user from a channel/group."""
     from telethon.tl.functions.channels import EditBannedRequest
     from telethon.tl.types import ChatBannedRights
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         channel = await client.get_entity(channel_id)
@@ -970,7 +1030,8 @@ async def kick_from_channel(
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def post_to_channel(
-    session_string: str, channel_id: int | str, text: str, access_hash: int = 0
+    session_string: str, channel_id: int | str, text: str, access_hash: int = 0,
+    _acc: dict | None = None,
 ) -> dict:
     """Post a text message to a channel/group.
 
@@ -981,7 +1042,7 @@ async def post_to_channel(
     """
     from telethon.tl.types import InputPeerChannel
     from telethon.errors import FloodWaitError, ChatWriteForbiddenError, UserNotParticipantError
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
@@ -1024,12 +1085,13 @@ async def post_to_channel(
 
 
 async def send_reaction(
-    session_string: str, channel_id: int, msg_id: int, emoji: str
+    session_string: str, channel_id: int, msg_id: int, emoji: str,
+    _acc: dict | None = None,
 ) -> bool:
     """Send a reaction emoji to a specific message."""
     from telethon.tl.functions.messages import SendReactionRequest
     from telethon.tl.types import ReactionEmoji
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -1054,6 +1116,7 @@ async def report_peer(
     peer_username: str,
     reason: str,
     message: str = "",
+    _acc: dict | None = None,
 ) -> bool:
     """Report a channel/user to Telegram moderators.
 
@@ -1074,7 +1137,7 @@ async def report_peer(
         "other": InputReportReasonOther(),
     }
     tg_reason = reason_map.get(reason, InputReportReasonSpam())
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(peer_username.lstrip("@"))
@@ -1099,10 +1162,11 @@ async def update_profile(
     first_name: str | None = None,
     last_name: str | None = None,
     about: str | None = None,
+    _acc: dict | None = None,
 ) -> bool:
     """Update the connected account's profile. Pass None to leave a field unchanged."""
     from telethon.tl.functions.account import UpdateProfileRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         await client.get_me()
@@ -1127,10 +1191,11 @@ async def update_profile(
             pass
 
 
-async def update_account_username(session_string: str, username: str) -> str:
+async def update_account_username(session_string: str, username: str,
+                                  _acc: dict | None = None) -> str:
     """Update account username. Returns '' on success, error string on failure."""
     from telethon.tl.functions.account import UpdateUsernameRequest
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         await client(UpdateUsernameRequest(username=username.lstrip("@")))
@@ -1156,6 +1221,7 @@ async def create_bot_via_botfather(
     session_string: str,
     bot_display_name: str,
     bot_username: str,
+    _acc: dict | None = None,
 ) -> dict:
     """Create a new Telegram bot via @BotFather automated dialog.
 
@@ -1163,7 +1229,7 @@ async def create_bot_via_botfather(
     or 'error' key with message on failure.
     """
     import re
-    client = _make_client(session_string)
+    client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 

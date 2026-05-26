@@ -1592,15 +1592,23 @@ async def get_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int):
 
 async def add_tg_account(pool: asyncpg.Pool, owner_id: int, phone: str,
                          session_str: str, tg_user_id: int,
-                         first_name: str, username: str) -> int:
+                         first_name: str, username: str,
+                         device_model: str | None = None,
+                         system_version: str | None = None,
+                         app_version: str | None = None) -> int:
     row = await pool.fetchrow(
-        """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id, first_name, username)
-           VALUES($1,$2,$3,$4,$5,$6)
+        """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
+               first_name, username, device_model, system_version, app_version)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
            ON CONFLICT (owner_id, phone) DO UPDATE
            SET session_str=$3, tg_user_id=$4, first_name=$5, username=$6,
+               device_model=COALESCE($7, tg_accounts.device_model),
+               system_version=COALESCE($8, tg_accounts.system_version),
+               app_version=COALESCE($9, tg_accounts.app_version),
                is_active=true, last_used=now()
            RETURNING id""",
         owner_id, phone, session_str, tg_user_id, first_name, username,
+        device_model, system_version, app_version,
     )
     return row["id"]
 

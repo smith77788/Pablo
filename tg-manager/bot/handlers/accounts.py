@@ -31,6 +31,7 @@ from services.account_manager import (
     confirm_2fa,
     confirm_code,
     confirm_qr_2fa,
+    generate_device_fingerprint,
     get_account_dialogs_stats,
     get_dialogs,
     get_client_info_and_session,
@@ -527,6 +528,9 @@ async def _qr_wait_task(
             tg_user_id=info.get("tg_user_id"),
             first_name=info.get("first_name", ""),
             username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
         )
     except Exception as exc:
         try:
@@ -621,6 +625,9 @@ async def handle_qr_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext)
             tg_user_id=info.get("tg_user_id"),
             first_name=info.get("first_name", ""),
             username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
         )
     except Exception as exc:
         await message.answer(
@@ -761,6 +768,9 @@ async def _finalize_login(
             tg_user_id=info.get("tg_user_id"),
             first_name=info.get("first_name", ""),
             username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
         )
     except Exception as exc:
         await message.answer(
@@ -848,7 +858,7 @@ async def cb_channels(
     )
 
     try:
-        dialogs = await get_dialogs(session_str)
+        dialogs = await get_dialogs(session_str, _acc=acc)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -921,7 +931,7 @@ async def cb_post_choose_chat(
     await callback.message.edit_text("⏳ Загружаю список каналов…", parse_mode="HTML")
 
     try:
-        dialogs = await get_dialogs(session_str)
+        dialogs = await get_dialogs(session_str, _acc=acc)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -1028,7 +1038,7 @@ async def handle_post_text(
     await message.answer("⏳ Отправляю сообщение…")
 
     try:
-        await send_message(session_str, chat_id, text)
+        await send_message(session_str, chat_id, text, _acc=acc)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -1140,7 +1150,7 @@ async def cb_check_health(
     )
 
     try:
-        result = await check_account_health(session_str)
+        result = await check_account_health(session_str, _acc=acc)
     except Exception as exc:
         result = {"ok": False, "reason": f"Ошибка: {escape(str(exc)[:200])}"}
 
@@ -1182,7 +1192,7 @@ async def cb_dialogs_stats(
     )
 
     try:
-        stats = await get_account_dialogs_stats(session_str)
+        stats = await get_account_dialogs_stats(session_str, _acc=acc)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -1740,6 +1750,7 @@ async def _finalize_import(
         return
 
     phone = info.get("phone") or f"id:{info.get('tg_user_id', 'unknown')}"
+    device = generate_device_fingerprint()
     try:
         await db.add_tg_account(
             pool,
@@ -1749,6 +1760,9 @@ async def _finalize_import(
             tg_user_id=info.get("tg_user_id") or 0,
             first_name=info.get("first_name", ""),
             username=info.get("username", ""),
+            device_model=device["device_model"],
+            system_version=device["system_version"],
+            app_version=device["app_version"],
         )
     except Exception as exc:
         await message.answer(
