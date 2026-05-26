@@ -35,9 +35,15 @@ async def add_bot(pool: asyncpg.Pool, token: str, bot_id: int, username: str,
                VALUES ($1, $2, $3, $4, $5)""",
             token, bot_id, username, first_name, added_by,
         )
-        return True
     except asyncpg.UniqueViolationError:
         return False
+    # Referral activation: first bot creation counts as "active"
+    existing_bots = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", added_by
+    ) or 0
+    if existing_bots == 1:  # this was the first bot
+        await mark_referral_activated(pool, added_by)
+    return True
 
 
 async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
@@ -1830,3 +1836,240 @@ async def get_managed_channels(
         "SELECT * FROM managed_channels WHERE owner_id=$1 ORDER BY acc_id, title",
         owner_id,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PLATFORM REFERRAL SYSTEM
+# ══════════════════════════════════════════════════════════════════════════════
+
+import random
+import string as _string
+
+
+def _gen_code() -> str:
+    chars = _string.ascii_uppercase + _string.digits
+    return "inv_" + "".join(random.choices(chars, k=6))
+
+
+async def get_or_create_referral_code(pool: asyncpg.Pool, user_id: int) -> str:
+    """Return existing referral code or create a new unique one."""
+    existing = await pool.fetchval(
+        "SELECT code FROM platform_referral_codes WHERE user_id=$1", user_id
+    )
+    if existing:
+        return existing
+    for _ in range(10):
+        code = _gen_code()
+        try:
+            await pool.execute(
+                "INSERT INTO platform_referral_codes(user_id, code) VALUES($1,$2)",
+                user_id, code,
+            )
+            return code
+        except Exception:
+            continue
+    raise RuntimeError("Failed to generate unique referral code")
+
+
+async def get_user_by_referral_code(pool: asyncpg.Pool, code: str) -> int | None:
+    """Return referrer user_id for a given code, or None."""
+    return await pool.fetchval(
+        "SELECT user_id FROM platform_referral_codes WHERE code=$1", code
+    )
+
+
+async def record_platform_referral(
+    pool: asyncpg.Pool, referrer_id: int, referred_id: int
+) -> bool:
+    """Record a new platform referral. Returns False if already exists or invalid."""
+    if referrer_id == referred_id:
+        return False
+    # Anti-fraud: max 100 referrals per month
+    monthly = await pool.fetchval(
+        """SELECT COUNT(*) FROM platform_referrals
+           WHERE referrer_id=$1 AND created_at >= now() - INTERVAL '30 days'""",
+        referrer_id,
+    ) or 0
+    if monthly >= 100:
+        return False
+    try:
+        await pool.execute(
+            "INSERT INTO platform_referrals(referrer_id, referred_id) VALUES($1,$2)",
+            referrer_id, referred_id,
+        )
+        await pool.execute(
+            "UPDATE platform_referral_codes SET total_clicks=total_clicks+1 WHERE user_id=$1",
+            referrer_id,
+        )
+        return True
+    except Exception:
+        return False
+
+
+async def mark_referral_activated(pool: asyncpg.Pool, referred_id: int) -> int | None:
+    """Mark referral as activated (user created first bot). Returns referrer_id or None."""
+    row = await pool.fetchrow(
+        """UPDATE platform_referrals
+           SET activated_at=now()
+           WHERE referred_id=$1 AND activated_at IS NULL
+           RETURNING referrer_id""",
+        referred_id,
+    )
+    return row["referrer_id"] if row else None
+
+
+async def mark_referral_paid(pool: asyncpg.Pool, referred_id: int) -> int | None:
+    """Mark referral as paid (referred user confirmed payment). Returns referrer_id or None."""
+    row = await pool.fetchrow(
+        """UPDATE platform_referrals
+           SET paid_at=now()
+           WHERE referred_id=$1 AND paid_at IS NULL
+           RETURNING referrer_id""",
+        referred_id,
+    )
+    return row["referrer_id"] if row else None
+
+
+async def get_referral_stats(pool: asyncpg.Pool, user_id: int) -> dict:
+    """Return referral dashboard data for a user."""
+    code = await get_or_create_referral_code(pool, user_id)
+    total = await pool.fetchval(
+        "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1", user_id
+    ) or 0
+    active = await pool.fetchval(
+        "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1 AND activated_at IS NOT NULL",
+        user_id,
+    ) or 0
+    paid = await pool.fetchval(
+        "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1 AND paid_at IS NOT NULL",
+        user_id,
+    ) or 0
+    rewards = await pool.fetch(
+        "SELECT level, plan, days, given_at FROM referral_rewards WHERE user_id=$1 ORDER BY given_at",
+        user_id,
+    )
+    return {
+        "code": code,
+        "total": total,
+        "active": active,
+        "paid": paid,
+        "rewards": [dict(r) for r in rewards],
+    }
+
+
+async def get_referral_leaderboard_platform(pool: asyncpg.Pool, limit: int = 10) -> list[dict]:
+    """Top referrers by number of paying referrals."""
+    rows = await pool.fetch(
+        """SELECT pr.referrer_id, pu.first_name, pu.username,
+                  COUNT(*) FILTER (WHERE pr.paid_at IS NOT NULL) AS paid_count,
+                  COUNT(*) AS total_count
+           FROM platform_referrals pr
+           JOIN platform_users pu ON pu.user_id = pr.referrer_id
+           GROUP BY pr.referrer_id, pu.first_name, pu.username
+           HAVING COUNT(*) FILTER (WHERE pr.paid_at IS NOT NULL) > 0
+           ORDER BY paid_count DESC, total_count DESC
+           LIMIT $1""",
+        limit,
+    )
+    return [dict(r) for r in rows]
+
+
+# Reward tier definitions
+_REWARD_TIERS = [
+    ("basic",    "active", 5,  "starter", 14),
+    ("silver",   "paid",   3,  "starter", 30),
+    ("gold",     "paid",   10, "pro",     30),
+    ("platinum", "paid",   25, "enterprise", 30),
+]
+
+
+async def check_and_grant_rewards(
+    pool: asyncpg.Pool, referrer_id: int, bot
+) -> list[str]:
+    """Check thresholds and grant any unclaimed rewards. Returns list of newly granted levels."""
+    stats = await get_referral_stats(pool, referrer_id)
+    granted = []
+    existing_levels = {r["level"] for r in stats["rewards"]}
+
+    for level, metric, threshold, plan, days in _REWARD_TIERS:
+        if level in existing_levels:
+            continue
+        count = stats["active"] if metric == "active" else stats["paid"]
+        if count < threshold:
+            continue
+        try:
+            await pool.execute(
+                "INSERT INTO referral_rewards(user_id, level, plan, days) VALUES($1,$2,$3,$4)",
+                referrer_id, level, plan, days,
+            )
+        except Exception:
+            continue
+        # Extend subscription
+        await pool.execute(
+            """INSERT INTO subscriptions (user_id, plan, expires_at, is_active)
+               VALUES ($1, $2, now() + ($3 || ' days')::INTERVAL, true)
+               ON CONFLICT (user_id) DO UPDATE SET
+                   plan = CASE
+                       WHEN ARRAY_POSITION(ARRAY['starter','pro','enterprise'], EXCLUDED.plan) >
+                            ARRAY_POSITION(ARRAY['starter','pro','enterprise'], subscriptions.plan)
+                       THEN EXCLUDED.plan ELSE subscriptions.plan END,
+                   is_active  = true,
+                   expires_at = GREATEST(subscriptions.expires_at, now())
+                              + ($3 || ' days')::INTERVAL""",
+            referrer_id, plan, str(days),
+        )
+        granted.append(level)
+        # Notify referrer
+        level_names = {
+            "basic": "🥉 Базовый", "silver": "🥈 Серебро",
+            "gold": "🥇 Золото", "platinum": "💎 Платина",
+        }
+        plan_names = {"starter": "Starter", "pro": "Pro", "enterprise": "Enterprise"}
+        try:
+            await bot.send_message(
+                referrer_id,
+                f"🎉 <b>Реферальная награда получена!</b>\n\n"
+                f"Уровень: {level_names.get(level, level)}\n"
+                f"Награда: <b>{days} дней {plan_names.get(plan, plan)} бесплатно!</b>\n\n"
+                f"Продолжайте приглашать — впереди ещё уровни!\n"
+                f"/referral — ваш прогресс",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+    return granted
+
+
+async def give_welcome_bonus(pool: asyncpg.Pool, referred_id: int, bot) -> bool:
+    """Give 7 days Starter to a new user who joined via referral link. One-time only."""
+    updated = await pool.fetchval(
+        """UPDATE platform_referrals
+           SET welcome_bonus_given=true
+           WHERE referred_id=$1 AND welcome_bonus_given=false
+           RETURNING id""",
+        referred_id,
+    )
+    if not updated:
+        return False
+    await pool.execute(
+        """INSERT INTO subscriptions (user_id, plan, expires_at, is_active)
+           VALUES ($1, 'starter', now() + INTERVAL '7 days', true)
+           ON CONFLICT (user_id) DO UPDATE SET
+               plan       = CASE WHEN subscriptions.is_active THEN subscriptions.plan ELSE 'starter' END,
+               is_active  = true,
+               expires_at = GREATEST(subscriptions.expires_at, now()) + INTERVAL '7 days'""",
+        referred_id,
+    )
+    try:
+        await bot.send_message(
+            referred_id,
+            "🎁 <b>Подарок от реферальной программы!</b>\n\n"
+            "Вы пришли по реферальной ссылке и получаете <b>7 дней Starter бесплатно!</b>\n\n"
+            "💡 Поделитесь своей ссылкой — и вы тоже можете получить бесплатный тариф:\n"
+            "/referral",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    return True

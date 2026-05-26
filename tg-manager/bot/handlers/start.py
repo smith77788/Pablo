@@ -8,6 +8,9 @@ from bot.utils.subscription import get_plan, PLAN_EMOJIS, is_platform_admin
 from database import db
 from bot.callbacks import BotCb
 from bot.handlers.admin import notify_new_platform_user
+import logging
+
+log = logging.getLogger(__name__)
 
 router = Router()
 
@@ -40,6 +43,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     except Exception:
         pass
 
+    is_new = False
     try:
         is_new = not await pool.fetchval(
             "SELECT 1 FROM platform_users WHERE user_id=$1", uid
@@ -61,6 +65,20 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
             )
     except Exception:
         pass
+
+    # Handle referral code from /start inv_XXXXXX
+    if is_new:
+        args = message.text.split(maxsplit=1)
+        start_param = args[1].strip() if len(args) > 1 else ""
+        if start_param.startswith("inv_"):
+            try:
+                referrer_id = await db.get_user_by_referral_code(pool, start_param)
+                if referrer_id and referrer_id != uid:
+                    recorded = await db.record_platform_referral(pool, referrer_id, uid)
+                    if recorded:
+                        await db.give_welcome_bonus(pool, uid, message.bot)
+            except Exception as e:
+                log.warning("Referral processing error: %s", e)
 
     bots = await db.get_bots(pool, uid)
     bot_count = len(bots)

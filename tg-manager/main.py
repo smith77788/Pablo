@@ -35,6 +35,7 @@ from bot.handlers import net_broadcast as net_bc_handler
 from bot.handlers import network_bulk as net_bulk_handler
 from bot.handlers import ranking as ranking_handler
 from bot.handlers import accounts as accounts_handler
+from bot.handlers import referral as referral_handler
 from bot.handlers import channel_ops as channel_ops_handler
 from bot.handlers import admin as admin_handler
 from services import scheduler
@@ -126,6 +127,7 @@ async def main() -> None:
     dp.include_router(ai_handler.router)
     dp.include_router(ranking_handler.router)
     dp.include_router(accounts_handler.router)
+    dp.include_router(referral_handler.router)
     dp.include_router(channel_ops_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
