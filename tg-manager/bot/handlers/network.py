@@ -176,7 +176,7 @@ async def cb_cluster_view(callback: CallbackQuery, callback_data: ClusterCb,
                            pool: asyncpg.Pool) -> None:
 
     await callback.answer()
-    cluster = callback_data.cluster
+    cluster = callback_data.cluster or ""
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     total_aud = sum(b["audience_count"] for b in bots)
     swarm_on = sum(1 for b in bots if b["swarm_enabled"])
@@ -203,12 +203,13 @@ async def cb_bulk_swarm_on(callback: CallbackQuery, callback_data: ClusterCb,
                             pool: asyncpg.Pool) -> None:
 
     await callback.answer()
-    n = await db.bulk_set_swarm(pool, callback.from_user.id, callback_data.cluster, True)
+    cluster = callback_data.cluster or ""
+    n = await db.bulk_set_swarm(pool, callback.from_user.id, cluster, True)
     await callback.answer(f"✅ Swarm включён для {n} ботов.", show_alert=True)
-    bots = await db.get_bots_in_cluster(pool, callback.from_user.id, callback_data.cluster)
+    bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     total_aud = sum(b["audience_count"] for b in bots)
     mode = await db.get_system_mode(pool)
-    lines = [f"🌐 <b>Кластер: {callback_data.cluster}</b>\n",
+    lines = [f"🌐 <b>Кластер: {cluster}</b>\n",
              f"Ботов: {len(bots)} | В Swarm: {n} | Аудитория: {total_aud:,}",
              f"Режим: <b>{mode.upper()}</b>\n", "<b>Боты:</b>"]
     for b in bots:
@@ -217,7 +218,7 @@ async def cb_bulk_swarm_on(callback: CallbackQuery, callback_data: ClusterCb,
         role = _ROLE_LABELS.get(b.get("bot_role", "general"), "⚙️")
         lines.append(f"  {swarm_icon} {label} [{role}] — {b['audience_count']:,} юз.")
     await callback.message.edit_text("\n".join(lines), parse_mode="HTML",
-                                      reply_markup=network_cluster_view(callback_data.cluster, bots))
+                                      reply_markup=network_cluster_view(cluster, bots))
 
 
 @router.callback_query(ClusterCb.filter(F.action == "bulk_swarm_off"))
@@ -225,17 +226,18 @@ async def cb_bulk_swarm_off(callback: CallbackQuery, callback_data: ClusterCb,
                              pool: asyncpg.Pool) -> None:
 
     await callback.answer()
-    n = await db.bulk_set_swarm(pool, callback.from_user.id, callback_data.cluster, False)
+    cluster = callback_data.cluster or ""
+    n = await db.bulk_set_swarm(pool, callback.from_user.id, cluster, False)
     await callback.answer(f"⚫ Swarm отключён для {n} ботов.", show_alert=True)
-    bots = await db.get_bots_in_cluster(pool, callback.from_user.id, callback_data.cluster)
+    bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     mode = await db.get_system_mode(pool)
-    lines = [f"🌐 <b>Кластер: {callback_data.cluster}</b>\n",
+    lines = [f"🌐 <b>Кластер: {cluster}</b>\n",
              f"Режим: <b>{mode.upper()}</b>\n", "<b>Боты:</b>"]
     for b in bots:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         lines.append(f"  ⚫ {label} — swarm off")
     await callback.message.edit_text("\n".join(lines), parse_mode="HTML",
-                                      reply_markup=network_cluster_view(callback_data.cluster, bots))
+                                      reply_markup=network_cluster_view(cluster, bots))
 
 
 @router.callback_query(ClusterCb.filter(F.action.in_({"bulk_role_entry", "bulk_role_conversion", "bulk_role_retention"})))
@@ -243,17 +245,18 @@ async def cb_bulk_role(callback: CallbackQuery, callback_data: ClusterCb,
                        pool: asyncpg.Pool) -> None:
 
     await callback.answer()
+    cluster = callback_data.cluster or ""
     role_map = {"bulk_role_entry": "entry", "bulk_role_conversion": "conversion",
                 "bulk_role_retention": "retention"}
     role = role_map[callback_data.action]
-    n = await db.bulk_set_role(pool, callback.from_user.id, callback_data.cluster, role)
+    n = await db.bulk_set_role(pool, callback.from_user.id, cluster, role)
     label = _ROLE_LABELS.get(role, role)
     await callback.answer(f"✅ Роль {label} назначена {n} ботам.", show_alert=True)
-    bots = await db.get_bots_in_cluster(pool, callback.from_user.id, callback_data.cluster)
+    bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     await callback.message.edit_text(
-        f"🌐 <b>Кластер: {callback_data.cluster}</b>\n\nРоль {label} применена к {n} ботам.",
+        f"🌐 <b>Кластер: {cluster}</b>\n\nРоль {label} применена к {n} ботам.",
         parse_mode="HTML",
-        reply_markup=network_cluster_view(callback_data.cluster, bots),
+        reply_markup=network_cluster_view(cluster, bots),
     )
 
 
@@ -266,12 +269,13 @@ async def cb_cluster_assign_start(callback: CallbackQuery, callback_data: Cluste
         await callback.answer("Нет ботов.", show_alert=True)
         return
     await callback.answer()
+    cluster = callback_data.cluster or ""
     await state.set_state(AssignCluster.waiting_name)
-    await state.update_data(cluster=callback_data.cluster)
+    await state.update_data(cluster=cluster)
     await callback.message.edit_text(
-        f"🌐 <b>Назначить бота в кластер «{callback_data.cluster}»</b>\n\nВыберите бота:",
+        f"🌐 <b>Назначить бота в кластер «{cluster}»</b>\n\nВыберите бота:",
         parse_mode="HTML",
-        reply_markup=network_assign_bot_pick(callback_data.cluster, list(bots)),
+        reply_markup=network_assign_bot_pick(cluster, list(bots)),
     )
 
 
@@ -280,22 +284,22 @@ async def cb_cluster_assign_confirm(callback: CallbackQuery, callback_data: Clus
                                      pool: asyncpg.Pool, state: FSMContext) -> None:
 
     await callback.answer()
+    cluster = callback_data.cluster or ""
     await state.clear()
-    await db.set_bot_cluster_name(pool, callback_data.bot_id, callback.from_user.id,
-                                   callback_data.cluster)
+    await db.set_bot_cluster_name(pool, callback_data.bot_id, callback.from_user.id, cluster)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else str(callback_data.bot_id))
-    await callback.answer(f"✅ {label} → кластер «{callback_data.cluster}»", show_alert=True)
-    bots = await db.get_bots_in_cluster(pool, callback.from_user.id, callback_data.cluster)
+    await callback.answer(f"✅ {label} → кластер «{cluster}»", show_alert=True)
+    bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     mode = await db.get_system_mode(pool)
-    lines = [f"🌐 <b>Кластер: {callback_data.cluster}</b>\n",
+    lines = [f"🌐 <b>Кластер: {cluster}</b>\n",
              f"Режим: <b>{mode.upper()}</b>\n", "<b>Боты:</b>"]
     for b in bots:
         lbl = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         lines.append(f"  {swarm_icon} {lbl} — {b['audience_count']:,} юз.")
     await callback.message.edit_text("\n".join(lines), parse_mode="HTML",
-                                      reply_markup=network_cluster_view(callback_data.cluster, bots))
+                                      reply_markup=network_cluster_view(cluster, bots))
 
 
 # ── Bot Ranking (PRO) ─────────────────────────────────────────────────────────

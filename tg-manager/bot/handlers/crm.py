@@ -95,25 +95,27 @@ async def msg_global_tag_name(message: Message, state: FSMContext, pool: asyncpg
 async def cb_tag_detail(callback: CallbackQuery, callback_data: CrmCb,
                          pool: asyncpg.Pool) -> None:
     await callback.answer()
-    safe_tag = callback_data.tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    user_ids = await db.get_users_by_tag(pool, callback_data.bot_id, callback_data.tag)
+    tag = callback_data.tag or ""
+    safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    user_ids = await db.get_users_by_tag(pool, callback_data.bot_id, tag)
     await callback.message.edit_text(
         f"🏷 <b>Тег: {safe_tag}</b>\n\n"
         f"Пользователей: <b>{len(user_ids)}</b>",
         parse_mode="HTML",
-        reply_markup=tag_detail_menu(callback_data.bot_id, callback_data.tag),
+        reply_markup=tag_detail_menu(callback_data.bot_id, tag),
     )
 
 
 @router.callback_query(CrmCb.filter(F.action == "delete_tag_all"))
 async def cb_delete_tag_all(callback: CallbackQuery, callback_data: CrmCb,
                               pool: asyncpg.Pool) -> None:
-    await callback.answer(f"🗑 Тег «{callback_data.tag}» удалён.")
+    tag = callback_data.tag or ""
+    await callback.answer(f"🗑 Тег «{tag}» удалён.")
     await pool.execute(
         "DELETE FROM user_tags WHERE bot_id=$1 AND tag=$2",
-        callback_data.bot_id, callback_data.tag,
+        callback_data.bot_id, tag,
     )
-    safe_tag = callback_data.tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     tags = await db.get_tag_names(pool, callback_data.bot_id)
     await callback.message.edit_text(
         f"🏷 <b>CRM</b>\n\nТег «{safe_tag}» удалён у всех пользователей.",

@@ -28,7 +28,7 @@ class BroadcastCb(CallbackData, prefix="bc"):
     action: str
     bot_id: int
     broadcast_id: int = 0
-    lang: str = ""
+    lang: Optional[str] = None
 
 
 class BulkCb(CallbackData, prefix="bulk"):
@@ -55,7 +55,7 @@ class ScheduleCb(CallbackData, prefix="sch"):
 class MultigeoCb(CallbackData, prefix="mg"):
     action: str
     bot_id: int
-    lang: str = ""
+    lang: Optional[str] = None
 
 
 class AutoReplyCb(CallbackData, prefix="ar"):
@@ -99,7 +99,7 @@ class CrmCb(CallbackData, prefix="crm"):
     action: str
     bot_id: int = 0
     user_id: int = 0
-    tag: str = ""
+    tag: Optional[str] = None
 
 class AutoCb(CallbackData, prefix="au"):
     action: str
@@ -135,7 +135,7 @@ class NetworkCb(CallbackData, prefix="net"):
 
 class ClusterCb(CallbackData, prefix="cl"):
     action: str
-    cluster: str = ""
+    cluster: Optional[str] = None
     bot_id: int = 0
 
 
@@ -155,7 +155,7 @@ class NetBcCb(CallbackData, prefix="nbc"):
     action: str
     bot_id: int = 0
     segment: str = "all"
-    lang: str = ""
+    lang: Optional[str] = None
 
 
 class AccCb(CallbackData, prefix="acc"):

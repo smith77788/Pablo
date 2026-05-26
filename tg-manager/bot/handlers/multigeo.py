@@ -138,8 +138,8 @@ async def cb_multigeo_desc(callback: CallbackQuery, callback_data: MultigeoCb,
 async def cb_lang_name(callback: CallbackQuery, callback_data: MultigeoCb,
                         state: FSMContext) -> None:
     await state.set_state(MultigeoEdit.waiting_name)
-    await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang)
-    lang_label = callback_data.lang.upper()
+    await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
+    lang_label = (callback_data.lang or "").upper()
     await callback.message.edit_text(
         f"📝 Введите новое имя для языка <code>{lang_label}</code>.\n\n"
         "Отправьте <code>-</code> чтобы сбросить.",
@@ -175,8 +175,8 @@ async def msg_multigeo_name(message: Message, state: FSMContext,
 async def cb_lang_short(callback: CallbackQuery, callback_data: MultigeoCb,
                          state: FSMContext) -> None:
     await state.set_state(MultigeoEdit.waiting_short)
-    await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang)
-    lang_label = callback_data.lang.upper()
+    await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
+    lang_label = (callback_data.lang or "").upper()
     await callback.message.edit_text(
         f"📋 Введите краткое описание для языка <code>{lang_label}</code>.\n\n"
         "Отправьте <code>-</code> чтобы сбросить.",
@@ -212,8 +212,8 @@ async def msg_multigeo_short(message: Message, state: FSMContext,
 async def cb_lang_desc(callback: CallbackQuery, callback_data: MultigeoCb,
                         state: FSMContext) -> None:
     await state.set_state(MultigeoEdit.waiting_desc)
-    await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang)
-    lang_label = callback_data.lang.upper()
+    await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
+    lang_label = (callback_data.lang or "").upper()
     await callback.message.edit_text(
         f"📄 Введите описание для языка <code>{lang_label}</code>.\n\n"
         "Отправьте <code>-</code> чтобы сбросить.",

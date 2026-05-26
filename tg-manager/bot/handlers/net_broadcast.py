@@ -80,7 +80,7 @@ async def cb_net_bc_type_msg(callback: CallbackQuery, callback_data: NetBcCb,
                               pool: asyncpg.Pool, state: FSMContext) -> None:
     await callback.answer()
     segment = callback_data.segment
-    lang = callback_data.lang
+    lang = callback_data.lang or ""
 
     segment_labels = {
         "cold_all": "холодных (7–30 дн) по всей сети",

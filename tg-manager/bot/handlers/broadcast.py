@@ -422,7 +422,7 @@ async def cb_segment(callback: CallbackQuery, callback_data: BroadcastCb,
 async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
                              state: FSMContext, pool: asyncpg.Pool) -> None:
 
-    lang = callback_data.lang
+    lang = callback_data.lang or ""
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
