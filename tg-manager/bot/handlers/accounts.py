@@ -444,7 +444,8 @@ async def cb_qr_login(
     )
 
     asyncio.create_task(
-        _qr_wait_task(bot, user_id, msg.chat.id, msg.message_id, pool),
+        _qr_wait_task(bot, user_id, msg.chat.id, msg.message_id, pool,
+                      state.storage, state.key.bot_id),
         name=f"qr-wait-{user_id}",
     )
 
@@ -455,9 +456,13 @@ async def _qr_wait_task(
     chat_id: int,
     message_id: int,
     pool: asyncpg.Pool,
+    storage,
+    bot_id: int,
 ) -> None:
     """Background task: wait for QR scan and finalize account connection."""
     from telethon.errors import SessionPasswordNeededError
+    from aiogram.fsm.storage.base import StorageKey
+    from aiogram.fsm.context import FSMContext as _FSMContext
 
     try:
         session_str, info = await wait_qr_login(user_id, timeout=120.0)
@@ -478,6 +483,11 @@ async def _qr_wait_task(
         await cleanup_qr_pending(user_id)
         return
     except SessionPasswordNeededError:
+        # Set FSM state so the password message handler catches the next input
+        key = StorageKey(bot_id=bot_id, chat_id=user_id, user_id=user_id)
+        ctx = _FSMContext(storage=storage, key=key)
+        await ctx.set_state(QrLogin2FA.waiting_password)
+
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
         kb.adjust(1)
@@ -487,19 +497,14 @@ async def _qr_wait_task(
                 message_id=message_id,
                 caption=(
                     "🔐 <b>Аккаунт защищён паролем 2FA</b>\n\n"
-                    "Введите пароль двухфакторной аутентификации ниже:"
+                    "Введите пароль двухфакторной аутентификации:"
                 ),
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
         except Exception:
             pass
-        # We can't easily set FSM state from a background task — send a plain prompt
-        # User should re-enter the flow. A simple workaround: send message asking for password.
-        await bot.send_message(
-            chat_id,
-            "🔐 Введите пароль 2FA:",
-        )
+        # Client stays in _pending_qr — needed by confirm_qr_2fa()
         return
     except Exception as exc:
         try:
@@ -575,6 +580,70 @@ async def cb_cancel_qr(callback: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="👤 Аккаунты", callback_data=AccCb(action="menu"))
     await callback.message.edit_text("❌ QR-вход отменён.", reply_markup=kb.as_markup())
+
+
+@router.message(QrLogin2FA.waiting_password)
+async def handle_qr_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    """Handle 2FA password after QR scan."""
+    password = (message.text or "").strip()
+    user_id = message.from_user.id
+
+    try:
+        session_str, info = await confirm_qr_2fa(user_id, password)
+    except ValueError as exc:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
+        kb.adjust(1)
+        await message.answer(
+            f"❌ {escape(str(exc))}\n\nВведите пароль ещё раз:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    except Exception as exc:
+        await message.answer(
+            f"❌ Ошибка: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        await state.clear()
+        await cleanup_qr_pending(user_id)
+        return
+
+    await state.clear()
+    await cleanup_qr_pending(user_id)
+
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=user_id,
+            phone=info.get("phone", f"id:{info['tg_user_id']}"),
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+        )
+    except Exception as exc:
+        await message.answer(
+            f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    display = escape(info.get("first_name") or info.get("username") or f"id:{info['tg_user_id']}")
+    phone_str = escape(info.get("phone", ""))
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await message.answer(
+        f"✅ <b>Аккаунт успешно подключён!</b>\n\n"
+        f"👤 {display}\n"
+        f"📱 {phone_str}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 # ── Step 2: receive OTP code ───────────────────────────────────────────────────
