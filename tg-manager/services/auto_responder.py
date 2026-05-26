@@ -81,6 +81,16 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
             # Track user activity — returns True for first-ever message (new user)
             is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)
 
+            # Register in bot_users so the user appears in broadcast audience
+            from_user = msg.get("from") or {}
+            await db.upsert_users(pool, bot_id, [{
+                "user_id": chat_id,
+                "username": from_user.get("username", ""),
+                "first_name": from_user.get("first_name", ""),
+                "last_name": from_user.get("last_name", ""),
+                "language_code": from_user.get("language_code", ""),
+            }])
+
             # Deep link tracking: /start <param>
             if text.strip().lower().startswith("/start "):
                 parts = text.strip().split(None, 1)
