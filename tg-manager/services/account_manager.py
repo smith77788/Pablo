@@ -18,6 +18,13 @@ _pending_qr: dict[int, tuple] = {}
 # Таймаут подключения в секундах
 _CONNECT_TIMEOUT = 30
 
+
+def _backoff(attempt: int, base: float = 2.0, cap: float = 120.0) -> float:
+    """Return exponential backoff seconds: base^attempt, capped at cap."""
+    import math
+    return min(base ** attempt, cap)
+
+
 # Pool of realistic Android device fingerprints
 _ANDROID_DEVICES: list[tuple[str, str]] = [
     ("Samsung SM-S928B", "Android 14"),
@@ -514,8 +521,8 @@ async def send_dm(session_string: str, username: str, text: str,
         return {"ok": True}
     except FloodWaitError as e:
         return {"error": f"FloodWait: подождите {e.seconds}с", "flood_wait": e.seconds}
-    except PeerFloodError:
-        return {"error": "PeerFlood: аккаунт временно ограничен по рассылке"}
+    except PeerFloodError as e:
+        return {"error": f"PeerFlood: аккаунт временно ограничен по рассылке: {e}", "banned": True}
     except UserPrivacyRestrictedError:
         return {"error": "приватность: пользователь запретил входящие"}
     except UserIsBlockedError:
@@ -728,9 +735,11 @@ async def create_channel(
             "invite_link": invite_link,
         }
     except Exception as e:
-        from telethon.errors import FloodWaitError
+        from telethon.errors import FloodWaitError, PeerFloodError
         if isinstance(e, FloodWaitError):
             return {"error": f"FloodWait {e.seconds}с — Telegram ограничил создание", "flood_wait": e.seconds}
+        if isinstance(e, PeerFloodError):
+            return {"error": f"PeerFlood: аккаунт ограничен — {e}", "flood_wait": e.seconds if hasattr(e, 'seconds') else 0}
         log.exception("create_channel error: %s", e)
         return {"error": str(e)[:200]}
     finally:
@@ -768,9 +777,15 @@ async def join_channel(session_string: str, invite_or_username: str,
             "members": getattr(ch, "participants_count", 0) or 0,
         }
     except Exception as e:
-        from telethon.errors import FloodWaitError
+        from telethon.errors import FloodWaitError, UserBannedInChannelError, ChannelPrivateError, PeerFloodError
         if isinstance(e, FloodWaitError):
             return {"error": f"FloodWait {e.seconds}с — подождите перед вступлением", "flood_wait": e.seconds}
+        if isinstance(e, UserBannedInChannelError):
+            return {"error": f"Аккаунт забанен в этом канале: {e}", "banned": True}
+        if isinstance(e, ChannelPrivateError):
+            return {"error": f"Канал приватный или аккаунт заблокирован: {e}", "banned": True}
+        if isinstance(e, PeerFloodError):
+            return {"error": f"PeerFlood: аккаунт временно ограничен: {e}", "banned": True}
         log.exception("join_channel error: %s", e)
         return {"error": str(e)[:200]}
     finally:

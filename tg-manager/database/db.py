@@ -1,7 +1,10 @@
 import asyncpg
 import glob
+import logging
 import os
 from config import DATABASE_URL
+
+log = logging.getLogger(__name__)
 
 
 async def create_pool() -> asyncpg.Pool:
@@ -2083,3 +2086,13 @@ async def give_welcome_bonus(pool: asyncpg.Pool, referred_id: int, bot) -> bool:
     except Exception:
         pass
     return True
+
+
+async def deactivate_account(pool: asyncpg.Pool, account_id: int, reason: str = "") -> None:
+    """Mark account as inactive (banned / PeerFlood). Called by operation handlers."""
+    await pool.execute(
+        "UPDATE tg_accounts SET is_active=false WHERE id=$1",
+        account_id,
+    )
+    if reason:
+        log.warning("Account %s deactivated: %s", account_id, reason)
