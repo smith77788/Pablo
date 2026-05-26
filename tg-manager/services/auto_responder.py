@@ -143,6 +143,53 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                             await db.subscribe_to_funnel(pool, int(arule["action_value"]), chat_id)
                         except (ValueError, TypeError):
                             pass
+                    elif arule["action_type"] == "webhook":
+                        # action_value = URL to POST to
+                        url = arule.get("action_value", "").strip()
+                        if url:
+                            try:
+                                payload = {
+                                    "bot_id": bot_id,
+                                    "chat_id": chat_id,
+                                    "trigger_type": arule["trigger_type"],
+                                    "trigger_value": arule.get("trigger_value"),
+                                    "user": {
+                                        "id": chat_id,
+                                        "username": from_user.get("username", ""),
+                                        "first_name": from_user.get("first_name", ""),
+                                    },
+                                    "text": text,
+                                }
+                                async with http.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                    log.debug("webhook action: url=%s status=%s", url, resp.status)
+                            except Exception as exc:
+                                log.warning("webhook action failed: url=%s error=%s", url, exc)
+                    elif arule["action_type"] == "send_ai_reply":
+                        # action_value = system prompt / persona description
+                        system_prompt = arule.get("action_value") or "Ты полезный ассистент."
+                        try:
+                            from config import OPENAI_API_KEY
+                            if OPENAI_API_KEY:
+                                ai_payload = {
+                                    "model": "gpt-4o-mini",
+                                    "messages": [
+                                        {"role": "system", "content": system_prompt},
+                                        {"role": "user", "content": text},
+                                    ],
+                                    "max_tokens": 300,
+                                }
+                                headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+                                async with http.post(
+                                    "https://api.openai.com/v1/chat/completions",
+                                    json=ai_payload, headers=headers,
+                                    timeout=aiohttp.ClientTimeout(total=30),
+                                ) as resp:
+                                    if resp.status == 200:
+                                        data = await resp.json()
+                                        ai_text = data["choices"][0]["message"]["content"].strip()
+                                        await bot_api.send_message(http, token, chat_id, ai_text)
+                        except Exception as exc:
+                            log.warning("send_ai_reply failed: %s", exc)
 
             # tag_added rules: fire once for each tag added above (one level, no recursion)
             for arule in automation_rules:
@@ -160,6 +207,51 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                             await db.subscribe_to_funnel(pool, int(arule["action_value"]), chat_id)
                         except (ValueError, TypeError):
                             pass
+                    elif arule["action_type"] == "webhook":
+                        url = arule.get("action_value", "").strip()
+                        if url:
+                            try:
+                                payload = {
+                                    "bot_id": bot_id,
+                                    "chat_id": chat_id,
+                                    "trigger_type": arule["trigger_type"],
+                                    "trigger_value": arule.get("trigger_value"),
+                                    "user": {
+                                        "id": chat_id,
+                                        "username": from_user.get("username", ""),
+                                        "first_name": from_user.get("first_name", ""),
+                                    },
+                                    "text": text,
+                                }
+                                async with http.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                    log.debug("webhook action: url=%s status=%s", url, resp.status)
+                            except Exception as exc:
+                                log.warning("webhook action failed: url=%s error=%s", url, exc)
+                    elif arule["action_type"] == "send_ai_reply":
+                        system_prompt = arule.get("action_value") or "Ты полезный ассистент."
+                        try:
+                            from config import OPENAI_API_KEY
+                            if OPENAI_API_KEY:
+                                ai_payload = {
+                                    "model": "gpt-4o-mini",
+                                    "messages": [
+                                        {"role": "system", "content": system_prompt},
+                                        {"role": "user", "content": text},
+                                    ],
+                                    "max_tokens": 300,
+                                }
+                                headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+                                async with http.post(
+                                    "https://api.openai.com/v1/chat/completions",
+                                    json=ai_payload, headers=headers,
+                                    timeout=aiohttp.ClientTimeout(total=30),
+                                ) as resp:
+                                    if resp.status == 200:
+                                        data = await resp.json()
+                                        ai_text = data["choices"][0]["message"]["content"].strip()
+                                        await bot_api.send_message(http, token, chat_id, ai_text)
+                        except Exception as exc:
+                            log.warning("send_ai_reply failed: %s", exc)
 
             # Funnels: subscribe on /start or keyword
             for funnel in funnels:
@@ -183,6 +275,7 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    asyncio.get_event_loop().create_task(run_inactivity_sweep(pool, http))
     while True:
         try:
             bots = await db.get_bots_for_polling(pool)
@@ -194,3 +287,75 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
         except Exception:
             log.exception("Auto-responder loop error")
         await asyncio.sleep(30)
+
+
+async def run_inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    """Background sweep: fire inactivity automation rules."""
+    await asyncio.sleep(600)  # startup delay 10 min
+    while True:
+        try:
+            await _inactivity_sweep(pool, http)
+        except Exception:
+            log.exception("inactivity_sweep error")
+        await asyncio.sleep(3600)  # hourly
+
+
+async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    """Find users inactive for N days and fire matching rules."""
+    # Get all active inactivity rules
+    rules = await pool.fetch(
+        """SELECT ar.*, mb.token
+           FROM automation_rules ar
+           JOIN managed_bots mb ON mb.bot_id = ar.bot_id
+           WHERE ar.trigger_type = 'inactivity'
+             AND ar.is_active = true
+             AND mb.is_active = true"""
+    )
+    if not rules:
+        return
+
+    for rule in rules:
+        try:
+            inactivity_days = int(rule["trigger_value"] or "3")
+        except (ValueError, TypeError):
+            inactivity_days = 3
+
+        # Find users inactive for N days (use user_activity table)
+        inactive_users = await pool.fetch(
+            """SELECT ua.chat_id FROM user_activity ua
+               WHERE ua.bot_id = $1
+                 AND ua.last_seen < NOW() - ($2 * INTERVAL '1 day')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM inactivity_alerts_sent ias
+                     WHERE ias.bot_id = $1
+                       AND ias.chat_id = ua.chat_id
+                       AND ias.rule_id = $3
+                       AND ias.sent_at > NOW() - ($2 * INTERVAL '1 day')
+                 )
+               LIMIT 100""",
+            rule["bot_id"], inactivity_days, rule["id"],
+        )
+
+        for user in inactive_users:
+            chat_id = user["chat_id"]
+            try:
+                if rule["action_type"] == "send_message":
+                    await bot_api.send_message(http, rule["token"], chat_id, rule["action_value"])
+                elif rule["action_type"] == "webhook":
+                    url = (rule["action_value"] or "").strip()
+                    if url:
+                        await http.post(url, json={
+                            "bot_id": rule["bot_id"], "chat_id": chat_id,
+                            "trigger_type": "inactivity", "inactivity_days": inactivity_days,
+                        }, timeout=aiohttp.ClientTimeout(total=10))
+
+                # Mark as sent (prevent duplicate)
+                await pool.execute(
+                    """INSERT INTO inactivity_alerts_sent(bot_id, chat_id, rule_id)
+                       VALUES($1, $2, $3)
+                       ON CONFLICT(bot_id, chat_id, rule_id) DO UPDATE SET sent_at=NOW()""",
+                    rule["bot_id"], chat_id, rule["id"],
+                )
+                await asyncio.sleep(0.1)  # tiny delay between messages
+            except Exception as exc:
+                log.warning("inactivity_sweep: failed for chat=%s: %s", chat_id, exc)
