@@ -4,3 +4,4 @@ aiohttp==3.10.10
 python-dotenv==1.0.1
 openai>=1.40.0
 telethon>=1.36.0
+opentele>=1.15.1

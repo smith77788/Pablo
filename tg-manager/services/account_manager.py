@@ -86,6 +86,126 @@ async def get_session_string(client) -> str:
     return client.session.save()
 
 
+# ── Session Import Helpers ─────────────────────────────────────────────────────
+
+async def import_from_session_string(session_string: str) -> tuple[str, dict]:
+    """Validate a Telethon StringSession and return (session_str, info).
+    Raises ValueError if the session is invalid or unauthorized.
+    """
+    session_string = session_string.strip()
+    if not session_string or len(session_string) < 20:
+        raise ValueError("Строка сессии слишком короткая.")
+
+    client = _make_client(session_string)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        if not await client.is_user_authorized():
+            raise ValueError("Сессия не авторизована или истекла.")
+        me = await client.get_me()
+        info = {
+            "tg_user_id": me.id,
+            "phone": getattr(me, "phone", "") or f"id:{me.id}",
+            "first_name": getattr(me, "first_name", "") or "",
+            "username": getattr(me, "username", "") or "",
+        }
+        return session_string, info
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
+    """Convert a Pyrogram JSON session to Telethon StringSession.
+
+    Accepted JSON fields: dc_id, auth_key (base64), user_id (optional).
+    Converts auth_key + dc_id to a Telethon StringSession and validates it.
+    """
+    import json as _json
+    import struct
+    import base64
+    from ipaddress import IPv4Address
+    from telethon.sessions import StringSession
+
+    try:
+        data = _json.loads(json_str)
+    except Exception:
+        raise ValueError("Некорректный JSON. Проверьте формат.")
+
+    dc_id = int(data.get("dc_id") or 2)
+    auth_key_raw = data.get("auth_key", "")
+    if not auth_key_raw:
+        raise ValueError("Поле auth_key не найдено в JSON.")
+
+    try:
+        auth_key = base64.b64decode(auth_key_raw + "==")
+    except Exception:
+        raise ValueError("Не удалось декодировать auth_key (ожидается base64).")
+
+    if len(auth_key) != 256:
+        raise ValueError(f"Неверная длина auth_key: {len(auth_key)}, нужно 256 байт.")
+
+    # Production DC server IPs
+    DC_IPS: dict[int, str] = {
+        1: "149.154.175.53",
+        2: "149.154.167.51",
+        3: "149.154.175.100",
+        4: "149.154.167.91",
+        5: "91.108.56.130",
+    }
+    ip_bytes = IPv4Address(DC_IPS.get(dc_id, DC_IPS[2])).packed
+    packed = struct.pack(">B4sH256s", dc_id, ip_bytes, 443, auth_key)
+    session_string = "1" + base64.urlsafe_b64encode(packed).decode()
+
+    return await import_from_session_string(session_string)
+
+
+async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
+    """Convert a TDesktop tdata directory to Telethon StringSession via opentele."""
+    try:
+        from opentele.td import TDesktop
+        from opentele.api import UseCurrentSession
+        from telethon.sessions import StringSession as _SS
+    except ImportError:
+        raise ImportError(
+            "Пакет opentele не установлен. Обратитесь к администратору.\n"
+            "pip install opentele"
+        )
+
+    try:
+        td = TDesktop(tdata_path)
+    except Exception as e:
+        raise ValueError(f"Не удалось загрузить tdata: {e}")
+
+    if not td.isLoaded():
+        raise ValueError("tdata не загружены. Проверьте архив — должна быть папка tdata с файлом key_datas.")
+
+    try:
+        client = await td.ToTelethon(session=_SS(), flag=UseCurrentSession)
+    except Exception as e:
+        raise ValueError(f"Ошибка конвертации tdata → Telethon: {e}")
+
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        if not await client.is_user_authorized():
+            raise ValueError("Сессия из tdata не авторизована.")
+        session_str = client.session.save()
+        me = await client.get_me()
+        info = {
+            "tg_user_id": me.id,
+            "phone": getattr(me, "phone", "") or f"id:{me.id}",
+            "first_name": getattr(me, "first_name", "") or "",
+            "username": getattr(me, "username", "") or "",
+        }
+        return session_str, info
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
     """Get session string + user info from a pending login. Call after confirm_code/confirm_2fa."""
     client = _pending.get(phone)

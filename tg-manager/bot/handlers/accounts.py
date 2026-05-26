@@ -31,6 +31,9 @@ from services.account_manager import (
     get_account_dialogs_stats,
     get_dialogs,
     get_client_info_and_session,
+    import_from_pyrogram_json,
+    import_from_session_string,
+    import_from_tdata,
     send_message,
     send_message_via_account,
     start_login,
@@ -54,6 +57,12 @@ class AccountLogin(StatesGroup):
     waiting_phone = State()
     waiting_code = State()   # state data: phone, phone_code_hash
     waiting_2fa = State()    # state data: phone
+
+
+class SessionImport(StatesGroup):
+    waiting_string_session = State()
+    waiting_pyrogram_json = State()
+    waiting_tdata_zip = State()
 
 
 class AccountPost(StatesGroup):
@@ -202,8 +211,10 @@ async def _show_accounts_menu(
     text += f"\n\n<i>Использовано: {used} / {limit_label}</i>"
 
     if used < limit:
-        kb.button(text="➕ Добавить аккаунт",
+        kb.button(text="➕ Добавить аккаунт (телефон)",
                   callback_data=AccCb(action="add"))
+        kb.button(text="📥 Импорт сессии",
+                  callback_data=AccCb(action="import_menu"))
 
     kb.button(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu"))
     kb.button(text="⚡ Массовые операции",     callback_data=ChanCb(action="bulk_menu"))
@@ -1137,3 +1148,301 @@ async def handle_send_msg_text(
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
+
+
+# ── Session Import ─────────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "import_menu"))
+async def cb_import_menu(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    if not _api_configured():
+        await callback.message.edit_text(_api_missing_text(), parse_mode="HTML", reply_markup=_cancel_markup())
+        return
+    plan, limit = await _get_account_limit(pool, callback.from_user.id)
+    if limit == 0:
+        await callback.message.edit_text(
+            locked_text("Личные аккаунты Telegram", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
+    accounts = await db.get_tg_accounts(pool, callback.from_user.id)
+    if len(accounts) >= limit:
+        limit_label = "∞" if limit >= 9999 else str(limit)
+        await callback.message.edit_text(
+            f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
+            "Обновите подписку для добавления новых аккаунтов.",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(plan),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔑 String Session (Telethon)",  callback_data=AccCb(action="import_string"))
+    kb.button(text="📄 Session JSON (Pyrogram)",    callback_data=AccCb(action="import_pyrogram"))
+    kb.button(text="📦 tdata (ZIP-архив)",          callback_data=AccCb(action="import_tdata"))
+    kb.button(text="◀️ Мои аккаунты",              callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "📥 <b>Импорт сессии</b>\n\n"
+        "Выберите формат:\n\n"
+        "🔑 <b>String Session</b> — строка вида <code>1BQANOTEuA...</code> (Telethon)\n"
+        "📄 <b>Session JSON</b> — JSON с полями <code>dc_id</code>, <code>auth_key</code> (Pyrogram)\n"
+        "📦 <b>tdata</b> — ZIP-архив папки <code>tdata</code> из Telegram Desktop\n\n"
+        "⚠️ Никогда не передавайте сессии незнакомым людям.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Import: Telethon String Session ───────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "import_string"))
+async def cb_import_string(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(SessionImport.waiting_string_session)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "🔑 <b>Импорт Telethon String Session</b>\n\n"
+        "Отправьте строку сессии. Она начинается с цифры <code>1</code> "
+        "и содержит только буквы, цифры, <code>+</code>, <code>/</code>, <code>=</code>.\n\n"
+        "Пример:\n<code>1BQANOTEuAGkA...</code>\n\n"
+        "Как получить: запустить скрипт с <code>StringSession()</code> и вызвать <code>client.session.save()</code>.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_string_session, F.text)
+async def handle_import_string(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    session_str = (message.text or "").strip()
+    msg = await message.answer("⏳ Проверяю сессию...")
+    try:
+        session_str, info = await import_from_session_string(session_str)
+    except Exception as exc:
+        await msg.edit_text(
+            f"❌ <b>Ошибка импорта</b>\n\n<code>{escape(str(exc)[:300])}</code>\n\n"
+            "Проверьте строку сессии и попробуйте снова.",
+            parse_mode="HTML",
+        )
+        return
+    await _finalize_import(message, pool, state, session_str, info)
+
+
+# ── Import: Pyrogram JSON ─────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "import_pyrogram"))
+async def cb_import_pyrogram(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(SessionImport.waiting_pyrogram_json)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "📄 <b>Импорт Pyrogram JSON Session</b>\n\n"
+        "Отправьте JSON с данными сессии. Необходимые поля:\n"
+        "• <code>dc_id</code> — номер дата-центра (1–5)\n"
+        "• <code>auth_key</code> — ключ авторизации (base64, 256 байт)\n\n"
+        "Пример:\n"
+        "<code>{\"dc_id\": 2, \"auth_key\": \"AAAA...\", \"user_id\": 123456}</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_pyrogram_json, F.text)
+async def handle_import_pyrogram(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    json_str = (message.text or "").strip()
+    msg = await message.answer("⏳ Конвертирую и проверяю сессию...")
+    try:
+        session_str, info = await import_from_pyrogram_json(json_str)
+    except Exception as exc:
+        await msg.edit_text(
+            f"❌ <b>Ошибка импорта</b>\n\n<code>{escape(str(exc)[:300])}</code>\n\n"
+            "Проверьте JSON и попробуйте снова.",
+            parse_mode="HTML",
+        )
+        return
+    await _finalize_import(message, pool, state, session_str, info)
+
+
+# ── Import: tdata ZIP ─────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "import_tdata"))
+async def cb_import_tdata(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(SessionImport.waiting_tdata_zip)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "📦 <b>Импорт tdata (Telegram Desktop)</b>\n\n"
+        "<b>Как подготовить архив:</b>\n"
+        "1. Найдите папку <code>tdata</code> в директории Telegram Desktop\n"
+        "   • Windows: <code>%APPDATA%\\Telegram Desktop\\tdata</code>\n"
+        "   • Linux: <code>~/.local/share/TelegramDesktop/tdata</code>\n"
+        "   • macOS: <code>~/Library/Group Containers/.../tdata</code>\n"
+        "2. Упакуйте папку <code>tdata</code> целиком в ZIP-архив\n"
+        "3. Отправьте ZIP-файл сюда\n\n"
+        "⚠️ Максимальный размер: <b>20 МБ</b>\n"
+        "⚠️ Аккаунт не должен быть защищён паролем экрана блокировки Telegram Desktop",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_tdata_zip, F.document)
+async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    import os
+    import tempfile
+    import zipfile
+
+    doc = message.document
+    if not doc:
+        await message.answer("⚠️ Отправьте ZIP-файл как документ.")
+        return
+
+    if doc.file_size and doc.file_size > 20 * 1024 * 1024:
+        await message.answer("❌ Файл слишком большой. Максимум 20 МБ.")
+        return
+
+    name = (doc.file_name or "").lower()
+    if not name.endswith(".zip"):
+        await message.answer("❌ Ожидается ZIP-архив. Упакуйте папку tdata в .zip и отправьте снова.")
+        return
+
+    msg = await message.answer("⏳ Загружаю архив...")
+
+    tmp_dir = tempfile.mkdtemp(prefix="tdata_import_")
+    zip_path = os.path.join(tmp_dir, "tdata.zip")
+    extract_dir = os.path.join(tmp_dir, "extracted")
+    os.makedirs(extract_dir, exist_ok=True)
+
+    try:
+        # Download ZIP
+        bot_file = await message.bot.get_file(doc.file_id)
+        await message.bot.download_file(bot_file.file_path, destination=zip_path)
+
+        # Extract
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+        except zipfile.BadZipFile:
+            await msg.edit_text("❌ Файл повреждён или не является ZIP-архивом.")
+            return
+
+        # Locate tdata folder inside the extract
+        tdata_path = _find_tdata_root(extract_dir)
+        if not tdata_path:
+            await msg.edit_text(
+                "❌ Папка <code>tdata</code> не найдена в архиве.\n\n"
+                "Убедитесь что архив содержит папку <code>tdata</code> с файлом <code>key_datas</code>.",
+                parse_mode="HTML",
+            )
+            return
+
+        await msg.edit_text("⏳ Конвертирую tdata в сессию Telethon...")
+        try:
+            session_str, info = await import_from_tdata(tdata_path)
+        except ImportError as exc:
+            await msg.edit_text(
+                f"❌ <b>Пакет opentele не установлен</b>\n\n<code>{escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+            return
+        except Exception as exc:
+            await msg.edit_text(
+                f"❌ <b>Ошибка конвертации tdata</b>\n\n<code>{escape(str(exc)[:300])}</code>",
+                parse_mode="HTML",
+            )
+            return
+    finally:
+        # Always clean up temp files
+        import shutil
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    await _finalize_import(message, pool, state, session_str, info)
+
+
+@router.message(SessionImport.waiting_tdata_zip)
+async def handle_import_tdata_wrong_type(message: Message) -> None:
+    await message.answer(
+        "⚠️ Отправьте ZIP-файл как документ (не фото, не текст).\n\n"
+        "Используйте вложение → Файл при отправке."
+    )
+
+
+# ── Shared import finalization ─────────────────────────────────────────────────
+
+def _find_tdata_root(extract_dir: str) -> str | None:
+    """Walk the extraction directory and find the tdata root (contains key_datas)."""
+    import os
+    # Check up to 3 levels deep
+    for root, dirs, files in os.walk(extract_dir):
+        if "key_datas" in files:
+            return root
+        # Limit depth
+        depth = root[len(extract_dir):].count(os.sep)
+        if depth >= 3:
+            dirs.clear()
+    return None
+
+
+async def _finalize_import(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+    session_str: str,
+    info: dict,
+) -> None:
+    """Save imported account to DB and report success."""
+    await state.clear()
+
+    plan, limit = await _get_account_limit(pool, message.from_user.id)
+    accounts = await db.get_tg_accounts(pool, message.from_user.id)
+    if len(accounts) >= limit:
+        limit_label = "∞" if limit >= 9999 else str(limit)
+        await message.answer(
+            f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
+            "Обновите подписку для добавления новых аккаунтов.",
+            parse_mode="HTML",
+        )
+        return
+
+    phone = info.get("phone") or f"id:{info.get('tg_user_id', 'unknown')}"
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=message.from_user.id,
+            phone=phone,
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id") or 0,
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+        )
+    except Exception as exc:
+        await message.answer(
+            f"❌ Ошибка сохранения в БД: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    name = info.get("first_name", "") or info.get("username", "") or phone
+    uname = f"@{info['username']}" if info.get("username") else "—"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ <b>Аккаунт успешно импортирован!</b>\n\n"
+        f"Имя: <b>{escape(name)}</b>\n"
+        f"Username: {escape(uname)}\n"
+        f"Телефон: <code>{escape(phone)}</code>\n"
+        f"Telegram ID: <code>{info.get('tg_user_id', '?')}</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
