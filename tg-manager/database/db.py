@@ -1790,3 +1790,43 @@ async def get_keyword_notify_enabled(pool: asyncpg.Pool, bot_id: int, owner_id: 
         bot_id, owner_id,
     )
     return bool(val)
+
+
+async def upsert_managed_channels(
+    pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict]
+) -> None:
+    """Сохраняет/обновляет список каналов аккаунта в managed_channels."""
+    if not channels:
+        return
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM managed_channels WHERE owner_id=$1 AND acc_id=$2",
+                owner_id, acc_id,
+            )
+            await conn.executemany(
+                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash)
+                   VALUES($1, $2, $3, $4, $5, $6)
+                   ON CONFLICT (owner_id, channel_id) DO UPDATE
+                   SET title=EXCLUDED.title, username=EXCLUDED.username,
+                       acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash""",
+                [
+                    (owner_id, acc_id, ch["id"], ch.get("title", ""), ch.get("username", ""), ch.get("access_hash", 0))
+                    for ch in channels
+                ],
+            )
+
+
+async def get_managed_channels(
+    pool: asyncpg.Pool, owner_id: int, acc_id: int | None = None
+) -> list[asyncpg.Record]:
+    """Возвращает каналы из кэша. Если acc_id задан — только для этого аккаунта."""
+    if acc_id is not None:
+        return await pool.fetch(
+            "SELECT * FROM managed_channels WHERE owner_id=$1 AND acc_id=$2 ORDER BY title",
+            owner_id, acc_id,
+        )
+    return await pool.fetch(
+        "SELECT * FROM managed_channels WHERE owner_id=$1 ORDER BY acc_id, title",
+        owner_id,
+    )

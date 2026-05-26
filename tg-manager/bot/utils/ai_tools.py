@@ -1,18 +1,24 @@
-"""Tool implementations for AI assistant — each tool is isolated per user_id."""
+"""Tool implementations for AI assistant — each tool is isolated per user_id.
+
+READ tools return data. ACTION tools return a pending_action dict that requires
+confirmation before execution. The executor function runs confirmed actions.
+"""
 from __future__ import annotations
 import asyncpg
+import json
 
+# ── READ TOOLS ────────────────────────────────────────────────────────────────
 
 async def get_my_bots(pool: asyncpg.Pool, user_id: int) -> dict:
     bots = await pool.fetch(
         """
         SELECT b.bot_id, b.username, b.first_name,
                COUNT(DISTINCT a.user_id) AS audience,
-               b.swarm_enabled, b.bot_role, b.cluster
+               b.swarm_enabled, b.bot_role, b.cluster, b.token
         FROM managed_bots b
         LEFT JOIN bot_users a ON a.bot_id = b.bot_id AND a.is_active = TRUE
-        WHERE b.added_by=$1
-        GROUP BY b.bot_id, b.username, b.first_name, b.swarm_enabled, b.bot_role, b.cluster
+        WHERE b.added_by=$1 AND b.is_active=TRUE
+        GROUP BY b.bot_id, b.username, b.first_name, b.swarm_enabled, b.bot_role, b.cluster, b.token
         ORDER BY audience DESC
         """,
         user_id,
@@ -35,88 +41,85 @@ async def get_my_bots(pool: asyncpg.Pool, user_id: int) -> dict:
 
 async def get_bot_details(pool: asyncpg.Pool, user_id: int, bot_id: int) -> dict:
     row = await pool.fetchrow(
-        "SELECT * FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, user_id
+        "SELECT * FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        bot_id, user_id,
     )
     if not row:
-        return {"error": "Bot not found"}
-
+        return {"error": "Бот не найден или не принадлежит вам"}
     audience = await pool.fetchval(
         "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
-    )
+    ) or 0
     today = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND first_seen > now() - INTERVAL '24 hours'",
-        bot_id,
-    )
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
+        "AND first_seen > now() - INTERVAL '24 hours'", bot_id,
+    ) or 0
     broadcasts = await pool.fetchval(
         "SELECT COUNT(*) FROM broadcasts WHERE bot_id=$1", bot_id
-    )
-    tags = await pool.fetchval(
-        "SELECT COUNT(DISTINCT tag) FROM user_tags WHERE bot_id=$1", bot_id
-    )
+    ) or 0
     return {
         "id": bot_id,
         "name": f"@{row['username']}" if row["username"] else row["first_name"],
-        "audience_total": audience,
-        "new_today": today,
-        "broadcasts_total": broadcasts,
-        "crm_tags": tags,
+        "username": row["username"] or "",
+        "description": (row.get("description") or "")[:200],
+        "short_description": (row.get("short_description") or "")[:100],
+        "audience_total": int(audience),
+        "new_today": int(today),
+        "broadcasts_total": int(broadcasts),
         "swarm": row["swarm_enabled"],
         "cluster": row["cluster"] or "default",
+        "role": row.get("bot_role") or "general",
     }
 
 
 async def get_network_stats(pool: asyncpg.Pool, user_id: int) -> dict:
     total_bots = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", user_id
-    )
+        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", user_id
+    ) or 0
     total_audience = await pool.fetchval(
         "SELECT COUNT(DISTINCT a.user_id) FROM bot_users a "
         "JOIN managed_bots b ON b.bot_id=a.bot_id WHERE b.added_by=$1 AND a.is_active=TRUE",
         user_id,
-    )
+    ) or 0
     total_sent = await pool.fetchval(
         "SELECT COALESCE(SUM(sent_count),0) FROM broadcasts b2 "
         "JOIN managed_bots m ON m.bot_id=b2.bot_id WHERE m.added_by=$1",
         user_id,
-    )
+    ) or 0
     swarm_bots = await pool.fetchval(
         "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND swarm_enabled=true", user_id
-    )
+    ) or 0
     return {
-        "total_bots": total_bots,
-        "unique_audience": total_audience,
-        "messages_sent": total_sent,
-        "swarm_bots": swarm_bots,
+        "total_bots": int(total_bots),
+        "unique_audience": int(total_audience),
+        "messages_sent": int(total_sent),
+        "swarm_bots": int(swarm_bots),
     }
 
 
 async def get_audience_activity(pool: asyncpg.Pool, user_id: int, bot_id: int) -> dict:
     row = await pool.fetchrow(
-        "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, user_id
+        "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        bot_id, user_id,
     )
     if not row:
-        return {"error": "Bot not found"}
+        return {"error": "Бот не найден"}
     hot = await pool.fetchval(
         "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
-        "AND last_seen > now() - INTERVAL '24 hours'",
-        bot_id,
-    )
+        "AND last_seen > now() - INTERVAL '24 hours'", bot_id,
+    ) or 0
     warm = await pool.fetchval(
         "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
-        "AND last_seen BETWEEN now() - INTERVAL '7 days' AND now() - INTERVAL '24 hours'",
-        bot_id,
-    )
+        "AND last_seen BETWEEN now() - INTERVAL '7 days' AND now() - INTERVAL '24 hours'", bot_id,
+    ) or 0
     cold = await pool.fetchval(
         "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
-        "AND last_seen BETWEEN now() - INTERVAL '30 days' AND now() - INTERVAL '7 days'",
-        bot_id,
-    )
+        "AND last_seen BETWEEN now() - INTERVAL '30 days' AND now() - INTERVAL '7 days'", bot_id,
+    ) or 0
     lost = await pool.fetchval(
         "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
-        "AND last_seen < now() - INTERVAL '30 days'",
-        bot_id,
-    )
-    return {"hot": hot, "warm": warm, "cold": cold, "lost": lost}
+        "AND last_seen < now() - INTERVAL '30 days'", bot_id,
+    ) or 0
+    return {"hot": int(hot), "warm": int(warm), "cold": int(cold), "lost": int(lost)}
 
 
 async def get_growth_trend(pool: asyncpg.Pool, user_id: int, bot_id: int, days: int = 7) -> dict:
@@ -124,14 +127,12 @@ async def get_growth_trend(pool: asyncpg.Pool, user_id: int, bot_id: int, days: 
         "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, user_id
     )
     if not row:
-        return {"error": "Bot not found"}
+        return {"error": "Бот не найден"}
     rows = await pool.fetch(
-        """
-        SELECT DATE(first_seen) AS day, COUNT(*) AS new_users
-        FROM bot_users
-        WHERE bot_id=$1 AND first_seen > now() - ($2 || ' days')::INTERVAL
-        GROUP BY day ORDER BY day
-        """,
+        """SELECT DATE(first_seen) AS day, COUNT(*) AS new_users
+           FROM bot_users
+           WHERE bot_id=$1 AND first_seen > now() - ($2 || ' days')::INTERVAL
+           GROUP BY day ORDER BY day""",
         bot_id, str(days),
     )
     return {
@@ -146,7 +147,7 @@ async def get_seo_recommendations(pool: asyncpg.Pool, user_id: int, bot_id: int)
         "SELECT * FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, user_id
     )
     if not row:
-        return {"error": "Bot not found"}
+        return {"error": "Бот не найден"}
     tips = []
     score = 0
     name = row.get("first_name") or ""
@@ -164,7 +165,6 @@ async def get_seo_recommendations(pool: asyncpg.Pool, user_id: int, bot_id: int)
         score += 30
         if len(row.get("description", "")) >= 100:
             score += 10
-        tips.append("Описание есть — убедитесь что в нём есть ключевые слова вашей тематики") if score < 60 else None
     else:
         tips.append("Нет описания — добавьте текст с ключевыми словами (≥100 символов)")
     if row.get("short_description"):
@@ -174,29 +174,270 @@ async def get_seo_recommendations(pool: asyncpg.Pool, user_id: int, bot_id: int)
     return {"seo_score": min(score, 100), "tips": tips[:5]}
 
 
+async def get_my_accounts(pool: asyncpg.Pool, user_id: int) -> dict:
+    rows = await pool.fetch(
+        "SELECT id, first_name, phone, username, is_active FROM tg_accounts WHERE owner_id=$1 ORDER BY id",
+        user_id,
+    )
+    return {
+        "total": len(rows),
+        "accounts": [
+            {
+                "id": r["id"],
+                "name": r["first_name"] or "",
+                "phone": r["phone"] or "",
+                "username": r["username"] or "",
+                "is_active": r["is_active"],
+            }
+            for r in rows
+        ],
+    }
+
+
+async def get_my_channels(pool: asyncpg.Pool, user_id: int) -> dict:
+    rows = await pool.fetch(
+        "SELECT channel_id, title, username, acc_id FROM managed_channels WHERE owner_id=$1 ORDER BY title",
+        user_id,
+    )
+    return {
+        "total": len(rows),
+        "channels": [
+            {
+                "id": r["channel_id"],
+                "title": r["title"] or "",
+                "username": r["username"] or "",
+                "acc_id": r["acc_id"],
+            }
+            for r in rows
+        ],
+    }
+
+
+async def get_broadcast_history(pool: asyncpg.Pool, user_id: int, bot_id: int, limit: int = 10) -> dict:
+    row = await pool.fetchrow(
+        "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, user_id
+    )
+    if not row:
+        return {"error": "Бот не найден"}
+    rows = await pool.fetch(
+        """SELECT id, status, total_users, sent_count, failed_count, created_at, finished_at,
+                  LEFT(message_text, 100) AS preview
+           FROM broadcasts WHERE bot_id=$1 ORDER BY created_at DESC LIMIT $2""",
+        bot_id, limit,
+    )
+    return {
+        "broadcasts": [
+            {
+                "id": r["id"],
+                "status": r["status"],
+                "total": r["total_users"],
+                "sent": r["sent_count"],
+                "failed": r["failed_count"],
+                "preview": r["preview"] or "",
+                "created": str(r["created_at"])[:16],
+                "finished": str(r["finished_at"])[:16] if r["finished_at"] else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+# ── ACTION TOOLS (return pending_action, require confirmation) ─────────────────
+
+async def action_launch_broadcast(pool: asyncpg.Pool, user_id: int, bot_id: int, text: str) -> dict:
+    row = await pool.fetchrow(
+        "SELECT bot_id, token, first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        bot_id, user_id,
+    )
+    if not row:
+        return {"error": "Бот не найден или не принадлежит вам"}
+    audience = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE",
+        bot_id,
+    ) or 0
+    name = f"@{row['username']}" if row["username"] else row["first_name"]
+    return {
+        "pending_action": "launch_broadcast",
+        "bot_id": bot_id,
+        "bot_name": name,
+        "text": text,
+        "audience": int(audience),
+        "preview": f"Рассылка для {name}: {text[:80]}{'...' if len(text) > 80 else ''}\nПолучателей: {audience}",
+    }
+
+
+async def action_update_bot_profile(
+    pool: asyncpg.Pool, user_id: int, bot_id: int,
+    name: str | None = None,
+    description: str | None = None,
+    short_description: str | None = None,
+) -> dict:
+    row = await pool.fetchrow(
+        "SELECT bot_id, token, first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        bot_id, user_id,
+    )
+    if not row:
+        return {"error": "Бот не найден или не принадлежит вам"}
+    if not any([name, description, short_description]):
+        return {"error": "Укажите хотя бы одно поле для обновления: name, description или short_description"}
+    bot_name = f"@{row['username']}" if row["username"] else row["first_name"]
+    changes = []
+    if name:
+        changes.append(f"имя: «{name}»")
+    if description:
+        changes.append(f"описание: «{description[:50]}{'...' if len(description)>50 else ''}»")
+    if short_description:
+        changes.append(f"краткое описание: «{short_description[:50]}{'...' if len(short_description)>50 else ''}»")
+    return {
+        "pending_action": "update_bot_profile",
+        "bot_id": bot_id,
+        "bot_name": bot_name,
+        "name": name,
+        "description": description,
+        "short_description": short_description,
+        "preview": f"Обновить профиль {bot_name}: {', '.join(changes)}",
+    }
+
+
+async def action_post_to_channel(
+    pool: asyncpg.Pool, user_id: int,
+    channel_id: int, text: str,
+) -> dict:
+    ch_row = await pool.fetchrow(
+        "SELECT channel_id, title, username, acc_id, access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+        user_id, channel_id,
+    )
+    if not ch_row:
+        return {"error": "Канал не найден в кэше. Сначала откройте «Мои каналы» чтобы обновить кэш."}
+    acc_row = await pool.fetchrow(
+        "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
+        user_id, ch_row["acc_id"],
+    )
+    if not acc_row:
+        return {"error": "Аккаунт канала не найден или не активен"}
+    ch_name = ch_row["title"] or (f"@{ch_row['username']}" if ch_row["username"] else f"id={channel_id}")
+    return {
+        "pending_action": "post_to_channel",
+        "channel_id": channel_id,
+        "channel_name": ch_name,
+        "acc_id": ch_row["acc_id"],
+        "access_hash": ch_row["access_hash"] or 0,
+        "text": text,
+        "preview": f"Опубликовать в {ch_name}: {text[:80]}{'...' if len(text)>80 else ''}",
+    }
+
+
+# ── EXECUTOR (runs confirmed actions) ─────────────────────────────────────────
+
+async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, http=None) -> str:
+    """Execute a confirmed pending action. Returns result string."""
+    name = action_data.get("pending_action")
+
+    if name == "launch_broadcast":
+        bot_id = action_data["bot_id"]
+        text = action_data["text"]
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id, user_id,
+        )
+        if not row or not http:
+            return "❌ Ошибка: бот не найден или HTTP сессия недоступна"
+        from database import db
+        from services import broadcaster
+        user_ids_rows = await pool.fetch(
+            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE",
+            bot_id,
+        )
+        ids = [r["user_id"] for r in user_ids_rows]
+        if not ids:
+            return "⚠️ Аудитория пуста — нет активных получателей"
+        bc_id = await db.create_broadcast(pool, bot_id, text, len(ids), user_id)
+        broadcaster.start(pool, http, bc_id, row["token"], bot_id, text, None, ids)
+        return f"✅ Рассылка #{bc_id} запущена! Получателей: {len(ids)}"
+
+    elif name == "update_bot_profile":
+        bot_id = action_data["bot_id"]
+        new_name = action_data.get("name")
+        description = action_data.get("description")
+        short_desc = action_data.get("short_description")
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id, user_id,
+        )
+        if not row or not http:
+            return "❌ Ошибка: бот не найден"
+        from services import bot_api
+        results = []
+        if new_name:
+            ok = await bot_api.set_name(http, row["token"], new_name)
+            if ok:
+                await pool.execute("UPDATE managed_bots SET first_name=$1 WHERE bot_id=$2", new_name, bot_id)
+                results.append(f"✅ Имя обновлено: «{new_name}»")
+            else:
+                results.append("❌ Не удалось обновить имя")
+        if description:
+            ok = await bot_api.set_description(http, row["token"], description)
+            if ok:
+                await pool.execute("UPDATE managed_bots SET description=$1 WHERE bot_id=$2", description, bot_id)
+                results.append(f"✅ Описание обновлено ({len(description)} симв.)")
+            else:
+                results.append("❌ Не удалось обновить описание")
+        if short_desc:
+            ok = await bot_api.set_short_description(http, row["token"], short_desc)
+            if ok:
+                await pool.execute("UPDATE managed_bots SET short_description=$1 WHERE bot_id=$2", short_desc, bot_id)
+                results.append(f"✅ Краткое описание обновлено")
+            else:
+                results.append("❌ Не удалось обновить краткое описание")
+        return "\n".join(results) if results else "❌ Нет изменений"
+
+    elif name == "post_to_channel":
+        channel_id = action_data["channel_id"]
+        acc_id = action_data["acc_id"]
+        access_hash = action_data.get("access_hash", 0) or 0
+        text = action_data["text"]
+        acc_row = await pool.fetchrow(
+            "SELECT session_str FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
+            user_id, acc_id,
+        )
+        if not acc_row:
+            return "❌ Аккаунт не найден или не активен"
+        from services import account_manager
+        result = await account_manager.post_to_channel(
+            acc_row["session_str"], channel_id, text, access_hash=access_hash
+        )
+        if "msg_id" in result:
+            return f"✅ Пост опубликован! ID сообщения: {result['msg_id']}"
+        return f"❌ Ошибка публикации: {result.get('error', 'неизвестная ошибка')}"
+
+    return "❌ Неизвестное действие"
+
+
+# ── TOOL DEFINITIONS ──────────────────────────────────────────────────────────
+
 TOOL_DEFINITIONS = [
     {
         "name": "get_my_bots",
-        "description": "Get list of all user's bots with basic stats (audience, swarm status, cluster)",
+        "description": "Получить список всех ботов пользователя с базовой статистикой (аудитория, swarm, кластер)",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "get_bot_details",
-        "description": "Get detailed statistics for a specific bot by its numeric ID",
+        "description": "Получить детальную информацию о конкретном боте по его ID",
         "input_schema": {
             "type": "object",
-            "properties": {"bot_id": {"type": "integer", "description": "Bot's numeric Telegram ID"}},
+            "properties": {"bot_id": {"type": "integer", "description": "Числовой ID бота в Telegram"}},
             "required": ["bot_id"],
         },
     },
     {
         "name": "get_network_stats",
-        "description": "Get aggregated statistics across all user's bots",
+        "description": "Получить сводную статистику по всем ботам пользователя",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "get_audience_activity",
-        "description": "Get hot/warm/cold/lost user segment counts for a specific bot",
+        "description": "Получить сегментацию аудитории бота: горячие/тёплые/холодные/потерянные",
         "input_schema": {
             "type": "object",
             "properties": {"bot_id": {"type": "integer"}},
@@ -205,30 +446,102 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "get_growth_trend",
-        "description": "Get daily new users trend for a bot over N days",
+        "description": "Получить динамику роста аудитории бота за N дней",
         "input_schema": {
             "type": "object",
             "properties": {
                 "bot_id": {"type": "integer"},
-                "days": {"type": "integer", "description": "Number of days to look back (default 7)", "default": 7},
+                "days": {"type": "integer", "description": "Кол-во дней (по умолчанию 7)", "default": 7},
             },
             "required": ["bot_id"],
         },
     },
     {
         "name": "get_seo_recommendations",
-        "description": "Get SEO score and optimization recommendations for a bot's profile",
+        "description": "Получить SEO-оценку и рекомендации по профилю бота",
         "input_schema": {
             "type": "object",
             "properties": {"bot_id": {"type": "integer"}},
             "required": ["bot_id"],
         },
     },
+    {
+        "name": "get_my_accounts",
+        "description": "Получить список подключённых Telegram-аккаунтов пользователя",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_my_channels",
+        "description": "Получить список каналов из кэша (нужно сначала открыть «Мои каналы» для обновления кэша)",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_broadcast_history",
+        "description": "Получить историю рассылок для конкретного бота",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bot_id": {"type": "integer"},
+                "limit": {"type": "integer", "description": "Кол-во последних рассылок (по умолчанию 10)", "default": 10},
+            },
+            "required": ["bot_id"],
+        },
+    },
+    {
+        "name": "launch_broadcast",
+        "description": (
+            "ДЕЙСТВИЕ: Запустить рассылку для всех активных пользователей бота. "
+            "Требует подтверждения пользователя перед выполнением. "
+            "Используй когда пользователь явно просит запустить рассылку/отправить сообщение аудитории."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bot_id": {"type": "integer", "description": "ID бота для рассылки"},
+                "text": {"type": "string", "description": "Текст сообщения (HTML поддерживается)"},
+            },
+            "required": ["bot_id", "text"],
+        },
+    },
+    {
+        "name": "update_bot_profile",
+        "description": (
+            "ДЕЙСТВИЕ: Обновить профиль бота (имя, описание, краткое описание). "
+            "Требует подтверждения пользователя перед выполнением. "
+            "Укажи только те поля, которые нужно изменить."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bot_id": {"type": "integer"},
+                "name": {"type": "string", "description": "Новое имя бота"},
+                "description": {"type": "string", "description": "Новое полное описание бота"},
+                "short_description": {"type": "string", "description": "Новое краткое описание (about)"},
+            },
+            "required": ["bot_id"],
+        },
+    },
+    {
+        "name": "post_to_channel",
+        "description": (
+            "ДЕЙСТВИЕ: Опубликовать пост в канал через подключённый Telegram-аккаунт. "
+            "Требует подтверждения пользователя перед выполнением. "
+            "Сначала вызови get_my_channels чтобы узнать доступные каналы."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "channel_id": {"type": "integer", "description": "Числовой ID канала из get_my_channels"},
+                "text": {"type": "string", "description": "Текст поста (HTML поддерживается)"},
+            },
+            "required": ["channel_id", "text"],
+        },
+    },
 ]
 
 
-async def run_tool(name: str, inputs: dict, pool: asyncpg.Pool, user_id: int) -> str:
-    import json
+async def run_tool(name: str, inputs: dict, pool: asyncpg.Pool, user_id: int, http=None) -> str:
+    """Execute a tool and return JSON string result."""
     try:
         if name == "get_my_bots":
             result = await get_my_bots(pool, user_id)
@@ -242,6 +555,23 @@ async def run_tool(name: str, inputs: dict, pool: asyncpg.Pool, user_id: int) ->
             result = await get_growth_trend(pool, user_id, inputs["bot_id"], inputs.get("days", 7))
         elif name == "get_seo_recommendations":
             result = await get_seo_recommendations(pool, user_id, inputs["bot_id"])
+        elif name == "get_my_accounts":
+            result = await get_my_accounts(pool, user_id)
+        elif name == "get_my_channels":
+            result = await get_my_channels(pool, user_id)
+        elif name == "get_broadcast_history":
+            result = await get_broadcast_history(pool, user_id, inputs["bot_id"], inputs.get("limit", 10))
+        elif name == "launch_broadcast":
+            result = await action_launch_broadcast(pool, user_id, inputs["bot_id"], inputs["text"])
+        elif name == "update_bot_profile":
+            result = await action_update_bot_profile(
+                pool, user_id, inputs["bot_id"],
+                name=inputs.get("name"),
+                description=inputs.get("description"),
+                short_description=inputs.get("short_description"),
+            )
+        elif name == "post_to_channel":
+            result = await action_post_to_channel(pool, user_id, inputs["channel_id"], inputs["text"])
         else:
             result = {"error": f"Unknown tool: {name}"}
         return json.dumps(result, ensure_ascii=False, default=str)
