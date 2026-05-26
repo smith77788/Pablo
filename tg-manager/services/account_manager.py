@@ -351,7 +351,7 @@ async def search_in_telegram(session_string: str, query: str, limit: int = 20) -
     from telethon.tl.functions.contacts import SearchRequest
     client = _make_client(session_string)
     try:
-        await client.connect()
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await client(SearchRequest(q=query, limit=limit))
         items = []
         for i, user in enumerate(result.users):
@@ -410,6 +410,9 @@ async def create_channel(
             "invite_link": invite_link,
         }
     except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            return {"error": f"FloodWait {e.seconds}с — Telegram ограничил создание", "flood_wait": e.seconds}
         log.exception("create_channel error: %s", e)
         return {"error": str(e)[:200]}
     finally:
@@ -913,6 +916,9 @@ async def create_bot_via_botfather(
             "display_name": bot_display_name,
         }
     except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            return {"error": f"FloodWait {e.seconds}с — Telegram ограничил создание", "flood_wait": e.seconds}
         log.exception("create_bot_via_botfather error: %s", e)
         return {"error": str(e)[:200]}
     finally:

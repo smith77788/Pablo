@@ -29,7 +29,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ChanCb
 from bot.states import (
-    BulkCreateFSM, BulkDmFSM, CreateBotFSM, CreateChannelFSM, EditChannelFSM,
+    BulkCreateFSM, BulkDmFSM, BulkPostChansFSM, CreateBotFSM, CreateChannelFSM, EditChannelFSM,
     InviteUsersFSM, JoinChannelFSM, MyChannelsFSM, PostToChannelFSM, ReportFSM,
     SendReactionFSM, UpdateProfileFSM,
 )
@@ -115,6 +115,7 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="📢 Создать канал/группу",  callback_data=ChanCb(action="bulk_create"))
     kb.button(text="🔗 Вступить в канал",      callback_data=ChanCb(action="bulk_join"))
     kb.button(text="🚪 Выйти из канала",       callback_data=ChanCb(action="bulk_leave"))
+    kb.button(text="📤 Пост в каналы",         callback_data=ChanCb(action="bulk_post_chans"))
     kb.button(text="📤 Опубликовать пост",     callback_data=ChanCb(action="bulk_post"))
     kb.button(text="✏️ Имя аккаунта",         callback_data=ChanCb(action="bulk_prof_name"))
     kb.button(text="📝 Bio аккаунта",          callback_data=ChanCb(action="bulk_prof_bio"))
@@ -122,6 +123,14 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="◀️ Назад",                callback_data=ChanCb(action="menu"))
     kb.adjust(1)
     return kb
+
+
+def _make_title(base: str, mode: str, global_idx: int, acc_label: str) -> str:
+    if mode == "num":
+        return f"{base} {global_idx}"
+    if mode == "acc":
+        return f"{base} ({acc_label[:20]})"
+    return base
 
 
 # OP label map for display
@@ -539,21 +548,51 @@ async def fsm_bulk_create_count(message: Message, state: FSMContext) -> None:
         return
     count = int(raw)
     await state.update_data(channel_count=count)
+    await state.set_state(BulkCreateFSM.choosing_name_mode)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="☐ Без изменений",             callback_data=ChanCb(action="bulk_name_mode_none"))
+    kb.button(text="🔢 Порядковый номер (1,2,3…)", callback_data=ChanCb(action="bulk_name_mode_num"))
+    kb.button(text="👤 По аккаунту",               callback_data=ChanCb(action="bulk_name_mode_acc"))
+    kb.button(text="❌ Отмена",                    callback_data=ChanCb(action="bulk_menu"))
+    kb.adjust(1)
+    await message.answer(
+        "📢 <b>Режим уникализации имён</b>\n\n"
+        "Как назвать создаваемые объекты?\n\n"
+        "• <b>Без изменений</b> — все получат одинаковое название\n"
+        "• <b>Порядковый номер</b> — «Название 1», «Название 2»…\n"
+        "• <b>По аккаунту</b> — «Название (Аккаунт1)», «Название (Аккаунт2)»",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ChanCb.filter(F.action.in_({"bulk_name_mode_none", "bulk_name_mode_num", "bulk_name_mode_acc"})))
+async def cb_bulk_name_mode(callback: CallbackQuery, callback_data: ChanCb, state: FSMContext) -> None:
+    await callback.answer()
+    mode_map = {
+        "bulk_name_mode_none": "none",
+        "bulk_name_mode_num": "num",
+        "bulk_name_mode_acc": "acc",
+    }
+    mode = mode_map[callback_data.action]
+    await state.update_data(name_mode=mode)
     data = await state.get_data()
     selected_ids = data.get("bulk_selected", [])
     n_acc = len(selected_ids)
+    count = data.get("channel_count", 1)
     total = n_acc * count
     title_s = html.escape(data["title"])
     entity = "группа" if data.get("is_group") else "канал"
+    mode_labels = {"none": "Без изменений", "num": "Порядковый номер", "acc": "По аккаунту"}
     kb = InlineKeyboardBuilder()
     kb.button(text=f"✅ Создать {total} объект(ов)", callback_data=ChanCb(action="do_bulk_create"))
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     kb.adjust(1)
     await state.set_state(BulkCreateFSM.confirming)
-    await message.answer(
+    await callback.message.edit_text(
         f"🔁 <b>Подтверждение массового создания</b>\n\n"
         f"Тип: <b>{entity}</b>\n"
         f"Название: <b>{title_s}</b>\n"
+        f"Режим имён: <b>{mode_labels[mode]}</b>\n"
         f"Аккаунтов: <b>{n_acc}</b> × <b>{count}</b> = итого <b>{total}</b>\n\n"
         "⚠️ Telegram может ограничить создание каналов с одного IP. Продолжить?",
         parse_mode="HTML", reply_markup=kb.as_markup(),
@@ -582,9 +621,11 @@ async def cb_do_bulk_create(
         )
     from services import account_manager
     channel_count = data.get("channel_count", 1)
+    name_mode = data.get("name_mode", "none")
     results_ok, results_err = [], []
     total_ops = len(accounts) * channel_count
     done_ops = 0
+    global_idx = 1
     progress_msg = await callback.message.edit_text(
         _progress_text("Создание каналов...", 0, total_ops, 0, 0),
         parse_mode="HTML",
@@ -592,18 +633,19 @@ async def cb_do_bulk_create(
     for acc in accounts:
         label = html.escape(acc["first_name"] or acc["phone"])
         for i in range(channel_count):
-            suffix = f" {i + 1}" if channel_count > 1 else ""
+            title = _make_title(data["title"], name_mode, global_idx, acc["first_name"] or acc["phone"])
             result = await account_manager.create_channel(
                 acc["session_str"],
-                title=data["title"] + suffix,
+                title=title,
                 about=data.get("about", ""),
                 megagroup=data.get("is_group", False),
             )
             if "error" in result:
-                results_err.append(f"❌ {label}{suffix}: {html.escape(result['error'][:60])}")
+                results_err.append(f"❌ {html.escape(label)}: {html.escape(result['error'][:60])}")
             else:
-                results_ok.append(f"✅ {label}{suffix}: id={result['channel_id']}")
+                results_ok.append(f"✅ {html.escape(title)}: id={result['channel_id']}")
             done_ops += 1
+            global_idx += 1
             try:
                 await progress_msg.edit_text(
                     _progress_text("Создание каналов...", done_ops, total_ops, len(results_ok), len(results_err)),
@@ -611,7 +653,8 @@ async def cb_do_bulk_create(
                 )
             except Exception:
                 pass
-            await asyncio.sleep(2)
+            flood = result.get("flood_wait", 0)
+            await asyncio.sleep(max(5, flood))
 
     lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err
@@ -1288,9 +1331,9 @@ async def cb_members_pick_account(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, _PRO):
+    if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Управление участниками — PRO</b>\n\nОформите: /subscription",
+            "🔒 <b>Управление участниками — STARTER</b>\n\nОформите: /subscription",
             parse_mode="HTML", reply_markup=_back_kb().as_markup(),
         )
         return
@@ -1635,7 +1678,7 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
         acc_label = html.escape(acc["first_name"] or acc["phone"])
         for i in range(bot_count):
             suffix = str(i + 1) if (bot_count > 1 or len(accounts) > 1) else ""
-            username = base_username.rstrip("bot") + (suffix if suffix else "") + "bot" if base_username.endswith("bot") else base_username + suffix
+            username = (base_username.rstrip("bot") + (suffix if suffix else "") + "bot") if base_username.endswith("bot") else (base_username + suffix)
             result = await account_manager.create_bot_via_botfather(
                 acc["session_str"], data["bot_name"], username
             )
@@ -1654,7 +1697,8 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
                 )
             except Exception:
                 pass
-            await asyncio.sleep(3)
+            flood = result.get("flood_wait", 0)
+            await asyncio.sleep(max(5, flood))
 
     lines = [f"🤖 <b>Результаты создания ботов</b> ({len(results_ok)}/{total})\n"]
     lines += results_ok + results_err
@@ -2265,7 +2309,8 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
                 )
             except Exception:
                 pass
-            await asyncio.sleep(2)
+            flood = result.get("flood_wait", 0)
+            await asyncio.sleep(max(2, flood))
         lines = [f"📤 <b>Публикация в {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
     else:
@@ -2644,7 +2689,10 @@ async def cb_my_chans(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCon
         )
         await state.update_data(my_chans_acc_id=acc["id"], my_chans_session=acc["session_str"])
         await state.set_state(MyChannelsFSM.browsing)
-        await _show_my_chans_page(callback.message, acc["session_str"], acc["id"], page=0, edit=True)
+        await _show_my_chans_page(
+            callback.message, pool, acc["session_str"], acc["id"], page=0, edit=True,
+            owner_id=callback.from_user.id,
+        )
         return
     kb = InlineKeyboardBuilder()
     for a in active:
@@ -2673,12 +2721,15 @@ async def cb_my_chans_acc(
     await callback.answer()
     await state.update_data(my_chans_acc_id=acc["id"], my_chans_session=acc["session_str"])
     await state.set_state(MyChannelsFSM.browsing)
-    await _show_my_chans_page(callback.message, acc["session_str"], acc["id"], page=0, edit=True)
+    await _show_my_chans_page(
+        callback.message, pool, acc["session_str"], acc["id"], page=0, edit=True,
+        owner_id=callback.from_user.id,
+    )
 
 
 @router.callback_query(ChanCb.filter(F.action == "my_chans_page"))
 async def cb_my_chans_page(
-    callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
+    callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer()
     data = await state.get_data()
@@ -2687,30 +2738,65 @@ async def cb_my_chans_page(
     if not session:
         await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops")
         return
-    await _show_my_chans_page(callback.message, session, acc_id, page=callback_data.page, edit=True)
+    await _show_my_chans_page(
+        callback.message, pool, session, acc_id, page=callback_data.page, edit=True,
+        owner_id=callback.from_user.id,
+    )
 
 
-async def _show_my_chans_page(msg, session_str: str, acc_id: int, page: int, edit: bool = True) -> None:
+@router.callback_query(ChanCb.filter(F.action == "my_chans_refresh"))
+async def cb_my_chans_refresh(
+    callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer("🔄 Обновляю из Telegram...")
+    data = await state.get_data()
+    session = data.get("my_chans_session")
+    acc_id = callback_data.acc_id or data.get("my_chans_acc_id")
+    if not session:
+        await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops")
+        return
+    await _show_my_chans_page(
+        callback.message, pool, session, acc_id, page=0, edit=True,
+        force_refresh=True, owner_id=callback.from_user.id,
+    )
+
+
+async def _show_my_chans_page(
+    msg, pool: asyncpg.Pool, session_str: str, acc_id: int, page: int,
+    edit: bool = True, force_refresh: bool = False, owner_id: int = 0,
+) -> None:
     from services import account_manager
-    loading_text = f"⏳ Загружаю список каналов (страница {page + 1})..."
-    try:
-        if edit:
-            await msg.edit_text(loading_text, parse_mode="HTML")
-        else:
-            await msg.answer(loading_text, parse_mode="HTML")
-    except Exception:
-        pass
+    from database.db import get_managed_channels, upsert_managed_channels
 
-    try:
-        dialogs = await account_manager.get_dialogs(session_str, limit=200)
-    except Exception as e:
-        kb = _back_kb()
-        text = f"❌ Не удалось загрузить каналы: {html.escape(str(e)[:80])}"
+    cached = await get_managed_channels(pool, owner_id, acc_id) if owner_id else []
+    need_fetch = force_refresh or not cached
+
+    if need_fetch:
         try:
-            await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+            if edit:
+                await msg.edit_text("⏳ Загружаю список каналов из Telegram...", parse_mode="HTML")
         except Exception:
             pass
-        return
+        try:
+            raw = await account_manager.get_dialogs(session_str, limit=200)
+        except Exception as e:
+            kb = _back_kb()
+            try:
+                await msg.edit_text(
+                    f"❌ Не удалось загрузить каналы: {html.escape(str(e)[:80])}",
+                    parse_mode="HTML", reply_markup=kb.as_markup(),
+                )
+            except Exception:
+                pass
+            return
+        if owner_id:
+            await upsert_managed_channels(pool, owner_id, acc_id, raw)
+        dialogs = raw
+    else:
+        dialogs = [
+            {"id": r["channel_id"], "title": r["title"] or "", "username": r["username"] or "", "type": "channel", "members": 0}
+            for r in cached
+        ]
 
     total = len(dialogs)
     total_pages = max(1, (total + _CHANS_PAGE_SIZE - 1) // _CHANS_PAGE_SIZE)
@@ -2719,10 +2805,10 @@ async def _show_my_chans_page(msg, session_str: str, acc_id: int, page: int, edi
 
     kb = InlineKeyboardBuilder()
     for ch in chunk:
-        ch_type = "📢" if ch["type"] == "channel" else "👥"
+        ch_type = "📢" if ch.get("type") == "channel" else "👥"
         uname = f" @{ch['username']}" if ch.get("username") else ""
         members = f" · {ch['members']:,}" if ch.get("members") else ""
-        label = f"{ch_type} {ch['title'][:28]}{uname}{members}"
+        label = f"{ch_type} {(ch.get('title') or '')[:28]}{uname}{members}"
         kb.button(text=label, callback_data=ChanCb(action="my_chans_item", channel_id=ch["id"], acc_id=acc_id))
     kb.adjust(1)
 
@@ -2731,16 +2817,18 @@ async def _show_my_chans_page(msg, session_str: str, acc_id: int, page: int, edi
         nav_row.append(("◀ Пред.", ChanCb(action="my_chans_page", page=page - 1, acc_id=acc_id)))
     if page < total_pages - 1:
         nav_row.append(("След. ▶", ChanCb(action="my_chans_page", page=page + 1, acc_id=acc_id)))
-    for label, cd in nav_row:
-        kb.button(text=label, callback_data=cd)
+    for btn_label, cd in nav_row:
+        kb.button(text=btn_label, callback_data=cd)
     if nav_row:
         kb.adjust(*([1] * len(chunk)), len(nav_row))
 
+    kb.button(text="🔄 Обновить из Telegram", callback_data=ChanCb(action="my_chans_refresh", acc_id=acc_id))
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
 
+    src = "Telegram" if need_fetch else "кэш"
     text = (
         f"📋 <b>Мои каналы/чаты</b>\n\n"
-        f"Всего: <b>{total}</b> · Страница <b>{page + 1}/{total_pages}</b>\n\n"
+        f"Всего: <b>{total}</b> · Страница <b>{page + 1}/{total_pages}</b> · <i>{src}</i>\n\n"
         "Нажмите на канал для управления:"
     )
     try:

@@ -1,3 +1,4 @@
+from typing import Optional
 from aiogram.filters.callback_data import CallbackData
 
 
@@ -140,9 +141,9 @@ class ClusterCb(CallbackData, prefix="cl"):
 
 class SubCb(CallbackData, prefix="sub"):
     action: str
-    plan: str = ""
+    plan: Optional[str] = None
     months: int = 1
-    currency: str = ""
+    currency: Optional[str] = None
 
 
 class AiCb(CallbackData, prefix="ai"):

@@ -17,9 +17,9 @@ TRON_WALLET: str = os.getenv("TRON_WALLET", "")
 TRON_API_KEY: str = os.getenv("TRON_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")  # оставлен для совместимости
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4-5")
 ADMIN_SECRET: str = os.getenv("ADMIN_SECRET", "")
-TG_API_ID: str = os.getenv("TG_API_ID", "")
+TG_API_ID: int = int(os.getenv("TG_API_ID", "0") or "0")
 TG_API_HASH: str = os.getenv("TG_API_HASH", "")
 
 PLAN_PRICES_USD: dict[str, int] = {"starter": 9, "pro": 25, "enterprise": 69}
