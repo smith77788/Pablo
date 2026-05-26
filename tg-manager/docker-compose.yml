@@ -21,6 +21,21 @@ services:
       - ./schema_v9.sql:/docker-entrypoint-initdb.d/09_schema_v9.sql
       - ./schema_v10.sql:/docker-entrypoint-initdb.d/10_schema_v10.sql
       - ./schema_v11.sql:/docker-entrypoint-initdb.d/11_schema_v11.sql
+      - ./schema_v12.sql:/docker-entrypoint-initdb.d/12_schema_v12.sql
+      - ./schema_v13.sql:/docker-entrypoint-initdb.d/13_schema_v13.sql
+      - ./schema_v14.sql:/docker-entrypoint-initdb.d/14_schema_v14.sql
+      - ./schema_v15.sql:/docker-entrypoint-initdb.d/15_schema_v15.sql
+      - ./schema_v16.sql:/docker-entrypoint-initdb.d/16_schema_v16.sql
+      - ./schema_v17.sql:/docker-entrypoint-initdb.d/17_schema_v17.sql
+      - ./schema_v18.sql:/docker-entrypoint-initdb.d/18_schema_v18.sql
+      - ./schema_v19.sql:/docker-entrypoint-initdb.d/19_schema_v19.sql
+      - ./schema_v20.sql:/docker-entrypoint-initdb.d/20_schema_v20.sql
+      - ./schema_v21.sql:/docker-entrypoint-initdb.d/21_schema_v21.sql
+      - ./schema_v22.sql:/docker-entrypoint-initdb.d/22_schema_v22.sql
+      - ./schema_v23.sql:/docker-entrypoint-initdb.d/23_schema_v23.sql
+      - ./schema_v24.sql:/docker-entrypoint-initdb.d/24_schema_v24.sql
+      - ./schema_v25.sql:/docker-entrypoint-initdb.d/25_schema_v25.sql
+      - ./schema_v26.sql:/docker-entrypoint-initdb.d/26_schema_v26.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tgmanager}"]
       interval: 10s
