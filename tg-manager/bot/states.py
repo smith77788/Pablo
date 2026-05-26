@@ -209,3 +209,7 @@ class MyChannelsFSM(StatesGroup):
     choosing_account = State()
     browsing = State()
     posting = State()
+
+
+class PaymentSettingsFSM(StatesGroup):
+    waiting_value = State()
