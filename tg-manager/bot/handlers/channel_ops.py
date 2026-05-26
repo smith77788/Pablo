@@ -1724,34 +1724,67 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
     )
 
     from services import account_manager
+    from database import db as _db
     results_ok, results_err = [], []
     done_ops = 0
+    attempt = 0
+    active_accounts = list(accounts)
 
-    for acc in accounts:
-        acc_label = html.escape(acc["first_name"] or acc["phone"])
-        for i in range(bot_count):
-            suffix = str(i + 1) if (bot_count > 1 or len(accounts) > 1) else ""
-            username = (base_username.rstrip("bot") + (suffix if suffix else "") + "bot") if base_username.endswith("bot") else (base_username + suffix)
-            result = await account_manager.create_bot_via_botfather(
-                acc["session_str"], data["bot_name"], username, _acc=acc
-            )
-            if "error" in result:
-                results_err.append(f"❌ {acc_label} [{username}]: {html.escape(result['error'][:60])}")
-            else:
-                token = result["token"]
-                results_ok.append(
-                    f"✅ {acc_label}: @{html.escape(result['username'])} — <code>{token}</code>"
-                )
+    # Round-robin: task global_i uses active_accounts[global_i % len(active_accounts)]
+    for global_i in range(total):
+        if not active_accounts:
+            results_err.append("❌ Нет доступных аккаунтов")
             done_ops += 1
-            try:
-                await msg.edit_text(
-                    _progress_text("Создание ботов...", done_ops, total, len(results_ok), len(results_err)),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-            flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(60, flood))
+            continue
+        acc_idx = global_i % len(active_accounts)
+        acc = active_accounts[acc_idx]
+        acc_label = html.escape(acc["first_name"] or acc["phone"])
+        # Determine suffix: overall bot index across all accounts
+        suffix = str(global_i + 1) if (total > 1) else ""
+        username = (base_username.rstrip("bot") + (suffix if suffix else "") + "bot") if base_username.endswith("bot") else (base_username + suffix)
+
+        # Account rotation on banned/flood_wait
+        tried_accs: set[int] = set()
+        result = None
+        for candidate in active_accounts:
+            if candidate["id"] in tried_accs:
+                continue
+            tried_accs.add(candidate["id"])
+            result = await account_manager.create_bot_via_botfather(
+                candidate["session_str"], data["bot_name"], username, _acc=dict(candidate)
+            )
+            if result.get("banned"):
+                await _db.deactivate_account(pool, candidate["id"], "banned detected in bulk op")
+                active_accounts = [a for a in active_accounts if a["id"] != candidate["id"]]
+                continue
+            if result.get("flood_wait"):
+                continue
+            break
+        if result is None:
+            result = {"error": "нет доступных аккаунтов"}
+
+        if "error" in result:
+            results_err.append(f"❌ {acc_label} [{username}]: {html.escape(result['error'][:60])}")
+        else:
+            token = result["token"]
+            results_ok.append(
+                f"✅ {acc_label}: @{html.escape(result['username'])} — <code>{token}</code>"
+            )
+        done_ops += 1
+        try:
+            await msg.edit_text(
+                _progress_text("Создание ботов...", done_ops, total, len(results_ok), len(results_err)),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        # Exponential backoff; reset every 5 iterations
+        if attempt >= 4:
+            attempt = 0
+        else:
+            attempt += 1
+        flood = result.get("flood_wait", 0)
+        await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=60.0), flood))
 
     lines = [f"🤖 <b>Результаты создания ботов</b> ({len(results_ok)}/{total})\n"]
     lines += results_ok + results_err
@@ -2273,20 +2306,30 @@ async def fsm_bulk_channel_id(message: Message, state: FSMContext, pool: asyncpg
     from services import account_manager
 
     if op == "leave":
+        from database import db as _db
         total = len(accounts)
         msg = await message.answer(
             _progress_text("Покидаю каналы...", 0, total, 0, 0), parse_mode="HTML"
         )
         ok_list, err_list = [], []
+        attempt = 0
         for idx, acc in enumerate(accounts):
             label = html.escape(acc["first_name"] or acc["phone"])
+            result = None
             try:
-                ok = await account_manager.leave_channel(acc["session_str"], channel_ref, _acc=acc)
-                (ok_list if ok else err_list).append(
-                    f"{'✅' if ok else '❌'} {label}" + ("" if ok else ": не удалось")
-                )
+                result = await account_manager.leave_channel(acc["session_str"], channel_ref, _acc=dict(acc))
             except Exception as e:
                 err_list.append(f"❌ {label}: {str(e)[:50]}")
+            if result is not None:
+                if isinstance(result, dict) and result.get("banned"):
+                    await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                    err_list.append(f"❌ {label}: забанен")
+                elif isinstance(result, dict) and result.get("flood_wait"):
+                    err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                elif result:
+                    ok_list.append(f"✅ {label}")
+                else:
+                    err_list.append(f"❌ {label}: не удалось")
             try:
                 await msg.edit_text(
                     _progress_text("Покидаю каналы...", idx + 1, total, len(ok_list), len(err_list)),
@@ -2294,7 +2337,13 @@ async def fsm_bulk_channel_id(message: Message, state: FSMContext, pool: asyncpg
                 )
             except Exception:
                 pass
-            await asyncio.sleep(3)
+            # Exponential backoff; reset every 5 iterations
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            flood = (result.get("flood_wait", 0) if isinstance(result, dict) else 0)
+            await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood))
         lines = [f"🚪 <b>Выход из {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
 
@@ -2347,11 +2396,21 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
                 message.from_user.id, cid,
             )
             bulk_access_hash = (ah_row["access_hash"] if ah_row else 0) or 0
+        from database import db as _db
         ok_list, err_list = [], []
-        for idx, acc in enumerate(accounts):
+        attempt = 0
+        active_accounts = list(accounts)
+        for idx, acc in enumerate(active_accounts):
             label = html.escape(acc["first_name"] or acc["phone"])
-            result = await account_manager.post_to_channel(acc["session_str"], channel_ref, text_to_post, access_hash=bulk_access_hash, _acc=acc)
-            if "msg_id" in result:
+            acc_id_cur = acc.get("id")
+            result = await account_manager.post_to_channel(acc["session_str"], channel_ref, text_to_post, access_hash=bulk_access_hash, _acc=dict(acc))
+            if result.get("banned"):
+                if acc_id_cur:
+                    await _db.deactivate_account(pool, acc_id_cur, "banned detected in bulk op")
+                err_list.append(f"❌ {label}: забанен")
+            elif result.get("flood_wait"):
+                err_list.append(f"⏳ {label}: flood_wait, пропущен")
+            elif "msg_id" in result:
                 ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
             else:
                 err_list.append(f"❌ {label}: {html.escape(result.get('error', 'ошибка')[:60])}")
@@ -2362,8 +2421,13 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
                 )
             except Exception:
                 pass
+            # Exponential backoff; reset every 5 iterations
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
             flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(5, flood))
+            await asyncio.sleep(max(_backoff(attempt), flood))
         lines = [f"📤 <b>Публикация в {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
     else:
@@ -2415,22 +2479,31 @@ async def fsm_join_invite_combined(message: Message, state: FSMContext, pool: as
 
     if is_bulk:
         accounts = await pool.fetch(
-            "SELECT session_str, first_name, phone FROM tg_accounts "
+            "SELECT id, session_str, first_name, phone FROM tg_accounts "
             "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
             message.from_user.id, selected_ids,
         )
         if not accounts:
             await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
             return
+        from database import db as _db
         total = len(accounts)
         msg = await message.answer(
             _progress_text("Вступаю в канал...", 0, total, 0, 0), parse_mode="HTML"
         )
         ok_list, err_list = [], []
-        for idx, acc in enumerate(accounts):
+        active_accounts = list(accounts)
+        attempt = 0
+        # Round-robin: distribute join attempts across accounts
+        for idx, acc in enumerate(active_accounts):
             label = html.escape(acc["first_name"] or acc["phone"])
-            result = await account_manager.join_channel(acc["session_str"], invite, _acc=acc)
-            if "error" in result:
+            result = await account_manager.join_channel(acc["session_str"], invite, _acc=dict(acc))
+            if result.get("banned"):
+                await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                err_list.append(f"❌ {label}: забанен")
+            elif result.get("flood_wait"):
+                err_list.append(f"⏳ {label}: flood_wait, пропущен")
+            elif "error" in result:
                 err_list.append(f"❌ {label}: {html.escape(result['error'][:60])}")
             else:
                 ok_list.append(f"✅ {label}: вступил")
@@ -2441,8 +2514,13 @@ async def fsm_join_invite_combined(message: Message, state: FSMContext, pool: as
                 )
             except Exception:
                 pass
+            # Exponential backoff; reset every 5 iterations
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
             flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(5, flood))
+            await asyncio.sleep(max(_backoff(attempt), flood))
         lines = [f"🔗 <b>Вступление в {html.escape(invite)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
         return
